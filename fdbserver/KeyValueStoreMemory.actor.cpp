@@ -228,15 +228,13 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
-	                                             int rowLimit = 1 << 30,
-	                                             int byteLimit = 1 << 30) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
 			return waitAndReadRange(this, keys, rowLimit, byteLimit);
 
-		Standalone<RangeResultRef> result;
+		RangeResult result;
 		if (rowLimit == 0) {
 			return result;
 		}
@@ -835,10 +833,10 @@ private:
 		wait(self->recovering);
 		return self->readValuePrefix(key, maxLength).get();
 	}
-	ACTOR static Future<Standalone<RangeResultRef>> waitAndReadRange(KeyValueStoreMemory* self,
-	                                                                 KeyRange keys,
-	                                                                 int rowLimit,
-	                                                                 int byteLimit) {
+	ACTOR static Future<RangeResult> waitAndReadRange(KeyValueStoreMemory* self,
+	                                                  KeyRange keys,
+	                                                  int rowLimit,
+	                                                  int byteLimit) {
 		wait(self->recovering);
 		return self->readRange(keys, rowLimit, byteLimit).get();
 	}

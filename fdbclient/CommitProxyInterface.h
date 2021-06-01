@@ -30,6 +30,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbclient/GlobalConfig.h"
 
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -112,34 +113,32 @@ struct ClientDBInfo {
 	vector<CommitProxyInterface> commitProxies;
 	Optional<CommitProxyInterface>
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
-	double clientTxnInfoSampleRate;
-	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
-	double transactionTagSampleRate;
-	double transactionTagSampleCost;
+	vector<VersionHistory> history;
+	vector<std::pair<UID, StorageServerInterface>>
+	    tssMapping; // logically map<ssid, tss interface> for all active TSS pairs
 
-	ClientDBInfo()
-	  : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1),
-	    transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE),
-	    transactionTagSampleCost(CLIENT_KNOBS->COMMIT_SAMPLE_COST) {}
+	ClientDBInfo() {}
 
 	bool operator==(ClientDBInfo const& r) const { return id == r.id; }
 	bool operator!=(ClientDBInfo const& r) const { return id != r.id; }
+
+	// convenience method to treat tss mapping like a map
+	Optional<StorageServerInterface> getTssPair(UID storageServerID) const {
+		for (auto& it : tssMapping) {
+			if (it.first == storageServerID) {
+				return Optional<StorageServerInterface>(it.second);
+			}
+		}
+		return Optional<StorageServerInterface>();
+	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar,
-		           grvProxies,
-		           commitProxies,
-		           id,
-		           clientTxnInfoSampleRate,
-		           clientTxnInfoSizeLimit,
-		           forward,
-		           transactionTagSampleRate,
-		           transactionTagSampleCost);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, tssMapping);
 	}
 };
 

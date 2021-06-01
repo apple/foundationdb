@@ -27,10 +27,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 700)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 710)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 700
+#elif FDB_API_VERSION > 710
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -97,7 +97,7 @@ typedef struct key {
 	const uint8_t* key;
 	int key_length;
 } FDBKey;
-#if FDB_API_VERSION >= 700
+#if FDB_API_VERSION >= 710
 typedef struct keyvalue {
 	const uint8_t* key;
 	int key_length;
@@ -188,6 +188,8 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_create_snapshot(FDBDatabase
                                                                      int snap_command_length);
 
 DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDatabase* db);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version);
 
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
 
@@ -280,8 +282,6 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_transaction_get_committed_version(F
  * be serviced by the main thread too.
  */
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr);
-
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_get_server_protocol(const char* clusterFilePath);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp(FDBTransaction* tr);
 

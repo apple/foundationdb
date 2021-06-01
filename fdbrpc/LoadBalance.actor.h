@@ -36,6 +36,8 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
+#include "fdbrpc/simulator.h" // for checking tss simulation mode
+#include "fdbrpc/TSSComparison.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using std::vector;
@@ -75,109 +77,281 @@ struct LoadBalancedReply {
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply);
 Optional<LoadBalancedReply> getLoadBalancedReply(const void*);
 
-// Returns true if we got a value for our request
-// Throws an error if the request returned an error that should bubble out
-// Returns false if we got an error that should result in reissuing the request
-template <class T>
-bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, bool atMostOnce, bool triedAllOptions) {
-	Optional<LoadBalancedReply> loadBalancedReply;
-	if (!result.isError()) {
-		loadBalancedReply = getLoadBalancedReply(&result.get());
+ACTOR template <class Req, class Resp>
+Future<Void> tssComparison(Req req,
+                           Future<ErrorOr<Resp>> fSource,
+                           Future<ErrorOr<Resp>> fTss,
+                           TSSEndpointData tssData) {
+	state double startTime = now();
+	state Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT);
+	state int finished = 0;
+	state double srcEndTime;
+	state double tssEndTime;
+
+	loop {
+		choose {
+			when(state ErrorOr<Resp> src = wait(fSource)) {
+				srcEndTime = now();
+				fSource = Never();
+				finished++;
+				if (finished == 2) {
+					break;
+				}
+			}
+			when(state Optional<ErrorOr<Resp>> tss = wait(fTssWithTimeout)) {
+				tssEndTime = now();
+				fTssWithTimeout = Never();
+				finished++;
+				if (finished == 2) {
+					break;
+				}
+			}
+		}
 	}
 
-	int errCode;
-	if (loadBalancedReply.present()) {
-		errCode =
-		    loadBalancedReply.get().error.present() ? loadBalancedReply.get().error.get().code() : error_code_success;
-	} else {
-		errCode = result.isError() ? result.getError().code() : error_code_success;
+	// we want to record ss/tss errors to metrics
+	int srcErrorCode = error_code_success;
+	int tssErrorCode = error_code_success;
+
+	++tssData.metrics->requests;
+
+	if (src.isError()) {
+		srcErrorCode = src.getError().code();
+		tssData.metrics->ssError(srcErrorCode);
+	}
+	if (!tss.present()) {
+		++tssData.metrics->tssTimeouts;
+	} else if (tss.get().isError()) {
+		tssErrorCode = tss.get().getError().code();
+		tssData.metrics->tssError(tssErrorCode);
+	}
+	if (!src.isError() && tss.present() && !tss.get().isError()) {
+		Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
+		Optional<LoadBalancedReply> tssLB = getLoadBalancedReply(&tss.get().get());
+		ASSERT(srcLB.present() ==
+		       tssLB.present()); // getLoadBalancedReply returned different responses for same templated type
+
+		// if Resp is a LoadBalancedReply, only compare if both replies are non-error
+		if (!srcLB.present() || (!srcLB.get().error.present() && !tssLB.get().error.present())) {
+			// only record latency difference if both requests actually succeeded, so that we're comparing apples to
+			// apples
+			tssData.metrics->recordLatency(req, srcEndTime - startTime, tssEndTime - startTime);
+
+			// expect mismatches in drop mutations mode.
+			Severity traceSeverity =
+			    (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+			        ? SevWarnAlways
+			        : SevError;
+
+			if (!TSS_doCompare(req, src.get(), tss.get().get(), traceSeverity, tssData.tssId)) {
+				++tssData.metrics->mismatches;
+			}
+		} else if (tssLB.present() && tssLB.get().error.present()) {
+			tssErrorCode = tssLB.get().error.get().code();
+			tssData.metrics->tssError(tssErrorCode);
+		} else if (srcLB.present() && srcLB.get().error.present()) {
+			srcErrorCode = srcLB.get().error.get().code();
+			tssData.metrics->ssError(srcErrorCode);
+		}
 	}
 
-	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
-	bool receivedResponse = loadBalancedReply.present() ? !loadBalancedReply.get().error.present() : result.present();
-	receivedResponse = receivedResponse || (!maybeDelivered && errCode != error_code_process_behind);
-	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
+	if (srcErrorCode != error_code_success && tssErrorCode != error_code_success && srcErrorCode != tssErrorCode) {
+		// if ss and tss both got different errors, record them
+		TraceEvent("TSSErrorMismatch")
+		    .suppressFor(1.0)
+		    .detail("TSSID", tssData.tssId)
+		    .detail("SSError", srcErrorCode)
+		    .detail("TSSError", tssErrorCode);
+	}
 
-	holder->release(
-	    receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
+	return Void();
+}
 
-	if (errCode == error_code_server_overloaded) {
+// Stores state for a request made by the load balancer
+template <class Request>
+struct RequestData : NonCopyable {
+	typedef ErrorOr<REPLY_TYPE(Request)> Reply;
+
+	Future<Reply> response;
+	Reference<ModelHolder> modelHolder;
+	bool triedAllOptions = false;
+
+	bool requestStarted = false; // true once the request has been sent to an alternative
+	bool requestProcessed = false; // true once a response has been received and handled by checkAndProcessResult
+
+	// Whether or not the response future is valid
+	// This is true once setupRequest is called, even though at that point the response is Never().
+	bool isValid() { return response.isValid(); }
+
+	static void maybeDuplicateTSSRequest(RequestStream<Request> const* stream,
+	                                     Request& request,
+	                                     QueueModel* model,
+	                                     Future<Reply> ssResponse) {
+		if (model) {
+			// Send parallel request to TSS pair, if it exists
+			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
+
+			if (tssData.present()) {
+				resetReply(request);
+				// FIXME: optimize to avoid creating new netNotifiedQueue for each message
+				RequestStream<Request> tssRequestStream(tssData.get().endpoint);
+				Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(request);
+				model->addActor.send(tssComparison(request, ssResponse, fTssResult, tssData.get()));
+			}
+		}
+	}
+
+	// Initializes the request state and starts it, possibly after a backoff delay
+	void startRequest(double backoff,
+	                  bool triedAllOptions,
+	                  RequestStream<Request> const* stream,
+	                  Request& request,
+	                  QueueModel* model) {
+		modelHolder = Reference<ModelHolder>();
+		requestStarted = false;
+
+		if (backoff > 0) {
+			response = mapAsync<Void, std::function<Future<Reply>(Void)>, Reply>(
+			    delay(backoff), [this, stream, &request, model](Void _) {
+				    requestStarted = true;
+				    modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
+				    Future<Reply> resp = stream->tryGetReply(request);
+				    maybeDuplicateTSSRequest(stream, request, model, resp);
+				    return resp;
+			    });
+		} else {
+			requestStarted = true;
+			modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
+			response = stream->tryGetReply(request);
+			maybeDuplicateTSSRequest(stream, request, model, response);
+		}
+
+		requestProcessed = false;
+		this->triedAllOptions = triedAllOptions;
+	}
+
+	// Implementation of the logic to handle a response.
+	// Checks the state of the response, updates the queue model, and returns one of the following outcomes:
+	// A return value of true means that the request completed successfully
+	// A return value of false means that the request failed but should be retried
+	// A return value with an error means that the error should be thrown back to original caller
+	static ErrorOr<bool> checkAndProcessResultImpl(Reply const& result,
+	                                               Reference<ModelHolder> modelHolder,
+	                                               bool atMostOnce,
+	                                               bool triedAllOptions) {
+		ASSERT(modelHolder);
+
+		Optional<LoadBalancedReply> loadBalancedReply;
+		if (!result.isError()) {
+			loadBalancedReply = getLoadBalancedReply(&result.get());
+		}
+
+		int errCode;
+		if (loadBalancedReply.present()) {
+			errCode = loadBalancedReply.get().error.present() ? loadBalancedReply.get().error.get().code()
+			                                                  : error_code_success;
+		} else {
+			errCode = result.isError() ? result.getError().code() : error_code_success;
+		}
+
+		bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
+		bool receivedResponse =
+		    loadBalancedReply.present() ? !loadBalancedReply.get().error.present() : result.present();
+		receivedResponse = receivedResponse || (!maybeDelivered && errCode != error_code_process_behind);
+		bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
+
+		modelHolder->release(
+		    receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
+
+		if (errCode == error_code_server_overloaded) {
+			return false;
+		}
+
+		if (loadBalancedReply.present() && !loadBalancedReply.get().error.present()) {
+			return true;
+		}
+
+		if (!loadBalancedReply.present() && result.present()) {
+			return true;
+		}
+
+		if (receivedResponse) {
+			return loadBalancedReply.present() ? loadBalancedReply.get().error.get() : result.getError();
+		}
+
+		if (atMostOnce && maybeDelivered) {
+			return request_maybe_delivered();
+		}
+
+		if (triedAllOptions && errCode == error_code_process_behind) {
+			return process_behind();
+		}
+
 		return false;
 	}
 
-	if (loadBalancedReply.present() && !loadBalancedReply.get().error.present()) {
-		return true;
+	// Checks the state of the response, updates the queue model, and returns one of the following outcomes:
+	// A return value of true means that the request completed successfully
+	// A return value of false means that the request failed but should be retried
+	// In the event of a non-retryable failure, an error is thrown indicating the failure
+	bool checkAndProcessResult(bool atMostOnce) {
+		ASSERT(response.isReady());
+		requestProcessed = true;
+
+		ErrorOr<bool> outcome =
+		    checkAndProcessResultImpl(response.get(), std::move(modelHolder), atMostOnce, triedAllOptions);
+
+		if (outcome.isError()) {
+			throw outcome.getError();
+		} else if (!outcome.get()) {
+			response = Future<Reply>();
+		}
+
+		return outcome.get();
 	}
 
-	if (!loadBalancedReply.present() && result.present()) {
-		return true;
+	// Convert this request to a lagging request. Such a request is no longer being waited on, but it still needs to be
+	// processed so we can update the queue model.
+	void makeLaggingRequest() {
+		ASSERT(response.isValid());
+		ASSERT(!response.isReady());
+		ASSERT(modelHolder);
+		ASSERT(modelHolder->model);
+
+		QueueModel* model = modelHolder->model;
+		if (model->laggingRequestCount > FLOW_KNOBS->MAX_LAGGING_REQUESTS_OUTSTANDING ||
+		    model->laggingRequests.isReady()) {
+			model->laggingRequests.cancel();
+			model->laggingRequestCount = 0;
+			model->addActor = PromiseStream<Future<Void>>();
+			model->laggingRequests = actorCollection(model->addActor.getFuture(), &model->laggingRequestCount);
+		}
+
+		// We need to process the lagging request in order to update the queue model
+		Reference<ModelHolder> holderCapture = std::move(modelHolder);
+		bool triedAllOptionsCapture = triedAllOptions;
+		Future<Void> updateModel = map(response, [holderCapture, triedAllOptionsCapture](Reply result) {
+			checkAndProcessResultImpl(result, holderCapture, false, triedAllOptionsCapture);
+			return Void();
+		});
+		model->addActor.send(updateModel);
 	}
 
-	if (receivedResponse) {
-		throw loadBalancedReply.present() ? loadBalancedReply.get().error.get() : result.getError();
-	}
-
-	if (atMostOnce && maybeDelivered) {
-		throw request_maybe_delivered();
-	}
-
-	if (triedAllOptions && errCode == error_code_process_behind) {
-		throw process_behind();
-	}
-
-	return false;
-}
-
-ACTOR template <class Request>
-Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream,
-                                                  Request request,
-                                                  double backoff,
-                                                  Future<Void> requestUnneeded,
-                                                  QueueModel* model,
-                                                  bool isFirstRequest,
-                                                  bool atMostOnce,
-                                                  bool triedAllOptions) {
-	if (backoff > 0.0) {
-		wait(delay(backoff) || requestUnneeded);
-	}
-
-	if (requestUnneeded.isReady()) {
-		return Optional<REPLY_TYPE(Request)>();
-	}
-
-	state Reference<ModelHolder> holder(new ModelHolder(model, stream->getEndpoint().token.first()));
-
-	ErrorOr<REPLY_TYPE(Request)> result = wait(stream->tryGetReply(request));
-	if (checkAndProcessResult(result, holder, atMostOnce, triedAllOptions)) {
-		return result.get();
-	} else {
-		return Optional<REPLY_TYPE(Request)>();
-	}
-}
-
-template <class Reply>
-void addLaggingRequest(Future<Optional<Reply>> reply, Promise<Void> requestFinished, QueueModel* model) {
-	requestFinished.send(Void());
-	if (!reply.isReady()) {
-		if (model) {
-			if (model->laggingRequestCount > FLOW_KNOBS->MAX_LAGGING_REQUESTS_OUTSTANDING ||
-			    model->laggingRequests.isReady()) {
-				model->laggingRequests.cancel();
-				model->laggingRequestCount = 0;
-				model->addActor = PromiseStream<Future<Void>>();
-				model->laggingRequests = actorCollection(model->addActor.getFuture(), &model->laggingRequestCount);
-			}
-
-			model->addActor.send(success(errorOr(reply)));
+	~RequestData() {
+		// If the request has been started but hasn't completed, mark it as a lagging request
+		if (requestStarted && !requestProcessed && modelHolder && modelHolder->model) {
+			makeLaggingRequest();
 		}
 	}
-}
+};
 
-// Keep trying to get a reply from any of servers until success or cancellation; tries to take into account
-//   failMon's information for load balancing and avoiding failed servers
+// Try to get a reply from one of the alternatives until success, cancellation, or certain errors.
+// Load balancing has a budget to race requests to a second alternative if the first request is slow.
+// Tries to take into account failMon's information for load balancing and avoiding failed servers.
 // If ALL the servers are failed and the list of servers is not fresh, throws an exception to let the caller refresh the
-// list of servers. When model is set, load balance among alternatives in the same DC, aiming to balance request queue
-// length on these interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
+// list of servers.
+// When model is set, load balance among alternatives in the same DC aims to balance request queue length on these
+// interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
 ACTOR template <class Interface, class Request, class Multi>
 Future<REPLY_TYPE(Request)> loadBalance(
     Reference<MultiInterface<Multi>> alternatives,
@@ -186,9 +360,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = nullptr) {
-	state Future<Optional<REPLY_TYPE(Request)>> firstRequest;
+
+	state RequestData<Request> firstRequestData;
+	state RequestData<Request> secondRequestData;
+
 	state Optional<uint64_t> firstRequestEndpoint;
-	state Future<Optional<REPLY_TYPE(Request)>> secondRequest;
 	state Future<Void> secondDelay = Never();
 
 	state Promise<Void> requestFinished;
@@ -320,7 +496,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		}
 
 		// Find an alternative, if any, that is not failed, starting with
-		// nextAlt. This logic matters only if model == NULL. Otherwise, the
+		// nextAlt. This logic matters only if model == nullptr. Otherwise, the
 		// bestAlt and nextAlt have been decided.
 		state RequestStream<Request> const* stream = nullptr;
 		for (int alternativeNum = 0; alternativeNum < alternatives->size(); alternativeNum++) {
@@ -340,7 +516,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			stream = nullptr;
 		}
 
-		if (!stream && !firstRequest.isValid()) {
+		if (!stream && !firstRequestData.isValid()) {
 			// Everything is down!  Wait for someone to be up.
 
 			vector<Future<Void>> ok(alternatives->size());
@@ -391,50 +567,33 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			numAttempts = 0; // now that we've got a server back, reset the backoff
 		} else if (!stream) {
 			// Only the first location is available.
-			Optional<REPLY_TYPE(Request)> result = wait(firstRequest);
-			if (result.present()) {
+			ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response);
+			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 				return result.get();
 			}
 
-			firstRequest = Future<Optional<REPLY_TYPE(Request)>>();
 			firstRequestEndpoint = Optional<uint64_t>();
-		} else if (firstRequest.isValid()) {
+		} else if (firstRequestData.isValid()) {
 			// Issue a second request, the first one is taking a long time.
-			secondRequest = makeRequest(
-			    stream, request, backoff, requestFinished.getFuture(), model, false, atMostOnce, triedAllOptions);
+			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model);
 			state bool firstFinished = false;
 
-			loop {
-				choose {
-					when(ErrorOr<Optional<REPLY_TYPE(Request)>> result =
-					         wait(firstRequest.isValid() ? errorOr(firstRequest) : Never())) {
-						if (result.isError() || result.get().present()) {
-							addLaggingRequest(secondRequest, requestFinished, model);
-							if (result.isError()) {
-								throw result.getError();
-							} else {
-								return result.get().get();
-							}
-						}
-
-						firstRequest = Future<Optional<REPLY_TYPE(Request)>>();
-						firstRequestEndpoint = Optional<uint64_t>();
-						firstFinished = true;
+			loop choose {
+				when(ErrorOr<REPLY_TYPE(Request)> result =
+				         wait(firstRequestData.response.isValid() ? firstRequestData.response : Never())) {
+					if (firstRequestData.checkAndProcessResult(atMostOnce)) {
+						return result.get();
 					}
-					when(ErrorOr<Optional<REPLY_TYPE(Request)>> result = wait(errorOr(secondRequest))) {
-						if (result.isError() || result.get().present()) {
-							if (!firstFinished) {
-								addLaggingRequest(firstRequest, requestFinished, model);
-							}
-							if (result.isError()) {
-								throw result.getError();
-							} else {
-								return result.get().get();
-							}
-						}
 
-						break;
+					firstRequestEndpoint = Optional<uint64_t>();
+					firstFinished = true;
+				}
+				when(ErrorOr<REPLY_TYPE(Request)> result = wait(secondRequestData.response)) {
+					if (secondRequestData.checkAndProcessResult(atMostOnce)) {
+						return result.get();
 					}
+
+					break;
 				}
 			}
 
@@ -445,13 +604,12 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			}
 		} else {
 			// Issue a request, if it takes too long to get a reply, go around the loop
-			firstRequest = makeRequest(
-			    stream, request, backoff, requestFinished.getFuture(), model, true, atMostOnce, triedAllOptions);
+			firstRequestData.startRequest(backoff, triedAllOptions, stream, request, model);
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 
 			loop {
 				choose {
-					when(ErrorOr<Optional<REPLY_TYPE(Request)>> result = wait(errorOr(firstRequest))) {
+					when(ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response)) {
 						if (model) {
 							model->secondMultiplier =
 							    std::max(model->secondMultiplier - FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_DECAY, 1.0);
@@ -460,15 +618,10 @@ Future<REPLY_TYPE(Request)> loadBalance(
 							             FLOW_KNOBS->SECOND_REQUEST_MAX_BUDGET);
 						}
 
-						if (result.isError()) {
-							throw result.getError();
+						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
+							return result.get();
 						}
 
-						if (result.get().present()) {
-							return result.get().get();
-						}
-
-						firstRequest = Future<Optional<REPLY_TYPE(Request)>>();
 						firstRequestEndpoint = Optional<uint64_t>();
 						break;
 					}

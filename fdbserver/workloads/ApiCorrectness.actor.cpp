@@ -447,10 +447,10 @@ public:
 		state bool reverse = deterministicRandom()->random01() > 0.5 ? false : true;
 
 		// Get the range from memory
-		state Standalone<RangeResultRef> storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
+		state RangeResult storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
 
 		// Get the range from the database
-		state Standalone<RangeResultRef> dbResults;
+		state RangeResult dbResults;
 		state Version readVersion;
 
 		state Reference<TransactionWrapper> transaction = self->createTransaction();
@@ -461,7 +461,7 @@ public:
 				readVersion = version;
 
 				KeyRangeRef range(start, end);
-				Standalone<RangeResultRef> rangeResults = wait(transaction->getRange(range, limit, reverse));
+				RangeResult rangeResults = wait(transaction->getRange(range, limit, reverse));
 				dbResults = rangeResults;
 				break;
 			} catch (Error& e) {
@@ -533,11 +533,10 @@ public:
 		state bool reverse = deterministicRandom()->random01() < 0.5 ? false : true;
 
 		// Get the range from the memory store
-		state Standalone<RangeResultRef> storeResults =
-		    self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);
+		state RangeResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);
 
 		// Get the range from the database
-		state Standalone<RangeResultRef> dbResults;
+		state RangeResult dbResults;
 
 		state Reference<TransactionWrapper> transaction = self->createTransaction();
 		state Version readVersion;
@@ -547,8 +546,7 @@ public:
 				Version version = wait(transaction->getReadVersion());
 				readVersion = version;
 
-				Standalone<RangeResultRef> range =
-				    wait(transaction->getRange(startSelector, endSelector, limit, reverse));
+				RangeResult range = wait(transaction->getRange(startSelector, endSelector, limit, reverse));
 
 				if (endKey == self->store.endKey()) {
 					for (int i = 0; i < range.size(); i++) {

@@ -103,7 +103,7 @@ struct FileSystemWorkload : TestWorkload {
 
 		tr->set(key, path);
 		std::string keyStr(key.toString());
-		tr->set(keyStr + "/size", format("%d", deterministicRandom()->randomInt(0, 2 << 30)));
+		tr->set(keyStr + "/size", format("%d", deterministicRandom()->randomInt(0, std::numeric_limits<int>::max())));
 		tr->set(keyStr + "/server", format("%d", deterministicRandom()->randomInt(0, self->serverCount)));
 		tr->set(keyStr + "/deleted", deleted ? LiteralStringRef("1") : LiteralStringRef("0"));
 		tr->set(keyStr + "/server", format("%d", serverID));
@@ -236,7 +236,7 @@ struct FileSystemWorkload : TestWorkload {
 		loop {
 			state int fileID = deterministicRandom()->randomInt(0, self->fileCount);
 			state bool isDeleting = deterministicRandom()->random01() < 0.25;
-			state int size = isDeleting ? 0 : deterministicRandom()->randomInt(0, 2 << 30);
+			state int size = isDeleting ? 0 : deterministicRandom()->randomInt(0, std::numeric_limits<int>::max());
 			state std::string keyStr = self->keyForFileID(fileID).toString();
 			state double tstart = now();
 			state Transaction tr(cx);
@@ -280,8 +280,7 @@ struct FileSystemWorkload : TestWorkload {
 		if (self->loggingQueries)
 			TraceEvent("UserQuery").detail("UserID", userID).detail("PathBase", base);
 		Key keyEnd(base + "/updated0");
-		Standalone<RangeResultRef> val =
-		    wait(tr->getRange(firstGreaterOrEqual(keyEnd) - 10, firstGreaterOrEqual(keyEnd), 10));
+		RangeResult val = wait(tr->getRange(firstGreaterOrEqual(keyEnd) - 10, firstGreaterOrEqual(keyEnd), 10));
 		Key keyBegin(base + "/updated/");
 		for (int i = val.size() - 1; i >= 0; i--) {
 			if (val[i].key.startsWith(keyBegin) && self->loggingQueries) {
@@ -308,7 +307,7 @@ struct FileSystemWorkload : TestWorkload {
 		state int transferSize = 1000;
 		state uint64_t deletedFiles = 0;
 		while (transfered == transferSize) {
-			Standalone<RangeResultRef> val = wait(tr->getRange(begin, end, transferSize));
+			RangeResult val = wait(tr->getRange(begin, end, transferSize));
 			transfered = val.size();
 			deletedFiles += transfered;
 			begin = begin + transfered;

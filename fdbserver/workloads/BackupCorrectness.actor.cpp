@@ -33,8 +33,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	int backupRangesCount, backupRangeLengthMax;
 	bool differentialBackup, performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
-	std::vector<std::string> prefixesMandatory;
-	Standalone<VectorRef<KeyRangeRef>> skipRestoreRanges;
+	std::vector<std::string> restorePrefixesToInclude;
+	std::vector<Standalone<KeyRangeRef>> skippedRestoreRanges;
 	Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 	static int backupAgentRequests;
 	bool locked;
@@ -68,7 +68,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
-		prefixesMandatory = getOption(options, LiteralStringRef("prefixesMandatory"), std::vector<std::string>());
+		restorePrefixesToInclude = getOption(options, LiteralStringRef("restorePrefixesToInclude"), std::vector<std::string>());
 		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
 
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
@@ -104,32 +104,45 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		if (performRestore && !prefixesMandatory.empty() && shouldSkipRestoreRanges) {
+		if (performRestore && !restorePrefixesToInclude.empty() && shouldSkipRestoreRanges) {
 			for (auto& range : backupRanges) {
 				bool intersection = false;
-				for (auto& prefix : prefixesMandatory) {
-					KeyRange mandatoryRange(KeyRangeRef(prefix, strinc(prefix)));
-					if (range.intersects(mandatoryRange))
+				for (auto& prefix : restorePrefixesToInclude) {
+					KeyRange prefixRange(KeyRangeRef(prefix, strinc(prefix)));
+					if (range.intersects(prefixRange)) {
 						intersection = true;
+					}
 					TraceEvent("BARW_PrefixSkipRangeDetails")
-					    .detail("PrefixMandatory", printable(mandatoryRange))
-					    .detail("BackUpRange", printable(range))
+					    .detail("PrefixMandatory", printable(prefix))
+					    .detail("BackupRange", printable(range))
 					    .detail("Intersection", intersection);
 				}
-				if (!intersection && deterministicRandom()->random01() < 0.5)
-					skipRestoreRanges.push_back(skipRestoreRanges.arena(), range);
-				else
-					restoreRanges.push_back(restoreRanges.arena(), range);
+				// If the backup range intersects with restorePrefixesToInclude or a coin flip is true then use it as a restore
+				// range as well, otherwise skip it.
+				if (intersection || deterministicRandom()->coinflip()) {
+					restoreRanges.push_back_deep(restoreRanges.arena(), range);
+				} else {
+					skippedRestoreRanges.push_back(range);
+				}
 			}
 		} else {
 			restoreRanges = backupRanges;
 		}
+
+		// If no random backup ranges intersected with restorePrefixesToInclude or won the coin flip then restoreRanges will be
+		// empty, so move an item from skippedRestoreRanges to restoreRanges.
+		if (restoreRanges.empty()) {
+			ASSERT(!skippedRestoreRanges.empty());
+			restoreRanges.push_back_deep(restoreRanges.arena(), skippedRestoreRanges.back());
+			skippedRestoreRanges.pop_back();
+		}
+
 		for (auto& range : restoreRanges) {
 			TraceEvent("BARW_RestoreRange", randomID)
 			    .detail("RangeBegin", printable(range.begin))
 			    .detail("RangeEnd", printable(range.end));
 		}
-		for (auto& range : skipRestoreRanges) {
+		for (auto& range : skippedRestoreRanges) {
 			TraceEvent("BARW_SkipRange", randomID)
 			    .detail("RangeBegin", printable(range.begin))
 			    .detail("RangeEnd", printable(range.end));
@@ -171,10 +184,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		loop {
 			try {
 				state int restoreIndex;
-				for (restoreIndex = 0; restoreIndex < self->skipRestoreRanges.size(); restoreIndex++) {
-					state KeyRangeRef range = self->skipRestoreRanges[restoreIndex];
+				for (restoreIndex = 0; restoreIndex < self->skippedRestoreRanges.size(); restoreIndex++) {
+					state KeyRangeRef range = self->skippedRestoreRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
-					Standalone<RangeResultRef> res = wait(tr.getRange(range, GetRangeLimits::ROW_LIMIT_UNLIMITED));
+					RangeResult res = wait(tr.getRange(range, GetRangeLimits::ROW_LIMIT_UNLIMITED));
 					if (!res.empty()) {
 						TraceEvent(SevError, "BARW_UnexpectedRangePresent").detail("Range", printable(range));
 						return false;
@@ -248,6 +261,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
+			                               deterministicRandom()->randomInt(0, 60),
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
@@ -386,7 +400,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state int rowCount = 0;
 		loop {
 			try {
-				Standalone<RangeResultRef> existingRows = wait(tr.getRange(normalKeys, 1));
+				RangeResult existingRows = wait(tr.getRange(normalKeys, 1));
 				rowCount = existingRows.size();
 				break;
 			} catch (Error& e) {
@@ -497,6 +511,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				try {
 					extraBackup = backupAgent.submitBackup(cx,
 					                                       LiteralStringRef("file://simfdb/backups/"),
+					                                       deterministicRandom()->randomInt(0, 60),
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
@@ -741,7 +756,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						printf("BackupCorrectnessLeftOverLogTasks: %ld\n", (long)taskCount);
 					}
 
-					Standalone<RangeResultRef> agentValues =
+					RangeResult agentValues =
 					    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
 					// Error if the system keyspace for the backup tag is not empty
@@ -776,10 +791,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						printf("No left over backup version key\n");
 					}
 
-					Standalone<RangeResultRef> versions = wait(tr->getRange(
+					RangeResult versions = wait(tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
 					if (!self->shareLogRange || !versions.size()) {
-						Standalone<RangeResultRef> logValues = wait(
+						RangeResult logValues = wait(
 						    tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 						// Error if the log/mutation keyspace for the backup tag  is not empty

@@ -76,4 +76,9 @@ RUN rm -f /root/anaconda-ks.cfg && \
     '   j start --tarball $(find ${HOME}/build_output/packages -name correctness\*.tar.gz) "${@}"' \
     '}' \
     '' \
+    'USER_BASHRC="$HOME/src/.bashrc.local"' \
+    'if test -f "$USER_BASHRC"; then' \
+    '   source $USER_BASHRC' \
+    'fi' \
+    '' \
     >> .bashrc

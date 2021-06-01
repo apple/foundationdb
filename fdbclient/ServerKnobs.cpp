@@ -19,8 +19,6 @@
  */
 
 #include "fdbclient/ServerKnobs.h"
-#include "fdbrpc/Locality.h"
-#include <cmath>
 
 #define init(knob, value) initKnob(knob, value, #knob)
 
@@ -80,7 +78,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH,           16<<10 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH = 500;
 	init( DISK_QUEUE_FILE_EXTENSION_BYTES,                    10<<20 ); // BUGGIFYd per file within the DiskQueue
 	init( DISK_QUEUE_FILE_SHRINK_BYTES,                      100<<20 ); // BUGGIFYd per file within the DiskQueue
-	init( DISK_QUEUE_MAX_TRUNCATE_BYTES,                       2<<30 ); if ( randomize && BUGGIFY ) DISK_QUEUE_MAX_TRUNCATE_BYTES = 0;
+	init( DISK_QUEUE_MAX_TRUNCATE_BYTES,                     2LL<<30 ); if ( randomize && BUGGIFY ) DISK_QUEUE_MAX_TRUNCATE_BYTES = 0;
 	init( TLOG_DEGRADED_DURATION,                                5.0 );
 	init( MAX_CACHE_VERSIONS,                                   10e6 );
 	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
@@ -214,6 +212,9 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SERVER_LIST_DELAY,                                     1.0 );
 	init( RECRUITMENT_IDLE_DELAY,                                1.0 );
 	init( STORAGE_RECRUITMENT_DELAY,                            10.0 );
+	init( TSS_HACK_IDENTITY_MAPPING,                           false ); // THIS SHOULD NEVER BE SET IN PROD. Only for performance testing
+	init( TSS_RECRUITMENT_TIMEOUT,       3*STORAGE_RECRUITMENT_DELAY ); if (randomize && BUGGIFY ) TSS_RECRUITMENT_TIMEOUT = 1.0; // Super low timeout should cause tss recruitments to fail
+	init( TSS_DD_KILL_INTERVAL,                                 60.0 ); if (randomize && BUGGIFY ) TSS_DD_KILL_INTERVAL = 1.0;    // May kill all TSS quickly
 	init( DATA_DISTRIBUTION_LOGGING_INTERVAL,                    5.0 );
 	init( DD_ENABLED_CHECK_DELAY,                                1.0 );
 	init( DD_STALL_CHECK_DELAY,                                  0.4 ); //Must be larger than 2*MAX_BUGGIFIED_DELAY
@@ -613,6 +614,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	//Worker
 	init( WORKER_LOGGING_INTERVAL,                               5.0 );
 	init( HEAP_PROFILER_INTERVAL,                               30.0 );
+	init( UNKNOWN_CC_TIMEOUT,                                  600.0 );
 	init( DEGRADED_RESET_INTERVAL,                          24*60*60 ); if ( randomize && BUGGIFY ) DEGRADED_RESET_INTERVAL = 10;
 	init( DEGRADED_WARNING_LIMIT,                                  1 );
 	init( DEGRADED_WARNING_RESET_DELAY,                   7*24*60*60 );
@@ -627,6 +629,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// Coordination
 	init( COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL,            1.0 ); if( randomize && BUGGIFY ) COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL = 10.0;
+	init( ENABLE_CROSS_CLUSTER_SUPPORT,                         true ); if( randomize && BUGGIFY ) ENABLE_CROSS_CLUSTER_SUPPORT = false;
 
 	// Buggification
 	init( BUGGIFIED_EVENTUAL_CONSISTENCY,                        1.0 );
@@ -702,7 +705,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REDWOOD_DEFAULT_PAGE_SIZE,                            4096 );
 	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
 	init( REDWOOD_COMMIT_CONCURRENT_READS,                        64 );
-	init( REDWOOD_PAGE_REBUILD_FILL_FACTOR,                     0.66 );
+	init( REDWOOD_PAGE_REBUILD_MAX_SLACK,                       0.33 );
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );
 	init( REDWOOD_LAZY_CLEAR_MAX_PAGES,                          1e6 );

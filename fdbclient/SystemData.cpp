@@ -25,6 +25,7 @@
 #include "flow/Arena.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/serialize.h"
+#include "flow/UnitTest.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -48,9 +49,7 @@ const Key keyServersKey(const KeyRef& k) {
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena) {
 	return k.withPrefix(keyServersPrefix, arena);
 }
-const Value keyServersValue(Standalone<RangeResultRef> result,
-                            const std::vector<UID>& src,
-                            const std::vector<UID>& dest) {
+const Value keyServersValue(RangeResult result, const std::vector<UID>& src, const std::vector<UID>& dest) {
 	if (!CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS) {
 		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue()));
 		wr << src << dest;
@@ -95,7 +94,7 @@ const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Ta
 	return wr.toValue();
 }
 
-void decodeKeyServersValue(Standalone<RangeResultRef> result,
+void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
                            std::vector<UID>& src,
                            std::vector<UID>& dest,
@@ -347,7 +346,11 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 	return idx;
 }
 
+const KeyRef tssMappingChangeKey = LiteralStringRef("\xff\x02/tssMappingChangeKey");
+const KeyRangeRef tssMappingKeys(LiteralStringRef("\xff/tss/"), LiteralStringRef("\xff/tss0"));
+
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
+
 const KeyRef serverTagPrefix = serverTagKeys.begin;
 const KeyRangeRef serverTagConflictKeys(LiteralStringRef("\xff/serverTagConflict/"),
                                         LiteralStringRef("\xff/serverTagConflict0"));
@@ -534,6 +537,7 @@ const Key serverListKeyFor(UID serverID) {
 	return wr.toValue();
 }
 
+// TODO use flatbuffers depending on version
 const Value serverListValue(StorageServerInterface const& server) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withServerListValue()));
 	wr << server;
@@ -549,6 +553,17 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	StorageServerInterface s;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> s;
+	return s;
+}
+
+const Value serverListValueFB(StorageServerInterface const& server) {
+	return ObjectWriter::toValue(server, IncludeVersion());
+}
+
+StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
+	StorageServerInterface s;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(s);
 	return s;
 }
 
@@ -596,6 +611,9 @@ ProcessClass decodeProcessClassValue(ValueRef const& value) {
 const KeyRangeRef configKeys(LiteralStringRef("\xff/conf/"), LiteralStringRef("\xff/conf0"));
 const KeyRef configKeysPrefix = configKeys.begin;
 
+const KeyRef perpetualStorageWiggleKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle"));
+const KeyRef wigglingStorageServerKey(LiteralStringRef("\xff/storageWigglePID"));
+
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 
 const KeyRangeRef excludedServersKeys(LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0"));
@@ -631,6 +649,19 @@ std::string encodeFailedServersKey(AddressExclusion const& addr) {
 	// FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
 	return failedServersPrefix.toString() + addr.toString();
 }
+
+// const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
+// const KeyRef globalConfigPrefix = globalConfigKeys.begin;
+
+const KeyRangeRef globalConfigDataKeys(LiteralStringRef("\xff/globalConfig/k/"),
+                                       LiteralStringRef("\xff/globalConfig/k0"));
+const KeyRef globalConfigKeysPrefix = globalConfigDataKeys.begin;
+
+const KeyRangeRef globalConfigHistoryKeys(LiteralStringRef("\xff/globalConfig/h/"),
+                                          LiteralStringRef("\xff/globalConfig/h0"));
+const KeyRef globalConfigHistoryPrefix = globalConfigHistoryKeys.begin;
+
+const KeyRef globalConfigVersionKey = LiteralStringRef("\xff/globalConfig/v");
 
 const KeyRangeRef workerListKeys(LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0"));
 const KeyRef workerListPrefix = workerListKeys.begin;
@@ -748,8 +779,7 @@ const KeyRef tagThrottleCountKey = LiteralStringRef("\xff\x02/throttledTags/manu
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"),
                                            LiteralStringRef("\xff\x02/fdbClientInfo0"));
-const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_sample_rate/");
-const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_size_limit/");
+// See remaining fields in GlobalConfig.actor.h
 
 // ConsistencyCheck settings
 const KeyRef fdbShouldConsistencyCheckBeSuspended = LiteralStringRef("\xff\x02/ConsistencyCheck/Suspend");
@@ -963,3 +993,60 @@ const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
 const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
+
+// for tests
+void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
+	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+	       ssi.id().toString().c_str(),
+	       ssi.locality.toString().c_str(),
+	       ssi.isTss() ? "true" : "false",
+	       ssi.isTss() ? ssi.tssPairID.get().toString().c_str() : "",
+	       ssi.address().toString().c_str(),
+	       ssi.getValue.getEndpoint().token.toString().c_str());
+
+	StorageServerInterface ssi2 =
+	    (useFB) ? decodeServerListValueFB(serverListValueFB(ssi)) : decodeServerListValue(serverListValue(ssi));
+
+	printf("ssi2=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+	       ssi2.id().toString().c_str(),
+	       ssi2.locality.toString().c_str(),
+	       ssi2.isTss() ? "true" : "false",
+	       ssi2.isTss() ? ssi2.tssPairID.get().toString().c_str() : "",
+	       ssi2.address().toString().c_str(),
+	       ssi2.getValue.getEndpoint().token.toString().c_str());
+
+	ASSERT(ssi.id() == ssi2.id());
+	ASSERT(ssi.locality == ssi2.locality);
+	ASSERT(ssi.isTss() == ssi2.isTss());
+	if (ssi.isTss()) {
+		ASSERT(ssi2.tssPairID.get() == ssi2.tssPairID.get());
+	}
+	ASSERT(ssi.address() == ssi2.address());
+	ASSERT(ssi.getValue.getEndpoint().token == ssi2.getValue.getEndpoint().token);
+}
+
+// unit test for serialization since tss stuff had bugs
+TEST_CASE("/SystemData/SerDes/SSI") {
+	printf("testing ssi serdes\n");
+	LocalityData localityData(Optional<Standalone<StringRef>>(),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Optional<Standalone<StringRef>>());
+
+	// non-tss
+	StorageServerInterface ssi;
+	ssi.uniqueID = UID(0x1234123412341234, 0x5678567856785678);
+	ssi.locality = localityData;
+	ssi.initEndpoints();
+
+	testSSISerdes(ssi, false);
+	testSSISerdes(ssi, true);
+
+	ssi.tssPairID = UID(0x2345234523452345, 0x1238123812381238);
+
+	testSSISerdes(ssi, false);
+	testSSISerdes(ssi, true);
+	printf("ssi serdes test complete\n");
+
+	return Void();
+}

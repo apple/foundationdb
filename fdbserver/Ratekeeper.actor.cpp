@@ -719,9 +719,11 @@ ACTOR Future<Void> trackEachStorageServer(
 		when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 			wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
 			if (change.second.present()) {
-				auto& a = actors[change.first];
-				a = Future<Void>();
-				a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
+				if (!change.second.get().isTss()) {
+					auto& a = actors[change.first];
+					a = Future<Void>();
+					a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
+				}
 			} else
 				actors.erase(change.first);
 		}
@@ -737,6 +739,10 @@ ACTOR Future<Void> monitorServerListChange(
 
 	loop {
 		try {
+			if (now() - self->lastSSListFetchedTimestamp > 2 * SERVER_KNOBS->SERVER_LIST_DELAY) {
+				TraceEvent(SevWarnAlways, "RatekeeperGetSSListLongLatency", self->id)
+				    .detail("Latency", now() - self->lastSSListFetchedTimestamp);
+			}
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			vector<std::pair<StorageServerInterface, ProcessClass>> results = wait(getServerListAndProcessClasses(&tr));
 			self->lastSSListFetchedTimestamp = now();
@@ -764,6 +770,7 @@ ACTOR Future<Void> monitorServerListChange(
 			tr = Transaction(self->db);
 			wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 		} catch (Error& e) {
+			TraceEvent("RatekeeperGetSSListError", self->id).error(e).suppressFor(1.0);
 			wait(tr.onError(e));
 		}
 	}
@@ -779,8 +786,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData* self) {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				state Future<Standalone<RangeResultRef>> throttledTagKeys =
-				    tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> throttledTagKeys = tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<Optional<Value>> autoThrottlingEnabled = tr.get(tagThrottleAutoEnabledKey);
 
 				if (!committed) {
@@ -1383,7 +1389,7 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Standalone<RangeResultRef> results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
 				self->configuration.fromKeyValues((VectorRef<KeyValueRef>)results);

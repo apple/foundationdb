@@ -66,6 +66,7 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/Tracing.h"
+#include "flow/UnitTest.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -88,7 +89,7 @@ enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
-	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_IGNORE_CONFIG_DB, OPT_USE_TEST_CONFIG_DB
 };
@@ -162,6 +163,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_HELP,                  "--help",                      SO_NONE },
 	{ OPT_DEVHELP,               "--dev-help",                  SO_NONE },
 	{ OPT_KNOB,                  "--knob_",                     SO_REQ_SEP },
+	{ OPT_UNITTESTPARAM,         "--test_",                     SO_REQ_SEP },
 	{ OPT_LOCALITY,              "--locality_",                 SO_REQ_SEP },
 	{ OPT_TESTSERVERS,           "--testservers",               SO_REQ_SEP },
 	{ OPT_TEST_ON_SERVERS,       "--testonservers",             SO_NONE },
@@ -432,7 +434,7 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
 
 				loop {
-					Standalone<RangeResultRef> results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
+					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
 					for (int r = 0; r < results.size(); r++) {
 						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
 						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
@@ -625,16 +627,19 @@ static void printUsage(const char* name, bool devhelp) {
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if (devhelp) {
 		printf("  --build_flags  Print build information and exit.\n");
-		printOptionUsage("-r ROLE, --role ROLE",
-		                 " Server role (valid options are fdbd, test, multitest,"
-		                 " simulation, networktestclient, networktestserver, restore"
-		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.");
+		printOptionUsage(
+		    "-r ROLE, --role ROLE",
+		    " Server role (valid options are fdbd, test, multitest,"
+		    " simulation, networktestclient, networktestserver, restore"
+		    " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, unittests). The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
 		printOptionUsage("-q, --no_dialog", " Disable error dialog on crash.");
 		printOptionUsage("--parentpid PID", " Specify a process after whose termination to exit.");
 #endif
-		printOptionUsage("-f TESTFILE, --testfile", " Testfile to run, defaults to `tests/default.txt'.");
+		printOptionUsage("-f TESTFILE, --testfile",
+		                 " Testfile to run, defaults to `tests/default.txt'.  If role is `unittests', specifies which "
+		                 "unit tests to run as a search prefix.");
 		printOptionUsage("-R, --restarting", " Restart a previous simulation that was cleanly shut down.");
 		printOptionUsage("-s SEED, --seed SEED", " Random seed.");
 		printOptionUsage("-k KEY, --key KEY", "Target key for search role.");
@@ -654,6 +659,8 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--num_testers NUM",
 		                 " A multitester will wait for NUM testers before starting"
 		                 " (defaults to 1).");
+		printOptionUsage("--test_PARAMNAME PARAMVALUE",
+		                 " Set a UnitTest named parameter to the given value.  Names are case sensitive.");
 #ifdef __linux__
 		printOptionUsage("--rsssize SIZE",
 		                 " Turns on automatic heap profiling when RSS memory size exceeds"
@@ -925,6 +932,7 @@ enum class ServerRole {
 	SkipListTest,
 	Test,
 	VersionedMapTest,
+	UnitTests
 };
 struct CLIOptions {
 	std::string commandLine;
@@ -977,6 +985,7 @@ struct CLIOptions {
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
+	UnitTestParameters testParams;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1052,6 +1061,15 @@ private:
 				manualKnobOverrides[syn] = args.OptionArg();
 				break;
 			}
+			case OPT_UNITTESTPARAM: {
+				std::string syn = args.OptionSyntax();
+				if (!StringRef(syn).startsWith(LiteralStringRef("--test_"))) {
+					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				testParams.set(syn.substr(7), args.OptionArg());
+				break;
+			}
 			case OPT_LOCALITY: {
 				std::string syn = args.OptionSyntax();
 				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
@@ -1110,6 +1128,8 @@ private:
 					role = ServerRole::KVFileGenerateIOLogChecksums;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ServerRole::ConsistencyCheck;
+				else if (!strcmp(sRole, "unittests"))
+					role = ServerRole::UnitTests;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1480,7 +1500,8 @@ private:
 			    return StringRef(addr).startsWith(LiteralStringRef("auto:"));
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
-		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums) ||
+		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
+		     role != ServerRole::UnitTests) ||
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
@@ -1503,7 +1524,7 @@ private:
 					fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
 					throw;
 				}
-				auto connectionFile = makeReference<ClusterConnectionFile>(connFile, ccs);
+				connectionFile = makeReference<ClusterConnectionFile>(connFile, ccs);
 			} else {
 				std::pair<std::string, bool> resolvedClusterFile;
 				try {
@@ -2000,6 +2021,18 @@ int main(int argc, char* argv[]) {
 			                       opts.testFile,
 			                       StringRef(),
 			                       opts.localities));
+			g_network->run();
+		} else if (role == ServerRole::UnitTests) {
+			setupRunLoopProfiler();
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			f = stopAfter(runTests(opts.connectionFile,
+			                       TEST_TYPE_UNIT_TESTS,
+			                       TEST_HERE,
+			                       1,
+			                       opts.testFile,
+			                       StringRef(),
+			                       opts.localities,
+			                       opts.testParams));
 			g_network->run();
 		} else if (role == ServerRole::CreateTemplateDatabase) {
 			createTemplateDatabase();

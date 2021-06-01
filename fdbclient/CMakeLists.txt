@@ -32,6 +32,9 @@ set(FDBCLIENT_SRCS
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp
+  GlobalConfig.h
+  GlobalConfig.actor.h
+  GlobalConfig.actor.cpp
   GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
@@ -80,6 +83,7 @@ set(FDBCLIENT_SRCS
   Status.h
   StatusClient.actor.cpp
   StatusClient.h
+  StorageServerInterface.cpp
   StorageServerInterface.h
   Subspace.cpp
   Subspace.h

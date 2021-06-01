@@ -401,11 +401,17 @@ ACTOR Future<Void> readCommitted(Database cx,
 			releaser = FlowLock::Releaser(
 			    *lock, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
-			state Standalone<RangeResultRef> values = wait(tr.getRange(begin, end, limits));
+			state RangeResult values = wait(tr.getRange(begin, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
+			// Copy the data instead of messing with the results directly to avoid TSS issues.
 			if (values.size() > 1 && BUGGIFY) {
-				values.resize(values.arena(), values.size() / 2);
+				RangeResult copy;
+				// only copy first half of values into copy
+				for (int i = 0; i < values.size() / 2; i++) {
+					copy.push_back_deep(copy.arena(), values[i]);
+				}
+				values = copy;
 				values.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
 				if (deterministicRandom()->random01() < 0.5)
@@ -467,11 +473,17 @@ ACTOR Future<Void> readCommitted(Database cx,
 			if (lockAware)
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state Standalone<RangeResultRef> rangevalue = wait(tr.getRange(nextKey, end, limits));
+			state RangeResult rangevalue = wait(tr.getRange(nextKey, end, limits));
 
-			// When this buggify line is enabled, if there are more than 1 result then use half of the results
+			// When this buggify line is enabled, if there are more than 1 result then use half of the results.
+			// Copy the data instead of messing with the results directly to avoid TSS issues.
 			if (rangevalue.size() > 1 && BUGGIFY) {
-				rangevalue.resize(rangevalue.arena(), rangevalue.size() / 2);
+				RangeResult copy;
+				// only copy first half of rangevalue into copy
+				for (int i = 0; i < rangevalue.size() / 2; i++) {
+					copy.push_back_deep(copy.arena(), rangevalue[i]);
+				}
+				rangevalue = copy;
 				rangevalue.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
 				if (deterministicRandom()->random01() < 0.5)
@@ -743,6 +755,9 @@ ACTOR Future<Void> applyMutations(Database cx,
 			wait(coalesceKeyVersionCache(
 			    uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
 			beginVersion = newEndVersion;
+			if (BUGGIFY) {
+				wait(delay(2.0));
+			}
 		}
 	} catch (Error& e) {
 		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError")
@@ -775,7 +790,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 			return Void();
 	}
 
-	state Standalone<RangeResultRef> backupVersions = wait(
+	state RangeResult backupVersions = wait(
 	    tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 
 	// Make sure version history key does exist and lower the beginVersion if needed
@@ -867,7 +882,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	}
 
 	if (!endVersion.present() && backupVersions.size() == 1) {
-		Standalone<RangeResultRef> existingDestUidValues =
+		RangeResult existingDestUidValues =
 		    wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 		for (auto it : existingDestUidValues) {
 			if (it.value == destUidValue) {
@@ -900,7 +915,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state Standalone<RangeResultRef> backupVersions = wait(tr->getRange(
+			state RangeResult backupVersions = wait(tr->getRange(
 			    KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 			state Version readVer = tr->getReadVersion().get();
 
@@ -987,7 +1002,7 @@ ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData) {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state Standalone<RangeResultRef> destUids = wait(
+			state RangeResult destUids = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 
 			for (auto destUid : destUids) {

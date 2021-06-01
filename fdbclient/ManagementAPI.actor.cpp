@@ -60,6 +60,13 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		return out;
 	}
 
+	if (mode == "tss") {
+		// Set temporary marker in config map to mark that this is a tss configuration and not a normal storage/log
+		// configuration. A bit of a hack but reuses the parsing code nicely.
+		out[p + "istss"] = "1";
+		return out;
+	}
+
 	if (mode == "locked") {
 		// Setting this key is interpreted as an instruction to use the normal version-stamp-based mechanism for locking
 		// the database.
@@ -119,7 +126,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 
 		if ((key == "logs" || key == "commit_proxies" || key == "grv_proxies" || key == "resolvers" ||
 		     key == "remote_logs" || key == "log_routers" || key == "usable_regions" ||
-		     key == "repopulate_anti_quorum") &&
+		     key == "repopulate_anti_quorum" || key == "count") &&
 		    isInteger(value)) {
 			out[p + key] = value;
 		}
@@ -134,6 +141,14 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			    BinaryWriter::toValue(regionObj, IncludeVersion(ProtocolVersion::withRegionConfiguration())).toString();
 		}
 
+		if (key == "perpetual_storage_wiggle" && isInteger(value)) {
+			int ppWiggle = atoi(value.c_str());
+			if (ppWiggle >= 2 || ppWiggle < 0) {
+				printf("Error: Only 0 and 1 are valid values of perpetual_storage_wiggle at present.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
 		return out;
 	}
 
@@ -326,6 +341,35 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p + "log_replication_policy"] = policyWriter.toValue().toString();
 	}
+	if (outConf.count(p + "istss")) {
+		// redo config parameters to be tss config instead of normal config
+
+		// save param values from parsing as a normal config
+		bool isNew = outConf.count(p + "initialized");
+		Optional<std::string> count;
+		Optional<std::string> storageEngine;
+		if (outConf.count(p + "count")) {
+			count = Optional<std::string>(outConf[p + "count"]);
+		}
+		if (outConf.count(p + "storage_engine")) {
+			storageEngine = Optional<std::string>(outConf[p + "storage_engine"]);
+		}
+
+		// A new tss setup must have count + storage engine. An adjustment must have at least one.
+		if ((isNew && (!count.present() || !storageEngine.present())) ||
+		    (!isNew && !count.present() && !storageEngine.present())) {
+			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
+		}
+
+		// clear map and only reset tss parameters
+		outConf.clear();
+		if (count.present()) {
+			outConf[p + "tss_count"] = count.get();
+		}
+		if (storageEngine.present()) {
+			outConf[p + "tss_storage_engine"] = storageEngine.get();
+		}
+	}
 	return ConfigurationResult::SUCCESS;
 }
 
@@ -357,7 +401,7 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Standalone<RangeResultRef> res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
 			DatabaseConfiguration config;
 			config.fromKeyValues((VectorRef<KeyValueRef>)res);
@@ -407,7 +451,7 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 			tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
 			if (!creating && !force) {
-				state Future<Standalone<RangeResultRef>> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<vector<ProcessData>> fWorkers = getWorkers(&tr);
 				wait(success(fConfig) || tooLong);
 
@@ -458,19 +502,19 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 						}
 					}
 
-					state Future<Standalone<RangeResultRef>> fServerList =
-					    (newConfig.regions.size()) ? tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY)
-					                               : Future<Standalone<RangeResultRef>>();
+					state Future<RangeResult> fServerList = (newConfig.regions.size())
+					                                            ? tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY)
+					                                            : Future<RangeResult>();
 
 					if (newConfig.usableRegions == 2) {
 						if (oldReplicationUsesDcId) {
-							state Future<Standalone<RangeResultRef>> fLocalityList =
+							state Future<RangeResult> fLocalityList =
 							    tr.getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
 							wait(success(fLocalityList) || tooLong);
 							if (!fLocalityList.isReady()) {
 								return ConfigurationResult::DATABASE_UNAVAILABLE;
 							}
-							Standalone<RangeResultRef> localityList = fLocalityList.get();
+							RangeResult localityList = fLocalityList.get();
 							ASSERT(!localityList.more && localityList.size() < CLIENT_KNOBS->TOO_MANY);
 
 							std::set<Key> localityDcIds;
@@ -513,7 +557,7 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 						if (!fServerList.isReady()) {
 							return ConfigurationResult::DATABASE_UNAVAILABLE;
 						}
-						Standalone<RangeResultRef> serverList = fServerList.get();
+						RangeResult serverList = fServerList.get();
 						ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 						std::set<Key> newDcIds;
@@ -988,8 +1032,8 @@ Future<ConfigurationResult> changeConfig(Database const& cx, std::string const& 
 }
 
 ACTOR Future<vector<ProcessData>> getWorkers(Transaction* tr) {
-	state Future<Standalone<RangeResultRef>> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	state Future<Standalone<RangeResultRef>> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
 	wait(success(processClasses) && success(processData));
 	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
@@ -1105,6 +1149,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 
 	vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+
 	leaderServers.reserve(coord.clientLeaderServers.size());
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 		leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
@@ -1188,14 +1233,20 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			TEST(old.clusterKeyName() != conn.clusterKeyName()); // Quorum change with new name
 			TEST(old.clusterKeyName() == conn.clusterKeyName()); // Quorum change with unchanged name
 
-			vector<Future<Optional<LeaderInfo>>> leaderServers;
-			ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+			state vector<Future<Optional<LeaderInfo>>> leaderServers;
+			state ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+			// check if allowed to modify the cluster descriptor
+			if (!change->getDesiredClusterKeyName().empty()) {
+				CheckDescriptorMutableReply mutabilityReply =
+				    wait(coord.clientLeaderServers[0].checkDescriptorMutable.getReply(CheckDescriptorMutableRequest()));
+				if (!mutabilityReply.isMutable)
+					return CoordinatorsResult::BAD_DATABASE_STATE;
+			}
 			leaderServers.reserve(coord.clientLeaderServers.size());
 			for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
 				                                           GetLeaderRequest(coord.clusterKey, UID()),
 				                                           TaskPriority::CoordinationReply));
-
 			choose {
 				when(wait(waitForAll(leaderServers))) {}
 				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
@@ -1679,9 +1730,9 @@ ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass p
 }
 
 ACTOR Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr) {
-	state Standalone<RangeResultRef> r = wait(tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeResult r = wait(tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-	state Standalone<RangeResultRef> r2 = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeResult r2 = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
 	vector<AddressExclusion> exclusions;
@@ -1867,7 +1918,7 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 	// recovery
 
 	// Check that there aren't any storage servers with addresses violating the exclusions
-	Standalone<RangeResultRef> serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+	RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 	state bool ok = true;
@@ -1948,7 +1999,7 @@ ACTOR Future<Void> waitForFullReplication(Database cx) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			Standalone<RangeResultRef> confResults = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult confResults = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY);
 			state DatabaseConfiguration config;
 			config.fromKeyValues((VectorRef<KeyValueRef>)confResults);
@@ -2203,8 +2254,7 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 			tr.clear(sysRangeClear);
 			tr.clear(privateRange);
 			tr.addReadConflictRange(privateRange);
-			Standalone<RangeResultRef> previous =
-			    wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, true));
+			RangeResult previous = wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, true));
 			bool prevIsCached = false;
 			if (!previous.empty()) {
 				std::vector<uint16_t> prevVal;
@@ -2220,8 +2270,7 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 				tr.set(sysRange.begin, trueValue);
 				tr.set(privateRange.begin, serverKeysTrue);
 			}
-			Standalone<RangeResultRef> after =
-			    wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
+			RangeResult after = wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
 			bool afterIsCached = false;
 			if (!after.empty()) {
 				std::vector<uint16_t> afterVal;

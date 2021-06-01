@@ -32,9 +32,9 @@ constexpr UID WLTOKEN_LEADERELECTIONREG_FORWARD(-1, 7);
 constexpr UID WLTOKEN_GENERATIONREG_READ(-1, 8);
 constexpr UID WLTOKEN_GENERATIONREG_WRITE(-1, 9);
 
-constexpr UID WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES(-1, 16);
-constexpr UID WLTOKEN_CONFIGFOLLOWER_GETCHANGES(-1, 17);
-constexpr UID WLTOKEN_CONFIGFOLLOWER_COMPACT(-1, 18);
+constexpr UID WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES(-1, 17);
+constexpr UID WLTOKEN_CONFIGFOLLOWER_GETCHANGES(-1, 18);
+constexpr UID WLTOKEN_CONFIGFOLLOWER_COMPACT(-1, 19);
 
 struct GenerationRegInterface {
 	constexpr static FileIdentifier file_identifier = 16726744;
@@ -231,6 +231,6 @@ public:
 	std::vector<ConfigFollowerInterface> configServers;
 };
 
-Future<Void> coordinationServer(std::string const& dataFolder, Optional<bool> const& useTestConfigDB);
+Future<Void> coordinationServer(std::string const& dataFolder, Reference<ClusterConnectionFile> const& ccf, Optional<bool> const &useTestConfigDB);
 
 #endif

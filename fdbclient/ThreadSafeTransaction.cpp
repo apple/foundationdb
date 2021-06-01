@@ -101,6 +101,15 @@ double ThreadSafeDatabase::getMainThreadBusyness() {
 	return g_network->networkInfo.metrics.networkBusyness;
 }
 
+// Returns the protocol version reported by the coordinator this client is connected to
+// If an expected version is given, the future won't return until the protocol version is different than expected
+// Note: this will never return if the server is running a protocol from FDB 5.0 or older
+ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
+	DatabaseContext* db = this->db;
+	return onMainThread(
+	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile* connFile =
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
@@ -145,6 +154,12 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadT
 		    ISingleThreadTransaction::create(tr, type, Database(cx));
 	    },
 	    nullptr);
+}
+
+// This constructor is only used while refactoring fdbcli and only called from the main thread
+ThreadSafeTransaction::ThreadSafeTransaction(ReadYourWritesTransaction* ryw) : tr(ryw) {
+	if (tr)
+		tr->addref();
 }
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
@@ -212,31 +227,31 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplit
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                                         const KeySelectorRef& end,
-                                                                         int limit,
-                                                                         bool snapshot,
-                                                                         bool reverse) {
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+                                                          const KeySelectorRef& end,
+                                                          int limit,
+                                                          bool snapshot,
+                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<Standalone<RangeResultRef>> {
+	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limit, snapshot, reverse);
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                                         const KeySelectorRef& end,
-                                                                         GetRangeLimits limits,
-                                                                         bool snapshot,
-                                                                         bool reverse) {
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+                                                          const KeySelectorRef& end,
+                                                          GetRangeLimits limits,
+                                                          bool snapshot,
+                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<Standalone<RangeResultRef>> {
+	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limits, snapshot, reverse);
 	});
@@ -408,16 +423,6 @@ void ThreadSafeApi::selectApiVersion(int apiVersion) {
 const char* ThreadSafeApi::getClientVersion() {
 	// There is only one copy of the ThreadSafeAPI, and it never gets deleted. Also, clientVersion is never modified.
 	return clientVersion.c_str();
-}
-
-// Wait until a quorum of coordinators with the same protocol version are available, and then return that protocol
-// version.
-ThreadFuture<uint64_t> ThreadSafeApi::getServerProtocol(const char* clusterFilePath) {
-	return onMainThread([clusterFilePath = std::string(clusterFilePath)]() -> Future<uint64_t> {
-		auto [clusterFile, isDefault] = ClusterConnectionFile::lookupClusterFileName(clusterFilePath);
-		Reference<ClusterConnectionFile> f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFile));
-		return getCoordinatorProtocols(f);
-	});
 }
 
 void ThreadSafeApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {

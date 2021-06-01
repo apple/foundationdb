@@ -1,4 +1,4 @@
-﻿/*
+/*
  * JsonParser.cs
  *
  * This source file is part of the FoundationDB open source project
@@ -34,9 +34,10 @@ namespace Magnesium
 	{
 		static Random r = new Random();
 
+		// dummy parameter nonFatalParseError to match xml
 		public static IEnumerable<Event> Parse(System.IO.Stream stream, string file,
 			bool keepOriginalElement = false, double startTime = -1, double endTime = Double.MaxValue,
-			double samplingFactor = 1.0)
+			double samplingFactor = 1.0, Action<string> nonFatalErrorMessage = null)
 		{
 			using (var reader = new System.IO.StreamReader(stream))
 			{

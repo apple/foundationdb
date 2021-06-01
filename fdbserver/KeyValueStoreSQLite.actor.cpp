@@ -1145,8 +1145,8 @@ struct RawCursor {
 		}
 		return Optional<Value>();
 	}
-	Standalone<RangeResultRef> getRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
-		Standalone<RangeResultRef> result;
+	RangeResult getRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
+		RangeResult result;
 		int accumulatedBytes = 0;
 		ASSERT(byteLimit > 0);
 		if (rowLimit == 0) {
@@ -1579,9 +1579,7 @@ public:
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override;
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override;
-	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
-	                                             int rowLimit = 1 << 30,
-	                                             int byteLimit = 1 << 30) override;
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override;
 
 	KeyValueStoreSQLite(std::string const& filename,
 	                    UID logID,
@@ -1697,7 +1695,7 @@ private:
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
-			ThreadReturnPromise<Standalone<RangeResultRef>> result;
+			ThreadReturnPromise<RangeResult> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
@@ -2207,7 +2205,7 @@ Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key, int max
 	readThreads->post(p);
 	return f;
 }
-Future<Standalone<RangeResultRef>> KeyValueStoreSQLite::readRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
+Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
 	++readsRequested;
 	auto p = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 	auto f = p->result.getFuture();

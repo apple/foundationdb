@@ -22,6 +22,7 @@
 
 #include "flow/Knobs.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
 #include "fdbclient/Knobs.h"
 
 // Disk queue
@@ -82,7 +83,7 @@ public:
 	int64_t TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH;
 	int64_t DISK_QUEUE_FILE_EXTENSION_BYTES; // When we grow the disk queue, by how many bytes should it grow?
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
-	int DISK_QUEUE_MAX_TRUNCATE_BYTES; // A truncate larger than this will cause the file to be replaced instead.
+	int64_t DISK_QUEUE_MAX_TRUNCATE_BYTES; // A truncate larger than this will cause the file to be replaced instead.
 	double TLOG_DEGRADED_DURATION;
 	int64_t MAX_CACHE_VERSIONS;
 	double TXS_POPPED_MAX_DELAY;
@@ -165,6 +166,9 @@ public:
 	double SERVER_LIST_DELAY;
 	double RECRUITMENT_IDLE_DELAY;
 	double STORAGE_RECRUITMENT_DELAY;
+	bool TSS_HACK_IDENTITY_MAPPING;
+	double TSS_RECRUITMENT_TIMEOUT;
+	double TSS_DD_KILL_INTERVAL;
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
@@ -541,6 +545,7 @@ public:
 	// Worker
 	double WORKER_LOGGING_INTERVAL;
 	double HEAP_PROFILER_INTERVAL;
+	double UNKNOWN_CC_TIMEOUT;
 	double DEGRADED_RESET_INTERVAL;
 	double DEGRADED_WARNING_LIMIT;
 	double DEGRADED_WARNING_RESET_DELAY;
@@ -556,6 +561,8 @@ public:
 
 	// Coordination
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
+	bool ENABLE_CROSS_CLUSTER_SUPPORT; // Allow a coordinator to serve requests whose connection string does not match
+	                                   // the local descriptor
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;
@@ -636,7 +643,7 @@ public:
 	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
 	int REDWOOD_COMMIT_CONCURRENT_READS; // Max number of concurrent reads done to support commit operations
-	double REDWOOD_PAGE_REBUILD_FILL_FACTOR; // When rebuilding pages, start a new page after this capacity
+	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
 	                                         // once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES; // Minimum number of pages to free before ending a lazy clear cycle, unless the

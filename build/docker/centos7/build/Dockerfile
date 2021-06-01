@@ -18,6 +18,8 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         curl \
         debbuild \
         devtoolset-8 \
+        devtoolset-8-libasan-devel \
+        devtoolset-8-libtsan-devel \
         devtoolset-8-libubsan-devel \
         devtoolset-8-systemtap-sdt-devel \
         docker-ce \
@@ -34,6 +36,7 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         lz4-devel \
         lz4-static \
         mono-devel \
+        redhat-lsb-core \
         rpm-build \
         tcl-devel \
         unzip \
@@ -138,7 +141,7 @@ RUN curl -Ls https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz -o rocks
     rm -rf /tmp/*
 
 # install boost 1.67 to /opt
-RUN curl -Ls https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 && \
+RUN curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 && \
     echo "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba  boost_1_67_0.tar.bz2" > boost-sha-67.txt && \
     sha256sum -c boost-sha-67.txt && \
     tar --no-same-owner --directory /opt -xjf boost_1_67_0.tar.bz2 && \
@@ -147,7 +150,7 @@ RUN curl -Ls https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.
 
 # install boost 1.72 to /opt
 RUN source /opt/rh/devtoolset-8/enable && \
-    curl -Ls https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 && \
+    curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 && \
     echo "59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722  boost_1_72_0.tar.bz2" > boost-sha-72.txt && \
     sha256sum -c boost-sha-72.txt && \
     tar --no-same-owner --directory /opt -xjf boost_1_72_0.tar.bz2 && \

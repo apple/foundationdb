@@ -43,6 +43,7 @@ struct ReadYourWritesTransactionOptions {
 	double timeoutInSeconds;
 	int maxRetries;
 	int snapshotRywEnabled;
+	bool bypassUnreadable : 1;
 
 	ReadYourWritesTransactionOptions() {}
 	explicit ReadYourWritesTransactionOptions(Transaction const& tr);
@@ -92,10 +93,10 @@ public:
 		                snapshot,
 		                reverse);
 	}
-	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
-	                                            GetRangeLimits limits,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) {
+	Future<RangeResult> getRange(const KeyRange& keys,
+	                             GetRangeLimits limits,
+	                             bool snapshot = false,
+	                             bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limits,
@@ -162,9 +163,9 @@ public:
 	void setToken(uint64_t token);
 
 	// Read from the special key space readConflictRangeKeysRange
-	Standalone<RangeResultRef> getReadConflictRangeIntersecting(KeyRangeRef kr);
+	RangeResult getReadConflictRangeIntersecting(KeyRangeRef kr);
 	// Read from the special key space writeConflictRangeKeysRange
-	Standalone<RangeResultRef> getWriteConflictRangeIntersecting(KeyRangeRef kr);
+	RangeResult getWriteConflictRangeIntersecting(KeyRangeRef kr);
 
 	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
 	bool specialKeySpaceChangeConfiguration() const { return options.specialKeySpaceChangeConfiguration; }
