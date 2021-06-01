@@ -187,6 +187,7 @@ struct GetCommitVersionRequest {
 struct ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
 	Version version;
+	Optional<Version> prevVersion; // if present, wait for prevVersion to be committed before replying
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
@@ -197,13 +198,14 @@ struct ReportRawCommittedVersionRequest {
 	ReportRawCommittedVersionRequest(Version version,
 	                                 bool locked,
 	                                 Optional<Value> metadataVersion,
-	                                 Version minKnownCommittedVersion)
+	                                 Version minKnownCommittedVersion,
+	                                 Optional<Version> prevVersion)
 	  : version(version), locked(locked), metadataVersion(metadataVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion), prevVersion(prevVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, reply);
+		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, prevVersion, reply);
 	}
 };
 
