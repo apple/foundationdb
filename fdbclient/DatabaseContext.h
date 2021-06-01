@@ -273,6 +273,9 @@ public:
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger proxiesChangeTrigger;
 	Future<Void> monitorProxiesInfoChange;
+	Future<Void> monitorTssInfoChange;
+	Future<Void> tssMismatchHandler;
+	PromiseStream<UID> tssMismatchStream;
 	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
@@ -319,6 +322,8 @@ public:
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
+
+	std::map<UID, Reference<TSSMetrics>> tssMetrics;
 
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
@@ -419,6 +424,9 @@ public:
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
+
+	void maybeAddTssMapping(StorageServerInterface const& ssi);
+	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
 };
 
 #endif

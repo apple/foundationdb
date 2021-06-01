@@ -116,18 +116,30 @@ struct ClientDBInfo {
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
 	vector<VersionHistory> history;
+	vector<std::pair<UID, StorageServerInterface>>
+	    tssMapping; // logically map<ssid, tss interface> for all active TSS pairs
 
 	ClientDBInfo() {}
 
 	bool operator==(ClientDBInfo const& r) const { return id == r.id; }
 	bool operator!=(ClientDBInfo const& r) const { return id != r.id; }
 
+	// convenience method to treat tss mapping like a map
+	Optional<StorageServerInterface> getTssPair(UID storageServerID) const {
+		for (auto& it : tssMapping) {
+			if (it.first == storageServerID) {
+				return Optional<StorageServerInterface>(it.second);
+			}
+		}
+		return Optional<StorageServerInterface>();
+	}
+
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, tssMapping);
 	}
 };
 

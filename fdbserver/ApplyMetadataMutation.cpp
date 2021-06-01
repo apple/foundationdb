@@ -68,6 +68,12 @@ void applyMetadataMutations(SpanID const& spanContext,
 	// std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
 
+	// Testing Storage Server removal (clearing serverTagKey) needs to read tss server list value to determine it is a
+	// tss + find partner's tag to send the private mutation. Since the removeStorageServer transaction clears both the
+	// storage list and server tag, we have to enforce ordering, proccessing the server tag first, and postpone the
+	// server list clear until the end;
+	std::vector<KeyRangeRef> tssServerListToRemove;
+
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
 		if (toCommit) {
@@ -95,12 +101,14 @@ void applyMetadataMutations(SpanID const& spanContext,
 
 						for (const auto& id : src) {
 							auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
+							ASSERT(!storageInfo->interf.isTss());
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back(storageInfo->tag);
 							info.src_info.push_back(storageInfo);
 						}
 						for (const auto& id : dest) {
 							auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
+							ASSERT(!storageInfo->interf.isTss());
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back(storageInfo->tag);
 							info.dest_info.push_back(storageInfo);
@@ -113,6 +121,8 @@ void applyMetadataMutations(SpanID const& spanContext,
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			} else if (m.param1.startsWith(serverKeysPrefix)) {
 				if (toCommit) {
+					Tag tag = decodeServerTagValue(
+					    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get());
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivateMutation", dbgid)
@@ -120,14 +130,9 @@ void applyMetadataMutations(SpanID const& spanContext,
 					    .detail("Privatized", privatized.toString())
 					    .detail("Server", serverKeysDecodeServer(m.param1))
 					    .detail("TagKey", serverTagKeyFor(serverKeysDecodeServer(m.param1)))
-					    .detail(
-					        "Tag",
-					        decodeServerTagValue(
-					            txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get())
-					            .toString());
+					    .detail("Tag", tag.toString());
 
-					toCommit->addTag(decodeServerTagValue(
-					    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get()));
+					toCommit->addTag(tag);
 					toCommit->writeTypedMessage(privatized);
 				}
 			} else if (m.param1.startsWith(serverTagPrefix)) {
@@ -379,8 +384,20 @@ void applyMetadataMutations(SpanID const& spanContext,
 				}
 			}
 			if (serverListKeys.intersects(range)) {
-				if (!initialCommit)
-					txnStateStore->clear(range & serverListKeys);
+				if (!initialCommit) {
+					KeyRangeRef rangeToClear = range & serverListKeys;
+					if (rangeToClear.singleKeyRange()) {
+						UID id = decodeServerListKey(rangeToClear.begin);
+						Optional<Value> ssiV = txnStateStore->readValue(serverListKeyFor(id)).get();
+						if (ssiV.present() && decodeServerListValue(ssiV.get()).isTss()) {
+							tssServerListToRemove.push_back(rangeToClear);
+						} else {
+							txnStateStore->clear(rangeToClear);
+						}
+					} else {
+						txnStateStore->clear(rangeToClear);
+					}
+				}
 			}
 			if (tagLocalityListKeys.intersects(range)) {
 				if (!initialCommit)
@@ -409,6 +426,32 @@ void applyMetadataMutations(SpanID const& spanContext,
 
 							toCommit->addTag(decodeServerTagValue(kv.value));
 							toCommit->writeTypedMessage(privatized);
+						}
+					}
+					// Might be a tss removal, which doesn't store a tag there.
+					// Chained if is a little verbose, but avoids unecessary work
+					if (!initialCommit && !serverKeysCleared.size()) {
+						KeyRangeRef maybeTssRange = range & serverTagKeys;
+						if (maybeTssRange.singleKeyRange()) {
+							UID id = decodeServerTagKey(maybeTssRange.begin);
+							Optional<Value> ssiV = txnStateStore->readValue(serverListKeyFor(id)).get();
+
+							if (ssiV.present()) {
+								StorageServerInterface ssi = decodeServerListValue(ssiV.get());
+								if (ssi.isTss()) {
+									Optional<Value> tagV =
+									    txnStateStore->readValue(serverTagKeyFor(ssi.tssPairID.get())).get();
+									if (tagV.present()) {
+										MutationRef privatized = m;
+										privatized.param1 = maybeTssRange.begin.withPrefix(systemKeys.begin, arena);
+										privatized.param2 =
+										    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
+
+										toCommit->addTag(decodeServerTagValue(tagV.get()));
+										toCommit->writeTypedMessage(privatized);
+									}
+								}
+							}
 						}
 					}
 				}
@@ -566,6 +609,10 @@ void applyMetadataMutations(SpanID const& spanContext,
 					txnStateStore->clear(commonLogRange);
 			}
 		}
+	}
+
+	for (KeyRangeRef& range : tssServerListToRemove) {
+		txnStateStore->clear(range);
 	}
 
 	// If we accumulated private mutations for cached key-ranges, we also need to

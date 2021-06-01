@@ -501,7 +501,10 @@ void initHelp() {
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
-	    "specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
+	    "specified.\n\ntss: when enabled, configures the testing storage server for the cluster instead."
+	    "When used with new to set up tss for the first time, it requires both a count and a storage engine."
+	    "To disable the testing storage server, run \"configure tss count=0\"\n\n"
+	    "Redundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
 	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
 	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
 	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
@@ -1127,6 +1130,17 @@ void printStatus(StatusObjectReader statusObj,
 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
+
+				if (statusObjConfig.get("tss_count", intVal) && intVal > 0) {
+					int activeTss = 0;
+					if (statusObjCluster.has("active_tss_count")) {
+						statusObjCluster.get("active_tss_count", activeTss);
+					}
+					outputString += format("\n  TSS                    - %d/%d", activeTss, intVal);
+
+					if (statusObjConfig.get("tss_storage_engine", strVal))
+						outputString += format("\n  TSS Storage Engine     - %s", strVal.c_str());
+				}
 
 				outputString += "\n  Usable Regions         - ";
 				if (statusObjConfig.get("usable_regions", intVal)) {
