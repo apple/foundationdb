@@ -21,6 +21,7 @@
 #include <algorithm>
 
 #include "fdbserver/ConfigBroadcaster.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/IConfigConsumer.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include

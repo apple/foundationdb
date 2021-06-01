@@ -24,6 +24,7 @@
 
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 

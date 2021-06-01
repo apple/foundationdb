@@ -20,6 +20,7 @@
 
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbclient/SimpleConfigTransaction.h"
+#include "fdbclient/Tuple.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include
 

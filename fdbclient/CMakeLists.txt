@@ -73,6 +73,8 @@ set(FDBCLIENT_SRCS
   S3BlobStore.actor.cpp
   Schemas.cpp
   Schemas.h
+  ServerKnobs.cpp
+  ServerKnobs.h
   SimpleConfigTransaction.h
   SnapshotCache.h
   Status.h
