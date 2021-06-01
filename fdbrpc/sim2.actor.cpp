@@ -743,7 +743,6 @@ private:
 				    .detail("FileCount", machineCache.count(self->filename));
 				renameFile(sourceFilename.c_str(), self->filename.c_str());
 
-				ASSERT(!machineCache.count(self->filename));
 				machineCache[self->filename] = machineCache[sourceFilename];
 				machineCache.erase(sourceFilename);
 				self->actualFilename = self->filename;
@@ -2254,8 +2253,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(std::string filename, i
 		if (itr == machineCache.end()) {
 			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
 			// This way, they can both keep up with the time to start the next operation
-			auto diskParameters =
-			    makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
+			auto diskParameters = Reference<DiskParameters>(
+			    new DiskParameters(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
 			f = AsyncFileNonDurable::open(filename,
 			                              actualFilename,
 			                              SimpleFile::open(filename, flags, mode, diskParameters, false),
