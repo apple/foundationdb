@@ -28,12 +28,17 @@
 #include <set>
 #include <string>
 #include <stdint.h>
+#include <variant>
+#include <optional>
 
-class KnobsCollection {
+struct NoKnobFound {};
+using ParsedKnobValue = std::variant<NoKnobFound, int, double, int64_t, bool, std::string>;
+
+class Knobs {
 protected:
-	KnobsCollection() = default;
-	KnobsCollection(KnobsCollection const&) = delete;
-	KnobsCollection& operator=(KnobsCollection const&) = delete;
+	Knobs() = default;
+	Knobs(Knobs const&) = delete;
+	Knobs& operator=(Knobs const&) = delete;
 	void initKnob(double& knob, double value, std::string const& name);
 	void initKnob(int64_t& knob, int64_t value, std::string const& name);
 	void initKnob(int& knob, int value, std::string const& name);
@@ -48,13 +53,17 @@ protected:
 	std::set<std::string> explicitlySetKnobs;
 
 public:
-	bool setKnob(std::string const& name,
-	             std::string const& value); // Returns true if the knob name is known, false if it is unknown
+	bool setKnob(std::string const& name, int value);
+	bool setKnob(std::string const& name, bool value);
+	bool setKnob(std::string const& name, int64_t value);
+	bool setKnob(std::string const& name, double value);
+	bool setKnob(std::string const& name, std::string const& value);
+	ParsedKnobValue parseKnobValue(std::string const& name, std::string const& value) const;
 	void trace() const;
 };
 
 template <class T>
-class Knobs : public KnobsCollection {
+class KnobsImpl : public Knobs {
 public:
 	template <class... Args>
 	void reset(Args&&... args) {
@@ -63,7 +72,7 @@ public:
 	}
 };
 
-class FlowKnobs : public Knobs<FlowKnobs> {
+class FlowKnobs : public KnobsImpl<FlowKnobs> {
 public:
 	int AUTOMATIC_TRACE_DUMP;
 	double PREVENT_FAST_SPIN_DELAY;

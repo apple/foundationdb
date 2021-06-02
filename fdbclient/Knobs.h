@@ -25,7 +25,7 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 
-class ClientKnobs : public Knobs<ClientKnobs> {
+class ClientKnobs : public KnobsImpl<ClientKnobs> {
 public:
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 

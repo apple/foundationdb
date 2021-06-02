@@ -21,10 +21,110 @@
 #pragma once
 
 #include <string>
+#include <variant>
 
 #include "fdbclient/FDBTypes.h"
 
+class KnobValueRef {
+	// TODO: Should use optional instead
+	struct Clear {
+		template <class Ar>
+		void serialize(Ar&) {}
+	};
+	std::variant<Clear, int, double, int64_t, bool, ValueRef> value;
+	template <class T>
+	explicit KnobValueRef(T const& v) : value(std::in_place_type<T>, v) {}
+
+	explicit KnobValueRef(Arena& arena, ValueRef& v) : value(std::in_place_type<ValueRef>, arena, v) {}
+
+	struct CreatorFunc {
+		Standalone<KnobValueRef> operator()(NoKnobFound const&) const {
+			ASSERT(false);
+			return {};
+		}
+		template <class T>
+		Standalone<KnobValueRef> operator()(T const& v) const {
+			return KnobValueRef(v);
+		}
+		Standalone<KnobValueRef> operator()(std::string const& v) const {
+			Standalone<KnobValueRef> knobValue;
+			return KnobValueRef(ValueRef(reinterpret_cast<uint8_t const*>(v.c_str()), v.size()));
+		}
+	};
+
+	struct ToStringFunc {
+		std::string operator()(Clear const& v) const { return "<clear>"; }
+		std::string operator()(int v) const { return format("%d", v); }
+		std::string operator()(int64_t v) const { return format("%ld", v); }
+		std::string operator()(bool v) const { return format("%d", v); }
+		std::string operator()(ValueRef v) const { return v.toString(); }
+		std::string operator()(double const& v) const { return format("%lf", v); }
+	};
+
+	template <class KnobsType>
+	class SetKnobFunc {
+		KnobsType* knobs;
+		std::string const* knobName;
+
+	public:
+		SetKnobFunc(KnobsType& knobs, std::string const& knobName) : knobs(&knobs), knobName(&knobName) {}
+		template <class T>
+		bool operator()(T const& v) const {
+			return knobs->setKnob(*knobName, v);
+		}
+		bool operator()(Clear const& v) const {
+			ASSERT(false);
+			return false;
+		}
+		bool operator()(StringRef const& v) const { return knobs->setKnob(*knobName, v.toString()); }
+	};
+
+public:
+	static constexpr FileIdentifier file_identifier = 9297109;
+
+	KnobValueRef() = default;
+
+	explicit KnobValueRef(Arena& arena, KnobValueRef const& rhs) : value(rhs.value) {
+		if (std::holds_alternative<ValueRef>(value)) {
+			value = ValueRef(arena, std::get<ValueRef>(value));
+		}
+	}
+
+	static Standalone<KnobValueRef> create(ParsedKnobValue const& v) { return std::visit(CreatorFunc{}, v); }
+
+	bool isSet() const { return !std::holds_alternative<Clear>(value); }
+
+	size_t expectedSize() const {
+		return std::holds_alternative<KeyRef>(value) ? std::get<KeyRef>(value).expectedSize() : 0;
+	}
+
+	template <class KnobsType>
+	bool setKnob(KnobsType& knobs, KeyRef knobName) {
+		return std::visit(value, [&knobs, knobName](auto& v) { return knobs.setKnob(knobName, v); });
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+
+	std::string toString() const { return std::visit(ToStringFunc{}, value); }
+
+	Value toValue() const {
+		auto s = toString();
+		return ValueRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
+	}
+
+	bool setKnob(std::string const& knobName, Knobs& knobs) const {
+		return std::visit(SetKnobFunc<Knobs>{ knobs, knobName }, value);
+	}
+};
+
+using KnobValue = Standalone<KnobValueRef>;
+
 struct ConfigKeyRef {
+	static constexpr FileIdentifier file_identifier = 5918726;
+
 	// Empty config class means the update is global
 	Optional<KeyRef> configClass;
 	KeyRef knobName;
@@ -61,11 +161,17 @@ inline bool operator<(ConfigKeyRef const& lhs, ConfigKeyRef const& rhs) {
 
 class ConfigMutationRef {
 	ConfigKeyRef key;
-	Optional<ValueRef> value;
+	KnobValueRef value;
+
 public:
+	static constexpr FileIdentifier file_identifier = 7219528;
+
 	ConfigMutationRef() = default;
 
-	ConfigMutationRef(ConfigKeyRef key, Optional<ValueRef> value) : key(key), value(value) {}
+	explicit ConfigMutationRef(Arena& arena, ConfigKeyRef key, KnobValueRef value)
+	  : key(arena, key), value(arena, value) {}
+
+	explicit ConfigMutationRef(ConfigKeyRef key, KnobValueRef value) : key(key), value(value) {}
 
 	ConfigKeyRef getKey() const { return key; }
 
@@ -73,13 +179,13 @@ public:
 
 	KeyRef getKnobName() const { return key.knobName; }
 
-	Optional<ValueRef> getValue() const { return value; }
+	KnobValueRef getValue() const { return value; }
 
 	ConfigMutationRef(Arena& arena, ConfigMutationRef const& rhs) : key(arena, rhs.key), value(arena, rhs.value) {}
 
-	bool isSet() const { return value.present(); }
+	bool isSet() const { return value.isSet(); }
 
-	static Standalone<ConfigMutationRef> createConfigMutation(KeyRef encodedKey, Optional<ValueRef> value) {
+	static Standalone<ConfigMutationRef> createConfigMutation(KeyRef encodedKey, KnobValueRef value) {
 		auto key = ConfigKeyRef::decodeKey(encodedKey);
 		return ConfigMutationRef(key, value);
 	}

@@ -67,7 +67,7 @@ struct ConfigFollowerGetSnapshotAndChangesReply {
 	static constexpr FileIdentifier file_identifier = 1734095;
 	Version snapshotVersion;
 	Version changesVersion;
-	std::map<ConfigKey, Value> snapshot;
+	std::map<ConfigKey, KnobValue> snapshot;
 	// TODO: Share arena
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
 	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;

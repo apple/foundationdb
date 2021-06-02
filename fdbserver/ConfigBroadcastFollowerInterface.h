@@ -50,7 +50,7 @@ public:
 struct ConfigBroadcastFollowerGetSnapshotReply {
 	static constexpr FileIdentifier file_identifier = 8701983;
 	Version version{ 0 };
-	std::map<ConfigKey, Value> snapshot;
+	std::map<ConfigKey, KnobValue> snapshot;
 
 	ConfigBroadcastFollowerGetSnapshotReply() = default;
 	template <class Snapshot>

@@ -52,9 +52,9 @@ struct ConfigTransactionGetVersionRequest {
 
 struct ConfigTransactionGetReply {
 	static constexpr FileIdentifier file_identifier = 2034110;
-	Optional<Value> value;
+	Optional<KnobValue> value;
 	ConfigTransactionGetReply() = default;
-	explicit ConfigTransactionGetReply(Optional<Value> const& value) : value(Optional<Value>(value)) {}
+	explicit ConfigTransactionGetReply(Optional<KnobValue> const& value) : value(value) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

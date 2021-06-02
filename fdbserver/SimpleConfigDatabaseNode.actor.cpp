@@ -179,7 +179,7 @@ class SimpleConfigDatabaseNodeImpl {
 		for (const auto &kv : range) {
 			auto version = getVersionFromVersionedMutationKey(kv.key);
 			ASSERT_LE(version, endVersion);
-			auto mutation = BinaryReader::fromStringRef<Standalone<ConfigMutationRef>>(kv.value, IncludeVersion());
+			auto mutation = ObjectReader::fromStringRef<ConfigMutation>(kv.value, IncludeVersion());
 			result.emplace_back_deep(result.arena(), version, mutation);
 		}
 		return result;
@@ -221,16 +221,20 @@ class SimpleConfigDatabaseNodeImpl {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
-		state Optional<Value> value =
+		state Optional<Value> serializedValue =
 		    wait(self->kvStore->readValue(BinaryWriter::toValue(req.key, IncludeVersion()).withPrefix(kvKeys.begin)));
+		state Optional<KnobValue> value;
+		if (serializedValue.present()) {
+			value = ObjectReader::fromStringRef<KnobValue>(serializedValue.get(), IncludeVersion());
+		}
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
 		for (const auto &versionedMutation : versionedMutations) {
 			const auto &mutation = versionedMutation.mutation;
 			if (mutation.getKey() == req.key) {
-				value = mutation.getValue().castTo<Value>();
+				value = mutation.getValue();
 			}
 		}
-		req.reply.send(ConfigTransactionGetReply(value));
+		req.reply.send(ConfigTransactionGetReply{ value });
 		return Void();
 	}
 
@@ -309,7 +313,7 @@ class SimpleConfigDatabaseNodeImpl {
 		int index = 0;
 		for (const auto &mutation : req.mutations) {
 			Key key = versionedMutationKey(req.version, index++);
-			Value value = BinaryWriter::toValue(mutation, IncludeVersion());
+			Value value = ObjectWriter::toValue(mutation, IncludeVersion());
 			if (mutation.isSet()) {
 				++self->setMutations;
 			} else {
@@ -358,7 +362,7 @@ class SimpleConfigDatabaseNodeImpl {
 		for (const auto& kv : data) {
 			reply
 			    .snapshot[BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(kvKeys.begin), IncludeVersion())] =
-			    kv.value;
+			    ObjectReader::fromStringRef<KnobValue>(kv.value, IncludeVersion());
 		}
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
 		wait(store(reply.changesVersion, getCommittedVersion(self)));
@@ -402,7 +406,8 @@ class SimpleConfigDatabaseNodeImpl {
 				    .detail("ReqVersion", req.version);
 				auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
 				if (mutation.isSet()) {
-					self->kvStore->set(KeyValueRef(serializedKey.withPrefix(kvKeys.begin), mutation.getValue().get()));
+					self->kvStore->set(KeyValueRef(serializedKey.withPrefix(kvKeys.begin),
+					                               ObjectWriter::toValue(mutation.getValue(), IncludeVersion())));
 				} else {
 					self->kvStore->clear(singleKeyRange(serializedKey.withPrefix(kvKeys.begin)));
 				}

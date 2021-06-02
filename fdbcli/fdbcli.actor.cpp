@@ -27,6 +27,7 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/KnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ClusterInterface.h"
@@ -3007,23 +3008,27 @@ struct CLIOptions {
 			return;
 		}
 
-		for (const auto& [knob, value] : knobs) {
+		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
-				if (!globalFlowKnobs->setKnob(knob, value) && !globalClientKnobs->setKnob(knob, value)) {
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knob.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knob));
+				auto knobValue = g_knobs->parseKnobValue(knobName, knobValueString);
+				if (!g_knobs->setKnob(knobName, knobValue)) {
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", value.c_str(), knob.c_str());
+					fprintf(stderr,
+					        "WARNING: Invalid value '%s' for knob option '%s'\n",
+					        knobValueString.c_str(),
+					        knobName.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knob))
-					    .detail("Value", printable(value));
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
 				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knob.c_str(), e.what());
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
-					    .detail("Knob", printable(knob))
-					    .detail("Value", printable(value))
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString))
 					    .error(e);
 					exit_code = FDB_EXIT_ERROR;
 				}
@@ -4830,6 +4835,8 @@ int main(int argc, char** argv) {
 	setMemoryQuota(memLimit);
 
 	registerCrashHandler();
+
+	g_knobs = KnobCollection::createClientKnobs(false, false);
 
 #ifdef __unixish__
 	struct sigaction act;

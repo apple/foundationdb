@@ -23,23 +23,11 @@
 #include <string>
 
 #include "fdbclient/ConfigKnobs.h"
+#include "fdbclient/KnobCollection.h"
 #include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
-
-class TestKnobs : public Knobs<TestKnobs> {
-public:
-	TestKnobs();
-	int64_t TEST_LONG;
-	int TEST_INT;
-	double TEST_DOUBLE;
-	bool TEST_BOOL;
-	std::string TEST_STRING;
-	bool operator==(TestKnobs const&) const;
-	bool operator!=(TestKnobs const&) const;
-	void initialize();
-};
 
 class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;

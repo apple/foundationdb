@@ -28,7 +28,7 @@
 // Disk queue
 static constexpr int _PAGE_SIZE = 4096;
 
-class ServerKnobs : public Knobs<ServerKnobs> {
+class ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
 	// Versions
 	int64_t VERSIONS_PER_SECOND;

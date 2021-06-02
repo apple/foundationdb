@@ -47,6 +47,8 @@ set(FDBCLIENT_SRCS
   KeyBackedTypes.h
   KeyRangeMap.actor.cpp
   KeyRangeMap.h
+  KnobCollection.cpp
+  KnobCollection.h
   Knobs.cpp
   Knobs.h
   ManagementAPI.actor.cpp

@@ -40,12 +40,12 @@ public:
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                  Version mostRecentVersion,
 	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
-	void applySnapshotAndChanges(std::map<ConfigKey, Value> const& snapshot,
+	void applySnapshotAndChanges(std::map<ConfigKey, KnobValue> const& snapshot,
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion,
 	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
-	void applySnapshotAndChanges(std::map<ConfigKey, Value>&& snapshot,
+	void applySnapshotAndChanges(std::map<ConfigKey, KnobValue>&& snapshot,
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion,

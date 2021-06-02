@@ -18,14 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbclient/Knobs.h"
+#include "fdbclient/KnobCollection.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/Knobs.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "fdbserver/OnDemandStore.h"
-#include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -36,26 +34,13 @@ const KeyRef configPathKey = "configPath"_sr;
 const KeyRef lastSeenVersionKey = "lastSeenVersion"_sr;
 const KeyRangeRef knobOverrideKeys = KeyRangeRef("knobOverride/"_sr, "knobOverride0"_sr);
 
-bool updateSingleKnob(Key knobName, Value knobValue) {
-	return false;
-}
-
-template <class K, class... Rest>
-bool updateSingleKnob(Key knobName, Value knobValue, K& k, Rest&... rest) {
-	if (k.setKnob(knobName.toString(), knobValue.toString())) {
-		return true;
-	} else {
-		return updateSingleKnob(knobName, knobValue, rest...);
-	}
-}
-
 KeyRef stringToKeyRef(std::string const& s) {
 	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 }
 
 class ConfigKnobOverrides {
 	Standalone<VectorRef<KeyRef>> configPath;
-	std::map<Optional<Key>, std::map<Key, Value>> configClassToKnobToValue;
+	std::map<Optional<Key>, std::map<Key, KnobValue>> configClassToKnobToValue;
 
 public:
 	ConfigKnobOverrides() = default;
@@ -74,26 +59,26 @@ public:
 		}
 	}
 	ConfigClassSet getConfigClassSet() const { return ConfigClassSet(configPath); }
-	void set(Optional<KeyRef> configClass, KeyRef knobName, ValueRef value) {
+	void set(Optional<KeyRef> configClass, KeyRef knobName, KnobValueRef value) {
+		ASSERT(value.isSet());
 		configClassToKnobToValue[configClass.castTo<Key>()][knobName] = value;
 	}
 	void remove(Optional<KeyRef> configClass, KeyRef knobName) {
 		configClassToKnobToValue[configClass.castTo<Key>()].erase(knobName);
 	}
 
-	template <class... KS>
-	void update(KS&... knobCollections) const {
+	void update(KnobCollection& knobCollection) const {
 		// Apply global overrides
 		const auto& knobToValue = configClassToKnobToValue.at({});
 		for (const auto& [knobName, knobValue] : knobToValue) {
-			updateSingleKnob(knobName, knobValue, knobCollections...);
+			ASSERT(knobCollection.setKnob(knobName.toString(), knobValue));
 		}
 
 		// Apply specific overrides
 		for (const auto& configClass : configPath) {
 			const auto& knobToValue = configClassToKnobToValue.at(configClass);
 			for (const auto& [knobName, knobValue] : knobToValue) {
-				updateSingleKnob(knobName, knobValue, knobCollections...);
+				ASSERT(knobCollection.setKnob(knobName.toString(), knobValue));
 			}
 		}
 	}
@@ -107,19 +92,19 @@ public:
 };
 
 class ManualKnobOverrides {
-	std::map<Key, Value> overrides;
+	std::map<Key, KnobValue> overrides;
 
 public:
 	explicit ManualKnobOverrides(std::map<std::string, std::string> const& overrides) {
-		for (const auto& [knobName, knobValue] : overrides) {
-			this->overrides[stringToKeyRef(knobName)] = stringToKeyRef(knobValue);
+		for (const auto& [knobName, knobValueString] : overrides) {
+			auto knobValue = KnobCollection::parseKnobValue(knobName, knobValueString, true);
+			this->overrides[stringToKeyRef(knobName)] = knobValue;
 		}
 	}
 
-	template <class... KS>
-	void update(KS&... knobCollections) const {
+	void update(KnobCollection& knobCollection) {
 		for (const auto& [knobName, knobValue] : overrides) {
-			if (!updateSingleKnob(knobName, knobValue, knobCollections...)) {
+			if (!knobCollection.setKnob(knobName.toString(), knobValue)) {
 				fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.toString().c_str());
 				TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
 			}
@@ -131,16 +116,16 @@ public:
 
 class LocalConfigurationImpl {
 	UID id;
-	// TODO: Listen for errors
 	OnDemandStore kvStore;
 	Future<Void> initFuture;
-	FlowKnobs flowKnobs;
-	ClientKnobs clientKnobs;
-	ServerKnobs serverKnobs;
-	TestKnobs testKnobs;
 	Version lastSeenVersion{ 0 };
 	ManualKnobOverrides manualKnobOverrides;
 	ConfigKnobOverrides configKnobOverrides;
+	std::unique_ptr<KnobCollection> testKnobCollection;
+
+	KnobCollection& getKnobs() { return testKnobCollection ? *testKnobCollection : *g_knobs; }
+
+	KnobCollection const& getKnobs() const { return testKnobCollection ? *testKnobCollection : *g_knobs; }
 
 	CounterCollection cc;
 	Counter broadcasterChanges;
@@ -196,37 +181,25 @@ class LocalConfigurationImpl {
 		for (const auto& kv : range) {
 			auto configKey =
 			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(knobOverrideKeys.begin), IncludeVersion());
-			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, kv.value);
+			self->configKnobOverrides.set(configKey.configClass,
+			                              configKey.knobName,
+			                              ObjectReader::fromStringRef<KnobValue>(kv.value, IncludeVersion()));
 		}
 		self->updateInMemoryState(lastSeenVersion);
 		return Void();
 	}
 
-	void initializeKnobs(bool randomize = false, bool isSimulated = false) {
-		flowKnobs.initialize(randomize, isSimulated);
-		clientKnobs.initialize(randomize);
-		serverKnobs.initialize(randomize, &clientKnobs, isSimulated);
-		testKnobs.initialize();
-	}
-
-	void resetKnobs(bool randomize = false, bool isSimulated = false) {
-		flowKnobs.reset(randomize, isSimulated);
-		clientKnobs.reset(randomize);
-		serverKnobs.reset(randomize, &clientKnobs, isSimulated);
-		testKnobs.reset();
-	}
-
 	void updateInMemoryState(Version lastSeenVersion) {
 		this->lastSeenVersion = lastSeenVersion;
-		resetKnobs();
-		configKnobOverrides.update(flowKnobs, clientKnobs, serverKnobs, testKnobs);
-		manualKnobOverrides.update(flowKnobs, clientKnobs, serverKnobs, testKnobs);
+		getKnobs().reset();
+		configKnobOverrides.update(getKnobs());
+		manualKnobOverrides.update(getKnobs());
 		// Must reinitialize in order to update dependent knobs
-		initializeKnobs();
+		getKnobs().initialize();
 	}
 
 	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
-	                                      std::map<ConfigKey, Value> snapshot,
+	                                      std::map<ConfigKey, KnobValue> snapshot,
 	                                      Version snapshotVersion) {
 		// TODO: Concurrency control?
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
@@ -234,8 +207,9 @@ class LocalConfigurationImpl {
 		self->kvStore->clear(knobOverrideKeys);
 		for (const auto& [configKey, knobValue] : snapshot) {
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, knobValue);
-			self->kvStore->set(KeyValueRef(
-			    BinaryWriter::toValue(configKey, IncludeVersion()).withPrefix(knobOverrideKeys.begin), knobValue));
+			self->kvStore->set(
+			    KeyValueRef(BinaryWriter::toValue(configKey, IncludeVersion()).withPrefix(knobOverrideKeys.begin),
+			                ObjectWriter::toValue(knobValue, IncludeVersion())));
 		}
 		ASSERT_GE(snapshotVersion, self->lastSeenVersion);
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(snapshotVersion, IncludeVersion())));
@@ -255,10 +229,9 @@ class LocalConfigurationImpl {
 			const auto& mutation = versionedMutation.mutation;
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
 			if (mutation.isSet()) {
-				self->kvStore->set(
-				    KeyValueRef(serializedKey.withPrefix(knobOverrideKeys.begin), mutation.getValue().get()));
-				self->configKnobOverrides.set(
-				    mutation.getConfigClass(), mutation.getKnobName(), mutation.getValue().get());
+				self->kvStore->set(KeyValueRef(serializedKey.withPrefix(knobOverrideKeys.begin),
+				                               ObjectWriter::toValue(mutation.getValue(), IncludeVersion())));
+				self->configKnobOverrides.set(mutation.getConfigClass(), mutation.getKnobName(), mutation.getValue());
 			} else {
 				self->kvStore->clear(singleKeyRange(serializedKey.withPrefix(knobOverrideKeys.begin)));
 				self->configKnobOverrides.remove(mutation.getConfigClass(), mutation.getKnobName());
@@ -317,6 +290,9 @@ public:
 	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
 	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
 	    manualKnobOverrides(manualKnobOverrides) {
+		if (testID.present()) {
+			testKnobCollection = KnobCollection::createServerKnobs(true, g_network->isSimulated());
+		}
 		logger = traceCounters(
 		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
 	}
@@ -333,22 +309,22 @@ public:
 
 	FlowKnobs const& getFlowKnobs() const {
 		ASSERT(initFuture.isValid() && initFuture.isReady());
-		return flowKnobs;
+		return getKnobs().getFlowKnobs();
 	}
 
 	ClientKnobs const& getClientKnobs() const {
 		ASSERT(initFuture.isValid() && initFuture.isReady());
-		return clientKnobs;
+		return getKnobs().getClientKnobs();
 	}
 
 	ServerKnobs const& getServerKnobs() const {
 		ASSERT(initFuture.isValid() && initFuture.isReady());
-		return serverKnobs;
+		return getKnobs().getServerKnobs();
 	}
 
 	TestKnobs const& getTestKnobs() const {
 		ASSERT(initFuture.isValid() && initFuture.isReady());
-		return testKnobs;
+		return getKnobs().getTestKnobs();
 	}
 
 	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
@@ -404,119 +380,101 @@ UID LocalConfiguration::getID() const {
 	return impl->getID();
 }
 
-#define init(knob, value) initKnob(knob, value, #knob)
-
-TestKnobs::TestKnobs() {
-	initialize();
-}
-
-void TestKnobs::initialize() {
-	init(TEST_LONG, 0);
-	init(TEST_INT, 0);
-	init(TEST_DOUBLE, 0.0);
-	init(TEST_BOOL, false);
-	init(TEST_STRING, "");
-}
-
-bool TestKnobs::operator==(TestKnobs const& rhs) const {
-	return (TEST_LONG == rhs.TEST_LONG) && (TEST_INT == rhs.TEST_INT) && (TEST_DOUBLE == rhs.TEST_DOUBLE) &&
-	       (TEST_BOOL == rhs.TEST_BOOL) && (TEST_STRING == rhs.TEST_STRING);
-}
-
-bool TestKnobs::operator!=(TestKnobs const& rhs) const {
-	return !(*this == rhs);
-}
-
+/*
 namespace {
 
-class TestKnobs2 : public Knobs<TestKnobs2> {
+// TODO: These tests should be moved to KnobCollection.cpp
+#define init(knob, value) initKnob(knob, value, #knob)
+
+class TestKnobs2 : public KnobsImpl<TestKnobs2> {
 public:
-	int64_t TEST2_LONG;
-	int TEST2_INT;
-	double TEST2_DOUBLE;
-	bool TEST2_BOOL;
-	std::string TEST2_STRING;
+    int64_t TEST2_LONG;
+    int TEST2_INT;
+    double TEST2_DOUBLE;
+    bool TEST2_BOOL;
+    std::string TEST2_STRING;
 
-	void initialize() {
-		init(TEST2_LONG, 0);
-		init(TEST2_INT, 0);
-		init(TEST2_DOUBLE, 0.0);
-		init(TEST2_BOOL, false);
-		init(TEST2_STRING, "");
-	}
+    void initialize() {
+        init(TEST2_LONG, 0);
+        init(TEST2_INT, 0);
+        init(TEST2_DOUBLE, 0.0);
+        init(TEST2_BOOL, false);
+        init(TEST2_STRING, "");
+    }
 
-	TestKnobs2() { initialize(); }
+    TestKnobs2() { initialize(); }
 };
 
 } // namespace
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/updateSingleKnob") {
-	TestKnobs k1;
-	TestKnobs2 k2;
-	updateSingleKnob("test_long"_sr, "5"_sr, k1, k2);
-	updateSingleKnob("test_int"_sr, "5"_sr, k1, k2);
-	updateSingleKnob("test_double"_sr, "5.0"_sr, k1, k2);
-	updateSingleKnob("test_bool"_sr, "true"_sr, k1, k2);
-	updateSingleKnob("test_string"_sr, "5"_sr, k1, k2);
-	updateSingleKnob("test2_long"_sr, "10"_sr, k1, k2);
-	updateSingleKnob("test2_int"_sr, "10"_sr, k1, k2);
-	updateSingleKnob("test2_double"_sr, "10.0"_sr, k1, k2);
-	updateSingleKnob("test2_bool"_sr, "true"_sr, k1, k2);
-	updateSingleKnob("test2_string"_sr, "10"_sr, k1, k2);
-	ASSERT_EQ(k1.TEST_LONG, 5);
-	ASSERT_EQ(k1.TEST_INT, 5);
-	ASSERT_EQ(k1.TEST_DOUBLE, 5.0);
-	ASSERT(k1.TEST_BOOL);
-	ASSERT(k1.TEST_STRING == "5");
-	ASSERT_EQ(k2.TEST2_LONG, 10);
-	ASSERT_EQ(k2.TEST2_INT, 10);
-	ASSERT_EQ(k2.TEST2_DOUBLE, 10.0);
-	ASSERT(k2.TEST2_BOOL);
-	ASSERT(k2.TEST2_STRING == "10");
-	return Void();
+    TestKnobs k1;
+    TestKnobs2 k2;
+    updateSingleKnob("test_long"_sr, KnobValueRef::create(int64_t{5}), k1, k2);
+    updateSingleKnob("test_int"_sr, KnobValueRef::create(int{5}), k1, k2);
+    updateSingleKnob("test_double"_sr, KnobValueRef::create(double{5.0}), k1, k2);
+    updateSingleKnob("test_bool"_sr, KnobValueRef::create(true), k1, k2);
+    updateSingleKnob("test_string"_sr, KnobValueRef::create("5"), k1, k2);
+    updateSingleKnob("test2_long"_sr, KnobValueRef::create(int64_t{10}), k1, k2);
+    updateSingleKnob("test2_int"_sr, KnobValueRef::create(int{10}), k1, k2);
+    updateSingleKnob("test2_double"_sr, KnobValueRef::create(double{10.0}), k1, k2);
+    updateSingleKnob("test2_bool"_sr, KnobValueRef::create(true), k1, k2);
+    updateSingleKnob("test2_string"_sr, KnobValueRef::create("10"), k1, k2);
+    ASSERT_EQ(k1.TEST_LONG, 5);
+    ASSERT_EQ(k1.TEST_INT, 5);
+    ASSERT_EQ(k1.TEST_DOUBLE, 5.0);
+    ASSERT(k1.TEST_BOOL);
+    ASSERT(k1.TEST_STRING == "5");
+    ASSERT_EQ(k2.TEST2_LONG, 10);
+    ASSERT_EQ(k2.TEST2_INT, 10);
+    ASSERT_EQ(k2.TEST2_DOUBLE, 10.0);
+    ASSERT(k2.TEST2_BOOL);
+    ASSERT(k2.TEST2_STRING == "10");
+    return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/ManualKnobOverrides") {
-	TestKnobs k1;
-	TestKnobs2 k2;
-	std::map<std::string, std::string> m = { { "test_int", "5" }, { "test2_int", "10" } };
-	ManualKnobOverrides manualKnobOverrides(std::move(m));
-	manualKnobOverrides.update(k1, k2);
-	ASSERT(k1.TEST_INT == 5);
-	ASSERT(k2.TEST2_INT == 10);
-	return Void();
+    TestKnobs k1;
+    TestKnobs2 k2;
+    std::map<std::string, std::string> m = { { "test_int", "5" }, { "test2_int", "10" } };
+    ManualKnobOverrides manualKnobOverrides(std::move(m));
+    manualKnobOverrides.update(k1, k2);
+    ASSERT(k1.TEST_INT == 5);
+    ASSERT(k2.TEST2_INT == 10);
+    return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/GlobalKnobOverride") {
-	TestKnobs k1;
-	ConfigKnobOverrides configKnobOverrides("class-A");
-	configKnobOverrides.set({}, "test_int"_sr, "5"_sr);
-	configKnobOverrides.update(k1);
-	ASSERT_EQ(k1.TEST_INT, 5);
-	return Void();
+    TestKnobs k1;
+    ConfigKnobOverrides configKnobOverrides("class-A");
+    configKnobOverrides.set({}, "test_int"_sr, KnobValueRef::create(int{5}));
+    configKnobOverrides.update(k1);
+    ASSERT_EQ(k1.TEST_INT, 5);
+    return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/ConfigKnobOverrides") {
-	TestKnobs k1;
-	TestKnobs2 k2;
-	ConfigKnobOverrides configKnobOverrides("class-A/class-B");
-	configKnobOverrides.update(k1, k2);
-	ASSERT(k1.TEST_INT == 0);
-	ASSERT(k2.TEST2_INT == 0);
-	configKnobOverrides.set("class-B"_sr, "test_int"_sr, "7"_sr);
-	configKnobOverrides.set("class-A"_sr, "test_int"_sr, "5"_sr);
-	configKnobOverrides.set("class-A"_sr, "test2_int"_sr, "10"_sr);
-	configKnobOverrides.update(k1, k2);
-	ASSERT(k1.TEST_INT == 7);
-	ASSERT(k2.TEST2_INT == 10);
-	return Void();
+    TestKnobs k1;
+    TestKnobs2 k2;
+    ConfigKnobOverrides configKnobOverrides("class-A/class-B");
+    configKnobOverrides.update(k1, k2);
+    ASSERT(k1.TEST_INT == 0);
+    ASSERT(k2.TEST2_INT == 0);
+    configKnobOverrides.set("class-B"_sr, "test_int"_sr, KnobValue::create(int{7}));
+    configKnobOverrides.set("class-A"_sr, "test_int"_sr, KnobValue::create(int{5}));
+    configKnobOverrides.set("class-A"_sr, "test2_int"_sr, KnobValue::create(int{10}));
+    configKnobOverrides.update(k1, k2);
+    ASSERT_EQ(k1.TEST_INT, 7);
+    ASSERT_EQ(k2.TEST2_INT, 10);
+    return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/InvalidKnobName") {
-	TestKnobs k1;
-	ConfigKnobOverrides configKnobOverrides("class-A");
-	// Noop with a SevWarnAlways trace
-	configKnobOverrides.set("class-A", "thisknobdoesnotexist"_sr, "5"_sr);
-	configKnobOverrides.update(k1);
-	return Void();
+    TestKnobs k1;
+    ConfigKnobOverrides configKnobOverrides("class-A");
+    // Noop with a SevWarnAlways trace
+    configKnobOverrides.set("class-A", "thisknobdoesnotexist"_sr, KnobValueRef::create(int{5}));
+    configKnobOverrides.update(k1);
+    return Void();
 }
+*/

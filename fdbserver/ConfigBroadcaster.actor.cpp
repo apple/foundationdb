@@ -115,7 +115,7 @@ public:
 
 class ConfigBroadcasterImpl {
 	PendingRequestStore pending;
-	std::map<ConfigKey, Value> snapshot;
+	std::map<ConfigKey, KnobValue> snapshot;
 	std::deque<VersionedConfigMutation> mutationHistory;
 	std::deque<VersionedConfigCommitAnnotation> annotationHistory;
 	Version lastCompactedVersion;
@@ -144,7 +144,7 @@ class ConfigBroadcasterImpl {
 				    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 				    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
 				    .detail("KnobName", versionedMutation.mutation.getKnobName())
-				    .detail("KnobValue", versionedMutation.mutation.getValue());
+				    .detail("KnobValue", versionedMutation.mutation.getValue().toString());
 				reply.changes.push_back_deep(reply.changes.arena(), versionedMutation);
 			}
 		}
@@ -227,7 +227,7 @@ class ConfigBroadcasterImpl {
 		for (const auto& change : changes) {
 			const auto& mutation = change.mutation;
 			if (mutation.isSet()) {
-				snapshot[mutation.getKey()] = mutation.getValue().get();
+				snapshot[mutation.getKey()] = mutation.getValue();
 			} else {
 				snapshot.erase(mutation.getKey());
 			}
@@ -304,7 +304,7 @@ public:
 			const auto& mutation = versionedMutation.mutation;
 			mutationObject["config_class"] = mutation.getConfigClass().orDefault("<global>"_sr);
 			mutationObject["knob_name"] = mutation.getKnobName();
-			mutationObject["knob_value"] = mutation.getValue().orDefault("<cleared>"_sr);
+			mutationObject["knob_value"] = mutation.getValue().toString();
 			mutationsArray.push_back(std::move(mutationObject));
 		}
 		result["mutations"] = std::move(mutationsArray);
@@ -320,7 +320,7 @@ public:
 		JsonBuilderObject snapshotObject;
 		std::map<Optional<Key>, std::vector<std::pair<Key, Value>>> snapshotMap;
 		for (const auto& [configKey, value] : snapshot) {
-			snapshotMap[configKey.configClass.castTo<Key>()].emplace_back(configKey.knobName, value);
+			snapshotMap[configKey.configClass.castTo<Key>()].emplace_back(configKey.knobName, value.toString());
 		}
 		for (const auto& [configClass, kvs] : snapshotMap) {
 			JsonBuilderObject kvsObject;
@@ -376,7 +376,7 @@ void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutatio
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
-    std::map<ConfigKey, Value> const& snapshot,
+    std::map<ConfigKey, KnobValue> const& snapshot,
     Version snapshotVersion,
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
@@ -385,7 +385,7 @@ void ConfigBroadcaster::applySnapshotAndChanges(
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
-    std::map<ConfigKey, Value>&& snapshot,
+    std::map<ConfigKey, KnobValue>&& snapshot,
     Version snapshotVersion,
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
@@ -411,12 +411,12 @@ Standalone<VectorRef<VersionedConfigMutationRef>> getTestChanges(Version version
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
 	if (includeGlobalMutation) {
 		ConfigKey key = ConfigKeyRef({}, "test_long"_sr);
-		ConfigMutation mutation = ConfigMutationRef(key, "5"_sr);
+		ConfigMutation mutation = ConfigMutationRef(key, KnobValueRef::create(int64_t{ 5 }));
 		changes.emplace_back_deep(changes.arena(), version, mutation);
 	}
 	{
 		ConfigKey key = ConfigKeyRef("class-A"_sr, "test_long"_sr);
-		ConfigMutation mutation = ConfigMutationRef(key, "5"_sr);
+		ConfigMutation mutation = ConfigMutationRef(key, KnobValueRef::create(int64_t{ 5 }));
 		changes.emplace_back_deep(changes.arena(), version, mutation);
 	}
 	return changes;

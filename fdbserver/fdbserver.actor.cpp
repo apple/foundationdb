@@ -35,6 +35,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
+#include "fdbclient/KnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
@@ -957,7 +958,7 @@ struct CLIOptions {
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = nullptr;
-	uint64_t memLimit =
+	int64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 	uint64_t storageMemLimit = 1LL << 30;
@@ -1645,46 +1646,38 @@ int main(int argc, char* argv[]) {
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
-		if (!globalServerKnobs->setKnob("log_directory", opts.logFolder))
-			ASSERT(false);
+		g_knobs = KnobCollection::createServerKnobs(true, role == ServerRole::Simulation);
+		g_knobs->setKnob("log_directory", KnobValue::create(opts.logFolder));
 		if (role != ServerRole::Simulation) {
-			if (!globalServerKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))
-				ASSERT(false);
+			g_knobs->setKnob("commit_batches_mem_bytes_hard_limit", KnobValue::create(int64_t{ opts.memLimit }));
 		}
-		for (auto k = opts.knobs.begin(); k != opts.knobs.end(); ++k) {
+
+		for (const auto& [knobName, knobValueString] : opts.knobs) {
 			try {
-				if (!globalFlowKnobs->setKnob(k->first, k->second) &&
-				    !globalClientKnobs->setKnob(k->first, k->second) &&
-				    !globalServerKnobs->setKnob(k->first, k->second)) {
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
-				}
+				auto knobValue = g_knobs->parseKnobValue(knobName, knobValueString);
+				g_knobs->setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
 					fprintf(stderr,
 					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        k->second.c_str(),
-					        k->first.c_str());
+					        knobName.c_str(),
+					        knobValueString.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(k->first))
-					    .detail("Value", printable(k->second));
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
 				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
-					    .detail("Knob", printable(k->first))
-					    .detail("Value", printable(k->second))
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString))
 					    .error(e);
 					throw;
 				}
 			}
 		}
-		if (!globalServerKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit)))
-			ASSERT(false);
-
+		g_knobs->setKnob("server_mem_limit", KnobValue::create(int64_t{ opts.memLimit }));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		globalFlowKnobs->initialize(true, role == ServerRole::Simulation);
-		globalClientKnobs->initialize(true);
-		globalServerKnobs->initialize(true, globalClientKnobs.get(), role == ServerRole::Simulation);
+		g_knobs->initialize(true, role == ServerRole::Simulation);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);

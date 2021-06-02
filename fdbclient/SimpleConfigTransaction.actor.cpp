@@ -20,8 +20,10 @@
 
 #include <algorithm>
 
-#include "fdbclient/SimpleConfigTransaction.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/KnobCollection.h"
+#include "fdbclient/SimpleConfigTransaction.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -58,12 +60,17 @@ class SimpleConfigTransactionImpl {
 			    .detail("ConfigClass", configKey.configClass)
 			    .detail("KnobName", configKey.knobName);
 		}
-		ConfigTransactionGetReply result =
-		    wait(self->cti.get.getReply(ConfigTransactionGetRequest(version, configKey)));
+		ConfigTransactionGetReply reply =
+		    wait(self->cti.get.getReply(ConfigTransactionGetRequest{ version, configKey }));
 		if (self->dID.present()) {
-			TraceEvent("SimpleConfigTransactionGotValue", self->dID.get()).detail("Value", result.value);
+			TraceEvent("SimpleConfigTransactionGotValue", self->dID.get())
+			    .detail("Value", reply.value.get().toString());
 		}
-		return result.value;
+		if (reply.value.present()) {
+			return reply.value.get().toValue();
+		} else {
+			return {};
+		}
 	}
 
 	ACTOR static Future<Standalone<RangeResultRef>> getConfigClasses(SimpleConfigTransactionImpl* self) {
@@ -119,7 +126,10 @@ public:
 		if (key == configTransactionDescriptionKey) {
 			toCommit.annotation.description = KeyRef(toCommit.arena, value);
 		} else {
-			toCommit.mutations.push_back_deep(toCommit.arena, ConfigMutationRef::createConfigMutation(key, value));
+			// TODO: Throw error if decoding fails
+			ConfigKey configKey = ConfigKeyRef::decodeKey(key);
+			auto knobValue = KnobCollection::parseKnobValue(configKey.knobName.toString(), value.toString(), true);
+			toCommit.mutations.emplace_back_deep(toCommit.arena, ConfigKeyRef::decodeKey(key), knobValue);
 		}
 	}
 
@@ -127,7 +137,7 @@ public:
 		if (key == configTransactionDescriptionKey) {
 			toCommit.annotation.description = ""_sr;
 		} else {
-			toCommit.mutations.push_back_deep(toCommit.arena, ConfigMutationRef::createConfigMutation(key, {}));
+			toCommit.mutations.emplace_back_deep(toCommit.arena, ConfigKeyRef::decodeKey(key), KnobValue{});
 		}
 	}
 

@@ -61,7 +61,7 @@ class SimpleConfigConsumerImpl {
 					    .detail("Version", versionedMutation.version)
 					    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
 					    .detail("KnobName", versionedMutation.mutation.getKnobName())
-					    .detail("KnobValue", versionedMutation.mutation.getValue());
+					    .detail("KnobValue", versionedMutation.mutation.getValue().toString());
 				}
 				if (reply.mostRecentVersion > self->lastSeenVersion) {
 					self->lastSeenVersion = reply.mostRecentVersion;
