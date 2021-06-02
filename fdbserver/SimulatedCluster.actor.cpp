@@ -170,7 +170,7 @@ class TestConfig {
 			if (attrib == "maxTLogVersion") {
 				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
-                        if (attrib == "restartInfoLocation") {
+			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
 		}
@@ -202,6 +202,23 @@ public:
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
+
+	bool tomlKeyPresent(const toml::value& data, std::string key) {
+		if (data.is_table()) {
+			for (const auto& [k, v] : data.as_table()) {
+				if (k == key || tomlKeyPresent(v, key)) {
+					return true;
+				}
+			}
+		} else if (data.is_array()) {
+			for (const auto& v : data.as_array()) {
+				if (tomlKeyPresent(v, key)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
 
 	void readFromConfig(const char* testFile) {
 		if (isIniFile(testFile)) {
@@ -247,6 +264,10 @@ public:
 				if (stderrSeverity.present()) {
 					TraceEvent("StderrSeverity").detail("NewSeverity", stderrSeverity.get());
 				}
+			}
+			// look for restartInfoLocation to mark isFirstTestInRestart
+			if (!isFirstTestInRestart) {
+				isFirstTestInRestart = tomlKeyPresent(file, "restartInfoLocation");
 			}
 		} catch (std::exception& e) {
 			std::cerr << e.what() << std::endl;
@@ -1188,7 +1209,11 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		db.grvProxyCount = 1;
 		db.resolverCount = 1;
 	}
-	int replication_type = testConfig.simpleConfig ? 1 : (std::max(testConfig.minimumReplication, datacenters > 4 ? deterministicRandom()->randomInt(1, 3) : std::min(deterministicRandom()->randomInt(0, 6), 3)));
+	int replication_type = testConfig.simpleConfig
+	                           ? 1
+	                           : (std::max(testConfig.minimumReplication,
+	                                       datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
+	                                                       : std::min(deterministicRandom()->randomInt(0, 6), 3)));
 	if (testConfig.config.present()) {
 		set_config(testConfig.config.get());
 	} else {
