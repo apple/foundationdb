@@ -4004,16 +4004,18 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				}
 			}
 			when(wait(restart.onTrigger())) {
-				StringRef pid = self->wigglingPid.get();
-
-				auto fv = self->excludeStorageServersForWiggle(pid);
-				moveFinishFuture = waitForAll(fv);
-				TraceEvent("PerpetualStorageWiggleRestart", self->distributorId)
-				    .detail("ProcessId", pid)
-				    .detail("StorageCount", fv.size());
-				isPaused = false;
+                if(self->wigglingPid.present()) {
+					StringRef pid = self->wigglingPid.get();
+                    auto fv = self->excludeStorageServersForWiggle(pid);
+                    moveFinishFuture = waitForAll(fv);
+                    TraceEvent("PerpetualStorageWiggleRestart", self->distributorId)
+                        .detail("ProcessId", pid)
+                        .detail("StorageCount", fv.size());
+                    isPaused = false;
+				}
 			}
 			when(wait(moveFinishFuture)) {
+				ASSERT(self->wigglingPid.present());
 				StringRef pid = self->wigglingPid.get();
 
 				moveFinishFuture = Never();
@@ -4044,14 +4046,15 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				ddQueueCheck = delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistributionLow);
 			}
 			when(wait(pauseWiggle.onTrigger())) {
-				StringRef pid = self->wigglingPid.get();
-
-				isPaused = true;
-				moveFinishFuture = Never();
-				self->includeStorageServersForWiggle(pid);
-				TraceEvent("PerpetualStorageWigglePause", self->distributorId)
-				    .detail("ProcessId", pid)
-				    .detail("StorageCount", movingCount);
+                if(self->wigglingPid.present()) {
+					StringRef pid = self->wigglingPid.get();
+					isPaused = true;
+					moveFinishFuture = Never();
+					self->includeStorageServersForWiggle(pid);
+					TraceEvent("PerpetualStorageWigglePause", self->distributorId)
+					    .detail("ProcessId", pid)
+					    .detail("StorageCount", movingCount);
+				}
 			}
 		}
 	}
