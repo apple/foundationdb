@@ -1894,6 +1894,12 @@ public:
 			self->remapQueue.resetHeadReader();
 
 			self->remapCleanupFuture = remapCleanup(self);
+			TraceEvent(SevInfo, "RedwoodRecovered")
+			    .detail("FilePrefix", self->filename.c_str())
+			    .detail("CommittedVersion", self->pHeader->committedVersion)
+			    .detail("LogicalPageSize", self->logicalPageSize)
+			    .detail("PhysicalPageSize", self->physicalPageSize)
+			    .detail("RemapEntries", self->remapQueue.numEntries);
 		} else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully
 			// committed. A new pager will be created in its place.
