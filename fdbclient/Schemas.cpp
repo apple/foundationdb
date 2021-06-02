@@ -144,6 +144,16 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "counter":0,
                      "roughness":0.0
                   },
+                  "fetched_versions":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "fetches_from_logs":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
                   "grv_latency_statistics":{
                      "default":{
                         "count":0,
@@ -648,6 +658,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "data_distribution_disabled_for_rebalance":true,
       "data_distribution_disabled":true,
       "active_primary_dc":"pv",
+      "bounce_impact":{
+         "can_clean_bounce":true,
+         "reason":""
+      },
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
