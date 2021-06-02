@@ -1192,9 +1192,12 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion); //< Is this valid?
 
-	//TraceEvent("ProxyPush", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion)
-	//	.detail("TransactionsSubmitted", trs.size()).detail("TransactionsCommitted", commitCount).detail("TxsPopTo",
-	// msg.popTo);
+	// TraceEvent("ProxyPush", pProxyCommitData->dbgid)
+	//     .detail("PrevVersion", self->prevVersion)
+	//     .detail("Version", self->commitVersion)
+	//     .detail("TransactionsSubmitted", trs.size())
+	//     .detail("TransactionsCommitted", self->commitCount)
+	//     .detail("TxsPopTo", self->msg.popTo);
 
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion);
@@ -1284,7 +1287,9 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
 
-	//TraceEvent("ProxyPushed", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion);
+	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
+	//     .detail("PrevVersion", self->prevVersion)
+	//     .detail("Version", self->commitVersion);
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterLogPush");
 
@@ -1305,7 +1310,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		    ReportRawCommittedVersionRequest(self->commitVersion,
 		                                     self->lockedAfter,
 		                                     self->metadataVersionAfter,
-		                                     pProxyCommitData->minKnownCommittedVersion),
+		                                     pProxyCommitData->minKnownCommittedVersion,
+		                                     self->prevVersion),
 		    TaskPriority::ProxyMasterVersionReply));
 	}
 	if (self->commitVersion > pProxyCommitData->committedVersion.get()) {
