@@ -1403,6 +1403,11 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
 				req.reply.send(recruited);
 			}
+			when(InitializeVersionIndexerRequest req = waitNext(interf.versionIndexer.getFuture())) {
+				VersionIndexerInterface recruited;
+				startRole(Role::VERSION_INDEXER, recruited.id, interf.id());
+				// DUMPTOKEN(recruited.waitFailure);
+			}
 			when(InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
 				if (!backupWorkerCache.exists(req.reqId)) {
 					BackupInterface recruited(locality);
@@ -2125,3 +2130,4 @@ const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
+const Role Role::VERSION_INDEXER("VersionIndexer", "VI");

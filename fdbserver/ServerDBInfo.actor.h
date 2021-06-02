@@ -48,6 +48,7 @@ struct ServerDBInfo {
 	MasterInterface master; // The best guess as to the most recent master, which might still be recovering
 	Optional<RatekeeperInterface> ratekeeper;
 	std::vector<ResolverInterface> resolvers;
+	std::vector<VersionIndexerInterface> versionIndexers;
 	DBRecoveryCount
 	    recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice;
 	                   // unsuccessful recoveries may increment it once. Depending on where the current master is in its

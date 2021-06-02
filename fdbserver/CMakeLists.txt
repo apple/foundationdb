@@ -104,6 +104,8 @@ set(FDBSERVER_SRCS
   TLogInterface.h
   TLogServer.actor.cpp
   VersionedBTree.actor.cpp
+  VersionIndexer.actor.cpp
+  VersionIndexerInterface.actor.h
   VFSAsync.h
   VFSAsync.cpp
   WaitFailure.actor.cpp

@@ -32,6 +32,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/VersionIndexerInterface.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/LogSystemConfig.h"
@@ -54,6 +55,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
+	RequestStream<struct InitializeVersionIndexerRequest> versionIndexer;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -515,6 +517,17 @@ struct InitializeBackupRequest {
 	}
 };
 
+struct InitializeVersionIndexerRequest {
+	constexpr static FileIdentifier file_identifier = 6194990;
+	UID reqId;
+	ReplyPromise<VersionIndexerInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, reply);
+	}
+};
+
 // FIXME: Rename to InitializeMasterRequest, etc
 struct RecruitMasterRequest {
 	constexpr static FileIdentifier file_identifier = 12684574;
@@ -784,6 +797,7 @@ struct Role {
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
+	static const Role VERSION_INDEXER;
 
 	std::string roleName;
 	std::string abbreviation;
