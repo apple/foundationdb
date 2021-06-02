@@ -586,7 +586,9 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxPoppedVersionLag = 30e6) {
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
-	state Future<Void> disableWiggling = setPerpetualStorageWiggle(cx, LiteralStringRef("0"));
+
+	wait(setPerpetualStorageWiggle(cx, LiteralStringRef("0")));
+
 	auto traceMessage = "QuietDatabase" + phase + "Begin";
 	TraceEvent(traceMessage.c_str());
 
