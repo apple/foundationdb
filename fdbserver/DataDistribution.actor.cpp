@@ -4086,7 +4086,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 }
 
 // This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by command
-// `configure perpetual_storage_wiggle=$value` if the value is 0, this actor start 2 actors,
+// `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 // `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
 ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection,
                                                  const DDEnabledState* ddEnabledState) {
@@ -5244,18 +5244,18 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 
 					// check whether this candidate is a process under perpetual wiggling, but be paused because of
 					// unhealthy cluster status. For the data on this server is not completely moved to other team, it
-					// cannot be recruited as TSS. Otherwise, there's probability of data losing.
-					bool notForTSS = false;
+					// cannot be recruited as TSS. Otherwise, there's probability of data-lose.
+					bool canBeTSS = true;
 					if (self->wigglingPid.present() &&
 					    candidateWorker.worker.locality.keyProcessId == self->wigglingPid.get()) {
-						notForTSS = true;
+						canBeTSS = false;
 
 						if (self->clearWigglingPidAfterRecruitment) {
 							self->wigglingPid.reset();
 						}
 					}
 
-					if (hasHealthyTeam && !tssState->active && tssToRecruit > 0 && !notForTSS) {
+					if (hasHealthyTeam && !tssState->active && tssToRecruit > 0 && canBeTSS) {
 						TraceEvent("TSS_Recruit", self->distributorId)
 						    .detail("Stage", "HoldTSS")
 						    .detail("Addr", candidateSSAddr.toString())
@@ -5269,7 +5269,7 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 						self->addActor.send(initializeStorage(self, candidateWorker, ddEnabledState, true, tssState));
 						checkTss = self->initialFailureReactionDelay;
 					} else {
-						if (!notForTSS && tssState->active && tssState->inDataZone(candidateWorker.worker.locality)) {
+						if (canBeTSS && tssState->active && tssState->inDataZone(candidateWorker.worker.locality)) {
 							TEST(true); // TSS recruits pair in same dc/datahall
 							self->isTssRecruiting = false;
 							TraceEvent("TSS_Recruit", self->distributorId)
@@ -5282,7 +5282,7 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 							tssState = makeReference<TSSPairState>();
 						} else {
 							TEST(tssState->active ||
-							     notForTSS); // TSS recruitment skipped potential pair because it's in a
+							     !canBeTSS); // TSS recruitment skipped potential pair because it's in a
 							                 // different dc/datahall or is a paused wiggling process
 							self->addActor.send(initializeStorage(
 							    self, candidateWorker, ddEnabledState, false, makeReference<TSSPairState>()));

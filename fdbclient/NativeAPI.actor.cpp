@@ -5886,6 +5886,8 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, Value value) {
     loop {
         try {
             tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+            tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
             tr.set(perpetualStorageWiggleKey, value);
             wait(tr.commit());
             break;
