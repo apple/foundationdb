@@ -878,6 +878,8 @@ public:
 	}
 
 	// Fast path extent peekAll (this zooms through the queue reading extents at a time)
+	// Output interface is a promise stream and one vector of results per extent found is sent to the promise stream
+	// Once we are finished reading all the extents of the queue, end_of_stream() is sent to mark completion
 	ACTOR static Future<Void> peekAll_ext(FIFOQueue* self, PromiseStream<Standalone<VectorRef<T>>> res) {
 		state Cursor c;
 		c.initReadOnly(self->headReader, true);
@@ -885,10 +887,12 @@ public:
 		debug_printf("FIFOQueue::Cursor(%s) peekAllExt begin\n", c.toString().c_str());
 		if (c.pageID == invalidLogicalPageID || c.pageID == c.endPageID) {
 			debug_printf("FIFOQueue::Cursor(%s) peekAllExt returning nothing\n", c.toString().c_str());
-			res.send(results);
+			res.sendError(end_of_stream());
 			return Void();
 		}
 
+		state int entriesRead = 0;
+		// Loop over all the extents in this queue
 		loop {
 			// We now know we are pointing to PageID and it should be read and used, but it may not be loaded yet.
 			if (!c.page) {
@@ -954,6 +958,19 @@ public:
 				if (c.pageID == invalidLogicalPageID || c.pageID == c.endPageID) {
 					debug_printf("FIFOQueue::Cursor(%s) peekAllExt Queue exhausted\n", c.toString().c_str());
 					res.send(results);
+
+					// Since we have reached the end of the queue, verify that the number of entries read matches
+					// the queue metadata. If it does, send end_of_stream() to mark completion, else throw an error
+					entriesRead += results.size();
+					if (entriesRead != self->numEntries) {
+						Error e = internal_error(); // TODO:  Something better?
+						TraceEvent(SevError, "FIFOQueueNumEntriesMisMatch")
+						    .detail("EntriesRead", entriesRead)
+						    .detail("ExpectedEntries", self->numEntries)
+						    .error(e);
+						throw e;
+					}
+					res.sendError(end_of_stream());
 					return Void();
 				}
 
@@ -962,6 +979,9 @@ public:
 					c.page.clear();
 					debug_printf("FIFOQueue::Cursor(%s) peekAllExt extent exhausted, moved to new extent\n",
 					             c.toString().c_str());
+					entriesRead += results.size();
+
+					// send an extent worth of entries to the promise stream
 					res.send(results);
 					self->pager->releaseExtentReadLock();
 					break;
@@ -1694,15 +1714,15 @@ public:
 	// Use pageCacheSizeBytes == 0 to use default from flow knobs
 	// If filename is empty, the pager will exist only in memory and once the cache is full writes will fail.
 	DWALPager(int desiredPageSize,
-	          int pagesPerExtent,
+	          int desiredExtentSize,
 	          std::string filename,
 	          int64_t pageCacheSizeBytes,
 	          Version remapCleanupWindow,
-	          int concExtentReads,
+	          int concurrentExtentReads,
 	          bool memoryOnly = false)
-	  : desiredPageSize(desiredPageSize), pagesPerExtent(pagesPerExtent), filename(filename), pHeader(nullptr),
+	  : desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize), filename(filename), pHeader(nullptr),
 	    pageCacheBytes(pageCacheSizeBytes), memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow),
-	    concurrentExtentReads(new FlowLock(concExtentReads)) {
+	    concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
@@ -1724,10 +1744,18 @@ public:
 		pageCache.setSizeLimit(1 + ((pageCacheBytes - 1) / physicalPageSize));
 	}
 
-	void setExtentSize(int pagesPerExtent) {
+	void setExtentSize(int size) {
+		// if the specified extent size is smaller than the physical page size, round it off to one physical page size
+		// physical extent size has to be a multiple of physical page size
+		if (size <= physicalPageSize) {
+			pagesPerExtent = 1;
+		} else {
+			pagesPerExtent = 1 + ((size - 1) / physicalPageSize);
+		}
 		physicalExtentSize = pagesPerExtent * physicalPageSize;
+
 		if (pHeader != nullptr) {
-			pHeader->pagesPerExtent = pagesPerExtent;
+			pHeader->extentSize = size;
 		}
 
 		// TODO: How should this cache be sized - not really a cache. it should hold all extentIDs?
@@ -1817,7 +1845,7 @@ public:
 				    .detail("DesiredPageSize", self->desiredPageSize);
 			}
 
-			self->setExtentSize(self->pHeader->pagesPerExtent);
+			self->setExtentSize(self->pHeader->extentSize);
 
 			self->freeList.recover(self, self->pHeader->freeList, "FreeListRecovered");
 			self->extentFreeList.recover(self, self->pHeader->extentFreeList, "ExtentFreeListRecovered");
@@ -1848,20 +1876,24 @@ public:
 			state PromiseStream<Standalone<VectorRef<RemappedPage>>> remapStream;
 			state Future<Void> remapRecoverActor;
 			remapRecoverActor = self->remapQueue.peekAllExt(remapStream);
-			state int remapEntriesRead = 0;
-			loop choose {
-				when(Standalone<VectorRef<RemappedPage>> remaps = waitNext(remapStream.getFuture())) {
-					debug_printf("DWALPager(%s) recovery. remaps size: %d, remapEntriesRead: %d, queueEntries: %d\n",
-					             self->filename.c_str(),
-					             remaps.size(),
-					             remapEntriesRead,
-					             self->remapQueue.numEntries);
-					for (auto& r : remaps) {
-						self->remappedPages[r.originalPageID][r.version] = r.newPageID;
+			try {
+				loop choose {
+					when(Standalone<VectorRef<RemappedPage>> remaps = waitNext(remapStream.getFuture())) {
+						debug_printf(
+						    "DWALPager(%s) recovery. remaps size: %d, remapEntriesRead: %d, queueEntries: %d\n",
+						    self->filename.c_str(),
+						    remaps.size(),
+						    remapEntriesRead,
+						    self->remapQueue.numEntries);
+						for (auto& r : remaps) {
+							self->remappedPages[r.originalPageID][r.version] = r.newPageID;
+						}
 					}
-					remapEntriesRead += remaps.size();
-					if (remapEntriesRead == self->remapQueue.numEntries)
-						break;
+					when(wait(remapRecoverActor)) { remapRecoverActor = Never(); }
+				}
+			} catch (Error& e) {
+				if (e.code() != error_code_end_of_stream) {
+					throw;
 				}
 			}
 
@@ -1915,7 +1947,7 @@ public:
 
 			// Now set the extent size, do this always after setting the page size as
 			// extent size is a multiple of page size
-			self->setExtentSize(self->pagesPerExtent);
+			self->setExtentSize(self->desiredExtentSize);
 
 			// Write new header using desiredPageSize
 			self->pHeader->formatVersion = Header::FORMAT_VERSION;
@@ -2959,7 +2991,7 @@ private:
 		uint32_t queueCount;
 		uint32_t pageSize;
 		int64_t pageCount;
-		uint32_t pagesPerExtent;
+		uint32_t extentSize;
 		FIFOQueue<LogicalPageID>::QueueState freeList;
 		FIFOQueue<LogicalPageID>::QueueState extentFreeList; // free list for extents
 		FIFOQueue<ExtentUsedListEntry>::QueueState extentUsedList; // in-use list for extents
@@ -3022,6 +3054,7 @@ private:
 	Header* pHeader;
 
 	int desiredPageSize;
+	int desiredExtentSize;
 
 	Reference<ArenaPage> lastCommittedHeaderPage;
 	Header* pLastCommittedHeader;
@@ -6848,7 +6881,7 @@ public:
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
-		int pagesPerExtent = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_PAGES;
+		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
 		int64_t pageCacheBytes =
 		    g_network->isSimulated()
 		        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
@@ -6858,7 +6891,7 @@ public:
 		    BUGGIFY ? deterministicRandom()->randomInt64(0, 1000) : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW;
 
 		IPager2* pager = new DWALPager(pageSize,
-		                               pagesPerExtent,
+		                               extentSize,
 		                               filePrefix,
 		                               pageCacheBytes,
 		                               remapCleanupWindow,
@@ -8617,11 +8650,10 @@ TEST_CASE("/redwood/correctness/btree") {
 
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
-	state int pagesPerExtent =
-	    params.getInt("pagesPerExtent")
-	        .orDefault(deterministicRandom()->coinflip() ? SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_PAGES
-	                                                     : deterministicRandom()->randomInt(1, 10));
-
+	state int extentSize =
+	    params.getInt("extentSize")
+	        .orDefault(deterministicRandom()->coinflip() ? SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE
+	                                                     : deterministicRandom()->randomInt(4096, 32768));
 	state int64_t targetPageOps = params.getInt("targetPageOps").orDefault(shortTest ? 50000 : 1000000);
 	state bool pagerMemoryOnly =
 	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
@@ -8650,7 +8682,7 @@ TEST_CASE("/redwood/correctness/btree") {
 	    params.getInt("remapCleanupWindow")
 	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, versionIncrement * 50));
 	state int maxVerificationMapEntries = params.getInt("maxVerificationMapEntries").orDefault(300e3);
-	state int concExtentReads =
+	state int concurrentExtentReads =
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
 	printf("\n");
@@ -8659,6 +8691,7 @@ TEST_CASE("/redwood/correctness/btree") {
 	printf("serialTest: %d\n", serialTest);
 	printf("shortTest: %d\n", shortTest);
 	printf("pageSize: %d\n", pageSize);
+	printf("extentSize: %d\n", extentSize);
 	printf("maxKeySize: %d\n", maxKeySize);
 	printf("maxValueSize: %d\n", maxValueSize);
 	printf("maxCommitSize: %d\n", maxCommitSize);
@@ -8678,7 +8711,7 @@ TEST_CASE("/redwood/correctness/btree") {
 
 	printf("Initializing...\n");
 	pager = new DWALPager(
-	    pageSize, pagesPerExtent, fileName, cacheSizeBytes, remapCleanupWindow, concExtentReads, pagerMemoryOnly);
+	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
 
@@ -8885,7 +8918,7 @@ TEST_CASE("/redwood/correctness/btree") {
 
 				printf("Reopening btree from disk.\n");
 				IPager2* pager = new DWALPager(
-				    pageSize, pagesPerExtent, fileName, cacheSizeBytes, remapCleanupWindow, concExtentReads);
+				    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
 				btree = new VersionedBTree(pager, fileName);
 				wait(btree->init());
 
@@ -8925,7 +8958,7 @@ TEST_CASE("/redwood/correctness/btree") {
 	state Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
-	btree = new VersionedBTree(new DWALPager(pageSize, pagesPerExtent, fileName, cacheSizeBytes, 0, concExtentReads),
+	btree = new VersionedBTree(new DWALPager(pageSize, extentSize, fileName, cacheSizeBytes, 0, concurrentExtentReads),
 	                           fileName);
 	wait(btree->init());
 
@@ -8998,9 +9031,9 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 	deleteFile(pagerFile);
 
 	int pageSize = 4096;
-	state int pagesPerExtent = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_PAGES;
+	int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
 	state IPager2* pager =
-	    new DWALPager(pageSize, pagesPerExtent, pagerFile, 0, 0, SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
+	    new DWALPager(pageSize, extentSize, pagerFile, 0, 0, SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
 	wait(success(pager->init()));
 	state LogicalPageID id = wait(pager->newPageID());
@@ -9049,25 +9082,26 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 
 	printf("Filename: %s\n", fileName.c_str());
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
-	state int pagesPerExtent = params.getInt("pagesPerExtent").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_PAGES);
+	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
 	state int64_t cacheSizeBytes = params.getInt("cacheSizeBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
 	// Choose a large remapCleanupWindow to avoid popping the queue
 	state Version remapCleanupWindow = params.getInt("remapCleanupWindow").orDefault(1e16);
 	state int numEntries = params.getInt("numEntries").orDefault(10e6);
-	state int concExtentReads =
+	state int concurrentExtentReads =
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 	state int targetCommitSize = deterministicRandom()->randomInt(2e6, 30e6);
 	state int currentCommitSize = 0;
 	state int64_t cumulativeCommitSize = 0;
 
 	printf("pageSize: %d\n", pageSize);
-	printf("pagesPerExtent: %d\n", pagesPerExtent);
+	printf("extentSize: %d\n", extentSize);
 	printf("cacheSizeBytes: %" PRId64 "\n", cacheSizeBytes);
 	printf("remapCleanupWindow: %" PRId64 "\n", remapCleanupWindow);
 
 	// Do random pushes into the queue and commit periodically
 	if (reload) {
-		pager = new DWALPager(pageSize, pagesPerExtent, fileName, cacheSizeBytes, remapCleanupWindow, concExtentReads);
+		pager =
+		    new DWALPager(pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
 
 		wait(success(pager->init()));
 
@@ -9118,7 +9152,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	}
 
 	printf("Reopening pager file from disk.\n");
-	pager = new DWALPager(pageSize, pagesPerExtent, fileName, cacheSizeBytes, remapCleanupWindow, concExtentReads);
+	pager = new DWALPager(pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
@@ -9145,11 +9179,18 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	state Future<Void> queueRecoverActor;
 	queueRecoverActor = m_extentQueue.peekAllExt(resultStream);
 	state int entriesRead = 0;
-	loop choose {
-		when(Standalone<VectorRef<ExtentQueueEntry<16>>> entries = waitNext(resultStream.getFuture())) {
-			entriesRead += entries.size();
-			if (entriesRead == m_extentQueue.numEntries)
-				break;
+	try {
+		loop choose {
+			when(Standalone<VectorRef<ExtentQueueEntry<16>>> entries = waitNext(resultStream.getFuture())) {
+				entriesRead += entries.size();
+				if (entriesRead == m_extentQueue.numEntries)
+					break;
+			}
+			when(wait(queueRecoverActor)) { queueRecoverActor = Never(); }
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_end_of_stream) {
+			throw;
 		}
 	}
 
@@ -9187,7 +9228,7 @@ TEST_CASE(":/redwood/performance/set") {
 
 	state std::string fileName = params.get("fileName").orDefault("unittest.redwood");
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
-	state int pagesPerExtent = params.getInt("pagesPerExtent").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_PAGES);
+	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
 	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
 	state int nodeCount = params.getInt("nodeCount").orDefault(1e9);
 	state int maxRecordsPerCommit = params.getInt("maxRecordsPerCommit").orDefault(20000);
@@ -9203,7 +9244,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state char lastKeyChar = params.get("lastKeyChar").orDefault("m")[0];
 	state Version remapCleanupWindow =
 	    params.getInt("remapCleanupWindow").orDefault(SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
-	state int concExtentReads =
+	state int concurrentExtentReads =
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 	state bool openExisting = params.getInt("openExisting").orDefault(0);
 	state bool insertRecords = !openExisting || params.getInt("insertRecords").orDefault(0);
@@ -9213,7 +9254,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state int scans = params.getInt("scans").orDefault(20000);
 
 	printf("pageSize: %d\n", pageSize);
-	printf("pagesPerExtent: %d\n", pagesPerExtent);
+	printf("extentSize: %d\n", extentSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
 	printf("trailingIntegerIndexRange: %d\n", nodeCount);
 	printf("maxChangesPerCommit: %d\n", maxRecordsPerCommit);
@@ -9241,7 +9282,7 @@ TEST_CASE(":/redwood/performance/set") {
 	}
 
 	DWALPager* pager =
-	    new DWALPager(pageSize, pagesPerExtent, fileName, pageCacheBytes, remapCleanupWindow, concExtentReads);
+	    new DWALPager(pageSize, extentSize, fileName, pageCacheBytes, remapCleanupWindow, concurrentExtentReads);
 	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());

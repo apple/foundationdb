@@ -704,7 +704,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( FASTRESTORE_RATE_UPDATE_SECONDS,                       1.0 ); if( randomize && BUGGIFY ) { FASTRESTORE_RATE_UPDATE_SECONDS = deterministicRandom()->random01() < 0.5 ? 0.1 : 2;}
 
 	init( REDWOOD_DEFAULT_PAGE_SIZE,                            4096 );
-	init( REDWOOD_DEFAULT_EXTENT_PAGES,                          256 );
+	init( REDWOOD_DEFAULT_EXTENT_SIZE,                       1048576 );
 	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
 	init( REDWOOD_COMMIT_CONCURRENT_READS,                        64 );
 	init( REDWOOD_EXTENT_CONCURRENT_READS,                         4 );
