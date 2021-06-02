@@ -151,40 +151,6 @@ struct CommitID {
 	    conflictingKRIndices(conflictingKRIndices) {}
 };
 
-struct ClientTagThrottleLimits {
-	double tpsRate;
-	double expiration;
-
-	ClientTagThrottleLimits() : tpsRate(0), expiration(0) {}
-	ClientTagThrottleLimits(double tpsRate, double expiration) : tpsRate(tpsRate), expiration(expiration) {}
-
-	template <class Archive>
-	void serialize(Archive& ar) {
-		// Convert expiration time to a duration to avoid clock differences
-		double duration = 0;
-		if (!ar.isDeserializing) {
-			duration = expiration - now();
-		}
-
-		serializer(ar, tpsRate, duration);
-
-		if (ar.isDeserializing) {
-			expiration = now() + duration;
-		}
-	}
-};
-
-struct ClientTrCommitCostEstimation {
-	int opsCount = 0;
-	uint64_t writeCosts = 0;
-	std::deque<std::pair<int, uint64_t>> clearIdxCosts;
-	uint32_t expensiveCostEstCount = 0;
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, opsCount, writeCosts, clearIdxCosts, expensiveCostEstCount);
-	}
-};
-
 struct CommitTransactionRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 93948;
 	enum { FLAG_IS_LOCK_AWARE = 0x1, FLAG_FIRST_IN_BATCH = 0x2 };
