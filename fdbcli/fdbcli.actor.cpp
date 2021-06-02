@@ -494,10 +494,10 @@ void initHelp() {
 	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will "
 	    "succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-	    "configure [new] "
+	    "configure [new|tss]"
 	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
 	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
-	    "perpetual_storage_wiggle=<WIGGLE_SPEED>",
+	    "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
