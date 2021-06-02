@@ -941,7 +941,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
 	}
-	
+
 //	if (deterministicRandom()->random01() < 0.5) {
 //		set_config("ssd");
 //	} else {
