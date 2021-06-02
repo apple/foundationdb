@@ -88,7 +88,8 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	             Version addedVersion = 0)
 	  : id(ssi.id()), collection(collection), lastKnownInterface(ssi), lastKnownClass(processClass),
 	    dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()),
-	    inDesiredDC(inDesiredDC), storeType(KeyValueStoreType::END), onTSSPairRemoved(Never()), addedVersion(addedVersion) {
+	    inDesiredDC(inDesiredDC), storeType(KeyValueStoreType::END), onTSSPairRemoved(Never()),
+	    addedVersion(addedVersion) {
 
 		if (!ssi.isTss()) {
 			localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -625,6 +626,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
 	AsyncVar<bool> disableFailingLaggingServers;
 	AsyncTrigger canStartStorageWiggling;
+	Optional<Key> wigglingPid; // Process id of current wiggling storage server;
+	bool clearWigglingPidAfterRecruitment = false;
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
@@ -652,6 +655,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	bool isTssRecruiting; // If tss recruiting is waiting on a pair, don't consider DD recruiting for the purposes of QuietDB
 
+	// WIGGLING if an address is under storage wiggling.
 	// EXCLUDED if an address is in the excluded list in the database.
 	// FAILED if an address is permanently failed.
 	// NONE by default.  Updated asynchronously (eventually)
@@ -2471,10 +2475,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		        std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(),
 		    storageServerSet,
 		    addedVersion);
-		ASSERT(r->lastKnownInterface.locality.processId().present());
-		StringRef pid = r->lastKnownInterface.locality.processId().get();
-		pid2server_info[pid].push_back(r);
-		canStartStorageWiggling.trigger();
 
 		if (newServer.isTss()) {
 			tss_info_by_pair[newServer.tssPairID.get()] = r;
@@ -2486,6 +2486,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			server_info[newServer.id()] = r;
 			// Establish the relation between server and machine
 			checkAndCreateMachine(r);
+			// Add storage server to pid map
+			ASSERT(r->lastKnownInterface.locality.processId().present());
+			StringRef pid = r->lastKnownInterface.locality.processId().get();
+			pid2server_info[pid].push_back(r);
+			canStartStorageWiggling.trigger();
 		}
 
 		r->tracker =
@@ -2812,7 +2817,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
 	}
 
-	std::vector<Future<Void>> excludeStorageWigglingServers(const Value& pid) {
+	std::vector<Future<Void>> excludeStorageServersForWiggle(const Value& pid) {
 		std::vector<Future<Void>> moveFutures;
 		if (this->pid2server_info.count(pid) != 0) {
 			for (auto& info : this->pid2server_info[pid]) {
@@ -2832,7 +2837,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return moveFutures;
 	}
 
-	void includeStorageWigglingServers(const Value& pid) {
+	void includeStorageServersForWiggle(const Value& pid) {
 		bool included = false;
 		for (auto& info : this->pid2server_info[pid]) {
 			AddressExclusion addr(info->lastKnownInterface.address().ip);
@@ -3950,30 +3955,32 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
                                            PromiseStream<Void> finishStorageWiggleSignal,
                                            DDTeamCollection* self,
                                            const DDEnabledState* ddEnabledState) {
-	state Value pid;
 	state Future<Void> watchFuture;
 	state Future<Void> moveFinishFuture = Never();
 	state Debouncer pauseWiggle(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY);
 	state AsyncTrigger restart;
-	state Future<Void> ddQueueCheck = delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistributionLow);
+	state Future<Void> ddQueueCheck =
+	    delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistributionLow);
 	state int movingCount = 0;
 	state bool isPaused = false;
 
 	state std::pair<Future<Void>, Value> res = wait(watchPerpetualStoragePIDChange(self->cx));
 	watchFuture = res.first;
-	pid = std::move(res.second);
-
+	self->wigglingPid = Optional<Key>(res.second);
+	self->clearWigglingPidAfterRecruitment = false;
+	
 	// start with the initial pid
 	if (self->healthyTeamCount > 1) { // pre-check health status
-		auto fv = self->excludeStorageWigglingServers(pid);
+		auto fv = self->excludeStorageServersForWiggle(self->wigglingPid.get());
 		movingCount = fv.size();
 		moveFinishFuture = waitForAll(fv);
 		TraceEvent("PerpetualStorageWiggleInitialStart", self->distributorId)
-		    .detail("ProcessId", pid)
+		    .detail("ProcessId", self->wigglingPid.get())
 		    .detail("StorageCount", movingCount);
 	} else {
 		isPaused = true;
-		TraceEvent("PerpetualStorageWiggleInitialPause", self->distributorId).detail("ProcessId", pid);
+		TraceEvent("PerpetualStorageWiggleInitialPause", self->distributorId)
+		    .detail("ProcessId", self->wigglingPid.get());
 	}
 
 	loop {
@@ -3983,13 +3990,13 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				// read new pid and set the next watch Future
 				wait(store(res, watchPerpetualStoragePIDChange(self->cx)));
 				watchFuture = res.first;
-				pid = std::move(res.second);
+				self->wigglingPid = Optional<Key>(res.second);
+				StringRef pid = self->wigglingPid.get();
 
 				if (self->healthyTeamCount <= 1) { // pre-check health status
 					pauseWiggle.trigger();
-				}
-				else {
-					auto fv = self->excludeStorageWigglingServers(pid);
+				} else {
+					auto fv = self->excludeStorageServersForWiggle(pid);
 					movingCount = fv.size();
 					moveFinishFuture = waitForAll(fv);
 					TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
@@ -3998,7 +4005,9 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				}
 			}
 			when(wait(restart.onTrigger())) {
-				auto fv = self->excludeStorageWigglingServers(pid);
+				StringRef pid = self->wigglingPid.get();
+
+				auto fv = self->excludeStorageServersForWiggle(pid);
 				moveFinishFuture = waitForAll(fv);
 				TraceEvent("PerpetualStorageWiggleRestart", self->distributorId)
 				    .detail("ProcessId", pid)
@@ -4006,14 +4015,17 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				isPaused = false;
 			}
 			when(wait(moveFinishFuture)) {
+				StringRef pid = self->wigglingPid.get();
+
 				moveFinishFuture = Never();
-				self->includeStorageWigglingServers(pid);
+				self->includeStorageServersForWiggle(pid);
 				TraceEvent("PerpetualStorageWiggleFinish", self->distributorId)
-				    .detail("ProcessId", pid)
+				    .detail("ProcessId", pid.toString())
 				    .detail("StorageCount", movingCount);
-				pid = Value();
-                finishStorageWiggleSignal.send(Void());
-            }
+
+				self->wigglingPid.reset();
+				finishStorageWiggleSignal.send(Void());
+			}
 			when(wait(self->zeroHealthyTeams->onChange())) {
 				if (self->zeroHealthyTeams->get() && !isPaused) {
 					pauseWiggle.trigger();
@@ -4026,15 +4038,18 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 
 				if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD && !isPaused) {
 					pauseWiggle.trigger();
-				} else if (count < SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD && self->healthyTeamCount > 1) {
+				} else if (count < SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD && self->healthyTeamCount > 1 &&
+				           isPaused) {
 					restart.trigger();
 				}
 				ddQueueCheck = delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistributionLow);
 			}
 			when(wait(pauseWiggle.onTrigger())) {
+				StringRef pid = self->wigglingPid.get();
+
 				isPaused = true;
 				moveFinishFuture = Never();
-				self->includeStorageWigglingServers(pid);
+				self->includeStorageServersForWiggle(pid);
 				TraceEvent("PerpetualStorageWigglePause", self->distributorId)
 				    .detail("ProcessId", pid)
 				    .detail("StorageCount", movingCount);
@@ -4042,7 +4057,11 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 		}
 	}
 
-	self->includeStorageWigglingServers(pid);
+	if(self->wigglingPid.present()) {
+		self->includeStorageServersForWiggle(self->wigglingPid.get());
+		self->clearWigglingPidAfterRecruitment = true;
+	}
+
 	return Void();
 }
 
@@ -4496,18 +4515,19 @@ ACTOR Future<Void> storageServerTracker(
 				otherChanges.push_back(self->excludedServers.onChange(testAddr));
 			}
 
-			if (worstStatus == DDTeamCollection::Status::WIGGLING) {
-				TraceEvent("WigglingStorageServer", self->distributorId)
-				    .detail("Server", server->id)
-				    .detail("Address", worstAddr.toString());
-				status.isWiggling = true;
-			} else if (worstStatus != DDTeamCollection::Status::NONE) {
+			if (worstStatus != DDTeamCollection::Status::NONE) {
 				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 				    .detail("Server", server->id)
 				    .detail("Excluded", worstAddr.toString());
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
-				if (worstStatus == DDTeamCollection::Status::FAILED && !isTss) {
+
+				if (worstStatus == DDTeamCollection::Status::WIGGLING && !isTss) {
+					status.isWiggling = true;
+					TraceEvent("PerpetualWigglingStorageServer", self->distributorId)
+					    .detail("Server", server->id)
+					    .detail("Address", worstAddr.toString());
+				} else if (worstStatus == DDTeamCollection::Status::FAILED && !isTss) {
 					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("Excluded", worstAddr.toString());
@@ -5155,7 +5175,20 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 						    .detail("NumExistingSS", numExistingSS);
 					}
 
-					if (hasHealthyTeam && !tssState->active && tssToRecruit > 0) {
+					// check whether this candidate is a process under perpetual wiggling, but be paused because of
+					// unhealthy cluster status. For the data on this server is not completely moved to other team, it
+					// cannot be recruited as TSS. Otherwise, there's probability of data losing.
+					bool notForTSS = false;
+					if (self->wigglingPid.present() &&
+					    candidateWorker.worker.locality.keyProcessId == self->wigglingPid.get()) {
+						notForTSS = true;
+
+						if(self->clearWigglingPidAfterRecruitment) {
+							self->wigglingPid.reset();
+						}
+					}
+
+					if (hasHealthyTeam && !tssState->active && tssToRecruit > 0 && !notForTSS) {
 						TraceEvent("TSS_Recruit", self->distributorId)
 						    .detail("Stage", "HoldTSS")
 						    .detail("Addr", candidateSSAddr.toString())
@@ -5167,7 +5200,7 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 
 						self->addActor.send(initializeStorage(self, candidateWorker, ddEnabledState, true, tssState));
 					} else {
-						if (tssState->active && tssState->inDataZone(candidateWorker.worker.locality)) {
+						if (!notForTSS && tssState->active && tssState->inDataZone(candidateWorker.worker.locality)) {
 							TEST(true); // TSS recruits pair in same dc/datahall
 							self->isTssRecruiting = false;
 							TraceEvent("TSS_Recruit", self->distributorId)
@@ -5180,8 +5213,8 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 							tssState = makeReference<TSSPairState>();
 							tssToRecruit--;
 						} else {
-							TEST(tssState->active); // TSS recruitment skipped potential pair because it's in a
-							                        // different dc/datahall
+							TEST(tssState->active || notForTSS); // TSS recruitment skipped potential pair because it's in a
+							                        // different dc/datahall or is a paused wiggling process
 							self->addActor.send(initializeStorage(
 							    self, candidateWorker, ddEnabledState, false, makeReference<TSSPairState>()));
 						}
