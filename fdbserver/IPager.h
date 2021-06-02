@@ -56,9 +56,6 @@ public:
 		if (userData != nullptr && userDataDestructor != nullptr) {
 			userDataDestructor(userData);
 		}
-		if (buffer != nullptr) {
-			VALGRIND_MAKE_MEM_UNDEFINED(buffer, bufferSize);
-		}
 	}
 
 	uint8_t const* begin() const { return (uint8_t*)buffer; }
