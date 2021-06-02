@@ -8077,6 +8077,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state bool pagerMemoryOnly = params.getInt("pagerMemoryOnly").orDefault(0);
 	state bool traceMetrics = params.getInt("traceMetrics").orDefault(0);
 
+	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
 	printf("trailingIntegerIndexRange: %d\n", nodeCount);
