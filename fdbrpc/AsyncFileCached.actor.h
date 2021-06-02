@@ -132,27 +132,13 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	const CacheEvictionType cacheEvictionType;
 };
 
-struct OpenFileInfo : NonCopyable {
-	IAsyncFile* f;
-	Future<Reference<IAsyncFile>> opened; // Only valid until the file is fully opened
-
-	OpenFileInfo() : f(0) {}
-	OpenFileInfo(OpenFileInfo&& r) BOOST_NOEXCEPT : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
-
-	Future<Reference<IAsyncFile>> get() {
-		if (f)
-			return Reference<IAsyncFile>::addRef(f);
-		else
-			return opened;
-	}
-};
-
 struct AFCPage;
 
 class AsyncFileCached : public IAsyncFile, public ReferenceCounted<AsyncFileCached> {
 	friend struct AFCPage;
 
 public:
+	// Opens a file that uses the FDB in-memory page cache
 	static Future<Reference<IAsyncFile>> open(std::string filename, int flags, int mode) {
 		//TraceEvent("AsyncFileCachedOpen").detail("Filename", filename);
 		if (openFiles.find(filename) == openFiles.end()) {
@@ -160,7 +146,7 @@ public:
 			if (f.isReady() && f.isError())
 				return f;
 			if (!f.isReady())
-				openFiles[filename].opened = f;
+				openFiles[filename] = UnsafeWeakFutureReference<IAsyncFile>(f);
 			else
 				return f.get();
 		}
@@ -263,7 +249,9 @@ public:
 	~AsyncFileCached();
 
 private:
-	static std::map<std::string, OpenFileInfo> openFiles;
+	// A map of filename to the file handle for all opened cached files
+	static std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> openFiles;
+
 	std::string filename;
 	Reference<IAsyncFile> uncached;
 	int64_t length;
@@ -330,6 +318,7 @@ private:
 
 	static Future<Reference<IAsyncFile>> open_impl(std::string filename, int flags, int mode);
 
+	// Opens a file that uses the FDB in-memory page cache
 	ACTOR static Future<Reference<IAsyncFile>> open_impl(std::string filename,
 	                                                     int flags,
 	                                                     int mode,
@@ -345,10 +334,7 @@ private:
 			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
 			int64_t l = wait(f->size());
 			TraceEvent("AFCUnderlyingSize").detail("Filename", filename).detail("Size", l);
-			auto& of = openFiles[filename];
-			of.f = new AsyncFileCached(f, filename, l, pageCache);
-			of.opened = Future<Reference<IAsyncFile>>();
-			return Reference<IAsyncFile>(of.f);
+			return new AsyncFileCached(f, filename, l, pageCache);
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				openFiles.erase(filename);

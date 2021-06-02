@@ -183,10 +183,14 @@ public:
 		Promise<KillType> shutdownSignal;
 	};
 
+	// A set of data associated with a simulated machine
 	struct MachineInfo {
 		ProcessInfo* machineProcess;
 		std::vector<ProcessInfo*> processes;
-		std::map<std::string, Future<Reference<IAsyncFile>>> openFiles;
+
+		// A map from filename to file handle for all open files on a machine
+		std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> openFiles;
+
 		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>> machineId;
