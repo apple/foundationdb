@@ -1051,6 +1051,18 @@ public:
 		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
 		Cursor(const Cursor& c) : cache(c.cache), tree(c.tree), nodeIndex(c.nodeIndex) {}
 
+		Cursor next() const {
+			Cursor c = *this;
+			c.moveNext();
+			return c;
+		}
+
+		Cursor previous() const {
+			Cursor c = *this;
+			c.movePrev();
+			return c;
+		}
+
 		int rootIndex() {
 			if (!cache->empty()) {
 				return 0;
