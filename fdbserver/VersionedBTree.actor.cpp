@@ -4044,6 +4044,7 @@ private:
 		// Lower bound of the page being added to
 		state RedwoodRecordRef pageLowerBound = lowerBound->withoutValue();
 		state RedwoodRecordRef pageUpperBound;
+		state int sinceYield = 0;
 
 		state int pageIndex;
 
@@ -4172,7 +4173,10 @@ private:
 				}
 			}
 
-			wait(yield());
+			if (++sinceYield > 100) {
+				sinceYield = 0;
+				wait(yield());
+			}
 
 			if (REDWOOD_DEBUG) {
 				auto& p = pagesToBuild[pageIndex];
@@ -4237,7 +4241,6 @@ private:
 	                                                         bool cacheable = true,
 	                                                         bool* fromCache = nullptr) {
 
-		wait(yield());
 		debug_printf("readPage() op=read%s %s @%" PRId64 "\n",
 		             forLazyClear ? "ForDeferredClear" : "",
 		             toString(id).c_str(),
@@ -8124,11 +8127,10 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("Starting.\n");
 	state double intervalStart = timer();
 	state double start = intervalStart;
+	state int sinceYield = 0;
 
 	if (insertRecords) {
 		while (kvBytesTotal < kvBytesTarget) {
-			wait(yield());
-
 			Version lastVer = btree->getLatestVersion();
 			state Version version = lastVer + 1;
 			btree->setWriteVersion(version);
@@ -8158,7 +8160,10 @@ TEST_CASE(":/redwood/performance/set") {
 					++recordsThisCommit;
 				}
 
-				wait(yield());
+				if (++sinceYield >= 100) {
+					sinceYield = 0;
+					wait(yield());
+				}
 			}
 
 			if (kvBytesThisCommit >= maxKVBytesPerCommit || recordsThisCommit >= maxRecordsPerCommit) {
