@@ -16,9 +16,13 @@ RUN yum install -y \
   traceroute \
   telnet \
   tcpdump \
+  unzip \
   vim
 
 #todo: nload, iperf, numademo
+
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.0.30.zip" -o "awscliv2.zip" \
+    &&  unzip awscliv2.zip && ./aws/install && rm -rf aws
 
 COPY misc/tini-amd64.sha256sum /tmp/
 # Adding tini as PID 1 https://github.com/krallin/tini
