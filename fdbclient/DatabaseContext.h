@@ -428,7 +428,12 @@ public:
 	static const std::vector<std::string> debugTransactionTagChoices;
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 
+        // Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
+        // Requests to the storage server will be duplicated to the TSS.
 	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
+
+        // Removes the storage server and its TSS pair from the TSS mapping (if present).
+        // Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
 };
 

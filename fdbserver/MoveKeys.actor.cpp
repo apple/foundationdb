@@ -24,7 +24,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/TSSMappingUtil.h"
+#include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using std::max;

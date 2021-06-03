@@ -1431,6 +1431,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	return Void();
 }
 
+// Add tss mapping data to the reply, if any of the included storage servers have a TSS pair
 void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
                         ProxyCommitData* commitData,
                         std::unordered_set<UID>& included,
