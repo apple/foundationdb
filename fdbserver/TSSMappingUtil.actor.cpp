@@ -20,24 +20,8 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "fdbserver/TSSMappingUtil.h"
+#include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-// TODO should I just change back to not use KeyBackedMap at this point?
-
-/*ACTOR Future<std::map<UID, StorageServerInterface>> readTSSMapping(Database cx) {
-    state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);    
-    loop {
-        try {
-            state std::map<UID, StorageServerInterface> mapping;
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-            readTSSMappingRYW(tr, &mapping);
-			return mapping;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-    }
-}*/
 
 ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr, std::map<UID, StorageServerInterface>* tssMapping) {
     KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);

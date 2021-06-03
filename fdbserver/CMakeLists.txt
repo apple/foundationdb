@@ -103,7 +103,7 @@ set(FDBSERVER_SRCS
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
-  TSSMappingUtil.h
+  TSSMappingUtil.actor.h
   TSSMappingUtil.actor.cpp
   VersionedBTree.actor.cpp
   VFSAsync.h
