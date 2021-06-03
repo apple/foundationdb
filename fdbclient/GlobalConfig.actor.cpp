@@ -34,12 +34,19 @@ const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_inf
 const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag_sample_rate");
 const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
 
+const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
+const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
+
 GlobalConfig::GlobalConfig(Database& cx) : cx(cx), lastUpdate(0) {}
 
 GlobalConfig& GlobalConfig::globalConfig() {
 	void* res = g_network->global(INetwork::enGlobalConfig);
 	ASSERT(res);
 	return *reinterpret_cast<GlobalConfig*>(res);
+}
+
+void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+	// this->dbInfo = dbInfo;
 }
 
 Key GlobalConfig::prefixedKey(KeyRef key) {

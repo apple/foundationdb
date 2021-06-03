@@ -69,6 +69,7 @@ set(FLOW_SRCS
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h
+  WriteOnlySet.actor.cpp
   XmlTraceLogFormatter.cpp
   XmlTraceLogFormatter.h
   actorcompiler.h

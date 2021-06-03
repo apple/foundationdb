@@ -792,6 +792,41 @@ struct Role {
 	std::string abbreviation;
 	bool includeInTraceRoles;
 
+	static const Role& get(ProcessClass::ClusterRole role) {
+		switch (role) {
+		case ProcessClass::Storage:
+			return STORAGE_SERVER;
+		case ProcessClass::TLog:
+			return TRANSACTION_LOG;
+		case ProcessClass::CommitProxy:
+			return COMMIT_PROXY;
+		case ProcessClass::GrvProxy:
+			return GRV_PROXY;
+		case ProcessClass::Master:
+			return MASTER;
+		case ProcessClass::Resolver:
+			return RESOLVER;
+		case ProcessClass::LogRouter:
+			return LOG_ROUTER;
+		case ProcessClass::ClusterController:
+			return CLUSTER_CONTROLLER;
+		case ProcessClass::DataDistributor:
+			return DATA_DISTRIBUTOR;
+		case ProcessClass::Ratekeeper:
+			return RATEKEEPER;
+		case ProcessClass::StorageCache:
+			return STORAGE_CACHE;
+		case ProcessClass::Backup:
+			return BACKUP;
+		case ProcessClass::Worker:
+			return WORKER;
+		case ProcessClass::NoRole:
+		default:
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+
 	bool operator==(const Role& r) const { return roleName == r.roleName; }
 	bool operator!=(const Role& r) const { return !(*this == r); }
 

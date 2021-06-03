@@ -140,6 +140,8 @@ public:
 class SpecialKeySpace {
 public:
 	enum class MODULE {
+		ACTORLINEAGE, // Sampling data
+		ACTOR_PROFILER_CONF, // profiler configuration
 		CLUSTERFILEPATH,
 		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
@@ -197,6 +199,12 @@ public:
 	static KeyRef getManagementApiCommandPrefix(const std::string& command) {
 		return managementApiCommandToRange.at(command).begin;
 	}
+	static KeyRangeRef getActorLineageApiCommandRange(const std::string& command) {
+		return actorLineageApiCommandToRange.at(command);
+	}
+	static KeyRef getActorLineageApiCommandPrefix(const std::string& command) {
+		return actorLineageApiCommandToRange.at(command).begin;
+	}
 	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
 	static const std::set<std::string>& getManagementApiOptionsSet() { return options; }
 	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
@@ -225,6 +233,7 @@ private:
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 	static std::unordered_map<std::string, KeyRange>
 	    managementApiCommandToRange; // management command to its special keys' range
+	static std::unordered_map<std::string, KeyRange> actorLineageApiCommandToRange;
 	static std::set<std::string> options; // "<command>/<option>"
 	static std::set<std::string> tracingOptions;
 
@@ -386,12 +395,32 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 };
 
+class ActorLineageImpl : public SpecialKeyRangeReadImpl {
+public:
+	explicit ActorLineageImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
+class ActorProfilerConf : public SpecialKeyRangeRWImpl {
+	bool didWrite = false;
+	std::map<std::string, std::string> config;
+
+public:
+	explicit ActorProfilerConf(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
 class MaintenanceImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit MaintenanceImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
+
 class DataDistributionImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit DataDistributionImpl(KeyRangeRef kr);

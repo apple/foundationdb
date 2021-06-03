@@ -31,6 +31,7 @@
 #include "flow/IThreadPool.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
+#include "flow/WriteOnlySet.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
@@ -977,6 +978,10 @@ public:
 	}
 
 	bool checkRunnable() override { return net2->checkRunnable(); }
+
+	ActorLineageSet& getActorLineageSet() override {
+		return actorLineageSet;
+	}
 
 	void stop() override { isStopped = true; }
 	void addStopCallback(std::function<void()> fn) override { stopCallbacks.emplace_back(std::move(fn)); }
@@ -2120,6 +2125,8 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+
+	ActorLineageSet actorLineageSet;
 };
 
 class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
@@ -2502,6 +2509,10 @@ Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 		fileWrites[filename] = now();
 	}
 	return fileWrites[filename];
+}
+
+ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
+	return actorLineageSet;
 }
 
 void Sim2FileSystem::newFileSystem() {

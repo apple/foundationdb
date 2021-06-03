@@ -27,7 +27,9 @@
 #define FDBCLIENT_GLOBALCONFIG_ACTOR_H
 
 #include <any>
+#include <functional>
 #include <map>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -48,6 +50,9 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
+
+extern const KeyRef samplingFrequency;
+extern const KeyRef samplingWindow;
 
 // Structure used to hold the values stored by global configuration. The arena
 // is used as memory to store both the key and the value (the value is only
@@ -89,6 +94,13 @@ public:
 	// call this function whenever they need to read a value out of the global
 	// configuration.
 	static GlobalConfig& globalConfig();
+
+	// Updates the ClientDBInfo object used by global configuration to read new
+	// data. For server processes, this value needs to be set by the cluster
+	// controller, but global config is initialized before the cluster
+	// controller is, so this function provides a mechanism to update the
+	// object after initialization.
+	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.

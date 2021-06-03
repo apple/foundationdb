@@ -48,6 +48,10 @@
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
 
+#include "fdbrpc/IAsyncFile.h"
+
+#include "fdbclient/AnnotateActor.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #include <winioctl.h>

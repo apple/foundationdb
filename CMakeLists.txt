@@ -152,6 +152,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 include(CompileBoost)
+include(GetMsgpack)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
