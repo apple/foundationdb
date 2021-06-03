@@ -34,7 +34,6 @@ class SimpleConfigTransactionImpl {
 	int numRetries{ 0 };
 	bool committed{ false };
 	Optional<UID> dID;
-	Promise<Void> resetPromise; // TODO: Make this a field of ISingleThreadTransaction?
 
 	ACTOR static Future<Version> getReadVersion(SimpleConfigTransactionImpl* self) {
 		if (self->dID.present()) {
@@ -129,7 +128,7 @@ public:
 			// TODO: Throw error if decoding fails
 			ConfigKey configKey = ConfigKeyRef::decodeKey(key);
 			auto knobValue = KnobCollection::parseKnobValue(configKey.knobName.toString(), value.toString(), true);
-			toCommit.mutations.emplace_back_deep(toCommit.arena, ConfigKeyRef::decodeKey(key), knobValue);
+			toCommit.mutations.emplace_back_deep(toCommit.arena, ConfigKeyRef::decodeKey(key), knobValue.contents());
 		}
 	}
 
@@ -137,7 +136,8 @@ public:
 		if (key == configTransactionDescriptionKey) {
 			toCommit.annotation.description = ""_sr;
 		} else {
-			toCommit.mutations.emplace_back_deep(toCommit.arena, ConfigKeyRef::decodeKey(key), KnobValue{});
+			toCommit.mutations.emplace_back_deep(
+			    toCommit.arena, ConfigKeyRef::decodeKey(key), Optional<KnobValueRef>{});
 		}
 	}
 
@@ -237,11 +237,6 @@ void SimpleConfigTransaction::set(KeyRef const& key, ValueRef const& value) {
 
 void SimpleConfigTransaction::clear(KeyRef const& key) {
 	impl->clear(key);
-}
-
-void SimpleConfigTransaction::clear(KeyRangeRef const& keys) {
-	// TODO: Implement
-	ASSERT(false);
 }
 
 Future<Void> SimpleConfigTransaction::commit() {

@@ -26,16 +26,11 @@
 #include "fdbclient/FDBTypes.h"
 
 class KnobValueRef {
-	// TODO: Should use optional instead
-	struct Clear {
-		template <class Ar>
-		void serialize(Ar&) {}
-	};
-	std::variant<Clear, int, double, int64_t, bool, ValueRef> value;
+	std::variant<int, double, int64_t, bool, ValueRef> value;
 	template <class T>
 	explicit KnobValueRef(T const& v) : value(std::in_place_type<T>, v) {}
 
-	explicit KnobValueRef(Arena& arena, ValueRef& v) : value(std::in_place_type<ValueRef>, arena, v) {}
+	explicit KnobValueRef(Arena& arena, ValueRef const& v) : value(std::in_place_type<ValueRef>, arena, v) {}
 
 	struct CreatorFunc {
 		Standalone<KnobValueRef> operator()(NoKnobFound const&) const {
@@ -53,7 +48,6 @@ class KnobValueRef {
 	};
 
 	struct ToStringFunc {
-		std::string operator()(Clear const& v) const { return "<clear>"; }
 		std::string operator()(int v) const { return format("%d", v); }
 		std::string operator()(int64_t v) const { return format("%ld", v); }
 		std::string operator()(bool v) const { return format("%d", v); }
@@ -72,10 +66,6 @@ class KnobValueRef {
 		bool operator()(T const& v) const {
 			return knobs->setKnob(*knobName, v);
 		}
-		bool operator()(Clear const& v) const {
-			ASSERT(false);
-			return false;
-		}
 		bool operator()(StringRef const& v) const { return knobs->setKnob(*knobName, v.toString()); }
 	};
 
@@ -91,8 +81,6 @@ public:
 	}
 
 	static Standalone<KnobValueRef> create(ParsedKnobValue const& v) { return std::visit(CreatorFunc{}, v); }
-
-	bool isSet() const { return !std::holds_alternative<Clear>(value); }
 
 	size_t expectedSize() const {
 		return std::holds_alternative<KeyRef>(value) ? std::get<KeyRef>(value).expectedSize() : 0;
@@ -161,17 +149,18 @@ inline bool operator<(ConfigKeyRef const& lhs, ConfigKeyRef const& rhs) {
 
 class ConfigMutationRef {
 	ConfigKeyRef key;
-	KnobValueRef value;
+	// Empty value means this is a clear mutation
+	Optional<KnobValueRef> value;
 
 public:
 	static constexpr FileIdentifier file_identifier = 7219528;
 
 	ConfigMutationRef() = default;
 
-	explicit ConfigMutationRef(Arena& arena, ConfigKeyRef key, KnobValueRef value)
+	explicit ConfigMutationRef(Arena& arena, ConfigKeyRef key, Optional<KnobValueRef> value)
 	  : key(arena, key), value(arena, value) {}
 
-	explicit ConfigMutationRef(ConfigKeyRef key, KnobValueRef value) : key(key), value(value) {}
+	explicit ConfigMutationRef(ConfigKeyRef key, Optional<KnobValueRef> value) : key(key), value(value) {}
 
 	ConfigKeyRef getKey() const { return key; }
 
@@ -179,11 +168,11 @@ public:
 
 	KeyRef getKnobName() const { return key.knobName; }
 
-	KnobValueRef getValue() const { return value; }
+	KnobValueRef getValue() const { return value.get(); }
 
 	ConfigMutationRef(Arena& arena, ConfigMutationRef const& rhs) : key(arena, rhs.key), value(arena, rhs.value) {}
 
-	bool isSet() const { return value.isSet(); }
+	bool isSet() const { return value.present(); }
 
 	static Standalone<ConfigMutationRef> createConfigMutation(KeyRef encodedKey, KnobValueRef value) {
 		auto key = ConfigKeyRef::decodeKey(encodedKey);

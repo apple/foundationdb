@@ -44,7 +44,7 @@ void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& 
                              Version version,
                              Optional<KeyRef> configClass,
                              KeyRef knobName,
-                             KnobValueRef knobValue) {
+                             Optional<KnobValueRef> knobValue) {
 	auto configKey = ConfigKeyRef(configClass, knobName);
 	auto mutation = ConfigMutationRef(configKey, knobValue);
 	versionedMutations.emplace_back_deep(versionedMutations.arena(), version, mutation);
@@ -184,7 +184,7 @@ class LocalConfigEnvironment {
 	ReadFromLocalConfigEnvironment readFrom;
 	Version lastWrittenVersion{ 0 };
 
-	Future<Void> addMutation(Optional<KeyRef> configClass, KnobValueRef value) {
+	Future<Void> addMutation(Optional<KeyRef> configClass, Optional<KnobValueRef> value) {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, "test_long"_sr, value);
 		return readFrom.getMutableLocalConfiguration().addChanges(versionedMutations, lastWrittenVersion);
@@ -201,7 +201,8 @@ public:
 	Future<Void> getError() const { return Never(); }
 	Future<Void> clear(Optional<KeyRef> configClass) { return addMutation(configClass, {}); }
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
-		return addMutation(configClass, KnobValueRef::create(value));
+		auto knobValue = KnobValueRef::create(value);
+		return addMutation(configClass, knobValue.contents());
 	}
 	void check(Optional<int64_t> value) const { return readFrom.checkImmediate(value); }
 };
@@ -233,7 +234,10 @@ public:
 
 	Future<Void> setup() { return setup(this); }
 
-	void set(Optional<KeyRef> configClass, int64_t value) { addMutation(configClass, KnobValueRef::create(value)); }
+	void set(Optional<KeyRef> configClass, int64_t value) {
+		auto knobValue = KnobValueRef::create(value);
+		addMutation(configClass, knobValue.contents());
+	}
 
 	void clear(Optional<KeyRef> configClass) { addMutation(configClass, {}); }
 

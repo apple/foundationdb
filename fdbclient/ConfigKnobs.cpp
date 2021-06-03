@@ -24,10 +24,15 @@
 
 ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 	auto tuple = Tuple::unpack(key);
-	ASSERT(tuple.size() == 2); // TODO: Fail gracefully
+	if (tuple.size() != 2) {
+		throw invalid_config_db_key();
+	}
 	if (tuple.getType(0) == Tuple::NULL_TYPE) {
 		return ConfigKeyRef({}, tuple.getString(1));
 	} else {
+		if (tuple.getType(0) != Tuple::BYTES || tuple.getType(1) != Tuple::BYTES) {
+			throw invalid_config_db_key();
+		}
 		return ConfigKeyRef(tuple.getString(0), tuple.getString(1));
 	}
 }
@@ -40,5 +45,33 @@ TEST_CASE("/fdbclient/ConfigDB/ConfigKey/EncodeDecode") {
 	auto unpacked = ConfigKeyRef::decodeKey(packed);
 	ASSERT(unpacked.configClass.get() == "class-A"_sr);
 	ASSERT(unpacked.knobName == "test_long"_sr);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/ConfigDB/ConfigKey/DecodeFailure1") {
+	try {
+		Tuple tuple;
+		tuple << "s1"_sr
+		      << "s2"_sr
+		      << "s3"_sr;
+		auto unpacked = ConfigKeyRef::decodeKey(tuple.pack());
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_invalid_config_db_key);
+		return Void();
+	}
+	ASSERT(false);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/ConfigDB/ConfigKey/DecodeFailure2") {
+	try {
+		Tuple tuple;
+		tuple << "s1"_sr << 5;
+		auto unpacked = ConfigKeyRef::decodeKey(tuple.pack());
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_invalid_config_db_key);
+		return Void();
+	}
+	ASSERT(false);
 	return Void();
 }

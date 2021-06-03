@@ -45,7 +45,7 @@ public:
 	                                            bool snapshot = false,
 	                                            bool reverse = false) override;
 	void set(KeyRef const& key, ValueRef const& value) override;
-	void clear(KeyRangeRef const&) override;
+	void clear(KeyRangeRef const&) override { throw client_invalid_operation(); }
 	void clear(KeyRef const&) override;
 	Future<Void> commit() override;
 	Version getCommittedVersion() const override;

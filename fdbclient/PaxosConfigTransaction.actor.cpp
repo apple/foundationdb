@@ -68,11 +68,6 @@ void PaxosConfigTransaction::clear(KeyRef const& key) {
 	ASSERT(false);
 }
 
-void PaxosConfigTransaction::clear(KeyRangeRef const& key) {
-	// TODO: Implememnt
-	ASSERT(false);
-}
-
 Future<Void> PaxosConfigTransaction::commit() {
 	// TODO: Implememnt
 	ASSERT(false);

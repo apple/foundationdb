@@ -151,6 +151,7 @@ ERROR( invalid_cache_eviction_policy, 2024, "Invalid cache eviction policy, only
 ERROR( network_cannot_be_restarted, 2025, "Network can only be started once" )
 ERROR( blocked_from_network_thread, 2026, "Detected a deadlock in a callback called from the network thread" )
 ERROR( invalid_config_db_range_read, 2027, "Invalid configuration database range read" )
+ERROR( invalid_config_db_key, 2028, "Invalid configuration database key provided" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )

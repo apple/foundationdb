@@ -411,12 +411,14 @@ Standalone<VectorRef<VersionedConfigMutationRef>> getTestChanges(Version version
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
 	if (includeGlobalMutation) {
 		ConfigKey key = ConfigKeyRef({}, "test_long"_sr);
-		ConfigMutation mutation = ConfigMutationRef(key, KnobValueRef::create(int64_t{ 5 }));
+		auto value = KnobValue::create(int64_t{ 5 });
+		ConfigMutation mutation = ConfigMutationRef(key, value.contents());
 		changes.emplace_back_deep(changes.arena(), version, mutation);
 	}
 	{
 		ConfigKey key = ConfigKeyRef("class-A"_sr, "test_long"_sr);
-		ConfigMutation mutation = ConfigMutationRef(key, KnobValueRef::create(int64_t{ 5 }));
+		auto value = KnobValue::create(int64_t{ 5 });
+		ConfigMutation mutation = ConfigMutationRef(key, value.contents());
 		changes.emplace_back_deep(changes.arena(), version, mutation);
 	}
 	return changes;

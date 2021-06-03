@@ -60,7 +60,6 @@ public:
 	}
 	ConfigClassSet getConfigClassSet() const { return ConfigClassSet(configPath); }
 	void set(Optional<KeyRef> configClass, KeyRef knobName, KnobValueRef value) {
-		ASSERT(value.isSet());
 		configClassToKnobToValue[configClass.castTo<Key>()][knobName] = value;
 	}
 	void remove(Optional<KeyRef> configClass, KeyRef knobName) {

@@ -61,7 +61,7 @@ public:
 	void checkDeferredError() const override;
 	int64_t getApproximateSize() const override;
 	void set(KeyRef const&, ValueRef const&) override;
-	void clear(KeyRangeRef const&) override;
+	void clear(KeyRangeRef const&) override { throw client_invalid_operation(); }
 	void clear(KeyRef const&) override;
 
 	void fullReset();
