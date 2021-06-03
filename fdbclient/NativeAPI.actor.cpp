@@ -37,10 +37,10 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/KnobCollection.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
@@ -1870,7 +1870,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		std::string knobValueString = optionValue.substr(eq + 1);
 
 		try {
-			auto knobValue = KnobCollection::parseKnobValue(knobName, knobValueString, false);
+			auto knobValue = g_knobs->parseKnobValue(knobName, knobValueString);
 			g_knobs->setKnob(knobName, knobValue);
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());

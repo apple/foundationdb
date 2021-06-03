@@ -27,7 +27,7 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
-#include "fdbclient/KnobCollection.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ClusterInterface.h"
@@ -3011,10 +3011,7 @@ struct CLIOptions {
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
 				auto knobValue = g_knobs->parseKnobValue(knobName, knobValueString);
-				if (!g_knobs->setKnob(knobName, knobValue)) {
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
-				}
+				g_knobs->setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
 					fprintf(stderr,
@@ -4836,7 +4833,7 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-	g_knobs = KnobCollection::createClientKnobs(false, false);
+	g_knobs = IKnobCollection::createClientKnobCollection(false, false);
 
 #ifdef __unixish__
 	struct sigaction act;

@@ -35,7 +35,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
-#include "fdbclient/KnobCollection.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
@@ -1646,7 +1646,7 @@ int main(int argc, char* argv[]) {
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
-		g_knobs = KnobCollection::createServerKnobs(true, role == ServerRole::Simulation);
+		g_knobs = IKnobCollection::createServerKnobCollection(true, role == ServerRole::Simulation);
 		g_knobs->setKnob("log_directory", KnobValue::create(opts.logFolder));
 		if (role != ServerRole::Simulation) {
 			g_knobs->setKnob("commit_batches_mem_bytes_hard_limit", KnobValue::create(int64_t{ opts.memLimit }));

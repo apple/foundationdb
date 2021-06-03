@@ -38,7 +38,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "fdbclient/KnobCollection.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
@@ -3704,15 +3704,12 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		g_knobs = KnobCollection::createClientKnobs(true, false);
+		g_knobs = IKnobCollection::createClientKnobCollection(false, false);
 
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
 				auto knobValue = g_knobs->parseKnobValue(knobName, knobValueString);
-				if (!g_knobs->setKnob(knobName, knobValue)) {
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobValueString));
-				}
+				g_knobs->setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
 					fprintf(stderr,

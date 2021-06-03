@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/KnobCollection.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -66,18 +66,18 @@ public:
 		configClassToKnobToValue[configClass.castTo<Key>()].erase(knobName);
 	}
 
-	void update(KnobCollection& knobCollection) const {
+	void update(IKnobCollection& knobCollection) const {
 		// Apply global overrides
 		const auto& knobToValue = configClassToKnobToValue.at({});
 		for (const auto& [knobName, knobValue] : knobToValue) {
-			ASSERT(knobCollection.setKnob(knobName.toString(), knobValue));
+			knobCollection.setKnob(knobName.toString(), knobValue);
 		}
 
 		// Apply specific overrides
 		for (const auto& configClass : configPath) {
 			const auto& knobToValue = configClassToKnobToValue.at(configClass);
 			for (const auto& [knobName, knobValue] : knobToValue) {
-				ASSERT(knobCollection.setKnob(knobName.toString(), knobValue));
+				knobCollection.setKnob(knobName.toString(), knobValue);
 			}
 		}
 	}
@@ -96,17 +96,23 @@ class ManualKnobOverrides {
 public:
 	explicit ManualKnobOverrides(std::map<std::string, std::string> const& overrides) {
 		for (const auto& [knobName, knobValueString] : overrides) {
-			auto knobValue = KnobCollection::parseKnobValue(knobName, knobValueString, true);
-			this->overrides[stringToKeyRef(knobName)] = knobValue;
+			try {
+				auto knobValue = IKnobCollection::parseKnobValue(knobName, knobValueString, true);
+				this->overrides[stringToKeyRef(knobName)] = knobValue;
+			} catch (Error& e) {
+				if (e.code() == error_code_invalid_option) {
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
+				} else {
+					throw e;
+				}
+			}
 		}
 	}
 
-	void update(KnobCollection& knobCollection) {
+	void update(IKnobCollection& knobCollection) {
 		for (const auto& [knobName, knobValue] : overrides) {
-			if (!knobCollection.setKnob(knobName.toString(), knobValue)) {
-				fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.toString().c_str());
-				TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
-			}
+			knobCollection.setKnob(knobName.toString(), knobValue);
 		}
 	}
 };
@@ -120,11 +126,11 @@ class LocalConfigurationImpl {
 	Version lastSeenVersion{ 0 };
 	ManualKnobOverrides manualKnobOverrides;
 	ConfigKnobOverrides configKnobOverrides;
-	std::unique_ptr<KnobCollection> testKnobCollection;
+	std::unique_ptr<IKnobCollection> testKnobCollection;
 
-	KnobCollection& getKnobs() { return testKnobCollection ? *testKnobCollection : *g_knobs; }
+	IKnobCollection& getKnobs() { return testKnobCollection ? *testKnobCollection : *g_knobs; }
 
-	KnobCollection const& getKnobs() const { return testKnobCollection ? *testKnobCollection : *g_knobs; }
+	IKnobCollection const& getKnobs() const { return testKnobCollection ? *testKnobCollection : *g_knobs; }
 
 	CounterCollection cc;
 	Counter broadcasterChanges;
@@ -290,7 +296,7 @@ public:
 	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
 	    manualKnobOverrides(manualKnobOverrides) {
 		if (testID.present()) {
-			testKnobCollection = KnobCollection::createServerKnobs(true, g_network->isSimulated());
+			testKnobCollection = IKnobCollection::createServerKnobCollection(true, g_network->isSimulated());
 		}
 		logger = traceCounters(
 		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
