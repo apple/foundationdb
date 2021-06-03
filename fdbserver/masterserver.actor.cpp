@@ -1231,12 +1231,10 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
 	if (req.version > self->liveCommittedVersion.get()) {
-		// Note this set call switches context to any waiters on liveCommittedVersion before continuing.
+		self->databaseLocked = req.locked;
+		self->proxyMetadataVersion = req.metadataVersion;
+		// Note the set call switches context to any waiters on liveCommittedVersion before continuing.
 		self->liveCommittedVersion.set(req.version);
-		if (self->liveCommittedVersion.get() <= req.version) {
-			self->databaseLocked = req.locked;
-			self->proxyMetadataVersion = req.metadataVersion;
-		}
 	}
 	++self->reportLiveCommittedVersionRequests;
 }
