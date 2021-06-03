@@ -147,7 +147,11 @@ public:
 			if (f.isReady() && f.isError())
 				return f;
 
-			itr = openFiles.try_emplace(filename, f).first;
+			auto result = openFiles.try_emplace(filename, f);
+
+			// This should be inserting a new entry
+			ASSERT(result.second);
+			itr = result.first;
 
 			// We return here instead of falling through to the outer scope so that we don't delete all references to
 			// the underlying file before returning
