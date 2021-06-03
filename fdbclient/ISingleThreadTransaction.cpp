@@ -47,10 +47,10 @@ void ISingleThreadTransaction::create(ISingleThreadTransaction* tr, Type type, D
 		new (tr) ReadYourWritesTransaction(db);
 		break;
 	case Type::SIMPLE_CONFIG:
-		new (tr) SimpleConfigTransaction(db->getConnectionFile()->getConnectionString());
+		new (tr) SimpleConfigTransaction(db);
 		break;
 	case Type::PAXOS_CONFIG:
-		new (tr) PaxosConfigTransaction(db->getConnectionFile()->getConnectionString());
+		new (tr) PaxosConfigTransaction(db);
 		break;
 	default:
 		ASSERT(false);

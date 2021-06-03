@@ -35,7 +35,7 @@ class SimpleConfigTransaction final : public IConfigTransaction, public FastAllo
 
 public:
 	SimpleConfigTransaction(ConfigTransactionInterface const&);
-	SimpleConfigTransaction(ClusterConnectionString const&);
+	SimpleConfigTransaction(Database const&);
 	~SimpleConfigTransaction();
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;

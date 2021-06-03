@@ -21,6 +21,7 @@
 #include <algorithm>
 
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KnobCollection.h"
 #include "fdbclient/SimpleConfigTransaction.h"
 #include "fdbserver/Knobs.h"
@@ -34,6 +35,7 @@ class SimpleConfigTransactionImpl {
 	int numRetries{ 0 };
 	bool committed{ false };
 	Optional<UID> dID;
+	Database cx;
 
 	ACTOR static Future<Version> getReadVersion(SimpleConfigTransactionImpl* self) {
 		if (self->dID.present()) {
@@ -113,8 +115,8 @@ class SimpleConfigTransactionImpl {
 	}
 
 public:
-	SimpleConfigTransactionImpl(ClusterConnectionString const& ccs) {
-		auto coordinators = ccs.coordinators();
+	SimpleConfigTransactionImpl(Database const& cx) : cx(cx) {
+		auto coordinators = cx->getConnectionFile()->getConnectionString().coordinators();
 		std::sort(coordinators.begin(), coordinators.end());
 		cti = ConfigTransactionInterface(coordinators[0]);
 	}
@@ -201,6 +203,14 @@ public:
 		this->dID = dID;
 	}
 
+	void checkDeferredError(Error const& deferredError) const {
+		if (deferredError.code() != invalid_error_code) {
+			throw deferredError;
+		}
+		if (cx.getPtr()) {
+			cx->checkDeferredError();
+		}
+	}
 }; // SimpleConfigTransactionImpl
 
 Future<Version> SimpleConfigTransaction::getReadVersion() {
@@ -277,14 +287,11 @@ void SimpleConfigTransaction::debugTransaction(UID dID) {
 }
 
 void SimpleConfigTransaction::checkDeferredError() const {
-	// TODO: Also check for deferred error in database?
-	if (deferredError.code() != invalid_error_code) {
-		throw deferredError;
-	}
+	impl->checkDeferredError(deferredError);
 }
 
-SimpleConfigTransaction::SimpleConfigTransaction(ClusterConnectionString const& ccs)
-  : impl(std::make_unique<SimpleConfigTransactionImpl>(ccs)) {}
+SimpleConfigTransaction::SimpleConfigTransaction(Database const& cx)
+  : impl(std::make_unique<SimpleConfigTransactionImpl>(cx)) {}
 
 SimpleConfigTransaction::SimpleConfigTransaction(ConfigTransactionInterface const& cti)
   : impl(std::make_unique<SimpleConfigTransactionImpl>(cti)) {}

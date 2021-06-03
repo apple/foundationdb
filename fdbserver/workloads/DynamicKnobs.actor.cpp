@@ -33,7 +33,7 @@ class DynamicKnobsWorkload : public TestWorkload {
 
 	ACTOR static Future<Void> start(DynamicKnobsWorkload* self, Database cx) {
 		state Arena arena;
-		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
+		state SimpleConfigTransaction tr(cx);
 		loop {
 			try {
 				Tuple tuple;

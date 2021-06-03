@@ -22,14 +22,14 @@
 #include "fdbclient/SimpleConfigTransaction.h"
 #include "fdbclient/PaxosConfigTransaction.h"
 
-Reference<IConfigTransaction> IConfigTransaction::createSimple(ConfigTransactionInterface const& cti) {
+Reference<IConfigTransaction> IConfigTransaction::createTestSimple(ConfigTransactionInterface const& cti) {
 	return makeReference<SimpleConfigTransaction>(cti);
 }
 
-Reference<IConfigTransaction> IConfigTransaction::createSimple(ClusterConnectionString const& ccs) {
-	return makeReference<SimpleConfigTransaction>(ccs);
+Reference<IConfigTransaction> IConfigTransaction::createSimple(Database const& cx) {
+	return makeReference<SimpleConfigTransaction>(cx);
 }
 
-Reference<IConfigTransaction> IConfigTransaction::createPaxos(ClusterConnectionString const& ccs) {
-	return makeReference<PaxosConfigTransaction>(ccs);
+Reference<IConfigTransaction> IConfigTransaction::createPaxos(Database const& cx) {
+	return makeReference<PaxosConfigTransaction>(cx);
 }

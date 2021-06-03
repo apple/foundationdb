@@ -122,7 +122,7 @@ void PaxosConfigTransaction::checkDeferredError() const {
 	ASSERT(false);
 }
 
-PaxosConfigTransaction::PaxosConfigTransaction(ClusterConnectionString const& ccs) {
+PaxosConfigTransaction::PaxosConfigTransaction(Database const& cx) {
 	// TODO: Implement
 	ASSERT(false);
 }

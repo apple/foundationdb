@@ -28,7 +28,7 @@ class PaxosConfigTransaction final : public IConfigTransaction, public FastAlloc
 	std::unique_ptr<class PaxosConfigTransactionImpl> impl;
 
 public:
-	PaxosConfigTransaction(ClusterConnectionString const&);
+	PaxosConfigTransaction(Database const&);
 	~PaxosConfigTransaction();
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;

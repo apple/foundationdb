@@ -1,5 +1,5 @@
 /*
- * ConfigBroadcaster.actor.cpp
+ * ConfigDatabaseUnitTests.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -69,7 +69,7 @@ class WriteToTransactionEnvironment {
 	                        Optional<KeyRef> configClass,
 	                        T value,
 	                        KeyRef knobName) {
-		state Reference<IConfigTransaction> tr = IConfigTransaction::createSimple(self->cti);
+		state Reference<IConfigTransaction> tr = IConfigTransaction::createTestSimple(self->cti);
 		auto configKey = encodeConfigKey(configClass, knobName);
 		tr->set(configKey, longToValue(value));
 		wait(tr->commit());
@@ -78,7 +78,7 @@ class WriteToTransactionEnvironment {
 	}
 
 	ACTOR static Future<Void> clear(WriteToTransactionEnvironment* self, Optional<KeyRef> configClass) {
-		state Reference<IConfigTransaction> tr = IConfigTransaction::createSimple(self->cti);
+		state Reference<IConfigTransaction> tr = IConfigTransaction::createTestSimple(self->cti);
 		auto configKey = encodeConfigKey(configClass, "test_long"_sr);
 		tr->clear(configKey);
 		wait(tr->commit());
@@ -265,7 +265,7 @@ class TransactionEnvironment {
 	                                Optional<KeyRef> configClass,
 	                                Optional<int64_t> expected) {
 		state Reference<IConfigTransaction> tr =
-		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
+		    IConfigTransaction::createTestSimple(self->writeTo.getTransactionInterface());
 		state Key configKey = encodeConfigKey(configClass, "test_long"_sr);
 		state Optional<Value> value = wait(tr->get(configKey));
 		if (expected.present()) {
@@ -278,7 +278,7 @@ class TransactionEnvironment {
 
 	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getConfigClasses(TransactionEnvironment* self) {
 		state Reference<IConfigTransaction> tr =
-		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
+		    IConfigTransaction::createTestSimple(self->writeTo.getTransactionInterface());
 		state KeySelector begin = firstGreaterOrEqual(configClassKeys.begin);
 		state KeySelector end = firstGreaterOrEqual(configClassKeys.end);
 		Standalone<RangeResultRef> range = wait(tr->getRange(begin, end, 1000));
@@ -293,7 +293,7 @@ class TransactionEnvironment {
 	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getKnobNames(TransactionEnvironment* self,
 	                                                                Optional<KeyRef> configClass) {
 		state Reference<IConfigTransaction> tr =
-		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
+		    IConfigTransaction::createTestSimple(self->writeTo.getTransactionInterface());
 		state KeyRange keys = globalConfigKnobKeys;
 		if (configClass.present()) {
 			keys = singleKeyRange(configClass.get().withPrefix(configKnobKeys.begin));
@@ -311,7 +311,7 @@ class TransactionEnvironment {
 
 	ACTOR static Future<Void> badRangeRead(TransactionEnvironment* self) {
 		state Reference<IConfigTransaction> tr =
-		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
+		    IConfigTransaction::createTestSimple(self->writeTo.getTransactionInterface());
 		KeySelector begin = firstGreaterOrEqual(normalKeys.begin);
 		KeySelector end = firstGreaterOrEqual(normalKeys.end);
 		wait(success(tr->getRange(begin, end, 1000)));

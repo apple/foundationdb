@@ -25,6 +25,7 @@
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbclient/ISingleThreadTransaction.h"
+#include "fdbclient/NativeAPI.actor.h"
 
 class IConfigTransaction : public ISingleThreadTransaction {
 protected:
@@ -33,9 +34,9 @@ protected:
 public:
 	virtual ~IConfigTransaction() = default;
 
-	static Reference<IConfigTransaction> createSimple(ConfigTransactionInterface const&);
-	static Reference<IConfigTransaction> createSimple(ClusterConnectionString const&);
-	static Reference<IConfigTransaction> createPaxos(ClusterConnectionString const&);
+	static Reference<IConfigTransaction> createTestSimple(ConfigTransactionInterface const&);
+	static Reference<IConfigTransaction> createSimple(Database const&);
+	static Reference<IConfigTransaction> createPaxos(Database const&);
 
 	// Not implemented:
 	void setVersion(Version) override { throw client_invalid_operation(); }
