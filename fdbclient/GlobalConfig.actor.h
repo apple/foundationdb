@@ -74,7 +74,7 @@ public:
 	template <class T>
 	static void create(Database& cx, Reference<AsyncVar<T>> db, const ClientDBInfo* dbInfo) {
 		if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
-			auto config = new GlobalConfig{cx};
+			auto config = new GlobalConfig{ cx };
 			g_network->setGlobal(INetwork::enGlobalConfig, config);
 			config->_updater = updater(config, dbInfo);
 			// Bind changes in `db` to the `dbInfoChanged` AsyncTrigger.

@@ -168,7 +168,7 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 		TraceEvent(SevInfo, "GlobalConfigMigrationError").detail("What", e.what());
 	}
 
-    return Void();
+	return Void();
 }
 
 // Updates local copy of global configuration by reading the entire key-range
