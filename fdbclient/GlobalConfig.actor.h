@@ -80,8 +80,8 @@ public:
 			// Bind changes in `db` to the `dbInfoChanged` AsyncTrigger.
 			forward(db, std::addressof(config->dbInfoChanged));
 		} else {
-			GlobalConfig* oldConfig = reinterpret_cast<GlobalConfig*>(g_network->global(INetwork::enGlobalConfig));
-			oldConfig->cx = cx;
+			GlobalConfig* config = reinterpret_cast<GlobalConfig*>(g_network->global(INetwork::enGlobalConfig));
+			config->cx = cx;
 		}
 	}
 
