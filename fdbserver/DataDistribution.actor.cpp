@@ -3818,8 +3818,8 @@ ACTOR Future<Void> trackExcludedServers(DDTeamCollection* self) {
 			state Future<RangeResult> flocalitiesExclude = tr.getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<RangeResult> flocalitiesFailed = tr.getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<std::vector<ProcessData>> fworkers = getWorkers(self->cx);
-			wait(success(fresultsExclude) && success(fresultsFailed) &&
-				success(flocalitiesExclude) && success(flocalitiesFailed));
+			wait(success(fresultsExclude) && success(fresultsFailed) && success(flocalitiesExclude) &&
+			     success(flocalitiesFailed));
 
 			state RangeResult excludedResults = fresultsExclude.get();
 			ASSERT(!excludedResults.more && excludedResults.size() < CLIENT_KNOBS->TOO_MANY);
@@ -3885,8 +3885,8 @@ ACTOR Future<Void> trackExcludedServers(DDTeamCollection* self) {
 			TraceEvent("DDExcludedServersChanged", self->distributorId)
 			    .detail("AddressesExcluded", excludedResults.size())
 			    .detail("AddressesFailed", failedResults.size())
-				.detail("LocalitiesExcluded", excludedLocalityResults.size())
-				.detail("LocalitiesFailed", failedLocalityResults.size());
+			    .detail("LocalitiesExcluded", excludedLocalityResults.size())
+			    .detail("LocalitiesFailed", failedLocalityResults.size());
 
 			self->restartRecruiting.trigger();
 			state Future<Void> watchFuture = tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey) ||

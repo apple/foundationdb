@@ -361,8 +361,9 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 			bool excludedServer = false;
 			bool excludedLocality = false;
 			if (configuration.present() && configuration.get().isExcludedServer(tempList))
-			    excludedServer = true;
-			if (locality.count(it->first) && configuration.present() && configuration.get().isMachineExcluded(locality[it->first]))
+				excludedServer = true;
+			if (locality.count(it->first) && configuration.present() &&
+			    configuration.get().isMachineExcluded(locality[it->first]))
 				excludedLocality = true;
 
 			notExcludedMap[machineId] = excludedServer || excludedLocality;
@@ -1018,8 +1019,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			statusObj["roles"] = roles.getStatusForAddress(address);
 
 			if (configuration.present()) {
-				statusObj["excluded"] = configuration.get().isExcludedServer(workerItr->interf.addresses())
-				                        || configuration.get().isExcludedLocality(workerItr->interf.locality);
+				statusObj["excluded"] = configuration.get().isExcludedServer(workerItr->interf.addresses()) ||
+				                        configuration.get().isExcludedLocality(workerItr->interf.locality);
 			}
 
 			statusObj["class_type"] = workerItr->processClass.toString();
@@ -1613,9 +1614,9 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 				excludedServersArr.push_back(statusObj);
 			}
 			std::set<std::string> excludedLocalities = configuration.getExcludedLocalities();
-			for (std::set<std::string>::iterator it = excludedLocalities.begin(); it != excludedLocalities.end(); it++) {
+			for (const auto& it : excludedLocalities) {
 				JsonBuilderObject statusObj;
-				statusObj["locality"] = *it;
+				statusObj["locality"] = it;
 				excludedServersArr.push_back(statusObj);
 			}
 			statusObj["excluded_servers"] = excludedServersArr;

@@ -1596,7 +1596,7 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 	}
 }
 
-void excludeLocalities(Transaction& tr, std::unordered_set<std::string>& localities, bool failed) {
+void excludeLocalities(Transaction& tr, std::unordered_set<std::string>* localities, bool failed) {
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1605,36 +1605,34 @@ void excludeLocalities(Transaction& tr, std::unordered_set<std::string>& localit
 	auto localityVersionKey = failed ? failedLocalityVersionKey : excludedLocalityVersionKey;
 	tr.addReadConflictRange(singleKeyRange(localityVersionKey)); // To conflict with parallel includeLocalities
 	tr.set(localityVersionKey, excludeVersionKey);
-	for (auto& l : localities) {
+	for (const auto& l : *localities) {
 		if (failed) {
 			tr.set(encodeFailedLocalityKey(l), StringRef());
 		} else {
 			tr.set(encodeExcludedLocalityKey(l), StringRef());
 		}
 	}
-	TraceEvent("ExcludeLocalitiesCommit")
-		.detail("Localities", describe(localities))
-		.detail("ExcludeFailed", failed);
+	TraceEvent("ExcludeLocalitiesCommit").detail("Localities", describe(*localities)).detail("ExcludeFailed", failed);
 }
 
-ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed) {
+ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string>* localities, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				ryw.set(
-				    SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failedlocality" : "excludedlocality", "force"),
-				    ValueRef());
-				for (auto& l : localities) {
+				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
+				            failed ? "failedlocality" : "excludedlocality", "force"),
+				        ValueRef());
+				for (const auto& l : *localities) {
 					Key addr = failed
 					               ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
 					               : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
 					ryw.set(addr, ValueRef());
 				}
 				TraceEvent("ExcludeLocalitiesSpecialKeySpaceCommit")
-				    .detail("Localities", describe(localities))
-					.detail("ExcludeFailed", failed);
+				    .detail("Localities", describe(*localities))
+				    .detail("ExcludeFailed", failed);
 
 				wait(ryw.commit());
 				return Void();
@@ -1759,7 +1757,7 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 	}
 }
 
-ACTOR Future<Void> includeLocalities(Database cx, vector<std::string> localities, bool failed, bool includeAll) {
+ACTOR Future<Void> includeLocalities(Database cx, vector<std::string>* localities, bool failed, bool includeAll) {
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
 		state ReadYourWritesTransaction ryw(cx);
@@ -1773,7 +1771,7 @@ ACTOR Future<Void> includeLocalities(Database cx, vector<std::string> localities
 						ryw.clear(SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
 					}
 				} else {
-					for (auto& l : localities) {
+					for (const auto& l : *localities) {
 						Key locality =
 						    failed ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
 						           : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
@@ -1781,9 +1779,9 @@ ACTOR Future<Void> includeLocalities(Database cx, vector<std::string> localities
 					}
 				}
 				TraceEvent("IncludeLocalitiesCommit")
-					.detail("Localities", describe(localities))
-					.detail("Failed", failed)
-					.detail("IncludeAll", includeAll);
+				    .detail("Localities", describe(*localities))
+				    .detail("Failed", failed)
+				    .detail("IncludeAll", includeAll);
 
 				wait(ryw.commit());
 				return Void();
@@ -1801,8 +1799,8 @@ ACTOR Future<Void> includeLocalities(Database cx, vector<std::string> localities
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
-				// includeLocalities might be used in an emergency transaction, so make sure it is retry-self-conflicting
-				// and CAUSAL_WRITE_RISKY
+				// includeLocalities might be used in an emergency transaction, so make sure it is
+				// retry-self-conflicting and CAUSAL_WRITE_RISKY
 				tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 				if (failed) {
 					tr.addReadConflictRange(singleKeyRange(failedLocalityVersionKey));
@@ -1819,7 +1817,7 @@ ACTOR Future<Void> includeLocalities(Database cx, vector<std::string> localities
 						tr.clear(excludedLocalityKeys);
 					}
 				} else {
-					for (auto& l : localities) {
+					for (const auto& l : *localities) {
 						if (failed) {
 							tr.clear(encodeFailedLocalityKey(l));
 						} else {
@@ -1829,9 +1827,9 @@ ACTOR Future<Void> includeLocalities(Database cx, vector<std::string> localities
 				}
 
 				TraceEvent("IncludeLocalitiesCommit")
-					.detail("Localities", describe(localities))
-					.detail("Failed", failed)
-					.detail("IncludeAll", includeAll);
+				    .detail("Localities", describe(*localities))
+				    .detail("Failed", failed)
+				    .detail("IncludeAll", includeAll);
 
 				wait(tr.commit());
 				return Void();
@@ -1921,12 +1919,12 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Transaction* tr) {
 	ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
 	vector<std::string> excludedLocalities;
-	for (auto i = r.begin(); i != r.end(); ++i) {
-		auto a = decodeExcludedLocalityKey(i->key);
+	for (const auto& i : r) {
+		auto a = decodeExcludedLocalityKey(i.key);
 		excludedLocalities.push_back(a);
 	}
-	for (auto i = r2.begin(); i != r2.end(); ++i) {
-		auto a = decodeFailedLocalityKey(i->key);
+	for (const auto& i : r2) {
+		auto a = decodeFailedLocalityKey(i.key);
 		excludedLocalities.push_back(a);
 	}
 	uniquify(excludedLocalities);
@@ -1948,16 +1946,20 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
 	}
 }
 
-std::pair<std::string, std::string> decodeLocality(std::string locality) {
+std::pair<std::string, std::string> decodeLocality(std::string& locality) {
 	StringRef localityRef(locality.c_str());
 	if (localityRef.startsWith(ExcludeLocalityKeyDcIdPrefix)) {
-		return std::make_pair(LocalityData::keyDcId.toString(), localityRef.removePrefix(ExcludeLocalityKeyDcIdPrefix).toString());
+		return std::make_pair(LocalityData::keyDcId.toString(),
+		                      localityRef.removePrefix(ExcludeLocalityKeyDcIdPrefix).toString());
 	} else if (localityRef.startsWith(ExcludeLocalityKeyMachineIdPrefix)) {
-		return std::make_pair(LocalityData::keyMachineId.toString(), localityRef.removePrefix(ExcludeLocalityKeyMachineIdPrefix).toString());
+		return std::make_pair(LocalityData::keyMachineId.toString(),
+		                      localityRef.removePrefix(ExcludeLocalityKeyMachineIdPrefix).toString());
 	} else if (localityRef.startsWith(ExcludeLocalityKeyProcessIdPrefix)) {
-		return std::make_pair(LocalityData::keyProcessId.toString(), localityRef.removePrefix(ExcludeLocalityKeyProcessIdPrefix).toString());
+		return std::make_pair(LocalityData::keyProcessId.toString(),
+		                      localityRef.removePrefix(ExcludeLocalityKeyProcessIdPrefix).toString());
 	} else if (localityRef.startsWith(ExcludeLocalityKeyZoneIdPrefix)) {
-		return std::make_pair(LocalityData::keyZoneId.toString(), localityRef.removePrefix(ExcludeLocalityKeyZoneIdPrefix).toString());
+		return std::make_pair(LocalityData::keyZoneId.toString(),
+		                      localityRef.removePrefix(ExcludeLocalityKeyZoneIdPrefix).toString());
 	}
 
 	return std::make_pair("", "");
@@ -1968,17 +1970,17 @@ std::set<AddressExclusion> getAddressesByLocality(std::vector<ProcessData>& work
 
 	std::set<AddressExclusion> localityAddresses;
 	for (int i = 0; i < workers.size(); i++) {
-		if (localityKeyValue.first == LocalityData::keyDcId && workers[i].locality.dcId().present()
-		    && localityKeyValue.second == workers[i].locality.dcId().get()) {
+		if (localityKeyValue.first == LocalityData::keyDcId && workers[i].locality.dcId().present() &&
+		    localityKeyValue.second == workers[i].locality.dcId().get()) {
 			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
-		} else if (localityKeyValue.first == LocalityData::keyMachineId && workers[i].locality.machineId().present()
-		           && localityKeyValue.second == workers[i].locality.machineId().get()) {
+		} else if (localityKeyValue.first == LocalityData::keyMachineId && workers[i].locality.machineId().present() &&
+		           localityKeyValue.second == workers[i].locality.machineId().get()) {
 			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
-		} else if (localityKeyValue.first == LocalityData::keyProcessId && workers[i].locality.processId().present()
-		           && localityKeyValue.second == workers[i].locality.processId().get()) {
+		} else if (localityKeyValue.first == LocalityData::keyProcessId && workers[i].locality.processId().present() &&
+		           localityKeyValue.second == workers[i].locality.processId().get()) {
 			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
-		} else if (localityKeyValue.first == LocalityData::keyZoneId && workers[i].locality.zoneId().present()
-		           && localityKeyValue.second == workers[i].locality.zoneId().get()) {
+		} else if (localityKeyValue.first == LocalityData::keyZoneId && workers[i].locality.zoneId().present() &&
+		           localityKeyValue.second == workers[i].locality.zoneId().get()) {
 			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
 		}
 	}
