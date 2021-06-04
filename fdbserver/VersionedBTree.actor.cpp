@@ -1004,7 +1004,7 @@ struct RedwoodMetrics {
 				if (*m.first == '\0') {
 					*s += "\n";
 				} else if (!skipZeroes || m.second != 0) {
-					*s += format("%-15s %-8u %8u/s  ", m.first, m.second, int(m.second / elapsed));
+					*s += format("%-15s %-8u %8" PRId64 "/s  ", m.first, m.second, int64_t(m.second / elapsed));
 				}
 			}
 		}
