@@ -140,12 +140,11 @@ struct SpecialCounter final : ICounter, FastAllocated<SpecialCounter<F>>, NonCop
 	std::string const& getName() const override { return name; }
 	int64_t getValue() const override {
 		auto result = f();
-		if constexpr (std::is_floating_point_v<decltype(result)>) {
-			if (result >= static_cast<decltype(result)>(std::numeric_limits<int64_t>::max())) {
-				// Clamp to max representable int64_t to avoid UB
-				return std::numeric_limits<int64_t>::max();
-			}
-		}
+		// Disallow conversion from floating point to int64_t, since this has
+		// been a source of confusion - e.g. a percentage represented as a
+		// fraction between 0 and 1 is not meaningful after conversion to
+		// int64_t.
+		static_assert(!std::is_floating_point_v<decltype(result)>);
 		return result;
 	}
 
