@@ -697,6 +697,16 @@ private:
 	AsyncVar<Void> v;
 };
 
+// Binds an AsyncTrigger object to an AsyncVar, so when the AsyncVar changes
+// the AsyncTrigger is triggered.
+ACTOR template <class T>
+void forward(Reference<AsyncVar<T>> from, AsyncTrigger* to) {
+	loop {
+		wait(from->onChange());
+		to->trigger();
+	}
+}
+
 class Debouncer : NonCopyable {
 public:
 	explicit Debouncer(double delay) { worker = debounceWorker(this, delay); }
