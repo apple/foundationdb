@@ -75,7 +75,7 @@ add_custom_target(python_package DEPENDS ${package_file})
 add_dependencies(python_package python_binding)
 add_dependencies(packages python_package)
 
-if (NOT WIN32)
+if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   add_fdbclient_test(
     NAME fdbcli_tests
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
