@@ -20,6 +20,8 @@
 
 #ifndef FDBRPC_STATS_H
 #define FDBRPC_STATS_H
+#include <limits>
+#include <type_traits>
 #pragma once
 
 // Yet another performance statistics interface
@@ -136,7 +138,16 @@ struct SpecialCounter final : ICounter, FastAllocated<SpecialCounter<F>>, NonCop
 	void remove() override { delete this; }
 
 	std::string const& getName() const override { return name; }
-	int64_t getValue() const override { return f(); }
+	int64_t getValue() const override {
+		auto result = f();
+		if constexpr (std::is_floating_point_v<decltype(result)>) {
+			if (result >= static_cast<decltype(result)>(std::numeric_limits<int64_t>::max())) {
+				// Clamp to max representable int64_t to avoid UB
+				return std::numeric_limits<int64_t>::max();
+			}
+		}
+		return result;
+	}
 
 	void resetInterval() override {}
 
