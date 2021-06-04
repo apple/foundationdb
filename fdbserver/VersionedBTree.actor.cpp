@@ -2871,7 +2871,8 @@ struct RedwoodRecordRef {
 			case 1:
 				return *(int32_t*)r;
 			case 2:
-				return (((int64_t)((int48_t*)r)->high) << 16) | (((int48_t*)r)->low & 0xFFFF);
+				return ((int64_t) static_cast<uint32_t>(reinterpret_cast<const int48_t*>(r)->high) << 16) |
+				       (((int48_t*)r)->low & 0xFFFF);
 			case 3:
 			default:
 				return *(int64_t*)r;
