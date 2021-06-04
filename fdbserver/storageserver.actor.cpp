@@ -95,13 +95,25 @@ struct AddingShard : NonCopyable {
 	Promise<Void> fetchComplete;
 	Promise<Void> readWrite;
 
-	std::deque<Standalone<VerUpdateRef>>
-	    updates; // during the Fetching phase, mutations with key in keys and version>=(fetchClient's) fetchVersion;
+	// During the Fetching phase, it saves newer mutations whose version is greater or equal to fetchClient's
+	// fetchVersion, while the shard is still busy catching up with fetchClient. It applies these updates after fetching
+	// completes.
+	std::deque<Standalone<VerUpdateRef>> updates;
 
 	struct StorageServer* server;
 	Version transferredVersion;
 
-	enum Phase { WaitPrevious, Fetching, Waiting };
+	// To learn more details of the phase transitions, see function fetchKeys(). The phases below are sorted in
+	// chronological order and do not go back.
+	enum Phase {
+		WaitPrevious,
+		// During Fetching phase, it fetches data before fetchVersion and write it to storage, then let updater know it
+		// is ready to update the deferred updates` (see the comment of member variable `updates` above).
+		Fetching,
+		// During Waiting phase, it sends updater the deferred updates, and wait until they are durable.
+		Waiting
+		// The shard's state is changed from adding to readWrite then.
+	};
 
 	Phase phase;
 
@@ -128,6 +140,7 @@ class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
 	  : adding(std::move(adding)), readWrite(readWrite), keys(keys) {}
 
 public:
+	// A shard has 3 mutual exclusive states: adding, readWrite and notAssigned.
 	std::unique_ptr<AddingShard> adding;
 	struct StorageServer* readWrite;
 	KeyRange keys;
@@ -284,6 +297,7 @@ const int VERSION_OVERHEAD =
          sizeof(Reference<VersionedMap<KeyRef, ValueOrClearToRef>::PTreeT>)); // versioned map [ x2 for
                                                                               // createNewVersion(version+1) ], 64b
                                                                               // overhead for map
+// Why *2?
 static int mvccStorageBytes(MutationRef const& m) {
 	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
 	       (MutationRef::OVERHEAD_BYTES + m.param1.size() + m.param2.size()) * 2;
@@ -577,6 +591,11 @@ public:
 	ActorCollection actors;
 
 	StorageServerMetrics metrics;
+	// Unlike StorageServerMetrics, the counters below count the number of bytes writen between two "StorageMetrics"
+	// trace events, without information about key distributions.
+	int fetchKeysBytes = 0;
+	int updateMutationBytes = 0;
+
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
 	Future<Void> byteSampleRecovery;
@@ -2209,6 +2228,7 @@ Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
 	return Optional<MutationRef>();
 }
 
+// Return whether or not the there is a mutation that need to be done.
 bool expandMutation(MutationRef& m,
                     StorageServer::VersionedData const& data,
                     UpdateEagerReadInfo* eager,
@@ -2306,12 +2326,17 @@ bool expandMutation(MutationRef& m,
 void applyMutation(StorageServer* self, MutationRef const& m, Arena& arena, StorageServer::VersionedData& data) {
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
+	int mutationBytes = mvccStorageBytes(m) / 2;
+	self->updateMutationBytes += mutationBytes;
+
 	StorageMetrics metrics;
-	metrics.bytesPerKSecond = mvccStorageBytes(m) / 2;
+	metrics.bytesPerKSecond = mutationBytes;
 	metrics.iosPerKSecond = 1;
 	self->metrics.notify(m.param1, metrics);
 
 	if (m.type == MutationRef::SetValue) {
+		// VersionedMap (data) is bookkeeping all empty ranges. If the key to be set is new, it is supposed to be in a
+		// range what was empty. Break the empty range into halves.
 		auto prev = data.atLatest().lastLessOrEqual(m.param1);
 		if (prev && prev->isClearTo() && prev->getEndKey() > m.param1) {
 			ASSERT(prev.key() <= m.param1);
@@ -2542,14 +2567,17 @@ class FetchKeysMetricReporter {
 	int fetchedBytes;
 	StorageServer::FetchKeysHistograms& histograms;
 	StorageServer::CurrentRunningFetchKeys& currentRunning;
+	int& storageFetchedBytes;
 
 public:
 	FetchKeysMetricReporter(const UID& uid_,
 	                        const double startTime_,
 	                        const KeyRange& keyRange,
 	                        StorageServer::FetchKeysHistograms& histograms_,
-	                        StorageServer::CurrentRunningFetchKeys& currentRunning_)
-	  : uid(uid_), startTime(startTime_), fetchedBytes(0), histograms(histograms_), currentRunning(currentRunning_) {
+	                        StorageServer::CurrentRunningFetchKeys& currentRunning_,
+	                        int& storageFetchedBytes)
+	  : uid(uid_), startTime(startTime_), fetchedBytes(0), histograms(histograms_), currentRunning(currentRunning_),
+	    storageFetchedBytes(storageFetchedBytes) {
 
 		currentRunning.recordStart(uid, keyRange);
 	}
@@ -2570,6 +2598,8 @@ public:
 		histograms.bandwidth->sample(bandwidth);
 
 		currentRunning.recordFinish(uid);
+
+		storageFetchedBytes += fetchedBytes;
 	}
 };
 
@@ -2581,7 +2611,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const double startTime = now();
 	state int fetchBlockBytes = BUGGIFY ? SERVER_KNOBS->BUGGIFY_BLOCK_BYTES : SERVER_KNOBS->FETCH_BLOCK_BYTES;
 	state FetchKeysMetricReporter metricReporter(
-	    fetchKeysID, startTime, keys, data->fetchKeysHistograms, data->currentRunningFetchKeys);
+	    fetchKeysID, startTime, keys, data->fetchKeysHistograms, data->currentRunningFetchKeys, data->fetchKeysBytes);
 
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
 	//  This allows adding->start() to be called inline with CSK.
@@ -2683,7 +2713,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// wait( data->fetchKeysStorageWriteLock.take() );
 				// state FlowLock::Releaser holdingFKSWL( data->fetchKeysStorageWriteLock );
 
-				// Write this_block to storage
+				// Write this_block directly to storage, bypassing update() which updates in the memory.
 				state KeyValueRef* kvItr = this_block.begin();
 				for (; kvItr != this_block.end(); ++kvItr) {
 					data->storage.writeKeyValue(*kvItr);
@@ -2805,6 +2835,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		Promise<FetchInjectionInfo*> p;
 		data->readyFetchKeys.push_back(p);
 
+		// After we add to the promise readyFetchKeys, update() would provide a pinter to FetchInjectionInfo that we can
+		// put mutation in.
 		FetchInjectionInfo* batch = wait(p.getFuture());
 		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
 
@@ -2858,6 +2890,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		setAvailableStatus(data,
 		                   keys,
 		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
+
+		// Note it does not leave this thread until this point, since it receives a pointer to FetchInjectionInfo.
 
 		// Wait for the transferredVersion (and therefore the shard data) to be committed and durable.
 		wait(data->durableVersion.whenAtLeast(shard->transferredVersion));
@@ -2922,6 +2956,9 @@ void AddingShard::addMutation(Version version, MutationRef const& mutation) {
 	if (phase == WaitPrevious) {
 		// Updates can be discarded
 	} else if (phase == Fetching) {
+		// Save incoming mutations (See the comments of member variable `updates`).
+
+		// Create a new VerUpdateRef in updates queue if it is a new version.
 		if (!updates.size() || version > updates.end()[-1].version) {
 			VerUpdateRef v;
 			v.version = version;
@@ -2930,6 +2967,7 @@ void AddingShard::addMutation(Version version, MutationRef const& mutation) {
 		} else {
 			ASSERT(version == updates.end()[-1].version);
 		}
+		// Add the mutation to the version.
 		updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
 	} else if (phase == Waiting) {
 		server->addMutation(version, mutation, keys, server->updateEagerReads);
@@ -3434,6 +3472,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				auto fk = data->readyFetchKeys.back();
 				data->readyFetchKeys.pop_back();
 				fk.send(&fii);
+				// fetchKeys() would put the data it fetched into the fii. It will not return back to this thread until
+				// it was completed.
 			}
 
 			for (auto& c : fii.changes)
@@ -4355,6 +4395,13 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			                                         UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
 			                                             self->thisServerID.second() ^ self->ssPairID.get().second()));
 		                               }
+
+                                       // These are the size of mutations since last "StorageMetrics" emission. It's
+		                               // easy to get bandwidths by dividing by "Elapsed".
+		                               te.detail("SSFetchKeysBytes", self->fetchKeysBytes);
+		                               te.detail("SSUpdateMutationBytes", self->updateMutationBytes);
+		                               self->fetchKeysBytes = 0;
+		                               self->updateMutationBytes = 0
 	                               }));
 
 	loop {
