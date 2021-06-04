@@ -43,9 +43,8 @@
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
 #include "fdbserver/ptxn/TLogInterface.h"
-#include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
+#include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/test/Utils.h"
 #include "flow/ActorCollection.h"
@@ -1654,6 +1653,7 @@ TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	// start a real TLog server
 	wait(startTLogServers(&actors, context, folder));
 	// TODO: start fake proxy to talk to real TLog servers.
+	startFakeSequencer(actors, context);
 	startFakeProxy(actors, context);
 	wait(quorum(actors, 1));
 	platform::eraseDirectoryRecursive(folder);

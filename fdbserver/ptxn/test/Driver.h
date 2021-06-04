@@ -25,13 +25,15 @@
 #include <memory>
 #include <unordered_map>
 #include <vector>
-#include <fdbserver/WorkerInterface.actor.h>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/Config.h"
+#include "fdbserver/ptxn/MessageSerializer.h"
+#include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/StorageServerInterface.h"
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "fdbserver/ResolverInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/UnitTest.h"
 
 namespace ptxn::test {
@@ -46,11 +48,13 @@ struct CommitValidationRecord {
 struct CommitRecord {
 	Version version;
 	StorageTeamID storageTeamID;
-	std::vector<MutationRef> mutations;
+	std::vector<Message> messages;
 
 	CommitValidationRecord validation;
 
-	CommitRecord(const Version& version, const StorageTeamID& storageTeamID, std::vector<MutationRef>&& mutationRef);
+	CommitRecord(const Version& version,
+	             const StorageTeamID& storageTeamID,
+	             std::vector<Message>&& messages);
 };
 
 // Driver options for starting mock environment.
@@ -94,6 +98,9 @@ struct TestDriverContext {
 	// whether to skip persistence validation
 	bool skipCommitValidation;
 
+	// Sequencer
+	std::shared_ptr<MasterInterface> sequencerInterface;
+
 	// Proxies
 	bool useFakeProxy;
 	int numProxies;
@@ -112,14 +119,15 @@ struct TestDriverContext {
 	std::vector<std::shared_ptr<TLogInterfaceBase>> tLogInterfaces;
 	std::unordered_map<StorageTeamID, TLogGroupID> storageTeamIDTLogGroupIDMapper;
 	std::shared_ptr<TLogInterfaceBase> getTLogInterface(const StorageTeamID&);
-	// Returns a pair of commit version and previous commit version for this storage team
-	std::pair<Version, Version> getCommitVersionPair(const StorageTeamID& storageTeamId);
+	// For a given storageTeamID, returns the pair(prevVersion, currentVersion).
+	std::pair<Version, Version> getCommitVersionPair(const StorageTeamID& storageTeamId, const Version& currentVersion);
 
 	// Storage Server
 	bool useFakeStorageServer;
 	int numStorageServers;
 	std::vector<std::shared_ptr<StorageServerInterfaceBase>> storageServerInterfaces;
-	std::unordered_map<StorageTeamID, std::shared_ptr<StorageServerInterfaceBase>> storageTeamIDStorageServerInterfaceMapper;
+	std::unordered_map<StorageTeamID, std::shared_ptr<StorageServerInterfaceBase>>
+	    storageTeamIDStorageServerInterfaceMapper;
 	std::shared_ptr<StorageServerInterfaceBase> getStorageServerInterface(const StorageTeamID&);
 
 	// Stores the generated commits
@@ -136,12 +144,12 @@ void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDr
 // Check if all records are validated
 bool isAllRecordsValidated(const std::vector<CommitRecord>& records);
 
-// Check if a set of mutations is coming from a previous know commit
-void verifyMutationsInRecord(std::vector<CommitRecord>& record,
-                             const Version&,
-                             const StorageTeamID&,
-                             const std::vector<MutationRef>& mutations,
-                             std::function<void(CommitValidationRecord&)> validateUpdater);
+// Check if a set of mutations is coming from a previous known commit
+void verifyMessagesInRecord(std::vector<CommitRecord>& record,
+                            const Version&,
+                            const StorageTeamID&,
+                            const SubsequencedMessageDeserializer& deserializedMessages,
+                            std::function<void(CommitValidationRecord&)> validateUpdater);
 
 std::shared_ptr<TestDriverContext> initTestDriverContext();
 
@@ -150,6 +158,8 @@ void startFakeProxy(std::vector<Future<Void>>& actors, std::shared_ptr<TestDrive
 void startFakeTLog(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
 
 void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
+
+void startFakeSequencer(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
 
 // Get a TeamID, the TeamID is determinstic in the simulation environment
 StorageTeamID getNewStorageTeamID();

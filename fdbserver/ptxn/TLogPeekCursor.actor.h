@@ -33,8 +33,8 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/MessageTypes.h"
+#include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/TLogInterface.h"
-#include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "flow/Arena.h"
 
 #include "flow/actorcompiler.h" // has to be the last file included
@@ -48,7 +48,7 @@ public:
 	// data that are already peeked from TLog.
 	// NOTE: Duplicating the iterator may led to unexpected behavior, i.e. step one iterator causes the other iterators
 	// being stepped. It is discouraged to explicitly duplicate the iterator.
-	class iterator : public ConstInputIteratorBase<VersionSubsequenceMutation> {
+	class iterator : public ConstInputIteratorBase<VersionSubsequenceMessage> {
 		friend class PeekCursorBase;
 
 		PeekCursorBase* pCursor;
@@ -83,7 +83,7 @@ public:
 	Future<bool> remoteMoreAvailable();
 
 	// Gets one mutation
-	const VersionSubsequenceMutation& get() const;
+	const VersionSubsequenceMessage& get() const;
 
 	// Moves to the next mutation, return false if there is no more mutation
 	void next();
@@ -105,7 +105,7 @@ protected:
 	virtual void nextImpl() = 0;
 
 	// Gets the message
-	virtual const VersionSubsequenceMutation& getImpl() const = 0;
+	virtual const VersionSubsequenceMessage& getImpl() const = 0;
 
 	// Checks if any remaining mutations
 	virtual bool hasRemainingImpl() const = 0;
@@ -123,8 +123,8 @@ class StorageTeamPeekCursor : public PeekCursorBase {
 	// The arena used to store incoming serialized data, if not nullptr, TLogPeekReply arenas will be attached to this
 	// arena, enables the access of deserialized data even the cursor is destroyed.
 	Arena* pAttachArena;
-	TLogStorageServerMessageDeserializer deserializer;
-	TLogStorageServerMessageDeserializer::iterator deserializerIter;
+	SubsequencedMessageDeserializer deserializer;
+	SubsequencedMessageDeserializer::iterator deserializerIter;
 
 	// Returns the begin verion for the cursor. The cursor will start from the begin version.
 	const Version& getBeginVersion() const;
@@ -160,7 +160,7 @@ public:
 protected:
 	virtual Future<bool> remoteMoreAvailableImpl() override;
 	virtual void nextImpl() override;
-	virtual const VersionSubsequenceMutation& getImpl() const override;
+	virtual const VersionSubsequenceMessage& getImpl() const override;
 	virtual bool hasRemainingImpl() const override;
 };
 
@@ -250,7 +250,7 @@ protected:
 
 	virtual Future<bool> remoteMoreAvailableImpl() override;
 	virtual void nextImpl() override;
-	virtual const VersionSubsequenceMutation& getImpl() const override;
+	virtual const VersionSubsequenceMessage& getImpl() const override;
 	virtual bool hasRemainingImpl() const override;
 };
 

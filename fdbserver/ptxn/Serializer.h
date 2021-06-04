@@ -125,8 +125,11 @@ public:
 //
 //   | Main Header | Section Header | Item | Item | ... | Section Header | Item | ... |
 //
-// Main Header and Section Header must have a fixed size.
-template <typename MainHeader, typename SectionHeader, typename Item>
+// Main Header and Section Header must have a fixed size. Each Item is an object that being serialized into a StringRef,
+// and the user must provide informations (e.g. object type, length, etc.) to deserialize them.
+// It is obvious that TwoLevelHeaderedItemSerializer can be implemented using HeaderedItemsSerializer. The reason not
+// use this strategy is that one additional memory copy will be included when a new section is opened.
+template <typename MainHeader, typename SectionHeader>
 class TwoLevelHeaderedItemsSerializer {
 	BinaryWriter writer;
 
@@ -152,7 +155,6 @@ class TwoLevelHeaderedItemsSerializer {
 public:
 	using main_header_t = MainHeader;
 	using section_header_t = SectionHeader;
-	using item_t = Item;
 
 	TwoLevelHeaderedItemsSerializer() : writer(IncludeVersion(ProtocolVersion::withPartitionTransaction())) {
 		writer << main_header_t();
@@ -192,7 +194,8 @@ public:
 	}
 
 	// Writes an item to the current section, the current section must be open
-	void writeItem(const Item& item) {
+	template <typename Item_t>
+	void writeItem(const Item_t& item) {
 		ASSERT(!isAllItemsCompleted() && !isSectionCompleted());
 
 		writer << item;
@@ -201,17 +204,22 @@ public:
 		++numItems;
 	}
 
+	// Returns the size of the main header, in bytes
 	size_t getMainHeaderBytes() const { return getSerializedBytes<main_header_t>(); }
 
+	// Returns the size of a single section header, in bytes
 	size_t getSectionHeaderBytes() const { return getSerializedBytes<section_header_t>(); }
 
+	// Returns the bytes of the serialized data
 	size_t getTotalBytes() const { return writer.getLength(); }
 
+	// Returns the number of sections
 	size_t getNumSections() const { return numSections; }
 
+	// Returns the number of items in the current section
 	size_t getNumItemsCurrentSection() const { return numItemsCurrentSection; }
 
-	// Gets the number of items in *ALL* sections
+	// Returns the number of items in *ALL* sections
 	size_t getNumItems() const { return numItems; }
 
 	// Marks the current section not accepting new items, and the section header is ready to be written.
@@ -257,14 +265,13 @@ bool headeredItemDeserializerBase(const Arena& arena, StringRef serialized, Head
 }
 
 // Deserializes the TwoLevelHeaderedItemsSerializer
-template <typename MainHeader, typename SectionHeader, typename Item>
+template <typename MainHeader, typename SectionHeader>
 class TwoLevelHeaderedItemsDeserializer {
 	ArenaReader reader;
 
 public:
 	using main_header_t = MainHeader;
 	using section_header_t = SectionHeader;
-	using item_t = Item;
 
 	// arena is the arena that contains the serialized data
 	// serialized is the StringRef points to the serialied data
@@ -294,18 +301,27 @@ public:
 		return sectionHeader;
 	}
 
-	// Extracts an element from serialized data in item format
+	// Extracts an element from serialized data in item_t format and returns the element
 	// NOTE It is the caller's obligation to ensure the element is in item format
-	item_t deserializeItem() {
-		ASSERT(!allConsumed());
-
-		item_t item;
-		reader >> item;
+	template <typename Item_t>
+	Item_t deserializeItem() {
+		Item_t item;
+		deserializeItem(item);
 		return item;
+	}
+
+	// Extracts an element from serialized data in item_t format, and stores it in the incoming parameter.
+	template <typename Item_t>
+	void deserializeItem(Item_t& item) {
+		ASSERT(!allConsumed());
+		reader >> item;
 	}
 
 	// Return true if reached the end of serialized data
 	bool allConsumed() const { return reader.empty(); }
+
+	// Peek raw bytes
+	const uint8_t* peekBytes(int nBytes) const { return reinterpret_cast<const uint8_t*>(reader.peekBytes(nBytes)); }
 };
 
 using SerializationProtocolVersion = uint8_t;

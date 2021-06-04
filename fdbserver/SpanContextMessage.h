@@ -46,6 +46,9 @@ struct SpanContextMessage {
 		    "code: %d, span context: %s", MutationRef::Reserved_For_SpanContextMessage, spanContext.toString().c_str());
 	}
 
+	bool operator==(const SpanContextMessage& another) const { return spanContext == another.spanContext; }
+	bool operator!=(const SpanContextMessage& another) const { return !(*this == another); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		uint8_t poly = MutationRef::Reserved_For_SpanContextMessage;
@@ -54,7 +57,7 @@ struct SpanContextMessage {
 
 	static bool startsSpanContextMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_SpanContextMessage; }
 	template <class Ar>
-	static bool isNextIn(Ar& ar) {
+	static bool isNextIn(const Ar& ar) {
 		return startsSpanContextMessage(*(const uint8_t*)ar.peekBytes(1));
 	}
 };

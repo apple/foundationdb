@@ -33,8 +33,8 @@
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h" // copy constructors for ServerCoordinators class
-#include "fdbserver/DBCoreState.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/DBCoreState.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"

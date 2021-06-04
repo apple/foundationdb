@@ -24,133 +24,111 @@
 #pragma once
 
 #include <ostream>
-#include <typeindex>
 #include <variant>
 
 #include "fdbclient/CommitTransaction.h"
+#include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
-#include "flow/ObjectSerializerTraits.h"
-#include "flow/serialize.h"
 
 namespace ptxn {
 
-struct VersionSubsequence {
-	Version version = 0;
-	Subsequence subsequence = 0;
-
-	explicit VersionSubsequence(const Version& version_, const Subsequence& subsequence_)
-	  : version(version_), subsequence(subsequence_) {}
-
-	template <typename Reader>
-	void loadFromArena(Reader& reader) {
-		reader >> version >> subsequence;
-	}
-
-	template <typename Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, version, subsequence);
-	}
-};
-
-// Stores the mutations and their subsequences, or the relative order of each mutations.
-// The order is used in recovery and restoring from backups.
+// Stores the mutation and their subsequences, or the relative order of each item. The order is used in recovery and
+// restoring from backups. This, and the following Subsequence***Item are used for serialization
 struct SubsequenceMutationItem {
-	Subsequence subsequence;
-	// The item can be a mutation in MutationRef or a serialized StringRef.
-	// However, the item can also be a SpanContextMessage.
-	// When deserialized, we always use the MutationRef format for mutations.
-	std::variant<MutationRef, StringRef, SpanContextMessage> item_;
-
-	// Returns mutation in MutationRef format after deserialization.
-	const MutationRef& mutation() const {
-		ASSERT(isMutation());
-		return std::get<MutationRef>(item_);
-	}
-
-	// Returns SpanContextMessage after deserialization.
-	const SpanContextMessage& span() const {
-		ASSERT(item_.index() == 2);
-		return std::get<SpanContextMessage>(item_);
-	}
-
-	// Returns if the item is a mutation (MutationRef or StringRef)
-	bool isMutation() const { return item_.index() <= 1; }
-
-	template <typename Reader>
-	void loadFromArena(Reader& reader) {
-		reader >> subsequence;
-		if (SpanContextMessage::isNextIn(reader)) {
-			SpanContextMessage span;
-			reader >> span;
-			item_ = span;
-		} else {
-			MutationRef m;
-			reader >> m;
-			item_ = m;
-		}
-	}
-
-	// Ideally, this should be the default one. However, we want to deserialize
-	// to either MutationRef or SpanContextMessage. So it's handled by specialized
-	// serialize() templates.
-	template <typename Ar>
-	void serializeImpl(Ar& ar) {
-		if (item_.index() == 0) {
-			serializer(ar, subsequence, std::get<MutationRef>(item_));
-		} else if (item_.index() == 1) {
-			serializer(ar, subsequence);
-			auto& bytes = std::get<StringRef>(item_);
-			ar.serializeBytes(bytes);
-		} else if (item_.index() == 2) {
-			serializer(ar, subsequence, std::get<SpanContextMessage>(item_));
-		} else {
-			UNREACHABLE();
-		}
-	}
-
-	template <typename Ar>
-	void serialize(Ar& ar) {
-		if (ar.isDeserializing) {
-			serializer(ar, subsequence);
-			if (SpanContextMessage::isNextIn(ar)) {
-				SpanContextMessage span;
-				serializer(ar, span);
-				item_ = span;
-			} else {
-				MutationRef m;
-				serializer(ar, m);
-				item_ = m;
-			}
-		} else {
-			serializeImpl(ar);
-		}
-	}
-
-	// Specialize for ArenaReader.
-	void serialize(ArenaReader& ar) { loadFromArena(ar); }
-
-	// Specialize for BinaryWriter.
-	void serialize(BinaryWriter& ar) { serializeImpl(ar); }
-};
-
-// Stores the
-//    Version - Subsequence - Mutation
-// tuple
-struct VersionSubsequenceMutation {
-	Version version;
 	Subsequence subsequence;
 	MutationRef mutation;
 
-	VersionSubsequenceMutation();
-	VersionSubsequenceMutation(const Version&, const Subsequence&, const MutationRef&);
+	template <typename Reader>
+	void loadFromArena(Reader& reader) {
+		reader >> subsequence >> mutation;
+	}
 
-	bool operator==(const VersionSubsequenceMutation& another) const;
-	bool operator!=(const VersionSubsequenceMutation& another) const;
-
-	std::string toString() const;
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, subsequence, mutation);
+	}
 };
 
-std::ostream& operator<<(std::ostream&, const VersionSubsequenceMutation&);
+// Stores the span context and their subsequences.
+// See the comments for SubsequenceMutationItem
+struct SubsequenceSpanContextItem {
+	Subsequence subsequence;
+	SpanContextMessage spanContext;
+
+	template <typename Reader>
+	void loadFromArena(Reader& reader) {
+		reader >> subsequence >> spanContext;
+	}
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, subsequence, spanContext);
+	}
+};
+
+// Stores the log protocol message and their subsequences.
+// See the comments for SubsequenceMutationItem
+struct SubsequenceLogProtocolMessageItem {
+	Subsequence subsequence;
+	LogProtocolMessage logProtocolMessage;
+
+	template <typename Reader>
+	void loadFromArena(Reader& reader) {
+		reader >> subsequence >> logProtocolMessage;
+	}
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, subsequence, logProtocolMessage);
+	}
+};
+
+// Stores one of the following:
+//    * MutationRef
+//    * SpanContextMessage
+//    * LogProtocolMessage
+struct Message : public std::variant<MutationRef, SpanContextMessage, LogProtocolMessage> {
+	using variant_t = std::variant<MutationRef, SpanContextMessage, LogProtocolMessage>;
+
+	enum class Type {
+		MUTATION_REF,
+		SPAN_CONTEXT_MESSAGE,
+		LOG_PROTOCOL_MESSAGE
+	};
+
+	using variant_t::variant_t;
+	using variant_t::operator=;
+
+	// Alias to std::variant::index()
+	Type getType() const;
+
+	std::string toString() const;
+
+	bool operator==(const Message&) const;
+	bool operator!=(const Message&) const;
+};
+
+std::ostream& operator<<(std::ostream&, const Message&);
+
+// Stores the
+//    Version - Subsequence - Message
+// tuple. The message is having the format Message and can store different type of objects. See the comment of Message.
+struct VersionSubsequenceMessage {
+	Version version;
+	Subsequence subsequence;
+	Message message;
+
+	VersionSubsequenceMessage() = default;
+	VersionSubsequenceMessage(const Version&, const Subsequence&);
+	VersionSubsequenceMessage(const Version&, const Subsequence&, const Message&);
+
+	std::string toString() const;
+
+	bool operator==(const VersionSubsequenceMessage&) const;
+	bool operator!=(const VersionSubsequenceMessage&) const;
+};
+
+std::ostream& operator<<(std::ostream&, const VersionSubsequenceMessage&);
 
 } // namespace ptxn
 

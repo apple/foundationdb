@@ -58,8 +58,8 @@ struct StorageServerPushRequest {
 	// Arena of the mutations
 	Arena arena;
 
-	// Mutations to be sent
-	VectorRef<MutationRef> mutations;
+	// Serialized messages
+	StringRef messages;
 
 	// Response
 	ReplyPromise<StorageServerPushReply> reply;
@@ -68,13 +68,13 @@ struct StorageServerPushRequest {
 	StorageServerPushRequest(const SpanID& spanID_,
 	                         const StorageTeamID& storageTeamID_,
 	                         const Version version_,
-	                         Arena& arena_,
-	                         const VectorRef<MutationRef>& mutations_)
-	  : spanID(spanID_), storageTeamID(storageTeamID_), version(version_), arena(arena_), mutations(mutations_) {}
+	                         const Arena& arena_,
+	                         const StringRef& messages_)
+	  : spanID(spanID_), storageTeamID(storageTeamID_), version(version_), arena(arena_), messages(messages_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, spanID, storageTeamID, version, mutations, reply);
+		serializer(ar, spanID, storageTeamID, version, messages, reply);
 	}
 };
 

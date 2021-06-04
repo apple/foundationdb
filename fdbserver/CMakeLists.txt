@@ -104,10 +104,10 @@ set(FDBSERVER_SRCS
   template_fdb.h
 
   ptxn/Config.h
+  ptxn/MessageSerializer.cpp
+  ptxn/MessageSerializer.h
   ptxn/MessageTypes.cpp
   ptxn/MessageTypes.h
-  ptxn/ProxyTLogPushMessageSerializer.cpp
-  ptxn/ProxyTLogPushMessageSerializer.h
   ptxn/Serializer.h
   ptxn/StorageServerInterface.cpp
   ptxn/StorageServerInterface.h
@@ -115,32 +115,28 @@ set(FDBSERVER_SRCS
   ptxn/TeamVersionTracker.h
   ptxn/TLogInterface.cpp
   ptxn/TLogInterface.h
-  ptxn/TLogServer.actor.cpp
-  ptxn/ProxyTLogPushMessageSerializer.cpp
-  ptxn/ProxyTLogPushMessageSerializer.h
-  ptxn/Serializer.h
   ptxn/TLogPeekCursor.actor.cpp
   ptxn/TLogPeekCursor.actor.h
-  ptxn/TLogStorageServerPeekMessageSerializer.cpp
-  ptxn/TLogStorageServerPeekMessageSerializer.h
+  ptxn/TLogServer.actor.cpp
 
-  ptxn/test/TestSerialization.cpp
   ptxn/test/Driver.actor.cpp
   ptxn/test/Driver.h
   ptxn/test/FakeProxy.actor.cpp
   ptxn/test/FakeProxy.actor.h
   ptxn/test/FakeResolver.actor.h
+  ptxn/test/FakeSequencer.actor.cpp
+  ptxn/test/FakeSequencer.actor.h
   ptxn/test/FakeStorageServer.actor.cpp
   ptxn/test/FakeStorageServer.actor.h
   ptxn/test/FakeTLog.actor.cpp
   ptxn/test/FakeTLog.actor.h
+  ptxn/test/RealStorageServer.actor.cpp
   ptxn/test/RealTLog.actor.cpp
   ptxn/test/RealTLog.actor.h
-  ptxn/test/TestTLogPeek.actor.cpp
-  ptxn/test/TestTLogPeek.h
   ptxn/test/TestResolver.actor.cpp
   ptxn/test/TestSerialization.cpp
-  ptxn/test/RealStorageServer.actor.cpp
+  ptxn/test/TestTLogPeek.actor.cpp
+  ptxn/test/TestTLogPeek.h
   ptxn/test/Utils.cpp
   ptxn/test/Utils.h
 

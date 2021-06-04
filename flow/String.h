@@ -26,21 +26,46 @@
 
 namespace {
 
+template <typename T>
+class HasToString {
+	using YES = char;
+	using NO = char[2];
+
+	template <typename C>
+		static YES& tester(decltype(&C::toString));
+	template <typename C>
+		static NO& tester(...);
+
+public:
+	enum { value = sizeof(tester<T>(nullptr)) == sizeof(YES) };
+};
+
 template <typename Arg>
 std::stringstream& _concatHelper(std::stringstream&& ss, const Arg& arg) {
-	ss << arg;
-	return ss;
+	if constexpr (HasToString<Arg>::value) {
+		ss << arg.toString();
+		return ss;
+	} else {
+		ss << arg;
+		return ss;
+	}
 }
 
 template <typename First, typename... Args>
 std::stringstream& _concatHelper(std::stringstream&& ss, const First& first, const Args&... args) {
-	ss << first;
-	return _concatHelper(std::move(ss), std::forward<const Args&>(args)...);
+	if constexpr (HasToString<First>::value) {
+		ss << first.toString();
+		return _concatHelper(std::move(ss), std::forward<const Args&>(args)...);
+	} else {
+		ss << first;
+		return _concatHelper(std::move(ss), std::forward<const Args&>(args)...);
+	}
 }
 
 } // anonymous namespace
 
-// Concatencate a list of objects to string
+// Concatencate a list of objects to string. If the object has toString() const, then call the toString(); otherwise
+// call operator<< to convert it to a string.
 template <typename... Args>
 std::string concatToString(const Args&... args) {
 	return _concatHelper(std::stringstream(), args...).str();
