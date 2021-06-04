@@ -45,10 +45,6 @@ GlobalConfig& GlobalConfig::globalConfig() {
 	return *reinterpret_cast<GlobalConfig*>(res);
 }
 
-void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
-	// this->dbInfo = dbInfo;
-}
-
 Key GlobalConfig::prefixedKey(KeyRef key) {
 	return key.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin);
 }

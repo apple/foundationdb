@@ -27,7 +27,6 @@
 #define FDBCLIENT_GLOBALCONFIG_ACTOR_H
 
 #include <any>
-#include <functional>
 #include <map>
 #include <optional>
 #include <type_traits>
@@ -94,13 +93,6 @@ public:
 	// call this function whenever they need to read a value out of the global
 	// configuration.
 	static GlobalConfig& globalConfig();
-
-	// Updates the ClientDBInfo object used by global configuration to read new
-	// data. For server processes, this value needs to be set by the cluster
-	// controller, but global config is initialized before the cluster
-	// controller is, so this function provides a mechanism to update the
-	// object after initialization.
-	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
