@@ -31,7 +31,7 @@ def enable_logging(level=logging.ERROR):
     return func_decorator
 
 def run_fdbcli_command(*args):
-    """run through commanline: fdbcli --exec '<arg1> <arg2> ... <argN>'.
+    """run the fdbcli statement: fdbcli --exec '<arg1> <arg2> ... <argN>'.
 
     Returns:
         string: Console output from fdbcli
