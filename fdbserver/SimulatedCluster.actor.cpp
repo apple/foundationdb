@@ -1203,6 +1203,13 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	//	}
 	//	set_config("memory");
 	//  set_config("memory-radixtree-beta");
+
+    if (deterministicRandom()->random01() < 0.5) {
+        set_config("perpetual_storage_wiggle=0");
+    } else {
+        set_config("perpetual_storage_wiggle=1");
+    }
+// 	set_config("perpetual_storage_wiggle=1");
 	if (testConfig.simpleConfig) {
 		db.desiredTLogCount = 1;
 		db.commitProxyCount = 1;
