@@ -118,7 +118,7 @@ void Histogram::writeToLog() {
 	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper.at(unit));
 
 	for (uint32_t i = 0; i < 32; i++) {
-		uint32_t value = i == 31 ? std::numeric_limits<uint32_t>::max() : ((uint32_t)1) << (i + 1);
+		uint64_t value = uint64_t(1) << (i + 1);
 
 		if (buckets[i]) {
 			switch (unit) {
