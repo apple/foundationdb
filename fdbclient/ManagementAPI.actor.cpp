@@ -60,6 +60,13 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		return out;
 	}
 
+	if (mode == "tss") {
+		// Set temporary marker in config map to mark that this is a tss configuration and not a normal storage/log
+		// configuration. A bit of a hack but reuses the parsing code nicely.
+		out[p + "istss"] = "1";
+		return out;
+	}
+
 	if (mode == "locked") {
 		// Setting this key is interpreted as an instruction to use the normal version-stamp-based mechanism for locking
 		// the database.
@@ -119,7 +126,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 
 		if ((key == "logs" || key == "commit_proxies" || key == "grv_proxies" || key == "resolvers" ||
 		     key == "remote_logs" || key == "log_routers" || key == "usable_regions" ||
-		     key == "repopulate_anti_quorum") &&
+		     key == "repopulate_anti_quorum" || key == "count") &&
 		    isInteger(value)) {
 			out[p + key] = value;
 		}
@@ -134,6 +141,14 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			    BinaryWriter::toValue(regionObj, IncludeVersion(ProtocolVersion::withRegionConfiguration())).toString();
 		}
 
+		if (key == "perpetual_storage_wiggle" && isInteger(value)) {
+			int ppWiggle = atoi(value.c_str());
+			if (ppWiggle >= 2 || ppWiggle < 0) {
+				printf("Error: Only 0 and 1 are valid values of perpetual_storage_wiggle at present.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
 		return out;
 	}
 
@@ -325,6 +340,35 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p + "log_replication_policy"] = policyWriter.toValue().toString();
+	}
+	if (outConf.count(p + "istss")) {
+		// redo config parameters to be tss config instead of normal config
+
+		// save param values from parsing as a normal config
+		bool isNew = outConf.count(p + "initialized");
+		Optional<std::string> count;
+		Optional<std::string> storageEngine;
+		if (outConf.count(p + "count")) {
+			count = Optional<std::string>(outConf[p + "count"]);
+		}
+		if (outConf.count(p + "storage_engine")) {
+			storageEngine = Optional<std::string>(outConf[p + "storage_engine"]);
+		}
+
+		// A new tss setup must have count + storage engine. An adjustment must have at least one.
+		if ((isNew && (!count.present() || !storageEngine.present())) ||
+		    (!isNew && !count.present() && !storageEngine.present())) {
+			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
+		}
+
+		// clear map and only reset tss parameters
+		outConf.clear();
+		if (count.present()) {
+			outConf[p + "tss_count"] = count.get();
+		}
+		if (storageEngine.present()) {
+			outConf[p + "tss_storage_engine"] = storageEngine.get();
+		}
 	}
 	return ConfigurationResult::SUCCESS;
 }
@@ -1105,6 +1149,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 
 	vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+
 	leaderServers.reserve(coord.clientLeaderServers.size());
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 		leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
@@ -1188,14 +1233,20 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			TEST(old.clusterKeyName() != conn.clusterKeyName()); // Quorum change with new name
 			TEST(old.clusterKeyName() == conn.clusterKeyName()); // Quorum change with unchanged name
 
-			vector<Future<Optional<LeaderInfo>>> leaderServers;
-			ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+			state vector<Future<Optional<LeaderInfo>>> leaderServers;
+			state ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+			// check if allowed to modify the cluster descriptor
+			if (!change->getDesiredClusterKeyName().empty()) {
+				CheckDescriptorMutableReply mutabilityReply =
+				    wait(coord.clientLeaderServers[0].checkDescriptorMutable.getReply(CheckDescriptorMutableRequest()));
+				if (!mutabilityReply.isMutable)
+					return CoordinatorsResult::BAD_DATABASE_STATE;
+			}
 			leaderServers.reserve(coord.clientLeaderServers.size());
 			for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
 				                                           GetLeaderRequest(coord.clusterKey, UID()),
 				                                           TaskPriority::CoordinationReply));
-
 			choose {
 				when(wait(waitForAll(leaderServers))) {}
 				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }

@@ -1,3 +1,4 @@
+[configuration]
 StderrSeverity = 30
 
 [[test]]

@@ -1,3 +1,4 @@
+[configuration]
 logAntiQuorum = 0
 
 [[test]] 

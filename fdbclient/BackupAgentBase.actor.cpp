@@ -404,8 +404,14 @@ ACTOR Future<Void> readCommitted(Database cx,
 			state RangeResult values = wait(tr.getRange(begin, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
+			// Copy the data instead of messing with the results directly to avoid TSS issues.
 			if (values.size() > 1 && BUGGIFY) {
-				values.resize(values.arena(), values.size() / 2);
+				RangeResult copy;
+				// only copy first half of values into copy
+				for (int i = 0; i < values.size() / 2; i++) {
+					copy.push_back_deep(copy.arena(), values[i]);
+				}
+				values = copy;
 				values.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
 				if (deterministicRandom()->random01() < 0.5)
@@ -469,9 +475,15 @@ ACTOR Future<Void> readCommitted(Database cx,
 
 			state RangeResult rangevalue = wait(tr.getRange(nextKey, end, limits));
 
-			// When this buggify line is enabled, if there are more than 1 result then use half of the results
+			// When this buggify line is enabled, if there are more than 1 result then use half of the results.
+			// Copy the data instead of messing with the results directly to avoid TSS issues.
 			if (rangevalue.size() > 1 && BUGGIFY) {
-				rangevalue.resize(rangevalue.arena(), rangevalue.size() / 2);
+				RangeResult copy;
+				// only copy first half of rangevalue into copy
+				for (int i = 0; i < rangevalue.size() / 2; i++) {
+					copy.push_back_deep(copy.arena(), rangevalue[i]);
+				}
+				rangevalue = copy;
 				rangevalue.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
 				if (deterministicRandom()->random01() < 0.5)

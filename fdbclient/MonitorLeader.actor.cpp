@@ -380,11 +380,14 @@ ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddres
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(NetworkAddress remote)
   : getLeader(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_GETLEADER)),
-    openDatabase(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)) {}
+    openDatabase(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)),
+    checkDescriptorMutable(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE)) {}
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 	getLeader.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskPriority::Coordination);
 	openDatabase.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_OPENDATABASE, TaskPriority::Coordination);
+	checkDescriptorMutable.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE,
+	                                             TaskPriority::Coordination);
 }
 
 // Nominee is the worker among all workers that are considered as leader by a coordinator
@@ -496,7 +499,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<ClusterConn
 			if (leader.get().first.forward) {
 				TraceEvent("MonitorLeaderForwarding")
 				    .detail("NewConnStr", leader.get().first.serializedInfo.toString())
-				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString()).trackLatest("MonitorLeaderForwarding");
+				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString())
+				    .trackLatest("MonitorLeaderForwarding");
 				info.intermediateConnFile = makeReference<ClusterConnectionFile>(
 				    connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				return info;

@@ -869,6 +869,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
                                     std::vector<TesterInterface> testers,
                                     bool doQuiescentCheck,
                                     bool doCacheCheck,
+                                    bool doTSSCheck,
                                     double quiescentWaitTimeout,
                                     double softTimeLimit,
                                     double databasePingDelay,
@@ -885,11 +886,15 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	Standalone<VectorRef<KeyValueRef>> options;
 	StringRef performQuiescent = LiteralStringRef("false");
 	StringRef performCacheCheck = LiteralStringRef("false");
+	StringRef performTSSCheck = LiteralStringRef("false");
 	if (doQuiescentCheck) {
 		performQuiescent = LiteralStringRef("true");
 	}
 	if (doCacheCheck) {
 		performCacheCheck = LiteralStringRef("true");
+	}
+	if (doTSSCheck) {
+		performTSSCheck = LiteralStringRef("true");
 	}
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
@@ -898,6 +903,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), performQuiescent));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performCacheCheck"), performCacheCheck));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performTSSCheck"), performTSSCheck));
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("quiescentWaitTimeout"),
 	                                   ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
@@ -973,6 +979,7 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   testers,
 				                                   quiescent,
 				                                   spec.runConsistencyCheckOnCache,
+				                                   spec.runConsistencyCheckOnTSS,
 				                                   10000.0,
 				                                   18000,
 				                                   spec.databasePingDelay,
@@ -1107,6 +1114,11 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      spec->runConsistencyCheckOnCache = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnCache", spec->runConsistencyCheckOnCache);
+	  } },
+	{ "runConsistencyCheckOnTSS",
+	  [](const std::string& value, TestSpec* spec) {
+	      spec->runConsistencyCheckOnTSS = (value == "true");
+	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnTSS", spec->runConsistencyCheckOnTSS);
 	  } },
 	{ "waitForQuiescence",
 	  [](const std::string& value, TestSpec* spec) {
@@ -1248,20 +1260,6 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 	std::vector<TestSpec> result;
 
 	const toml::value& conf = toml::parse(fileName);
-
-	// Handle all global settings
-	for (const auto& [k, v] : conf.as_table()) {
-		if (k == "test") {
-			continue;
-		}
-		if (testSpecGlobalKeys.find(k) != testSpecGlobalKeys.end()) {
-			testSpecGlobalKeys[k](toml_to_string(v));
-		} else {
-			TraceEvent(SevError, "TestSpecUnrecognizedGlobalParam")
-			    .detail("Attrib", k)
-			    .detail("Value", toml_to_string(v));
-		}
-	}
 
 	// Then parse each test
 	const toml::array& tests = toml::find(conf, "test").as_array();

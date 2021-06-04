@@ -371,9 +371,9 @@ public:
 		const T* upperBound() const { return upper; }
 
 		DeltaTree* tree;
+		Arena arena;
 
 	private:
-		Arena arena;
 		DecodedNode* root;
 		const T* lower;
 		const T* upper;
