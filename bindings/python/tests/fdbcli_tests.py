@@ -44,11 +44,11 @@ def advanceversion(logger):
     # get current read version
     version1 = int(run_fdbcli_command('getversion'))
     logger.debug("Read version: {}".format(version1))
-    # advance version to a much larger value to the present version
+    # advance version to a much larger value compared to the current version
     version2 = version1 * 10000
     logger.debug("Advanced to version: " + str(version2))
     run_fdbcli_command('advanceversion', str(version2))
-    # after running the advanceversion command
+    # after running the advanceversion command,
     # check the read version is advanced to the specified value
     version3 = int(run_fdbcli_command('getversion'))
     logger.debug("Read version: {}".format(version3))
@@ -63,18 +63,18 @@ def advanceversion(logger):
 
 @enable_logging()
 def maintenance(logger):
-    # fdbcli output when there's no ongoing maintenance
+    # expected fdbcli output when running 'maintenance' while there's no ongoing maintenance
     no_maintenance_output = 'No ongoing maintenance.'
-    # no ongoing maintenance
     output1 = run_fdbcli_command('maintenance')
     assert output1 == no_maintenance_output
     # set maintenance on a fake zone id for 10 seconds
-    run_fdbcli_command('maintenance', 'on', 'fake_zone', '10')
+    run_fdbcli_command('maintenance', 'on', 'fake_zone_id', '10')
     # show current maintenance status
     output2 = run_fdbcli_command('maintenance')
     logger.debug("Maintenance status: " + output2)
     items = output2.split(' ')
-    assert 'fake_zone' in items
+    # make sure this specific zone id is under maintenance
+    assert 'fake_zone_id' in items
     logger.debug("Remaining time(seconds): " + items[-2])
     assert 0 < int(items[-2]) < 10
     # turn off maintenance
