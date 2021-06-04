@@ -207,7 +207,7 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
     The database is available.
 
     Welcome to the fdbcli. For help, type `help'.
-    fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6
+    fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6 dcid:primary-satellite zoneid:primary-satellite-log-2 machineid:primary-stateless-1 processid:223be2da244ca0182375364e4d122c30
     Waiting for state to be removed from all excluded servers.  This may take a while.
     It is now safe to remove these machines or processes from the cluster.
 

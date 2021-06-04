@@ -165,15 +165,18 @@ void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool fai
 
 // Exclude the servers matching the given set of localities from use as state servers.  Returns as soon as the change
 // is durable, without necessarily waiting for the servers to be evacuated.
-ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed = false);
-void excludeLocalities(Transaction& tr, std::unordered_set<std::string>& localities, bool failed = false);
+ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string>* localities, bool failed = false);
+void excludeLocalities(Transaction& tr, std::unordered_set<std::string>* localities, bool failed = false);
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given
 // IP.  A NetworkAddress() means all servers (don't exclude anything)
 ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
 
 // Remove the given localities from the exclusion list.
-ACTOR Future<Void> includeLocalities(Database cx, vector<std::string> localities, bool failed = false, bool includeAll = false);
+ACTOR Future<Void> includeLocalities(Database cx,
+                                     vector<std::string>* localities,
+                                     bool failed = false,
+                                     bool includeAll = false);
 
 // Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on
 // the given IP.

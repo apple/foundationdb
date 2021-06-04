@@ -1172,10 +1172,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<FailedServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("failed")));
-		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::MANAGEMENT,
-		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<ExcludedLocalitiesRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("excludedlocality")));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
+		                              SpecialKeySpace::IMPLTYPE::READWRITE,
+		                              std::make_unique<ExcludedLocalitiesRangeImpl>(
+		                                  SpecialKeySpace::getManamentApiCommandRange("excludedlocality")));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,

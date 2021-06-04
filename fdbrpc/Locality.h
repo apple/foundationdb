@@ -24,10 +24,10 @@
 
 #include "flow/flow.h"
 
-const StringRef ExcludeLocalityKeyDcIdPrefix = LiteralStringRef("dcid:");
-const StringRef ExcludeLocalityKeyMachineIdPrefix = LiteralStringRef("machineid:");
-const StringRef ExcludeLocalityKeyProcessIdPrefix = LiteralStringRef("processid:");
-const StringRef ExcludeLocalityKeyZoneIdPrefix = LiteralStringRef("zoneid:");
+inline const StringRef ExcludeLocalityKeyDcIdPrefix = LiteralStringRef("dcid:");
+inline const StringRef ExcludeLocalityKeyMachineIdPrefix = LiteralStringRef("machineid:");
+inline const StringRef ExcludeLocalityKeyProcessIdPrefix = LiteralStringRef("processid:");
+inline const StringRef ExcludeLocalityKeyZoneIdPrefix = LiteralStringRef("zoneid:");
 
 struct ProcessClass {
 	constexpr static FileIdentifier file_identifier = 6697257;

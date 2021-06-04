@@ -104,7 +104,10 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
-std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force", "excludedlocality/force", "failedlocality/force" };
+std::set<std::string> SpecialKeySpace::options = { "excluded/force",
+	                                               "failed/force",
+	                                               "excludedlocality/force",
+	                                               "failedlocality/force" };
 
 std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
 
@@ -2126,39 +2129,36 @@ void includeLocalities(ReadYourWritesTransaction* ryw) {
 	ryw->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	// for excluded localities
-	auto ranges =
-	    ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
-	auto iter = ranges.begin();
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
+	    SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
 	Transaction& tr = ryw->getTransaction();
-	while (iter != ranges.end()) {
-		auto entry = iter->value();
+	for (auto& iter : ranges) {
+		auto entry = iter.value();
 		if (entry.first && !entry.second.present()) {
 			tr.addReadConflictRange(singleKeyRange(excludedLocalityVersionKey));
 			tr.set(excludedLocalityVersionKey, versionKey);
-			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter->range()));
+			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter.range()));
 		}
-		++iter;
 	}
 	// for failed localities
-	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManamentApiCommandRange("failedlocality"));
-	iter = ranges.begin();
-	while (iter != ranges.end()) {
-		auto entry = iter->value();
+	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
+	    SpecialKeySpace::getManamentApiCommandRange("failedlocality"));
+	for (auto& iter : ranges) {
+		auto entry = iter.value();
 		if (entry.first && !entry.second.present()) {
 			tr.addReadConflictRange(singleKeyRange(failedLocalityVersionKey));
 			tr.set(failedLocalityVersionKey, versionKey);
-			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter->range()));
+			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter.range()));
 		}
-		++iter;
 	}
 }
 
 bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
                              bool failed,
                              std::unordered_set<std::string>& localities,
-							 std::vector<AddressExclusion>& addresses,
+                             std::vector<AddressExclusion>& addresses,
                              std::set<AddressExclusion>& exclusions,
-							 std::vector<ProcessData>& workers,
+                             std::vector<ProcessData>& workers,
                              Optional<std::string>& msg) {
 	KeyRangeRef range = failed ? SpecialKeySpace::getManamentApiCommandRange("failedlocality")
 	                           : SpecialKeySpace::getManamentApiCommandRange("excludedlocality");
@@ -2173,12 +2173,12 @@ bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
 		    .detail("Key", iter->begin().toString());
 		if (entry.first && entry.second.present()) {
 			Key locality = iter->begin().removePrefix(range.begin);
-			if (locality.startsWith(ExcludeLocalityKeyDcIdPrefix)
-				|| locality.startsWith(ExcludeLocalityKeyMachineIdPrefix)
-				|| locality.startsWith(ExcludeLocalityKeyProcessIdPrefix)
-				|| locality.startsWith(ExcludeLocalityKeyZoneIdPrefix)) {
+			if (locality.startsWith(ExcludeLocalityKeyDcIdPrefix) ||
+			    locality.startsWith(ExcludeLocalityKeyMachineIdPrefix) ||
+			    locality.startsWith(ExcludeLocalityKeyProcessIdPrefix) ||
+			    locality.startsWith(ExcludeLocalityKeyZoneIdPrefix)) {
 				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality.toString());
-				if(!localityAddresses.empty()) {
+				if (!localityAddresses.empty()) {
 					std::copy(localityAddresses.begin(), localityAddresses.end(), back_inserter(addresses));
 					exclusions.insert(localityAddresses.begin(), localityAddresses.end());
 				}
@@ -2214,7 +2214,7 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 			return result;
 	}
 
-	excludeLocalities(ryw->getTransaction(), localities, failed);
+	excludeLocalities(ryw->getTransaction(), &localities, failed);
 	includeLocalities(ryw);
 
 	return result;

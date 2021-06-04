@@ -440,7 +440,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::unordered_set<std::string> localities;
 		auto processes = getServers();
 		// collecting all localities
-		for (auto& it : processes) {
+		for (const auto& it : processes) {
 			if (it->locality.dcId().present())
 				localities.insert(ExcludeLocalityKeyDcIdPrefix.toString() + it->locality.dcId().get().toString());
 			if (it->locality.zoneId().present())
@@ -499,7 +499,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Kill3Size", toKill3.size())
 			    .detail("ToKill3", describe(toKill3))
 			    .detail("ClusterAvailable", g_simulator.isAvailable());
-			wait(includeLocalities(cx, vector<std::string>(1), failed, true));
+			vector<std::string> emptyLocalities;
+			wait(includeLocalities(cx, &emptyLocalities, failed, true));
 		}
 
 		return Void();
@@ -766,17 +767,13 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	}
 
 	template <class T>
-	static std::set<T> random_subset(std::unordered_set<T> s, int n) {
-		std::vector<T> v;
-		std::copy(s.begin(), s.end(), back_inserter(v));
-		return random_subset(v, n);
+	static std::set<T> random_subset(std::unordered_set<T>& s, int n) {
+		return random_subset(std::vector<T>(s.begin(), s.end()), n);
 	}
 
 	template <class T>
-	static std::set<T> random_subset(std::set<T> s, int n) {
-		std::vector<T> v;
-		std::copy(s.begin(), s.end(), back_inserter(v));
-		return random_subset(v, n);
+	static std::set<T> random_subset(std::set<T>& s, int n) {
+		return random_subset(std::vector<T>(s.begin(), s.end()), n);
 	}
 
 	bool killContainsProcess(AddressExclusion kill, NetworkAddress process) {
@@ -788,7 +785,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		state Transaction tr(cx);
 		state std::vector<ProcessData> workers = wait(getWorkers(&tr));
 		state std::set<AddressExclusion> addressesSet;
-		for (auto& l : localities) {
+		for (const auto& l : localities) {
 			std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, l);
 			addressesSet.insert(localityAddresses.begin(), localityAddresses.end());
 		}
@@ -798,7 +795,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	std::set<std::string> getSafeLocalitiesToKill(std::vector<ISimulator::ProcessInfo*> const& safeProcesses) {
 		std::unordered_map<std::string, int> safeLocalitiesCount;
-		for (auto& processInfo : safeProcesses) {
+		for (const auto& processInfo : safeProcesses) {
 			if (processInfo->locality.dcId().present())
 				safeLocalitiesCount[ExcludeLocalityKeyDcIdPrefix.toString() +
 				                    processInfo->locality.dcId().get().toString()]++;
@@ -815,7 +812,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		auto processes = getServers();
 		std::unordered_map<std::string, int> allLocalitiesCount;
-		for (auto& processInfo : processes) {
+		for (const auto& processInfo : processes) {
 			if (processInfo->locality.dcId().present())
 				allLocalitiesCount[ExcludeLocalityKeyDcIdPrefix.toString() +
 				                   processInfo->locality.dcId().get().toString()]++;
@@ -831,7 +828,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 
 		std::set<std::string> safeLocalities;
-		for (auto& l : safeLocalitiesCount) {
+		for (const auto& l : safeLocalitiesCount) {
 			if (l.second == allLocalitiesCount[l.first]) {
 				safeLocalities.insert(l.first);
 			}
@@ -872,10 +869,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				toKillMarkFailedSet = random_subset(toKill, deterministicRandom()->randomInt(0, toKill.size() + 1));
 				state std::set<AddressExclusion> toKillMarkFailedAddressesSet =
 				    wait(self->getLocalitiesAddresses(cx, toKillMarkFailedSet));
-				state std::vector<AddressExclusion> toKillMarkFailedAddressesVector;
-				std::copy(toKillMarkFailedAddressesSet.begin(),
-				          toKillMarkFailedAddressesSet.end(),
-				          back_inserter(toKillMarkFailedAddressesVector));
+				state std::vector<AddressExclusion> toKillMarkFailedAddressesVector(
+				    toKillMarkFailedAddressesSet.begin(), toKillMarkFailedAddressesSet.end());
 				TraceEvent("RemoveAndKillLocalities", functionId)
 				    .detail("Step", "SafetyCheck")
 				    .detail("Exclusion Localities", describe(toKillMarkFailedSet))
@@ -920,9 +915,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("ClusterAvailable", g_simulator.isAvailable())
 		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
 		if (markExcludeAsFailed) {
-			wait(excludeLocalities(cx, toKillMarkFailedUnorderedSet, true));
+			wait(excludeLocalities(cx, &toKillMarkFailedUnorderedSet, true));
 		}
-		wait(excludeLocalities(cx, toKillUnorderedSet));
+		wait(excludeLocalities(cx, &toKillUnorderedSet));
 
 		TraceEvent("RemoveAndKillLocalities", functionId)
 		    .detail("Step", "done")
@@ -940,9 +935,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 
 		vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
-		for (int i = 0; i < processes.size(); i++) {
-			processes[i]->locality.set(LocalityData::keyProcessId,
-			                           workers[addressToIndexMap[processes[i]->address]].locality.processId());
+		for (auto process : processes) {
+			process->locality.set(LocalityData::keyProcessId,
+			                      workers[addressToIndexMap[process->address]].locality.processId());
 		}
 
 		return Void();

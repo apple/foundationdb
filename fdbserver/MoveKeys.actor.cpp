@@ -1032,17 +1032,64 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 			        ? tr->get(StringRef(encodeFailedServersKey(AddressExclusion(server.secondaryAddress().get().ip))))
 			        : Future<Optional<Value>>(Optional<Value>());
 
+			state Future<Optional<Value>> fExclLocDCID =
+			    server.locality.dcId().present()
+			        ? tr->get(StringRef(encodeExcludedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() +
+			                                                      server.locality.dcId().get().toString())))
+			        : Future<Optional<Value>>(Optional<Value>());
+			state Future<Optional<Value>> fFailedLocDCID =
+			    server.locality.dcId().present()
+			        ? tr->get(StringRef(encodeFailedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() +
+			                                                    server.locality.dcId().get().toString())))
+			        : Future<Optional<Value>>(Optional<Value>());
+			state Future<Optional<Value>> fExclLocZoneID =
+			    server.locality.zoneId().present()
+			        ? tr->get(StringRef(encodeExcludedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() +
+			                                                      server.locality.zoneId().get().toString())))
+			        : Future<Optional<Value>>(Optional<Value>());
+			state Future<Optional<Value>> fFailedLocZoneID =
+			    server.locality.zoneId().present()
+			        ? tr->get(StringRef(encodeFailedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() +
+			                                                    server.locality.zoneId().get().toString())))
+			        : Future<Optional<Value>>(Optional<Value>());
+			state Future<Optional<Value>> fExclLocMachineID =
+			    server.locality.machineId().present()
+			        ? tr->get(StringRef(encodeExcludedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() +
+			                                                      server.locality.machineId().get().toString())))
+			        : Future<Optional<Value>>(Optional<Value>());
+			state Future<Optional<Value>> fFailedLocMachineID =
+			    server.locality.machineId().present()
+			        ? tr->get(StringRef(encodeFailedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() +
+			                                                    server.locality.machineId().get().toString())))
+			        : Future<Optional<Value>>(Optional<Value>());
+			state Future<Optional<Value>> fExclLocProcessID =
+			    server.locality.processId().present()
+			        ? tr->get(StringRef(encodeExcludedLocalityKey(ExcludeLocalityKeyProcessIdPrefix.toString() +
+			                                                      server.locality.processId().get().toString())))
+			        : Future<Optional<Value>>(Optional<Value>());
+			state Future<Optional<Value>> fFailedLocProcessID =
+			    server.locality.processId().present()
+			        ? tr->get(StringRef(encodeFailedLocalityKey(ExcludeLocalityKeyProcessIdPrefix.toString() +
+			                                                    server.locality.processId().get().toString())))
+			        : Future<Optional<Value>>(Optional<Value>());
+
 			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
 			state Future<RangeResult> fHistoryTags = tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
 
 			wait(success(fTagLocalities) && success(fv) && success(fTags) && success(fHistoryTags) &&
 			     success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) &&
-			     success(fExclProc2) && success(fExclIP2) && success(fFailProc2) && success(fFailIP2));
+			     success(fExclProc2) && success(fExclIP2) && success(fFailProc2) && success(fFailIP2) &&
+			     success(fExclLocDCID) && success(fFailedLocDCID) && success(fExclLocZoneID) &&
+			     success(fFailedLocZoneID) && success(fExclLocMachineID) && success(fFailedLocMachineID) &&
+			     success(fExclLocProcessID) && success(fFailedLocProcessID));
 
 			// If we have been added to the excluded/failed state servers list, we have to fail
 			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() ||
 			    fFailIP.get().present() || fExclProc2.get().present() || fExclIP2.get().present() ||
-			    fFailProc2.get().present() || fFailIP2.get().present()) {
+			    fFailProc2.get().present() || fFailIP2.get().present() || fExclLocDCID.get().present() ||
+			    fFailedLocDCID.get().present() || fExclLocZoneID.get().present() || fFailedLocZoneID.get().present() ||
+			    fExclLocMachineID.get().present() || fFailedLocMachineID.get().present() ||
+			    fExclLocProcessID.get().present() || fFailedLocProcessID.get().present()) {
 				throw recruitment_failed();
 			}
 
