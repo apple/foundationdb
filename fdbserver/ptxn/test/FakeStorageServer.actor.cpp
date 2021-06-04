@@ -44,7 +44,7 @@ ACTOR Future<Void> fakeStorageServer_PassivelyReceive(
 			verifyMessagesInRecord(pTestDriverContext->commitRecord,
 			                       request.version,
 			                       request.storageTeamID,
-								   deserializer,
+			                       deserializer,
 			                       [](CommitValidationRecord& record) { record.storageServerValidated = true; });
 			request.reply.send(StorageServerPushReply());
 		}
