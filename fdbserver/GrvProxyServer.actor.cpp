@@ -831,8 +831,10 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		}
 		span = Span(span.location);
 
-		grvProxyData->stats.percentageOfDefaultGRVQueueProcessed = (double)defaultGRVProcessed / defaultQueueSize;
-		grvProxyData->stats.percentageOfBatchGRVQueueProcessed = (double)batchGRVProcessed / batchQueueSize;
+		grvProxyData->stats.percentageOfDefaultGRVQueueProcessed =
+		    defaultQueueSize ? (double)defaultGRVProcessed / defaultQueueSize : 1;
+		grvProxyData->stats.percentageOfBatchGRVQueueProcessed =
+		    batchQueueSize ? (double)batchGRVProcessed / batchQueueSize : 1;
 	}
 }
 
