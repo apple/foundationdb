@@ -4,9 +4,7 @@ import os
 import sys
 import subprocess
 import logging
-import fdb
 import functools
-
 
 def enable_logging(level=logging.ERROR):
     """Enable logging in the function with the specified logging level
@@ -63,7 +61,7 @@ def advanceversion(logger):
     logger.debug("Read version: {}".format(version4))
     assert version4 >= version3
 
-@enable_logging(logging.DEBUG)
+@enable_logging()
 def maintenance(logger):
     # fdbcli output when there's no ongoing maintenance
     no_maintenance_output = 'No ongoing maintenance.'
@@ -86,13 +84,10 @@ def maintenance(logger):
     assert output3 == no_maintenance_output
 
 if __name__ == '__main__':
-    # specify fdb version
-    fdb.api_version(710)
-    # fdbcli_tests.py <path_to_fdb_cluster_file> <path_to_fdbcli_binary>
-    assert len(sys.argv) == 3, "Please pass arguments: <path_to_fdb_cluster_file> <path_to_fdbcli_binary>"
-    # open the existing database
-    db = fdb.open(sys.argv[1])
-    command_template = [sys.argv[2], '--exec']
+    # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file>
+    assert len(sys.argv) == 3, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file>"
+    # shell command template
+    command_template = [sys.argv[1], '-C', sys.argv[2], '--exec']
     # tests for fdbcli commands
     # assertions will fail if fdbcli does not work as expected
     advanceversion()

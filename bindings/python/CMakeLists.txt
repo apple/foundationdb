@@ -79,7 +79,7 @@ if (NOT WIN32)
   add_fdbclient_test(
     NAME fdbcli_tests
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
-            @CLUSTER_FILE@
             ${CMAKE_BINARY_DIR}/bin/fdbcli
+            @CLUSTER_FILE@
             )
 endif()
