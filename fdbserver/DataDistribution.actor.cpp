@@ -3462,6 +3462,7 @@ bool teamContainsFailedServer(DDTeamCollection* self, Reference<TCTeamInfo> team
 ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
 	state int lastServersLeft = team->size();
 	state bool lastAnyUndesired = false;
+	state bool lastAnyWigglingServer = false;
 	state bool logTeamEvents =
 	    g_network->isSimulated() || !badTeam || team->size() <= self->configuration.storageTeamSize;
 	state bool lastReady = false;
@@ -3570,13 +3571,15 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			}
 
 			if (serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
-			    anyWrongConfiguration != lastWrongConfiguration || recheck) { // NOTE: do not check wrongSize
+			    anyWrongConfiguration != lastWrongConfiguration || anyWigglingServer != lastAnyWigglingServer ||
+			    recheck) { // NOTE: do not check wrongSize
 				if (logTeamEvents) {
 					TraceEvent("ServerTeamHealthChanged", self->distributorId)
 					    .detail("ServerTeam", team->getDesc())
 					    .detail("ServersLeft", serversLeft)
 					    .detail("LastServersLeft", lastServersLeft)
 					    .detail("ContainsUndesiredServer", anyUndesired)
+					    .detail("ContainsWigglingServer", anyWigglingServer)
 					    .detail("HealthyTeamsCount", self->healthyTeamCount)
 					    .detail("IsWrongConfiguration", anyWrongConfiguration);
 				}
@@ -3618,6 +3621,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				lastServersLeft = serversLeft;
 				lastAnyUndesired = anyUndesired;
 				lastWrongConfiguration = anyWrongConfiguration;
+				lastAnyWigglingServer = anyWigglingServer;
 
 				state int lastPriority = team->getPriority();
 				if (team->size() == 0) {
@@ -3671,8 +3675,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 				lastZeroHealthy =
 				    self->zeroHealthyTeams->get(); // set this again in case it changed from this teams health changing
-				if ((self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get()) || containsFailed ||
-				    anyWigglingServer) {
+				if ((self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get()) || containsFailed) {
 
 					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 					    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
@@ -3920,9 +3923,7 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncTrigger* stopSignal,
 
 	loop choose {
 		when(wait(stopSignal->onTrigger())) { break; }
-		when(waitNext(finishStorageWiggleSignal)) {
-			wait(updateNextWigglingStoragePID(teamCollection));
-		}
+		when(waitNext(finishStorageWiggleSignal)) { wait(updateNextWigglingStoragePID(teamCollection)); }
 	}
 
 	return Void();
