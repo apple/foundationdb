@@ -444,8 +444,18 @@ public:
 
 	StringRef substr(int start) const { return StringRef(data + start, length - start); }
 	StringRef substr(int start, int size) const { return StringRef(data + start, size); }
-	bool startsWith(const StringRef& s) const { return size() >= s.size() && !memcmp(begin(), s.begin(), s.size()); }
+	bool startsWith(const StringRef& s) const {
+		// Avoid UB - can't pass nullptr to memcmp
+		if (s.size() == 0) {
+			return true;
+		}
+		return size() >= s.size() && !memcmp(begin(), s.begin(), s.size());
+	}
 	bool endsWith(const StringRef& s) const {
+		// Avoid UB - can't pass nullptr to memcmp
+		if (s.size() == 0) {
+			return true;
+		}
 		return size() >= s.size() && !memcmp(end() - s.size(), s.begin(), s.size());
 	}
 
