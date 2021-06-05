@@ -141,16 +141,23 @@ public:
 	// Opens a file that uses the FDB in-memory page cache
 	static Future<Reference<IAsyncFile>> open(std::string filename, int flags, int mode) {
 		//TraceEvent("AsyncFileCachedOpen").detail("Filename", filename);
-		if (openFiles.find(filename) == openFiles.end()) {
+		auto itr = openFiles.find(filename);
+		if (itr == openFiles.end()) {
 			auto f = open_impl(filename, flags, mode);
 			if (f.isReady() && f.isError())
 				return f;
-			if (!f.isReady())
-				openFiles[filename] = UnsafeWeakFutureReference<IAsyncFile>(f);
-			else
-				return f.get();
+
+			auto result = openFiles.try_emplace(filename, f);
+
+			// This should be inserting a new entry
+			ASSERT(result.second);
+			itr = result.first;
+
+			// We return here instead of falling through to the outer scope so that we don't delete all references to
+			// the underlying file before returning
+			return itr->second.get();
 		}
-		return openFiles[filename].get();
+		return itr->second.get();
 	}
 
 	virtual Future<int> read(void* data, int length, int64_t offset) {
