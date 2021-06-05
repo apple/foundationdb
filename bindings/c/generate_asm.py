@@ -75,9 +75,10 @@ def write_unix_asm(asmfile, functions, prefix):
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
         asmfile.write("%s%s:\n" % (prefix, f))
         if platform == "linux-aarch64":
-            asmfile.write("\tldr x16, =fdb_api_ptr_%s\n" % (f))
-            asmfile.write("\tldr x16, [x16]\n")
-            asmfile.write("\tbr x16\n")
+            asmfile.write("\tadrp x8, :got:fdb_api_ptr_%s\n" % (f))
+            asmfile.write("\tldr x8, [x8, :got_lo12:fdb_api_ptr_%s]\n" % (f))
+            asmfile.write("\tldr x8, [x8]\n")
+            asmfile.write("\tbr x8\n")
         else:
             asmfile.write(
                 "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f))
