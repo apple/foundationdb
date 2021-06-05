@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.12',
+        VERSION:     '6.3.13',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -172,7 +172,7 @@ Recipe</p>
 <li><p class="first">Start <code class="docutils literal"><span class="pre">fdbcli</span></code> and run <code class="docutils literal"><span class="pre">status</span> <span class="pre">details</span></code>. This should show a number of processes equal to both old and new machines, with processes on the original machines serving as the cluster coordinators.</p>
 </li>
 <li><p class="first">Exclude the original machines from the cluster using <code class="docutils literal"><span class="pre">exclude</span></code> in <code class="docutils literal"><span class="pre">fdbcli</span></code>. This command will not return until all database state has been moved off of the original machines and fully replicated to the new machines. For example:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">exclude</span> <span class="mf">192.168</span><span class="o">.</span><span class="mf">1.1</span><span class="p">:</span><span class="mi">4500</span> <span class="mf">192.168</span><span class="o">.</span><span class="mf">1.2</span><span class="p">:</span><span class="mi">4500</span> <span class="mf">192.168</span><span class="o">.</span><span class="mf">1.3</span><span class="p">:</span><span class="mi">4500</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">exclude</span> <span class="mf">192.168.1.1</span><span class="p">:</span><span class="mi">4500</span> <span class="mf">192.168.1.2</span><span class="p">:</span><span class="mi">4500</span> <span class="mf">192.168.1.3</span><span class="p">:</span><span class="mi">4500</span>
 </pre></div>
 </div>
 </li>
@@ -204,7 +204,7 @@ Recipe</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 14, 2021.<br/>
+      Last updated on Jun 04, 2021.<br/>
     </p>
   </div>
 </footer>

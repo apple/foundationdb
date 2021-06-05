@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.12',
+        VERSION:     '6.3.13',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -211,7 +211,7 @@
 </pre></div>
 </div>
 <p>will invoke the <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> on <code class="docutils literal"><span class="pre">tlog</span></code> role with the following arguments:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">--</span><span class="n">param1</span> <span class="n">param1</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">param2</span> <span class="n">param2</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">circus</span><span class="o">/</span><span class="n">data</span><span class="o">/</span><span class="mi">4502</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2</span><span class="o">.</span><span class="mi">6</span> <span class="o">--</span><span class="n">role</span> <span class="n">tlog</span> <span class="o">--</span><span class="n">uid</span> <span class="n">c50263df28be44ebb596f5c2a849adbb</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">--</span><span class="n">param1</span> <span class="n">param1</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">param2</span> <span class="n">param2</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">circus</span><span class="o">/</span><span class="n">data</span><span class="o">/</span><span class="mi">4502</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">tlog</span> <span class="o">--</span><span class="n">uid</span> <span class="n">c50263df28be44ebb596f5c2a849adbb</span>
 </pre></div>
 </div>
 <div class="section" id="disk-snapshot-backup-specification">
@@ -477,9 +477,9 @@ exit 0
 </div>
 </li>
 <li><p class="first"><code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> gets invoked once for each role namely <code class="docutils literal"><span class="pre">tlog</span></code>, <code class="docutils literal"><span class="pre">storage</span></code> and <code class="docutils literal"><span class="pre">coordinator</span></code> in this process with the following arguments:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2</span><span class="o">.</span><span class="mi">6</span> <span class="o">--</span><span class="n">role</span> <span class="n">storage</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
-<span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2</span><span class="o">.</span><span class="mi">6</span> <span class="o">--</span><span class="n">role</span> <span class="n">tlog</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
-<span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2</span><span class="o">.</span><span class="mi">6</span> <span class="o">--</span><span class="n">role</span> <span class="n">coord</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">storage</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
+<span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">tlog</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
+<span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">coord</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
 </pre></div>
 </div>
 </li>
@@ -499,7 +499,7 @@ log2-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792.sqlite  logqueue-V_3_LS_2-b9990ae
 <li><p class="first">Repeat the above steps to restore <code class="docutils literal"><span class="pre">storage</span></code> and <code class="docutils literal"><span class="pre">tlog</span></code> backup images</p>
 </li>
 <li><p class="first">Prepare the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> for the restore with new <code class="docutils literal"><span class="pre">coordinator</span></code> IP address, example:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">znC1NC5b</span><span class="p">:</span><span class="n">iYHJLq7z</span><span class="o">@</span><span class="mf">10.2</span><span class="o">.</span><span class="mf">80.40</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-&gt;</span> <span class="n">znC1NC5b</span><span class="p">:</span><span class="n">iYHJLq7z</span><span class="o">@</span><span class="mf">10.2</span><span class="o">.</span><span class="mf">80.41</span><span class="p">:</span><span class="mi">4500</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">znC1NC5b</span><span class="p">:</span><span class="n">iYHJLq7z</span><span class="o">@</span><span class="mf">10.2.80.40</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-&gt;</span> <span class="n">znC1NC5b</span><span class="p">:</span><span class="n">iYHJLq7z</span><span class="o">@</span><span class="mf">10.2.80.41</span><span class="p">:</span><span class="mi">4500</span>
 </pre></div>
 </div>
 </li>
@@ -579,7 +579,7 @@ fdb&gt; get key2
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 14, 2021.<br/>
+      Last updated on Jun 04, 2021.<br/>
     </p>
   </div>
 </footer>

@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.12',
+        VERSION:     '6.3.13',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -240,7 +240,7 @@
 <p>Since version 6.1, FoundationDB clusters can be converted to TLS without downtime. FoundationDB server can listen to TLS and unencrypted traffic simultaneously on two separate ports. As a result, FDB clusters can live migrate to TLS:</p>
 <ol class="arabic">
 <li><p class="first">Restart each FoundationDB server individually, but with an additional listen address for TLS traffic:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fdbserver</span> <span class="o">-</span><span class="n">C</span> <span class="n">fdb</span><span class="o">.</span><span class="n">cluster</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">4600</span><span class="p">:</span><span class="n">tls</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fdbserver</span> <span class="o">-</span><span class="n">C</span> <span class="n">fdb</span><span class="o">.</span><span class="n">cluster</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4600</span><span class="p">:</span><span class="n">tls</span>
 </pre></div>
 </div>
 <p>Since, the server still listens to unencrypted traffic and the cluster file still contains the old address, rest of the processes will be able to talk to this new process.</p>
@@ -666,7 +666,7 @@ to proceed.</td>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 14, 2021.<br/>
+      Last updated on Jun 04, 2021.<br/>
     </p>
   </div>
 </footer>

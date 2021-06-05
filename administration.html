@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.12',
+        VERSION:     '6.3.13',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -136,6 +136,10 @@
 <li><a class="reference internal" href="#upgrading-from-older-versions">Upgrading from Older Versions</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#version-specific-notes-on-downgrading">Version-specific notes on downgrading</a><ul>
+<li><a class="reference internal" href="#downgrading-from-6-3-13-6-2-33">Downgrading from 6.3.13 - 6.2.33</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -232,6 +236,10 @@
 <li><a class="reference internal" href="#upgrading-from-5-2-x">Upgrading from 5.2.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-5-0-x-5-1-x">Upgrading from 5.0.x - 5.1.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-older-versions">Upgrading from Older Versions</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#version-specific-notes-on-downgrading">Version-specific notes on downgrading</a><ul>
+<li><a class="reference internal" href="#downgrading-from-6-3-13-6-2-33">Downgrading from 6.3.13 - 6.2.33</a></li>
 </ul>
 </li>
 </ul>
@@ -361,7 +369,7 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 <p>FoundationDB (since v6.1) can accept network connections from clients connecting over IPv6. IPv6 address/port pair is represented as <code class="docutils literal"><span class="pre">[IP]:PORT</span></code>, e.g. &#8220;[::1]:4800&#8221;, &#8220;[abcd::dead:beef]:4500&#8221;.</p>
 <ol class="arabic">
 <li><p class="first">The cluster file can contain mix of IPv4 and IPv6 addresses. For example:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">description</span><span class="p">:</span><span class="n">ID</span><span class="o">@</span><span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">4500</span><span class="p">,[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">4500</span><span class="p">,</span><span class="o">...</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">description</span><span class="p">:</span><span class="n">ID</span><span class="o">@</span><span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4500</span><span class="p">,[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">4500</span><span class="p">,</span><span class="o">...</span>
 </pre></div>
 </div>
 </li>
@@ -998,13 +1006,13 @@ From the output of <code class="docutils literal"><span class="pre">status</span
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_6.3.12-1_amd64.deb \
-foundationdb-server_6.3.12-1_amd64.deb
+user&#64;host$ sudo dpkg -i foundationdb-clients_6.3.13-1_amd64.deb \
+foundationdb-server_6.3.13-1_amd64.deb
 </pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.3.12-1.el7.x86_64.rpm \
-foundationdb-server-6.3.12-1.el7.x86_64.rpm
+user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.3.13-1.el7.x86_64.rpm \
+foundationdb-server-6.3.13-1.el7.x86_64.rpm
 </pre>
 <p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> API. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </div>
@@ -1050,6 +1058,19 @@ foundationdb-server-6.3.12-1.el7.x86_64.rpm
 <p>Upgrades from versions older than 5.0.0 are no longer supported.</p>
 </div>
 </div>
+<div class="section" id="version-specific-notes-on-downgrading">
+<h2>Version-specific notes on downgrading</h2>
+<p>In general, downgrades between non-patch releases (i.e. 6.2.x - 6.1.x) are not supported.</p>
+<div class="section" id="downgrading-from-6-3-13-6-2-33">
+<span id="downgrade-specific-version"></span><h3>Downgrading from 6.3.13 - 6.2.33</h3>
+<p>After upgrading from 6.2 to 6.3, the option of rolling back and downgrading to 6.2 is still possible, given that the following conditions are met:</p>
+<ul class="simple">
+<li>The 6.3 cluster cannot have <code class="docutils literal"><span class="pre">TLogVersion</span></code> greater than V4 (6.2).</li>
+<li>The 6.3 cluster cannot use storage engine types that are not <code class="docutils literal"><span class="pre">ssd-1</span></code>, <code class="docutils literal"><span class="pre">ssd-2</span></code>, or <code class="docutils literal"><span class="pre">memory</span></code>.</li>
+<li>The 6.3 cluster must not have any key servers serialized with tag encoding. This condition can only be guaranteed if the <code class="docutils literal"><span class="pre">TAG_ENCODE_KEY_SERVERS</span></code> knob has never been changed to <code class="docutils literal"><span class="pre">true</span></code> on this cluster.</li>
+</ul>
+</div>
+</div>
 </div>
 
 
@@ -1072,7 +1093,7 @@ foundationdb-server-6.3.12-1.el7.x86_64.rpm
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 14, 2021.<br/>
+      Last updated on Jun 04, 2021.<br/>
     </p>
   </div>
 </footer>
