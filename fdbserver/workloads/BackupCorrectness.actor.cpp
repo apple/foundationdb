@@ -436,7 +436,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
 		state FileBackupAgent backupAgent;
-		state Future<Void> extraBackup;
 		state bool extraTasks = false;
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
@@ -505,26 +504,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			state Reference<IBackupContainer> lastBackupContainer =
 			    wait(BackupConfig(logUid).backupContainer().getD(cx));
 
-			// Occasionally start yet another backup that might still be running when we restore
-			if (!self->locked && BUGGIFY) {
-				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
-				try {
-					extraBackup = backupAgent.submitBackup(cx,
-					                                       LiteralStringRef("file://simfdb/backups/"),
-					                                       deterministicRandom()->randomInt(0, 60),
-					                                       deterministicRandom()->randomInt(0, 100),
-					                                       self->backupTag.toString(),
-					                                       self->backupRanges,
-					                                       true);
-				} catch (Error& e) {
-					TraceEvent("BARW_SubmitBackup2Exception", randomID)
-					    .error(e)
-					    .detail("BackupTag", printable(self->backupTag));
-					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
-						throw;
-				}
-			}
-
 			TEST(!startRestore.isReady()); // Restore starts at specified time
 			wait(startRestore);
 
@@ -548,7 +527,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
 				BackupDescription desc = wait(container->describeBackup());
 
-				Version targetVersion = -1;
+				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
 					if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.minRestorableVersion.get();
@@ -567,46 +546,62 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				state bool multipleRangesInOneTag = false;
 				state int restoreIndex = 0;
 				if (deterministicRandom()->random01() < 0.5) {
-					for (restoreIndex = 0; restoreIndex < self->restoreRanges.size(); restoreIndex++) {
+					for (restoreIndex = 0; restoreIndex < self->restoreRanges.size();) {
 						auto range = self->restoreRanges[restoreIndex];
-						Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" +
-						                                 std::to_string(restoreIndex));
-						restoreTags.push_back(restoreTag);
-						printf("BackupCorrectness, restore for each range: backupAgent.restore is called for "
-						       "restoreIndex:%d tag:%s ranges:%s\n",
-						       restoreIndex,
-						       range.toString().c_str(),
-						       restoreTag.toString().c_str());
-						restores.push_back(backupAgent.restore(cx,
-						                                       cx,
-						                                       restoreTag,
-						                                       KeyRef(lastBackupContainer->getURL()),
-						                                       true,
-						                                       targetVersion,
-						                                       true,
-						                                       range,
-						                                       Key(),
-						                                       Key(),
-						                                       self->locked));
+						try {
+							state Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" +
+							                                       std::to_string(restoreIndex));
+							printf("BackupCorrectness, restore for each range: backupAgent.restore is called for "
+							       "restoreIndex:%d tag:%s ranges:%s\n",
+							       restoreIndex,
+							       range.toString().c_str(),
+							       restoreTag.toString().c_str());
+							Version restore = wait(backupAgent.restore(cx,
+							                                           cx,
+							                                           restoreTag,
+							                                           KeyRef(lastBackupContainer->getURL()),
+							                                           true,
+							                                           targetVersion,
+							                                           true,
+							                                           range,
+							                                           Key(),
+							                                           Key(),
+							                                           self->locked));
+							restores.push_back(restore);
+							restoreTags.push_back(restoreTag);
+							restoreIndex++;
+						} catch (Error& e) {
+							if (e.code() != error_code_restore_when_backup_is_active) {
+								throw e;
+							}
+						}
 					}
 				} else {
 					multipleRangesInOneTag = true;
-					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
-					restoreTags.push_back(restoreTag);
-					printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
-					       restoreIndex,
-					       restoreTag.toString().c_str());
-					restores.push_back(backupAgent.restore(cx,
-					                                       cx,
-					                                       restoreTag,
-					                                       KeyRef(lastBackupContainer->getURL()),
-					                                       self->restoreRanges,
-					                                       true,
-					                                       targetVersion,
-					                                       true,
-					                                       Key(),
-					                                       Key(),
-					                                       self->locked));
+					try {
+						state Standalone<StringRef> restoreTag2(self->backupTag.toString() + "_" +
+						                                        std::to_string(restoreIndex));
+						printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
+						       restoreIndex,
+						       restoreTag2.toString().c_str());
+						Version restore = wait(backupAgent.restore(cx,
+						                                           cx,
+						                                           restoreTag2,
+						                                           KeyRef(lastBackupContainer->getURL()),
+						                                           self->restoreRanges,
+						                                           true,
+						                                           targetVersion,
+						                                           true,
+						                                           Key(),
+						                                           Key(),
+						                                           self->locked));
+						restores.push_back(restore);
+						restoreTags.push_back(restoreTag2);
+					} catch (Error& e) {
+						if (e.code() != error_code_restore_when_backup_is_active) {
+							throw e;
+						}
+					}
 				}
 
 				// Sometimes kill and restart the restore
@@ -622,17 +617,24 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 									tr->clear(range);
 								return Void();
 							}));
-							restores[restoreIndex] = backupAgent.restore(cx,
-							                                             cx,
-							                                             restoreTags[restoreIndex],
-							                                             KeyRef(lastBackupContainer->getURL()),
-							                                             self->restoreRanges,
-							                                             true,
-							                                             -1,
-							                                             true,
-							                                             Key(),
-							                                             Key(),
-							                                             self->locked);
+							try {
+								Version restore = wait(backupAgent.restore(cx,
+								                                           cx,
+								                                           restoreTags[restoreIndex],
+								                                           KeyRef(lastBackupContainer->getURL()),
+								                                           self->restoreRanges,
+								                                           true,
+								                                           -1,
+								                                           true,
+								                                           Key(),
+								                                           Key(),
+								                                           self->locked));
+								restores[restoreIndex] = restore;
+							} catch (Error& e) {
+								if (e.code() != error_code_restore_when_backup_is_active) {
+									throw e;
+								}
+							}
 						}
 					} else {
 						for (restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
@@ -647,17 +649,24 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 									    tr->clear(self->restoreRanges[restoreIndex]);
 									    return Void();
 								    }));
-								restores[restoreIndex] = backupAgent.restore(cx,
-								                                             cx,
-								                                             restoreTags[restoreIndex],
-								                                             KeyRef(lastBackupContainer->getURL()),
-								                                             true,
-								                                             -1,
-								                                             true,
-								                                             self->restoreRanges[restoreIndex],
-								                                             Key(),
-								                                             Key(),
-								                                             self->locked);
+								try {
+									Version restore = wait(backupAgent.restore(cx,
+									                                           cx,
+									                                           restoreTags[restoreIndex],
+									                                           KeyRef(lastBackupContainer->getURL()),
+									                                           true,
+									                                           -1,
+									                                           true,
+									                                           self->restoreRanges[restoreIndex],
+									                                           Key(),
+									                                           Key(),
+									                                           self->locked));
+									restores[restoreIndex] = restore;
+								} catch (Error& e) {
+									if (e.code() != error_code_restore_when_backup_is_active) {
+										throw e;
+									}
+								}
 							}
 						}
 					}
@@ -667,29 +676,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 				for (auto& restore : restores) {
 					ASSERT(!restore.isError());
-				}
-			}
-
-			if (extraBackup.isValid()) {
-				TraceEvent("BARW_WaitExtraBackup", randomID).detail("BackupTag", printable(self->backupTag));
-				extraTasks = true;
-				try {
-					wait(extraBackup);
-				} catch (Error& e) {
-					TraceEvent("BARW_ExtraBackupException", randomID)
-					    .error(e)
-					    .detail("BackupTag", printable(self->backupTag));
-					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
-						throw;
-				}
-
-				TraceEvent("BARW_AbortBackupExtra", randomID).detail("BackupTag", printable(self->backupTag));
-				try {
-					wait(backupAgent.abortBackup(cx, self->backupTag.toString()));
-				} catch (Error& e) {
-					TraceEvent("BARW_AbortBackupExtraException", randomID).error(e);
-					if (e.code() != error_code_backup_unneeded)
-						throw;
 				}
 			}
 

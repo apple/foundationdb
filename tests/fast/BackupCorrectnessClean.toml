@@ -46,8 +46,8 @@ simBackupAgents = 'BackupToFile'
     [[test.workload]]
     testName = 'BackupAndRestoreCorrectness'
     backupTag = 'backup2'
-    backupAfter = 15.0
-    restoreAfter = 60.0
+    backupAfter = 250.0
+    restoreAfter = 300.0
     performRestore = true
     allowPauses = false
     restorePrefixesToInclude = 'a,A,m'
