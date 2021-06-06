@@ -24,6 +24,11 @@ $copyright = <<EOF
 EOF
 
 def main
+  if ARGV.size == 0
+    puts "Usage: apply_copyright.rb [file name] [file name] ..."
+    exit 1
+  end
+
   ARGV.each do |path|
     ext_name = File.extname(path)
     next unless ['.cpp', '.h', '.c'].include?(ext_name)
@@ -32,8 +37,13 @@ def main
 
     content = File.readlines(path)
     if content[0] != "/*\n"
-        content.unshift($copyright.gsub(/FILENAME/, file_name).gsub(/YEAR/, Time.new.year.to_s))
-        File.open(path, 'w') { |stream| stream.puts(content) }
+      # No copyright, insert one
+      content.unshift($copyright.gsub(/FILENAME/, file_name).gsub(/YEAR/, Time.new.year.to_s))
+      File.open(path, 'w') { |stream| stream.puts(content) }
+    elsif content[1] != " * #{file_name}\n"
+      # Update the file name
+      content[1] = " * #{file_name}\n"
+      File.open(path, 'w') { |stream| stream.puts(content) }
     end
   end
 end
