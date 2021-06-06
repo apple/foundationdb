@@ -78,12 +78,26 @@ struct ConfigBroadcastFollowerGetSnapshotRequest {
 	}
 };
 
+struct ConfigBroadcastFollowerGetChangesReply {
+	static constexpr FileIdentifier file_identifier = 4014927;
+	Version mostRecentVersion;
+	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
+
+	ConfigBroadcastFollowerGetChangesReply()=default;
+	explicit ConfigBroadcastFollowerGetChangesReply(Version mostRecentVersion, Standalone<VectorRef<VersionedConfigMutationRef>> const& changes)
+		: mostRecentVersion(mostRecentVersion), changes(changes) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mostRecentVersion, changes);
+	}
+};
+
 struct ConfigBroadcastFollowerGetChangesRequest {
 	static constexpr FileIdentifier file_identifier = 601280;
 	Version lastSeenVersion;
 	ConfigClassSet configClassSet;
-	// TODO: Should use a different type here because we don't care about annotation
-	ReplyPromise<ConfigFollowerGetChangesReply> reply;
+	ReplyPromise<ConfigBroadcastFollowerGetChangesReply> reply;
 
 	ConfigBroadcastFollowerGetChangesRequest() = default;
 	explicit ConfigBroadcastFollowerGetChangesRequest(Version lastSeenVersion, ConfigClassSet const& configClassSet)

@@ -252,7 +252,7 @@ class LocalConfigurationImpl {
 	                                          ConfigBroadcastFollowerInterface broadcaster) {
 		loop {
 			try {
-				state ConfigFollowerGetChangesReply changesReply =
+				state ConfigBroadcastFollowerGetChangesReply changesReply =
 				    wait(broadcaster.getChanges.getReply(ConfigBroadcastFollowerGetChangesRequest{
 				        self->lastSeenVersion, self->configKnobOverrides.getConfigClassSet() }));
 				TraceEvent(SevDebug, "LocalConfigGotChanges", self->id); // TODO: Add more fields

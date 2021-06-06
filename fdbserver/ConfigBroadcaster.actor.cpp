@@ -134,7 +134,7 @@ class ConfigBroadcasterImpl {
 	template <class Changes>
 	void sendChangesReply(ConfigBroadcastFollowerGetChangesRequest const& req, Changes const& changes) const {
 		ASSERT_LT(req.lastSeenVersion, mostRecentVersion);
-		ConfigFollowerGetChangesReply reply;
+		ConfigBroadcastFollowerGetChangesReply reply;
 		reply.mostRecentVersion = mostRecentVersion;
 		for (const auto& versionedMutation : changes) {
 			if (versionedMutation.version > req.lastSeenVersion &&
