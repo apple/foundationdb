@@ -20,7 +20,6 @@
 
 #ifndef FDBRPC_STATS_H
 #define FDBRPC_STATS_H
-#include <limits>
 #include <type_traits>
 #pragma once
 
