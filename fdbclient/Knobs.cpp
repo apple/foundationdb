@@ -254,13 +254,13 @@ void ClientKnobs::initialize(bool randomize) {
 TEST_CASE("/fdbclient/knobs/initialize") {
 	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
 	ClientKnobs clientKnobs;
-	int initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
+	int64_t initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
 	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
-	clientKnobs.setKnob("core_versionspersecond", format("%ld", initialCoreVersionsPerSecond * 2));
-	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
-	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions);
+	clientKnobs.setKnob("core_versionspersecond", initialCoreVersionsPerSecond*2);
+	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
+	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions);
 	clientKnobs.initialize();
-	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
-	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions * 2);
+	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
+	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions * 2);
 	return Void();
 }
