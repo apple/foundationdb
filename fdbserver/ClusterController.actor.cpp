@@ -4526,7 +4526,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(
-	    statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators, &configBroadcaster));
+	    statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators, useTestConfigDB.present() ? &configBroadcaster : nullptr));
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));

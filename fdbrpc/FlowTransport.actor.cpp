@@ -158,7 +158,7 @@ const Endpoint& EndpointMap::insert(NetworkAddressList localAddresses,
 NetworkMessageReceiver* EndpointMap::get(Endpoint::Token const& token) {
 	uint32_t index = token.second();
 	if (index < wellKnownEndpointCount && data[index].receiver == nullptr) {
-		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded").detail("Token", token).detail("Index", index);
+		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded").detail("Token", token).detail("Index", index).backtrace();
 	}
 	if (index < data.size() && data[index].token().first() == token.first() &&
 	    ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second())
