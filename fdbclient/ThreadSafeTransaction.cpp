@@ -71,7 +71,7 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 		    db->checkDeferredError();
 		    db->setOption(option, passValue.contents());
 	    },
-	    &db->deferredError); // TODO: If config database is being used, use a different config option
+	    &db->deferredError);
 }
 
 ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {

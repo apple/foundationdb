@@ -127,7 +127,6 @@ public:
 		if (key == configTransactionDescriptionKey) {
 			toCommit.annotation.description = KeyRef(toCommit.arena, value);
 		} else {
-			// TODO: Throw error if decoding fails
 			ConfigKey configKey = ConfigKeyRef::decodeKey(key);
 			auto knobValue = IKnobCollection::parseKnobValue(configKey.knobName.toString(), value.toString(), true);
 			toCommit.mutations.emplace_back_deep(toCommit.arena, ConfigKeyRef::decodeKey(key), knobValue.contents());

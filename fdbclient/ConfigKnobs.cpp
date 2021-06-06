@@ -23,7 +23,13 @@
 #include "flow/UnitTest.h"
 
 ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
-	auto tuple = Tuple::unpack(key);
+	Tuple tuple;
+	try {
+		tuple = Tuple::unpack(key);
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "FailedToUnpackConfigKey").detail("Key", printable(key)).error(e);
+		throw invalid_config_db_key();
+	}
 	if (tuple.size() != 2) {
 		throw invalid_config_db_key();
 	}
@@ -48,30 +54,33 @@ TEST_CASE("/fdbclient/ConfigDB/ConfigKey/EncodeDecode") {
 	return Void();
 }
 
-TEST_CASE("/fdbclient/ConfigDB/ConfigKey/DecodeFailure1") {
+namespace {
+
+void decodeFailureTest(KeyRef key) {
 	try {
+		ConfigKeyRef::decodeKey(key);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_invalid_config_db_key);
+		return;
+	}
+	ASSERT(false);
+}
+
+} // namespace
+
+TEST_CASE("/fdbclient/ConfigDB/ConfigKey/DecodeFailure") {
+	{
 		Tuple tuple;
 		tuple << "s1"_sr
 		      << "s2"_sr
 		      << "s3"_sr;
-		auto unpacked = ConfigKeyRef::decodeKey(tuple.pack());
-	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_invalid_config_db_key);
-		return Void();
+		decodeFailureTest(tuple.pack());
 	}
-	ASSERT(false);
-	return Void();
-}
-
-TEST_CASE("/fdbclient/ConfigDB/ConfigKey/DecodeFailure2") {
-	try {
+	{
 		Tuple tuple;
 		tuple << "s1"_sr << 5;
-		auto unpacked = ConfigKeyRef::decodeKey(tuple.pack());
-	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_invalid_config_db_key);
-		return Void();
+		decodeFailureTest(tuple.pack());
 	}
-	ASSERT(false);
+	decodeFailureTest("non-tuple-key"_sr);
 	return Void();
 }

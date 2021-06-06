@@ -2076,7 +2076,6 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 	state LocalConfiguration localConfig(dataFolder, configPath, manualKnobOverrides);
 
 	if (useTestConfigDB.present()) {
-		// TODO: Shouldn't block here
 		wait(localConfig.initialize());
 	}
 
