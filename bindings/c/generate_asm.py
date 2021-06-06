@@ -81,7 +81,7 @@ def write_unix_asm(asmfile, functions, prefix):
         #
         # 2. Perform a tail-call to the function pointer that works for a
         #    function with any number of arguments. For example, since registers x0-x7 are used
-        #    pass arguments in the arm calling convention we must not use x0-x7
+        #    to pass arguments in the Arm calling convention we must not use x0-x7
         #    here.
         #
         # You can compile this example c program to get a rough idea of how to
@@ -91,7 +91,7 @@ def write_unix_asm(asmfile, functions, prefix):
         # typedef int (*function)();
         # extern function f;
         # int g() { return f(); }
-        # [anoyes@docker build]$ cc -S -O3 -fPIC test.c && grep -A 10 '^g:' test.[sS]
+        # $ cc -S -O3 -fPIC test.c && grep -A 10 '^g:' test.[sS]
         # g:
         # .LFB0:
         # 	.cfi_startproc
