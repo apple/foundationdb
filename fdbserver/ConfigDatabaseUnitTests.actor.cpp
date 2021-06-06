@@ -57,6 +57,7 @@ Value longToValue(int64_t v) {
 
 class WriteToTransactionEnvironment {
 	UID id;
+	std::string dataDir;
 	ConfigTransactionInterface cti;
 	ConfigFollowerInterface cfi;
 	Reference<IConfigDatabaseNode> node;
@@ -92,8 +93,9 @@ class WriteToTransactionEnvironment {
 	}
 
 public:
-	WriteToTransactionEnvironment()
-	  : id(deterministicRandom()->randomUniqueID()), node(IConfigDatabaseNode::createSimple("./", id)) {
+	WriteToTransactionEnvironment(std::string const& dataDir)
+	  : id(deterministicRandom()->randomUniqueID()), dataDir(dataDir),
+	    node(IConfigDatabaseNode::createSimple(dataDir, id)) {
 		setup();
 	}
 
@@ -109,7 +111,7 @@ public:
 	void restartNode() {
 		cfiServer.cancel();
 		ctiServer.cancel();
-		node = IConfigDatabaseNode::createSimple("./", id);
+		node = IConfigDatabaseNode::createSimple(dataDir, id);
 		setup();
 	}
 
@@ -122,6 +124,7 @@ public:
 
 class ReadFromLocalConfigEnvironment {
 	UID id;
+	std::string dataDir;
 	LocalConfiguration localConfiguration;
 	Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> cbfi;
 	Future<Void> consumer;
@@ -145,15 +148,16 @@ class ReadFromLocalConfigEnvironment {
 	}
 
 public:
-	ReadFromLocalConfigEnvironment(std::string const& configPath,
+	ReadFromLocalConfigEnvironment(std::string const& dataDir,
+	                               std::string const& configPath,
 	                               std::map<std::string, std::string> const& manualKnobOverrides)
-	  : id(deterministicRandom()->randomUniqueID()), localConfiguration("./", configPath, manualKnobOverrides, id),
-	    consumer(Never()) {}
+	  : id(deterministicRandom()->randomUniqueID()), dataDir(dataDir),
+	    localConfiguration(dataDir, configPath, manualKnobOverrides, id), consumer(Never()) {}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		localConfiguration = LocalConfiguration("./", newConfigPath, {}, id);
+		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, id);
 		return setup();
 	}
 
@@ -191,9 +195,10 @@ class LocalConfigEnvironment {
 	}
 
 public:
-	LocalConfigEnvironment(std::string const& configPath,
+	LocalConfigEnvironment(std::string const& dataDir,
+	                       std::string const& configPath,
 	                       std::map<std::string, std::string> const& manualKnobOverrides = {})
-	  : readFrom(configPath, manualKnobOverrides) {}
+	  : readFrom(dataDir, configPath, manualKnobOverrides) {}
 	Future<Void> setup() { return readFrom.setup(); }
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
 		return readFrom.restartLocalConfig(newConfigPath);
@@ -228,9 +233,9 @@ class BroadcasterToLocalConfigEnvironment {
 	}
 
 public:
-	BroadcasterToLocalConfigEnvironment(std::string const& configPath)
+	BroadcasterToLocalConfigEnvironment(std::string const& dataDir, std::string const& configPath)
 	  : broadcaster(ConfigFollowerInterface{}), cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
-	    readFrom(configPath, {}) {}
+	    readFrom(dataDir, configPath, {}) {}
 
 	Future<Void> setup() { return setup(this); }
 
@@ -319,6 +324,8 @@ class TransactionEnvironment {
 	}
 
 public:
+	TransactionEnvironment(std::string const& dataDir) : writeTo(dataDir) {}
+
 	Future<Void> setup() { return Void(); }
 
 	void restartNode() { writeTo.restartNode(); }
@@ -355,8 +362,8 @@ class TransactionToLocalConfigEnvironment {
 	}
 
 public:
-	TransactionToLocalConfigEnvironment(std::string const& configPath)
-	  : readFrom(configPath, {}), broadcaster(writeTo.getFollowerInterface()),
+	TransactionToLocalConfigEnvironment(std::string const& dataDir, std::string const& configPath)
+	  : writeTo(dataDir), readFrom(dataDir, configPath, {}), broadcaster(writeTo.getFollowerInterface()),
 	    cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()) {}
 
 	Future<Void> setup() { return setup(this); }
@@ -417,9 +424,13 @@ Future<Void> compact(BroadcasterToLocalConfigEnvironment& env) {
 	return Void();
 }
 
+std::string getDataDir(UnitTestParameters const& params) {
+	return params.get("unitTestDataDir").get();
+}
+
 ACTOR template <class Env>
-Future<Void> testRestartLocalConfig() {
-	state Env env("class-A");
+Future<Void> testRestartLocalConfig(UnitTestParameters params) {
+	state Env env(getDataDir(params), "class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(check(env, 1));
@@ -431,8 +442,8 @@ Future<Void> testRestartLocalConfig() {
 }
 
 ACTOR template <class Env>
-Future<Void> testRestartLocalConfigAndChangeClass() {
-	state Env env("class-A");
+Future<Void> testRestartLocalConfigAndChangeClass(UnitTestParameters params) {
+	state Env env(getDataDir(params), "class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(check(env, 1));
@@ -444,8 +455,8 @@ Future<Void> testRestartLocalConfigAndChangeClass() {
 }
 
 ACTOR template <class Env>
-Future<Void> testSet() {
-	state LocalConfigEnvironment env("class-A", {});
+Future<Void> testSet(UnitTestParameters params) {
+	state LocalConfigEnvironment env(getDataDir(params), "class-A", {});
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(check(env, 1));
@@ -453,8 +464,8 @@ Future<Void> testSet() {
 }
 
 ACTOR template <class Env>
-Future<Void> testClear() {
-	state LocalConfigEnvironment env("class-A", {});
+Future<Void> testClear(UnitTestParameters params) {
+	state LocalConfigEnvironment env(getDataDir(params), "class-A", {});
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(clear(env, "class-A"_sr));
@@ -463,8 +474,8 @@ Future<Void> testClear() {
 }
 
 ACTOR template <class Env>
-Future<Void> testGlobalSet() {
-	state Env env("class-A");
+Future<Void> testGlobalSet(UnitTestParameters params) {
+	state Env env(getDataDir(params), "class-A");
 	wait(env.setup());
 	wait(set(env, Optional<KeyRef>{}, 1));
 	env.check(1);
@@ -474,8 +485,8 @@ Future<Void> testGlobalSet() {
 }
 
 ACTOR template <class Env>
-Future<Void> testIgnore() {
-	state Env env("class-A");
+Future<Void> testIgnore(UnitTestParameters params) {
+	state Env env(getDataDir(params), "class-A");
 	wait(env.setup());
 	wait(set(env, "class-B"_sr, 1));
 	choose {
@@ -486,8 +497,8 @@ Future<Void> testIgnore() {
 }
 
 ACTOR template <class Env>
-Future<Void> testCompact() {
-	state Env env("class-A");
+Future<Void> testCompact(UnitTestParameters params) {
+	state Env env(getDataDir(params), "class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(compact(env));
@@ -498,8 +509,8 @@ Future<Void> testCompact() {
 }
 
 ACTOR template <class Env>
-Future<Void> testChangeBroadcaster() {
-	state Env env("class-A");
+Future<Void> testChangeBroadcaster(UnitTestParameters params) {
+	state Env env(getDataDir(params), "class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(check(env, 1));
@@ -517,8 +528,8 @@ bool matches(Standalone<VectorRef<KeyRef>> const& vec, std::set<Key> const& comp
 	return (s == compareTo);
 }
 
-ACTOR Future<Void> testGetConfigClasses(bool doCompact) {
-	state TransactionEnvironment env;
+ACTOR Future<Void> testGetConfigClasses(UnitTestParameters params, bool doCompact) {
+	state TransactionEnvironment env(getDataDir(params));
 	wait(set(env, "class-A"_sr, 1));
 	wait(set(env, "class-B"_sr, 1));
 	if (doCompact) {
@@ -529,8 +540,8 @@ ACTOR Future<Void> testGetConfigClasses(bool doCompact) {
 	return Void();
 }
 
-ACTOR Future<Void> testGetKnobs(bool global, bool doCompact) {
-	state TransactionEnvironment env;
+ACTOR Future<Void> testGetKnobs(UnitTestParameters params, bool global, bool doCompact) {
+	state TransactionEnvironment env(getDataDir(params));
 	state Optional<Key> configClass;
 	if (!global) {
 		configClass = "class-A"_sr;
@@ -549,32 +560,32 @@ ACTOR Future<Void> testGetKnobs(bool global, bool doCompact) {
 } // namespace
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Set") {
-	wait(testSet<LocalConfigEnvironment>());
+	wait(testSet<LocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
-	wait(testRestartLocalConfig<LocalConfigEnvironment>());
+	wait(testRestartLocalConfig<LocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/RestartFresh") {
-	wait(testRestartLocalConfigAndChangeClass<LocalConfigEnvironment>());
+	wait(testRestartLocalConfigAndChangeClass<LocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Clear") {
-	wait(testClear<LocalConfigEnvironment>());
+	wait(testClear<LocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/GlobalSet") {
-	wait(testGlobalSet<LocalConfigEnvironment>());
+	wait(testGlobalSet<LocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverrides") {
-	state LocalConfigEnvironment env("class-A/class-B", {});
+	state LocalConfigEnvironment env(getDataDir(params), "class-A/class-B", {});
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(set(env, "class-B"_sr, 10));
@@ -583,7 +594,7 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverrides") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Manual") {
-	state LocalConfigEnvironment env("class-A", { { "test_long", "1000" } });
+	state LocalConfigEnvironment env(getDataDir(params), "class-A", { { "test_long", "1000" } });
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	env.check(1000);
@@ -591,62 +602,62 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Manual") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Set") {
-	wait(testSet<BroadcasterToLocalConfigEnvironment>());
+	wait(testSet<BroadcasterToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Clear") {
-	wait(testClear<BroadcasterToLocalConfigEnvironment>());
+	wait(testClear<BroadcasterToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Ignore") {
-	wait(testIgnore<BroadcasterToLocalConfigEnvironment>());
+	wait(testIgnore<BroadcasterToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/GlobalSet") {
-	wait(testGlobalSet<BroadcasterToLocalConfigEnvironment>());
+	wait(testGlobalSet<BroadcasterToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/ChangeBroadcaster") {
-	wait(testChangeBroadcaster<BroadcasterToLocalConfigEnvironment>());
+	wait(testChangeBroadcaster<BroadcasterToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfig") {
-	wait(testRestartLocalConfig<BroadcasterToLocalConfigEnvironment>());
+	wait(testRestartLocalConfig<BroadcasterToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfigAndChangeClass") {
-	wait(testRestartLocalConfigAndChangeClass<BroadcasterToLocalConfigEnvironment>());
+	wait(testRestartLocalConfigAndChangeClass<BroadcasterToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Compact") {
-	wait(testCompact<BroadcasterToLocalConfigEnvironment>());
+	wait(testCompact<BroadcasterToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Set") {
-	wait(testSet<TransactionToLocalConfigEnvironment>());
+	wait(testSet<TransactionToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Clear") {
-	wait(testClear<TransactionToLocalConfigEnvironment>());
+	wait(testClear<TransactionToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/GlobalSet") {
-	wait(testGlobalSet<TransactionToLocalConfigEnvironment>());
+	wait(testGlobalSet<TransactionToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartNode") {
-	state TransactionToLocalConfigEnvironment env("class-A");
+	state TransactionToLocalConfigEnvironment env(getDataDir(params), "class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	env.restartNode();
@@ -655,32 +666,32 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartNode") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/ChangeBroadcaster") {
-	wait(testChangeBroadcaster<TransactionToLocalConfigEnvironment>());
+	wait(testChangeBroadcaster<TransactionToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigAndChangeClass") {
-	wait(testRestartLocalConfigAndChangeClass<TransactionToLocalConfigEnvironment>());
+	wait(testRestartLocalConfigAndChangeClass<TransactionToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/CompactNode") {
-	wait(testCompact<TransactionToLocalConfigEnvironment>());
+	wait(testCompact<TransactionToLocalConfigEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Set") {
-	wait(testSet<TransactionEnvironment>());
+	wait(testSet<TransactionEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Clear") {
-	wait(testClear<TransactionEnvironment>());
+	wait(testClear<TransactionEnvironment>(params));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
-	state TransactionEnvironment env;
+	state TransactionEnvironment env(getDataDir(params));
 	wait(set(env, "class-A"_sr, 1));
 	env.restartNode();
 	wait(check(env, "class-A"_sr, 1));
@@ -688,7 +699,7 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactNode") {
-	state TransactionEnvironment env;
+	state TransactionEnvironment env(getDataDir(params));
 	wait(set(env, "class-A"_sr, 1));
 	wait(env.compact());
 	wait(env.check("class-A"_sr, 1));
@@ -698,37 +709,37 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactNode") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/GetConfigClasses") {
-	wait(testGetConfigClasses(false));
+	wait(testGetConfigClasses(params, false));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetConfigClasses") {
-	wait(testGetConfigClasses(true));
+	wait(testGetConfigClasses(params, true));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/GetKnobs") {
-	wait(testGetKnobs(false, false));
+	wait(testGetKnobs(params, false, false));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetKnobs") {
-	wait(testGetKnobs(false, true));
+	wait(testGetKnobs(params, false, true));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/GetGlobalKnobs") {
-	wait(testGetKnobs(true, false));
+	wait(testGetKnobs(params, true, false));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetGlobalKnobs") {
-	wait(testGetKnobs(true, true));
+	wait(testGetKnobs(params, true, true));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/BadRangeRead") {
-	state TransactionEnvironment env;
+	state TransactionEnvironment env(getDataDir(params));
 	try {
 		wait(env.badRangeRead() || env.getError());
 		ASSERT(false);

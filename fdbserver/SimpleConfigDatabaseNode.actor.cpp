@@ -95,7 +95,6 @@ TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutati
 
 class SimpleConfigDatabaseNodeImpl {
 	UID id;
-	// TODO: Listen for errors
 	OnDemandStore kvStore;
 	std::map<std::string, std::string> config;
 

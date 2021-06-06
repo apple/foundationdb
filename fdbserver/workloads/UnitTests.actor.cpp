@@ -35,6 +35,7 @@ struct UnitTestWorkload : TestWorkload {
 	std::string testPattern;
 	int testRunLimit;
 	UnitTestParameters testParams;
+	std::string dataDir;
 
 	PerfIntCounter testsAvailable, testsExecuted, testsFailed;
 	PerfDoubleCounter totalWallTime, totalSimTime;
@@ -46,6 +47,8 @@ struct UnitTestWorkload : TestWorkload {
 		enabled = !clientId; // only do this on the "first" client
 		testPattern = getOption(options, LiteralStringRef("testsMatching"), Value()).toString();
 		testRunLimit = getOption(options, LiteralStringRef("maxTestCases"), -1);
+		dataDir = getOption(options, LiteralStringRef("unitTestDataDir"), "simfdb/unittests/"_sr).toString();
+		testParams.set("unitTestDataDir", dataDir);
 
 		// Consume all remaining options as testParams which the unit test can access
 		for (auto& kv : options) {
@@ -103,11 +106,13 @@ struct UnitTestWorkload : TestWorkload {
 			state double start_timer = timer();
 
 			try {
+				platform::createDirectory(self->dataDir);
 				wait(test->func(self->testParams));
 			} catch (Error& e) {
 				++self->testsFailed;
 				result = e;
 			}
+			platform::eraseDirectoryRecursive(self->dataDir);
 			++self->testsExecuted;
 			double wallTime = timer() - start_timer;
 			double simTime = now() - start_now;
