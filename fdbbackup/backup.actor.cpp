@@ -63,9 +63,6 @@ using std::endl;
 
 #ifdef __linux__
 #include <execinfo.h>
-#ifdef ALLOC_INSTRUMENTATION
-#include <cxxabi.h>
-#endif
 #endif
 
 #include "fdbclient/versions.h"
@@ -3045,10 +3042,6 @@ Version parseVersion(const char* str) {
 	return ver;
 }
 
-#ifdef ALLOC_INSTRUMENTATION
-extern uint8_t* g_extra_memory;
-#endif
-
 int main(int argc, char* argv[]) {
 	platformInit();
 
@@ -3062,9 +3055,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	try {
-#ifdef ALLOC_INSTRUMENTATION
-		g_extra_memory = new uint8_t[1000000];
-#endif
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error
@@ -4180,56 +4170,6 @@ int main(int argc, char* argv[]) {
 			status = fstatus.get().get();
 		}
 
-#ifdef ALLOC_INSTRUMENTATION
-		{
-			cout << "Page Counts: " << FastAllocator<16>::pageCount << " " << FastAllocator<32>::pageCount << " "
-			     << FastAllocator<64>::pageCount << " " << FastAllocator<128>::pageCount << " "
-			     << FastAllocator<256>::pageCount << " " << FastAllocator<512>::pageCount << " "
-			     << FastAllocator<1024>::pageCount << " " << FastAllocator<2048>::pageCount << " "
-			     << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
-			     << FastAllocator<16384>::pageCount << endl;
-
-			vector<std::pair<std::string, const char*>> typeNames;
-			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
-				std::string s;
-
-#ifdef __linux__
-				char* demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
-				if (demangled) {
-					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
-					free(demangled);
-				} else
-					s = i->first;
-#else
-				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
-#endif
-
-				typeNames.push_back(std::make_pair(s, i->first));
-			}
-			std::sort(typeNames.begin(), typeNames.end());
-			for (int i = 0; i < typeNames.size(); i++) {
-				const char* n = typeNames[i].second;
-				auto& f = allocInstr[n];
-				printf("%+d\t%+d\t%d\t%d\t%s\n",
-				       f.allocCount,
-				       -f.deallocCount,
-				       f.allocCount - f.deallocCount,
-				       f.maxAllocated,
-				       typeNames[i].first.c_str());
-			}
-
-			// We're about to exit and clean up data structures, this will wreak havoc on allocation recording
-			memSample_entered = true;
-		}
-#endif
 	} catch (Error& e) {
 		TraceEvent(SevError, "MainError").error(e);
 		status = FDB_EXIT_MAIN_ERROR;

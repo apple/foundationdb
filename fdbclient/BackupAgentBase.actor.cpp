@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <time.h>
 
+#include "flow/Hash3.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"

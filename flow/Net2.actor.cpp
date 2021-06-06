@@ -66,6 +66,10 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
+#if defined(__linux__)
+#include <malloc.h>
+#endif
+
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 
@@ -84,10 +88,6 @@ sigset_t sigprof_set;
 void initProfiling() {
 	net2backtraces = new volatile void*[net2backtraces_max];
 	other_backtraces = new volatile void*[net2backtraces_max];
-
-	// According to folk wisdom, calling this once before setting up the signal handler makes
-	// it async signal safe in practice :-/
-	backtrace(const_cast<void**>(other_backtraces), net2backtraces_max);
 
 	sigemptyset(&sigprof_set);
 	sigaddset(&sigprof_set, SIGPROF);

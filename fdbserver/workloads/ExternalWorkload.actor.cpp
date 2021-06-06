@@ -140,6 +140,11 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		    .detail("LibraryName", libraryName)
 		    .detail("LibraryPath", fullPath)
 		    .detail("WorkloadName", wName);
+#if defined(USE_JEMALLOC)
+		fprintf(stderr,
+		        "External workloads are not compatible with overriding malloc with jemalloc.\n"
+		        "You may see crashes. Try rebuilding with -DUSE_JEMALLOC=OFF\n");
+#endif
 		library = loadLibrary(fullPath.c_str());
 		if (library == nullptr) {
 			TraceEvent(SevError, "ExternalWorkloadLoadError");
