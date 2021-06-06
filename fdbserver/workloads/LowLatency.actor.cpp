@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -50,8 +51,8 @@ struct LowLatencyWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {
-			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("min_delay_cc_worst_fit_candidacy_seconds", "5"));
-			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("max_delay_cc_worst_fit_candidacy_seconds", "10"));
+			g_knobs->setKnob("min_delay_cc_worst_fit_candidacy_seconds", KnobValueRef::create(double{5.0}));
+			g_knobs->setKnob("max_delay_cc_worst_fit_candidacy_seconds", KnobValueRef::create(double{10.0}));
 		}
 		return Void();
 	}
