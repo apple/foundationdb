@@ -4073,6 +4073,8 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 
 	if (self->wigglingPid.present()) {
 		self->includeStorageServersForWiggle(self->wigglingPid.get());
+		TraceEvent("PerpetualStorageWiggleExitingPause", self->distributorId)
+			.detail("ProcessId", self->wigglingPid.get());
 		self->wigglingPid.reset();
 	}
 

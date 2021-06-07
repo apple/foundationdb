@@ -889,6 +889,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	StringRef performTSSCheck = LiteralStringRef("false");
 	if (doQuiescentCheck) {
 		performQuiescent = LiteralStringRef("true");
+		spec.restorePerpetualWiggleSetting = false;
 	}
 	if (doCacheCheck) {
 		performCacheCheck = LiteralStringRef("true");
@@ -1382,6 +1383,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state bool useDB = false;
 	state bool waitForQuiescenceBegin = false;
 	state bool waitForQuiescenceEnd = false;
+	state bool restorePerpetualWiggleSetting = false;
+	state bool perpetualWiggleEnabled = false;
 	state double startDelay = 0.0;
 	state double databasePingDelay = 1e9;
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
@@ -1396,6 +1399,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			waitForQuiescenceBegin = true;
 		if (iter->waitForQuiescenceEnd)
 			waitForQuiescenceEnd = true;
+		if (iter->restorePerpetualWiggleSetting)
+			restorePerpetualWiggleSetting = true;
 		startDelay = std::max(startDelay, iter->startDelay);
 		databasePingDelay = std::min(databasePingDelay, iter->databasePingDelay);
 		if (iter->simBackupAgents != ISimulator::BackupAgentType::NoBackupAgents)
@@ -1434,6 +1439,15 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
 		}
+		if (restorePerpetualWiggleSetting) {
+			std::string_view confView(reinterpret_cast<const char*>(startingConfiguration.begin()),
+			                          startingConfiguration.size());
+			const std::string setting = "perpetual_storage_wiggle:=";
+			auto pos = confView.find(setting);
+			if (pos != confView.npos && confView.at(pos + setting.size()) == '1') {
+				perpetualWiggleEnabled = true;
+			}
+		}
 	}
 
 	if (useDB && waitForQuiescenceBegin) {
@@ -1448,6 +1462,10 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		} catch (Error& e) {
 			TraceEvent("QuietDatabaseStartExternalError").error(e);
 			throw;
+		}
+
+		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
+			wait(setPerpetualStorageWiggle(cx, true, true));
 		}
 	}
 
