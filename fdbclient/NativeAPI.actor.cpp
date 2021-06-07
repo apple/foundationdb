@@ -838,11 +838,12 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 			}
 		}
 		if (found) {
-			TraceEvent(SevWarnAlways, "TSS_KillMismatch").detail("TSSID", tssID.toString());
-			TEST(true); // killing TSS because it got mismatch
+			state bool quarantine = CLIENT_KNOBS->QUARANTINE_TSS_ON_MISMATCH;
+			TraceEvent(SevWarnAlways, quarantine ? "TSS_QuarantineMismatch" : "TSS_KillMismatch")
+			    .detail("TSSID", tssID.toString());
+			TEST(quarantine); // Quarantining TSS because it got mismatch
+			TEST(!quarantine); // Killing TSS because it got mismatch
 
-			// TODO we could write something to the system keyspace and then have DD listen to that keyspace and then DD
-			// do exactly this, so why not just cut out the middle man (or the middle system keys, as it were)
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(cx)));
 			state int tries = 0;
 			loop {
@@ -850,7 +851,11 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-					tr->clear(serverTagKeyFor(tssID));
+					if (quarantine) {
+						tr->set(tssQuarantineKeyFor(tssID), LiteralStringRef(""));
+					} else {
+						tr->clear(serverTagKeyFor(tssID));
+					}
 					tssMapDB.erase(tr, tssPairID);
 
 					wait(tr->commit());
@@ -861,16 +866,15 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 				}
 				tries++;
 				if (tries > 10) {
-					// Give up on trying to kill the tss, it'll get another mismatch or a human will investigate
-					// eventually
-					TraceEvent("TSS_KillMismatchGaveUp").detail("TSSID", tssID.toString());
+					// Give up, it'll get another mismatch or a human will investigate eventually
+					TraceEvent("TSS_MismatchGaveUp").detail("TSSID", tssID.toString());
 					break;
 				}
 			}
 			// clear out txn so that the extra DatabaseContext ref gets decref'd and we can free cx
 			tr = makeReference<ReadYourWritesTransaction>();
 		} else {
-			TEST(true); // Not killing TSS with mismatch because it's already gone
+			TEST(true); // Not handling TSS with mismatch because it's already gone
 		}
 	}
 }

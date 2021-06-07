@@ -115,8 +115,15 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
 
-//    "\xff/tss/[[serverId]]" := "[[tssId]]"
+// "\xff/tss/[[serverId]]" := "[[tssId]]"
 extern const KeyRangeRef tssMappingKeys;
+
+// "\xff/tssQ/[[serverId]]" := ""
+// For quarantining a misbehaving TSS.
+extern const KeyRangeRef tssQuarantineKeys;
+
+const Key tssQuarantineKeyFor(UID serverID);
+UID decodeTssQuarantineKey(KeyRef const&);
 
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
