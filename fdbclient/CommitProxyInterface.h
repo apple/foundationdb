@@ -29,7 +29,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/GlobalConfig.h"
 

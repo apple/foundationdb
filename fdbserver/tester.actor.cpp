@@ -39,6 +39,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

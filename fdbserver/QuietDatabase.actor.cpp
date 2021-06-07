@@ -26,6 +26,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"

@@ -27,6 +27,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
