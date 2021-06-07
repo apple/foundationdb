@@ -130,6 +130,8 @@ struct WorkerDetails {
 	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded)
 	  : interf(interf), processClass(processClass), degraded(degraded) {}
 
+	bool operator<(const WorkerDetails& r) const { return interf.id() < r.interf.id(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, interf, processClass, degraded);
@@ -612,11 +614,13 @@ struct InitializeStorageRequest {
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
+	Optional<std::pair<UID, Version>>
+	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion);
 	}
 };
 
@@ -768,6 +772,7 @@ struct DiskStoreRequest {
 struct Role {
 	static const Role WORKER;
 	static const Role STORAGE_SERVER;
+	static const Role TESTING_STORAGE_SERVER;
 	static const Role TRANSACTION_LOG;
 	static const Role SHARED_TRANSACTION_LOG;
 	static const Role COMMIT_PROXY;
@@ -838,6 +843,7 @@ class IDiskQueue;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
+                                 Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo>> db,
                                  std::string folder);

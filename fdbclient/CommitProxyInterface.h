@@ -29,7 +29,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/GlobalConfig.h"
 
@@ -288,9 +287,12 @@ struct GetKeyServerLocationsReply {
 	Arena arena;
 	std::vector<std::pair<KeyRangeRef, vector<StorageServerInterface>>> results;
 
+	// if any storage servers in results have a TSS pair, that mapping is in here
+	std::vector<std::pair<UID, StorageServerInterface>> resultsTssMapping;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, arena);
+		serializer(ar, results, resultsTssMapping, arena);
 	}
 };
 

@@ -40,6 +40,10 @@ Error Error::fromUnvalidatedCode(int code) {
 		return Error::fromCode(code);
 }
 
+bool Error::isDiskError() const {
+	return (error_code == error_code_io_error || error_code == error_code_io_timeout);
+}
+
 Error internal_error_impl(const char* file, int line) {
 	fprintf(stderr, "Internal Error @ %s %d:\n  %s\n", file, line, platform::get_backtrace().c_str());
 
@@ -47,6 +51,7 @@ Error internal_error_impl(const char* file, int line) {
 	    .error(Error::fromCode(error_code_internal_error))
 	    .detail("File", file)
 	    .detail("Line", line)
+	    .setErrorKind(ErrorKind::BugDetected)
 	    .backtrace();
 	flushTraceFileVoid();
 	return Error(error_code_internal_error);
@@ -60,6 +65,7 @@ Error internal_error_impl(const char* msg, const char* file, int line) {
 	    .detail("FailedAssertion", msg)
 	    .detail("File", file)
 	    .detail("Line", line)
+	    .setErrorKind(ErrorKind::BugDetected)
 	    .backtrace();
 	flushTraceFileVoid();
 	return Error(error_code_internal_error);
@@ -86,6 +92,7 @@ Error internal_error_impl(const char* a_nm,
 	    .detail("RightValue", b)
 	    .detail("File", file)
 	    .detail("Line", line)
+	    .setErrorKind(ErrorKind::BugDetected)
 	    .backtrace();
 	flushTraceFileVoid();
 	return Error(error_code_internal_error);

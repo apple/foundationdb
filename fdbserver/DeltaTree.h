@@ -230,9 +230,6 @@ struct DeltaTree {
 	inline Node& newNode() { return *(Node*)((uint8_t*)this + size()); }
 
 public:
-	// Get count of total overhead bytes (everything but the user-formatted Delta) for a tree given size n
-	static int emptyTreeSize() { return sizeof(DeltaTree); }
-
 	struct DecodedNode {
 		DecodedNode() {}
 
@@ -374,9 +371,9 @@ public:
 		const T* upperBound() const { return upper; }
 
 		DeltaTree* tree;
+		Arena arena;
 
 	private:
-		Arena arena;
 		DecodedNode* root;
 		const T* lower;
 		const T* upper;
@@ -835,7 +832,7 @@ public:
 		int count = end - begin;
 		numItems = count;
 		nodeBytesDeleted = 0;
-		initialHeight = (uint8_t)log2(count) + 1;
+		initialHeight = count ? (uint8_t)log2(count) + 1 : 0;
 		maxHeight = 0;
 
 		// The boundary leading to the new page acts as the last time we branched right

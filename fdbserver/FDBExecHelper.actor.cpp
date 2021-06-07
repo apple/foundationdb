@@ -148,7 +148,10 @@ ACTOR Future<int> spawnProcess(std::string path,
 	state pid_t pid = pidAndReadFD.first;
 	state Optional<int> readFD = pidAndReadFD.second;
 	if (pid == -1) {
-		TraceEvent(SevWarnAlways, "SpawnProcess: Command failed to spawn").detail("Cmd", path).detail("Args", allArgs);
+		TraceEvent(SevWarnAlways, "SpawnProcessFailure")
+		    .detail("Reason", "Command failed to spawn")
+		    .detail("Cmd", path)
+		    .detail("Args", allArgs);
 		return -1;
 	} else if (pid > 0) {
 		state int status = -1;
@@ -160,7 +163,8 @@ ACTOR Future<int> spawnProcess(std::string path,
 			if (runTime > maxWaitTime) {
 				// timing out
 
-				TraceEvent(SevWarnAlways, "SpawnProcess : Command failed, timeout")
+				TraceEvent(SevWarnAlways, "SpawnProcessFailure")
+				    .detail("Reason", "Command failed, timeout")
 				    .detail("Cmd", path)
 				    .detail("Args", allArgs);
 				return -1;
@@ -175,9 +179,10 @@ ACTOR Future<int> spawnProcess(std::string path,
 			}
 
 			if (err < 0) {
-				TraceEvent event(SevWarnAlways, "SpawnProcess : Command failed");
+				TraceEvent event(SevWarnAlways, "SpawnProcessFailure");
 				setupTraceWithOutput(event, bytesRead, outputBuffer);
-				event.detail("Cmd", path)
+				event.detail("Reason", "Command failed")
+				    .detail("Cmd", path)
 				    .detail("Args", allArgs)
 				    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 				return -1;
@@ -194,14 +199,15 @@ ACTOR Future<int> spawnProcess(std::string path,
 			} else {
 				// child process completed
 				if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-					TraceEvent event(SevWarnAlways, "SpawnProcess : Command failed");
+					TraceEvent event(SevWarnAlways, "SpawnProcessFailure");
 					setupTraceWithOutput(event, bytesRead, outputBuffer);
-					event.detail("Cmd", path)
+					event.detail("Reason", "Command failed")
+					    .detail("Cmd", path)
 					    .detail("Args", allArgs)
 					    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 					return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 				}
-				TraceEvent event("SpawnProcess : Command status");
+				TraceEvent event("SpawnProcessCommandStatus");
 				setupTraceWithOutput(event, bytesRead, outputBuffer);
 				event.detail("Cmd", path)
 				    .detail("Args", allArgs)

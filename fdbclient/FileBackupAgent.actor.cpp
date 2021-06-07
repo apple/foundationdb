@@ -23,6 +23,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/RestoreInterface.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -141,7 +142,7 @@ public:
 	}
 	KeyBackedProperty<Key> addPrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> onlyAppyMutationLogs() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
@@ -1025,7 +1026,7 @@ ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<Re
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	state Standalone<VectorRef<KeyRef>> results;
-	Standalone<RangeResultRef> values = wait(tr->getRange(
+	RangeResult values = wait(tr->getRange(
 	    KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
 
 	for (auto& s : values) {
@@ -2705,13 +2706,17 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		wait(checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version));
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state BackupConfig config(task);
+		state Future<Optional<bool>> partitionedLog;
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				Version startVersion = wait(tr->getReadVersion());
+				partitionedLog = config.partitionedLogEnabled().get(tr);
+				state Future<Version> startVersionFuture = tr->getReadVersion();
+				wait(success(partitionedLog) && success(startVersionFuture));
 
-				Params.beginVersion().set(task, startVersion);
+				Params.beginVersion().set(task, startVersionFuture.get());
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -2721,14 +2726,15 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		// Check if backup worker is enabled
 		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
 		state bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
-		if (!backupWorkerEnabled) {
+		if (!backupWorkerEnabled && partitionedLog.get().present() && partitionedLog.get().get()) {
+			// Change configuration only when we set to use partitioned logs and
+			// the flag was not set before.
 			wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
 			backupWorkerEnabled = true;
 		}
 
 		// Set the "backupStartedKey" and wait for all backup worker started
 		tr->reset();
-		state BackupConfig config(task);
 		loop {
 			state Future<Void> watchFuture;
 			try {
@@ -2738,7 +2744,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 				state Future<Optional<Value>> started = tr->get(backupStartedKey);
 				state Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
-				state Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
+				partitionedLog = config.partitionedLogEnabled().get(tr);
 				wait(success(started) && success(taskStarted) && success(partitionedLog));
 
 				if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
@@ -3574,9 +3580,9 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		state int64_t remainingInBatch = Params.remainingInBatch().get(task);
 		state bool addingToExistingBatch = remainingInBatch > 0;
 		state Version restoreVersion;
-		state Future<Optional<bool>> incrementalBackupOnly = restore.incrementalBackupOnly().get(tr);
+		state Future<Optional<bool>> onlyAppyMutationLogs = restore.onlyAppyMutationLogs().get(tr);
 
-		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)) && success(incrementalBackupOnly) &&
+		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)) && success(onlyAppyMutationLogs) &&
 		     checkTaskVersion(tr->getDatabase(), task, name, version));
 
 		// If not adding to an existing batch then update the apply mutations end version so the mutations from the
@@ -4043,6 +4049,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state Version beginVersion;
 		state Reference<IBackupContainer> bc;
 		state std::vector<KeyRange> ranges;
+		state bool logsOnly;
+		state bool inconsistentSnapshotOnly;
 
 		loop {
 			try {
@@ -4050,11 +4058,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				Optional<Version> _beginVersion = wait(restore.beginVersion().get(tr));
-				beginVersion = _beginVersion.present() ? _beginVersion.get() : invalidVersion;
+				wait(store(beginVersion, restore.beginVersion().getD(tr, false, invalidVersion)));
 
 				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+				wait(store(logsOnly, restore.onlyAppyMutationLogs().getD(tr, false, false)));
+				wait(store(inconsistentSnapshotOnly, restore.inconsistentSnapshotOnly().getD(tr, false, false)));
 
 				wait(taskBucket->keepRunning(tr, task));
 
@@ -4101,8 +4110,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
-		Optional<bool> _incremental = wait(restore.incrementalBackupOnly().get(tr));
-		state bool incremental = _incremental.present() ? _incremental.get() : false;
+		state Version firstConsistentVersion = invalidVersion;
 		if (beginVersion == invalidVersion) {
 			beginVersion = 0;
 		}
@@ -4111,26 +4119,47 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
 		state Optional<RestorableFileSet> restorable =
-		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, incremental, beginVersion));
-		if (!incremental) {
-			beginVersion = restorable.get().snapshot.beginVersion;
-		}
-
+		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion));
 		if (!restorable.present())
 			throw restore_missing_data();
-
-		// First version for which log data should be applied
-		Params.firstVersion().set(task, beginVersion);
 
 		// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
 		state std::vector<RestoreConfig::RestoreFile> files;
-
-		state Version firstConsistentVersion = beginVersion;
-		for (const RangeFile& f : restorable.get().ranges) {
-			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
-			firstConsistentVersion = std::max(firstConsistentVersion, f.version);
+		if (!logsOnly) {
+			beginVersion = restorable.get().snapshot.beginVersion;
+			if (!inconsistentSnapshotOnly) {
+				for (const RangeFile& f : restorable.get().ranges) {
+					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+					// In a restore with both snapshots and logs, the firstConsistentVersion is the highest version of
+					// any range file.
+					firstConsistentVersion = std::max(firstConsistentVersion, f.version);
+				}
+			} else {
+				for (int i = 0; i < restorable.get().ranges.size(); ++i) {
+					const RangeFile& f = restorable.get().ranges[i];
+					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+					// In inconsistentSnapshotOnly mode, if all range files have the same version, then it is the
+					// firstConsistentVersion, otherwise unknown (use -1).
+					if (i != 0 && f.version != firstConsistentVersion) {
+						firstConsistentVersion = invalidVersion;
+					} else {
+						firstConsistentVersion = f.version;
+					}
+				}
+			}
+		} else {
+			// In logs-only (incremental) mode, the firstConsistentVersion should just be restore.beginVersion().
+			firstConsistentVersion = beginVersion;
 		}
+		if (!inconsistentSnapshotOnly) {
+			for (const LogFile& f : restorable.get().logs) {
+				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+			}
+		}
+		// First version for which log data should be applied
+		Params.firstVersion().set(task, beginVersion);
+
 		tr->reset();
 		loop {
 			try {
@@ -4141,16 +4170,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
-			}
-		}
-
-		tr->reset();
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		bool inconsistentSnapshotOnly = wait(restore.inconsistentSnapshotOnly().getD(tr, false, false));
-		if (!inconsistentSnapshotOnly) {
-			for (const LogFile& f : restorable.get().logs) {
-				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
 			}
 		}
 
@@ -4226,7 +4245,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
 
 		wait(taskBucket->finish(tr, task));
-		state Future<Optional<bool>> logsOnly = restore.incrementalBackupOnly().get(tr);
+		state Future<Optional<bool>> logsOnly = restore.onlyAppyMutationLogs().get(tr);
 		wait(success(logsOnly));
 		if (logsOnly.get().present() && logsOnly.get().get()) {
 			// If this is an incremental restore, we need to set the applyMutationsMapPrefix
@@ -4571,7 +4590,7 @@ public:
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
 		if (normalizedRanges.size() == 1) {
-			Standalone<RangeResultRef> existingDestUidValues = wait(
+			RangeResult existingDestUidValues = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 			bool found = false;
 			for (auto it : existingDestUidValues) {
@@ -4626,7 +4645,7 @@ public:
 	                                        Key addPrefix,
 	                                        Key removePrefix,
 	                                        bool lockDB,
-	                                        bool incrementalBackupOnly,
+	                                        bool onlyAppyMutationLogs,
 	                                        bool inconsistentSnapshotOnly,
 	                                        Version beginVersion,
 	                                        UID uid) {
@@ -4678,8 +4697,8 @@ public:
 			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
 			                                .removePrefix(removePrefix)
 			                                .withPrefix(addPrefix);
-			Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
-			if (existingRows.size() > 0 && !incrementalBackupOnly) {
+			RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
+			if (existingRows.size() > 0 && !onlyAppyMutationLogs) {
 				throw restore_destination_not_empty();
 			}
 		}
@@ -4696,7 +4715,7 @@ public:
 		restore.sourceContainer().set(tr, bc);
 		restore.stateEnum().set(tr, ERestoreState::QUEUED);
 		restore.restoreVersion().set(tr, restoreVersion);
-		restore.incrementalBackupOnly().set(tr, incrementalBackupOnly);
+		restore.onlyAppyMutationLogs().set(tr, onlyAppyMutationLogs);
 		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		restore.beginVersion().set(tr, beginVersion);
 		if (BUGGIFY && restoreRanges.size() == 1) {
@@ -5271,7 +5290,7 @@ public:
 	//   removePrefix: for each key to be restored, remove this prefix first.
 	//   lockDB: if set lock the database with randomUid before performing restore;
 	//           otherwise, check database is locked with the randomUid
-	//   incrementalBackupOnly: only perform incremental restore, by only applying mutation logs
+	//   onlyAppyMutationLogs: only perform incremental restore, by only applying mutation logs
 	//   inconsistentSnapshotOnly: Ignore mutation log files during the restore to speedup the process.
 	//                             When set to true, gives an inconsistent snapshot, thus not recommended
 	//   beginVersion: restore's begin version
@@ -5288,7 +5307,7 @@ public:
 	                                     Key addPrefix,
 	                                     Key removePrefix,
 	                                     bool lockDB,
-	                                     bool incrementalBackupOnly,
+	                                     bool onlyAppyMutationLogs,
 	                                     bool inconsistentSnapshotOnly,
 	                                     Version beginVersion,
 	                                     UID randomUid) {
@@ -5308,12 +5327,12 @@ public:
 		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 			targetVersion = desc.maxRestorableVersion.get();
 
-		if (targetVersion == invalidVersion && incrementalBackupOnly && desc.contiguousLogEnd.present()) {
+		if (targetVersion == invalidVersion && onlyAppyMutationLogs && desc.contiguousLogEnd.present()) {
 			targetVersion = desc.contiguousLogEnd.get() - 1;
 		}
 
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, ranges, incrementalBackupOnly, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, ranges, onlyAppyMutationLogs, beginVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -5345,7 +5364,7 @@ public:
 				                   addPrefix,
 				                   removePrefix,
 				                   lockDB,
-				                   incrementalBackupOnly,
+				                   onlyAppyMutationLogs,
 				                   inconsistentSnapshotOnly,
 				                   beginVersion,
 				                   randomUid));
@@ -5563,7 +5582,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          Key addPrefix,
                                          Key removePrefix,
                                          bool lockDB,
-                                         bool incrementalBackupOnly,
+                                         bool onlyAppyMutationLogs,
                                          bool inconsistentSnapshotOnly,
                                          Version beginVersion) {
 	return FileBackupAgentImpl::restore(this,
@@ -5578,7 +5597,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    addPrefix,
 	                                    removePrefix,
 	                                    lockDB,
-	                                    incrementalBackupOnly,
+	                                    onlyAppyMutationLogs,
 	                                    inconsistentSnapshotOnly,
 	                                    beginVersion,
 	                                    deterministicRandom()->randomUniqueID());
@@ -5728,7 +5747,7 @@ ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef
 			    .detail("Range", KeyRangeRef(k1, k2))
 			    .detail("Begin", begin)
 			    .detail("End", end);
-			Standalone<RangeResultRef> readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
+			RangeResult readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
 			ASSERT(readKVs.size() > 0 || begin == end);
 			break;
 		} catch (Error& e) {
@@ -5760,7 +5779,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (i = 0; i < restoreRanges.size(); ++i) {
-				Standalone<RangeResultRef> kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
+				RangeResult kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
 				for (auto kv : kvs) {
 					oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
@@ -5827,7 +5846,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Standalone<RangeResultRef> emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			for (int i = 0; i < emptyData.size(); ++i) {
 				TraceEvent(SevError, "ExpectEmptyData")
 				    .detail("Index", i)
@@ -5865,7 +5884,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			TraceEvent(SevFRTestInfo, "SanityCheckData").detail("Size", allData.size());
 			for (int i = 0; i < allData.size(); ++i) {
 				std::pair<bool, bool> backupRestoreValid = insideValidRange(allData[i], restoreRanges, backupRanges);

@@ -21,6 +21,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/Knobs.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -143,7 +144,9 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 				}
 				coordinators.ccf->setConnectionString(
 				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
-				TraceEvent("LeaderForwarding").detail("ConnStr", coordinators.ccf->getConnectionString().toString());
+				TraceEvent("LeaderForwarding")
+				    .detail("ConnStr", coordinators.ccf->getConnectionString().toString())
+				    .trackLatest("LeaderForwarding");
 				throw coordinators_changed();
 			}
 

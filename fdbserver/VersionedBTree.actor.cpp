@@ -27,7 +27,6 @@
 #include "flow/UnitTest.h"
 #include "fdbserver/IPager.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "flow/crc32c.h"
 #include "flow/ActorCollection.h"
 #include <map>
 #include <vector>
@@ -41,6 +40,12 @@
 
 #define REDWOOD_DEBUG 0
 
+// Only print redwood debug statements for a certain address. Useful in simulation with many redwood processes to reduce
+// log size.
+#define REDWOOD_DEBUG_ADDR 0
+// example addr:  "[abcd::4:0:1:4]:1"
+#define REDWOOD_DEBUG_ADDR_VAL "";
+
 #define debug_printf_stream stdout
 #define debug_printf_always(...)                                                                                       \
 	{                                                                                                                  \
@@ -50,11 +55,25 @@
 		fflush(debug_printf_stream);                                                                                   \
 	}
 
+#define debug_printf_addr(...)                                                                                         \
+	{                                                                                                                  \
+		std::string addr = REDWOOD_DEBUG_ADDR_VAL;                                                                     \
+		if (!memcmp(addr.c_str(), g_network->getLocalAddress().toString().c_str(), addr.size())) {                     \
+			std::string prefix =                                                                                       \
+			    format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);               \
+			std::string msg = format(__VA_ARGS__);                                                                     \
+			writePrefixedLines(debug_printf_stream, prefix, msg);                                                      \
+			fflush(debug_printf_stream);                                                                               \
+		}                                                                                                              \
+	}
+
 #define debug_printf_noop(...)
 
 #if defined(NO_INTELLISENSE)
 #if REDWOOD_DEBUG
 #define debug_printf debug_printf_always
+#elif REDWOOD_DEBUG_ADDR
+#define debug_printf debug_printf_addr
 #else
 #define debug_printf debug_printf_noop
 #endif
@@ -235,24 +254,37 @@ public:
 #pragma pack(pop)
 
 	struct Cursor {
+		// Queue mode
 		enum Mode { NONE, POP, READONLY, WRITE };
+		Mode mode;
 
-		// The current page being read or written to
+		// Queue this cursor is accessing
+		FIFOQueue* queue;
+
+		// The current page and pageID being read or written to
 		LogicalPageID pageID;
+		Reference<ArenaPage> page;
 
 		// The first page ID to be written to the pager, if this cursor has written anything
 		LogicalPageID firstPageIDWritten;
 
-		// Offset after RawPage header to next read from or write to
+		// Offset after RawPage header in page to next read from or write to
 		int offset;
 
 		// A read cursor will not read this page (or beyond)
 		LogicalPageID endPageID;
 
-		Reference<IPage> page;
-		FIFOQueue* queue;
-		Future<Void> operation;
-		Mode mode;
+		// Page future and corresponding page ID for the expected next page to be used.  It may not
+		// match the current page's next page link because queues can prepended with new front pages.
+		Future<Reference<ArenaPage>> nextPageReader;
+		LogicalPageID nextPageID;
+
+		// Future that represents all outstanding write operations previously issued
+		// This exists because writing the queue returns void, not a future
+		Future<Void> writeOperations;
+
+		FlowLock mutex;
+		Future<Void> killMutex;
 
 		Cursor() : mode(NONE) {}
 
@@ -262,26 +294,35 @@ public:
 		          LogicalPageID initialPageID = invalidLogicalPageID,
 		          int readOffset = 0,
 		          LogicalPageID endPage = invalidLogicalPageID) {
-			if (operation.isValid()) {
-				operation.cancel();
-			}
 			queue = q;
+
+			// If the pager gets an error, which includes shutdown, kill the mutex so any waiters can no longer run.
+			// This avoids having every mutex wait also wait on pagerError.
+			killMutex = map(ready(queue->pagerError), [=](Void e) {
+				mutex.kill();
+				return Void();
+			});
+
 			mode = m;
 			firstPageIDWritten = invalidLogicalPageID;
 			offset = readOffset;
 			endPageID = endPage;
 			page.clear();
+			writeOperations = Void();
 
 			if (mode == POP || mode == READONLY) {
 				// If cursor is not pointed at the end page then start loading it.
 				// The end page will not have been written to disk yet.
 				pageID = initialPageID;
-				operation = (pageID == endPageID) ? Void() : loadPage();
+				if (pageID != endPageID) {
+					startNextPageLoad(pageID);
+				} else {
+					nextPageID = invalidLogicalPageID;
+				}
 			} else {
 				pageID = invalidLogicalPageID;
 				ASSERT(mode == WRITE ||
 				       (initialPageID == invalidLogicalPageID && readOffset == 0 && endPage == invalidLogicalPageID));
-				operation = Void();
 			}
 
 			debug_printf("FIFOQueue::Cursor(%s) initialized\n", toString().c_str());
@@ -294,17 +335,17 @@ public:
 		// Since cursors can have async operations pending which modify their state they can't be copied cleanly
 		Cursor(const Cursor& other) = delete;
 
+		~Cursor() { writeOperations.cancel(); }
+
 		// A read cursor can be initialized from a pop cursor
 		void initReadOnly(const Cursor& c) {
 			ASSERT(c.mode == READONLY || c.mode == POP);
 			init(c.queue, READONLY, c.pageID, c.offset, c.endPageID);
 		}
 
-		~Cursor() { operation.cancel(); }
-
 		std::string toString() const {
 			if (mode == WRITE) {
-				return format("{WriteCursor %s:%p pos=%s:%d endOffset=%d}",
+				return format("{WriteCursor %s:%p pos=%s:%d rawEndOffset=%d}",
 				              queue->name.c_str(),
 				              this,
 				              ::toString(pageID).c_str(),
@@ -312,13 +353,14 @@ public:
 				              page ? raw()->endOffset : -1);
 			}
 			if (mode == POP || mode == READONLY) {
-				return format("{ReadCursor %s:%p pos=%s:%d endOffset=%d endPage=%s}",
+				return format("{ReadCursor %s:%p pos=%s:%d rawEndOffset=%d endPage=%s nextPage=%s}",
 				              queue->name.c_str(),
 				              this,
 				              ::toString(pageID).c_str(),
 				              offset,
 				              page ? raw()->endOffset : -1,
-				              ::toString(endPageID).c_str());
+				              ::toString(endPageID).c_str(),
+				              ::toString(nextPageID).c_str());
 			}
 			ASSERT(mode == NONE);
 			return format("{NullCursor=%p}", this);
@@ -326,17 +368,33 @@ public:
 
 #pragma pack(push, 1)
 		struct RawPage {
+			// The next page of the queue after this one
 			LogicalPageID nextPageID;
+			// The start offset of the next page
 			uint16_t nextOffset;
+			// The end offset of the current page
 			uint16_t endOffset;
+			// Get pointer to data after page header
 			uint8_t* begin() { return (uint8_t*)(this + 1); }
 		};
 #pragma pack(pop)
 
-		Future<Void> notBusy() { return operation; }
+		// Returns true if the mutex cannot be immediately taken.
+		bool isBusy() { return mutex.activePermits() != 0; }
+
+		// Wait for all operations started before now to be ready, which is done by
+		// obtaining and releasing the mutex.
+		Future<Void> notBusy() {
+			return isBusy() ? map(mutex.take(),
+			                      [&](Void) {
+				                      mutex.release();
+				                      return Void();
+			                      })
+			                : Void();
+		}
 
 		// Returns true if any items have been written to the last page
-		bool pendingWrites() const { return mode == WRITE && offset != 0; }
+		bool pendingTailWrites() const { return mode == WRITE && offset != 0; }
 
 		RawPage* raw() const { return ((RawPage*)(page->begin())); }
 
@@ -347,14 +405,11 @@ public:
 			p->nextOffset = offset;
 		}
 
-		Future<Void> loadPage() {
-			ASSERT(mode == POP | mode == READONLY);
-			debug_printf("FIFOQueue::Cursor(%s) loadPage\n", toString().c_str());
-			return map(queue->pager->readPage(pageID, true), [=](Reference<IPage> p) {
-				page = p;
-				debug_printf("FIFOQueue::Cursor(%s) loadPage done\n", toString().c_str());
-				return Void();
-			});
+		void startNextPageLoad(LogicalPageID id) {
+			nextPageID = id;
+			debug_printf(
+			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
+			nextPageReader = waitOrError(queue->pager->readPage(nextPageID, true), queue->pagerError);
 		}
 
 		void writePage() {
@@ -369,6 +424,8 @@ public:
 		}
 
 		// Link the current page to newPageID:newOffset and then write it to the pager.
+		// The link destination could be a new page at the end of the queue, or the beginning of
+		// an existing chain of queue pages.
 		// If initializeNewPage is true a page buffer will be allocated for the new page and it will be initialized
 		// as a new tail page.
 		void addNewPage(LogicalPageID newPageID, int newOffset, bool initializeNewPage) {
@@ -382,12 +439,24 @@ public:
 			// Update existing page and write, if it exists
 			if (page) {
 				setNext(newPageID, newOffset);
-				debug_printf("FIFOQueue::Cursor(%s) Linked new page\n", toString().c_str());
+				debug_printf("FIFOQueue::Cursor(%s) Linked new page %s:%d\n",
+				             toString().c_str(),
+				             ::toString(newPageID).c_str(),
+				             newOffset);
 				writePage();
 			}
 
 			pageID = newPageID;
 			offset = newOffset;
+
+			if (BUGGIFY) {
+				// Randomly change the byte limit for queue pages.  The min here must be large enough for at least one
+				// queue item of any type.  This change will suddenly make some pages being written to seem overfilled
+				// but this won't break anything, the next write will just be detected as not fitting and the page will
+				// end.
+				queue->dataBytesPerPage = deterministicRandom()->randomInt(
+				    50, queue->pager->getUsablePageSize() - sizeof(typename Cursor::RawPage));
+			}
 
 			if (initializeNewPage) {
 				debug_printf("FIFOQueue::Cursor(%s) Initializing new page\n", toString().c_str());
@@ -402,123 +471,197 @@ public:
 		}
 
 		// Write item to the next position in the current page or, if it won't fit, add a new page and write it there.
-		ACTOR static Future<Void> write_impl(Cursor* self, T item, Future<Void> start) {
+		ACTOR static Future<Void> write_impl(Cursor* self, T item) {
 			ASSERT(self->mode == WRITE);
 
-			// Wait for the previous operation to finish
-			state Future<Void> previous = self->operation;
-			wait(start);
-			wait(previous);
-
+			state bool mustWait = self->isBusy();
 			state int bytesNeeded = Codec::bytesNeeded(item);
-			if (self->pageID == invalidLogicalPageID || self->offset + bytesNeeded > self->queue->dataBytesPerPage) {
+			state bool needNewPage =
+			    self->pageID == invalidLogicalPageID || self->offset + bytesNeeded > self->queue->dataBytesPerPage;
+
+			debug_printf("FIFOQueue::Cursor(%s) write(%s) mustWait=%d needNewPage=%d\n",
+			             self->toString().c_str(),
+			             ::toString(item).c_str(),
+			             mustWait,
+			             needNewPage);
+
+			// If we have to wait for the mutex because it's busy, or we need a new page, then wait for the mutex.
+			if (mustWait || needNewPage) {
+				wait(self->mutex.take());
+
+				// If we had to wait because the mutex was busy, then update needNewPage as another writer
+				// would have changed the cursor state
+				// Otherwise, taking the mutex would be immediate so no other writer could have run
+				if (mustWait) {
+					needNewPage = self->pageID == invalidLogicalPageID ||
+					              self->offset + bytesNeeded > self->queue->dataBytesPerPage;
+				}
+			}
+
+			// If we need a new page, add one.
+			if (needNewPage) {
 				debug_printf("FIFOQueue::Cursor(%s) write(%s) page is full, adding new page\n",
 				             self->toString().c_str(),
 				             ::toString(item).c_str());
 				LogicalPageID newPageID = wait(self->queue->pager->newPageID());
 				self->addNewPage(newPageID, 0, true);
 				++self->queue->numPages;
-				wait(yield());
 			}
+
 			debug_printf(
-			    "FIFOQueue::Cursor(%s) before write(%s)\n", self->toString().c_str(), ::toString(item).c_str());
+			    "FIFOQueue::Cursor(%s) write(%s) writing\n", self->toString().c_str(), ::toString(item).c_str());
 			auto p = self->raw();
 			Codec::writeToBytes(p->begin() + self->offset, item);
 			self->offset += bytesNeeded;
 			p->endOffset = self->offset;
 			++self->queue->numEntries;
+
+			if (mustWait || needNewPage) {
+				self->mutex.release();
+			}
+
 			return Void();
 		}
 
 		void write(const T& item) {
-			Promise<Void> p;
-			operation = write_impl(this, item, p.getFuture());
-			p.send(Void());
+			// Start the write.  It may complete immediately if no IO was being waited on
+			Future<Void> w = write_impl(this, item);
+			// If it didn't complete immediately, then store the future in operation
+			if (!w.isReady()) {
+				writeOperations = writeOperations && w;
+			}
 		}
 
-		// Read the next item at the cursor (if <= upperBound), moving to a new page first if the current page is
-		// exhausted
-		ACTOR static Future<Optional<T>> readNext_impl(Cursor* self, Optional<T> upperBound, Future<Void> start) {
-			ASSERT(self->mode == POP || self->mode == READONLY);
+		// If readNext() cannot complete immediately, it will route to here
+		// The mutex will be taken if locked is false
+		// The next page will be waited for if load is true
+		// Only mutex holders will wait on the page read.
+		ACTOR static Future<Optional<T>> waitThenReadNext(Cursor* self,
+		                                                  Optional<T> upperBound,
+		                                                  bool locked,
+		                                                  bool load) {
+			// Lock the mutex if it wasn't already
+			if (!locked) {
+				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext locking mutex\n", self->toString().c_str());
+				wait(self->mutex.take());
+			}
 
-			// Wait for the previous operation to finish
-			state Future<Void> previous = self->operation;
-			wait(start);
-			wait(previous);
+			if (load) {
+				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext waiting for page load\n",
+				             self->toString().c_str());
+				wait(success(self->nextPageReader));
+			}
 
-			debug_printf("FIFOQueue::Cursor(%s) readNext begin\n", self->toString().c_str());
-			if (self->pageID == invalidLogicalPageID || self->pageID == self->endPageID) {
-				debug_printf("FIFOQueue::Cursor(%s) readNext returning nothing\n", self->toString().c_str());
+			Optional<T> result = wait(self->readNext(upperBound, true));
+
+			// If this actor instance locked the mutex, then unlock it.
+			if (!locked) {
+				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext unlocking mutex\n", self->toString().c_str());
+				self->mutex.release();
+			}
+
+			return result;
+		}
+
+		// Read the next item at the cursor (if < upperBound), moving to a new page first if the current page is
+		// exhausted If locked is true, this call owns the mutex, which would have been locked by readNext() before a
+		// recursive call
+		Future<Optional<T>> readNext(const Optional<T>& upperBound = {}, bool locked = false) {
+			if ((mode != POP && mode != READONLY) || pageID == invalidLogicalPageID || pageID == endPageID) {
+				debug_printf("FIFOQueue::Cursor(%s) readNext returning nothing\n", toString().c_str());
 				return Optional<T>();
 			}
 
-			// We now know we are pointing to PageID and it should be read and used, but it may not be loaded yet.
-			if (!self->page) {
-				wait(self->loadPage());
-				wait(yield());
+			// If we don't own the mutex and it's not available then acquire it
+			if (!locked && isBusy()) {
+				return waitThenReadNext(this, upperBound, false, false);
 			}
 
-			auto p = self->raw();
-			debug_printf("FIFOQueue::Cursor(%s) readNext reading at current position\n", self->toString().c_str());
-			ASSERT(self->offset < p->endOffset);
+			// We now know pageID is valid and should be used, but page might not point to it yet
+			if (!page) {
+				debug_printf("FIFOQueue::Cursor(%s) loading\n", toString().c_str());
+
+				// If the next pageID loading or loaded is not the page we should be reading then restart the load
+				// nextPageID coud be different because it could be invalid or it could be no longer relevant
+				// if the previous commit added new pages to the front of the queue.
+				if (pageID != nextPageID) {
+					debug_printf("FIFOQueue::Cursor(%s) reloading\n", toString().c_str());
+					startNextPageLoad(pageID);
+				}
+
+				if (!nextPageReader.isReady()) {
+					return waitThenReadNext(this, upperBound, locked, true);
+				}
+
+				page = nextPageReader.get();
+
+				// Start loading the next page if it's not the end page
+				auto p = raw();
+				if (p->nextPageID != endPageID) {
+					startNextPageLoad(p->nextPageID);
+				} else {
+					// Prevent a future next page read from reusing the same result as page would have to be updated
+					// before the queue would read it again
+					nextPageID = invalidLogicalPageID;
+				}
+			}
+
+			auto p = raw();
+			debug_printf("FIFOQueue::Cursor(%s) readNext reading at current position\n", toString().c_str());
+			ASSERT(offset < p->endOffset);
 			int bytesRead;
-			T result = Codec::readFromBytes(p->begin() + self->offset, bytesRead);
+			const T result = Codec::readFromBytes(p->begin() + offset, bytesRead);
 
 			if (upperBound.present() && upperBound.get() < result) {
 				debug_printf("FIFOQueue::Cursor(%s) not popping %s, exceeds upper bound %s\n",
-				             self->toString().c_str(),
+				             toString().c_str(),
 				             ::toString(result).c_str(),
 				             ::toString(upperBound.get()).c_str());
+
 				return Optional<T>();
 			}
 
-			self->offset += bytesRead;
-			if (self->mode == POP) {
-				--self->queue->numEntries;
+			offset += bytesRead;
+			if (mode == POP) {
+				--queue->numEntries;
 			}
-			debug_printf(
-			    "FIFOQueue::Cursor(%s) after read of %s\n", self->toString().c_str(), ::toString(result).c_str());
-			ASSERT(self->offset <= p->endOffset);
+			debug_printf("FIFOQueue::Cursor(%s) after read of %s\n", toString().c_str(), ::toString(result).c_str());
+			ASSERT(offset <= p->endOffset);
 
-			if (self->offset == p->endOffset) {
-				debug_printf("FIFOQueue::Cursor(%s) Page exhausted\n", self->toString().c_str());
-				LogicalPageID oldPageID = self->pageID;
-				self->pageID = p->nextPageID;
-				self->offset = p->nextOffset;
-				if (self->mode == POP) {
-					--self->queue->numPages;
+			// If this page is exhausted, start reading the next page for the next readNext() to use, unless it's the
+			// tail page
+			if (offset == p->endOffset) {
+				debug_printf("FIFOQueue::Cursor(%s) Page exhausted\n", toString().c_str());
+				LogicalPageID oldPageID = pageID;
+				pageID = p->nextPageID;
+				offset = p->nextOffset;
+
+				// If pageID isn't the tail page and nextPageID isn't pageID then start loading the next page
+				if (pageID != endPageID && nextPageID != pageID) {
+					startNextPageLoad(pageID);
 				}
-				self->page.clear();
-				debug_printf("FIFOQueue::Cursor(%s) readNext page exhausted, moved to new page\n",
-				             self->toString().c_str());
 
-				if (self->mode == POP) {
+				if (mode == POP) {
+					--queue->numPages;
+				}
+				page.clear();
+				debug_printf("FIFOQueue::Cursor(%s) readNext page exhausted, moved to new page\n", toString().c_str());
+
+				if (mode == POP) {
 					// Freeing the old page must happen after advancing the cursor and clearing the page reference
 					// because freePage() could cause a push onto a queue that causes a newPageID() call which could
-					// pop() from this very same queue. Queue pages are freed at page 0 because they can be reused after
-					// the next commit.
-					self->queue->pager->freePage(oldPageID, 0);
+					// pop() from this very same queue. Queue pages are freed at version 0 because they can be reused
+					// after the next commit.
+					queue->pager->freePage(oldPageID, 0);
 				}
 			}
 
 			debug_printf("FIFOQueue(%s) %s(upperBound=%s) -> %s\n",
-			             self->queue->name.c_str(),
-			             (self->mode == POP ? "pop" : "peek"),
+			             queue->name.c_str(),
+			             (mode == POP ? "pop" : "peek"),
 			             ::toString(upperBound).c_str(),
 			             ::toString(result).c_str());
-			return result;
-		}
-
-		// Read and move past the next item if is <= upperBound or if upperBound is not present
-		Future<Optional<T>> readNext(const Optional<T>& upperBound = {}) {
-			if (mode == NONE) {
-				return Optional<T>();
-			}
-			Promise<Void> p;
-			Future<Optional<T>> read = readNext_impl(this, upperBound, p.getFuture());
-			operation = success(read);
-			p.send(Void());
-			return read;
+			return Optional<T>(result);
 		}
 	};
 
@@ -534,6 +677,7 @@ public:
 	void create(IPager2* p, LogicalPageID newPageID, std::string queueName) {
 		debug_printf("FIFOQueue(%s) create from page %s\n", queueName.c_str(), toString(newPageID).c_str());
 		pager = p;
+		pagerError = pager->getError();
 		name = queueName;
 		numPages = 1;
 		numEntries = 0;
@@ -549,6 +693,7 @@ public:
 	void recover(IPager2* p, const QueueState& qs, std::string queueName) {
 		debug_printf("FIFOQueue(%s) recover from queue state %s\n", queueName.c_str(), qs.toString().c_str());
 		pager = p;
+		pagerError = pager->getError();
 		name = queueName;
 		numPages = qs.numPages;
 		numEntries = qs.numEntries;
@@ -614,15 +759,15 @@ public:
 		headWriter.write(item);
 	}
 
-	// Wait until the most recently started operations on each cursor as of now are ready
-	Future<Void> notBusy() {
-		return headWriter.notBusy() && headReader.notBusy() && tailWriter.notBusy() && ready(newTailPage);
+	bool isBusy() {
+		return headWriter.isBusy() || headReader.isBusy() || tailWriter.isBusy() || !newTailPage.isReady();
 	}
 
-	// Returns true if any most recently started operations on any cursors are not ready
-	bool busy() {
-		return !headWriter.notBusy().isReady() || !headReader.notBusy().isReady() || !tailWriter.notBusy().isReady() ||
-		       !newTailPage.isReady();
+	// Wait until all previously started operations on each cursor are done and the new tail page is ready
+	Future<Void> notBusy() {
+		auto f = headWriter.notBusy() && headReader.notBusy() && tailWriter.notBusy() && ready(newTailPage);
+		debug_printf("FIFOQueue(%s) notBusy future ready=%d\n", name.c_str(), f.isReady());
+		return f;
 	}
 
 	// preFlush() prepares this queue to be flushed to disk, but doesn't actually do it so the queue can still
@@ -631,7 +776,7 @@ public:
 	//
 	// If one or more queues are used by their pager in newPageID() or freePage() operations, then preFlush()
 	// must be called on each of them inside a loop that runs until each of the preFlush() calls have returned
-	// false.
+	// false twice in a row.
 	//
 	// The reason for all this is that:
 	//   - queue pop() can call pager->freePage() which can call push() on the same or another queue
@@ -644,7 +789,7 @@ public:
 
 		// Completion of the pending operations as of the start of notBusy() could have began new operations,
 		// so see if any work is pending now.
-		bool workPending = self->busy();
+		bool workPending = self->isBusy();
 
 		if (!workPending) {
 			// A newly created or flushed queue starts out in a state where its tail page to be written to is empty.
@@ -653,8 +798,12 @@ public:
 			// the next flush.  (This is explained more at the top of FIFOQueue but it is because queue pages can only
 			// be written once because once they contain durable data a second write to link to a new page could corrupt
 			// the existing data if the subsequent commit never succeeds.)
+			//
+			// If the newTailPage future is ready but it's an invalid page and the tail page we are currently pointed to
+			// has had items added to it, then get a new tail page ID.
 			if (self->newTailPage.isReady() && self->newTailPage.get() == invalidLogicalPageID &&
-			    self->tailWriter.pendingWrites()) {
+			    self->tailWriter.pendingTailWrites()) {
+				debug_printf("FIFOQueue(%s) preFlush starting to get new page ID\n", self->name.c_str());
 				self->newTailPage = self->pager->newPageID();
 				workPending = true;
 			}
@@ -668,7 +817,7 @@ public:
 
 	void finishFlush() {
 		debug_printf("FIFOQueue(%s) finishFlush start\n", name.c_str());
-		ASSERT(!busy());
+		ASSERT(!isBusy());
 
 		// If a new tail page was allocated, link the last page of the tail writer to it.
 		if (newTailPage.get() != invalidLogicalPageID) {
@@ -677,14 +826,14 @@ public:
 			++numPages;
 
 			// newPage() should be ready immediately since a pageID is being explicitly passed.
-			ASSERT(tailWriter.notBusy().isReady());
+			ASSERT(!tailWriter.isBusy());
 
 			newTailPage = invalidLogicalPageID;
 		}
 
 		// If the headWriter wrote anything, link its tail page to the headReader position and point the headReader
 		// to the start of the headWriter
-		if (headWriter.pendingWrites()) {
+		if (headWriter.pendingTailWrites()) {
 			headWriter.addNewPage(headReader.pageID, headReader.offset, false);
 			headReader.pageID = headWriter.firstPageIDWritten;
 			headReader.offset = 0;
@@ -715,6 +864,8 @@ public:
 	Future<Void> flush() { return flush_impl(this); }
 
 	IPager2* pager;
+	Future<Void> pagerError;
+
 	int64_t numPages;
 	int64_t numEntries;
 	int dataBytesPerPage;
@@ -732,50 +883,6 @@ public:
 int nextPowerOf2(uint32_t x) {
 	return 1 << (32 - clz(x - 1));
 }
-
-class FastAllocatedPage : public IPage, public FastAllocated<FastAllocatedPage>, ReferenceCounted<FastAllocatedPage> {
-public:
-	// Create a fast-allocated page with size total bytes INCLUDING checksum
-	FastAllocatedPage(int size, int bufferSize) : logicalSize(size), bufferSize(bufferSize) {
-		buffer = (uint8_t*)allocateFast(bufferSize);
-		// Mark any unused page portion defined
-		VALGRIND_MAKE_MEM_DEFINED(buffer + logicalSize, bufferSize - logicalSize);
-	};
-
-	~FastAllocatedPage() override { freeFast(bufferSize, buffer); }
-
-	Reference<IPage> clone() const override {
-		FastAllocatedPage* p = new FastAllocatedPage(logicalSize, bufferSize);
-		memcpy(p->buffer, buffer, logicalSize);
-		return Reference<IPage>(p);
-	}
-
-	// Usable size, without checksum
-	int size() const override { return logicalSize - sizeof(Checksum); }
-
-	uint8_t const* begin() const override { return buffer; }
-
-	uint8_t* mutate() override { return buffer; }
-
-	void addref() const override { ReferenceCounted<FastAllocatedPage>::addref(); }
-
-	void delref() const override { ReferenceCounted<FastAllocatedPage>::delref(); }
-
-	typedef uint32_t Checksum;
-
-	Checksum& getChecksum() { return *(Checksum*)(buffer + size()); }
-
-	Checksum calculateChecksum(LogicalPageID pageID) { return crc32c_append(pageID, buffer, size()); }
-
-	void updateChecksum(LogicalPageID pageID) { getChecksum() = calculateChecksum(pageID); }
-
-	bool verifyChecksum(LogicalPageID pageID) { return getChecksum() == calculateChecksum(pageID); }
-
-private:
-	int logicalSize;
-	int bufferSize;
-	uint8_t* buffer;
-};
 
 struct RedwoodMetrics {
 	static constexpr int btreeLevels = 5;
@@ -897,7 +1004,7 @@ struct RedwoodMetrics {
 				if (*m.first == '\0') {
 					*s += "\n";
 				} else if (!skipZeroes || m.second != 0) {
-					*s += format("%-15s %-8u %8u/s  ", m.first, m.second, int(m.second / elapsed));
+					*s += format("%-15s %-8u %8" PRId64 "/s  ", m.first, m.second, int64_t(m.second / elapsed));
 				}
 			}
 		}
@@ -1028,6 +1135,22 @@ public:
 		}
 		++g_redwoodMetrics.pagerProbeMiss;
 		return nullptr;
+	}
+
+	// Try to evict the item at index from cache
+	// Returns true if item is evicted or was not present in cache
+	bool tryEvict(const IndexType& index) {
+		auto i = cache.find(index);
+		if (i == cache.end() || !i->second.item.evictable()) {
+			return false;
+		}
+		Entry& toEvict = i->second;
+		if (toEvict.hits == 0) {
+			++g_redwoodMetrics.pagerEvictUnhit;
+		}
+		evictionOrder.erase(evictionOrder.iterator_to(toEvict));
+		cache.erase(toEvict.index);
+		return true;
 	}
 
 	// Get the object for i or create a new one.
@@ -1164,7 +1287,6 @@ class DWALPagerSnapshot;
 // back to their original location once the original version is no longer needed.
 class DWALPager : public IPager2 {
 public:
-	typedef FastAllocatedPage Page;
 	typedef FIFOQueue<LogicalPageID> LogicalPageQueueT;
 	typedef std::map<Version, LogicalPageID> VersionToPageMapT;
 	typedef std::unordered_map<LogicalPageID, VersionToPageMapT> PageToVersionedMapT;
@@ -1204,7 +1326,7 @@ public:
 
 		Type getType() const { return getTypeOf(newPageID); }
 
-		bool operator<(const RemappedPage& rhs) { return version < rhs.version; }
+		bool operator<(const RemappedPage& rhs) const { return version < rhs.version; }
 
 		std::string toString() const {
 			return format("RemappedPage(%c: %s -> %s %s}",
@@ -1296,12 +1418,12 @@ public:
 			wait(store(self->headerPage, self->readHeaderPage(self, 0)));
 
 			// If the checksum fails for the header page, try to recover committed header backup from page 1
-			if (!self->headerPage.castTo<Page>()->verifyChecksum(0)) {
+			if (!self->headerPage->verifyChecksum(0)) {
 				TraceEvent(SevWarn, "DWALPagerRecoveringHeader").detail("Filename", self->filename);
 
 				wait(store(self->headerPage, self->readHeaderPage(self, 1)));
 
-				if (!self->headerPage.castTo<Page>()->verifyChecksum(1)) {
+				if (!self->headerPage->verifyChecksum(1)) {
 					if (g_network->isSimulated()) {
 						// TODO: Detect if process is being restarted and only throw injected if so?
 						throw io_error().asInjectedFault();
@@ -1389,8 +1511,8 @@ public:
 
 			// Create queues
 			self->freeList.create(self, self->newLastPageID(), "FreeList");
-			self->delayedFreeList.create(self, self->newLastPageID(), "delayedFreeList");
-			self->remapQueue.create(self, self->newLastPageID(), "remapQueue");
+			self->delayedFreeList.create(self, self->newLastPageID(), "DelayedFreeList");
+			self->remapQueue.create(self, self->newLastPageID(), "RemapQueue");
 
 			// The first commit() below will flush the queues and update the queue states in the header,
 			// but since the queues will not be used between now and then their states will not change.
@@ -1419,13 +1541,15 @@ public:
 		return Void();
 	}
 
-	Reference<IPage> newPageBuffer() override {
-		return Reference<IPage>(new FastAllocatedPage(logicalPageSize, physicalPageSize));
+	Reference<ArenaPage> newPageBuffer() override {
+		return Reference<ArenaPage>(new ArenaPage(logicalPageSize, physicalPageSize));
 	}
 
 	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
 	// For a given pager instance, separate calls to this function must return the same value.
-	int getUsablePageSize() const override { return logicalPageSize - sizeof(FastAllocatedPage::Checksum); }
+	// TODO: This is abstraction breaking.  This should probably be stored as a member, calculated once on construction
+	// by creating an ArenaPage and getting its usable size.
+	int getUsablePageSize() const override { return logicalPageSize - sizeof(ArenaPage::Checksum); }
 
 	// Get a new, previously available page ID.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to, until it is returned to the pager via freePage()
@@ -1467,7 +1591,7 @@ public:
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
 
-	Future<Void> writePhysicalPage(PhysicalPageID pageID, Reference<IPage> page, bool header = false) {
+	Future<Void> writePhysicalPage(PhysicalPageID pageID, Reference<ArenaPage> page, bool header = false) {
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysical"),
@@ -1476,7 +1600,7 @@ public:
 
 		++g_redwoodMetrics.pagerDiskWrite;
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
-		((Page*)page.getPtr())->updateChecksum(pageID);
+		page->updateChecksum(pageID);
 
 		if (memoryOnly) {
 			return Void();
@@ -1497,11 +1621,11 @@ public:
 		return f;
 	}
 
-	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<IPage> page) {
+	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
 		return writePhysicalPage(pageID, page, true);
 	}
 
-	void updatePage(LogicalPageID pageID, Reference<IPage> data) override {
+	void updatePage(LogicalPageID pageID, Reference<ArenaPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
 		PageCacheEntry& cacheEntry = pageCache.get(pageID, true, true);
@@ -1543,7 +1667,7 @@ public:
 		cacheEntry.readFuture = data;
 	}
 
-	Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data, Version v) override {
+	Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<ArenaPage> data, Version v) override {
 		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageID).c_str(), v);
 		Future<LogicalPageID> f = map(newPageID(), [=](LogicalPageID newPageID) {
 			updatePage(newPageID, data);
@@ -1638,9 +1762,9 @@ public:
 	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
-	ACTOR static Future<Reference<IPage>> readPhysicalPage(DWALPager* self,
-	                                                       PhysicalPageID pageID,
-	                                                       bool header = false) {
+	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
+	                                                           PhysicalPageID pageID,
+	                                                           bool header = false) {
 		ASSERT(!self->memoryOnly);
 		++g_redwoodMetrics.pagerDiskRead;
 
@@ -1648,8 +1772,8 @@ public:
 			wait(delay(0, TaskPriority::DiskRead));
 		}
 
-		state Reference<IPage> page =
-		    header ? Reference<IPage>(new FastAllocatedPage(smallestPhysicalBlock, smallestPhysicalBlock))
+		state Reference<ArenaPage> page =
+		    header ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock, smallestPhysicalBlock))
 		           : self->newPageBuffer();
 		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p\n",
 		             self->filename.c_str(),
@@ -1667,8 +1791,7 @@ public:
 
 		// Header reads are checked explicitly during recovery
 		if (!header) {
-			Page* p = (Page*)page.getPtr();
-			if (!p->verifyChecksum(pageID)) {
+			if (!page->verifyChecksum(pageID)) {
 				debug_printf(
 				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageID).c_str());
 				Error e = checksum_failed();
@@ -1677,27 +1800,43 @@ public:
 				    .detail("PageID", pageID)
 				    .detail("PageSize", self->physicalPageSize)
 				    .detail("Offset", pageID * self->physicalPageSize)
-				    .detail("CalculatedChecksum", p->calculateChecksum(pageID))
-				    .detail("ChecksumInPage", p->getChecksum())
+				    .detail("CalculatedChecksum", page->calculateChecksum(pageID))
+				    .detail("ChecksumInPage", page->getChecksum())
 				    .error(e);
+				ASSERT(false);
 				throw e;
 			}
 		}
 		return page;
 	}
 
-	static Future<Reference<IPage>> readHeaderPage(DWALPager* self, PhysicalPageID pageID) {
+	static Future<Reference<ArenaPage>> readHeaderPage(DWALPager* self, PhysicalPageID pageID) {
 		return readPhysicalPage(self, pageID, true);
 	}
 
-	// Reads the most recent version of pageID, either previously committed or written using updatePage() in the current
-	// commit
-	Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable, bool noHit = false) override {
+	bool tryEvictPage(LogicalPageID logicalID, Version v) {
+		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
+		return pageCache.tryEvict(physicalID);
+	}
+
+	// Reads the most recent version of pageID, either previously committed or written using updatePage()
+	// in the current commit
+	// If cacheable is false then if fromCache is valid it will be set to true if the page is from cache, otherwise
+	// false. If cacheable is true, fromCache is ignored as the result is automatically from cache by virtue of being
+	// cacheable.
+	Future<Reference<ArenaPage>> readPage(LogicalPageID pageID,
+	                                      bool cacheable,
+	                                      bool noHit = false,
+	                                      bool* fromCache = nullptr) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		if (!cacheable) {
 			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
 			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageID);
+			if (fromCache != nullptr) {
+				*fromCache = pCacheEntry != nullptr;
+			}
+
 			if (pCacheEntry != nullptr) {
 				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageID).c_str());
 				return pCacheEntry->readFuture;
@@ -1725,14 +1864,14 @@ public:
 		return cacheEntry.readFuture;
 	}
 
-	Future<Reference<IPage>> readPageAtVersion(LogicalPageID pageID, Version v, bool cacheable, bool noHit) {
+	PhysicalPageID getPhysicalPageID(LogicalPageID pageID, Version v) {
 		auto i = remappedPages.find(pageID);
 
 		if (i != remappedPages.end()) {
 			auto j = i->second.upper_bound(v);
 			if (j != i->second.begin()) {
 				--j;
-				debug_printf("DWALPager(%s) op=readAtVersionRemapped %s @%" PRId64 " -> %s\n",
+				debug_printf("DWALPager(%s) op=lookupRemapped %s @%" PRId64 " -> %s\n",
 				             filename.c_str(),
 				             toString(pageID).c_str(),
 				             v,
@@ -1741,13 +1880,22 @@ public:
 				ASSERT(pageID != invalidLogicalPageID);
 			}
 		} else {
-			debug_printf("DWALPager(%s) op=readAtVersionNotRemapped %s @%" PRId64 " (not remapped)\n",
+			debug_printf("DWALPager(%s) op=lookupNotRemapped %s @%" PRId64 " (not remapped)\n",
 			             filename.c_str(),
 			             toString(pageID).c_str(),
 			             v);
 		}
 
-		return readPage(pageID, cacheable, noHit);
+		return (PhysicalPageID)pageID;
+	}
+
+	Future<Reference<ArenaPage>> readPageAtVersion(LogicalPageID logicalID,
+	                                               Version v,
+	                                               bool cacheable,
+	                                               bool noHit,
+	                                               bool* fromCache) {
+		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
+		return readPage(physicalID, cacheable, noHit, fromCache);
 	}
 
 	// Get snapshot as of the most recent committed version of the pager
@@ -1854,7 +2002,7 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<IPage> data = wait(self->readPage(p.newPageID, false, true));
+			Reference<ArenaPage> data = wait(self->readPage(p.newPageID, false, true));
 
 			// Write the data to the original page so it can be read using its original pageID
 			self->updatePage(p.originalPageID, data);
@@ -1963,15 +2111,26 @@ public:
 		wait(self->remapQueue.flush());
 
 		// Flush the free list and delayed free list queues together as they are used by freePage() and newPageID()
+		// Since each queue's preFlush can create work for the other, we must see preflush return false for both
+		// twice in row.
+		state int clear = 0;
 		loop {
 			state bool freeBusy = wait(self->freeList.preFlush());
 			state bool delayedFreeBusy = wait(self->delayedFreeList.preFlush());
+			debug_printf("DWALPager(%s) flushQueues freeBusy=%d delayedFreeBusy=%d\n",
+			             self->filename.c_str(),
+			             freeBusy,
+			             delayedFreeBusy);
 
 			// Once preFlush() returns false for both queues then there are no more operations pending
 			// on either queue.  If preFlush() returns true for either queue in one loop execution then
 			// it could have generated new work for itself or the other queue.
 			if (!freeBusy && !delayedFreeBusy) {
-				break;
+				if (++clear == 2) {
+					break;
+				}
+			} else {
+				clear = 0;
 			}
 		}
 		self->freeList.finishFlush();
@@ -2111,8 +2270,9 @@ public:
 		// known, if each commit delayed entries that were freeable were shuffled from the delayed free queue to the
 		// free queue, but this doesn't seem necessary.
 		int64_t reusable = (freeList.numEntries + delayedFreeList.numEntries) * physicalPageSize;
+		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
-		return StorageBytes(free, total, pagerSize - reusable, free + reusable);
+		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
 	}
 
 	ACTOR static Future<Void> getUserPageCount_cleanup(DWALPager* self) {
@@ -2189,7 +2349,7 @@ private:
 #pragma pack(pop)
 
 	struct PageCacheEntry {
-		Future<Reference<IPage>> readFuture;
+		Future<Reference<ArenaPage>> readFuture;
 		Future<Void> writeFuture;
 
 		bool initialized() const { return readFuture.isValid(); }
@@ -2216,12 +2376,12 @@ private:
 	int64_t pageCacheBytes;
 
 	// The header will be written to / read from disk as a smallestPhysicalBlock sized chunk.
-	Reference<IPage> headerPage;
+	Reference<ArenaPage> headerPage;
 	Header* pHeader;
 
 	int desiredPageSize;
 
-	Reference<IPage> lastCommittedHeaderPage;
+	Reference<ArenaPage> lastCommittedHeaderPage;
 	Header* pLastCommittedHeader;
 
 	std::string filename;
@@ -2275,13 +2435,18 @@ public:
 	  : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {}
 	~DWALPagerSnapshot() override {}
 
-	Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool noHit) override {
+	Future<Reference<const ArenaPage>> getPhysicalPage(LogicalPageID pageID,
+	                                                   bool cacheable,
+	                                                   bool noHit,
+	                                                   bool* fromCache) override {
 		if (expired.isError()) {
 			throw expired.getError();
 		}
-		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit),
-		           [=](Reference<IPage> p) { return Reference<const IPage>(p); });
+		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit, fromCache),
+		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
+
+	bool tryEvictPage(LogicalPageID id) override { return pager->tryEvictPage(id, version); }
 
 	Key getMetaKey() const override { return metaKey; }
 
@@ -2706,7 +2871,8 @@ struct RedwoodRecordRef {
 			case 1:
 				return *(int32_t*)r;
 			case 2:
-				return (((int64_t)((int48_t*)r)->high) << 16) | (((int48_t*)r)->low & 0xFFFF);
+				return ((int64_t) static_cast<uint32_t>(reinterpret_cast<const int48_t*>(r)->high) << 16) |
+				       (((int48_t*)r)->low & 0xFFFF);
 			case 3:
 			default:
 				return *(int64_t*)r;
@@ -2864,7 +3030,8 @@ struct RedwoodRecordRef {
 
 	bool operator>=(const RedwoodRecordRef& rhs) const { return compare(rhs) >= 0; }
 
-	// Worst case overhead means to assu
+	// Worst case overhead means to assume that either the prefix length or the suffix length
+	// could contain the full key size
 	int deltaSize(const RedwoodRecordRef& base, int skipLen, bool worstCaseOverhead) const {
 		int prefixLen = getCommonPrefixLen(base, skipLen);
 		int keySuffixLen = key.size() - prefixLen;
@@ -3056,21 +3223,21 @@ struct BTreePage {
 	}
 };
 
-static void makeEmptyRoot(Reference<IPage> page) {
+static void makeEmptyRoot(Reference<ArenaPage> page) {
 	BTreePage* btpage = (BTreePage*)page->begin();
 	btpage->height = 1;
 	btpage->kvBytes = 0;
 	btpage->tree().build(page->size(), nullptr, nullptr, nullptr, nullptr);
 }
 
-BTreePage::BinaryTree::Cursor getCursor(const Reference<const IPage>& page) {
+BTreePage::BinaryTree::Cursor getCursor(const Reference<const ArenaPage>& page) {
 	return ((BTreePage::BinaryTree::Mirror*)page->userData)->getCursor();
 }
 
 struct BoundaryRefAndPage {
 	Standalone<RedwoodRecordRef> lowerBound;
-	Reference<IPage> firstPage;
-	std::vector<Reference<IPage>> extPages;
+	Reference<ArenaPage> firstPage;
+	std::vector<Reference<ArenaPage>> extPages;
 
 	std::string toString() const {
 		return format("[%s, %d pages]", lowerBound.toString().c_str(), extPages.size() + (firstPage ? 1 : 0));
@@ -3282,7 +3449,7 @@ public:
 
 		loop {
 			state int toPop = SERVER_KNOBS->REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES;
-			state std::vector<std::pair<LazyClearQueueEntry, Future<Reference<const IPage>>>> entries;
+			state std::vector<std::pair<LazyClearQueueEntry, Future<Reference<const ArenaPage>>>> entries;
 			entries.reserve(toPop);
 
 			// Take up to batchSize pages from front of queue
@@ -3294,14 +3461,14 @@ public:
 				}
 				// Start reading the page, without caching
 				entries.push_back(
-				    std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, nullptr, nullptr, true)));
+				    std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, nullptr, nullptr, true, false)));
 
 				--toPop;
 			}
 
 			state int i;
 			for (i = 0; i < entries.size(); ++i) {
-				Reference<const IPage> p = wait(entries[i].second);
+				Reference<const ArenaPage> p = wait(entries[i].second);
 				const LazyClearQueueEntry& entry = entries[i].first;
 				const BTreePage& btPage = *(BTreePage*)p->begin();
 				auto& metrics = g_redwoodMetrics.level(btPage.height);
@@ -3384,7 +3551,7 @@ public:
 			self->m_header.root.set(newRoot, sizeof(headerSpace) - sizeof(m_header));
 			self->m_header.height = 1;
 			++latest;
-			Reference<IPage> page = self->m_pager->newPageBuffer();
+			Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 			makeEmptyRoot(page);
 			self->m_pager->updatePage(id, page);
 			self->m_pager->setCommitVersion(latest);
@@ -3722,9 +3889,10 @@ private:
 	std::unordered_map<LogicalPageID, ParentInfo> parents;
 	ParentInfoMapT childUpdateTracker;
 
-	// MetaKey changes size so allocate space for it to expand into
+	// MetaKey changes size so allocate space for it to expand into. FIXME: Steve is fixing this to be dynamically
+	// sized.
 	union {
-		uint8_t headerSpace[sizeof(MetaKey) + sizeof(LogicalPageID) * 30];
+		uint8_t headerSpace[sizeof(MetaKey) + sizeof(LogicalPageID) * 200];
 		MetaKey m_header;
 	};
 
@@ -3732,7 +3900,193 @@ private:
 	Future<int> m_lazyClearActor;
 	bool m_lazyClearStop;
 
-	// Writes entries to 1 or more pages and return a vector of boundary keys with their IPage(s)
+	// Describes a range of a vector of records that should be built into a BTreePage
+	struct PageToBuild {
+		PageToBuild(int index, int blockSize)
+		  : startIndex(index), count(0), pageSize(blockSize),
+		    bytesLeft(blockSize - sizeof(BTreePage) - sizeof(BTreePage::BinaryTree)),
+		    largeDeltaTree(pageSize > BTreePage::BinaryTree::SmallSizeLimit), blockSize(blockSize), blockCount(1),
+		    kvBytes(0) {}
+
+		int startIndex; // Index of the first record
+		int count; // Number of records added to the page
+		int pageSize; // Page size required to hold a BTreePage of the added records, which is a multiple of blockSize
+		int bytesLeft; // Bytes in pageSize that are unused by the BTreePage so far
+		bool largeDeltaTree; // Whether or not the DeltaTree in the generated page is in the 'large' size range
+		int blockSize; // Base block size by which pageSize can be incremented
+		int blockCount; // The number of blocks in pageSize
+		int kvBytes; // The amount of user key/value bytes added to the page
+
+		// Number of bytes used by the generated/serialized BTreePage
+		int size() const { return pageSize - bytesLeft; }
+
+		// Used fraction of pageSize bytes
+		double usedFraction() const { return (double)size() / pageSize; }
+
+		// Unused fraction of pageSize bytes
+		double slackFraction() const { return (double)bytesLeft / pageSize; }
+
+		// Fraction of PageSize in use by key or value string bytes, disregarding all overhead including string sizes
+		double kvFraction() const { return (double)kvBytes / pageSize; }
+
+		// Index of the last record to be included in this page
+		int lastIndex() const { return endIndex() - 1; }
+
+		// Index of the first record NOT included in this page
+		int endIndex() const { return startIndex + count; }
+
+		std::string toString() const {
+			return format(
+			    "{start=%d count=%d used %d/%d bytes (%.2f%% slack) kvBytes=%d blocks=%d blockSize=%d large=%d}",
+			    startIndex,
+			    count,
+			    size(),
+			    pageSize,
+			    slackFraction() * 100,
+			    kvBytes,
+			    blockCount,
+			    blockSize,
+			    largeDeltaTree);
+		}
+
+		// Move an item from a to b if a has 2 or more items and the item fits in b
+		// a and b must be consecutive pages from the same array of records
+		static bool shiftItem(PageToBuild& a, PageToBuild& b, int deltaSize, int kvBytes) {
+			if (a.count < 2) {
+				return false;
+			}
+
+			// Size of the nodes in A and B, respectively
+			int aNodeSize = deltaSize + BTreePage::BinaryTree::Node::headerSize(a.largeDeltaTree);
+			int bNodeSize = deltaSize + BTreePage::BinaryTree::Node::headerSize(b.largeDeltaTree);
+
+			if (b.bytesLeft < bNodeSize) {
+				return false;
+			}
+
+			--a.count;
+			++b.count;
+			--b.startIndex;
+			a.bytesLeft += aNodeSize;
+			b.bytesLeft -= bNodeSize;
+			a.kvBytes -= kvBytes;
+			b.kvBytes += kvBytes;
+
+			return true;
+		}
+
+		// Try to add a record of the given delta size to the page.
+		// If force is true, the page will be expanded to make the record fit if needed.
+		// Return value is whether or not the record was added to the page.
+		bool addRecord(const RedwoodRecordRef& rec, int deltaSize, bool force) {
+			int nodeSize = deltaSize + BTreePage::BinaryTree::Node::headerSize(largeDeltaTree);
+
+			// If the record doesn't fit and the page can't be expanded then return false
+			if (nodeSize > bytesLeft && !force) {
+				return false;
+			}
+
+			++count;
+			bytesLeft -= nodeSize;
+			kvBytes += rec.kvBytes();
+
+			// If needed, expand page so that record fits.
+			// This is a loop because the first expansion may increase per-node overhead which could
+			// then require a second expansion.
+			while (bytesLeft < 0) {
+				int newBlocks = (-bytesLeft + blockSize - 1) / blockSize;
+				int extraSpace = newBlocks * blockSize;
+				blockCount += newBlocks;
+				bytesLeft += extraSpace;
+				pageSize += extraSpace;
+
+				// If size has moved into the "large" range then every node has gotten bigger so adjust bytesLeft
+				if (!largeDeltaTree && pageSize > BTreePage::BinaryTree::SmallSizeLimit) {
+					largeDeltaTree = true;
+					bytesLeft -= (count * BTreePage::BinaryTree::LargeTreePerNodeExtraOverhead);
+				}
+			}
+			return true;
+		}
+	};
+
+	// Scans a vector of records and decides on page split points, returning a vector of 1+ pages to build
+	static std::vector<PageToBuild> splitPages(const RedwoodRecordRef* lowerBound,
+	                                           const RedwoodRecordRef* upperBound,
+	                                           int prefixLen,
+	                                           VectorRef<RedwoodRecordRef> records,
+	                                           int height,
+	                                           int blockSize) {
+		debug_printf("splitPages height=%d records=%d lowerBound=%s upperBound=%s\n",
+		             height,
+		             records.size(),
+		             lowerBound->toString(false).c_str(),
+		             upperBound->toString(false).c_str());
+		ASSERT(!records.empty());
+
+		// Leaves can have just one record if it's large, but internal pages should have at least 4
+		int minRecords = height == 1 ? 1 : 4;
+		double maxSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_MAX_SLACK;
+		std::vector<PageToBuild> pages;
+
+		// deltaSizes contains pair-wise delta sizes for [lowerBound, records..., upperBound]
+		std::vector<int> deltaSizes(records.size() + 1);
+		deltaSizes.front() = records.front().deltaSize(*lowerBound, prefixLen, true);
+		deltaSizes.back() = records.back().deltaSize(*upperBound, prefixLen, true);
+		for (int i = 1; i < records.size(); ++i) {
+			deltaSizes[i] = records[i].deltaSize(records[i - 1], prefixLen, true);
+		}
+
+		PageToBuild p(0, blockSize);
+
+		for (int i = 0; i < records.size(); ++i) {
+			bool force = p.count < minRecords || p.slackFraction() > maxSlack;
+			debug_printf(
+			    "  before addRecord  i=%d  records=%d  deltaSize=%d  kvSize=%d  force=%d  pageToBuild=%s  record=%s",
+			    i,
+			    records.size(),
+			    deltaSizes[i],
+			    records[i].kvBytes(),
+			    force,
+			    p.toString().c_str(),
+			    records[i].toString(height == 1).c_str());
+
+			if (!p.addRecord(records[i], deltaSizes[i], force)) {
+				pages.push_back(p);
+				p = PageToBuild(p.endIndex(), blockSize);
+				p.addRecord(records[i], deltaSizes[i], true);
+			}
+		}
+
+		if (p.count > 0) {
+			pages.push_back(p);
+		}
+
+		debug_printf("  Before shift: %s\n", ::toString(pages).c_str());
+
+		// If page count is > 1, try to balance slack between last two pages
+		// The buggify disables this balancing as this will result in more edge
+		// cases of pages with very few records.
+		if (pages.size() > 1 && !BUGGIFY) {
+			PageToBuild& a = pages[pages.size() - 2];
+			PageToBuild& b = pages.back();
+
+			// While the last page page has too much slack and the second to last page
+			// has more than the minimum record count, shift a record from the second
+			// to last page to the last page.
+			while (b.slackFraction() > maxSlack && a.count > minRecords) {
+				int i = a.lastIndex();
+				if (!PageToBuild::shiftItem(a, b, deltaSizes[i], records[i].kvBytes())) {
+					break;
+				}
+				debug_printf("  After shifting i=%d: a=%s b=%s\n", i, a.toString().c_str(), b.toString().c_str());
+			}
+		}
+
+		return pages;
+	}
+
+	// Writes entries to 1 or more pages and return a vector of boundary keys with their ArenaPage(s)
 	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(VersionedBTree* self,
 	                                                                        const RedwoodRecordRef* lowerBound,
 	                                                                        const RedwoodRecordRef* upperBound,
@@ -3741,197 +4095,130 @@ private:
 	                                                                        Version v,
 	                                                                        BTreePageIDRef previousID) {
 		ASSERT(entries.size() > 0);
+
 		state Standalone<VectorRef<RedwoodRecordRef>> records;
 
-		// This is how much space for the binary tree exists in the page, after the header
-		state int blockSize = self->m_blockSize;
-		state int pageSize = blockSize - sizeof(BTreePage);
-		state int pageFillTarget = pageSize * SERVER_KNOBS->REDWOOD_PAGE_REBUILD_FILL_FACTOR;
-		state int blockCount = 1;
+		// All records share the prefix shared by the lower and upper boundaries
+		state int prefixLen = lowerBound->getCommonPrefixLen(*upperBound);
 
-		state int kvBytes = 0;
-		state int compressedBytes = BTreePage::BinaryTree::emptyTreeSize();
-		state bool largeTree = false;
-
-		state int start = 0;
-		state int i = 0;
-		// The common prefix length between the first and last records are common to all records
-		state int skipLen = entries.front().getCommonPrefixLen(entries.back());
-
-		// Leaves can have just one record if it's large, but internal pages should have at least 4
-		state int minimumEntries = (height == 1 ? 1 : 4);
+		state std::vector<PageToBuild> pagesToBuild =
+		    splitPages(lowerBound, upperBound, prefixLen, entries, height, self->m_blockSize);
+		debug_printf("splitPages returning %s\n", toString(pagesToBuild).c_str());
 
 		// Lower bound of the page being added to
 		state RedwoodRecordRef pageLowerBound = lowerBound->withoutValue();
 		state RedwoodRecordRef pageUpperBound;
 
-		while (1) {
-			// While there are still entries to add and the page isn't full enough, add an entry
-			while (i < entries.size() && (i - start < minimumEntries || compressedBytes < pageFillTarget)) {
-				const RedwoodRecordRef& entry = entries[i];
+		state int pageIndex;
 
-				// Get delta from previous record or page lower boundary if this is the first item in a page
-				const RedwoodRecordRef& base = (i == start) ? pageLowerBound : entries[i - 1];
+		for (pageIndex = 0; pageIndex < pagesToBuild.size(); ++pageIndex) {
+			auto& p = pagesToBuild[pageIndex];
+			debug_printf("building page %d of %d %s\n", pageIndex + 1, pagesToBuild.size(), p.toString().c_str());
+			ASSERT(p.count != 0);
 
-				// All record pairs in entries have skipLen bytes in common with each other, but for i == 0 the base is
-				// lowerBound
-				int skip = i == 0 ? 0 : skipLen;
+			// For internal pages, skip first entry if child link is null.  Such links only exist
+			// to maintain a borrow-able prefix for the previous subtree after a subtree deletion.
+			// If the null link falls on a new page post-split, then the pageLowerBound of the page
+			// being built now will serve as the previous subtree's upper boundary as it is the same
+			// key as entries[p.startIndex] and there is no need to actually store the null link in
+			// the new page.
+			if (height != 1 && !entries[p.startIndex].value.present()) {
+				p.kvBytes -= entries[p.startIndex].key.size();
+				++p.startIndex;
+				--p.count;
+				debug_printf("Skipping first null record, new count=%d\n", p.count);
 
-				// In a delta tree, all common prefix bytes that can be borrowed, will be, but not necessarily
-				// by the same records during the linear estimate of the built page size.  Since the key suffix bytes
-				// and therefore the key prefix lengths can be distributed differently in the balanced tree, worst case
-				// overhead for the delta size must be assumed.
-				int deltaSize = entry.deltaSize(base, skip, true);
-
-				int nodeSize = BTreePage::BinaryTree::Node::headerSize(largeTree) + deltaSize;
-				debug_printf("Adding %3d of %3lu (i=%3d) klen %4d  vlen %5d  nodeSize %5d  deltaSize %5d  page usage: "
-				             "%d/%d (%.2f%%)  record=%s\n",
-				             i + 1,
-				             entries.size(),
-				             i,
-				             entry.key.size(),
-				             entry.value.orDefault(StringRef()).size(),
-				             nodeSize,
-				             deltaSize,
-				             compressedBytes,
-				             pageSize,
-				             (float)compressedBytes / pageSize * 100,
-				             entry.toString(height == 1).c_str());
-
-				// While the node doesn't fit, expand the page.
-				// This is a loop because if the page size moves into "large" range for DeltaTree
-				// then the overhead will increase, which could require another page expansion.
-				int spaceAvailable = pageSize - compressedBytes;
-				if (nodeSize > spaceAvailable) {
-					// Figure out how many additional whole or partial blocks are needed
-					// newBlocks = ceil ( additional space needed / block size)
-					int newBlocks = 1 + (nodeSize - spaceAvailable - 1) / blockSize;
-					int newPageSize = pageSize + (newBlocks * blockSize);
-
-					// If we've moved into "large" page range for the delta tree then add additional overhead required
-					if (!largeTree && newPageSize > BTreePage::BinaryTree::SmallSizeLimit) {
-						largeTree = true;
-						// Add increased overhead for the current node to nodeSize
-						nodeSize += BTreePage::BinaryTree::LargeTreePerNodeExtraOverhead;
-						// Add increased overhead for all previously added nodes
-						compressedBytes += (i - start) * BTreePage::BinaryTree::LargeTreePerNodeExtraOverhead;
-
-						// Update calculations above made with previous overhead sizes
-						spaceAvailable = pageSize - compressedBytes;
-						newBlocks = 1 + (nodeSize - spaceAvailable - 1) / blockSize;
-						newPageSize = pageSize + (newBlocks * blockSize);
-					}
-
-					blockCount += newBlocks;
-					pageSize = newPageSize;
-					pageFillTarget = pageSize * SERVER_KNOBS->REDWOOD_PAGE_REBUILD_FILL_FACTOR;
+				// If the page is now empty then it must be the last page in pagesToBuild, otherwise there would
+				// be more than 1 item since internal pages need to have multiple children. While there is no page
+				// to be built here, a record must be added to the output set because the upper boundary of the last
+				// page built does not match the upper boundary of the original page that this call to writePages() is
+				// replacing.  Put another way, the upper boundary of the rightmost page of the page set that was just
+				// built does not match the upper boundary of the original page that the page set is replacing, so
+				// adding the extra null link fixes this.
+				if (p.count == 0) {
+					ASSERT(pageIndex == pagesToBuild.size() - 1);
+					records.push_back_deep(records.arena(), pageUpperBound);
+					break;
 				}
-
-				kvBytes += entry.kvBytes();
-				compressedBytes += nodeSize;
-				++i;
-			}
-
-			// Flush the accumulated records to a page
-			state int nextStart = i;
-			// If we are building internal pages and there is a record after this page (index nextStart) but it has an
-			// empty childPage value then skip it. It only exists to serve as an upper boundary for a child page that
-			// has not been rewritten in the current commit, and that purpose will now be served by the upper bound of
-			// the page we are now building.
-			if (height != 1 && nextStart < entries.size() && !entries[nextStart].value.present()) {
-				++nextStart;
 			}
 
 			// Use the next entry as the upper bound, or upperBound if there are no more entries beyond this page
-			pageUpperBound = (i == entries.size()) ? upperBound->withoutValue() : entries[i].withoutValue();
+			int endIndex = p.endIndex();
+			bool lastPage = endIndex == entries.size();
+			pageUpperBound = lastPage ? upperBound->withoutValue() : entries[endIndex].withoutValue();
 
 			// If this is a leaf page, and not the last one to be written, shorten the upper boundary
-			state bool isLastPage = (nextStart == entries.size());
-			if (!isLastPage && height == 1) {
-				int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[i - 1], 0);
+			if (!lastPage && height == 1) {
+				int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[endIndex - 1], prefixLen);
 				pageUpperBound.truncate(commonPrefix + 1);
 			}
 
-			state std::vector<Reference<IPage>> pages;
+			state std::vector<Reference<ArenaPage>> pages;
 			BTreePage* btPage;
 
-			int capacity = blockSize * blockCount;
-			if (blockCount == 1) {
-				Reference<IPage> page = self->m_pager->newPageBuffer();
+			if (p.blockCount == 1) {
+				Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 				btPage = (BTreePage*)page->mutate();
 				pages.push_back(std::move(page));
 			} else {
-				ASSERT(blockCount > 1);
-				btPage = (BTreePage*)new uint8_t[capacity];
+				ASSERT(p.blockCount > 1);
+				btPage = (BTreePage*)new uint8_t[p.pageSize];
 			}
 
 			btPage->height = height;
-			btPage->kvBytes = kvBytes;
+			btPage->kvBytes = p.kvBytes;
 
-			debug_printf(
-			    "Building tree.  start=%d  i=%d  count=%d  page usage: %d/%d (%.2f%%) bytes\nlower: %s\nupper: %s\n",
-			    start,
-			    i,
-			    i - start,
-			    compressedBytes,
-			    pageSize,
-			    (float)compressedBytes / pageSize * 100,
-			    pageLowerBound.toString(false).c_str(),
-			    pageUpperBound.toString(false).c_str());
+			debug_printf("Building tree for %s\nlower: %s\nupper: %s\n",
+			             p.toString().c_str(),
+			             pageLowerBound.toString(false).c_str(),
+			             pageUpperBound.toString(false).c_str());
 
-			int written =
-			    btPage->tree().build(pageSize, &entries[start], &entries[i], &pageLowerBound, &pageUpperBound);
-			if (written > pageSize) {
-				debug_printf("ERROR:  Wrote %d bytes to %d byte page (%d blocks). recs %d  kvBytes %d  compressed %d\n",
+			int deltaTreeSpace = p.pageSize - sizeof(BTreePage);
+			state int written = btPage->tree().build(
+			    deltaTreeSpace, &entries[p.startIndex], &entries[endIndex], &pageLowerBound, &pageUpperBound);
+
+			if (written > deltaTreeSpace) {
+				debug_printf("ERROR:  Wrote %d bytes to page %s deltaTreeSpace=%d\n",
 				             written,
-				             pageSize,
-				             blockCount,
-				             i - start,
-				             kvBytes,
-				             compressedBytes);
-				fprintf(stderr,
-				        "ERROR:  Wrote %d bytes to %d byte page (%d blocks). recs %d  kvBytes %d  compressed %d\n",
-				        written,
-				        pageSize,
-				        blockCount,
-				        i - start,
-				        kvBytes,
-				        compressedBytes);
+				             p.toString().c_str(),
+				             deltaTreeSpace);
+				TraceEvent(SevError, "RedwoodDeltaTreeOverflow")
+				    .detail("PageSize", p.pageSize)
+				    .detail("BytesWritten", written);
 				ASSERT(false);
 			}
 
 			auto& metrics = g_redwoodMetrics.level(btPage->height);
 			metrics.pageBuild += 1;
-			metrics.pageBuildExt += blockCount - 1;
-			metrics.buildFillPct += (double)written / capacity;
-			metrics.buildStoredPct += (double)btPage->kvBytes / capacity;
-			metrics.buildItemCount += btPage->tree().numItems;
+			metrics.pageBuildExt += p.blockCount - 1;
+			metrics.buildFillPct += p.usedFraction();
+			metrics.buildStoredPct += p.kvFraction();
+			metrics.buildItemCount += p.count;
 
 			// Create chunked pages
 			// TODO: Avoid copying page bytes, but this is not trivial due to how pager checksums are currently handled.
-			if (blockCount != 1) {
+			if (p.blockCount != 1) {
 				// Mark the slack in the page buffer as defined
-				VALGRIND_MAKE_MEM_DEFINED(((uint8_t*)btPage) + written, (blockCount * blockSize) - written);
+				VALGRIND_MAKE_MEM_DEFINED(((uint8_t*)btPage) + written, (p.blockCount * p.blockSize) - written);
 				const uint8_t* rptr = (const uint8_t*)btPage;
-				for (int b = 0; b < blockCount; ++b) {
-					Reference<IPage> page = self->m_pager->newPageBuffer();
-					memcpy(page->mutate(), rptr, blockSize);
-					rptr += blockSize;
+				for (int b = 0; b < p.blockCount; ++b) {
+					Reference<ArenaPage> page = self->m_pager->newPageBuffer();
+					memcpy(page->mutate(), rptr, p.blockSize);
+					rptr += p.blockSize;
 					pages.push_back(std::move(page));
 				}
 				delete[](uint8_t*) btPage;
 			}
 
 			// Write this btree page, which is made of 1 or more pager pages.
-			state int p;
 			state BTreePageIDRef childPageID;
+			state int k;
 
 			// If we are only writing 1 page and it has the same BTreePageID size as the original then try to reuse the
 			// LogicalPageIDs in previousID and try to update them atomically.
-			bool isOnlyPage = isLastPage && (start == 0);
-			if (isOnlyPage && previousID.size() == pages.size()) {
-				for (p = 0; p < pages.size(); ++p) {
-					LogicalPageID id = wait(self->m_pager->atomicUpdatePage(previousID[p], pages[p], v));
+			if (pagesToBuild.size() == 1 && previousID.size() == pages.size()) {
+				for (k = 0; k < pages.size(); ++k) {
+					LogicalPageID id = wait(self->m_pager->atomicUpdatePage(previousID[k], pages[k], v));
 					childPageID.push_back(records.arena(), id);
 				}
 			} else {
@@ -3942,31 +4229,25 @@ private:
 				if (records.empty()) {
 					self->freeBTreePage(previousID, v);
 				}
-				for (p = 0; p < pages.size(); ++p) {
+				for (k = 0; k < pages.size(); ++k) {
 					LogicalPageID id = wait(self->m_pager->newPageID());
-					self->m_pager->updatePage(id, pages[p]);
+					self->m_pager->updatePage(id, pages[k]);
 					childPageID.push_back(records.arena(), id);
 				}
 			}
 
 			wait(yield());
 
-			debug_printf("Flushing %s  lastPage=%d  original=%s  start=%d  i=%d  count=%d  page usage: %d/%d (%.2f%%) "
-			             "bytes\nlower: %s\nupper: %s\n",
-			             toString(childPageID).c_str(),
-			             isLastPage,
-			             toString(previousID).c_str(),
-			             start,
-			             i,
-			             i - start,
-			             compressedBytes,
-			             pageSize,
-			             (float)compressedBytes / pageSize * 100,
-			             pageLowerBound.toString(false).c_str(),
-			             pageUpperBound.toString(false).c_str());
-
 			if (REDWOOD_DEBUG) {
-				for (int j = start; j < i; ++j) {
+				auto& p = pagesToBuild[pageIndex];
+				debug_printf("Wrote %s original=%s deltaTreeSize=%d for %s\nlower: %s\nupper: %s\n",
+				             toString(childPageID).c_str(),
+				             toString(previousID).c_str(),
+				             written,
+				             p.toString().c_str(),
+				             pageLowerBound.toString(false).c_str(),
+				             pageUpperBound.toString(false).c_str());
+				for (int j = p.startIndex; j < p.endIndex(); ++j) {
 					debug_printf(" %3d: %s\n", j, entries[j].toString(height == 1).c_str());
 				}
 				ASSERT(pageLowerBound.key <= pageUpperBound.key);
@@ -3978,25 +4259,7 @@ private:
 			// records.arena() above
 			records.back().setChildPage(childPageID);
 
-			if (isLastPage) {
-				break;
-			}
-
-			start = nextStart;
-			kvBytes = 0;
-			compressedBytes = BTreePage::BinaryTree::emptyTreeSize();
 			pageLowerBound = pageUpperBound;
-		}
-
-		// If we're writing internal pages, if the last entry was the start of a new page and had an empty child link
-		// then it would not be written to a page. This means that the upper boundary for the the page set being built
-		// is not the upper bound of the final page in that set, so it must be added to the output set to preserve the
-		// decodability of the subtree to its left. Fortunately, this is easy to detect because the loop above would
-		// exit before i has reached the item count.
-		if (height != 1 && i != entries.size()) {
-			debug_printf("Adding dummy record to avoid writing useless page containing only one null link: %s\n",
-			             pageUpperBound.toString(false).c_str());
-			records.push_back_deep(records.arena(), pageUpperBound);
 		}
 
 		return records;
@@ -4021,46 +4284,24 @@ private:
 		return records;
 	}
 
-	class SuperPage : public IPage, ReferenceCounted<SuperPage>, public FastAllocated<SuperPage> {
-	public:
-		SuperPage(std::vector<Reference<const IPage>> pages) {
-			int blockSize = pages.front()->size();
-			m_size = blockSize * pages.size();
-			m_data = new uint8_t[m_size];
-			uint8_t* wptr = m_data;
-			for (auto& p : pages) {
-				ASSERT(p->size() == blockSize);
-				memcpy(wptr, p->begin(), blockSize);
-				wptr += blockSize;
-			}
+	// Try to evict a BTree page from the pager cache.
+	// Returns true if, at the end of the call, the page is no longer in cache,
+	// so the caller can assume its ArenaPage reference is the only one.
+	bool tryEvictPage(IPagerSnapshot* pager, BTreePageIDRef id) {
+		// If it's an oversized page, currently it cannot be in the cache
+		if (id.size() > 0) {
+			return true;
 		}
+		return pager->tryEvictPage(id.front());
+	}
 
-		~SuperPage() override { delete[] m_data; }
-
-		Reference<IPage> clone() const override {
-			return Reference<IPage>(new SuperPage({ Reference<const IPage>::addRef(this) }));
-		}
-
-		void addref() const override { ReferenceCounted<SuperPage>::addref(); }
-
-		void delref() const override { ReferenceCounted<SuperPage>::delref(); }
-
-		int size() const override { return m_size; }
-
-		uint8_t const* begin() const override { return m_data; }
-
-		uint8_t* mutate() override { return m_data; }
-
-	private:
-		uint8_t* m_data;
-		int m_size;
-	};
-
-	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot,
-	                                                     BTreePageIDRef id,
-	                                                     const RedwoodRecordRef* lowerBound,
-	                                                     const RedwoodRecordRef* upperBound,
-	                                                     bool forLazyClear = false) {
+	ACTOR static Future<Reference<const ArenaPage>> readPage(Reference<IPagerSnapshot> snapshot,
+	                                                         BTreePageIDRef id,
+	                                                         const RedwoodRecordRef* lowerBound,
+	                                                         const RedwoodRecordRef* upperBound,
+	                                                         bool forLazyClear = false,
+	                                                         bool cacheable = true,
+	                                                         bool* fromCache = nullptr) {
 		if (!forLazyClear) {
 			debug_printf("readPage() op=read %s @%" PRId64 " lower=%s upper=%s\n",
 			             toString(id).c_str(),
@@ -4074,20 +4315,25 @@ private:
 
 		wait(yield());
 
-		state Reference<const IPage> page;
+		state Reference<const ArenaPage> page;
 
 		if (id.size() == 1) {
-			Reference<const IPage> p = wait(snapshot->getPhysicalPage(id.front(), !forLazyClear, false));
-			page = p;
+			Reference<const ArenaPage> p = wait(snapshot->getPhysicalPage(id.front(), cacheable, false, fromCache));
+			page = std::move(p);
 		} else {
 			ASSERT(!id.empty());
-			std::vector<Future<Reference<const IPage>>> reads;
+			std::vector<Future<Reference<const ArenaPage>>> reads;
 			for (auto& pageID : id) {
-				reads.push_back(snapshot->getPhysicalPage(pageID, !forLazyClear, false));
+				reads.push_back(snapshot->getPhysicalPage(pageID, cacheable, false));
 			}
-			std::vector<Reference<const IPage>> pages = wait(getAll(reads));
+			std::vector<Reference<const ArenaPage>> pages = wait(getAll(reads));
 			// TODO:  Cache reconstituted super pages somehow, perhaps with help from the Pager.
-			page = Reference<const IPage>(new SuperPage(pages));
+			page = ArenaPage::concatPages(pages);
+
+			// In the current implementation, SuperPages are never present in the cache
+			if (fromCache != nullptr) {
+				*fromCache = false;
+			}
 		}
 
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
@@ -4097,7 +4343,7 @@ private:
 		metrics.pageReadExt += (id.size() - 1);
 
 		if (!forLazyClear && page->userData == nullptr) {
-			debug_printf("readPage() Creating Reader for %s @%" PRId64 " lower=%s upper=%s\n",
+			debug_printf("readPage() Creating Mirror for %s @%" PRId64 " lower=%s upper=%s\n",
 			             toString(id).c_str(),
 			             snapshot->getVersion(),
 			             lowerBound->toString(false).c_str(),
@@ -4111,7 +4357,7 @@ private:
 			             pTreePage->toString(false, id, snapshot->getVersion(), lowerBound, upperBound).c_str());
 		}
 
-		return page;
+		return std::move(page);
 	}
 
 	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef id) {
@@ -4135,7 +4381,7 @@ private:
 	ACTOR static Future<BTreePageIDRef> updateBTreePage(VersionedBTree* self,
 	                                                    BTreePageIDRef oldID,
 	                                                    Arena* arena,
-	                                                    Reference<IPage> page,
+	                                                    Reference<ArenaPage> page,
 	                                                    Version writeVersion) {
 		state BTreePageIDRef newID;
 		newID.resize(*arena, oldID.size());
@@ -4144,11 +4390,11 @@ private:
 			LogicalPageID id = wait(self->m_pager->atomicUpdatePage(oldID.front(), page, writeVersion));
 			newID.front() = id;
 		} else {
-			state std::vector<Reference<IPage>> pages;
+			state std::vector<Reference<ArenaPage>> pages;
 			const uint8_t* rptr = page->begin();
 			int bytesLeft = page->size();
 			while (bytesLeft > 0) {
-				Reference<IPage> p = self->m_pager->newPageBuffer();
+				Reference<ArenaPage> p = self->m_pager->newPageBuffer();
 				int blockSize = p->size();
 				memcpy(p->mutate(), rptr, blockSize);
 				rptr += blockSize;
@@ -4169,8 +4415,8 @@ private:
 	}
 
 	// Copy page and initialize a Mirror for reading it.
-	Reference<IPage> cloneForUpdate(Reference<const IPage> page) {
-		Reference<IPage> newPage = page->clone();
+	Reference<ArenaPage> cloneForUpdate(Reference<const ArenaPage> page) {
+		Reference<ArenaPage> newPage = page->cloneContents();
 
 		auto oldMirror = (const BTreePage::BinaryTree::Mirror*)page->userData;
 		auto newBTPage = (BTreePage*)newPage->mutate();
@@ -4294,11 +4540,12 @@ private:
 
 		std::string toString() const {
 			std::string s;
-			s += format("SubtreeSlice: addr=%p skipLen=%d subtreeCleared=%d childrenChanged=%d\n",
+			s += format("SubtreeSlice: addr=%p skipLen=%d subtreeCleared=%d childrenChanged=%d inPlaceUpdate=%d\n",
 			            this,
 			            skipLen,
 			            childrenChanged && newLinks.empty(),
-			            childrenChanged);
+			            childrenChanged,
+			            inPlaceUpdate);
 			s += format("SubtreeLower: %s\n", subtreeLowerBound->toString(false).c_str());
 			s += format(" DecodeLower: %s\n", decodeLowerBound->toString(false).c_str());
 			s += format(" DecodeUpper: %s\n", decodeUpperBound->toString(false).c_str());
@@ -4481,8 +4728,9 @@ private:
 		state Reference<FlowLock> commitReadLock = self->m_commitReadLock;
 		wait(commitReadLock->take());
 		state FlowLock::Releaser readLock(*commitReadLock);
-		state Reference<const IPage> page =
-		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound));
+		state bool fromCache = false;
+		state Reference<const ArenaPage> page = wait(
+		    readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound, false, false, &fromCache));
 		readLock.release();
 
 		state BTreePage* btPage = (BTreePage*)page->begin();
@@ -4494,11 +4742,13 @@ private:
 		// though it is awkward to reason about.
 		state bool tryToUpdate = btPage->tree().numItems > 0 && update->boundariesNormal();
 
-		// If trying to update the page, we need to clone it so we don't modify the original.
+		// If trying to update the page and the page reference points into the cache,
+		// we need to clone it so we don't modify the original version of the page.
 		// TODO: Refactor DeltaTree::Mirror so it can be shared between different versions of pages
-		if (tryToUpdate) {
+		if (tryToUpdate && fromCache) {
 			page = self->cloneForUpdate(page);
 			btPage = (BTreePage*)page->begin();
+			fromCache = false;
 		}
 
 		debug_printf(
@@ -4739,7 +4989,7 @@ private:
 				} else {
 					// Otherwise update it.
 					BTreePageIDRef newID = wait(self->updateBTreePage(
-					    self, rootID, &update->newLinks.arena(), page.castTo<IPage>(), writeVersion));
+					    self, rootID, &update->newLinks.arena(), page.castTo<ArenaPage>(), writeVersion));
 
 					update->updatedInPlace(newID, btPage, newID.size() * self->m_blockSize);
 					debug_printf(
@@ -4979,6 +5229,7 @@ private:
 			state bool detachChildren = (parentInfo->count > 2);
 			state bool forceUpdate = false;
 
+			// If no changes were made, but we should rewrite it to point directly to remapped child pages
 			if (!m.changesMade && detachChildren) {
 				debug_printf(
 				    "%s Internal page forced rewrite because at least %d children have been updated in-place.\n",
@@ -4986,12 +5237,17 @@ private:
 				    parentInfo->count);
 				forceUpdate = true;
 				if (!m.updating) {
-					page = self->cloneForUpdate(page);
-					cursor = getCursor(page);
-					btPage = (BTreePage*)page->begin();
-					m.btPage = btPage;
-					m.m = cursor.mirror;
 					m.updating = true;
+
+					// Copy the page before modification if the page references the cache
+					if (fromCache) {
+						page = self->cloneForUpdate(page);
+						cursor = getCursor(page);
+						btPage = (BTreePage*)page->begin();
+						m.btPage = btPage;
+						m.m = cursor.mirror;
+						fromCache = false;
+					}
 				}
 				++g_redwoodMetrics.level(btPage->height).forceUpdate;
 			}
@@ -5009,7 +5265,7 @@ private:
 					if (m.updating) {
 						// Page was updated in place (or being forced to be updated in place to update child page ids)
 						debug_printf(
-						    "%s Internal page modified in-place tryUpdate=%d forceUpdate=%d detachChildren=%d\n",
+						    "%s Internal page modified in-place tryToUpdate=%d forceUpdate=%d detachChildren=%d\n",
 						    context.c_str(),
 						    tryToUpdate,
 						    forceUpdate,
@@ -5045,7 +5301,7 @@ private:
 						}
 
 						BTreePageIDRef newID = wait(self->updateBTreePage(
-						    self, rootID, &update->newLinks.arena(), page.castTo<IPage>(), writeVersion));
+						    self, rootID, &update->newLinks.arena(), page.castTo<ArenaPage>(), writeVersion));
 						debug_printf(
 						    "%s commitSubtree(): Internal page updated in-place at version %s, new contents: %s\n",
 						    context.c_str(),
@@ -5171,7 +5427,7 @@ private:
 			if (all.newLinks.empty()) {
 				debug_printf("Writing new empty root.\n");
 				LogicalPageID newRootID = wait(self->m_pager->newPageID());
-				Reference<IPage> page = self->m_pager->newPageBuffer();
+				Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 				makeEmptyRoot(page);
 				self->m_header.height = 1;
 				self->m_pager->updatePage(newRootID, page);
@@ -5232,12 +5488,12 @@ public:
 		struct PageCursor : ReferenceCounted<PageCursor>, FastAllocated<PageCursor> {
 			Reference<PageCursor> parent;
 			BTreePageIDRef pageID; // Only needed for debugging purposes
-			Reference<const IPage> page;
+			Reference<const ArenaPage> page;
 			BTreePage::BinaryTree::Cursor cursor;
 
 			// id will normally reference memory owned by the parent, which is okay because a reference to the parent
 			// will be held in the cursor
-			PageCursor(BTreePageIDRef id, Reference<const IPage> page, Reference<PageCursor> parent = {})
+			PageCursor(BTreePageIDRef id, Reference<const ArenaPage> page, Reference<PageCursor> parent = {})
 			  : pageID(id), page(page), parent(parent), cursor(getCursor(page)) {}
 
 			PageCursor(const PageCursor& toCopy)
@@ -5256,7 +5512,7 @@ public:
 				next.moveNext();
 				const RedwoodRecordRef& rec = cursor.get();
 				BTreePageIDRef id = rec.getChildPage();
-				Future<Reference<const IPage>> child = readPage(pager, id, &rec, &next.getOrUpperBound());
+				Future<Reference<const ArenaPage>> child = readPage(pager, id, &rec, &next.getOrUpperBound());
 
 				// Read ahead siblings at level 2
 				// TODO:  Application of readAheadBytes is not taking into account the size of the current page or any
@@ -5274,7 +5530,7 @@ public:
 					} while (readAheadBytes > 0 && next.moveNext());
 				}
 
-				return map(child, [=](Reference<const IPage> page) {
+				return map(child, [=](Reference<const ArenaPage> page) {
 					return makeReference<PageCursor>(id, page, Reference<PageCursor>::addRef(this));
 				});
 			}
@@ -5350,8 +5606,8 @@ public:
 			}
 
 			// Otherwise read the root page
-			Future<Reference<const IPage>> root = readPage(pager, rootPageID, &dbBegin, &dbEnd);
-			return map(root, [=](Reference<const IPage> p) {
+			Future<Reference<const ArenaPage>> root = readPage(pager, rootPageID, &dbBegin, &dbEnd);
+			return map(root, [=](Reference<const ArenaPage> p) {
 				pageCursor = makeReference<PageCursor>(rootPageID, p);
 				return Void();
 			});
@@ -5491,17 +5747,19 @@ public:
 	// Holds references to all pages touched.
 	// All record references returned from it are valid until the cursor is destroyed.
 	class BTreeCursor {
-		Arena arena;
-		Reference<IPagerSnapshot> pager;
-		std::unordered_map<LogicalPageID, Reference<const IPage>> pages;
-		VersionedBTree* btree;
-		bool valid;
-
+	public:
 		struct PathEntry {
-			BTreePage* btPage;
+			Reference<const ArenaPage> page;
 			BTreePage::BinaryTree::Cursor cursor;
+
+			const BTreePage* btPage() const { return (BTreePage*)page->begin(); };
 		};
-		VectorRef<PathEntry> path;
+
+	private:
+		VersionedBTree* btree;
+		Reference<IPagerSnapshot> pager;
+		bool valid;
+		std::vector<PathEntry> path;
 
 	public:
 		BTreeCursor() {}
@@ -5514,7 +5772,7 @@ public:
 				r += format("[%d/%d: %s] ",
 				            i + 1,
 				            path.size(),
-				            path[i].cursor.valid() ? path[i].cursor.get().toString(path[i].btPage->isLeaf()).c_str()
+				            path[i].cursor.valid() ? path[i].cursor.get().toString(path[i].btPage()->isLeaf()).c_str()
 				                                   : "<invalid>");
 			}
 			if (!valid) {
@@ -5528,29 +5786,17 @@ public:
 
 		bool inRoot() const { return path.size() == 1; }
 
-		// Pop and return the page cursor at the end of the path.
-		// This is meant to enable range scans to consume the contents of a leaf page more efficiently.
-		// Can only be used when inRoot() is true.
-		BTreePage::BinaryTree::Cursor popPath() {
-			BTreePage::BinaryTree::Cursor c = path.back().cursor;
-			path.pop_back();
-			return c;
-		}
+		// To enable more efficient range scans, caller can read the lowest page
+		// of the cursor and pop it.
+		PathEntry& back() { return path.back(); }
+		void popPath() { path.pop_back(); }
 
 		Future<Void> pushPage(BTreePageIDRef id,
 		                      const RedwoodRecordRef& lowerBound,
 		                      const RedwoodRecordRef& upperBound) {
-			Reference<const IPage>& page = pages[id.front()];
-			if (page.isValid()) {
-				// The pager won't see this access so count it as a cache hit
-				++g_redwoodMetrics.pagerCacheHit;
-				path.push_back(arena, { (BTreePage*)page->begin(), getCursor(page) });
-				return Void();
-			}
 
-			return map(readPage(pager, id, &lowerBound, &upperBound), [this, &page, id](Reference<const IPage> p) {
-				page = p;
-				path.push_back(arena, { (BTreePage*)p->begin(), getCursor(p) });
+			return map(readPage(pager, id, &lowerBound, &upperBound), [this, id](Reference<const ArenaPage> p) {
+				path.push_back({ p, getCursor(p) });
 				return Void();
 			});
 		}
@@ -5566,7 +5812,7 @@ public:
 		Future<Void> init(VersionedBTree* btree_in, Reference<IPagerSnapshot> pager_in, BTreePageIDRef root) {
 			btree = btree_in;
 			pager = pager_in;
-			path.reserve(arena, 6);
+			path.reserve(6);
 			valid = false;
 			return pushPage(root, dbBegin, dbEnd);
 		}
@@ -5582,13 +5828,13 @@ public:
 		// to query.compare(cursor.get())
 		ACTOR Future<int> seek_impl(BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
 			state RedwoodRecordRef internalPageQuery = query.withMaxPageID();
-			self->path = self->path.slice(0, 1);
+			self->path.resize(1);
 			debug_printf(
 			    "seek(%s, %d) start cursor = %s\n", query.toString().c_str(), prefetchBytes, self->toString().c_str());
 
 			loop {
 				auto& entry = self->path.back();
-				if (entry.btPage->isLeaf()) {
+				if (entry.btPage()->isLeaf()) {
 					int cmp = entry.cursor.seek(query);
 					self->valid = entry.cursor.valid() && !entry.cursor.node->isDeleted();
 					debug_printf("seek(%s, %d) loop exit cmp=%d cursor=%s\n",
@@ -5612,7 +5858,7 @@ public:
 
 					// Prefetch siblings, at least prefetchBytes, at level 2 but without jumping to another level 2
 					// sibling
-					if (prefetchBytes != 0 && entry.btPage->height == 2) {
+					if (prefetchBytes != 0 && entry.btPage()->height == 2) {
 						auto c = entry.cursor;
 						bool fwd = prefetchBytes > 0;
 						prefetchBytes = abs(prefetchBytes);
@@ -5681,7 +5927,7 @@ public:
 				}
 
 				// Skip over internal page entries that do not link to child pages.  There should never be two in a row.
-				if (success && !entry.btPage->isLeaf() && !entry.cursor.get().value.present()) {
+				if (success && !entry.btPage()->isLeaf() && !entry.cursor.get().value.present()) {
 					success = forward ? entry.cursor.moveNext() : entry.cursor.movePrev();
 					ASSERT(!success || entry.cursor.get().value.present());
 				}
@@ -5697,14 +5943,14 @@ public:
 				}
 
 				// Move to parent
-				self->path = self->path.slice(0, self->path.size() - 1);
+				self->path.pop_back();
 			}
 
 			// While not on a leaf page, move down to get to one.
 			while (1) {
 				debug_printf("move%s() second loop cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
 				auto& entry = self->path.back();
-				if (entry.btPage->isLeaf()) {
+				if (entry.btPage()->isLeaf()) {
 					break;
 				}
 
@@ -6026,17 +6272,15 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
-	                                             int rowLimit = 1 << 30,
-	                                             int byteLimit = 1 << 30) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
 		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> readRange_impl(KeyValueStoreRedwoodUnversioned* self,
-	                                                               KeyRange keys,
-	                                                               int rowLimit,
-	                                                               int byteLimit) {
+	ACTOR static Future<RangeResult> readRange_impl(KeyValueStoreRedwoodUnversioned* self,
+	                                                KeyRange keys,
+	                                                int rowLimit,
+	                                                int byteLimit) {
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
@@ -6045,7 +6289,7 @@ public:
 		state FlowLock::Releaser releaser(*readLock);
 		++g_redwoodMetrics.opGetRange;
 
-		state Standalone<RangeResultRef> result;
+		state RangeResult result;
 		state int accumulatedBytes = 0;
 		ASSERT(byteLimit > 0);
 
@@ -6060,58 +6304,84 @@ public:
 			wait(cur.seekGTE(keys.begin, prefetchBytes));
 			while (cur.isValid()) {
 				// Read page contents without using waits
-				bool isRoot = cur.inRoot();
-				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
+				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
+
 				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
 				// > because both query end and page upper bound are exclusive of the query results and page contents,
 				// respectively
 				bool boundsCheck = leafCursor.upperBound() > keys.end;
+				// Whether or not any results from this page were added to results
+				bool usedPage = false;
+
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
 					if (boundsCheck && kv.key.compare(keys.end) >= 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
-					result.push_back_deep(result.arena(), kv);
+					result.push_back(result.arena(), kv);
+					usedPage = true;
 					if (--rowLimit == 0 || accumulatedBytes >= byteLimit) {
 						break;
 					}
 					leafCursor.moveNext();
 				}
+
+				// If the page was used, results must depend on the ArenaPage arena and the Mirror arena.
+				// This must be done after visiting all the results in case the Mirror arena changes.
+				if (usedPage) {
+					result.arena().dependsOn(leafCursor.mirror->arena);
+					result.arena().dependsOn(cur.back().page->getArena());
+				}
+
 				// Stop if the leaf cursor is still valid which means we hit a key or size limit or
-				// if we started in the root page
-				if (leafCursor.valid() || isRoot) {
+				// if the cursor is in the root page, in which case there are no more pages.
+				if (leafCursor.valid() || cur.inRoot()) {
 					break;
 				}
+				cur.popPath();
 				wait(cur.moveNext());
 			}
 		} else {
 			wait(cur.seekLT(keys.end, prefetchBytes));
 			while (cur.isValid()) {
 				// Read page contents without using waits
-				bool isRoot = cur.inRoot();
-				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
+				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
+
 				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
 				// < because both query begin and page lower bound are inclusive of the query results and page contents,
 				// respectively
 				bool boundsCheck = leafCursor.lowerBound() < keys.begin;
+				// Whether or not any results from this page were added to results
+				bool usedPage = false;
+
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
 					if (boundsCheck && kv.key.compare(keys.begin) < 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
-					result.push_back_deep(result.arena(), kv);
+					result.push_back(result.arena(), kv);
+					usedPage = true;
 					if (++rowLimit == 0 || accumulatedBytes >= byteLimit) {
 						break;
 					}
 					leafCursor.movePrev();
 				}
+
+				// If the page was used, results must depend on the ArenaPage arena and the Mirror arena.
+				// This must be done after visiting all the results in case the Mirror arena changes.
+				if (usedPage) {
+					result.arena().dependsOn(leafCursor.mirror->arena);
+					result.arena().dependsOn(cur.back().page->getArena());
+				}
+
 				// Stop if the leaf cursor is still valid which means we hit a key or size limit or
 				// if we started in the root page
-				if (leafCursor.valid() || isRoot) {
+				if (leafCursor.valid() || cur.inRoot()) {
 					break;
 				}
+				cur.popPath();
 				wait(cur.movePrev());
 			}
 		}
@@ -6137,8 +6407,13 @@ public:
 
 		wait(cur.seekGTE(key, 0));
 		if (cur.isValid() && cur.get().key == key) {
-			return cur.get().value.get();
+			// Return a Value whose arena depends on the source page arena
+			Value v;
+			v.arena().dependsOn(cur.back().page->getArena());
+			v.contents() = cur.get().value.get();
+			return v;
 		}
+
 		return Optional<Value>();
 	}
 
@@ -6146,32 +6421,15 @@ public:
 		return catchError(readValue_impl(this, key, debugID));
 	}
 
-	ACTOR static Future<Optional<Value>> readValuePrefix_impl(KeyValueStoreRedwoodUnversioned* self,
-	                                                          Key key,
-	                                                          int maxLength,
-	                                                          Optional<UID> debugID) {
-		state VersionedBTree::BTreeCursor cur;
-		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
-
-		state Reference<FlowLock> readLock = self->m_concurrentReads;
-		wait(readLock->take());
-		state FlowLock::Releaser releaser(*readLock);
-		++g_redwoodMetrics.opGet;
-
-		wait(cur.seekGTE(key, 0));
-		if (cur.isValid() && cur.get().key == key) {
-			Value v = cur.get().value.get();
-			int len = std::min(v.size(), maxLength);
-			return Value(v.substr(0, len));
-		}
-
-		return Optional<Value>();
-	}
-
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
 	                                        Optional<UID> debugID = Optional<UID>()) override {
-		return catchError(readValuePrefix_impl(this, key, maxLength, debugID));
+		return catchError(map(readValue_impl(this, key, debugID), [maxLength](Optional<Value> v) {
+			if (v.present() && v.get().size() > maxLength) {
+				v.get().contents() = v.get().substr(0, maxLength);
+			}
+			return v;
+		}));
 	}
 
 	~KeyValueStoreRedwoodUnversioned() override{};
@@ -6270,7 +6528,7 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	    "VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.printable().c_str(), end.printable().c_str());
 	wait(cur.seekGTE(start, 0));
 
-	state std::vector<KeyValue> results;
+	state Standalone<VectorRef<KeyValueRef>> results;
 
 	while (cur.isValid() && cur.get().key < end) {
 		// Find the next written kv pair that would be present at this version
@@ -6328,7 +6586,10 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 
 		ASSERT(errors == 0);
 
-		results.push_back(KeyValue(KeyValueRef(cur.get().key, cur.get().value.get())));
+		results.push_back(results.arena(), cur.get().toKeyValueRef());
+		results.arena().dependsOn(cur.back().cursor.mirror->arena);
+		results.arena().dependsOn(cur.back().page->getArena());
+
 		wait(cur.moveNext());
 	}
 
@@ -6367,7 +6628,7 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	// Now read the range from the tree in reverse order and compare to the saved results
 	wait(cur.seekLT(end, 0));
 
-	state std::vector<KeyValue>::const_reverse_iterator r = results.rbegin();
+	state std::reverse_iterator<const KeyValueRef*> r = results.rbegin();
 
 	while (cur.isValid() && cur.get().key >= start) {
 		if (r == results.rend()) {
@@ -7305,11 +7566,15 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		    { deterministicRandom()->randomInt(prev.k, next.k), deterministicRandom()->randomInt(prev.v, next.v) });
 	};
 
-	// Build a set of N unique items
+	// Build a set of N unique items, where no consecutive items are in the set, a requirement of the seek behavior tests.
 	std::set<IntIntPair> uniqueItems;
 	while (uniqueItems.size() < N) {
 		IntIntPair p = randomPair();
-		if (uniqueItems.count(p) == 0) {
+		auto nextP = p; // also check if next highest/lowest key is not in set
+		nextP.v++;
+		auto prevP = p;
+		prevP.v--;
+		if (uniqueItems.count(p) == 0 && uniqueItems.count(nextP) == 0 && uniqueItems.count(prevP) == 0) {
 			uniqueItems.insert(p);
 		}
 	}
@@ -7327,7 +7592,11 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	std::vector<IntIntPair> toDelete;
 	while (1) {
 		IntIntPair p = randomPair();
-		if (uniqueItems.count(p) == 0) {
+		auto nextP = p; // also check if next highest/lowest key is not in the set
+		nextP.v++;
+		auto prevP = p;
+		prevP.v--;
+		if (uniqueItems.count(p) == 0 && uniqueItems.count(nextP) == 0 && uniqueItems.count(prevP) == 0) {
 			if (!r.insert(p)) {
 				break;
 			};
@@ -7477,6 +7746,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 
 	// SeekLTE to the next possible int pair value after each element to make sure the base element is found
+	// Assumes no consecutive items are present in the set
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
@@ -7493,6 +7763,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 
 	// SeekGTE to the previous possible int pair value after each element to make sure the base element is found
+	// Assumes no consecutive items are present in the set
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
@@ -7528,6 +7799,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 
 	// SeekLTE to each element's next possible value, using each element as a hint
+	// Assumes no consecutive items are present in the set
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
@@ -7576,12 +7848,14 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 			pos = newPos;
 		}
 		double elapsed = timer() - start;
-		printf("Seek/skip test, jumpMax=%d, items=%d, oldSeek=%d useHint=%d:  Elapsed %f s\n",
+		printf("Seek/skip test, count=%d jumpMax=%d, items=%d, oldSeek=%d useHint=%d:  Elapsed %f seconds  %.2f M/s\n",
+		       count,
 		       jumpMax,
 		       items.size(),
 		       old,
 		       useHint,
-		       elapsed);
+		       elapsed,
+		       double(count) / elapsed / 1e6);
 	};
 
 	// Compare seeking to nearby elements with and without hints, using the old and new SeekLessThanOrEqual methods.
@@ -7667,6 +7941,27 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 	return Void();
 }
 
+// This test is only useful with Arena debug statements which show when aligned buffers are allocated and freed.
+TEST_CASE(":/redwood/pager/ArenaPage") {
+	Arena x;
+	printf("Making p\n");
+	Reference<ArenaPage> p(new ArenaPage(4096, 4096));
+	printf("Made p=%p\n", p->begin());
+	printf("Clearing p\n");
+	p.clear();
+	printf("Making p\n");
+	p = Reference<ArenaPage>(new ArenaPage(4096, 4096));
+	printf("Made p=%p\n", p->begin());
+	printf("Making x depend on p\n");
+	x.dependsOn(p->getArena());
+	printf("Clearing p\n");
+	p.clear();
+	printf("Clearing x\n");
+	x = Arena();
+	printf("Pointer should be freed\n");
+	return Void();
+}
+
 TEST_CASE("/redwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
@@ -7674,8 +7969,8 @@ TEST_CASE("/redwood/correctness/btree") {
 	state std::string fileName = params.get("fileName").orDefault("unittest_pageFile.redwood");
 	IPager2* pager;
 
-	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->coinflip());
-	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->coinflip());
+	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
+	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->random01() < 0.25);
 
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
@@ -7694,8 +7989,8 @@ TEST_CASE("/redwood/correctness/btree") {
 	    params.getDouble("clearSingleKeyProbability").orDefault(deterministicRandom()->random01());
 	state double clearPostSetProbability =
 	    params.getDouble("clearPostSetProbability").orDefault(deterministicRandom()->random01() * .1);
-	state double coldStartProbability = params.getDouble("coldStartProbability")
-	                                        .orDefault(pagerMemoryOnly ? 0 : (deterministicRandom()->random01() * 0.3));
+	state double coldStartProbability =
+	    params.getDouble("coldStartProbability").orDefault(pagerMemoryOnly ? 0 : (deterministicRandom()->random01()));
 	state double advanceOldVersionProbability =
 	    params.getDouble("advanceOldVersionProbability").orDefault(deterministicRandom()->random01());
 	state int64_t cacheSizeBytes =
@@ -7871,8 +8166,9 @@ TEST_CASE("/redwood/correctness/btree") {
 		    mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
 			// Wait for previous commit to finish
 			wait(commit);
-			printf(
-			    "Committed.  Next commit %d bytes, %" PRId64 " bytes.", mutationBytesThisCommit, mutationBytes.get());
+			printf("Last commit complete.  Next commit %d bytes, %" PRId64 " bytes committed so far.",
+			       mutationBytesThisCommit,
+			       mutationBytes.get() - mutationBytesThisCommit);
 			printf("  Stats:  Insert %.2f MB/s  ClearedKeys %.2f MB/s  Total %.2f\n",
 			       (keyBytesInserted.rate() + valueBytesInserted.rate()) / 1e6,
 			       keyBytesCleared.rate() / 1e6,
@@ -7891,7 +8187,8 @@ TEST_CASE("/redwood/correctness/btree") {
 			commit = map(btree->commit(), [=, &ops = totalPageOps](Void) {
 				// Update pager ops before clearing metrics
 				ops += g_redwoodMetrics.pageOps();
-				printf("PageOps %" PRId64 "/%" PRId64 " (%.2f%%) VerificationMapEntries %d/%d (%.2f%%)\n",
+				printf("Committed %s PageOps %" PRId64 "/%" PRId64 " (%.2f%%) VerificationMapEntries %d/%d (%.2f%%)\n",
+				       toString(v).c_str(),
 				       ops,
 				       targetPageOps,
 				       ops * 100.0 / targetPageOps,
@@ -7919,7 +8216,7 @@ TEST_CASE("/redwood/correctness/btree") {
 			mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 			// Recover from disk at random
-			if (!serialTest && deterministicRandom()->random01() < coldStartProbability) {
+			if (!pagerMemoryOnly && deterministicRandom()->random01() < coldStartProbability) {
 				printf("Recovering from disk after next commit.\n");
 
 				// Wait for outstanding commit
@@ -7942,8 +8239,11 @@ TEST_CASE("/redwood/correctness/btree") {
 				wait(btree->init());
 
 				Version v = btree->getLatestVersion();
+				printf("Recovered from disk.  Latest recovered version %" PRId64 " highest written version %" PRId64
+				       "\n",
+				       v,
+				       version);
 				ASSERT(v == version);
-				printf("Recovered from disk.  Latest version %" PRId64 "\n", v);
 
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
@@ -8050,12 +8350,12 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 
 	wait(success(pager->init()));
 	state LogicalPageID id = wait(pager->newPageID());
-	Reference<IPage> p = pager->newPageBuffer();
+	Reference<ArenaPage> p = pager->newPageBuffer();
 	memset(p->mutate(), (char)id, p->size());
 	pager->updatePage(id, p);
 	pager->setMetaKey(LiteralStringRef("asdfasdf"));
 	wait(pager->commit());
-	Reference<IPage> p2 = wait(pager->readPage(id, true));
+	Reference<ArenaPage> p2 = wait(pager->readPage(id, true));
 	printf("%s\n", StringRef(p2->begin(), p2->size()).toHexString().c_str());
 
 	// TODO: Verify reads, do more writes and reads to make this a real pager validator
@@ -8073,15 +8373,7 @@ TEST_CASE(":/redwood/performance/set") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	// If a test file is passed in by environment then don't write new data to it.
-	state bool reload = getenv("TESTFILE") == nullptr;
-	state std::string pagerFile = reload ? "unittest.redwood" : getenv("TESTFILE");
-
-	if (reload) {
-		printf("Deleting old test data\n");
-		deleteFile(pagerFile);
-	}
-
+	state std::string fileName = params.get("fileName").orDefault("unittest.redwood");
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
 	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
 	state int nodeCount = params.getInt("nodeCount").orDefault(1e9);
@@ -8098,6 +8390,12 @@ TEST_CASE(":/redwood/performance/set") {
 	state char lastKeyChar = params.get("lastKeyChar").orDefault("m")[0];
 	state Version remapCleanupWindow =
 	    params.getInt("remapCleanupWindow").orDefault(SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
+	state bool openExisting = params.getInt("openExisting").orDefault(0);
+	state bool insertRecords = !openExisting || params.getInt("insertRecords").orDefault(0);
+	state int concurrentSeeks = params.getInt("concurrentSeeks").orDefault(64);
+	state int concurrentScans = params.getInt("concurrentScans").orDefault(64);
+	state int seeks = params.getInt("seeks").orDefault(1000000);
+	state int scans = params.getInt("scans").orDefault(20000);
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
@@ -8113,10 +8411,23 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
 	printf("KeyLexicon '%c' to '%c'\n", firstKeyChar, lastKeyChar);
 	printf("remapCleanupWindow: %" PRId64 "\n", remapCleanupWindow);
+	printf("concurrentScans: %d\n", concurrentScans);
+	printf("concurrentSeeks: %d\n", concurrentSeeks);
+	printf("seeks: %d\n", seeks);
+	printf("scans: %d\n", scans);
+	printf("fileName: %s\n", fileName.c_str());
+	printf("openExisting: %d\n", openExisting);
+	printf("insertRecords: %d\n", insertRecords);
 
-	DWALPager* pager = new DWALPager(pageSize, pagerFile, pageCacheBytes, remapCleanupWindow);
-	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
+	if (!openExisting) {
+		printf("Deleting old test data\n");
+		deleteFile(fileName);
+	}
+
+	DWALPager* pager = new DWALPager(pageSize, fileName, pageCacheBytes, remapCleanupWindow);
+	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
+	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
 	state int64_t kvBytesThisCommit = 0;
 	state int64_t kvBytesTotal = 0;
@@ -8128,7 +8439,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state double intervalStart = timer();
 	state double start = intervalStart;
 
-	if (reload) {
+	if (insertRecords) {
 		while (kvBytesTotal < kvBytesTarget) {
 			wait(yield());
 
@@ -8201,52 +8512,57 @@ TEST_CASE(":/redwood/performance/set") {
 		printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n",
 		       kvBytesTotal / 1e6,
 		       kvBytesTotal / (timer() - start) / 1e6);
+		printf("StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 	}
 
-	int seeks = 1e6;
 	printf("Warming cache with seeks\n");
-	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
-	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
-	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
+	for (int x = 0; x < concurrentSeeks; ++x) {
+		actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
+	}
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
-	state int ops = 10000;
-
 	printf("Serial scans with adaptive readAhead...\n");
-	actors.add(randomScans(btree, ops, 50, -1, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, -1, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 3 pages...\n");
-	actors.add(randomScans(btree, ops, 50, 12000, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, 12000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 2 pages...\n");
-	actors.add(randomScans(btree, ops, 50, 8000, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, 8000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 1 page...\n");
-	actors.add(randomScans(btree, ops, 50, 4000, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, 4000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans...\n");
-	actors.add(randomScans(btree, ops, 50, 0, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, 0, firstKeyChar, lastKeyChar));
+	wait(actors.signalAndReset());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+
+	printf("Parallel scans, concurrency=%d, no readAhead ...\n", concurrentScans);
+	for (int x = 0; x < concurrentScans; ++x) {
+		actors.add(randomScans(btree, scans / concurrentScans, 50, 0, firstKeyChar, lastKeyChar));
+	}
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial seeks...\n");
-	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
+	actors.add(randomSeeks(btree, seeks, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
-	printf("Parallel seeks...\n");
-	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
-	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
-	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
+	printf("Parallel seeks, concurrency=%d ...\n", concurrentSeeks);
+	for (int x = 0; x < concurrentSeeks; ++x) {
+		actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
+	}
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
@@ -8394,14 +8710,6 @@ struct KVSource {
 		return format("{prefixLen=%d prefixes=%d format=%s}", prefixLen, numPrefixes(), ::toString(desc).c_str());
 	}
 };
-
-std::string toString(const StorageBytes& sb) {
-	return format("{%.2f MB total, %.2f MB free, %.2f MB available, %.2f MB used}",
-	              sb.total / 1e6,
-	              sb.free / 1e6,
-	              sb.available / 1e6,
-	              sb.used / 1e6);
-}
 
 ACTOR Future<StorageBytes> getStableStorageBytes(IKeyValueStore* kvs) {
 	state StorageBytes sb = kvs->getStorageBytes();
@@ -8687,7 +8995,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 		KeyRangeRef range = source.getKeyRangeRef(singlePrefix, suffixSize);
 		int rowLim = (deterministicRandom()->randomInt(0, 2) != 0) ? rowLimit : -rowLimit;
 
-		Standalone<RangeResultRef> result = wait(kvs->readRange(range, rowLim));
+		RangeResult result = wait(kvs->readRange(range, rowLim));
 
 		recordsRead += result.size();
 		bytesRead += result.size() * recordSize;

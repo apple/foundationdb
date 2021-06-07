@@ -42,6 +42,7 @@
 #include "fdbserver/ProxyCommitData.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/RestoreUtil.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -1430,11 +1431,26 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	return Void();
 }
 
+// Add tss mapping data to the reply, if any of the included storage servers have a TSS pair
+void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
+                        ProxyCommitData* commitData,
+                        std::unordered_set<UID>& included,
+                        UID ssId) {
+	if (!included.count(ssId)) {
+		auto mappingItr = commitData->tssMapping.find(ssId);
+		if (mappingItr != commitData->tssMapping.end()) {
+			included.insert(ssId);
+			reply.resultsTssMapping.push_back(*mappingItr);
+		}
+	}
+}
+
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
+	std::unordered_set<UID> tssMappingsIncluded;
 	GetKeyServerLocationsReply rep;
 	if (!req.end.present()) {
 		auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin)
@@ -1443,6 +1459,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 		ssis.reserve(r.value().src_info.size());
 		for (auto& it : r.value().src_info) {
 			ssis.push_back(it->interf);
+			maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 		}
 		rep.results.push_back(std::make_pair(r.range(), ssis));
 	} else if (!req.reverse) {
@@ -1454,6 +1471,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
+				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
 			rep.results.push_back(std::make_pair(r.range(), ssis));
 			count++;
@@ -1466,6 +1484,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
+				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
 			rep.results.push_back(std::make_pair(r.range(), ssis));
 			if (r == commitData->keyInfo.ranges().begin()) {
@@ -1511,8 +1530,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 			GetStorageServerRejoinInfoReply rep;
 			rep.version = commitData->version;
 			rep.tag = decodeServerTagValue(commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get());
-			Standalone<RangeResultRef> history =
-			    commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
+			RangeResult history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
 			for (int i = history.size() - 1; i >= 0; i--) {
 				rep.history.push_back(
 				    std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
@@ -1936,18 +1954,18 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 				if (txnSequences.size() == maxSequence) {
 					state KeyRange txnKeys = allKeys;
-					Standalone<RangeResultRef> UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
+					RangeResult UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
 					state std::map<Tag, UID> tag_uid;
 					for (const KeyValueRef kv : UIDtoTagMap) {
 						tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 					}
 					loop {
 						wait(yield());
-						Standalone<RangeResultRef> data = commitData.txnStateStore
-						                                      ->readRange(txnKeys,
-						                                                  SERVER_KNOBS->BUGGIFIED_ROW_LIMIT,
-						                                                  SERVER_KNOBS->APPLY_MUTATION_BYTES)
-						                                      .get();
+						RangeResult data = commitData.txnStateStore
+						                       ->readRange(txnKeys,
+						                                   SERVER_KNOBS->BUGGIFIED_ROW_LIMIT,
+						                                   SERVER_KNOBS->APPLY_MUTATION_BYTES)
+						                       .get();
 						if (!data.size())
 							break;
 						((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);

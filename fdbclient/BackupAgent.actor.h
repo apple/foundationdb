@@ -294,7 +294,7 @@ public:
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
 	                        bool lockDB = true,
-	                        bool incrementalBackupOnly = false,
+	                        bool onlyAppyMutationLogs = false,
 	                        bool inconsistentSnapshotOnly = false,
 	                        Version beginVersion = -1);
 	Future<Version> restore(Database cx,
@@ -308,7 +308,7 @@ public:
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
 	                        bool lockDB = true,
-	                        bool incrementalBackupOnly = false,
+	                        bool onlyAppyMutationLogs = false,
 	                        bool inconsistentSnapshotOnly = false,
 	                        Version beginVersion = -1) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
@@ -324,8 +324,8 @@ public:
 		               addPrefix,
 		               removePrefix,
 		               lockDB,
-		               incrementalBackupOnly,
-					   inconsistentSnapshotOnly,
+		               onlyAppyMutationLogs,
+		               inconsistentSnapshotOnly,
 		               beginVersion);
 	}
 	Future<Version> atomicRestore(Database cx,
@@ -593,10 +593,10 @@ public:
 	Reference<FutureBucket> futureBucket;
 };
 
-typedef std::pair<Standalone<RangeResultRef>, Version> RangeResultWithVersion;
+using RangeResultWithVersion = std::pair<RangeResult, Version>;
 
 struct RCGroup {
-	Standalone<RangeResultRef> items;
+	RangeResult items;
 	Version version;
 	uint64_t groupKey;
 

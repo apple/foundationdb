@@ -313,6 +313,10 @@ struct UnreadableWorkload : TestWorkload {
 			state bool snapshot;
 			state KeySelectorRef begin;
 			state KeySelectorRef end;
+			state bool bypassUnreadable = deterministicRandom()->coinflip();
+			if (bypassUnreadable) {
+				tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
+			}
 
 			setMap[normalKeys.begin] = ValueRef();
 			setMap[normalKeys.end] = ValueRef();
@@ -360,7 +364,7 @@ struct UnreadableWorkload : TestWorkload {
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
-					ErrorOr<Standalone<RangeResultRef>> value =
+					ErrorOr<RangeResult> value =
 					    wait(errorOr(tr.getRange(range, CLIENT_KNOBS->TOO_MANY, snapshot, reverse)));
 
 					if (snapshot)
@@ -377,6 +381,9 @@ struct UnreadableWorkload : TestWorkload {
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);
+						if (bypassUnreadable) {
+							tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
+						}
 						arena = Arena();
 
 						setMap[normalKeys.begin] = ValueRef();
@@ -393,15 +400,14 @@ struct UnreadableWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
 					//TraceEvent("RYWT_GetRangeBefore").detail("Reverse", reverse).detail("Begin", begin.toString()).detail("End", end.toString()).detail("Limit", limit);
-					ErrorOr<Standalone<RangeResultRef>> value =
-					    wait(errorOr(tr.getRange(begin, end, limit, snapshot, reverse)));
+					ErrorOr<RangeResult> value = wait(errorOr(tr.getRange(begin, end, limit, snapshot, reverse)));
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
 					bool isUnreadable = value.isError() && value.getError().code() == error_code_accessed_unreadable;
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
 						/*
-						Standalone<RangeResultRef> result = value.get();
+						RangeResult result = value.get();
 						TraceEvent("RYWT_GetKeySelRangeOk")
 						    .detail("Begin", begin.toString())
 						    .detail("End", end.toString())
@@ -422,6 +428,9 @@ struct UnreadableWorkload : TestWorkload {
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);
+						if (bypassUnreadable) {
+							tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
+						}
 						arena = Arena();
 
 						setMap[normalKeys.begin] = ValueRef();
@@ -441,7 +450,7 @@ struct UnreadableWorkload : TestWorkload {
 
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
 						//TraceEvent("RYWT_Get").detail("Key", printable(key)).detail("IsUnreadable", value.isError());
-						if (snapshot) {
+						if (snapshot || bypassUnreadable) {
 							ASSERT(!value.isError());
 						} else {
 							ASSERT(unreadableMap[key] == value.isError());
@@ -451,6 +460,9 @@ struct UnreadableWorkload : TestWorkload {
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);
+						if (bypassUnreadable) {
+							tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
+						}
 						arena = Arena();
 
 						setMap[normalKeys.begin] = ValueRef();
