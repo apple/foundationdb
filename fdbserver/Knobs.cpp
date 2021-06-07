@@ -266,10 +266,6 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	init( DD_REMOVE_STORE_ENGINE_DELAY,                         60.0 ); if( randomize && BUGGIFY ) DD_REMOVE_STORE_ENGINE_DELAY =  deterministicRandom()->random01() * 60.0;
 
-	// Redwood Storage Engine
-	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT,                   30 );
-	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN,                      0 );
-
 	// KeyValueStore SQLITE
 	init( CLEAR_BUFFER_SIZE,                                   20000 );
 	init( READ_VALUE_TIME_ESTIMATE,                           .00005 );
