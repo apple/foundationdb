@@ -261,14 +261,16 @@ class LocalConfigurationImpl {
 				state ConfigBroadcastFollowerGetChangesReply changesReply =
 				    wait(broadcaster.getChanges.getReply(ConfigBroadcastFollowerGetChangesRequest{
 				        self->lastSeenVersion, self->configKnobOverrides.getConfigClassSet() }));
-				TraceEvent(SevDebug, "LocalConfigGotChanges", self->id); // TODO: Add more fields
+				TraceEvent(SevDebug, "LocalConfigGotChanges", self->id)
+				    .detail("Size", changesReply.changes.size())
+				    .detail("Version", changes.version);
 				wait(self->addChanges(changesReply.changes, changesReply.mostRecentVersion));
 			} catch (Error& e) {
 				if (e.code() == error_code_version_already_compacted) {
-					// TODO: Collect stats
 					state ConfigBroadcastFollowerGetSnapshotReply snapshotReply = wait(broadcaster.getSnapshot.getReply(
 					    ConfigBroadcastFollowerGetSnapshotRequest{ self->configKnobOverrides.getConfigClassSet() }));
 					ASSERT_GT(snapshotReply.version, self->lastSeenVersion);
+					++self->snapshots;
 					wait(setSnapshot(self, std::move(snapshotReply.snapshot), snapshotReply.version));
 				} else {
 					throw e;
