@@ -1858,21 +1858,12 @@ public:
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
-	// If cacheable is false then if fromCache is valid it will be set to true if the page is from cache, otherwise
-	// false. If cacheable is true, fromCache is ignored as the result is automatically from cache by virtue of being
-	// cacheable.
-	Future<Reference<ArenaPage>> readPage(LogicalPageID pageID,
-	                                      bool cacheable,
-	                                      bool noHit = false,
-	                                      bool* fromCache = nullptr) override {
+	Future<Reference<ArenaPage>> readPage(LogicalPageID pageID, bool cacheable, bool noHit = false) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		if (!cacheable) {
 			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
 			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageID);
-			if (fromCache != nullptr) {
-				*fromCache = pCacheEntry != nullptr;
-			}
 
 			if (pCacheEntry != nullptr) {
 				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageID).c_str());
@@ -1926,13 +1917,9 @@ public:
 		return (PhysicalPageID)pageID;
 	}
 
-	Future<Reference<ArenaPage>> readPageAtVersion(LogicalPageID logicalID,
-	                                               Version v,
-	                                               bool cacheable,
-	                                               bool noHit,
-	                                               bool* fromCache) {
+	Future<Reference<ArenaPage>> readPageAtVersion(LogicalPageID logicalID, Version v, bool cacheable, bool noHit) {
 		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
-		return readPage(physicalID, cacheable, noHit, fromCache);
+		return readPage(physicalID, cacheable, noHit);
 	}
 
 	// Get snapshot as of the most recent committed version of the pager
@@ -2473,14 +2460,11 @@ public:
 	  : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {}
 	~DWALPagerSnapshot() override {}
 
-	Future<Reference<const ArenaPage>> getPhysicalPage(LogicalPageID pageID,
-	                                                   bool cacheable,
-	                                                   bool noHit,
-	                                                   bool* fromCache) override {
+	Future<Reference<const ArenaPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool noHit) override {
 		if (expired.isError()) {
 			throw expired.getError();
 		}
-		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit, fromCache),
+		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit),
 		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
 
@@ -3389,8 +3373,7 @@ public:
 
 	VersionedBTree(IPager2* pager, std::string name)
 	  : m_pager(pager), m_writeVersion(invalidVersion), m_lastCommittedVersion(invalidVersion), m_pBuffer(nullptr),
-	    m_commitReadLock(new FlowLock(SERVER_KNOBS->REDWOOD_COMMIT_CONCURRENT_READS)), m_name(name), m_pHeader(nullptr),
-	    m_headerSpace(0) {
+	    m_name(name), m_pHeader(nullptr), m_headerSpace(0) {
 
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -3834,7 +3817,6 @@ private:
 	Version m_writeVersion;
 	Version m_lastCommittedVersion;
 	Version m_newOldestVersion;
-	Reference<FlowLock> m_commitReadLock;
 	Future<Void> m_latestCommit;
 	Future<Void> m_init;
 	std::string m_name;
@@ -4251,8 +4233,7 @@ private:
 	ACTOR static Future<Reference<const ArenaPage>> readPage(Reference<IPagerSnapshot> snapshot,
 	                                                         BTreePageIDRef id,
 	                                                         bool forLazyClear = false,
-	                                                         bool cacheable = true,
-	                                                         bool* fromCache = nullptr) {
+	                                                         bool cacheable = true) {
 
 		debug_printf("readPage() op=read%s %s @%" PRId64 "\n",
 		             forLazyClear ? "ForDeferredClear" : "",
@@ -4262,7 +4243,7 @@ private:
 		state Reference<const ArenaPage> page;
 
 		if (id.size() == 1) {
-			Reference<const ArenaPage> p = wait(snapshot->getPhysicalPage(id.front(), cacheable, false, fromCache));
+			Reference<const ArenaPage> p = wait(snapshot->getPhysicalPage(id.front(), cacheable, false));
 			page = std::move(p);
 		} else {
 			ASSERT(!id.empty());
@@ -4273,11 +4254,6 @@ private:
 			std::vector<Reference<const ArenaPage>> pages = wait(getAll(reads));
 			// TODO:  Cache reconstituted super pages somehow, perhaps with help from the Pager.
 			page = ArenaPage::concatPages(pages);
-
-			// In the current implementation, SuperPages are never present in the cache
-			if (fromCache != nullptr) {
-				*fromCache = false;
-			}
 		}
 
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
@@ -4726,24 +4702,14 @@ private:
 			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
+		state Reference<const ArenaPage> page = wait(readPage(snapshot, rootID, false, false));
 		state Version writeVersion = self->getLastCommittedVersion() + 1;
-
-		state Reference<FlowLock> commitReadLock = self->m_commitReadLock;
-		wait(commitReadLock->take());
-		state FlowLock::Releaser readLock(*commitReadLock);
-		state bool fromCache = false;
-		state Reference<const ArenaPage> page = wait(readPage(snapshot, rootID, false, false, &fromCache));
-		readLock.release();
 
 		// If the page exists in the cache, it must be copied before modification.
 		// That copy will be referenced by pageCopy, as page must stay in scope in case anything references its
 		// memory and it gets evicted from the cache.
 		// If the page is not in the cache, then no copy is needed so we will initialize pageCopy to page
-		state Reference<const ArenaPage> pageCopy = fromCache ? Reference<const ArenaPage>() : page;
-
-		if (!fromCache) {
-			pageCopy = page;
-		}
+		state Reference<const ArenaPage> pageCopy;
 
 		state BTreePage* btPage = (BTreePage*)page->begin();
 		ASSERT(isLeaf == btPage->isLeaf());
