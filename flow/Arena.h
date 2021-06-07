@@ -792,6 +792,7 @@ struct VectorRefPreserializer {
 	void invalidate() {}
 	void add(const T& item) {}
 	void remove(const T& item) {}
+	void reset() {}
 };
 
 template <class T>
@@ -823,6 +824,7 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 			_cached_size -= _string_traits.getSize(item);
 		}
 	}
+	void reset() { _cached_size = 0; }
 };
 
 template <class T, VecSerStrategy SerStrategy = VecSerStrategy::FlatBuffers>
@@ -1039,6 +1041,11 @@ public:
 			VPS::add(*ptr);
 		}
 		m_size = size;
+	}
+
+	void clear() {
+		VPS::reset();
+		m_size = 0;
 	}
 
 	void reserve(Arena& p, int size) {
