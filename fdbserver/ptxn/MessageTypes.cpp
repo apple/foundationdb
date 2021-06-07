@@ -39,6 +39,8 @@ std::string Message::toString() const {
 	case Type::LOG_PROTOCOL_MESSAGE:
 		result = concatToString(result, "Log Protocol ", std::get<LogProtocolMessage>(*this));
 		break;
+	case Type::UNDEFINED:
+		result = concatToString(result, "Undefined value");
 	default:
 		UNREACHABLE();
 	}
@@ -47,6 +49,9 @@ std::string Message::toString() const {
 }
 
 bool Message::operator==(const Message& another) const {
+	if (getType() != another.getType()) {
+		return false;
+	}
 	switch (getType()) {
 	case Type::MUTATION_REF:
 		return std::get<MutationRef>(*this) == std::get<MutationRef>(another);
@@ -54,6 +59,8 @@ bool Message::operator==(const Message& another) const {
 		return std::get<SpanContextMessage>(*this) == std::get<SpanContextMessage>(another);
 	case Type::LOG_PROTOCOL_MESSAGE:
 		return std::get<LogProtocolMessage>(*this) == std::get<LogProtocolMessage>(another);
+	case Type::UNDEFINED:
+		return true;
 	default:
 		UNREACHABLE();
 	}

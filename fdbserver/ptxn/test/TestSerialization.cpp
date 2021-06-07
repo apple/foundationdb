@@ -217,6 +217,7 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 namespace {
 
 // The test is done by serializing data for multiple versions, in each version there are differenty types of objects.
+// Different section should have different versions in order to avoid confusion.
 namespace testSubsequencedMessageSerializer {
 
 // Section 1: Serialize multiple MutationRefs
@@ -343,6 +344,52 @@ void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
 
 } // namespace S4
 
+// Section 5: Test write with std::variant type variable
+namespace S5 {
+
+const Version version = 20;
+
+void write(ptxn::SubsequencedMessageSerializer& serializer) {
+	serializer.startVersionWriting(version);
+	serializer.write(1, MutationRef(MutationRef::SetValue, "key"_sr, "value"_sr));
+	serializer.write(2, SpanContextMessage(SpanID(1, 1)));
+	serializer.write(3, LogProtocolMessage());
+	serializer.completeVersionWriting();
+}
+
+void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
+	auto mutation = std::get<MutationRef>(iterator->message);
+	ASSERT_EQ(mutation.type, MutationRef::SetValue);
+	ASSERT(mutation.param1 == "key"_sr);
+	ASSERT(mutation.param2 == "value"_sr);
+	++iterator;
+
+	auto span = std::get<SpanContextMessage>(iterator->message);
+	ASSERT(span == SpanID(1, 1));
+	++iterator;
+
+	auto logProtocol = std::get<LogProtocolMessage>(iterator->message);
+	ASSERT(logProtocol == LogProtocolMessage());
+	++iterator;
+}
+
+} // namespace S5
+
+// Section 6: Test writing pre-serialized data
+namespace S6 {
+
+const Version version = 30;
+
+void write(ptxn::SubsequencedMessageSerializer& serializer) {
+	serializer.startVersionWriting(version);
+
+	serializer.completeVersionWriting();
+}
+
+void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {}
+
+} // namespace S6
+
 bool testSerialization() {
 	using namespace ptxn;
 
@@ -359,6 +406,7 @@ bool testSerialization() {
 	S2::write(serializer);
 	S3::write(serializer);
 	S4::write(serializer);
+	S5::write(serializer);
 
 	serializer.completeMessageWriting();
 
@@ -369,14 +417,15 @@ bool testSerialization() {
 	SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
 
 	ASSERT(deserializer.getStorageTeamID() == storageTeamID);
-	ASSERT_EQ(deserializer.getNumVersions(), 4);
+	ASSERT_EQ(deserializer.getNumVersions(), 5);
 	ASSERT_EQ(deserializer.getFirstVersion(), S1::version);
-	ASSERT_EQ(deserializer.getLastVersion(), S4::version);
+	ASSERT_EQ(deserializer.getLastVersion(), S5::version);
 
 	S1::verify(iterator);
 	S2::verify(iterator);
 	S3::verify(iterator);
 	S4::verify(iterator);
+	S5::verify(iterator);
 
 	ASSERT(iterator == deserializer.cend());
 
@@ -673,7 +722,7 @@ bool testWriteMessage(const UnitTestParameters& params) {
 
 	ASSERT_EQ(serializer.getVersion(), version);
 
-	SpanID spanID = test::randomUID();
+	const SpanID spanID = test::randomUID();
 	serializer.broadcastSpanContext(spanID);
 
 	for (const auto& mutation : mutationRefs) {
@@ -709,22 +758,20 @@ bool testWriteMessage(const UnitTestParameters& params) {
 
 	auto mutationRefIter = mutationRefs.cbegin();
 	auto allMessagesIter = allMessages.cbegin();
+	int numSpanContextMessages = 0;
 
-	// Go through the SpanContextMessage
-	for (int _ = 0; _ < numStorageTeamIDs; ++_) {
-		auto deserializedSpanContext = std::get<SpanContextMessage>(allMessagesIter->second.message);
-		ASSERT(deserializedSpanContext == SpanContextMessage(spanID));
-		++allMessagesIter;
-	}
-
-	// Compare the mutationRefs
 	while (allMessagesIter != allMessages.cend()) {
-		auto deserializedMutation = std::get<MutationRef>(allMessagesIter->second.message);
-		auto mutation = *mutationRefIter;
-		ASSERT(mutation == deserializedMutation);
+		const auto& m = allMessagesIter->second.message;
+		if (m.getType() == Message::Type::SPAN_CONTEXT_MESSAGE) {
+			++numSpanContextMessages;
+			ASSERT(std::get<SpanContextMessage>(m) == spanID);
+		} else {
+			auto deserializedMutation = std::get<MutationRef>(allMessagesIter->second.message);
+			ASSERT(std::get<MutationRef>(m) == deserializedMutation);
 
+			++mutationRefIter;
+		}
 		++allMessagesIter;
-		++mutationRefIter;
 	}
 
 	return true;
@@ -737,7 +784,7 @@ bool testWriteMessage(const UnitTestParameters& params) {
 TEST_CASE("/fdbserver/ptxn/test/ProxySubsequenceMessageSerializer/normal") {
 	using namespace testProxySubsequenceMessageSerializer;
 
-	// ASSERT(testWriteMessage(params));
+	ASSERT(testWriteMessage(params));
 
 	return Void();
 }

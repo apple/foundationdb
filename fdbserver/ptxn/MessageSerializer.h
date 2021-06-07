@@ -123,25 +123,31 @@ public:
 	void startVersionWriting(const Version& version);
 
 	// Writes a mutation to the serializer
-	void write(const SubsequenceMutationItem& subsequenceMutationItem);
+	void write(const SubsequenceMutationItem&);
 
 	// Writes a mutation to the serializer
 	void write(const Subsequence&, const MutationRef&);
 
 	// Writes a SpanContext to the serializer
-	void write(const SubsequenceSpanContextItem& subsequeneSpanContextItem);
+	void write(const SubsequenceSpanContextItem&);
 
 	// Writes a SpanContext to the serializer
 	void write(const Subsequence&, const SpanContextMessage&);
 
 	// Writes a LogProtocolMessage to the serializer
-	void write(const SubsequenceLogProtocolMessageItem& subsequenceLogProtocolMessageItem);
+	void write(const SubsequenceLogProtocolMessageItem&);
 
 	// Writes a LogProtocolMessage to the serializer
 	void write(const Subsequence&, const LogProtocolMessage&);
 
-	// TODO Rethink about this overload
-	void write(const Subsequence&, const std::variant<MutationRef, SpanContextMessage, LogProtocolMessage>&);
+	// Writes a Message to the serializer
+	void write(const Subsequence&, const Message&);
+
+	// Writes a serialized message to the serializer
+	void write(const SubsequenceSerializedMessageItem&);
+
+	// Writes a serialized message to the serializer
+	void write(const Subsequence&, StringRef);
 
 	// Gets the current version being written
 	const Version& getCurrentVersion() const;
@@ -204,7 +210,8 @@ public:
 	// Gets the version the serializer is currently using
 	const Version& getVersion() const;
 
-	// Broadcasts the span context to all storage teams.
+	// Broadcasts the span context to all storage teams. After this function is called, for any storage team, the first
+	// write will always prepose this SpanContextMessage before the mutation.
 	void broadcastSpanContext(const SpanContextMessage&);
 
 	// Writes a mutation to a given stoarge team.

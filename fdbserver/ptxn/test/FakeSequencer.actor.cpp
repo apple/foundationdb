@@ -30,7 +30,7 @@ namespace ptxn::test {
 
 namespace {
 
-Future<Void> getVersion(std::shared_ptr<FakeSequencerContext> pContext, GetCommitVersionRequest request) {
+void getVersion(std::shared_ptr<FakeSequencerContext> pContext, GetCommitVersionRequest request) {
 	GetCommitVersionReply reply;
 	reply.requestNum = request.requestNum;
 
@@ -39,7 +39,6 @@ Future<Void> getVersion(std::shared_ptr<FakeSequencerContext> pContext, GetCommi
 	reply.version = pContext->version;
 
 	request.reply.send(reply);
-	return Void();
 }
 
 } // anonymous namespace

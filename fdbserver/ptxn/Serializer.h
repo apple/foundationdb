@@ -320,7 +320,7 @@ public:
 	// Return true if reached the end of serialized data
 	bool allConsumed() const { return reader.empty(); }
 
-	// Peek raw bytes
+	// Peek raw bytes, but doesn't consume the bytes
 	const uint8_t* peekBytes(int nBytes) const { return reinterpret_cast<const uint8_t*>(reader.peekBytes(nBytes)); }
 };
 

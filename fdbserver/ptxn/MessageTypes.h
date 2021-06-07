@@ -32,16 +32,11 @@
 
 namespace ptxn {
 
-// Stores the mutation and their subsequences, or the relative order of each item. The order is used in recovery and
+// Stores the mutation and its subsequence, or the relative order of each item. The order is used in recovery and
 // restoring from backups. This, and the following Subsequence***Item are used for serialization
 struct SubsequenceMutationItem {
 	Subsequence subsequence;
 	MutationRef mutation;
-
-	template <typename Reader>
-	void loadFromArena(Reader& reader) {
-		reader >> subsequence >> mutation;
-	}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
@@ -49,16 +44,11 @@ struct SubsequenceMutationItem {
 	}
 };
 
-// Stores the span context and their subsequences.
+// Stores the span context and its subsequence.
 // See the comments for SubsequenceMutationItem
 struct SubsequenceSpanContextItem {
 	Subsequence subsequence;
 	SpanContextMessage spanContext;
-
-	template <typename Reader>
-	void loadFromArena(Reader& reader) {
-		reader >> subsequence >> spanContext;
-	}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
@@ -66,20 +56,30 @@ struct SubsequenceSpanContextItem {
 	}
 };
 
-// Stores the log protocol message and their subsequences.
+// Stores the log protocol message and its subsequence.
 // See the comments for SubsequenceMutationItem
 struct SubsequenceLogProtocolMessageItem {
 	Subsequence subsequence;
 	LogProtocolMessage logProtocolMessage;
 
-	template <typename Reader>
-	void loadFromArena(Reader& reader) {
-		reader >> subsequence >> logProtocolMessage;
-	}
-
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, subsequence, logProtocolMessage);
+	}
+};
+
+// Stores a pre-serialized message and its subsequence.
+// See the comments for SubsequenceMutationItem
+struct SubsequenceSerializedMessageItem {
+	Subsequence subsequence;
+	StringRef serializedMessage;
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		static_assert(!Ar::isDeserializing, "Only support serialization");
+		serializer(ar, subsequence);
+		// For the StringRef, standard serialization will add a length information.
+		ar.serializeBytes(serializedMessage.begin(), serializedMessage.size());
 	}
 };
 
@@ -90,10 +90,11 @@ struct SubsequenceLogProtocolMessageItem {
 struct Message : public std::variant<MutationRef, SpanContextMessage, LogProtocolMessage> {
 	using variant_t = std::variant<MutationRef, SpanContextMessage, LogProtocolMessage>;
 
-	enum class Type {
+	enum class Type : std::size_t {
 		MUTATION_REF,
 		SPAN_CONTEXT_MESSAGE,
-		LOG_PROTOCOL_MESSAGE
+		LOG_PROTOCOL_MESSAGE,
+		UNDEFINED = std::variant_npos
 	};
 
 	using variant_t::variant_t;
@@ -114,8 +115,8 @@ std::ostream& operator<<(std::ostream&, const Message&);
 //    Version - Subsequence - Message
 // tuple. The message is having the format Message and can store different type of objects. See the comment of Message.
 struct VersionSubsequenceMessage {
-	Version version;
-	Subsequence subsequence;
+	Version version = invalidVersion;
+	Subsequence subsequence = invalidSubsequence;
 	Message message;
 
 	VersionSubsequenceMessage() = default;

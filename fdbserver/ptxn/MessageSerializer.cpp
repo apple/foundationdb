@@ -55,10 +55,7 @@ void SubsequencedMessageSerializer::write(const SubsequenceMutationItem& subsequ
 }
 
 void SubsequencedMessageSerializer::write(const Subsequence& subsequence, const MutationRef& mutation) {
-	ASSERT(subsequence > header.lastSubsequence);
-
-	header.lastSubsequence = subsequence;
-	serializer.writeItem(SubsequenceMutationItem{ subsequence, mutation });
+	write(SubsequenceMutationItem{ subsequence, mutation });
 }
 
 void SubsequencedMessageSerializer::write(const SubsequenceSpanContextItem& subsequenceSpanContextItem) {
@@ -69,10 +66,7 @@ void SubsequencedMessageSerializer::write(const SubsequenceSpanContextItem& subs
 }
 
 void SubsequencedMessageSerializer::write(const Subsequence& subsequence, const SpanContextMessage& spanContext) {
-	ASSERT(subsequence > header.lastSubsequence);
-
-	header.lastSubsequence = subsequence;
-	serializer.writeItem(SubsequenceSpanContextItem{ subsequence, spanContext });
+	write(SubsequenceSpanContextItem{ subsequence, spanContext });
 }
 
 void SubsequencedMessageSerializer::write(const SubsequenceLogProtocolMessageItem& subsequenceLogProtocolMessageItem) {
@@ -84,27 +78,34 @@ void SubsequencedMessageSerializer::write(const SubsequenceLogProtocolMessageIte
 
 void SubsequencedMessageSerializer::write(const Subsequence& subsequence,
                                           const LogProtocolMessage& logProtocolMessage) {
-	ASSERT(subsequence > header.lastSubsequence);
-
-	header.lastSubsequence = subsequence;
-	serializer.writeItem(SubsequenceLogProtocolMessageItem{ subsequence, logProtocolMessage });
+	write(SubsequenceLogProtocolMessageItem{ subsequence, logProtocolMessage });
 }
 
-void SubsequencedMessageSerializer::write(
-    const Subsequence& subsequence,
-    const std::variant<MutationRef, SpanContextMessage, LogProtocolMessage>& message) {
-
-	switch (static_cast<MutationRef::Type>(message.index())) {
-	case MutationRef::Reserved_For_SpanContextMessage:
+void SubsequencedMessageSerializer::write(const Subsequence& subsequence, const Message& message) {
+	switch (message.getType()) {
+	case Message::Type::SPAN_CONTEXT_MESSAGE:
 		write(subsequence, std::get<SpanContextMessage>(message));
 		break;
-	case MutationRef::Reserved_For_LogProtocolMessage:
+	case Message::Type::LOG_PROTOCOL_MESSAGE:
 		write(subsequence, std::get<LogProtocolMessage>(message));
 		break;
-	default:
+	case Message::Type::MUTATION_REF:
 		write(subsequence, std::get<MutationRef>(message));
 		break;
+	default:
+		throw internal_error_msg("message to be serialized is valueless, or having undefined type");
 	}
+}
+
+void SubsequencedMessageSerializer::write(const SubsequenceSerializedMessageItem& subsequenceSerializedMessageItem) {
+	ASSERT(subsequenceSerializedMessageItem.subsequence > header.lastSubsequence);
+
+	header.lastSubsequence = subsequenceSerializedMessageItem.subsequence;
+	serializer.writeItem(subsequenceSerializedMessageItem);
+}
+
+void SubsequencedMessageSerializer::write(const Subsequence& subsequence, StringRef serializedMessage) {
+	write(SubsequenceSerializedMessageItem{ subsequence, serializedMessage });
 }
 
 const Version& SubsequencedMessageSerializer::getCurrentVersion() const {
