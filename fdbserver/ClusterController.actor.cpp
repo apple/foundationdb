@@ -458,6 +458,38 @@ public:
 		}
 	}
 
+	// Log the reason why the worker is considered as unavailable.
+	void logWorkerUnavailable(const Severity severity,
+	                          const UID& id,
+	                          const std::string& method,
+	                          const std::string& reason,
+	                          const WorkerDetails& details,
+	                          const ProcessClass::Fitness& fitness,
+	                          const std::set<Optional<Key>>& dcIds) {
+		// Construct the list of DCs where the TLog recruitment is happening. This is mainly for logging purpose.
+		std::string dcList;
+		for (const auto& dc : dcIds) {
+			if (!dcList.empty()) {
+				dcList += ',';
+			}
+			dcList += printable(dc);
+		}
+		// Logging every possible options is a lot for every recruitment; logging all of the options with GoodFit or
+		// BestFit may work because there should only be like 30 tlog class processes. Plus, the recruitment happens
+		// only during initial database creation and recovery. So these trace events should be sparse.
+		if (fitness == ProcessClass::GoodFit || fitness == ProcessClass::BestFit ||
+		    fitness == ProcessClass::NeverAssign) {
+			TraceEvent(severity, "GetTLogTeamWorkerUnavailable", id)
+			    .detail("TLogRecruitMethod", method)
+			    .detail("Reason", reason)
+			    .detail("WorkerID", details.interf.id())
+			    .detail("WorkerDC", details.interf.locality.dcId())
+			    .detail("Address", details.interf.addresses().toString())
+			    .detail("Fitness", fitness)
+			    .detail("RecruitmentDcIds", dcList);
+		}
+	}
+
 	// A TLog recruitment method specialized for three_data_hall and three_datacenter configurations
 	// It attempts to evenly recruit processes from across data_halls or datacenters
 	std::vector<WorkerDetails> getWorkersForTlogsComplex(DatabaseConfiguration const& conf,
@@ -478,11 +510,37 @@ public:
 			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
 
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
-			        exclusionWorkerIds.end() ||
-			    !workerAvailable(worker_info, checkStable) ||
-			    conf.isExcludedServer(worker_details.interf.addresses()) || fitness == ProcessClass::NeverAssign ||
-			    (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) ||
-			    (!allowDegraded && worker_details.degraded)) {
+			    exclusionWorkerIds.end()) {
+				logWorkerUnavailable(SevInfo, id, "complex", "Worker is excluded", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (!workerAvailable(worker_info, checkStable)) {
+				logWorkerUnavailable(SevInfo, id, "complex", "Worker is not available", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "complex",
+				                     "Worker server is excluded from the cluster",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
+				continue;
+			}
+			if (fitness == ProcessClass::NeverAssign) {
+				logWorkerUnavailable(
+				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+				logWorkerUnavailable(
+				    SevDebug, id, "complex", "Worker is not in the target DC", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (!allowDegraded && worker_details.degraded) {
+				logWorkerUnavailable(
+				    SevInfo, id, "complex", "Worker is degraded and not allowed", worker_details, fitness, dcIds);
 				continue;
 			}
 
@@ -685,11 +743,34 @@ public:
 		for (const auto& [worker_process_id, worker_info] : id_worker) {
 			const auto& worker_details = worker_info.details;
 			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
+
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
-			        exclusionWorkerIds.end() ||
-			    !workerAvailable(worker_info, checkStable) ||
-			    conf.isExcludedServer(worker_details.interf.addresses()) || fitness == ProcessClass::NeverAssign ||
-			    (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0)) {
+			    exclusionWorkerIds.end()) {
+				logWorkerUnavailable(SevInfo, id, "simple", "Worker is excluded", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (!workerAvailable(worker_info, checkStable)) {
+				logWorkerUnavailable(SevInfo, id, "simple", "Worker is not available", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "simple",
+				                     "Worker server is excluded from the cluster",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
+				continue;
+			}
+			if (fitness == ProcessClass::NeverAssign) {
+				logWorkerUnavailable(
+				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+				logWorkerUnavailable(
+				    SevDebug, id, "simple", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
 			}
 
@@ -794,11 +875,35 @@ public:
 		for (const auto& [worker_process_id, worker_info] : id_worker) {
 			const auto& worker_details = worker_info.details;
 			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
+
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
-			        exclusionWorkerIds.end() ||
-			    !workerAvailable(worker_info, checkStable) ||
-			    conf.isExcludedServer(worker_details.interf.addresses()) || fitness == ProcessClass::NeverAssign ||
-			    (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0)) {
+			    exclusionWorkerIds.end()) {
+				logWorkerUnavailable(SevInfo, id, "deprecated", "Worker is excluded", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (!workerAvailable(worker_info, checkStable)) {
+				logWorkerUnavailable(
+				    SevInfo, id, "deprecated", "Worker is not available", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "deprecated",
+				                     "Worker server is excluded from the cluster",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
+				continue;
+			}
+			if (fitness == ProcessClass::NeverAssign) {
+				logWorkerUnavailable(
+				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+				logWorkerUnavailable(
+				    SevDebug, id, "deprecated", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
 			}
 
@@ -3091,9 +3196,9 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 					cluster->masterProcessId = Optional<Key>();
 				}
 				TraceEvent("ClusterControllerWorkerFailed", cluster->id)
-					.detail("ProcessId", worker.locality.processId())
-					.detail("ProcessClass", failedWorkerInfo.details.processClass.toString())
-					.detail("Address", worker.address());
+				    .detail("ProcessId", worker.locality.processId())
+				    .detail("ProcessClass", failedWorkerInfo.details.processClass.toString())
+				    .detail("Address", worker.address());
 				cluster->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
 				cluster->id_worker.erase(worker.locality.processId());
 				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
@@ -3277,6 +3382,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies) {
 		isChanged = true;
+		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
@@ -3827,7 +3933,6 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					}
 
 					clientInfo.id = deterministicRandom()->randomUniqueID();
-
 					// Update ServerDBInfo so fdbserver processes receive updated history.
 					ServerDBInfo serverInfo = db->serverInfo->get();
 					serverInfo.id = deterministicRandom()->randomUniqueID();
@@ -4315,6 +4420,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
+	// self.addActor.send(monitorTSSMapping(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
 	                                 self.id,

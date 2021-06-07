@@ -33,14 +33,29 @@ namespace Magnesium
 
 		public static IEnumerable<Event> Parse(System.IO.Stream stream, string file, 
 			bool keepOriginalElement = false, double startTime = -1, double endTime = Double.MaxValue,
-			double samplingFactor = 1.0)
+			double samplingFactor = 1.0, Action<string> nonFatalErrorMessage = null)
 		{
 			using (var reader = XmlReader.Create(stream))
 			{
 				reader.ReadToDescendant("Trace");
 				reader.Read();
-				foreach (var xev in StreamElements(reader))
+				
+				// foreach (var xev in StreamElements(reader))
+				// need to be able to catch and save non-fatal exceptions in StreamElements, so use explicit iterator instead of foreach
+				var iter = StreamElements(reader).GetEnumerator();
+				while (true)
 				{
+					try {
+						if (!iter.MoveNext()) {
+							break;
+						}
+					} catch (Exception e) {
+						if (nonFatalErrorMessage != null) {
+							nonFatalErrorMessage(e.Message);
+						}
+						break;
+					}
+					var xev = iter.Current;
 					Event ev = null;
 					try
 					{
@@ -165,28 +180,20 @@ namespace Magnesium
 			}
 		}
 
+		// throws exceptions if xml is invalid
 		private static IEnumerable<XElement> StreamElements(this XmlReader reader)
 		{
 			while (!reader.EOF)
 			{
 				if (reader.NodeType == XmlNodeType.Element)
 				{
-					XElement node = null;
-					try
-					{
-						node = XElement.ReadFrom(reader) as XElement;
-					}
-					catch (Exception) { break; }
+					XElement node = XElement.ReadFrom(reader) as XElement;
 					if (node != null)
 						yield return node;
 				}
 				else
 				{
-					try
-					{
 						reader.Read();
-					}
-					catch (Exception) { break; }
 				}
 			}
 		}

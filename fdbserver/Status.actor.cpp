@@ -31,6 +31,7 @@
 #include "flow/UnitTest.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -387,6 +388,19 @@ JsonBuilderObject getLagObject(int64_t versions) {
 	return lag;
 }
 
+static JsonBuilderObject getBounceImpactInfo(int recoveryStatusCode) {
+	JsonBuilderObject bounceImpact;
+
+	if (recoveryStatusCode == RecoveryStatus::fully_recovered) {
+		bounceImpact["can_clean_bounce"] = true;
+	} else {
+		bounceImpact["can_clean_bounce"] = false;
+		bounceImpact["reason"] = "cluster hasn't fully recovered yet";
+	}
+
+	return bounceImpact;
+}
+
 struct MachineMemoryInfo {
 	double memoryUsage;
 	double aggregateLimit;
@@ -478,6 +492,8 @@ struct RolesInfo {
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
 			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));
+			obj["fetched_versions"] = StatusCounter(storageMetrics.getValue("FetchedVersions")).getStatus();
+			obj["fetches_from_logs"] = StatusCounter(storageMetrics.getValue("FetchesFromLogs")).getStatus();
 
 			Version version = storageMetrics.getInt64("Version");
 			Version durableVersion = storageMetrics.getInt64("DurableVersion");
@@ -615,7 +631,7 @@ struct RolesInfo {
 			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
 			if (commitLatencyBands.size()) {
 				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
-			} 
+			}
 
 			TraceEventFields const& commitBatchingWindowSize = metrics.at("CommitBatchingWindowSize");
 			if (commitBatchingWindowSize.size()) {
@@ -1169,6 +1185,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
 			message["missing_logs"] = md.getValue("MissingIDs").c_str();
 		}
+
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
 
@@ -1853,10 +1870,10 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<CommitProxyInterface, EventMap>> results =
-	    wait(getServerMetrics(db->get().client.commitProxies,
-	                          address_workers,
-	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize"}));
+	vector<std::pair<CommitProxyInterface, EventMap>> results = wait(getServerMetrics(
+	    db->get().client.commitProxies,
+	    address_workers,
+	    std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" }));
 
 	return results;
 }
@@ -1864,10 +1881,10 @@ ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommit
 ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<GrvProxyInterface, EventMap>> results =
-	    wait(getServerMetrics(db->get().client.grvProxies,
-	                          address_workers,
-	                          std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
+	vector<std::pair<GrvProxyInterface, EventMap>> results = wait(
+	    getServerMetrics(db->get().client.grvProxies,
+	                     address_workers,
+	                     std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
 	return results;
 }
 
@@ -2775,6 +2792,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
+		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;
@@ -2987,6 +3005,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
+
+		int activeTSSCount = 0;
+		for (auto& it : storageServers) {
+			if (it.first.isTss()) {
+				activeTSSCount++;
+			}
+		}
+		statusObj["active_tss_count"] = activeTSSCount;
 
 		int totalDegraded = 0;
 		for (auto& it : workers) {

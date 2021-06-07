@@ -34,10 +34,7 @@ const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_inf
 const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag_sample_rate");
 const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
 
-const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
-const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
-
-GlobalConfig::GlobalConfig() : lastUpdate(0) {}
+GlobalConfig::GlobalConfig(Database& cx) : cx(cx), lastUpdate(0) {}
 
 GlobalConfig& GlobalConfig::globalConfig() {
 	void* res = g_network->global(INetwork::enGlobalConfig);
@@ -163,15 +160,15 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 		}
 
 		wait(tr->commit());
-		return Void();
 	} catch (Error& e) {
 		// If multiple fdbserver processes are started at once, they will all
 		// attempt this migration at the same time, sometimes resulting in
 		// aborts due to conflicts. Purposefully avoid retrying, making this
 		// migration best-effort.
 		TraceEvent(SevInfo, "GlobalConfigMigrationError").detail("What", e.what());
-		throw;
 	}
+
+	return Void();
 }
 
 // Updates local copy of global configuration by reading the entire key-range

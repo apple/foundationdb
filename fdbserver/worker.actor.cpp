@@ -23,7 +23,6 @@
 
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.actor.h"
-#include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
@@ -34,7 +33,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MetricLogger.actor.h"
 #include "fdbserver/BackupInterface.h"
-#include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
@@ -50,7 +48,6 @@
 #include "flow/Profiler.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
-#include "flow/flow.h"
 #include "flow/network.h"
 
 #ifdef __linux__
@@ -79,10 +76,6 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #else
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
-
-namespace {
-RoleLineageCollector roleLineageCollector;
-}
 
 ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream,
                                                        UpdateServerDBInfoRequest req) {
@@ -153,9 +146,7 @@ Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
 	                                  enableLocalityLoadBalance,
 	                                  taskID,
 	                                  lockAware);
-	GlobalConfig::create(cx.getPtr(), db, std::addressof(db->get().client));
-	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+	GlobalConfig::create(cx, db, std::addressof(db->get().client));
 	return cx;
 }
 
@@ -284,6 +275,7 @@ ACTOR Future<Void> loadedPonger(FutureStream<LoadedPingRequest> pings) {
 }
 
 StringRef fileStoragePrefix = LiteralStringRef("storage-");
+StringRef testingStoragePrefix = LiteralStringRef("testingstorage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
@@ -327,6 +319,7 @@ std::string filenameFromSample(KeyValueStoreType storeType, std::string folder, 
 }
 
 std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std::string prefix, UID id) {
+
 	if (storeType == KeyValueStoreType::SSD_BTREE_V1)
 		return joinPath(folder, prefix + id.toString() + ".fdb");
 	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
@@ -338,6 +331,7 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, prefix + id.toString() + ".rocksdb");
 
+	TraceEvent(SevError, "UnknownStoreType").detail("StoreType", storeType.toString());
 	UNREACHABLE();
 }
 
@@ -456,6 +450,9 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 		if (filename.startsWith(fileStoragePrefix)) {
 			store.storedComponent = DiskStore::Storage;
 			prefix = fileStoragePrefix;
+		} else if (filename.startsWith(testingStoragePrefix)) {
+			store.storedComponent = DiskStore::Storage;
+			prefix = testingStoragePrefix;
 		} else if (filename.startsWith(fileVersionedLogDataPrefix)) {
 			store.storedComponent = DiskStore::TLogData;
 			// Use the option string that's in the file rather than tLogOptions.toPrefix(),
@@ -566,20 +563,24 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			}
 		}
 
+		state bool ccInterfacePresent = ccInterface->get().present();
 		state Future<RegisterWorkerReply> registrationReply =
-		    ccInterface->get().present()
-		        ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
-		        : Never();
+		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
+		                       : Never();
 		state double startTime = now();
 		loop choose {
 			when(RegisterWorkerReply reply = wait(registrationReply)) {
 				processClass = reply.processClass;
 				asyncPriorityInfo->set(reply.priorityInfo);
-				TraceEvent("WorkerRegisterReply").detail("CCID", ccInterface->get().get().id());
+				TraceEvent("WorkerRegisterReply")
+				    .detail("CCID", ccInterface->get().get().id())
+				    .detail("ProcessClass", reply.processClass.toString());
 				break;
 			}
-			when(wait(delay(SERVER_KNOBS->REGISTER_WORKER_REQUEST_TIMEOUT))) {
-				TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
+			when(wait(delay(SERVER_KNOBS->UNKNOWN_CC_TIMEOUT))) {
+				if (!ccInterfacePresent) {
+					TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
+				}
 			}
 			when(wait(ccInterface->onChange())) { break; }
 			when(wait(ddInterf->onChange())) { break; }
@@ -747,6 +748,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(Future<Void> prevStorageServer,
                                                  std::string filename,
                                                  UID id,
                                                  LocalityData locality,
+                                                 bool isTss,
                                                  Reference<AsyncVar<ServerDBInfo>> db,
                                                  std::string folder,
                                                  ActorCollection* filesClosed,
@@ -764,6 +766,9 @@ ACTOR Future<Void> storageServerRollbackRebooter(Future<Void> prevStorageServer,
 		StorageServerInterface recruited;
 		recruited.uniqueID = id;
 		recruited.locality = locality;
+		recruited.tssPairID =
+		    isTss ? Optional<UID>(UID()) : Optional<UID>(); // set this here since we use its presence to determine
+		                                                    // whether this server is a tss or not
 		recruited.initEndpoints();
 
 		DUMPTOKEN(recruited.getValue);
@@ -1100,21 +1105,32 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			DiskStore s = stores[f];
 			// FIXME: Error handling
 			if (s.storedComponent == DiskStore::Storage) {
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 				IKeyValueStore* kv =
 				    openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, false, validateDataFiles);
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
+				// std::string doesn't have startsWith
+				std::string tssPrefix = testingStoragePrefix.toString();
+				// TODO might be more efficient to mark a boolean on DiskStore in getDiskStores, but that kind of breaks
+				// the abstraction since DiskStore also applies to storage cache + tlog
+				bool isTss = s.filename.find(tssPrefix) != std::string::npos;
+				Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
+
 				StorageServerInterface recruited;
 				recruited.uniqueID = s.storeID;
 				recruited.locality = locality;
+				recruited.tssPairID =
+				    isTss ? Optional<UID>(UID())
+				          : Optional<UID>(); // presence of optional is used as source of truth for tss vs not. Value
+				                             // gets overridden later in restoreDurableState
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
-				startRole(Role::STORAGE_SERVER, recruited.id(), interf.id(), details, "Restored");
+				details["IsTSS"] = isTss ? "Yes" : "No";
+
+				startRole(ssRole, recruited.id(), interf.id(), details, "Restored");
 
 				DUMPTOKEN(recruited.getValue);
 				DUMPTOKEN(recruited.getKey);
@@ -1139,15 +1155,14 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				                                  s.filename,
 				                                  recruited.id(),
 				                                  recruited.locality,
+				                                  isTss,
 				                                  dbInfo,
 				                                  folder,
 				                                  &filesClosed,
 				                                  memoryLimit,
 				                                  kv);
-				errorForwarders.add(forwardError(errors, Role::STORAGE_SERVER, recruited.id(), f));
+				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TLog;
 				std::string logQueueBasename;
 				const std::string filename = basename(s.filename);
 				if (StringRef(filename).startsWith(fileLogDataPrefix)) {
@@ -1280,7 +1295,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 						notUpdated = interf.updateServerDBInfo.getEndpoint();
 					} else if (localInfo.infoGeneration > dbInfo->get().infoGeneration ||
 					           dbInfo->get().clusterInterface != ccInterface->get().get()) {
-
 						TraceEvent("GotServerDBInfoChange")
 						    .detail("ChangeID", localInfo.id)
 						    .detail("MasterID", localInfo.master.id())
@@ -1347,8 +1361,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				}
 			}
 			when(RecruitMasterRequest req = waitNext(interf.master.getFuture())) {
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Master;
 				MasterInterface recruited;
 				recruited.locality = locality;
 				recruited.initEndpoints();
@@ -1371,8 +1383,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				req.reply.send(recruited);
 			}
 			when(InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture())) {
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::DataDistributor;
 				DataDistributorInterface recruited(locality);
 				recruited.initEndpoints();
 
@@ -1395,8 +1405,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				req.reply.send(recruited);
 			}
 			when(InitializeRatekeeperRequest req = waitNext(interf.ratekeeper.getFuture())) {
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Ratekeeper;
 				RatekeeperInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
@@ -1423,8 +1431,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			}
 			when(InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
 				if (!backupWorkerCache.exists(req.reqId)) {
-					LocalLineage _;
-					currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Backup;
 					BackupInterface recruited(locality);
 					recruited.initEndpoints();
 
@@ -1454,8 +1460,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					    .detail("MinRecruitable", TLogVersion::MIN_RECRUITABLE);
 					req.reply.sendError(internal_error());
 				}
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TLog;
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
 				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
@@ -1509,15 +1513,19 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
 				if (!storageCache.exists(req.reqId)) {
-					LocalLineage _;
-					currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
+
+					bool isTss = req.tssPairIDAndVersion.present();
+
 					StorageServerInterface recruited(req.interfaceId);
 					recruited.locality = locality;
+					recruited.tssPairID = isTss ? req.tssPairIDAndVersion.get().first : Optional<UID>();
 					recruited.initEndpoints();
 
 					std::map<std::string, std::string> details;
 					details["StorageEngine"] = req.storeType.toString();
-					startRole(Role::STORAGE_SERVER, recruited.id(), interf.id(), details);
+					details["IsTSS"] = std::to_string(isTss);
+					Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
+					startRole(ssRole, recruited.id(), interf.id(), details);
 
 					DUMPTOKEN(recruited.getValue);
 					DUMPTOKEN(recruited.getKey);
@@ -1535,13 +1543,22 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					// printf("Recruited as storageServer\n");
 
 					std::string filename =
-					    filenameFromId(req.storeType, folder, fileStoragePrefix.toString(), recruited.id());
+					    filenameFromId(req.storeType,
+					                   folder,
+					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
+					                   recruited.id());
 					IKeyValueStore* data = openKVStore(req.storeType, filename, recruited.id(), memoryLimit);
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
-					Future<Void> s = storageServer(data, recruited, req.seedTag, storageReady, dbInfo, folder);
+					Future<Void> s = storageServer(data,
+					                               recruited,
+					                               req.seedTag,
+					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
+					                               storageReady,
+					                               dbInfo,
+					                               folder);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(s,
@@ -1549,18 +1566,17 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                                  filename,
 					                                  recruited.id(),
 					                                  recruited.locality,
+					                                  isTss,
 					                                  dbInfo,
 					                                  folder,
 					                                  &filesClosed,
 					                                  memoryLimit,
 					                                  data);
-					errorForwarders.add(forwardError(errors, Role::STORAGE_SERVER, recruited.id(), s));
+					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else
 					forwardPromise(req.reply, storageCache.get(req.reqId));
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::CommitProxy;
 				CommitProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
@@ -1586,8 +1602,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				req.reply.send(recruited);
 			}
 			when(InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture())) {
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::GrvProxy;
 				GrvProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
@@ -1608,8 +1622,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				req.reply.send(recruited);
 			}
 			when(InitializeResolverRequest req = waitNext(interf.resolver.getFuture())) {
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Resolver;
 				ResolverInterface recruited;
 				recruited.locality = locality;
 				recruited.initEndpoints();
@@ -1627,8 +1639,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				req.reply.send(recruited);
 			}
 			when(InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture())) {
-				LocalLineage _;
-				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::LogRouter;
 				TLogInterface recruited(locality);
 				recruited.initEndpoints();
 
@@ -2036,8 +2046,6 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy(
 	}
 }
 
-extern void setupStackSignal();
-
 ACTOR Future<Void> serveProtocolInfo() {
 	state RequestStream<ProtocolInfoRequest> protocolInfo(
 	    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
@@ -2045,37 +2053,6 @@ ACTOR Future<Void> serveProtocolInfo() {
 	loop {
 		state ProtocolInfoRequest req = waitNext(protocolInfo.getFuture());
 		req.reply.send(ProtocolInfoReply{ g_network->protocolVersion() });
-	}
-}
-
-// Handles requests from ProcessInterface, an interface meant for direct
-// communication between the client and FDB processes.
-ACTOR Future<Void> serveProcess() {
-	state ProcessInterface process;
-	process.getInterface.makeWellKnownEndpoint(WLTOKEN_PROCESS, TaskPriority::DefaultEndpoint);
-	loop {
-		choose {
-			when(GetProcessInterfaceRequest req = waitNext(process.getInterface.getFuture())) {
-				req.reply.send(process);
-			}
-			when(ActorLineageRequest req = waitNext(process.actorLineage.getFuture())) {
-				state SampleCollection sampleCollector;
-				auto samples = sampleCollector->get(req.timeStart, req.timeEnd);
-
-				std::vector<SerializedSample> serializedSamples;
-				for (const auto& samplePtr : samples) {
-					auto serialized = SerializedSample{ .time = samplePtr->time };
-					for (const auto& [waitState, pair] : samplePtr->data) {
-						if (waitState >= req.waitStateStart && waitState <= req.waitStateEnd) {
-							serialized.data[waitState] = std::string(pair.first, pair.second);
-						}
-					}
-					serializedSamples.push_back(std::move(serialized));
-				}
-				ActorLineageReply reply{ serializedSamples };
-				req.reply.send(reply);
-			}
-		}
 	}
 }
 
@@ -2091,11 +2068,8 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string whitelistBinPaths) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	setupStackSignal();
-	currentLineage->modify(&RoleLineage::role) = ProcessClass::Worker;
 
 	actors.push_back(serveProtocolInfo());
-	actors.push_back(serveProcess());
 
 	try {
 		ServerCoordinators coordinators(connFile);
@@ -2115,7 +2089,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		if (coordFolder.size()) {
 			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
 			// their files
-			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder)));
+			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder, coordinators.ccf)));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
@@ -2179,6 +2153,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 
 const Role Role::WORKER("Worker", "WK", false);
 const Role Role::STORAGE_SERVER("StorageServer", "SS");
+const Role Role::TESTING_STORAGE_SERVER("TestingStorageServer", "ST");
 const Role Role::TRANSACTION_LOG("TLog", "TL");
 const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
 const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");

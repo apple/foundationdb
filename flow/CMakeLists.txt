@@ -58,7 +58,7 @@ set(FLOW_SRCS
   TLSConfig.actor.cpp
   TLSConfig.actor.h
   ThreadHelper.actor.h
-  ThreadHelper.cpp
+  ThreadHelper.actor.cpp
   ThreadPrimitives.cpp
   ThreadPrimitives.h
   ThreadSafeQueue.h
@@ -69,7 +69,6 @@ set(FLOW_SRCS
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h
-  WriteOnlySet.actor.cpp
   XmlTraceLogFormatter.cpp
   XmlTraceLogFormatter.h
   actorcompiler.h

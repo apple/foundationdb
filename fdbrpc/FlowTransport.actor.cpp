@@ -51,6 +51,8 @@ constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
+const int WLTOKEN_COUNTS = 12; // number of wellKnownEndpoints
+
 class EndpointMap : NonCopyable {
 public:
 	// Reserve space for this many wellKnownEndpoints
@@ -96,6 +98,7 @@ void EndpointMap::realloc() {
 
 void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority) {
 	int index = token.second();
+	ASSERT(index <= WLTOKEN_COUNTS);
 	ASSERT(data[index].receiver == nullptr);
 	data[index].receiver = r;
 	data[index].token() =
@@ -334,7 +337,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 }
 
 TransportData::TransportData(uint64_t transportId)
-  : endpoints(/*wellKnownTokenCount*/ 12), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
+  : endpoints(WLTOKEN_COUNTS), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
     warnAlwaysForLargePacket(true), lastIncompatibleMessage(0), transportId(transportId),
     numIncompatibleConnections(0) {
 	degraded = makeReference<AsyncVar<bool>>(false);
@@ -1215,7 +1218,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							}
 							compatible = false;
 							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
-								if(peer) {
+								if (peer) {
 									peer->protocolVersion->set(protocolVersion);
 								}
 

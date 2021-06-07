@@ -25,6 +25,7 @@
 #include "flow/Arena.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/serialize.h"
+#include "flow/UnitTest.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -345,7 +346,10 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 	return idx;
 }
 
+const KeyRangeRef tssMappingKeys(LiteralStringRef("\xff/tss/"), LiteralStringRef("\xff/tss0"));
+
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
+
 const KeyRef serverTagPrefix = serverTagKeys.begin;
 const KeyRangeRef serverTagConflictKeys(LiteralStringRef("\xff/serverTagConflict/"),
                                         LiteralStringRef("\xff/serverTagConflict0"));
@@ -532,6 +536,7 @@ const Key serverListKeyFor(UID serverID) {
 	return wr.toValue();
 }
 
+// TODO use flatbuffers depending on version
 const Value serverListValue(StorageServerInterface const& server) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withServerListValue()));
 	wr << server;
@@ -547,6 +552,17 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	StorageServerInterface s;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> s;
+	return s;
+}
+
+const Value serverListValueFB(StorageServerInterface const& server) {
+	return ObjectWriter::toValue(server, IncludeVersion());
+}
+
+StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
+	StorageServerInterface s;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(s);
 	return s;
 }
 
@@ -594,6 +610,9 @@ ProcessClass decodeProcessClassValue(ValueRef const& value) {
 const KeyRangeRef configKeys(LiteralStringRef("\xff/conf/"), LiteralStringRef("\xff/conf0"));
 const KeyRef configKeysPrefix = configKeys.begin;
 
+const KeyRef perpetualStorageWiggleKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle"));
+const KeyRef wigglingStorageServerKey(LiteralStringRef("\xff/storageWigglePID"));
+
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 
 const KeyRangeRef excludedServersKeys(LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0"));
@@ -633,15 +652,17 @@ std::string encodeFailedServersKey(AddressExclusion const& addr) {
 // const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
 // const KeyRef globalConfigPrefix = globalConfigKeys.begin;
 
-const KeyRangeRef globalConfigDataKeys( LiteralStringRef("\xff/globalConfig/k/"), LiteralStringRef("\xff/globalConfig/k0") );
+const KeyRangeRef globalConfigDataKeys(LiteralStringRef("\xff/globalConfig/k/"),
+                                       LiteralStringRef("\xff/globalConfig/k0"));
 const KeyRef globalConfigKeysPrefix = globalConfigDataKeys.begin;
 
-const KeyRangeRef globalConfigHistoryKeys( LiteralStringRef("\xff/globalConfig/h/"), LiteralStringRef("\xff/globalConfig/h0") );
+const KeyRangeRef globalConfigHistoryKeys(LiteralStringRef("\xff/globalConfig/h/"),
+                                          LiteralStringRef("\xff/globalConfig/h0"));
 const KeyRef globalConfigHistoryPrefix = globalConfigHistoryKeys.begin;
 
 const KeyRef globalConfigVersionKey = LiteralStringRef("\xff/globalConfig/v");
 
-const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
+const KeyRangeRef workerListKeys(LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0"));
 const KeyRef workerListPrefix = workerListKeys.begin;
 
 const Key workerListKeyFor(StringRef processID) {
@@ -939,124 +960,8 @@ const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainS
 
 const KeyRangeRef monitorConfKeys(LiteralStringRef("\xff\x02/monitorConf/"), LiteralStringRef("\xff\x02/monitorConf0"));
 
-const KeyRef restoreLeaderKey = LiteralStringRef("\xff\x02/restoreLeader");
-const KeyRangeRef restoreWorkersKeys(LiteralStringRef("\xff\x02/restoreWorkers/"),
-                                     LiteralStringRef("\xff\x02/restoreWorkers0"));
-const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus/");
-
-const KeyRef restoreRequestTriggerKey = LiteralStringRef("\xff\x02/restoreRequestTrigger");
 const KeyRef restoreRequestDoneKey = LiteralStringRef("\xff\x02/restoreRequestDone");
-const KeyRangeRef restoreRequestKeys(LiteralStringRef("\xff\x02/restoreRequests/"),
-                                     LiteralStringRef("\xff\x02/restoreRequests0"));
 
-const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"),
-                                     LiteralStringRef("\xff\x02/restoreApplier0"));
-const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
-
-// restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
-// Version and batchIndex are passed in as LittleEndian,
-// they must be converted to BigEndian to maintain ordering in lexical order
-const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(restoreApplierKeys.begin);
-	wr << applierID << bigEndian64(batchIndex) << bigEndian64(version);
-	return wr.toValue();
-}
-
-std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key) {
-	BinaryReader rd(key, Unversioned());
-	UID applierID;
-	int64_t batchIndex;
-	Version version;
-	rd >> applierID >> batchIndex >> version;
-	return std::make_tuple(applierID, bigEndian64(batchIndex), bigEndian64(version));
-}
-
-// Encode restore worker key for workerID
-const Key restoreWorkerKeyFor(UID const& workerID) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(restoreWorkersKeys.begin);
-	wr << workerID;
-	return wr.toValue();
-}
-
-// Encode restore agent value
-const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreWorkerInterfaceValue()));
-	wr << cmdInterf;
-	return wr.toValue();
-}
-
-RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value) {
-	RestoreWorkerInterface s;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> s;
-	return s;
-}
-
-// Encode and decode restore request value
-// restoreRequestTrigger key
-const Value restoreRequestTriggerValue(UID randomID, int const numRequests) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestTriggerValue()));
-	wr << numRequests;
-	wr << randomID;
-	return wr.toValue();
-}
-int decodeRestoreRequestTriggerValue(ValueRef const& value) {
-	int s;
-	UID randomID;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> s;
-	reader >> randomID;
-	return s;
-}
-
-// restoreRequestDone key
-const Value restoreRequestDoneVersionValue(Version readVersion) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestDoneVersionValue()));
-	wr << readVersion;
-	return wr.toValue();
-}
-Version decodeRestoreRequestDoneVersionValue(ValueRef const& value) {
-	Version v;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> v;
-	return v;
-}
-
-const Key restoreRequestKeyFor(int const& index) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(restoreRequestKeys.begin);
-	wr << index;
-	return wr.toValue();
-}
-
-const Value restoreRequestValue(RestoreRequest const& request) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestValue()));
-	wr << request;
-	return wr.toValue();
-}
-
-RestoreRequest decodeRestoreRequestValue(ValueRef const& value) {
-	RestoreRequest s;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> s;
-	return s;
-}
-
-// TODO: Register restore performance data to restoreStatus key
-const Key restoreStatusKeyFor(StringRef statusType) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(restoreStatusKey);
-	wr << statusType;
-	return wr.toValue();
-}
-
-const Value restoreStatusValue(double val) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreStatusValue()));
-	wr << StringRef(std::to_string(val));
-	return wr.toValue();
-}
 const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");
 const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures");
 const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");
@@ -1082,3 +987,60 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTON
 const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
+
+// for tests
+void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
+	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+	       ssi.id().toString().c_str(),
+	       ssi.locality.toString().c_str(),
+	       ssi.isTss() ? "true" : "false",
+	       ssi.isTss() ? ssi.tssPairID.get().toString().c_str() : "",
+	       ssi.address().toString().c_str(),
+	       ssi.getValue.getEndpoint().token.toString().c_str());
+
+	StorageServerInterface ssi2 =
+	    (useFB) ? decodeServerListValueFB(serverListValueFB(ssi)) : decodeServerListValue(serverListValue(ssi));
+
+	printf("ssi2=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+	       ssi2.id().toString().c_str(),
+	       ssi2.locality.toString().c_str(),
+	       ssi2.isTss() ? "true" : "false",
+	       ssi2.isTss() ? ssi2.tssPairID.get().toString().c_str() : "",
+	       ssi2.address().toString().c_str(),
+	       ssi2.getValue.getEndpoint().token.toString().c_str());
+
+	ASSERT(ssi.id() == ssi2.id());
+	ASSERT(ssi.locality == ssi2.locality);
+	ASSERT(ssi.isTss() == ssi2.isTss());
+	if (ssi.isTss()) {
+		ASSERT(ssi2.tssPairID.get() == ssi2.tssPairID.get());
+	}
+	ASSERT(ssi.address() == ssi2.address());
+	ASSERT(ssi.getValue.getEndpoint().token == ssi2.getValue.getEndpoint().token);
+}
+
+// unit test for serialization since tss stuff had bugs
+TEST_CASE("/SystemData/SerDes/SSI") {
+	printf("testing ssi serdes\n");
+	LocalityData localityData(Optional<Standalone<StringRef>>(),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Optional<Standalone<StringRef>>());
+
+	// non-tss
+	StorageServerInterface ssi;
+	ssi.uniqueID = UID(0x1234123412341234, 0x5678567856785678);
+	ssi.locality = localityData;
+	ssi.initEndpoints();
+
+	testSSISerdes(ssi, false);
+	testSSISerdes(ssi, true);
+
+	ssi.tssPairID = UID(0x2345234523452345, 0x1238123812381238);
+
+	testSSISerdes(ssi, false);
+	testSSISerdes(ssi, true);
+	printf("ssi serdes test complete\n");
+
+	return Void();
+}

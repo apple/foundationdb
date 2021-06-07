@@ -719,9 +719,11 @@ ACTOR Future<Void> trackEachStorageServer(
 		when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 			wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
 			if (change.second.present()) {
-				auto& a = actors[change.first];
-				a = Future<Void>();
-				a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
+				if (!change.second.get().isTss()) {
+					auto& a = actors[change.first];
+					a = Future<Void>();
+					a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
+				}
 			} else
 				actors.erase(change.first);
 		}

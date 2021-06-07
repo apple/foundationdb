@@ -1,7 +1,4 @@
 set(FDBCLIENT_SRCS
-  ActorLineageProfiler.h
-  ActorLineageProfiler.cpp
-  AnnotateActor.cpp
   AsyncFileS3BlobStore.actor.cpp
   AsyncFileS3BlobStore.actor.h
   AsyncTaskThread.actor.cpp
@@ -30,7 +27,6 @@ set(FDBCLIENT_SRCS
   EventTypes.actor.h
   FDBOptions.h
   FDBTypes.h
-  FluentDSampleIngestor.cpp
   FileBackupAgent.actor.cpp
   GlobalConfig.h
   GlobalConfig.actor.h
@@ -61,7 +57,8 @@ set(FDBCLIENT_SRCS
   SpecialKeySpace.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
-  RestoreWorkerInterface.actor.h
+  RestoreInterface.cpp
+  RestoreInterface.h
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h
@@ -72,6 +69,7 @@ set(FDBCLIENT_SRCS
   Status.h
   StatusClient.actor.cpp
   StatusClient.h
+  StorageServerInterface.cpp
   StorageServerInterface.h
   Subspace.cpp
   Subspace.h
@@ -144,7 +142,8 @@ endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
-target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
 if(BUILD_AZURE_BACKUP)
-  target_link_libraries(fdbclient PRIVATE curl uuid azure-storage-lite)
+  target_link_libraries(fdbclient PUBLIC fdbrpc PRIVATE curl uuid azure-storage-lite)
+else()
+  target_link_libraries(fdbclient PUBLIC fdbrpc)
 endif()

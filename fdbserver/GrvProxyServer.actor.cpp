@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/Notified.h"
-#include "fdbclient/TransactionLineage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -110,15 +109,18 @@ struct GrvProxyStats {
 	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		// The rate at which the limit(budget) is allowed to grow.
-		specialCounter(cc, "SystemAndDefaultTxnRateAllowed", [this]() { return this->transactionRateAllowed; });
-		specialCounter(cc, "BatchTransactionRateAllowed", [this]() { return this->batchTransactionRateAllowed; });
-		specialCounter(cc, "SystemAndDefaultTxnLimit", [this]() { return this->transactionLimit; });
-		specialCounter(cc, "BatchTransactionLimit", [this]() { return this->batchTransactionLimit; });
-		specialCounter(cc, "PercentageOfDefaultGRVQueueProcessed", [this]() {
-			return this->percentageOfDefaultGRVQueueProcessed;
-		});
 		specialCounter(
-		    cc, "PercentageOfBatchGRVQueueProcessed", [this]() { return this->percentageOfBatchGRVQueueProcessed; });
+		    cc, "SystemAndDefaultTxnRateAllowed", [this]() { return int64_t(this->transactionRateAllowed); });
+		specialCounter(
+		    cc, "BatchTransactionRateAllowed", [this]() { return int64_t(this->batchTransactionRateAllowed); });
+		specialCounter(cc, "SystemAndDefaultTxnLimit", [this]() { return int64_t(this->transactionLimit); });
+		specialCounter(cc, "BatchTransactionLimit", [this]() { return int64_t(this->batchTransactionLimit); });
+		specialCounter(cc, "PercentageOfDefaultGRVQueueProcessed", [this]() {
+			return int64_t(100 * this->percentageOfDefaultGRVQueueProcessed);
+		});
+		specialCounter(cc, "PercentageOfBatchGRVQueueProcessed", [this]() {
+			return int64_t(100 * this->percentageOfBatchGRVQueueProcessed);
+		});
 
 		logger = traceCounters("GrvProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "GrvProxyMetrics");
 		for (int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
@@ -356,11 +358,8 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>>
                                                GrvProxyStats* stats,
                                                GrvTransactionRateInfo* batchRateInfo,
                                                TransactionTagMap<uint64_t>* transactionTagCounter) {
-	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetConsistentReadVersion;
 	loop choose {
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
-			auto lineage = make_scoped_lineage(&TransactionLineage::txID, req.spanContext.first());
-			// currentLineage->modify(&TransactionLineage::txID) =
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
 			    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
@@ -654,7 +653,6 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state Span span;
 
 	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
-	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetConsistentReadVersion;
 	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
 	addActor.send(getRate(proxy.id(),
@@ -836,8 +834,10 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		}
 		span = Span(span.location);
 
-		grvProxyData->stats.percentageOfDefaultGRVQueueProcessed = (double)defaultGRVProcessed / defaultQueueSize;
-		grvProxyData->stats.percentageOfBatchGRVQueueProcessed = (double)batchGRVProcessed / batchQueueSize;
+		grvProxyData->stats.percentageOfDefaultGRVQueueProcessed =
+		    defaultQueueSize ? (double)defaultGRVProcessed / defaultQueueSize : 1;
+		grvProxyData->stats.percentageOfBatchGRVQueueProcessed =
+		    batchQueueSize ? (double)batchGRVProcessed / batchQueueSize : 1;
 	}
 }
 

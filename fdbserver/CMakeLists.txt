@@ -83,13 +83,12 @@ set(FDBSERVER_SRCS
   RestoreLoader.actor.cpp
   RestoreWorker.actor.h
   RestoreWorker.actor.cpp
+  RestoreWorkerInterface.actor.cpp
+  RestoreWorkerInterface.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
-  RoleLineage.actor.h
-  RoleLineage.actor.cpp
   ServerDBInfo.actor.h
   ServerDBInfo.h
-  SigStack.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
@@ -106,6 +105,8 @@ set(FDBSERVER_SRCS
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
+  TSSMappingUtil.actor.h
+  TSSMappingUtil.actor.cpp
   VersionedBTree.actor.cpp
   VFSAsync.h
   VFSAsync.cpp

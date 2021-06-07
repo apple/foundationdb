@@ -31,7 +31,8 @@ void DatabaseConfiguration::resetInternal() {
 	commitProxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
 	    storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
-	tLogDataStoreType = storageServerStoreType = KeyValueStoreType::END;
+	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = KeyValueStoreType::END;
+	desiredTSSCount = 0;
 	tLogSpillType = TLogSpillType::DEFAULT;
 	autoCommitProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
 	autoGrvProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES;
@@ -43,6 +44,7 @@ void DatabaseConfiguration::resetInternal() {
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 	backupWorkerEnabled = false;
+	perpetualStorageWiggleSpeed = 0;
 }
 
 void parse(int* i, ValueRef const& v) {
@@ -194,9 +196,9 @@ bool DatabaseConfiguration::isValid() const {
 	      getDesiredRemoteLogs() >= 1 && remoteTLogReplicationFactor >= 0 && repopulateRegionAntiQuorum >= 0 &&
 	      repopulateRegionAntiQuorum <= 1 && usableRegions >= 1 && usableRegions <= 2 && regions.size() <= 2 &&
 	      (usableRegions == 1 || regions.size() == 2) && (regions.size() == 0 || regions[0].priority >= 0) &&
-	      (regions.size() == 0 ||
-	       tLogPolicy->info() !=
-	           "dcid^2 x zoneid^2 x 1"))) { // We cannot specify regions with three_datacenter replication
+	      (regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") &&
+	      // We cannot specify regions with three_datacenter replication
+	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1))) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -298,6 +300,25 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["storage_engine"] = "custom";
 	}
 
+	if (desiredTSSCount > 0) {
+		result["tss_count"] = desiredTSSCount;
+		if (testingStorageServerStoreType == KeyValueStoreType::SSD_BTREE_V1) {
+			result["tss_storage_engine"] = "ssd-1";
+		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_BTREE_V2) {
+			result["tss_storage_engine"] = "ssd-2";
+		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
+			result["tss_storage_engine"] = "ssd-redwood-experimental";
+		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+			result["tss_storage_engine"] = "ssd-rocksdb-experimental";
+		} else if (testingStorageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
+			result["tss_storage_engine"] = "memory-radixtree-beta";
+		} else if (testingStorageServerStoreType == KeyValueStoreType::MEMORY) {
+			result["tss_storage_engine"] = "memory-2";
+		} else {
+			result["tss_storage_engine"] = "custom";
+		}
+	}
+
 	result["log_spill"] = (int)tLogSpillType;
 
 	if (remoteTLogReplicationFactor == 1) {
@@ -352,7 +373,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	}
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
-
+	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	return result;
 }
 
@@ -448,6 +469,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		}
 	} else if (ck == LiteralStringRef("storage_replicas")) {
 		parse(&storageTeamSize, value);
+	} else if (ck == LiteralStringRef("tss_count")) {
+		parse(&desiredTSSCount, value);
 	} else if (ck == LiteralStringRef("log_version")) {
 		parse((&type), value);
 		type = std::max((int)TLogVersion::MIN_RECRUITABLE, type);
@@ -470,6 +493,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("storage_engine")) {
 		parse((&type), value);
 		storageServerStoreType = (KeyValueStoreType::StoreType)type;
+	} else if (ck == LiteralStringRef("tss_storage_engine")) {
+		parse((&type), value);
+		testingStorageServerStoreType = (KeyValueStoreType::StoreType)type;
 	} else if (ck == LiteralStringRef("auto_commit_proxies")) {
 		parse(&autoCommitProxyCount, value);
 	} else if (ck == LiteralStringRef("auto_grv_proxies")) {
@@ -499,6 +525,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse(&repopulateRegionAntiQuorum, value);
 	} else if (ck == LiteralStringRef("regions")) {
 		parse(&regions, value);
+	} else if (ck == LiteralStringRef("perpetual_storage_wiggle")) {
+		parse(&perpetualStorageWiggleSpeed, value);
 	} else {
 		return false;
 	}

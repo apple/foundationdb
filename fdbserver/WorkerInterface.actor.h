@@ -614,11 +614,13 @@ struct InitializeStorageRequest {
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
+	Optional<std::pair<UID, Version>>
+	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion);
 	}
 };
 
@@ -770,6 +772,7 @@ struct DiskStoreRequest {
 struct Role {
 	static const Role WORKER;
 	static const Role STORAGE_SERVER;
+	static const Role TESTING_STORAGE_SERVER;
 	static const Role TRANSACTION_LOG;
 	static const Role SHARED_TRANSACTION_LOG;
 	static const Role COMMIT_PROXY;
@@ -788,41 +791,6 @@ struct Role {
 	std::string roleName;
 	std::string abbreviation;
 	bool includeInTraceRoles;
-
-	static const Role& get(ProcessClass::ClusterRole role) {
-		switch (role) {
-		case ProcessClass::Storage:
-			return STORAGE_SERVER;
-		case ProcessClass::TLog:
-			return TRANSACTION_LOG;
-		case ProcessClass::CommitProxy:
-			return COMMIT_PROXY;
-		case ProcessClass::GrvProxy:
-			return GRV_PROXY;
-		case ProcessClass::Master:
-			return MASTER;
-		case ProcessClass::Resolver:
-			return RESOLVER;
-		case ProcessClass::LogRouter:
-			return LOG_ROUTER;
-		case ProcessClass::ClusterController:
-			return CLUSTER_CONTROLLER;
-		case ProcessClass::DataDistributor:
-			return DATA_DISTRIBUTOR;
-		case ProcessClass::Ratekeeper:
-			return RATEKEEPER;
-		case ProcessClass::StorageCache:
-			return STORAGE_CACHE;
-		case ProcessClass::Backup:
-			return BACKUP;
-		case ProcessClass::Worker:
-			return WORKER;
-		case ProcessClass::NoRole:
-		default:
-			ASSERT(false);
-			throw internal_error();
-		}
-	}
 
 	bool operator==(const Role& r) const { return roleName == r.roleName; }
 	bool operator!=(const Role& r) const { return !(*this == r); }
@@ -875,6 +843,7 @@ class IDiskQueue;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
+                                 Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo>> db,
                                  std::string folder);

@@ -152,6 +152,7 @@ public:
 		databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
 		runConsistencyCheck = g_network->isSimulated();
 		runConsistencyCheckOnCache = false;
+		runConsistencyCheckOnTSS = true;
 		waitForQuiescenceBegin = true;
 		waitForQuiescenceEnd = true;
 		simCheckRelocationDuration = false;
@@ -167,8 +168,8 @@ public:
 	         double databasePingDelay = -1.0)
 	  : title(title), dumpAfterTest(dump), clearAfterTest(clear), startDelay(startDelay), useDB(useDB), timeout(600),
 	    databasePingDelay(databasePingDelay), runConsistencyCheck(g_network->isSimulated()),
-	    runConsistencyCheckOnCache(false), waitForQuiescenceBegin(true), waitForQuiescenceEnd(true),
-	    simCheckRelocationDuration(false), simConnectionFailuresDisableDuration(0),
+	    runConsistencyCheckOnCache(false), runConsistencyCheckOnTSS(false), waitForQuiescenceBegin(true),
+	    waitForQuiescenceEnd(true), simCheckRelocationDuration(false), simConnectionFailuresDisableDuration(0),
 	    simBackupAgents(ISimulator::BackupAgentType::NoBackupAgents),
 	    simDrAgents(ISimulator::BackupAgentType::NoBackupAgents) {
 		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
@@ -187,6 +188,7 @@ public:
 	double databasePingDelay;
 	bool runConsistencyCheck;
 	bool runConsistencyCheckOnCache;
+	bool runConsistencyCheckOnTSS;
 	bool waitForQuiescenceBegin;
 	bool waitForQuiescenceEnd;
 

@@ -26,6 +26,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -308,9 +309,13 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncV
 			    .detail("SS", servers[i].id());
 			throw attribute_not_found();
 		}
-		messages.push_back(timeoutError(itr->second.eventLogRequest.getReply(
-		                                    EventLogRequest(StringRef(servers[i].id().toString() + "/StorageMetrics"))),
-		                                1.0));
+		// Ignore TSS in add delay mode since it can purposefully freeze forever
+		if (!servers[i].isTss() || !g_network->isSimulated() ||
+		    g_simulator.tssMode != ISimulator::TSSMode::EnabledAddDelay) {
+			messages.push_back(timeoutError(itr->second.eventLogRequest.getReply(EventLogRequest(
+			                                    StringRef(servers[i].id().toString() + "/StorageMetrics"))),
+			                                1.0));
+		}
 	}
 
 	wait(waitForAll(messages));
@@ -516,7 +521,15 @@ ACTOR Future<bool> getStorageServersRecruiting(Database cx, WorkerInterface dist
 		                      1.0));
 
 		TraceEvent("StorageServersRecruiting").detail("Message", recruitingMessage.toString());
-		return recruitingMessage.getValue("State") == "Recruiting";
+
+		if (recruitingMessage.getValue("State") == "Recruiting") {
+			std::string tssValue;
+			// if we're tss recruiting, that's fine because that can block indefinitely if only 1 free storage process
+			if (!recruitingMessage.tryGetValue("IsTSS", tssValue) || tssValue == "False") {
+				return true;
+			}
+		}
+		return false;
 	} catch (Error& e) {
 		TraceEvent("QuietDatabaseFailure", distributorWorker.id())
 		    .detail("Reason", "Failed to extract StorageServersRecruiting")
@@ -585,6 +598,10 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if (g_network->isSimulated())
 		wait(delay(5.0));
+
+	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
+	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
+	wait(setPerpetualStorageWiggle(cx, false, true));
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;

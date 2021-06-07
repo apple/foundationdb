@@ -2,8 +2,20 @@
 Release Notes
 #############
 
+
+6.3.14
+======
+* Fixed fdbbackup start command that automatically configures database with backup workers to only do so when using partitioned logs. `(PR #4863) <https://github.com/apple/foundationdb/pull/4863>`_
+* Added ``cluster.bounce_impact`` section to status to report if there will be any extra effects when bouncing the cluster, and if so, the reason for those effects. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
+* Added ``fetched_versions`` to the storage metrics section of status to report how fast a storage server is catching up in versions. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
+* Added ``fetches_from_logs`` to the storage metrics section of status to report how frequently a storage server fetches updates from transaction logs. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
+* Added the ``bypass_unreadable`` transaction option which allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. `(PR #4774) <https://github.com/apple/foundationdb/pull/4774>`_
+* Fix several packaging issues. The osx package should now install successfully, and the structure of the RPM and DEB packages should match that of 6.2. `(PR #4810) <https://github.com/apple/foundationdb/pull/4810>`_
+* Fix an accounting error that could potentially result in inaccuracies in priority busyness metrics. `(PR #4824) <https://github.com/apple/foundationdb/pull/4824>`_
+
 6.3.13
 ======
+* Added ``commit_batching_window_size`` to the proxy roles section of status to record statistics about commit batching window size on each proxy. `(PR #4736) <https://github.com/apple/foundationdb/pull/4736>`_
 * The multi-version client now requires at most two client connections with version 6.2 or larger, regardless of how many external clients are configured. Clients older than 6.2 will continue to create an additional connection each. `(PR #4667) <https://github.com/apple/foundationdb/pull/4667>`_
 
 6.3.12
@@ -11,6 +23,9 @@ Release Notes
 * Change the default for --knob_tls_server_handshake_threads to 64. The previous was 1000. This avoids starting 1000 threads by default, but may adversely affect recovery time for large clusters using tls. Users with large tls clusters should consider explicitly setting this knob in their foundationdb.conf file. `(PR #4421) <https://github.com/apple/foundationdb/pull/4421>`_
 * Fix accounting error that could cause commits to incorrectly fail with ``proxy_memory_limit_exceeded``. `(PR #4526) <https://github.com/apple/foundationdb/pull/4526>`_
 * As an optimization, partial restore using target key ranges now filters backup log data prior to loading it into the database.  `(PR #4554) <https://github.com/apple/foundationdb/pull/4554>`_
+* Fix fault tolerance calculation when there are no tLogs in LogSet.  `(PR #4454) <https://github.com/apple/foundationdb/pull/4454>`_
+* Change client's ``iteration_progression`` size defaults from 256 to 4096 bytes for better performance. `(PR #4416) <https://github.com/apple/foundationdb/pull/4416>`_
+* Add the ability to instrument java driver actions, such as ``FDBTransaction`` and ``RangeQuery``. `(PR #4385) <https://github.com/apple/foundationdb/pull/4385>`_
 
 6.3.11
 ======

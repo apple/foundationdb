@@ -133,6 +133,7 @@ public:
 	int PRIORITY_RECOVER_MOVE;
 	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
 	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
 	int PRIORITY_TEAM_HEALTHY;
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
 	int PRIORITY_TEAM_REDUNDANT;
@@ -167,6 +168,9 @@ public:
 	double SERVER_LIST_DELAY;
 	double RECRUITMENT_IDLE_DELAY;
 	double STORAGE_RECRUITMENT_DELAY;
+	bool TSS_HACK_IDENTITY_MAPPING;
+	double TSS_RECRUITMENT_TIMEOUT;
+	double TSS_DD_CHECK_INTERVAL;
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
@@ -200,6 +204,7 @@ public:
 	int DD_TEAMS_INFO_PRINT_INTERVAL;
 	int DD_TEAMS_INFO_PRINT_YIELD_COUNT;
 	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
+	int DD_STORAGE_WIGGLE_PAUSE_THRESHOLD; // How many unhealthy relocations are ongoing will pause storage wiggle
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -543,7 +548,7 @@ public:
 	// Worker
 	double WORKER_LOGGING_INTERVAL;
 	double HEAP_PROFILER_INTERVAL;
-	double REGISTER_WORKER_REQUEST_TIMEOUT;
+	double UNKNOWN_CC_TIMEOUT;
 	double DEGRADED_RESET_INTERVAL;
 	double DEGRADED_WARNING_LIMIT;
 	double DEGRADED_WARNING_RESET_DELAY;
@@ -559,6 +564,8 @@ public:
 
 	// Coordination
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
+	bool ENABLE_CROSS_CLUSTER_SUPPORT; // Allow a coordinator to serve requests whose connection string does not match
+	                                   // the local descriptor
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;
