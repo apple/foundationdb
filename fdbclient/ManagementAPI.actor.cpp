@@ -1315,7 +1315,7 @@ struct AutoQuorumChange final : IQuorumChange {
 	                                                      vector<NetworkAddress> oldCoordinators,
 	                                                      Reference<ClusterConnectionFile> ccf,
 	                                                      CoordinatorsResult& err) override {
-		return getDesired(this, tr, oldCoordinators, ccf, &err);
+		return getDesired(Reference<AutoQuorumChange>::addRef(this), tr, oldCoordinators, ccf, &err);
 	}
 
 	ACTOR static Future<int> getRedundancy(AutoQuorumChange* self, Transaction* tr) {
@@ -1378,7 +1378,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		return true; // The status quo seems fine
 	}
 
-	ACTOR static Future<vector<NetworkAddress>> getDesired(AutoQuorumChange* self,
+	ACTOR static Future<vector<NetworkAddress>> getDesired(Reference<AutoQuorumChange> self,
 	                                                       Transaction* tr,
 	                                                       vector<NetworkAddress> oldCoordinators,
 	                                                       Reference<ClusterConnectionFile> ccf,
@@ -1386,7 +1386,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		state int desiredCount = self->desired;
 
 		if (desiredCount == -1) {
-			int redundancy = wait(getRedundancy(self, tr));
+			int redundancy = wait(getRedundancy(self.getPtr(), tr));
 			desiredCount = redundancy * 2 - 1;
 		}
 
@@ -1415,7 +1415,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		}
 
 		if (checkAcceptable) {
-			bool ok = wait(isAcceptable(self, tr, oldCoordinators, ccf, desiredCount, &excluded));
+			bool ok = wait(isAcceptable(self.getPtr(), tr, oldCoordinators, ccf, desiredCount, &excluded));
 			if (ok)
 				return oldCoordinators;
 		}

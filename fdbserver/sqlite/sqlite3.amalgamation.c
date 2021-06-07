@@ -43143,7 +43143,7 @@ SQLITE_PRIVATE void sqlite3VdbeMakeReady(
         p->pFree = sqlite3DbMallocZero(db, nByte);
       }
       zCsr = p->pFree;
-      zEnd = &zCsr[nByte];
+      zEnd = zCsr ? &zCsr[nByte] : NULL;
     }while( nByte && !db->mallocFailed );
 
     p->nCursor = (u16)nCursor;
