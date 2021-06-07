@@ -183,7 +183,8 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
+	// FIXME: Undo
+	init( MIN_TRACE_SEVERITY,                  isSimulated ? 1 : 5 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );
@@ -254,8 +255,9 @@ static std::string toLower(std::string const& name) {
 	return lower_name;
 }
 
-static int64_t parseInt64(std::string const& value) {
-	int64_t v;
+template <class T>
+static T parseIntegral(std::string const& value) {
+	T v;
 	int n = 0;
 	if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
 		if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
@@ -280,12 +282,12 @@ ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const
 		} else if (toLower(value) == "false") {
 			return false;
 		} else {
-			return parseInt64(value);
+			return parseIntegral<bool>(value);
 		}
 	} else if (int64_knobs.count(knob)) {
-		return parseInt64(value);
+		return parseIntegral<int64_t>(value);
 	} else if (int_knobs.count(knob)) {
-		return parseInt64(value);
+		return parseIntegral<int>(value);
 	} else if (string_knobs.count(knob)) {
 		return value;
 	}

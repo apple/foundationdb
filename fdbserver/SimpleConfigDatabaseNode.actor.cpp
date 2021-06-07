@@ -20,6 +20,7 @@
 
 #include <map>
 
+#include "fdbclient/SystemData.h"
 #include "fdbserver/SimpleConfigDatabaseNode.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/OnDemandStore.h"
@@ -230,7 +231,11 @@ class SimpleConfigDatabaseNodeImpl {
 		for (const auto &versionedMutation : versionedMutations) {
 			const auto &mutation = versionedMutation.mutation;
 			if (mutation.getKey() == req.key) {
-				value = mutation.getValue();
+				if (mutation.isSet()) {
+					value = mutation.getValue();
+				} else {
+					value = {};
+				}
 			}
 		}
 		req.reply.send(ConfigTransactionGetReply{ value });
@@ -314,6 +319,11 @@ class SimpleConfigDatabaseNodeImpl {
 			Key key = versionedMutationKey(req.version, index++);
 			Value value = ObjectWriter::toValue(mutation, IncludeVersion());
 			if (mutation.isSet()) {
+				TraceEvent("SimpleConfigDatabaseNodeSetting")
+				    .detail("ConfigClass", mutation.getConfigClass())
+				    .detail("KnobName", mutation.getKnobName())
+				    .detail("Value", mutation.getValue().toString())
+				    .detail("Version", req.version);
 				++self->setMutations;
 			} else {
 				++self->clearMutations;
@@ -367,7 +377,7 @@ class SimpleConfigDatabaseNodeImpl {
 		wait(store(reply.changesVersion, getCommittedVersion(self)));
 		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, reply.changesVersion)));
 		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, reply.changesVersion)));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingSnapshot")
+		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingSnapshot", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)
 		    .detail("ChangesVersion", reply.changesVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
@@ -379,7 +389,7 @@ class SimpleConfigDatabaseNodeImpl {
 
 	ACTOR static Future<Void> compact(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerCompactRequest req) {
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeCompacting")
+		TraceEvent(SevDebug, "ConfigDatabaseNodeCompacting", self->id)
 		    .detail("Version", req.version)
 		    .detail("LastCompacted", lastCompactedVersion);
 		if (req.version <= lastCompactedVersion) {
@@ -441,9 +451,8 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 public:
-	SimpleConfigDatabaseNodeImpl(std::string const& folder, Optional<UID> testID)
-	  : id(testID.present() ? testID.get() : deterministicRandom()->randomUniqueID()),
-	    kvStore(folder, id, "globalconf-" + (testID.present() ? id.toString() : "")), cc("ConfigDatabaseNode"),
+	SimpleConfigDatabaseNodeImpl(std::string const& folder)
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigDatabaseNode"),
 	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
 	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
@@ -451,6 +460,7 @@ public:
 	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {
 		logger = traceCounters(
 		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
+		TraceEvent(SevDebug, "StartingSimpleConfigDatabaseNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
 	}
 
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
@@ -458,8 +468,8 @@ public:
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
 };
 
-SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& folder, Optional<UID> testID)
-  : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(folder, testID)) {}
+SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& folder)
+  : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(folder)) {}
 
 SimpleConfigDatabaseNode::~SimpleConfigDatabaseNode() = default;
 

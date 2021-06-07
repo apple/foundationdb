@@ -135,8 +135,7 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
-	state OnDemandStore store(
-	    params.get("unitTestDataDir").get(), deterministicRandom()->randomUniqueID(), "coordination");
+	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), "coordination");
 	state Future<Void> actor = localGenerationReg(reg, &store);
 	state Key the_key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 10)));
 

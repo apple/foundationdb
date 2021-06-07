@@ -72,10 +72,15 @@ public:
 	}
 
 	void setKnob(std::string const& knobName, KnobValueRef const& knobValue) override {
-		// Assert because we should validate inputs beforehand
-		ASSERT(knobValue.setKnob(knobName, clientKnobCollection.getMutableFlowKnobs()) ||
-		       knobValue.setKnob(knobName, clientKnobCollection.getMutableClientKnobs()) ||
-		       knobValue.setKnob(knobName, serverKnobs) || knobValue.setKnob(knobName, testKnobs));
+		if (!knobValue.setKnob(knobName, clientKnobCollection.getMutableFlowKnobs()) &&
+		    !knobValue.setKnob(knobName, clientKnobCollection.getMutableClientKnobs()) &&
+		    !knobValue.setKnob(knobName, serverKnobs) && !knobValue.setKnob(knobName, testKnobs)) {
+			// Input should already have been validated, so this indicates a bug
+			TraceEvent(SevError, "FailedToSetKnob")
+			    .detail("KnobName", knobName)
+			    .detail("KnobValue", knobValue.toString());
+			ASSERT(false);
+		}
 	}
 };
 

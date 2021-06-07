@@ -50,8 +50,8 @@ IKeyValueStore* OnDemandStore::get() {
 }
 
 bool OnDemandStore::exists() const {
-	return store || fileExists(joinPath(folder, prefix + "-0.fdq")) ||
-	       fileExists(joinPath(folder, prefix + "-1.fdq")) || fileExists(joinPath(folder, prefix + ".fdb"));
+	return store || fileExists(joinPath(folder, prefix + "0.fdq")) || fileExists(joinPath(folder, prefix + "1.fdq")) ||
+	       fileExists(joinPath(folder, prefix + ".fdb"));
 }
 
 IKeyValueStore* OnDemandStore::operator->() {

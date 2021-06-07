@@ -43,6 +43,61 @@ ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 	}
 }
 
+Value KnobValueRef::ToValueFunc::operator()(int v) const {
+	return BinaryWriter::toValue(v, Unversioned());
+}
+Value KnobValueRef::ToValueFunc::operator()(int64_t v) const {
+	return BinaryWriter::toValue(v, Unversioned());
+}
+Value KnobValueRef::ToValueFunc::operator()(bool v) const {
+	return BinaryWriter::toValue(v, Unversioned());
+}
+Value KnobValueRef::ToValueFunc::operator()(ValueRef v) const {
+	return v;
+}
+Value KnobValueRef::ToValueFunc::operator()(double v) const {
+	return BinaryWriter::toValue(v, Unversioned());
+}
+
+std::string KnobValueRef::ToStringFunc::operator()(int v) const {
+	return format("int:%d", v);
+}
+std::string KnobValueRef::ToStringFunc::operator()(int64_t v) const {
+	return format("int64_t:%ld", v);
+}
+std::string KnobValueRef::ToStringFunc::operator()(bool v) const {
+	return format("bool:%d", v);
+}
+std::string KnobValueRef::ToStringFunc::operator()(ValueRef v) const {
+	return "string:" + v.toString();
+}
+std::string KnobValueRef::ToStringFunc::operator()(double v) const {
+	return format("double:%lf", v);
+}
+
+KnobValue KnobValueRef::CreatorFunc::operator()(NoKnobFound) const {
+	ASSERT(false);
+	return {};
+}
+KnobValue KnobValueRef::CreatorFunc::operator()(int v) const {
+	return KnobValueRef(v);
+}
+KnobValue KnobValueRef::CreatorFunc::operator()(double v) const {
+	return KnobValueRef(v);
+}
+KnobValue KnobValueRef::CreatorFunc::operator()(int64_t v) const {
+	return KnobValueRef(v);
+}
+KnobValue KnobValueRef::CreatorFunc::operator()(bool v) const {
+	return KnobValueRef(v);
+}
+KnobValue KnobValueRef::CreatorFunc::operator()(std::string const& v) const {
+	return KnobValueRef(ValueRef(reinterpret_cast<uint8_t const*>(v.c_str()), v.size()));
+}
+KnobValue KnobValueRef::create(ParsedKnobValue const& v) {
+	return std::visit(CreatorFunc{}, v);
+}
+
 TEST_CASE("/fdbclient/ConfigDB/ConfigKey/EncodeDecode") {
 	Tuple tuple;
 	tuple << "class-A"_sr

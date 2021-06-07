@@ -128,9 +128,15 @@ class LocalConfigurationImpl {
 	ConfigKnobOverrides configKnobOverrides;
 	std::unique_ptr<IKnobCollection> testKnobCollection;
 
-	IKnobCollection& getKnobs() { return testKnobCollection ? *testKnobCollection : *g_knobs; }
+	IKnobCollection& getKnobs() {
+		ASSERT(testKnobCollection);
+		return testKnobCollection ? *testKnobCollection : *g_knobs;
+	}
 
-	IKnobCollection const& getKnobs() const { return testKnobCollection ? *testKnobCollection : *g_knobs; }
+	IKnobCollection const& getKnobs() const {
+		ASSERT(testKnobCollection);
+		return testKnobCollection ? *testKnobCollection : *g_knobs;
+	}
 
 	CounterCollection cc;
 	Counter broadcasterChanges;
@@ -289,13 +295,12 @@ public:
 	LocalConfigurationImpl(std::string const& dataFolder,
 	                       std::string const& configPath,
 	                       std::map<std::string, std::string> const& manualKnobOverrides,
-	                       Optional<UID> testID)
-	  : id(testID.present() ? testID.get() : deterministicRandom()->randomUniqueID()),
-	    kvStore(dataFolder, id, "localconf-" + (testID.present() ? id.toString() : "")), cc("LocalConfiguration"),
+	                       bool isTest)
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"), cc("LocalConfiguration"),
 	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
 	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
 	    manualKnobOverrides(manualKnobOverrides) {
-		if (testID.present()) {
+		if (isTest) {
 			testKnobCollection = IKnobCollection::createServerKnobCollection(true, g_network->isSimulated());
 		}
 		logger = traceCounters(
@@ -342,8 +347,8 @@ public:
 LocalConfiguration::LocalConfiguration(std::string const& dataFolder,
                                        std::string const& configPath,
                                        std::map<std::string, std::string> const& manualKnobOverrides,
-                                       Optional<UID> testID)
-  : impl(std::make_unique<LocalConfigurationImpl>(dataFolder, configPath, manualKnobOverrides, testID)) {}
+                                       bool isTest)
+  : impl(std::make_unique<LocalConfigurationImpl>(dataFolder, configPath, manualKnobOverrides, isTest)) {}
 
 LocalConfiguration::LocalConfiguration(LocalConfiguration&&) = default;
 

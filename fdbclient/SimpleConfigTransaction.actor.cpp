@@ -54,8 +54,8 @@ class SimpleConfigTransactionImpl {
 		if (!self->getVersionFuture.isValid()) {
 			self->getVersionFuture = getReadVersion(self);
 		}
+		state ConfigKey configKey = ConfigKey::decodeKey(key);
 		Version version = wait(self->getVersionFuture);
-		auto configKey = ConfigKey::decodeKey(key);
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGettingValue", self->dID.get())
 			    .detail("ConfigClass", configKey.configClass)

@@ -35,7 +35,6 @@ struct UnitTestWorkload : TestWorkload {
 	std::string testPattern;
 	int testRunLimit;
 	UnitTestParameters testParams;
-	std::string dataDir;
 
 	PerfIntCounter testsAvailable, testsExecuted, testsFailed;
 	PerfDoubleCounter totalWallTime, totalSimTime;
@@ -47,8 +46,7 @@ struct UnitTestWorkload : TestWorkload {
 		enabled = !clientId; // only do this on the "first" client
 		testPattern = getOption(options, LiteralStringRef("testsMatching"), Value()).toString();
 		testRunLimit = getOption(options, LiteralStringRef("maxTestCases"), -1);
-		dataDir = getOption(options, LiteralStringRef("unitTestDataDir"), "simfdb/unittests/"_sr).toString();
-		testParams.set("unitTestDataDir", dataDir);
+		testParams.setDataDir(getOption(options, LiteralStringRef("dataDir"), "simfdb/unittests/"_sr).toString());
 
 		// Consume all remaining options as testParams which the unit test can access
 		for (auto& kv : options) {
@@ -67,7 +65,10 @@ struct UnitTestWorkload : TestWorkload {
 	}
 
 	std::string description() const override { return "UnitTests"; }
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> setup(Database const& cx) override {
+		platform::eraseDirectoryRecursive(testParams.getDataDir());
+		return Void();
+	}
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
 			return runUnitTests(this);
@@ -105,14 +106,14 @@ struct UnitTestWorkload : TestWorkload {
 			state double start_now = now();
 			state double start_timer = timer();
 
+			platform::createDirectory(self->testParams.getDataDir());
 			try {
-				platform::createDirectory(self->dataDir);
 				wait(test->func(self->testParams));
 			} catch (Error& e) {
 				++self->testsFailed;
 				result = e;
 			}
-			platform::eraseDirectoryRecursive(self->dataDir);
+			platform::eraseDirectoryRecursive(self->testParams.getDataDir());
 			++self->testsExecuted;
 			double wallTime = timer() - start_timer;
 			double simTime = now() - start_now;

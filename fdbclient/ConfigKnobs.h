@@ -33,26 +33,28 @@ class KnobValueRef {
 	explicit KnobValueRef(Arena& arena, ValueRef const& v) : value(std::in_place_type<ValueRef>, arena, v) {}
 
 	struct CreatorFunc {
-		Standalone<KnobValueRef> operator()(NoKnobFound const&) const {
-			ASSERT(false);
-			return {};
-		}
-		template <class T>
-		Standalone<KnobValueRef> operator()(T const& v) const {
-			return KnobValueRef(v);
-		}
-		Standalone<KnobValueRef> operator()(std::string const& v) const {
-			Standalone<KnobValueRef> knobValue;
-			return KnobValueRef(ValueRef(reinterpret_cast<uint8_t const*>(v.c_str()), v.size()));
-		}
+		Standalone<KnobValueRef> operator()(NoKnobFound) const;
+		Standalone<KnobValueRef> operator()(int) const;
+		Standalone<KnobValueRef> operator()(double) const;
+		Standalone<KnobValueRef> operator()(int64_t) const;
+		Standalone<KnobValueRef> operator()(bool) const;
+		Standalone<KnobValueRef> operator()(std::string const& v) const;
+	};
+
+	struct ToValueFunc {
+		Value operator()(int) const;
+		Value operator()(int64_t) const;
+		Value operator()(bool) const;
+		Value operator()(ValueRef) const;
+		Value operator()(double) const;
 	};
 
 	struct ToStringFunc {
-		std::string operator()(int v) const { return format("%d", v); }
-		std::string operator()(int64_t v) const { return format("%ld", v); }
-		std::string operator()(bool v) const { return format("%d", v); }
-		std::string operator()(ValueRef v) const { return v.toString(); }
-		std::string operator()(double const& v) const { return format("%lf", v); }
+		std::string operator()(int) const;
+		std::string operator()(int64_t) const;
+		std::string operator()(bool) const;
+		std::string operator()(ValueRef) const;
+		std::string operator()(double) const;
 	};
 
 	template <class KnobsType>
@@ -72,6 +74,11 @@ class KnobValueRef {
 public:
 	static constexpr FileIdentifier file_identifier = 9297109;
 
+	template <class T>
+	static Value toValue(T const& v) {
+		return ToValueFunc{}(v);
+	}
+
 	KnobValueRef() = default;
 
 	explicit KnobValueRef(Arena& arena, KnobValueRef const& rhs) : value(rhs.value) {
@@ -80,7 +87,7 @@ public:
 		}
 	}
 
-	static Standalone<KnobValueRef> create(ParsedKnobValue const& v) { return std::visit(CreatorFunc{}, v); }
+	static Standalone<KnobValueRef> create(ParsedKnobValue const& v);
 
 	size_t expectedSize() const {
 		return std::holds_alternative<KeyRef>(value) ? std::get<KeyRef>(value).expectedSize() : 0;
@@ -98,10 +105,7 @@ public:
 
 	std::string toString() const { return std::visit(ToStringFunc{}, value); }
 
-	Value toValue() const {
-		auto s = toString();
-		return ValueRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
-	}
+	Value toValue() const { return std::visit(ToValueFunc{}, value); }
 
 	bool setKnob(std::string const& knobName, Knobs& knobs) const {
 		return std::visit(SetKnobFunc<Knobs>{ knobs, knobName }, value);

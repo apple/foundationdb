@@ -139,12 +139,17 @@ class ConfigBroadcasterImpl {
 		for (const auto& versionedMutation : changes) {
 			if (versionedMutation.version > req.lastSeenVersion &&
 			    matchesConfigClass(req.configClassSet, versionedMutation.mutation.getConfigClass())) {
-				TraceEvent(SevDebug, "ConfigBroadcasterSendingChangeMutation", id)
-				    .detail("Version", versionedMutation.version)
+				TraceEvent te(SevDebug, "ConfigBroadcasterSendingChangeMutation", id);
+				te.detail("Version", versionedMutation.version)
 				    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 				    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
-				    .detail("KnobName", versionedMutation.mutation.getKnobName())
-				    .detail("KnobValue", versionedMutation.mutation.getValue().toString());
+				    .detail("KnobName", versionedMutation.mutation.getKnobName());
+				if (versionedMutation.mutation.isSet()) {
+					te.detail("Op", "Set").detail("KnobValue", versionedMutation.mutation.getValue().toString());
+				} else {
+					te.detail("Op", "Clear");
+				}
+
 				reply.changes.push_back_deep(reply.changes.arena(), versionedMutation);
 			}
 		}
@@ -167,6 +172,9 @@ class ConfigBroadcasterImpl {
 						}
 					}
 					reply.version = impl->mostRecentVersion;
+					TraceEvent(SevDebug, "ConfigBroadcasterGotSnapshotRequest", impl->id)
+					    .detail("Size", reply.snapshot.size())
+					    .detail("Version", reply.version);
 					req.reply.send(reply);
 				}
 				when(ConfigBroadcastFollowerGetChangesRequest req = waitNext(cbfi.getChanges.getFuture())) {

@@ -57,11 +57,15 @@ class SimpleConfigConsumerImpl {
 				    wait(self->cfi.getChanges.getReply(ConfigFollowerGetChangesRequest{ self->lastSeenVersion }));
 				++self->successfulChangeRequest;
 				for (const auto& versionedMutation : reply.changes) {
-					TraceEvent(SevDebug, "ConsumerFetchedMutation", self->id)
-					    .detail("Version", versionedMutation.version)
+					TraceEvent te(SevDebug, "ConsumerFetchedMutation", self->id);
+					te.detail("Version", versionedMutation.version)
 					    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
-					    .detail("KnobName", versionedMutation.mutation.getKnobName())
-					    .detail("KnobValue", versionedMutation.mutation.getValue().toString());
+					    .detail("KnobName", versionedMutation.mutation.getKnobName());
+					if (versionedMutation.mutation.isSet()) {
+						te.detail("Op", "Set").detail("KnobValue", versionedMutation.mutation.getValue().toString());
+					} else {
+						te.detail("Op", "Clear");
+					}
 				}
 				if (reply.mostRecentVersion > self->lastSeenVersion) {
 					self->lastSeenVersion = reply.mostRecentVersion;
