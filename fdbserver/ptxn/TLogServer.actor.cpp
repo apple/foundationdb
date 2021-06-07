@@ -28,9 +28,9 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Stats.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -38,10 +38,6 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MutationTracking.h"
-#include "fdbserver/ptxn/MessageSerializer.h"
-#include "fdbserver/ptxn/test/Driver.h"
-#include "fdbserver/ptxn/test/Utils.h"
-#include "fdbserver/ptxn/TLogInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SpanContextMessage.h"
@@ -57,7 +53,6 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 
