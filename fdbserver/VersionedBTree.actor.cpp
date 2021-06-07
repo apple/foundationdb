@@ -41,6 +41,12 @@
 
 #define REDWOOD_DEBUG 0
 
+// Only print redwood debug statements for a certain address. Useful in simulation with many redwood processes to reduce
+// log size.
+#define REDWOOD_DEBUG_ADDR 0
+// example addr:  "[abcd::4:0:1:4]:1"
+#define REDWOOD_DEBUG_ADDR_VAL "";
+
 #define debug_printf_stream stdout
 #define debug_printf_always(...)                                                                                       \
 	{                                                                                                                  \
@@ -50,11 +56,25 @@
 		fflush(debug_printf_stream);                                                                                   \
 	}
 
+#define debug_printf_addr(...)                                                                                         \
+	{                                                                                                                  \
+		std::string addr = REDWOOD_DEBUG_ADDR_VAL;                                                                     \
+		if (!memcmp(addr.c_str(), g_network->getLocalAddress().toString().c_str(), addr.size())) {                     \
+			std::string prefix =                                                                                       \
+			    format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);               \
+			std::string msg = format(__VA_ARGS__);                                                                     \
+			writePrefixedLines(debug_printf_stream, prefix, msg);                                                      \
+			fflush(debug_printf_stream);                                                                               \
+		}                                                                                                              \
+	}
+
 #define debug_printf_noop(...)
 
 #if defined(NO_INTELLISENSE)
 #if REDWOOD_DEBUG
 #define debug_printf debug_printf_always
+#elif REDWOOD_DEBUG_ADDR
+#define debug_printf debug_printf_addr
 #else
 #define debug_printf debug_printf_noop
 #endif
@@ -3769,9 +3789,10 @@ private:
 	std::unordered_map<LogicalPageID, ParentInfo> parents;
 	ParentInfoMapT childUpdateTracker;
 
-	// MetaKey changes size so allocate space for it to expand into
+	// MetaKey changes size so allocate space for it to expand into. FIXME: Steve is fixing this to be dynamically
+	// sized.
 	union {
-		uint8_t headerSpace[sizeof(MetaKey) + sizeof(LogicalPageID) * 30];
+		uint8_t headerSpace[sizeof(MetaKey) + sizeof(LogicalPageID) * 200];
 		MetaKey m_header;
 	};
 
@@ -7475,11 +7496,15 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		    { deterministicRandom()->randomInt(prev.k, next.k), deterministicRandom()->randomInt(prev.v, next.v) });
 	};
 
-	// Build a set of N unique items
+	// Build a set of N unique items, where no consecutive items are in the set, a requirement of the seek behavior tests.
 	std::set<IntIntPair> uniqueItems;
 	while (uniqueItems.size() < N) {
 		IntIntPair p = randomPair();
-		if (uniqueItems.count(p) == 0) {
+		auto nextP = p; // also check if next highest/lowest key is not in set
+		nextP.v++;
+		auto prevP = p;
+		prevP.v--;
+		if (uniqueItems.count(p) == 0 && uniqueItems.count(nextP) == 0 && uniqueItems.count(prevP) == 0) {
 			uniqueItems.insert(p);
 		}
 	}
@@ -7497,7 +7522,11 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	std::vector<IntIntPair> toDelete;
 	while (1) {
 		IntIntPair p = randomPair();
-		if (uniqueItems.count(p) == 0) {
+		auto nextP = p; // also check if next highest/lowest key is not in the set
+		nextP.v++;
+		auto prevP = p;
+		prevP.v--;
+		if (uniqueItems.count(p) == 0 && uniqueItems.count(nextP) == 0 && uniqueItems.count(prevP) == 0) {
 			if (!r.insert(p)) {
 				break;
 			};
@@ -7647,6 +7676,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 
 	// SeekLTE to the next possible int pair value after each element to make sure the base element is found
+	// Assumes no consecutive items are present in the set
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
@@ -7663,6 +7693,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 
 	// SeekGTE to the previous possible int pair value after each element to make sure the base element is found
+	// Assumes no consecutive items are present in the set
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
@@ -7698,6 +7729,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 
 	// SeekLTE to each element's next possible value, using each element as a hint
+	// Assumes no consecutive items are present in the set
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
