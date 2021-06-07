@@ -37,6 +37,40 @@
 #include <cinttypes>
 #include <boost/intrusive/list.hpp>
 
+// A low-overhead FIFO mutex made with no internal queue structure (no list, deque, vector, etc)
+// The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
+// called Lock.
+//
+// Usage:
+//   Lock lock = wait(mutex.take());
+//   lock.release();  // Next waiter will get the lock, OR
+//   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise OR
+//   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
+struct FlowMutex {
+	FlowMutex() { lastPromise.send(Void()); }
+
+	bool available() { return lastPromise.isSet(); }
+
+	struct Lock {
+		void release() { promise.send(Void()); }
+
+		void error(Error e = broken_promise()) { promise.sendError(e); }
+
+		// This is exposed in case the caller wants to use/copy it directly
+		Promise<Void> promise;
+	};
+
+	Future<Lock> take() {
+		Lock newLock;
+		Future<Lock> f = lastPromise.isSet() ? newLock : tag(lastPromise.getFuture(), newLock);
+		lastPromise = newLock.promise;
+		return f;
+	}
+
+private:
+	Promise<Void> lastPromise;
+};
+
 #define REDWOOD_DEBUG 0
 
 // Only print redwood debug statements for a certain address. Useful in simulation with many redwood processes to reduce
@@ -282,8 +316,7 @@ public:
 		// This exists because writing the queue returns void, not a future
 		Future<Void> writeOperations;
 
-		FlowLock mutex;
-		Future<Void> killMutex;
+		FlowMutex mutex;
 
 		Cursor() : mode(NONE) {}
 
@@ -294,14 +327,6 @@ public:
 		          int readOffset = 0,
 		          LogicalPageID endPage = invalidLogicalPageID) {
 			queue = q;
-
-			// If the pager gets an error, which includes shutdown, kill the mutex so any waiters can no longer run.
-			// This avoids having every mutex wait also wait on pagerError.
-			killMutex = map(ready(queue->pagerError), [=](Void e) {
-				mutex.kill();
-				return Void();
-			});
-
 			mode = m;
 			firstPageIDWritten = invalidLogicalPageID;
 			offset = readOffset;
@@ -379,14 +404,14 @@ public:
 #pragma pack(pop)
 
 		// Returns true if the mutex cannot be immediately taken.
-		bool isBusy() { return mutex.activePermits() != 0; }
+		bool isBusy() { return !mutex.available(); }
 
 		// Wait for all operations started before now to be ready, which is done by
 		// obtaining and releasing the mutex.
 		Future<Void> notBusy() {
 			return isBusy() ? map(mutex.take(),
-			                      [&](Void) {
-				                      mutex.release();
+			                      [&](FlowMutex::Lock lock) {
+				                      lock.release();
 				                      return Void();
 			                      })
 			                : Void();
@@ -473,6 +498,7 @@ public:
 		ACTOR static Future<Void> write_impl(Cursor* self, T item) {
 			ASSERT(self->mode == WRITE);
 
+			state FlowMutex::Lock lock;
 			state bool mustWait = self->isBusy();
 			state int bytesNeeded = Codec::bytesNeeded(item);
 			state bool needNewPage =
@@ -486,7 +512,8 @@ public:
 
 			// If we have to wait for the mutex because it's busy, or we need a new page, then wait for the mutex.
 			if (mustWait || needNewPage) {
-				wait(self->mutex.take());
+				FlowMutex::Lock _lock = wait(self->mutex.take());
+				lock = _lock;
 
 				// If we had to wait because the mutex was busy, then update needNewPage as another writer
 				// would have changed the cursor state
@@ -524,7 +551,7 @@ public:
 					wait(yield());
 				}
 
-				self->mutex.release();
+				lock.release();
 			}
 
 			return Void();
@@ -545,12 +572,15 @@ public:
 		// Only mutex holders will wait on the page read.
 		ACTOR static Future<Optional<T>> waitThenReadNext(Cursor* self,
 		                                                  Optional<T> upperBound,
-		                                                  bool locked,
+		                                                  FlowMutex::Lock* lock,
 		                                                  bool load) {
-			// Lock the mutex if it wasn't already
-			if (!locked) {
+			state FlowMutex::Lock localLock;
+
+			// Lock the mutex if it wasn't already locked, so we didn't get a lock pointer
+			if (lock == nullptr) {
 				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext locking mutex\n", self->toString().c_str());
-				wait(self->mutex.take());
+				FlowMutex::Lock newLock = wait(self->mutex.take());
+				localLock = newLock;
 			}
 
 			if (load) {
@@ -559,10 +589,10 @@ public:
 				wait(success(self->nextPageReader));
 			}
 
-			state Optional<T> result = wait(self->readNext(upperBound, true));
+			state Optional<T> result = wait(self->readNext(upperBound, &localLock));
 
-			// If this actor instance locked the mutex, then unlock it.
-			if (!locked) {
+			// If a lock was not passed in, so this actor locked the mutex above, then unlock it
+			if (lock == nullptr) {
 				// Prevent possible stack overflow if too many waiters which require no IO are queued up
 				// Using static because multiple Cursors can be involved
 				static int sinceYield = 0;
@@ -572,7 +602,7 @@ public:
 				}
 
 				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext unlocking mutex\n", self->toString().c_str());
-				self->mutex.release();
+				localLock.release();
 			}
 
 			return result;
@@ -581,15 +611,15 @@ public:
 		// Read the next item at the cursor (if < upperBound), moving to a new page first if the current page is
 		// exhausted If locked is true, this call owns the mutex, which would have been locked by readNext() before a
 		// recursive call
-		Future<Optional<T>> readNext(const Optional<T>& upperBound = {}, bool locked = false) {
+		Future<Optional<T>> readNext(const Optional<T>& upperBound = {}, FlowMutex::Lock* lock = nullptr) {
 			if ((mode != POP && mode != READONLY) || pageID == invalidLogicalPageID || pageID == endPageID) {
 				debug_printf("FIFOQueue::Cursor(%s) readNext returning nothing\n", toString().c_str());
 				return Optional<T>();
 			}
 
-			// If we don't own the mutex and it's not available then acquire it
-			if (!locked && isBusy()) {
-				return waitThenReadNext(this, upperBound, false, false);
+			// If we don't have a lock and the mutex isn't available then acquire it
+			if (lock == nullptr && isBusy()) {
+				return waitThenReadNext(this, upperBound, lock, false);
 			}
 
 			// We now know pageID is valid and should be used, but page might not point to it yet
@@ -605,7 +635,7 @@ public:
 				}
 
 				if (!nextPageReader.isReady()) {
-					return waitThenReadNext(this, upperBound, locked, true);
+					return waitThenReadNext(this, upperBound, lock, true);
 				}
 
 				page = nextPageReader.get();
@@ -8721,6 +8751,136 @@ TEST_CASE("!/redwood/performance/randomRangeScans") {
 	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000));
 	wait(closeKVS(redwood));
 	printf("\n");
+
+	return Void();
+}
+
+constexpr double mutexTestDelay = 0.00001;
+
+ACTOR Future<Void> mutexTest(int id, FlowMutex* mutex, int n, bool allowError, bool* verbose) {
+	while (n-- > 0) {
+		state double d = deterministicRandom()->random01() * mutexTestDelay;
+		if (*verbose) {
+			printf("%d:%d wait %f while unlocked\n", id, n, d);
+		}
+		wait(delay(d));
+
+		if (*verbose) {
+			printf("%d:%d locking\n", id, n);
+		}
+		state FlowMutex::Lock lock = wait(mutex->take());
+		if (*verbose) {
+			printf("%d:%d locked\n", id, n);
+		}
+
+		d = deterministicRandom()->random01() * mutexTestDelay;
+		if (*verbose) {
+			printf("%d:%d wait %f while locked\n", id, n, d);
+		}
+		wait(delay(d));
+
+		// On the last iteration, send an error or drop the lock if allowError is true
+		if (n == 0 && allowError) {
+			if (deterministicRandom()->coinflip()) {
+				// Send explicit error
+				if (*verbose) {
+					printf("%d:%d sending error\n", id, n);
+				}
+				lock.error(end_of_stream());
+			} else {
+				// Do nothing
+				if (*verbose) {
+					printf("%d:%d dropping promise, returning without unlock\n", id, n);
+				}
+			}
+		} else {
+			if (*verbose) {
+				printf("%d:%d unlocking\n", id, n);
+			}
+			lock.release();
+		}
+	}
+
+	if (*verbose) {
+		printf("%d Returning\n", id);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlowMutex") {
+	state int count = 100000;
+
+	// Default verboseness
+	state bool verboseSetting = false;
+	// Useful for debugging, enable verbose mode for this iteration number
+	state int verboseTestIteration = -1;
+
+	try {
+		state bool verbose = verboseSetting || count == verboseTestIteration;
+
+		while (--count > 0) {
+			if (count % 1000 == 0) {
+				printf("%d tests left\n", count);
+			}
+
+			state FlowMutex mutex;
+			state std::vector<Future<Void>> tests;
+
+			state bool allowErrors = deterministicRandom()->coinflip();
+			if (verbose) {
+				printf("\nTesting allowErrors=%d\n", allowErrors);
+			}
+
+			state Optional<Error> error;
+
+			try {
+				for (int i = 0; i < 10; ++i) {
+					tests.push_back(mutexTest(i, &mutex, 10, allowErrors, &verbose));
+				}
+				wait(waitForAll(tests));
+
+				if (allowErrors) {
+					if (verbose) {
+						printf("Final wait in case error was injected by the last actor to finish\n");
+					}
+					wait(success(mutex.take()));
+				}
+			} catch (Error& e) {
+				if (verbose) {
+					printf("Caught error %s\n", e.what());
+				}
+				error = e;
+
+				// Wait for all actors still running to finish their waits and try to take the mutex
+				if (verbose) {
+					printf("Waiting for completions\n");
+				}
+				wait(delay(2 * mutexTestDelay));
+
+				if (verbose) {
+					printf("Future end states:\n");
+				}
+				// All futures should be ready, some with errors.
+				bool allReady = true;
+				for (int i = 0; i < tests.size(); ++i) {
+					auto f = tests[i];
+					if (verbose) {
+						printf(
+						    "  %d: %s\n", i, f.isReady() ? (f.isError() ? f.getError().what() : "done") : "not ready");
+					}
+					allReady = allReady && f.isReady();
+				}
+				ASSERT(allReady);
+			}
+
+			// If an error was caused, one should have been detected.
+			// Otherwise, no errors should be detected.
+			ASSERT(error.present() == allowErrors);
+		}
+	} catch (Error& e) {
+		printf("Error at count=%d\n", count + 1);
+		ASSERT(false);
+	}
 
 	return Void();
 }
