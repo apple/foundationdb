@@ -1807,7 +1807,7 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(
 			++futureItr;
 		}
 
-		results.push_back(std::make_pair(servers[i], serverResults));
+		results.emplace_back(servers[i], serverResults);
 	}
 
 	return results;

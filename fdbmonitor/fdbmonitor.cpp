@@ -856,7 +856,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 
 				if (id_command[i.first]->kill_on_configuration_change) {
 					kill_ids.push_back(i.first);
-					start_ids.push_back(std::make_pair(i.first, cmd));
+					start_ids.emplace_back(i.first, cmd);
 				}
 			} else {
 				log_msg(SevInfo, "Updated configuration for %s\n", id_command[i.first]->ssection.c_str());

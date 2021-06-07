@@ -1032,7 +1032,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 						anyWithSource = true;
 					}
 
-					bestTeams.push_back(std::make_pair(bestTeam.first.get(), bestTeam.second));
+					bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 					tciIndex++;
 				}
 				if (foundTeams && anyHealthy) {

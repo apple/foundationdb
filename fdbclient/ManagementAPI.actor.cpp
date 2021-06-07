@@ -785,7 +785,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 			}
 
 			if (processClass.classType() != ProcessClass::TesterClass) {
-				machine_processes[machineId].push_back(std::make_pair(addr, processClass));
+				machine_processes[machineId].emplace_back(addr, processClass);
 				processCount++;
 			}
 		}
