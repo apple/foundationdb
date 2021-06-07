@@ -638,6 +638,7 @@ public:
 
 	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
+	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
 	int REDWOOD_COMMIT_CONCURRENT_READS; // Max number of concurrent reads done to support commit operations
 	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
