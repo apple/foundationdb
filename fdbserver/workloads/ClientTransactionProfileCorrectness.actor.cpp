@@ -218,7 +218,8 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			globalClientKnobs->CSI_STATUS_DELAY = 2.0; // 2 seconds
+			auto knobValue = g_knobs->parseKnobValue("csi_status_delay", "2.0"); // 2 seconds
+			g_knobs->setKnob("csi_status_delay", knobValue);
 			return changeProfilingParameters(cx, trInfoSizeLimit, samplingProbability);
 		}
 		return Void();

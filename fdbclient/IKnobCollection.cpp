@@ -71,4 +71,4 @@ KnobValue IKnobCollection::parseKnobValue(std::string const& knobName,
 	}
 }
 
-std::unique_ptr<IKnobCollection> g_knobs;
+std::unique_ptr<IKnobCollection> g_knobs = IKnobCollection::createClientKnobCollection(false, false);

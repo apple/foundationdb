@@ -30,6 +30,7 @@ set(FDBCLIENT_SRCS
   DatabaseContext.h
   EventTypes.actor.h
   FDBOptions.h
+  FDBTypes.cpp
   FDBTypes.h
   FileBackupAgent.actor.cpp
   GlobalConfig.h
@@ -47,8 +48,9 @@ set(FDBCLIENT_SRCS
   KeyBackedTypes.h
   KeyRangeMap.actor.cpp
   KeyRangeMap.h
-  Knobs.cpp
   Knobs.h
+  KnobsImpl.cpp
+  KnobsImpl.h
   IKnobCollection.cpp
   IKnobCollection.h
   ManagementAPI.actor.cpp

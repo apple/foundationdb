@@ -3034,7 +3034,7 @@ struct CLIOptions {
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		globalFlowKnobs->initialize(true);
-		globalClientKnobs->initialize(true);
+		g_knobs->initialize(true);
 	}
 
 	int processArg(CSimpleOpt& args) {

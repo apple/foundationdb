@@ -23,7 +23,7 @@
 #include <memory>
 
 #include "fdbclient/ConfigKnobs.h"
-#include "fdbclient/Knobs.h"
+#include "fdbclient/KnobsImpl.h"
 #include "fdbclient/ServerKnobs.h"
 #include "flow/Knobs.h"
 

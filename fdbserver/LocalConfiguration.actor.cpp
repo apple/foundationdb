@@ -263,7 +263,7 @@ class LocalConfigurationImpl {
 				        self->lastSeenVersion, self->configKnobOverrides.getConfigClassSet() }));
 				TraceEvent(SevDebug, "LocalConfigGotChanges", self->id)
 				    .detail("Size", changesReply.changes.size())
-				    .detail("Version", changes.version);
+				    .detail("Version", changesReply.mostRecentVersion);
 				wait(self->addChanges(changesReply.changes, changesReply.mostRecentVersion));
 			} catch (Error& e) {
 				if (e.code() == error_code_version_already_compacted) {

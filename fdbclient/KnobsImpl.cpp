@@ -23,9 +23,6 @@
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
 
-std::unique_ptr<ClientKnobs> globalClientKnobs = std::make_unique<ClientKnobs>();
-ClientKnobs const* CLIENT_KNOBS = globalClientKnobs.get();
-
 #define init(knob, value) initKnob(knob, value, #knob)
 
 ClientKnobs::ClientKnobs() {
@@ -256,7 +253,7 @@ TEST_CASE("/fdbclient/knobs/initialize") {
 	ClientKnobs clientKnobs;
 	int64_t initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
 	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
-	clientKnobs.setKnob("core_versionspersecond", initialCoreVersionsPerSecond*2);
+	clientKnobs.setKnob("core_versionspersecond", initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions);
 	clientKnobs.initialize();

@@ -23,7 +23,7 @@
 #include "flow/Knobs.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
-#include "fdbclient/Knobs.h"
+#include "fdbclient/KnobsImpl.h"
 
 // Disk queue
 static constexpr int _PAGE_SIZE = 4096;

@@ -20,7 +20,6 @@
 
 #pragma once
 
-#include "fdbclient/ServerKnobs.h"
+#include "fdbclient/IKnobCollection.h"
 
-extern std::unique_ptr<ServerKnobs> globalServerKnobs;
-extern ServerKnobs const* SERVER_KNOBS;
+#define SERVER_KNOBS (&g_knobs->getServerKnobs())
