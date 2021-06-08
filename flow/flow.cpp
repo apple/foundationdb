@@ -46,13 +46,14 @@ Reference<ActorLineage> getCurrentLineage() {
 	return currentLineage;
 }
 
+void sample(const Reference<ActorLineage>& lineage);
+
 void replaceLineage(Reference<ActorLineage> lineage) {
 	if (!startSampling) {
 		currentLineage = lineage;
 	} else {
 		startSampling = false;
-		// sample(currentLineage);
-		// SampleCollection::instance().collect(lineage);
+		sample(currentLineage);
 		currentLineage = lineage;
 	}
 }

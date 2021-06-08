@@ -184,6 +184,7 @@ std::shared_ptr<Sample> SampleCollectorT::collect(ActorLineage* lineage) {
 	return sample;
 }
 
+// TODO: Remove
 void SampleCollection_t::refresh() {
 	if (data.empty()) {
 		return;
@@ -211,6 +212,18 @@ void SampleCollection_t::collect(const Reference<ActorLineage>& lineage) {
 		Lock _{ mutex };
 		data.emplace_back(sample);
 	}
+	auto min = std::min(data.back()->time - windowSize, data.back()->time);
+	double oldest = data.front()->time;
+	// we don't need to check for data.empty() in this loop (or the inner loop) as we know that we will end
+	// up with at least one entry which is the most recent sample
+	while (oldest < min) {
+		Lock _{ mutex };
+		// we remove at most 10 elements at a time. This is so we don't block the main thread for too long.
+		for (int i = 0; i < 10 && oldest < min; ++i) {
+			data.pop_front();
+			oldest = data.front()->time;
+		}
+	}
 	// TODO: Should only call ingest when deleting from memory
 	if (sample.get() != 0) {
 		config->ingest(sample);
@@ -231,9 +244,9 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 	return res;
 }
 
-void ActorLineageProfilerT::sample(const Reference<ActorLineage>& lineage) {
-	boost::asio::post(context(), [this, lineage]() {
-		collection->collect(lineage);
+void sample(const Reference<ActorLineage>& lineage) {
+	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage]() {
+		SampleCollection::instance().collect(lineage);
 	});
 }
 
@@ -259,7 +272,7 @@ struct ProfilerImpl {
 		if (ec) {
 			return;
 		}
-		collection->refresh();
+		// collection->refresh();
 		startSampling = true;
 		timer = boost::asio::steady_timer(context, std::chrono::microseconds(1000000 / frequency));
 		timer.async_wait([this](auto const& ec) { profileHandler(ec); });

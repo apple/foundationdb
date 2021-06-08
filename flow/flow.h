@@ -1156,13 +1156,13 @@ struct Actor : SAV<ReturnValue> {
 
 	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) {
 		/*++actorCount;*/
-		// replaceLineage(lineage);
+		replaceLineage(lineage);
 	}
 	//~Actor() { --actorCount; }
 
 	Reference<ActorLineage> setLineage() {
 		auto res = currentLineage;
-		// replaceLineage(lineage);
+		replaceLineage(lineage);
 		return res;
 	}
 };
@@ -1176,13 +1176,13 @@ struct Actor<void> {
 
 	Actor() : actor_wait_state(0) {
 		/*++actorCount;*/
-		// replaceLineage(lineage);
+		replaceLineage(lineage);
 	}
 	//~Actor() { --actorCount; }
 
 	Reference<ActorLineage> setLineage() {
 		auto res = currentLineage;
-		// replaceLineage(lineage);
+		replaceLineage(lineage);
 		return res;
 	}
 };

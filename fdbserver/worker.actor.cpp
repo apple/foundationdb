@@ -154,6 +154,8 @@ Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
 	                                  taskID,
 	                                  lockAware);
 	GlobalConfig::create(cx, db, std::addressof(db->get().client));
+	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
 	return cx;
 }
 
