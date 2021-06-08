@@ -621,6 +621,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::map<int,int> priority_teams;
 	std::map<UID, Reference<TCServerInfo>> server_info;
 	std::map<Key, std::vector<Reference<TCServerInfo>>> pid2server_info; // some process may serve as multiple storage servers
+	std::vector<AddressExclusion> wiggle_addresses; // collection of wiggling servers' address
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
 	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a read-only concatenation of 2 data structures? 
 	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
@@ -2826,6 +2827,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    this->excludedServers.get(addr) != DDTeamCollection::Status::NONE) {
 					continue; // don't overwrite the value set by actor trackExcludedServer
 				}
+				this->wiggle_addresses.push_back(addr);
 				this->excludedServers.set(addr, DDTeamCollection::Status::WIGGLING);
 				moveFutures.push_back(
 				    waitForAllDataRemoved(this->cx, info->lastKnownInterface.id(), info->addedVersion, this));
@@ -2837,19 +2839,19 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return moveFutures;
 	}
 
-	// Include storage servers held on process of which the Process Id is “pid” by setting their status from `WIGGLING`
+	// Include wiggled storage servers by setting their status from `WIGGLING`
 	// to `NONE`. The storage recruiter will recruit them as new storage servers
-	void includeStorageServersForWiggle(const Value& pid) {
+	void includeStorageServersForWiggle() {
 		bool included = false;
-		for (auto& info : this->pid2server_info[pid]) {
-			AddressExclusion addr(info->lastKnownInterface.address().ip);
-			if (!this->excludedServers.count(addr) ||
-			    this->excludedServers.get(addr) != DDTeamCollection::Status::WIGGLING) {
+		for (auto& address : this->wiggle_addresses) {
+			if (!this->excludedServers.count(address) ||
+			    this->excludedServers.get(address) != DDTeamCollection::Status::WIGGLING) {
 				continue;
 			}
 			included = true;
-			this->excludedServers.set(addr, DDTeamCollection::Status::NONE);
+			this->excludedServers.set(address, DDTeamCollection::Status::NONE);
 		}
+		this->wiggle_addresses.clear();
 		if (included) {
 			this->restartRecruiting.trigger();
 		}
@@ -3931,8 +3933,8 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncTrigger* stopSignal,
 
 // Watch the value change of `wigglingStorageServerKey`.
 // Return the watch future and the current value of `wigglingStorageServerKey`.
-ACTOR Future<std::pair<Future<Void>, Value>> watchPerpetualStoragePIDChange(Database cx) {
-	state ReadYourWritesTransaction tr(cx);
+ACTOR Future<std::pair<Future<Void>, Value>> watchPerpetualStoragePIDChange(DDTeamCollection* self) {
+	state ReadYourWritesTransaction tr(self->cx);
 	state Future<Void> watchFuture;
 	state Value ret;
 	loop {
@@ -3960,7 +3962,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
                                            PromiseStream<Void> finishStorageWiggleSignal,
                                            DDTeamCollection* self,
                                            const DDEnabledState* ddEnabledState) {
-	state Future<Void> watchFuture;
+	state Future<Void> watchFuture = Never();
 	state Future<Void> moveFinishFuture = Never();
 	state Debouncer pauseWiggle(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY);
 	state AsyncTrigger restart;
@@ -3969,8 +3971,8 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 	state int movingCount = 0;
 	state bool isPaused = false;
 
-	state std::pair<Future<Void>, Value> res = wait(watchPerpetualStoragePIDChange(self->cx));
-	watchFuture = res.first;
+	state std::pair<Future<Void>, Value> res = wait(watchPerpetualStoragePIDChange(self));
+	ASSERT(!self->wigglingPid.present()); // only single process wiggle is allowed
 	self->wigglingPid = Optional<Key>(res.second);
 
 	// start with the initial pid
@@ -3993,9 +3995,11 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 		choose {
 			when(wait(stopSignal->onTrigger())) { break; }
 			when(wait(watchFuture)) {
+				ASSERT(!self->wigglingPid.present()); // the previous wiggle must be finished
+				watchFuture = Never();
+
 				// read new pid and set the next watch Future
-				wait(store(res, watchPerpetualStoragePIDChange(self->cx)));
-				watchFuture = res.first;
+				wait(store(res, watchPerpetualStoragePIDChange(self)));
 				self->wigglingPid = Optional<Key>(res.second);
 				StringRef pid = self->wigglingPid.get();
 
@@ -4030,12 +4034,13 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				StringRef pid = self->wigglingPid.get();
 
 				moveFinishFuture = Never();
-				self->includeStorageServersForWiggle(pid);
+				self->includeStorageServersForWiggle();
 				TraceEvent("PerpetualStorageWiggleFinish", self->distributorId)
 				    .detail("ProcessId", pid.toString())
 				    .detail("StorageCount", movingCount);
 
 				self->wigglingPid.reset();
+				watchFuture = res.first;
 				finishStorageWiggleSignal.send(Void());
 			}
 			when(wait(self->zeroHealthyTeams->onChange())) {
@@ -4062,7 +4067,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 					StringRef pid = self->wigglingPid.get();
 					isPaused = true;
 					moveFinishFuture = Never();
-					self->includeStorageServersForWiggle(pid);
+					self->includeStorageServersForWiggle();
 					TraceEvent("PerpetualStorageWigglePause", self->distributorId)
 					    .detail("ProcessId", pid)
 					    .detail("StorageCount", movingCount);
@@ -4072,7 +4077,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 	}
 
 	if (self->wigglingPid.present()) {
-		self->includeStorageServersForWiggle(self->wigglingPid.get());
+		self->includeStorageServersForWiggle();
 		TraceEvent("PerpetualStorageWiggleExitingPause", self->distributorId)
 			.detail("ProcessId", self->wigglingPid.get());
 		self->wigglingPid.reset();
@@ -4090,7 +4095,7 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 	state AsyncTrigger stopWiggleSignal;
 	state PromiseStream<Void> finishStorageWiggleSignal;
 	state SignalableActorCollection collection;
-
+	state bool started = false;
 	loop {
 		state ReadYourWritesTransaction tr(teamCollection->cx);
 		loop {
@@ -4105,16 +4110,18 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 				wait(tr.commit());
 
 				ASSERT(speed == 1 || speed == 0);
-				if (speed == 1) {
+				if (speed == 1 && !started) {
 					collection.add(perpetualStorageWiggleIterator(
 					    &stopWiggleSignal, finishStorageWiggleSignal.getFuture(), teamCollection));
 					collection.add(perpetualStorageWiggler(
 					    &stopWiggleSignal, finishStorageWiggleSignal, teamCollection, ddEnabledState));
 					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId);
-				} else {
+					started = true;
+				} else if (speed == 0 && started) {
 					stopWiggleSignal.trigger();
 					wait(collection.signalAndReset());
 					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId);
+					started = false;
 				}
 				wait(watchFuture);
 				break;
@@ -4545,6 +4552,7 @@ ACTOR Future<Void> storageServerTracker(
 					status.isWiggling = true;
 					TraceEvent("PerpetualWigglingStorageServer", self->distributorId)
 					    .detail("Server", server->id)
+					    .detail("ProcessId", server->lastKnownInterface.locality.processId())
 					    .detail("Address", worstAddr.toString());
 				} else if (worstStatus == DDTeamCollection::Status::FAILED && !isTss) {
 					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
@@ -5464,8 +5472,10 @@ ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> te
 		self->addActor.send(trackExcludedServers(self));
 		self->addActor.send(monitorHealthyTeams(self));
 		self->addActor.send(waitHealthyZoneChange(self));
-		self->addActor.send(monitorPerpetualStorageWiggle(self, ddEnabledState));
 
+		if (self->primary) { // the primary dc also handle the satellite dc's perpetual wiggling
+			self->addActor.send(monitorPerpetualStorageWiggle(self, ddEnabledState));
+		}
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
 		loop choose {
