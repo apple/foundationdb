@@ -358,16 +358,19 @@ void write(ptxn::SubsequencedMessageSerializer& serializer) {
 }
 
 void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
+	ASSERT_EQ(iterator->message.getType(), ptxn::Message::Type::MUTATION_REF);
 	auto mutation = std::get<MutationRef>(iterator->message);
 	ASSERT_EQ(mutation.type, MutationRef::SetValue);
 	ASSERT(mutation.param1 == "key"_sr);
 	ASSERT(mutation.param2 == "value"_sr);
 	++iterator;
 
+	ASSERT_EQ(iterator->message.getType(), ptxn::Message::Type::SPAN_CONTEXT_MESSAGE);
 	auto span = std::get<SpanContextMessage>(iterator->message);
 	ASSERT(span == SpanID(1, 1));
 	++iterator;
 
+	ASSERT_EQ(iterator->message.getType(), ptxn::Message::Type::LOG_PROTOCOL_MESSAGE);
 	auto logProtocol = std::get<LogProtocolMessage>(iterator->message);
 	ASSERT(logProtocol == LogProtocolMessage());
 	++iterator;
@@ -379,14 +382,31 @@ void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
 namespace S6 {
 
 const Version version = 30;
+const MutationRef mutationRef = MutationRef(MutationRef::SetValue, "keyS6"_sr, "valueS6"_sr);
 
 void write(ptxn::SubsequencedMessageSerializer& serializer) {
 	serializer.startVersionWriting(version);
 
+	// Serializing a mutationRef requires the writer include a serialization protocol version.
+	BinaryWriter writer(IncludeVersion());
+	writer << mutationRef;
+	Standalone<StringRef> serialized = writer.toValue();
+	StringRef serializedWithoutVersionOptions(serialized.begin() + ptxn::SerializerVersionOptionBytes,
+	                                          serialized.size() - ptxn::SerializerVersionOptionBytes);
+
+	serializer.write(1, serializedWithoutVersionOptions);
+
 	serializer.completeVersionWriting();
 }
 
-void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {}
+void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
+	ASSERT_EQ(iterator->message.getType(), ptxn::Message::Type::MUTATION_REF);
+	auto mutation = std::get<MutationRef>(iterator->message);
+	ASSERT_EQ(mutation.type, MutationRef::SetValue);
+	ASSERT(mutation.param1 == "keyS6"_sr);
+	ASSERT(mutation.param2 == "valueS6"_sr);
+	++iterator;
+}
 
 } // namespace S6
 
@@ -407,6 +427,7 @@ bool testSerialization() {
 	S3::write(serializer);
 	S4::write(serializer);
 	S5::write(serializer);
+	S6::write(serializer);
 
 	serializer.completeMessageWriting();
 
@@ -417,15 +438,16 @@ bool testSerialization() {
 	SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
 
 	ASSERT(deserializer.getStorageTeamID() == storageTeamID);
-	ASSERT_EQ(deserializer.getNumVersions(), 5);
+	ASSERT_EQ(deserializer.getNumVersions(), 6);
 	ASSERT_EQ(deserializer.getFirstVersion(), S1::version);
-	ASSERT_EQ(deserializer.getLastVersion(), S5::version);
+	ASSERT_EQ(deserializer.getLastVersion(), S6::version);
 
 	S1::verify(iterator);
 	S2::verify(iterator);
 	S3::verify(iterator);
 	S4::verify(iterator);
 	S5::verify(iterator);
+	S6::verify(iterator);
 
 	ASSERT(iterator == deserializer.cend());
 

@@ -159,27 +159,37 @@ const Version& ProxySubsequencedMessageSerializer::getVersion() const {
 	return version;
 }
 
+void ProxySubsequencedMessageSerializer::prepareWriteMessage(const StorageTeamID& storageTeamID) {
+	// If the storage team ID is unseen, create a serializer for it.
+	if (serializers.find(storageTeamID) == serializers.end()) {
+		serializers.emplace(storageTeamID, storageTeamID);
+		serializers.at(storageTeamID).startVersionWriting(version);
+	}
+
+	// If span context message exists, and not being written to the serializer, then serialize it first.
+	if (spanContextMessage.present() &&
+	    storageTeamInjectedSpanContext.find(storageTeamID) == storageTeamInjectedSpanContext.end()) {
+
+		const SpanContextMessage& message = spanContextMessage.get();
+
+		storageTeamInjectedSpanContext.insert(storageTeamID);
+		serializers.at(storageTeamID).write(SubsequenceSpanContextItem{ subsequence++, message });
+	}
+}
+
 void ProxySubsequencedMessageSerializer::broadcastSpanContext(const SpanContextMessage& spanContext) {
 	spanContextMessage = spanContext;
 	storageTeamInjectedSpanContext.clear();
 }
 
 void ProxySubsequencedMessageSerializer::write(const MutationRef& mutation, const StorageTeamID& storageTeamID) {
-	if (serializers.find(storageTeamID) == serializers.end()) {
-		serializers.emplace(storageTeamID, storageTeamID);
-		serializers.at(storageTeamID).startVersionWriting(version);
-	}
+	prepareWriteMessage(storageTeamID);
+	serializers.at(storageTeamID).write(subsequence++, mutation);
+}
 
-	if (spanContextMessage.present()) {
-		if (storageTeamInjectedSpanContext.find(storageTeamID) == storageTeamInjectedSpanContext.end()) {
-			const SpanContextMessage& message = spanContextMessage.get();
-
-			storageTeamInjectedSpanContext.insert(storageTeamID);
-			serializers.at(storageTeamID).write(SubsequenceSpanContextItem{ subsequence++, message });
-		}
-	}
-
-	serializers.at(storageTeamID).write(SubsequenceMutationItem{ subsequence++, mutation });
+void ProxySubsequencedMessageSerializer::write(const StringRef& serialized, const StorageTeamID& storageTeamID) {
+	prepareWriteMessage(storageTeamID);
+	serializers.at(storageTeamID).write(subsequence++, serialized);
 }
 
 StringRef ProxySubsequencedMessageSerializer::getSerialized(const StorageTeamID& storageTeamID) {

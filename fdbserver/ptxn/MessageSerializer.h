@@ -204,6 +204,11 @@ private:
 	// Stores the version of the commit
 	const Version version;
 
+	// Prepares writing a message:
+	//     * Create a new StorageTeam serializer if necessary.
+	//     * Write SpanContextMessage if exists/not preposed.
+	void prepareWriteMessage(const StorageTeamID& storageTeamID);
+
 public:
 	explicit ProxySubsequencedMessageSerializer(const Version&);
 
@@ -217,9 +222,8 @@ public:
 	// Writes a mutation to a given stoarge team.
 	void write(const MutationRef&, const StorageTeamID&);
 
-	// Writes an already serialized mutation to a given storage team.
-	// FIXME
-	// void write(const StringRef&, const StorageTeamID&);
+	// Writes an already serialized message to a given storage team.
+	void write(const StringRef&, const StorageTeamID&);
 
 	// Writes a mutation to multiple storage teams.
 	// storageTeams is a container that supports input iterator, and contains all storage team IDs that should receive

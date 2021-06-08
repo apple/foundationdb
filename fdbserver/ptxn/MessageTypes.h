@@ -78,8 +78,9 @@ struct SubsequenceSerializedMessageItem {
 	void serialize(Ar& ar) {
 		static_assert(!Ar::isDeserializing, "Only support serialization");
 		serializer(ar, subsequence);
-		// For the StringRef, standard serialization will add a length information.
-		ar.serializeBytes(serializedMessage.begin(), serializedMessage.size());
+		// For StringRef, standard serialization will add a length information. The deserializer will *NOT* be able to
+		// recognize such information. In this case, serializeBytes is used instead of the default StringRef serializer.
+		ar.serializeBytes(serializedMessage);
 	}
 };
 
