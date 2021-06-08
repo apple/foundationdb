@@ -1440,6 +1440,8 @@ void SQLiteDB::open(bool writable) {
 			TraceEvent("CreatedDBFile").detail("Filename", apath);
 		}
 	}
+	if (walFile.isError() && walFile.getError().code() != error_code_file_not_found)
+		throw walFile.getError();
 	if (dbFile.isError())
 		throw dbFile.getError(); // If we've failed to open the file, throw an exception
 	if (walFile.isError())
