@@ -35,6 +35,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/DeterministicRandom.h"
@@ -496,11 +497,15 @@ void initHelp() {
 	helpMap["configure"] = CommandHelp(
 	    "configure [new] "
 	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
-	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
+	    "perpetual_storage_wiggle=<WIGGLE_SPEED>",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
-	    "specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
+	    "specified.\n\ntss: when enabled, configures the testing storage server for the cluster instead."
+	    "When used with new to set up tss for the first time, it requires both a count and a storage engine."
+	    "To disable the testing storage server, run \"configure tss count=0\"\n\n"
+	    "Redundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
 	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
 	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
 	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
@@ -517,8 +522,11 @@ void initHelp() {
 	    "1, or set to -1 which restores the number of GRV proxies to the default value.\n\nlogs=<LOGS>: Sets the "
 	    "desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of "
 	    "logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. "
-	    "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the "
-	    "FoundationDB Administration Guide for more information.");
+	    "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\n"
+	    "perpetual_storage_wiggle=<WIGGLE_SPEED>: Set the value speed (a.k.a., the number of processes that the Data "
+	    "Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the "
+	    "perpetual storage wiggle.\n\n"
+	    "See the FoundationDB Administration Guide for more information.");
 	helpMap["fileconfigure"] = CommandHelp(
 	    "fileconfigure [new] <FILENAME>",
 	    "change the database configuration from a file",
@@ -1123,6 +1131,17 @@ void printStatus(StatusObjectReader statusObj,
 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
+
+				if (statusObjConfig.get("tss_count", intVal) && intVal > 0) {
+					int activeTss = 0;
+					if (statusObjCluster.has("active_tss_count")) {
+						statusObjCluster.get("active_tss_count", activeTss);
+					}
+					outputString += format("\n  TSS                    - %d/%d", activeTss, intVal);
+
+					if (statusObjConfig.get("tss_storage_engine", strVal))
+						outputString += format("\n  TSS Storage Engine     - %s", strVal.c_str());
+				}
 
 				outputString += "\n  Usable Regions         - ";
 				if (statusObjConfig.get("usable_regions", intVal)) {
@@ -2766,6 +2785,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "grv_proxies=",
 		                   "logs=",
 		                   "resolvers=",
+		                   "perpetual_storage_wiggle=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -3088,7 +3108,7 @@ struct CLIOptions {
 				return FDB_EXIT_ERROR;
 			}
 			syn = syn.substr(7);
-			knobs.push_back(std::make_pair(syn, args.OptionArg()));
+			knobs.emplace_back(syn, args.OptionArg());
 			break;
 		}
 		case OPT_DEBUG_TLS:

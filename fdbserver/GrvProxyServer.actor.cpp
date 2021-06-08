@@ -109,15 +109,18 @@ struct GrvProxyStats {
 	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		// The rate at which the limit(budget) is allowed to grow.
-		specialCounter(cc, "SystemAndDefaultTxnRateAllowed", [this]() { return this->transactionRateAllowed; });
-		specialCounter(cc, "BatchTransactionRateAllowed", [this]() { return this->batchTransactionRateAllowed; });
-		specialCounter(cc, "SystemAndDefaultTxnLimit", [this]() { return this->transactionLimit; });
-		specialCounter(cc, "BatchTransactionLimit", [this]() { return this->batchTransactionLimit; });
-		specialCounter(cc, "PercentageOfDefaultGRVQueueProcessed", [this]() {
-			return this->percentageOfDefaultGRVQueueProcessed;
-		});
 		specialCounter(
-		    cc, "PercentageOfBatchGRVQueueProcessed", [this]() { return this->percentageOfBatchGRVQueueProcessed; });
+		    cc, "SystemAndDefaultTxnRateAllowed", [this]() { return int64_t(this->transactionRateAllowed); });
+		specialCounter(
+		    cc, "BatchTransactionRateAllowed", [this]() { return int64_t(this->batchTransactionRateAllowed); });
+		specialCounter(cc, "SystemAndDefaultTxnLimit", [this]() { return int64_t(this->transactionLimit); });
+		specialCounter(cc, "BatchTransactionLimit", [this]() { return int64_t(this->batchTransactionLimit); });
+		specialCounter(cc, "PercentageOfDefaultGRVQueueProcessed", [this]() {
+			return int64_t(100 * this->percentageOfDefaultGRVQueueProcessed);
+		});
+		specialCounter(cc, "PercentageOfBatchGRVQueueProcessed", [this]() {
+			return int64_t(100 * this->percentageOfBatchGRVQueueProcessed);
+		});
 
 		logger = traceCounters("GrvProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "GrvProxyMetrics");
 		for (int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
@@ -831,8 +834,10 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		}
 		span = Span(span.location);
 
-		grvProxyData->stats.percentageOfDefaultGRVQueueProcessed = (double)defaultGRVProcessed / defaultQueueSize;
-		grvProxyData->stats.percentageOfBatchGRVQueueProcessed = (double)batchGRVProcessed / batchQueueSize;
+		grvProxyData->stats.percentageOfDefaultGRVQueueProcessed =
+		    defaultQueueSize ? (double)defaultGRVProcessed / defaultQueueSize : 1;
+		grvProxyData->stats.percentageOfBatchGRVQueueProcessed =
+		    batchQueueSize ? (double)batchGRVProcessed / batchQueueSize : 1;
 	}
 }
 

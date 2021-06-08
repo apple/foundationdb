@@ -130,6 +130,9 @@ public:
 	UID id;
 	std::string filename;
 
+	// For files that use atomic write and create, they are initially created with an extra suffix
+	std::string initialFilename;
+
 	// An approximation of the size of the file; .size() should be used instead of this variable in most cases
 	mutable int64_t approximateSize;
 
@@ -182,11 +185,13 @@ private:
 	    reponses; // cannot call getResult on this actor collection, since the actors will be on different processes
 
 	AsyncFileNonDurable(const std::string& filename,
+	                    const std::string& initialFilename,
 	                    Reference<IAsyncFile> file,
 	                    Reference<DiskParameters> diskParameters,
 	                    NetworkAddress openedAddress,
 	                    bool aio)
-	  : openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false),
+	  : filename(filename), initialFilename(initialFilename), file(file), diskParameters(diskParameters),
+	    openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false),
 	    aio(aio) {
 
 		// This is only designed to work in simulation
@@ -194,9 +199,6 @@ private:
 		this->id = deterministicRandom()->randomUniqueID();
 
 		//TraceEvent("AsyncFileNonDurable_Create", id).detail("Filename", filename);
-		this->file = file;
-		this->filename = filename;
-		this->diskParameters = diskParameters;
 		maxWriteDelay = FLOW_KNOBS->NON_DURABLE_MAX_WRITE_DELAY;
 		hasBeenSynced = false;
 
@@ -236,10 +238,11 @@ public:
 				//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete2").detail("Filename", filename);
 				if (shutdown.isReady())
 					throw io_error().asInjectedFault();
+				wait(g_simulator.onProcess(currentProcess, currentTaskID));
 			}
 
 			state Reference<AsyncFileNonDurable> nonDurableFile(
-			    new AsyncFileNonDurable(filename, file, diskParameters, currentProcess->address, aio));
+			    new AsyncFileNonDurable(filename, actualFilename, file, diskParameters, currentProcess->address, aio));
 
 			// Causes the approximateSize member to be set
 			state Future<int64_t> sizeFuture = nonDurableFile->size();
@@ -269,13 +272,38 @@ public:
 	}
 
 	void addref() override { ReferenceCounted<AsyncFileNonDurable>::addref(); }
+
 	void delref() override {
 		if (delref_no_destroy()) {
-			ASSERT(filesBeingDeleted.count(filename) == 0);
-			//TraceEvent("AsyncFileNonDurable_StartDelete", id).detail("Filename", filename);
-			Future<Void> deleteFuture = deleteFile(this);
-			if (!deleteFuture.isReady())
-				filesBeingDeleted[filename] = deleteFuture;
+			if (filesBeingDeleted.count(filename) == 0) {
+				//TraceEvent("AsyncFileNonDurable_StartDelete", id).detail("Filename", filename);
+				Future<Void> deleteFuture = deleteFile(this);
+				if (!deleteFuture.isReady())
+					filesBeingDeleted[filename] = deleteFuture;
+			}
+
+			removeOpenFile(filename, this);
+			if (initialFilename != filename) {
+				removeOpenFile(initialFilename, this);
+			}
+		}
+	}
+
+	// Removes a file from the openFiles map
+	static void removeOpenFile(std::string filename, AsyncFileNonDurable* file) {
+		auto& openFiles = g_simulator.getCurrentProcess()->machine->openFiles;
+
+		auto iter = openFiles.find(filename);
+
+		// Various actions (e.g. simulated delete) can remove a file from openFiles prematurely, so it may already
+		// be gone. Renamed files (from atomic write and create) will also be present under only one of the two
+		// names.
+		if (iter != openFiles.end()) {
+			// even if the filename exists, it doesn't mean that it references the same file. It could be that the
+			// file was renamed and later a file with the same name was opened.
+			if (iter->second.getPtrIfReady().orDefault(nullptr) == file) {
+				openFiles.erase(iter);
+			}
 		}
 	}
 
@@ -832,11 +860,9 @@ private:
 			//TraceEvent("AsyncFileNonDurable_FinishDelete", self->id).detail("Filename", self->filename);
 
 			delete self;
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
 			return Void();
 		} catch (Error& e) {
 			state Error err = e;
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
 			throw err;
 		}
 	}

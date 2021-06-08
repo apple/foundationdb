@@ -881,7 +881,7 @@ struct EventMetric final : E, ReferenceCounted<EventMetric<E>>, MetricUtil<Event
 		time.flushField(mk, rollTime, batch);
 		flushFields(typename Descriptor<E>::field_indexes(), mk, rollTime, batch);
 		if (!latestRecorded) {
-			batch.updates.push_back(std::make_pair(mk.packLatestKey(), StringRef()));
+			batch.updates.emplace_back(mk.packLatestKey(), StringRef());
 			latestRecorded = true;
 		}
 	}
@@ -1249,7 +1249,7 @@ public:
 
 	void flushData(const MetricKeyRef& mk, uint64_t rollTime, MetricUpdateBatch& batch) override {
 		if (!recorded) {
-			batch.updates.push_back(std::make_pair(mk.packLatestKey(), getLatestAsValue()));
+			batch.updates.emplace_back(mk.packLatestKey(), getLatestAsValue());
 			recorded = true;
 		}
 

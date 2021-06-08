@@ -78,6 +78,8 @@ if(NOT WIN32)
     test/unit/fdb_api.cpp
     test/unit/fdb_api.hpp)
 
+  set(UNIT_TEST_VERSION_510_SRCS test/unit/unit_tests_version_510.cpp)
+
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
@@ -85,6 +87,7 @@ if(NOT WIN32)
     add_library(mako OBJECT ${MAKO_SRCS})
     add_library(fdb_c_setup_tests OBJECT test/unit/setup_tests.cpp)
     add_library(fdb_c_unit_tests OBJECT ${UNIT_TEST_SRCS})
+    add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
@@ -92,6 +95,7 @@ if(NOT WIN32)
     add_executable(mako ${MAKO_SRCS})
     add_executable(fdb_c_setup_tests test/unit/setup_tests.cpp)
     add_executable(fdb_c_unit_tests ${UNIT_TEST_SRCS})
+    add_executable(fdb_c_unit_tests_version_510 ${UNIT_TEST_VERSION_510_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
@@ -104,8 +108,10 @@ if(NOT WIN32)
   add_dependencies(fdb_c_unit_tests doctest)
   target_include_directories(fdb_c_setup_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(fdb_c_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
+  target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -136,6 +142,11 @@ if(NOT WIN32)
             @CLUSTER_FILE@
             fdb)
   add_fdbclient_test(
+    NAME fdb_c_unit_tests_version_510
+    COMMAND $<TARGET_FILE:fdb_c_unit_tests_version_510>
+            @CLUSTER_FILE@
+            fdb)
+  add_fdbclient_test(
     NAME fdb_c_external_client_unit_tests
     COMMAND $<TARGET_FILE:fdb_c_unit_tests>
             @CLUSTER_FILE@
@@ -157,6 +168,10 @@ endif()
 set_target_properties(c_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
 target_link_libraries(c_workloads PUBLIC fdb_c)
+
+if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+  target_link_options(c_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
+endif()
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"

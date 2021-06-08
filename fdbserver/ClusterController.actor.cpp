@@ -599,8 +599,8 @@ public:
 			std::vector<std::tuple<ProcessClass::Fitness, int, bool, int, Field>> orderedFields;
 			for (auto& it : fieldsWithMin) {
 				auto& fitness = field_fitness[it];
-				orderedFields.push_back(std::make_tuple(
-				    std::get<0>(fitness), std::get<1>(fitness), std::get<2>(fitness), field_count[it], it));
+				orderedFields.emplace_back(
+				    std::get<0>(fitness), std::get<1>(fitness), std::get<2>(fitness), field_count[it], it);
 			}
 			std::sort(orderedFields.begin(), orderedFields.end());
 			int totalFields = desired / minPerField;
@@ -1692,19 +1692,36 @@ public:
 		if (req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
 			if (regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
+				TraceEvent("CCSwitchPrimaryDc", id)
+				    .detail("CCDcId", clusterControllerDcId.get())
+				    .detail("OldPrimaryDcId", regions[0].dcId)
+				    .detail("NewPrimaryDcId", regions[1].dcId);
 				std::swap(regions[0], regions[1]);
 			}
 
 			if (regions[1].dcId == clusterControllerDcId.get() &&
 			    (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
 				if (regions[1].priority >= 0) {
+					TraceEvent("CCSwitchPrimaryDcVersionDifference", id)
+					    .detail("CCDcId", clusterControllerDcId.get())
+					    .detail("OldPrimaryDcId", regions[0].dcId)
+					    .detail("NewPrimaryDcId", regions[1].dcId);
 					std::swap(regions[0], regions[1]);
 				} else {
 					TraceEvent(SevWarnAlways, "CCDcPriorityNegative")
 					    .detail("DcId", regions[1].dcId)
-					    .detail("Priority", regions[1].priority);
+					    .detail("Priority", regions[1].priority)
+					    .detail("FindWorkersInDc", regions[0].dcId)
+					    .detail("Warning", "Failover did not happen but CC is in remote DC");
 				}
 			}
+
+			TraceEvent("CCFindWorkersForConfiguration", id)
+			    .detail("CCDcId", clusterControllerDcId.get())
+			    .detail("Region0DcId", regions[0].dcId)
+			    .detail("Region1DcId", regions[1].dcId)
+			    .detail("DatacenterVersionDifference", datacenterVersionDifference)
+			    .detail("VersionDifferenceUpdated", versionDifferenceUpdated);
 
 			bool setPrimaryDesired = false;
 			try {
@@ -1719,6 +1736,10 @@ public:
 				} else if (regions[0].dcId == clusterControllerDcId.get()) {
 					return reply.get();
 				}
+				TraceEvent(SevWarn, "CCRecruitmentFailed", id)
+				    .detail("Reason", "Recruited Txn system and CC are in different DCs")
+				    .detail("CCDcId", clusterControllerDcId.get())
+				    .detail("RecruitedTxnSystemDcId", regions[0].dcId);
 				throw no_more_servers();
 			} catch (Error& e) {
 				if (!goodRemoteRecruitmentTime.isReady() && regions[1].dcId != clusterControllerDcId.get()) {
@@ -1728,7 +1749,9 @@ public:
 				if (e.code() != error_code_no_more_servers || regions[1].priority < 0) {
 					throw;
 				}
-				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id).error(e);
+				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDc", id)
+				    .detail("SetPrimaryDesired", setPrimaryDesired)
+				    .error(e);
 				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId);
 				if (!setPrimaryDesired) {
 					vector<Optional<Key>> dcPriority;
@@ -3382,6 +3405,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies) {
 		isChanged = true;
+		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
@@ -3874,7 +3898,7 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
-				state ClientDBInfo clientInfo = db->clientInfo->get();
+				state ClientDBInfo clientInfo = db->serverInfo->get().client;
 
 				if (globalConfigVersion.present()) {
 					// Since the history keys end with versionstamps, they
@@ -3932,6 +3956,14 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					}
 
 					clientInfo.id = deterministicRandom()->randomUniqueID();
+					// Update ServerDBInfo so fdbserver processes receive updated history.
+					ServerDBInfo serverInfo = db->serverInfo->get();
+					serverInfo.id = deterministicRandom()->randomUniqueID();
+					serverInfo.infoGeneration = ++db->dbInfoCount;
+					serverInfo.client = clientInfo;
+					db->serverInfo->set(serverInfo);
+
+					// Update ClientDBInfo so client processes receive updated history.
 					db->clientInfo->set(clientInfo);
 				}
 
@@ -4411,6 +4443,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
+	// self.addActor.send(monitorTSSMapping(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
 	                                 self.id,

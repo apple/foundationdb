@@ -26,7 +26,6 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/RestoreWorkerInterface.actor.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -115,6 +114,9 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
 
+//    "\xff/tss/[[serverId]]" := "[[tssId]]"
+extern const KeyRangeRef tssMappingKeys;
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
 //	storage server's corresponding TLog in order to apply mutations.
@@ -196,6 +198,8 @@ UID decodeProcessClassKeyOld(KeyRef const& key);
 extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
+extern const KeyRef perpetualStorageWiggleKey;
+extern const KeyRef wigglingStorageServerKey;
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
 
@@ -441,31 +445,6 @@ extern const KeyRef mustContainSystemMutationsKey;
 
 // Key range reserved for storing changes to monitor conf files
 extern const KeyRangeRef monitorConfKeys;
-
-// Fast restore
-extern const KeyRef restoreLeaderKey;
-extern const KeyRangeRef restoreWorkersKeys;
-extern const KeyRef restoreStatusKey; // To be used when we measure fast restore performance
-extern const KeyRef restoreRequestTriggerKey;
-extern const KeyRef restoreRequestDoneKey;
-extern const KeyRangeRef restoreRequestKeys;
-extern const KeyRangeRef restoreApplierKeys;
-extern const KeyRef restoreApplierTxnValue;
-
-const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version);
-std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key);
-const Key restoreWorkerKeyFor(UID const& workerID);
-const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
-RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
-const Value restoreRequestTriggerValue(UID randomUID, int const numRequests);
-int decodeRestoreRequestTriggerValue(ValueRef const& value);
-const Value restoreRequestDoneVersionValue(Version readVersion);
-Version decodeRestoreRequestDoneVersionValue(ValueRef const& value);
-const Key restoreRequestKeyFor(int const& index);
-const Value restoreRequestValue(RestoreRequest const& server);
-RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
-const Key restoreStatusKeyFor(StringRef statusType);
-const Value restoreStatusValue(double val);
 
 extern const KeyRef healthyZoneKey;
 extern const StringRef ignoreSSFailuresZoneString;
