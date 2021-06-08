@@ -591,7 +591,6 @@ public:
 	ActorCollection actors;
 
 	StorageServerMetrics metrics;
-
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
 	Future<Void> byteSampleRecovery;
@@ -705,28 +704,25 @@ public:
 		CounterCollection cc;
 		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, finishedQueries, lowPriorityQueries,
 		    rowsQueried, bytesQueried, watchQueries, emptyQueries;
-		Counter
-		    // Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
-		    // and cleared from the memory, we do not exact it but add it to bytesDurable.
-		    bytesInput,
-		    // Bytes of the mutations that have been removed from memory because they durable. The counting is same as
-		    // bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
-		    // reflect the current memory footprint of MVCC.
-		    bytesDurable,
-		    // Bytes fetched by fetchKeys() for data movements. The size is counted as a collection of KeyValueRef.
-		    // The interval is reset between "StorageMetrics" events.
-		    bytesFetched,
-		    // Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
-		    // is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
-		    // and the lengths of both parameters. The interval is reset between "StorageMetrics" events.
-		    mutationBytes;
+
+		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
+		// and cleared from the memory, we do not exact it but add it to bytesDurable.
+		Counter bytesInput;
+		// Bytes of the mutations that have been removed from memory because they durable. The counting is same as
+		// bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
+		// reflect the current memory footprint of MVCC.
+		Counter bytesDurable;
+		// Bytes fetched by fetchKeys() for data movements. The size is counted as a collection of KeyValueRef.
+		Counter bytesFetched;
+		// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
+		// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
+		// and the lengths of both parameters.
+		Counter mutationBytes;
+
 		Counter sampledBytesCleared;
-		Counter
-		    // The number of key-value pairs fetched by fetchKeys()
-		    // The interval is reset between "StorageMetrics" events.
-		    kvFetched,
-		    // The interval is reset between "StorageMetrics" events.
-		    mutations, setMutations, clearRangeMutations, atomicMutations;
+		// The number of key-value pairs fetched by fetchKeys()
+		Counter kvFetched;
+		Counter mutations, setMutations, clearRangeMutations, atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
@@ -2911,7 +2907,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		                   keys,
 		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
 
-		// Note it does not leave this thread until this point, since it receives a pointer to FetchInjectionInfo.
+		// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until this
+		// point.
 
 		// Wait for the transferredVersion (and therefore the shard data) to be committed and durable.
 		wait(data->durableVersion.whenAtLeast(shard->transferredVersion));
@@ -3492,8 +3489,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				auto fk = data->readyFetchKeys.back();
 				data->readyFetchKeys.pop_back();
 				fk.send(&fii);
-				// fetchKeys() would put the data it fetched into the fii. It will not return back to this thread until
-				// it was completed.
+				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this actor
+				// until it was completed.
 			}
 
 			for (auto& c : fii.changes)
@@ -4388,18 +4385,12 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 #pragma region Core
 #endif
 
-// Log the number increased since last reset and then reset. It's easy to get rates by dividing by "Elapsed" field of
-// "StorageMetrics".
-inline void logCounterAndResetInterval(TraceEvent& te, const char* key, Counter& counter) {
-	te.detail(key, counter.getIntervalDelta());
-	counter.resetInterval();
-}
-
 ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
 	state Future<Void> doPollMetrics = Void();
 
 	wait(self->byteSampleRecovery);
 
+	// Logs all counters in `counters.cc` and reset the interval.
 	self->actors.add(traceCounters("StorageMetrics",
 	                               self->thisServerID,
 	                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
@@ -4424,16 +4415,6 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			                                         UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
 			                                             self->thisServerID.second() ^ self->ssPairID.get().second()));
 		                               }
-
-		                               // The size of data processed for data movement and actual writes. They are
-		                               // roughly comparable, but the overhead is counted differently.
-		                               logCounterAndResetInterval(te, "BytesFetched", self->counters.bytesFetched);
-		                               logCounterAndResetInterval(te, "MutationBytes", self->counters.mutationBytes);
-		                               // The number of KVs affected for data movement and actual writes. They are
-		                               // roughly comparable, but clear is counted as one mutation while unrelated to
-		                               // kvFetched
-		                               logCounterAndResetInterval(te, "KVFetched", self->counters.kvFetched);
-		                               logCounterAndResetInterval(te, "Mutations", self->counters.mutations);
 	                               }));
 
 	loop {
