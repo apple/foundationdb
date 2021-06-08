@@ -1329,9 +1329,10 @@ public:
 	          std::string filename,
 	          int64_t pageCacheSizeBytes,
 	          Version remapCleanupWindow,
-	          bool memoryOnly = false)
+	          bool memoryOnly = false,
+	          Promise<Void> errorPromise = {})
 	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes),
-	    memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow) {
+	    memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow), errorPromise(errorPromise) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
@@ -6186,7 +6187,7 @@ public:
 		Version remapCleanupWindow =
 		    BUGGIFY ? deterministicRandom()->randomInt64(0, 1000) : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW;
 
-		IPager2* pager = new DWALPager(pageSize, filePrefix, pageCacheBytes, remapCleanupWindow);
+		IPager2* pager = new DWALPager(pageSize, filePrefix, pageCacheBytes, remapCleanupWindow, false, m_error);
 		m_tree = new VersionedBTree(pager, filePrefix);
 		m_init = catchError(init_impl(this));
 	}
