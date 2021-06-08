@@ -375,14 +375,14 @@ struct ServerStatus {
 	LocalityData locality;
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
-	ServerStatus(bool isFailed, bool isUndesired, LocalityData const& locality)
+	ServerStatus(bool isFailed, bool isUndesired, bool isWiggling, LocalityData const& locality)
 	  : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false),
-	    initialized(true), isWiggling(false) {}
+	    initialized(true), isWiggling(isWiggling) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
 	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
 
 	bool operator==(ServerStatus const& r) const {
-		return isFailed == r.isFailed && isUndesired == r.isUndesired &&
+		return isFailed == r.isFailed && isUndesired == r.isUndesired && isWiggling == r.isWiggling &&
 		       isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized;
 	}
 	bool operator!=(ServerStatus const& r) const { return !(*this == r); }
@@ -3831,10 +3831,12 @@ ACTOR Future<Void> trackExcludedServers(DDTeamCollection* self) {
 
 			// Reset and reassign self->excludedServers based on excluded, but we only
 			// want to trigger entries that are different
-			// Do not retrigger and double-overwrite failed servers
+			// Do not retrigger and double-overwrite failed or wiggling servers
 			auto old = self->excludedServers.getKeys();
 			for (const auto& o : old) {
-				if (!excluded.count(o) && !failed.count(o)) {
+				if (!excluded.count(o) && !failed.count(o) &&
+				    !(self->excludedServers.count(o) &&
+				      self->excludedServers.get(o) == DDTeamCollection::Status::WIGGLING)) {
 					self->excludedServers.set(o, DDTeamCollection::Status::NONE);
 				}
 			}
@@ -4079,7 +4081,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 	if (self->wigglingPid.present()) {
 		self->includeStorageServersForWiggle();
 		TraceEvent("PerpetualStorageWiggleExitingPause", self->distributorId)
-			.detail("ProcessId", self->wigglingPid.get());
+		    .detail("ProcessId", self->wigglingPid.get());
 		self->wigglingPid.reset();
 	}
 
@@ -4419,7 +4421,7 @@ ACTOR Future<Void> storageServerTracker(
     bool isTss) {
 
 	state Future<Void> failureTracker;
-	state ServerStatus status(false, false, server->lastKnownInterface.locality);
+	state ServerStatus status(false, false, false, server->lastKnownInterface.locality);
 	state bool lastIsUnhealthy = false;
 	state Future<Void> metricsTracker = serverMetricsPolling(server);
 
@@ -4712,7 +4714,7 @@ ACTOR Future<Void> storageServerTracker(
 					interfaceChanged = server->onInterfaceChanged;
 					// Old failureTracker for the old interface will be actorCancelled since the handler of the old
 					// actor now points to the new failure monitor actor.
-					status = ServerStatus(status.isFailed, status.isUndesired, server->lastKnownInterface.locality);
+					status = ServerStatus(status.isFailed, status.isUndesired, status.isWiggling, server->lastKnownInterface.locality);
 
 					// self->traceTeamCollectionInfo();
 					recordTeamCollectionInfo = true;
@@ -6452,7 +6454,7 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
 		collection->server_info[uid] = makeReference<TCServerInfo>(
 		    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
-		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
+		collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
 		collection->checkAndCreateMachine(collection->server_info[uid]);
 	}
 
@@ -6509,7 +6511,7 @@ std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
 		collection->server_info[uid] = makeReference<TCServerInfo>(
 		    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 
-		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
+		collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
 	}
 
 	int totalServerIndex = collection->constructMachinesFromServers();
