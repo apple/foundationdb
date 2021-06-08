@@ -836,6 +836,7 @@ private:
 
 #define g_sim2 ((Sim2&)g_simulator)
 
+// A simulated version of the network which allows the database to be deterministically simulated.
 class Sim2 final : public ISimulator, public INetworkConnections {
 public:
 	// Implement INetwork interface
@@ -843,7 +844,7 @@ public:
 	// machines and time
 	double now() const override { return time; }
 
-	// timer() can be up to 0.1 seconds ahead of now()
+	// timer() can be up to 0.1 seconds ahead of actualTime
 	double timer() override {
 		timerTime += deterministicRandom()->random01() * (actualTime + 0.1 - timerTime) / 2.0;
 		return timerTime;
@@ -855,6 +856,8 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess);
 	}
+
+	// The duration of simulated delays can be artifically increased. Tasks which end at similar times can be reordered.
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine) {
 		ASSERT(seconds >= -0.0001);
 		seconds = std::max(0.0, seconds);
@@ -1101,6 +1104,9 @@ public:
 		}
 	}
 
+	// The simulated run loop is implemented to behave similar to the Net2 run loop. It batches together multiple tasks
+	// that are all at the same time, reorders them by priority, and executes them without considering any new tasks
+	// which have been issued since the start of the batch.
 	ACTOR static Future<Void> runLoop(Sim2* self) {
 		state ISimulator::ProcessInfo* callingMachine = self->currentProcess;
 		while (!self->isStopped) {
@@ -2132,9 +2138,10 @@ public:
 
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
-	double time;
-	double actualTime;
-	double timerTime;
+	double time; // The time as returned by now()
+	double actualTime; // A more accurate account of the simulated time which is updated within a batch of tasks
+	double timerTime; // To simulate that timer() can increase without ever returning to the run loop, and timer() can
+	                  // increase up to .1 larger than actualTime when called multiple times in a row
 	TaskPriority currentTaskID;
 
 	// taskCount is guarded by ISimulator::mutex

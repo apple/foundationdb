@@ -178,6 +178,8 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( MAX_CLOGGING_LATENCY,                                  0 ); if( randomize && BUGGIFY ) MAX_CLOGGING_LATENCY =  0.1 * deterministicRandom()->random01();
 	init( MAX_BUGGIFIED_DELAY,                                   0 ); if( randomize && BUGGIFY ) MAX_BUGGIFIED_DELAY =  0.2 * deterministicRandom()->random01();
 	init( SIM_CONNECT_ERROR_MODE, deterministicRandom()->randomInt(0,3) );
+
+	//This knobs controls the maximum of time two simulated task can be apart from each other and still be executed in the same batch (with the same now())
 	init( MAX_RUNLOOP_TIME_BATCHING,                         0.001 ); if( randomize && BUGGIFY ) MAX_RUNLOOP_TIME_BATCHING = 0.001 * deterministicRandom()->random01();
 
 	//Tracefiles
