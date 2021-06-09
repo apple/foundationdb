@@ -927,7 +927,7 @@ public:
 					             page->calculateChecksum(c.pageID),
 					             page->getChecksum());
 					Error e = checksum_failed();
-					TraceEvent(SevError, "FIFOQueueChecksumFailed")
+					TraceEvent(SevError, "RedwoodChecksumFailed")
 					    .detail("PageID", c.pageID)
 					    .detail("PageSize", self->pager->getPhysicalPageSize())
 					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize())
@@ -947,6 +947,7 @@ public:
 					debug_printf(
 					    "FIFOQueue::Cursor(%s) after read of %s\n", c.toString().c_str(), ::toString(result).c_str());
 					results.push_back(results.arena(), result);
+					entriesRead++;
 
 					c.offset += bytesRead;
 					ASSERT(c.offset <= p->endOffset);
@@ -971,10 +972,9 @@ public:
 
 					// Since we have reached the end of the queue, verify that the number of entries read matches
 					// the queue metadata. If it does, send end_of_stream() to mark completion, else throw an error
-					entriesRead += results.size();
 					if (entriesRead != self->numEntries) {
 						Error e = internal_error(); // TODO:  Something better?
-						TraceEvent(SevError, "FIFOQueueNumEntriesMisMatch")
+						TraceEvent(SevError, "RedwoodQueueNumEntriesMisMatch")
 						    .detail("EntriesRead", entriesRead)
 						    .detail("ExpectedEntries", self->numEntries)
 						    .error(e);
@@ -989,7 +989,6 @@ public:
 					c.page.clear();
 					debug_printf("FIFOQueue::Cursor(%s) peekAllExt extent exhausted, moved to new extent\n",
 					             c.toString().c_str());
-					entriesRead += results.size();
 
 					// send an extent worth of entries to the promise stream
 					res.send(results);
@@ -1818,7 +1817,7 @@ public:
 
 			// If the checksum fails for the header page, try to recover committed header backup from page 1
 			if (!self->headerPage->verifyChecksum(0)) {
-				TraceEvent(SevWarn, "DWALPagerRecoveringHeader").detail("Filename", self->filename);
+				TraceEvent(SevWarn, "RedwoodRecoveringHeader").detail("Filename", self->filename);
 
 				wait(store(self->headerPage, self->readHeaderPage(self, 1)));
 
@@ -1829,7 +1828,7 @@ public:
 					}
 
 					Error e = checksum_failed();
-					TraceEvent(SevError, "DWALPagerRecoveryFailed").detail("Filename", self->filename).error(e);
+					TraceEvent(SevError, "RedwoodRecoveryFailed").detail("Filename", self->filename).error(e);
 					throw e;
 				}
 				recoveredHeader = true;
@@ -1839,7 +1838,7 @@ public:
 
 			if (self->pHeader->formatVersion != Header::FORMAT_VERSION) {
 				Error e = internal_error(); // TODO:  Something better?
-				TraceEvent(SevError, "DWALPagerRecoveryFailedWrongVersion")
+				TraceEvent(SevError, "RedwoodRecoveryFailedWrongVersion")
 				    .detail("Filename", self->filename)
 				    .detail("Version", self->pHeader->formatVersion)
 				    .detail("ExpectedVersion", Header::FORMAT_VERSION)
@@ -1849,7 +1848,7 @@ public:
 
 			self->setPageSize(self->pHeader->pageSize);
 			if (self->logicalPageSize != self->desiredPageSize) {
-				TraceEvent(SevWarn, "DWALPagerPageSizeNotDesired")
+				TraceEvent(SevWarn, "RedwoodPageSizeNotDesired")
 				    .detail("Filename", self->filename)
 				    .detail("ExistingPageSize", self->logicalPageSize)
 				    .detail("DesiredPageSize", self->desiredPageSize);
@@ -2361,7 +2360,7 @@ public:
 				debug_printf(
 				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageID).c_str());
 				Error e = checksum_failed();
-				TraceEvent(SevError, "DWALPagerChecksumFailed")
+				TraceEvent(SevError, "RedwoodChecksumFailed")
 				    .detail("Filename", self->filename.c_str())
 				    .detail("PageID", pageID)
 				    .detail("PageSize", self->physicalPageSize)
