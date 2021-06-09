@@ -52,6 +52,7 @@ class TCMachineTeamInfo;
 ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self);
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self);
 ACTOR Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion, DDTeamCollection* teams);
+bool _exclusionSafetyCheck(vector<UID>& excludeServerIDs, DDTeamCollection* teamCollection);
 
 struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	UID id;
@@ -379,7 +380,9 @@ struct ServerStatus {
 	  : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false),
 	    initialized(true), isWiggling(isWiggling) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
-	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
+	const char* toString() const {
+		return isFailed ? "Failed" : isUndesired ? "Undesired" : isWiggling ? "Wiggling" : "Healthy";
+	}
 
 	bool operator==(ServerStatus const& r) const {
 		return isFailed == r.isFailed && isUndesired == r.isUndesired && isWiggling == r.isWiggling &&
@@ -3972,13 +3975,16 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 	    delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistributionLow);
 	state int movingCount = 0;
 	state bool isPaused = false;
-
+	state vector<UID> excludedServerIds;
 	state std::pair<Future<Void>, Value> res = wait(watchPerpetualStoragePIDChange(self));
 	ASSERT(!self->wigglingPid.present()); // only single process wiggle is allowed
 	self->wigglingPid = Optional<Key>(res.second);
 
 	// start with the initial pid
-	if (self->healthyTeamCount > 1) { // pre-check health status
+	for (const auto& info : self->pid2server_info[self->wigglingPid.get()]) {
+		excludedServerIds.push_back(info->id);
+	}
+	if (self->teams.size() > 1 && _exclusionSafetyCheck(excludedServerIds, self)) { // pre-check health status
 		TEST(true); // start the first wiggling
 
 		auto fv = self->excludeStorageServersForWiggle(self->wigglingPid.get());
@@ -4005,9 +4011,12 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				self->wigglingPid = Optional<Key>(res.second);
 				StringRef pid = self->wigglingPid.get();
 
-				if (self->healthyTeamCount <= 1) { // pre-check health status
-					pauseWiggle.trigger();
-				} else {
+				// pre-check health status
+				excludedServerIds.clear();
+				for (const auto& info : self->pid2server_info[self->wigglingPid.get()]) {
+					excludedServerIds.push_back(info->id);
+				}
+				if (self->teams.size() > 1 && _exclusionSafetyCheck(excludedServerIds, self)) {
 					TEST(true); // start wiggling
 
 					auto fv = self->excludeStorageServersForWiggle(pid);
@@ -4016,6 +4025,8 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 					TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
 					    .detail("ProcessId", pid)
 					    .detail("StorageCount", movingCount);
+				} else {
+					pauseWiggle.trigger();
 				}
 			}
 			when(wait(restart.onTrigger())) {
@@ -4057,11 +4068,12 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 
 				if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD && !isPaused) {
 					pauseWiggle.trigger();
-				} else if (count < SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD && self->healthyTeamCount > 1 &&
-				           isPaused) {
+				}
+				else if (isPaused && count < SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD &&
+				           self->healthyTeamCount > 1 && _exclusionSafetyCheck(excludedServerIds, self)) {
 					restart.trigger();
 				}
-				ddQueueCheck = delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistributionLow);
+				ddQueueCheck = delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow);
 			}
 			when(wait(pauseWiggle.onTrigger())) {
 				if (self->wigglingPid.present()) {
@@ -4714,7 +4726,8 @@ ACTOR Future<Void> storageServerTracker(
 					interfaceChanged = server->onInterfaceChanged;
 					// Old failureTracker for the old interface will be actorCancelled since the handler of the old
 					// actor now points to the new failure monitor actor.
-					status = ServerStatus(status.isFailed, status.isUndesired, status.isWiggling, server->lastKnownInterface.locality);
+					status = ServerStatus(
+					    status.isFailed, status.isUndesired, status.isWiggling, server->lastKnownInterface.locality);
 
 					// self->traceTeamCollectionInfo();
 					recordTeamCollectionInfo = true;
@@ -6229,6 +6242,30 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
 	return Void();
 }
 
+// Find size of set intersection of excludeServerIDs and serverIDs on each team and see if the leftover team is valid
+bool _exclusionSafetyCheck(vector<UID>& excludeServerIDs, DDTeamCollection* teamCollection) {
+	std::sort(excludeServerIDs.begin(), excludeServerIDs.end());
+	for (const auto& team : teamCollection->teams) {
+		vector<UID> teamServerIDs = team->getServerIDs();
+		std::sort(teamServerIDs.begin(), teamServerIDs.end());
+		TraceEvent(SevDebug, "DDExclusionSafetyCheck", teamCollection->distributorId)
+		    .detail("Excluding", describe(excludeServerIDs))
+		    .detail("Existing", team->getDesc());
+		// Find size of set intersection of both vectors and see if the leftover team is valid
+		vector<UID> intersectSet(teamServerIDs.size());
+		auto it = std::set_intersection(excludeServerIDs.begin(),
+		                                excludeServerIDs.end(),
+		                                teamServerIDs.begin(),
+		                                teamServerIDs.end(),
+		                                intersectSet.begin());
+		intersectSet.resize(it - intersectSet.begin());
+		if (teamServerIDs.size() - intersectSet.size() < SERVER_KNOBS->DD_EXCLUDE_MIN_REPLICAS) {
+			return false;
+		}
+	}
+	return true;
+}
+
 ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
                                           Reference<DataDistributorData> self,
                                           Database cx) {
@@ -6258,26 +6295,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 			}
 		}
 	}
-	std::sort(excludeServerIDs.begin(), excludeServerIDs.end());
-	for (const auto& team : self->teamCollection->teams) {
-		vector<UID> teamServerIDs = team->getServerIDs();
-		std::sort(teamServerIDs.begin(), teamServerIDs.end());
-		TraceEvent(SevDebug, "DDExclusionSafetyCheck", self->ddId)
-		    .detail("Excluding", describe(excludeServerIDs))
-		    .detail("Existing", team->getDesc());
-		// Find size of set intersection of both vectors and see if the leftover team is valid
-		vector<UID> intersectSet(teamServerIDs.size());
-		auto it = std::set_intersection(excludeServerIDs.begin(),
-		                                excludeServerIDs.end(),
-		                                teamServerIDs.begin(),
-		                                teamServerIDs.end(),
-		                                intersectSet.begin());
-		intersectSet.resize(it - intersectSet.begin());
-		if (teamServerIDs.size() - intersectSet.size() < SERVER_KNOBS->DD_EXCLUDE_MIN_REPLICAS) {
-			reply.safe = false;
-			break;
-		}
-	}
+	reply.safe = _exclusionSafetyCheck(excludeServerIDs, self->teamCollection);
 	TraceEvent("DDExclusionSafetyCheckFinish", self->ddId);
 	req.reply.send(reply);
 	return Void();
