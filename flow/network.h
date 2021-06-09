@@ -150,7 +150,7 @@ public:
 	const IPAddressStore& toV6() const { return std::get<IPAddressStore>(addr); }
 
 	std::string toString() const;
-	static Optional<IPAddress> parse(std::string str);
+	static Optional<IPAddress> parse(std::string const& str);
 
 	bool operator==(const IPAddress& addr) const;
 	bool operator!=(const IPAddress& addr) const;

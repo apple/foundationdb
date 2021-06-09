@@ -36,11 +36,11 @@ struct SystemMonitorMachineState {
 
 	SystemMonitorMachineState() : monitorStartTime(0) {}
 	explicit SystemMonitorMachineState(const IPAddress& ip) : ip(ip), monitorStartTime(0) {}
-	SystemMonitorMachineState(std::string folder,
-	                          Optional<Standalone<StringRef>> dcId,
-	                          Optional<Standalone<StringRef>> zoneId,
-	                          Optional<Standalone<StringRef>> machineId,
-	                          const IPAddress& ip)
+	SystemMonitorMachineState(std::string const& folder,
+	                          Optional<Standalone<StringRef>> const& dcId,
+	                          Optional<Standalone<StringRef>> const& zoneId,
+	                          Optional<Standalone<StringRef>> const& machineId,
+	                          IPAddress const& ip)
 	  : folder(folder), dcId(dcId), zoneId(zoneId), machineId(machineId), ip(ip), monitorStartTime(0) {}
 };
 
@@ -148,7 +148,9 @@ struct StatisticsState {
 };
 
 void systemMonitor();
-SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics = false);
+SystemStatistics customSystemMonitor(std::string const& eventName,
+                                     StatisticsState* statState,
+                                     bool machineMetrics = false);
 SystemStatistics getSystemStatistics();
 
 #endif /* FLOW_SYSTEM_MONITOR_H */
