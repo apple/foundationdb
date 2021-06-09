@@ -1348,7 +1348,9 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	// Only works if broken_on_destruct.canBeSet()
 	void kill(Error e = broken_promise()) {
 		if (broken_on_destruct.canBeSet()) {
-			broken_on_destruct.sendError(e);
+			auto local = broken_on_destruct;
+			// It could be the case that calling broken_on_destruct destroys this FlowLock
+			local.sendError(e);
 		}
 	}
 
