@@ -706,7 +706,7 @@ public:
 		    rowsQueried, bytesQueried, watchQueries, emptyQueries;
 
 		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
-		// and cleared from the memory, we do not exact it but add it to bytesDurable.
+		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
 		Counter bytesInput;
 		// Bytes of the mutations that have been removed from memory because they durable. The counting is same as
 		// bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
@@ -2238,7 +2238,8 @@ Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
 	return Optional<MutationRef>();
 }
 
-// Return whether or not the there is a mutation that need to be done.
+// Return true if the mutation need to be applied, otherwise (it's a CompareAndClear mutation and failed the comparison)
+// false.
 bool expandMutation(MutationRef& m,
                     StorageServer::VersionedData const& data,
                     UpdateEagerReadInfo* eager,
@@ -2591,10 +2592,10 @@ public:
 		currentRunning.recordStart(uid, keyRange);
 	}
 
-	void addFetchedBytes(const int bytes, const int kvs) {
+	void addFetchedBytes(const int bytes, const int kvCount) {
 		fetchedBytes += bytes;
 		bytesFetchedCounter += bytes;
-		kvFetchedCounter += kvs;
+		kvFetchedCounter += kvCount;
 	}
 
 	~FetchKeysMetricReporter() {
@@ -2729,7 +2730,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// wait( data->fetchKeysStorageWriteLock.take() );
 				// state FlowLock::Releaser holdingFKSWL( data->fetchKeysStorageWriteLock );
 
-				// Write this_block directly to storage, bypassing update() which updates in the memory.
+				// Write this_block directly to storage, bypassing update() which write to MVCC in memory.
 				state KeyValueRef* kvItr = this_block.begin();
 				for (; kvItr != this_block.end(); ++kvItr) {
 					data->storage.writeKeyValue(*kvItr);
