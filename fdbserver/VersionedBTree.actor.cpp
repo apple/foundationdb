@@ -158,6 +158,42 @@ std::string toString(const VectorRef<T>& v) {
 	return toString(v.begin(), v.end());
 }
 
+template <typename K, typename V>
+std::string toString(const std::map<K, V>& m) {
+	std::string r = "{";
+	bool comma = false;
+	for (const auto& [key, value] : m) {
+		if (comma) {
+			r += ", ";
+		} else {
+			comma = true;
+		}
+		r += toString(value);
+		r += " ";
+		r += toString(key);
+	}
+	r += "}\n";
+	return r;
+}
+
+template <typename K, typename V>
+std::string toString(const std::unordered_map<K, V>& u) {
+	std::string r = "{";
+	bool comma = false;
+	for (const auto& n : u) {
+		if (comma) {
+			r += ", ";
+		} else {
+			comma = true;
+		}
+		r += toString(n.first);
+		r += " => ";
+		r += toString(n.second);
+	}
+	r += "}";
+	return r;
+}
+
 template <typename T>
 std::string toString(const Optional<T>& o) {
 	if (o.present()) {
@@ -235,6 +271,7 @@ public:
 #pragma pack(push, 1)
 	struct QueueState {
 		bool operator==(const QueueState& rhs) const { return memcmp(this, &rhs, sizeof(QueueState)) == 0; }
+		QueueID queueID = invalidQueueID;
 		LogicalPageID headPageID = invalidLogicalPageID;
 		LogicalPageID tailPageID = invalidLogicalPageID;
 		uint16_t headOffset;
@@ -242,14 +279,39 @@ public:
 		// start at 0
 		int64_t numPages;
 		int64_t numEntries;
+		bool usesExtents = false; // Is this an extent based queue?
+		LogicalPageID prevExtentEndPageID = invalidLogicalPageID;
+		bool tailPageNewExtent = false;
+		KeyRef asKeyRef() const { return KeyRef((uint8_t*)this, sizeof(QueueState)); }
+
+		void fromKeyRef(KeyRef k) { memcpy(this, k.begin(), k.size()); }
+
 		std::string toString() const {
-			return format("{head: %s:%d  tail: %s  numPages: %" PRId64 "  numEntries: %" PRId64 "}",
+			return format("{queueID: %u head: %s:%d  tail: %s  numPages: %" PRId64 "  numEntries: %" PRId64
+			              "  usesExtents:%d}",
+			              queueID,
 			              ::toString(headPageID).c_str(),
 			              (int)headOffset,
 			              ::toString(tailPageID).c_str(),
 			              numPages,
-			              numEntries);
+			              numEntries,
+			              usesExtents);
 		}
+	};
+
+	struct RawPage {
+		// The next page of the queue after this one
+		LogicalPageID nextPageID;
+		// The start offset of the next page
+		uint16_t nextOffset;
+		// The end offset of the current page
+		uint16_t endOffset;
+		// Current page within the extent
+		LogicalPageID extentCurPageID;
+		// The nd page within the extent
+		LogicalPageID extentEndPageID;
+		// Get pointer to data after page header
+		uint8_t* begin() { return (uint8_t*)(this + 1); }
 	};
 #pragma pack(pop)
 
@@ -292,8 +354,11 @@ public:
 		void init(FIFOQueue* q = nullptr,
 		          Mode m = NONE,
 		          LogicalPageID initialPageID = invalidLogicalPageID,
+		          bool initExtentInfo = true,
+		          bool tailPageNewExtent = false,
+		          LogicalPageID endPage = invalidLogicalPageID,
 		          int readOffset = 0,
-		          LogicalPageID endPage = invalidLogicalPageID) {
+		          LogicalPageID prevExtentEndPageID = invalidLogicalPageID) {
 			queue = q;
 
 			// If the pager gets an error, which includes shutdown, kill the mutex so any waiters can no longer run.
@@ -315,7 +380,11 @@ public:
 				// The end page will not have been written to disk yet.
 				pageID = initialPageID;
 				if (pageID != endPageID) {
-					startNextPageLoad(pageID);
+					// For extent based queues, we loads extents at a time during recovery
+					if (queue->usesExtents && initExtentInfo)
+						loadExtent();
+					else
+						startNextPageLoad(pageID);
 				} else {
 					nextPageID = invalidLogicalPageID;
 				}
@@ -328,7 +397,18 @@ public:
 			debug_printf("FIFOQueue::Cursor(%s) initialized\n", toString().c_str());
 
 			if (mode == WRITE && initialPageID != invalidLogicalPageID) {
-				addNewPage(initialPageID, 0, true);
+				debug_printf("FIFOQueue::Cursor(%s) init. Adding new page %u\n", toString().c_str(), initialPageID);
+				addNewPage(initialPageID, 0, true, initExtentInfo, tailPageNewExtent, prevExtentEndPageID);
+			}
+		}
+
+		// Reset the read cursor (this is used only for extent based remap queue after recovering the remap
+		// queue contents via fastpath extent reads)
+		void resetRead() {
+			ASSERT(mode == POP || mode == READONLY);
+			page.clear();
+			if (pageID != endPageID) {
+				startNextPageLoad(pageID);
 			}
 		}
 
@@ -338,9 +418,9 @@ public:
 		~Cursor() { writeOperations.cancel(); }
 
 		// A read cursor can be initialized from a pop cursor
-		void initReadOnly(const Cursor& c) {
+		void initReadOnly(const Cursor& c, bool readExtents = false) {
 			ASSERT(c.mode == READONLY || c.mode == POP);
-			init(c.queue, READONLY, c.pageID, c.offset, c.endPageID);
+			init(c.queue, READONLY, c.pageID, readExtents, false, c.endPageID, c.offset);
 		}
 
 		std::string toString() const {
@@ -365,19 +445,6 @@ public:
 			ASSERT(mode == NONE);
 			return format("{NullCursor=%p}", this);
 		}
-
-#pragma pack(push, 1)
-		struct RawPage {
-			// The next page of the queue after this one
-			LogicalPageID nextPageID;
-			// The start offset of the next page
-			uint16_t nextOffset;
-			// The end offset of the current page
-			uint16_t endOffset;
-			// Get pointer to data after page header
-			uint8_t* begin() { return (uint8_t*)(this + 1); }
-		};
-#pragma pack(pop)
 
 		// Returns true if the mutex cannot be immediately taken.
 		bool isBusy() { return mutex.activePermits() != 0; }
@@ -412,6 +479,16 @@ public:
 			nextPageReader = waitOrError(queue->pager->readPage(nextPageID, true), queue->pagerError);
 		}
 
+		Future<Void> loadExtent() {
+			ASSERT(mode == POP | mode == READONLY);
+			debug_printf("FIFOQueue::Cursor(%s) loadExtent\n", toString().c_str());
+			return map(queue->pager->readExtent(pageID), [=](Reference<ArenaPage> p) {
+				page = p;
+				debug_printf("FIFOQueue::Cursor(%s) loadExtent done. Page: %p\n", toString().c_str(), page->begin());
+				return Void();
+			});
+		}
+
 		void writePage() {
 			ASSERT(mode == WRITE);
 			debug_printf("FIFOQueue::Cursor(%s) writePage\n", toString().c_str());
@@ -428,15 +505,24 @@ public:
 		// an existing chain of queue pages.
 		// If initializeNewPage is true a page buffer will be allocated for the new page and it will be initialized
 		// as a new tail page.
-		void addNewPage(LogicalPageID newPageID, int newOffset, bool initializeNewPage) {
+		// if initializeExtentInfo is true in addition to initializeNewPage, update the extentEndPageID info
+		// in the mew page being added using newExtentPage and prevExtentEndPageID parameters
+		void addNewPage(LogicalPageID newPageID,
+		                int newOffset,
+		                bool initializeNewPage,
+		                bool initializeExtentInfo = false,
+		                bool newExtentPage = false,
+		                LogicalPageID prevExtentEndPageID = invalidLogicalPageID) {
 			ASSERT(mode == WRITE);
 			ASSERT(newPageID != invalidLogicalPageID);
-			debug_printf("FIFOQueue::Cursor(%s) Adding page %s init=%d\n",
+			debug_printf("FIFOQueue::Cursor(%s) Adding page %s initPage=%d initExtentInfo=%d newExtentPage=%d\n",
 			             toString().c_str(),
 			             ::toString(newPageID).c_str(),
-			             initializeNewPage);
+			             initializeNewPage,
+			             initializeExtentInfo,
+			             newExtentPage);
 
-			// Update existing page and write, if it exists
+			// Update existing page/newLastPageID and write, if it exists
 			if (page) {
 				setNext(newPageID, newOffset);
 				debug_printf("FIFOQueue::Cursor(%s) Linked new page %s:%d\n",
@@ -444,6 +530,16 @@ public:
 				             ::toString(newPageID).c_str(),
 				             newOffset);
 				writePage();
+				auto p = raw();
+				prevExtentEndPageID = p->extentEndPageID;
+				if (pageID == prevExtentEndPageID)
+					newExtentPage = true;
+				debug_printf(
+				    "FIFOQueue::Cursor(%s) Linked new page. pageID %u, newPageID %u,  prevExtentEndPageID %u\n",
+				    toString().c_str(),
+				    pageID,
+				    newPageID,
+				    prevExtentEndPageID);
 			}
 
 			pageID = newPageID;
@@ -454,18 +550,48 @@ public:
 				// queue item of any type.  This change will suddenly make some pages being written to seem overfilled
 				// but this won't break anything, the next write will just be detected as not fitting and the page will
 				// end.
-				queue->dataBytesPerPage = deterministicRandom()->randomInt(
-				    50, queue->pager->getUsablePageSize() - sizeof(typename Cursor::RawPage));
+				queue->dataBytesPerPage =
+				    deterministicRandom()->randomInt(50, queue->pager->getUsablePageSize() - sizeof(RawPage));
 			}
 
 			if (initializeNewPage) {
-				debug_printf("FIFOQueue::Cursor(%s) Initializing new page\n", toString().c_str());
+				debug_printf("FIFOQueue::Cursor(%s) Initializing new page. usesExtents: %d, initializeExtentInfo: %d\n",
+				             toString().c_str(),
+				             queue->usesExtents,
+				             initializeExtentInfo);
 				page = queue->pager->newPageBuffer();
 				setNext(0, 0);
 				auto p = raw();
 				ASSERT(newOffset == 0);
 				p->endOffset = 0;
+				// For extent based queue, update the index of current page within the extent
+				if (queue->usesExtents) {
+					debug_printf("FIFOQueue::Cursor(%s) Adding page %s init=%d pageCount %d\n",
+					             toString().c_str(),
+					             ::toString(newPageID).c_str(),
+					             initializeNewPage,
+					             queue->pager->getPageCount());
+					p->extentCurPageID = newPageID;
+					if (initializeExtentInfo) {
+						int pagesPerExtent = queue->pagesPerExtent;
+						if (newExtentPage) {
+							p->extentEndPageID = newPageID + pagesPerExtent - 1;
+							debug_printf("FIFOQueue::Cursor(%s) newExtentPage. newPageID %u, pagesPerExtent %d, "
+							             "ExtentEndPageID: %s\n",
+							             toString().c_str(),
+							             newPageID,
+							             pagesPerExtent,
+							             ::toString(p->extentEndPageID).c_str());
+						} else {
+							p->extentEndPageID = prevExtentEndPageID;
+							debug_printf("FIFOQueue::Cursor(%s) Copied ExtentEndPageID: %s\n",
+							             toString().c_str(),
+							             ::toString(p->extentEndPageID).c_str());
+						}
+					}
+				}
 			} else {
+				debug_printf("FIFOQueue::Cursor(%s) Clearing new page\n", toString().c_str());
 				page.clear();
 			}
 		}
@@ -478,6 +604,14 @@ public:
 			state int bytesNeeded = Codec::bytesNeeded(item);
 			state bool needNewPage =
 			    self->pageID == invalidLogicalPageID || self->offset + bytesNeeded > self->queue->dataBytesPerPage;
+
+			if (BUGGIFY) {
+				// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
+				// written (indicated by non-zero offset) to the current page.
+				if ((self->offset > 0) && deterministicRandom()->random01() < 0.01) {
+					needNewPage = true;
+				}
+			}
 
 			debug_printf("FIFOQueue::Cursor(%s) write(%s) mustWait=%d needNewPage=%d\n",
 			             self->toString().c_str(),
@@ -495,6 +629,13 @@ public:
 				if (mustWait) {
 					needNewPage = self->pageID == invalidLogicalPageID ||
 					              self->offset + bytesNeeded > self->queue->dataBytesPerPage;
+					if (BUGGIFY) {
+						// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
+						// written (indicated by non-zero offset) to the current page.
+						if ((self->offset > 0) && deterministicRandom()->random01() < 0.01) {
+							needNewPage = true;
+						}
+					}
 				}
 			}
 
@@ -502,9 +643,33 @@ public:
 			if (needNewPage) {
 				debug_printf("FIFOQueue::Cursor(%s) write(%s) page is full, adding new page\n",
 				             self->toString().c_str(),
-				             ::toString(item).c_str());
-				LogicalPageID newPageID = wait(self->queue->pager->newPageID());
-				self->addNewPage(newPageID, 0, true);
+				             ::toString(item).c_str(),
+				             ::toString(self->pageID).c_str(),
+				             bytesNeeded,
+				             self->queue->dataBytesPerPage);
+				state LogicalPageID newPageID;
+				// If this is an extent based queue, check if there is an available page in current extent
+				if (self->queue->usesExtents) {
+					bool allocateNewExtent = false;
+					if (self->pageID != invalidLogicalPageID) {
+						auto praw = self->raw();
+						if (praw->extentCurPageID < praw->extentEndPageID) {
+							newPageID = praw->extentCurPageID + 1;
+						} else {
+							allocateNewExtent = true;
+						}
+					} else
+						allocateNewExtent = true;
+					if (allocateNewExtent) {
+						LogicalPageID newPID = wait(self->queue->pager->newExtentPageID(self->queue->queueID));
+						newPageID = newPID;
+					}
+				} else {
+					LogicalPageID newPID = wait(self->queue->pager->newPageID());
+					newPageID = newPID;
+				}
+				self->addNewPage(newPageID, 0, true, true);
+
 				++self->queue->numPages;
 			}
 
@@ -647,12 +812,16 @@ public:
 				page.clear();
 				debug_printf("FIFOQueue::Cursor(%s) readNext page exhausted, moved to new page\n", toString().c_str());
 
-				if (mode == POP) {
+				if (mode == POP && !queue->usesExtents) {
 					// Freeing the old page must happen after advancing the cursor and clearing the page reference
 					// because freePage() could cause a push onto a queue that causes a newPageID() call which could
 					// pop() from this very same queue. Queue pages are freed at version 0 because they can be reused
 					// after the next commit.
 					queue->pager->freePage(oldPageID, 0);
+				} else if (queue->usesExtents && (p->extentCurPageID == p->extentEndPageID)) {
+					// Figure out the beginning of the extent
+					int pagesPerExtent = queue->pagesPerExtent;
+					queue->pager->freeExtent(oldPageID - pagesPerExtent + 1);
 				}
 			}
 
@@ -674,36 +843,183 @@ public:
 	void operator=(const FIFOQueue& rhs) = delete;
 
 	// Create a new queue at newPageID
-	void create(IPager2* p, LogicalPageID newPageID, std::string queueName) {
-		debug_printf("FIFOQueue(%s) create from page %s\n", queueName.c_str(), toString(newPageID).c_str());
+	void create(IPager2* p, LogicalPageID newPageID, std::string queueName, QueueID id, bool extent) {
+		debug_printf("FIFOQueue(%s) create from page %s. usesExtents %d\n",
+		             queueName.c_str(),
+		             toString(newPageID).c_str(),
+		             extent);
 		pager = p;
 		pagerError = pager->getError();
 		name = queueName;
+		queueID = id;
 		numPages = 1;
 		numEntries = 0;
-		dataBytesPerPage = pager->getUsablePageSize() - sizeof(typename Cursor::RawPage);
-		headReader.init(this, Cursor::POP, newPageID, 0, newPageID);
-		tailWriter.init(this, Cursor::WRITE, newPageID);
+		dataBytesPerPage = pager->getUsablePageSize() - sizeof(RawPage);
+		usesExtents = extent;
+		pagesPerExtent = pager->getPagesPerExtent();
+		headReader.init(this, Cursor::POP, newPageID, false, false, newPageID, 0);
+		tailWriter.init(this, Cursor::WRITE, newPageID, true, true);
 		headWriter.init(this, Cursor::WRITE);
 		newTailPage = invalidLogicalPageID;
 		debug_printf("FIFOQueue(%s) created\n", queueName.c_str());
 	}
 
 	// Load an existing queue from its queue state
-	void recover(IPager2* p, const QueueState& qs, std::string queueName) {
+	void recover(IPager2* p, const QueueState& qs, std::string queueName, bool loadExtents = true) {
 		debug_printf("FIFOQueue(%s) recover from queue state %s\n", queueName.c_str(), qs.toString().c_str());
 		pager = p;
 		pagerError = pager->getError();
 		name = queueName;
+		queueID = qs.queueID;
 		numPages = qs.numPages;
 		numEntries = qs.numEntries;
-		dataBytesPerPage = pager->getUsablePageSize() - sizeof(typename Cursor::RawPage);
-		headReader.init(this, Cursor::POP, qs.headPageID, qs.headOffset, qs.tailPageID);
-		tailWriter.init(this, Cursor::WRITE, qs.tailPageID);
+		dataBytesPerPage = pager->getUsablePageSize() - sizeof(RawPage);
+		usesExtents = qs.usesExtents;
+		pagesPerExtent = pager->getPagesPerExtent();
+		headReader.init(this, Cursor::POP, qs.headPageID, loadExtents, false, qs.tailPageID, qs.headOffset);
+		tailWriter.init(this,
+		                Cursor::WRITE,
+		                qs.tailPageID,
+		                true,
+		                qs.tailPageNewExtent,
+		                invalidLogicalPageID,
+		                0,
+		                qs.prevExtentEndPageID);
 		headWriter.init(this, Cursor::WRITE);
 		newTailPage = invalidLogicalPageID;
 		debug_printf("FIFOQueue(%s) recovered\n", queueName.c_str());
 	}
+
+	// Reset the head reader (this is used only for extent based remap queue after recovering the remap
+	// queue contents via fastpath extent reads)
+	void resetHeadReader() {
+		headReader.resetRead();
+		debug_printf("FIFOQueue(%s) read cursor reset\n", name.c_str());
+	}
+
+	// Fast path extent peekAll (this zooms through the queue reading extents at a time)
+	// Output interface is a promise stream and one vector of results per extent found is sent to the promise stream
+	// Once we are finished reading all the extents of the queue, end_of_stream() is sent to mark completion
+	ACTOR static Future<Void> peekAll_ext(FIFOQueue* self, PromiseStream<Standalone<VectorRef<T>>> res) {
+		state Cursor c;
+		c.initReadOnly(self->headReader, true);
+
+		debug_printf("FIFOQueue::Cursor(%s) peekAllExt begin\n", c.toString().c_str());
+		if (c.pageID == invalidLogicalPageID || c.pageID == c.endPageID) {
+			debug_printf("FIFOQueue::Cursor(%s) peekAllExt returning nothing\n", c.toString().c_str());
+			res.sendError(end_of_stream());
+			return Void();
+		}
+
+		state int entriesRead = 0;
+		// Loop over all the extents in this queue
+		loop {
+			// We now know we are pointing to PageID and it should be read and used, but it may not be loaded yet.
+			if (!c.page) {
+				debug_printf("FIFOQueue::Cursor(%s) peekAllExt going to Load Extent %s.\n",
+				             c.toString().c_str(),
+				             ::toString(c.pageID).c_str());
+				wait(c.loadExtent());
+				wait(yield());
+			}
+
+			state Standalone<VectorRef<T>> results;
+			results.reserve(results.arena(), self->pagesPerExtent * self->pager->getPhysicalPageSize() / sizeof(T));
+
+			// Loop over all the pages in this extent
+			int pageIdx = 0;
+			loop {
+				// Position the page pointer to current page in the extent
+				Reference<ArenaPage> page =
+				    c.page->subPage(pageIdx++ * self->pager->getPhysicalPageSize(), self->pager->getLogicalPageSize());
+				debug_printf("FIFOQueue::Cursor(%s) peekALLExt %s. Offset %d, CalculateChecksum %d ChecksumInPage %d\n",
+				             c.toString().c_str(),
+				             toString(c.pageID).c_str(),
+				             c.pageID * self->pager->getPhysicalPageSize(),
+				             page->calculateChecksum(c.pageID),
+				             page->getChecksum());
+				if (!page->verifyChecksum(c.pageID)) {
+					debug_printf("FIFOQueue::Cursor(%s) peekALLExt checksum failed for %s. Offset %d, "
+					             "CalculateChecksum %d ChecksumInPage %d\n",
+					             c.toString().c_str(),
+					             toString(c.pageID).c_str(),
+					             c.pageID * self->pager->getPhysicalPageSize(),
+					             page->calculateChecksum(c.pageID),
+					             page->getChecksum());
+					Error e = checksum_failed();
+					TraceEvent(SevError, "RedwoodChecksumFailed")
+					    .detail("PageID", c.pageID)
+					    .detail("PageSize", self->pager->getPhysicalPageSize())
+					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize())
+					    .detail("CalculatedChecksum", page->calculateChecksum(c.pageID))
+					    .detail("ChecksumInPage", page->getChecksum())
+					    .error(e);
+					throw e;
+				}
+
+				RawPage* p = (RawPage*)(page->begin());
+				int bytesRead;
+
+				// Now loop over all entries inside the current page
+				loop {
+					ASSERT(c.offset < p->endOffset);
+					T result = Codec::readFromBytes(p->begin() + c.offset, bytesRead);
+					debug_printf(
+					    "FIFOQueue::Cursor(%s) after read of %s\n", c.toString().c_str(), ::toString(result).c_str());
+					results.push_back(results.arena(), result);
+					entriesRead++;
+
+					c.offset += bytesRead;
+					ASSERT(c.offset <= p->endOffset);
+
+					if (c.offset == p->endOffset) {
+						c.pageID = p->nextPageID;
+						c.offset = p->nextOffset;
+						debug_printf("FIFOQueue::Cursor(%s) peekAllExt page exhausted, moved to new page\n",
+						             c.toString().c_str());
+						debug_printf("FIFOQueue:: nextPageID=%s, extentCurPageID=%s, extentEndPageID=%s\n",
+						             ::toString(p->nextPageID).c_str(),
+						             ::toString(p->extentCurPageID).c_str(),
+						             ::toString(p->extentEndPageID).c_str());
+						break;
+					}
+				} // End of Page
+
+				// Check if we have reached the end of the queue
+				if (c.pageID == invalidLogicalPageID || c.pageID == c.endPageID) {
+					debug_printf("FIFOQueue::Cursor(%s) peekAllExt Queue exhausted\n", c.toString().c_str());
+					res.send(results);
+
+					// Since we have reached the end of the queue, verify that the number of entries read matches
+					// the queue metadata. If it does, send end_of_stream() to mark completion, else throw an error
+					if (entriesRead != self->numEntries) {
+						Error e = internal_error(); // TODO:  Something better?
+						TraceEvent(SevError, "RedwoodQueueNumEntriesMisMatch")
+						    .detail("EntriesRead", entriesRead)
+						    .detail("ExpectedEntries", self->numEntries)
+						    .error(e);
+						throw e;
+					}
+					res.sendError(end_of_stream());
+					return Void();
+				}
+
+				// Check if we have reached the end of current extent
+				if (p->extentCurPageID == p->extentEndPageID) {
+					c.page.clear();
+					debug_printf("FIFOQueue::Cursor(%s) peekAllExt extent exhausted, moved to new extent\n",
+					             c.toString().c_str());
+
+					// send an extent worth of entries to the promise stream
+					res.send(results);
+					self->pager->releaseExtentReadLock();
+					break;
+				}
+			} // End of Extent
+		} // End of Queue
+	}
+
+	Future<Void> peekAllExt(PromiseStream<Standalone<VectorRef<T>>> resStream) { return peekAll_ext(this, resStream); }
 
 	ACTOR static Future<Standalone<VectorRef<T>>> peekAll_impl(FIFOQueue* self) {
 		state Standalone<VectorRef<T>> results;
@@ -711,12 +1027,19 @@ public:
 		c.initReadOnly(self->headReader);
 		results.reserve(results.arena(), self->numEntries);
 
+		state int sinceYield = 0;
 		loop {
 			Optional<T> x = wait(c.readNext());
 			if (!x.present()) {
 				break;
 			}
 			results.push_back(results.arena(), x.get());
+
+			// yield periodically to avoid overflowing the stack
+			if (++sinceYield >= 100) {
+				sinceYield = 0;
+				wait(yield());
+			}
 		}
 
 		return results;
@@ -739,11 +1062,15 @@ public:
 
 	QueueState getState() const {
 		QueueState s;
+		s.queueID = queueID;
 		s.headOffset = headReader.offset;
 		s.headPageID = headReader.pageID;
 		s.tailPageID = tailWriter.pageID;
 		s.numEntries = numEntries;
 		s.numPages = numPages;
+		s.usesExtents = usesExtents;
+		s.tailPageNewExtent = tailPageNewExtent;
+		s.prevExtentEndPageID = prevExtentEndPageID;
 
 		debug_printf("FIFOQueue(%s) getState(): %s\n", name.c_str(), s.toString().c_str());
 		return s;
@@ -801,11 +1128,54 @@ public:
 			//
 			// If the newTailPage future is ready but it's an invalid page and the tail page we are currently pointed to
 			// has had items added to it, then get a new tail page ID.
-			if (self->newTailPage.isReady() && self->newTailPage.get() == invalidLogicalPageID &&
-			    self->tailWriter.pendingTailWrites()) {
-				debug_printf("FIFOQueue(%s) preFlush starting to get new page ID\n", self->name.c_str());
-				self->newTailPage = self->pager->newPageID();
-				workPending = true;
+			if (self->newTailPage.isReady() && self->newTailPage.get() == invalidLogicalPageID) {
+				if (self->tailWriter.pendingTailWrites()) {
+					debug_printf("FIFOQueue(%s) preFlush starting to get new page ID\n", self->name.c_str());
+					if (self->usesExtents) {
+						if (self->tailWriter.pageID == invalidLogicalPageID) {
+							self->newTailPage = self->pager->newExtentPageID(self->queueID);
+							self->tailPageNewExtent = true;
+							self->prevExtentEndPageID = invalidLogicalPageID;
+						} else {
+							auto p = self->tailWriter.raw();
+							debug_printf(
+							    "FIFOQueue(%s) newTailPage tailWriterPage %u extentCurPageID %u, extentEndPageID %u\n",
+							    self->name.c_str(),
+							    self->tailWriter.pageID,
+							    p->extentCurPageID,
+							    p->extentEndPageID);
+							if (p->extentCurPageID < p->extentEndPageID) {
+								self->newTailPage = p->extentCurPageID + 1;
+								self->tailPageNewExtent = false;
+								self->prevExtentEndPageID = p->extentEndPageID;
+							} else {
+								self->newTailPage = self->pager->newExtentPageID(self->queueID);
+								self->tailPageNewExtent = true;
+								self->prevExtentEndPageID = invalidLogicalPageID;
+							}
+						}
+						debug_printf("FIFOQueue(%s) newTailPage tailPageNewExtent:%d prevExtentEndPageID: %u "
+						             "tailWriterPage %u\n",
+						             self->name.c_str(),
+						             self->tailPageNewExtent,
+						             self->prevExtentEndPageID,
+						             self->tailWriter.pageID);
+					} else
+						self->newTailPage = self->pager->newPageID();
+					workPending = true;
+				} else {
+					if (self->usesExtents) {
+						auto p = self->tailWriter.raw();
+						self->prevExtentEndPageID = p->extentEndPageID;
+						self->tailPageNewExtent = false;
+						debug_printf("FIFOQueue(%s) newTailPage tailPageNewExtent: %d prevExtentEndPageID: %u "
+						             "tailWriterPage %u\n",
+						             self->name.c_str(),
+						             self->tailPageNewExtent,
+						             self->prevExtentEndPageID,
+						             self->tailWriter.pageID);
+					}
+				}
 			}
 		}
 
@@ -818,10 +1188,11 @@ public:
 	void finishFlush() {
 		debug_printf("FIFOQueue(%s) finishFlush start\n", name.c_str());
 		ASSERT(!isBusy());
+		bool initTailWriter = true;
 
 		// If a new tail page was allocated, link the last page of the tail writer to it.
 		if (newTailPage.get() != invalidLogicalPageID) {
-			tailWriter.addNewPage(newTailPage.get(), 0, false);
+			tailWriter.addNewPage(newTailPage.get(), 0, false, false);
 			// The flush sequence allocated a page and added it to the queue so increment numPages
 			++numPages;
 
@@ -829,6 +1200,7 @@ public:
 			ASSERT(!tailWriter.isBusy());
 
 			newTailPage = invalidLogicalPageID;
+			initTailWriter = true;
 		}
 
 		// If the headWriter wrote anything, link its tail page to the headReader position and point the headReader
@@ -844,7 +1216,15 @@ public:
 		headReader.endPageID = tailWriter.pageID;
 
 		// Reset the write cursors
-		tailWriter.init(this, Cursor::WRITE, tailWriter.pageID);
+		debug_printf("FIFOQueue(%s) Reset tailWriter cursor. tailPageNewExtent: %d\n", name.c_str(), tailPageNewExtent);
+		tailWriter.init(this,
+		                Cursor::WRITE,
+		                tailWriter.pageID,
+		                initTailWriter /*false*/,
+		                tailPageNewExtent,
+		                invalidLogicalPageID,
+		                0,
+		                prevExtentEndPageID);
 		headWriter.init(this, Cursor::WRITE);
 
 		debug_printf("FIFOQueue(%s) finishFlush end\n", name.c_str());
@@ -864,11 +1244,16 @@ public:
 	Future<Void> flush() { return flush_impl(this); }
 
 	IPager2* pager;
+	QueueID queueID;
 	Future<Void> pagerError;
 
 	int64_t numPages;
 	int64_t numEntries;
 	int dataBytesPerPage;
+	int pagesPerExtent;
+	bool usesExtents;
+	bool tailPageNewExtent;
+	LogicalPageID prevExtentEndPageID;
 
 	Cursor headReader;
 	Cursor tailWriter;
@@ -1337,21 +1722,36 @@ public:
 		}
 	};
 
+	struct ExtentUsedListEntry {
+		QueueID queueID;
+		LogicalPageID extentID;
+
+		bool operator<(const ExtentUsedListEntry& rhs) const { return queueID < rhs.queueID; }
+
+		std::string toString() const {
+			return format("ExtentUsedListEntry{%s @%s}", ::toString(extentID).c_str(), ::toString(queueID).c_str());
+		}
+	};
+
 #pragma pack(pop)
 
 	typedef FIFOQueue<DelayedFreePage> DelayedFreePageQueueT;
 	typedef FIFOQueue<RemappedPage> RemapQueueT;
+	typedef FIFOQueue<ExtentUsedListEntry> ExtentUsedListQueueT;
 
 	// If the file already exists, pageSize might be different than desiredPageSize
 	// Use pageCacheSizeBytes == 0 to use default from flow knobs
 	// If filename is empty, the pager will exist only in memory and once the cache is full writes will fail.
 	DWALPager(int desiredPageSize,
+	          int desiredExtentSize,
 	          std::string filename,
 	          int64_t pageCacheSizeBytes,
 	          Version remapCleanupWindow,
+	          int concurrentExtentReads,
 	          bool memoryOnly = false)
-	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes),
-	    memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow) {
+	  : desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize), filename(filename), pHeader(nullptr),
+	    pageCacheBytes(pageCacheSizeBytes), memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow),
+	    concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
@@ -1371,6 +1771,24 @@ public:
 			pHeader->pageSize = logicalPageSize;
 		}
 		pageCache.setSizeLimit(1 + ((pageCacheBytes - 1) / physicalPageSize));
+	}
+
+	void setExtentSize(int size) {
+		// if the specified extent size is smaller than the physical page size, round it off to one physical page size
+		// physical extent size has to be a multiple of physical page size
+		if (size <= physicalPageSize) {
+			pagesPerExtent = 1;
+		} else {
+			pagesPerExtent = 1 + ((size - 1) / physicalPageSize);
+		}
+		physicalExtentSize = pagesPerExtent * physicalPageSize;
+
+		if (pHeader != nullptr) {
+			pHeader->extentSize = size;
+		}
+
+		// TODO: How should this cache be sized - not really a cache. it should hold all extentIDs?
+		extentCache.setSizeLimit(100000);
 	}
 
 	void updateCommittedHeader() {
@@ -1419,7 +1837,7 @@ public:
 
 			// If the checksum fails for the header page, try to recover committed header backup from page 1
 			if (!self->headerPage->verifyChecksum(0)) {
-				TraceEvent(SevWarn, "DWALPagerRecoveringHeader").detail("Filename", self->filename);
+				TraceEvent(SevWarn, "RedwoodRecoveringHeader").detail("Filename", self->filename);
 
 				wait(store(self->headerPage, self->readHeaderPage(self, 1)));
 
@@ -1430,7 +1848,7 @@ public:
 					}
 
 					Error e = checksum_failed();
-					TraceEvent(SevError, "DWALPagerRecoveryFailed").detail("Filename", self->filename).error(e);
+					TraceEvent(SevError, "RedwoodRecoveryFailed").detail("Filename", self->filename).error(e);
 					throw e;
 				}
 				recoveredHeader = true;
@@ -1440,7 +1858,7 @@ public:
 
 			if (self->pHeader->formatVersion != Header::FORMAT_VERSION) {
 				Error e = internal_error(); // TODO:  Something better?
-				TraceEvent(SevError, "DWALPagerRecoveryFailedWrongVersion")
+				TraceEvent(SevError, "RedwoodRecoveryFailedWrongVersion")
 				    .detail("Filename", self->filename)
 				    .detail("Version", self->pHeader->formatVersion)
 				    .detail("ExpectedVersion", Header::FORMAT_VERSION)
@@ -1450,20 +1868,68 @@ public:
 
 			self->setPageSize(self->pHeader->pageSize);
 			if (self->logicalPageSize != self->desiredPageSize) {
-				TraceEvent(SevWarn, "DWALPagerPageSizeNotDesired")
+				TraceEvent(SevWarn, "RedwoodPageSizeNotDesired")
 				    .detail("Filename", self->filename)
 				    .detail("ExistingPageSize", self->logicalPageSize)
 				    .detail("DesiredPageSize", self->desiredPageSize);
 			}
 
+			self->setExtentSize(self->pHeader->extentSize);
+
 			self->freeList.recover(self, self->pHeader->freeList, "FreeListRecovered");
+			self->extentFreeList.recover(self, self->pHeader->extentFreeList, "ExtentFreeListRecovered");
 			self->delayedFreeList.recover(self, self->pHeader->delayedFreeList, "DelayedFreeListRecovered");
+			self->extentUsedList.recover(self, self->pHeader->extentUsedList, "ExtentUsedListRecovered");
 			self->remapQueue.recover(self, self->pHeader->remapQueue, "RemapQueueRecovered");
 
-			Standalone<VectorRef<RemappedPage>> remaps = wait(self->remapQueue.peekAll());
-			for (auto& r : remaps) {
-				self->remappedPages[r.originalPageID][r.version] = r.newPageID;
+			debug_printf("DWALPager(%s) Queue recovery complete.\n", self->filename.c_str());
+
+			// remapQueue entries are recovered using a fast path reading extents at a time
+			// we first issue disk reads for remapQueue extents obtained from extentUsedList
+			Standalone<VectorRef<ExtentUsedListEntry>> extents = wait(self->extentUsedList.peekAll());
+			debug_printf("DWALPager(%s) ExtentUsedList size: %d.\n", self->filename.c_str(), extents.size());
+			if (extents.size() > 1) {
+				QueueID remapQueueID = self->remapQueue.queueID;
+				for (int i = 1; i < extents.size() - 1; i++) {
+					if (extents[i].queueID == remapQueueID) {
+						LogicalPageID extID = extents[i].extentID;
+						debug_printf("DWALPager Extents: ID: %s ", toString(extID).c_str());
+						self->readExtent(extID);
+					}
+				}
 			}
+
+			// And here we consume results of the disk reads and populate the remappedPages map
+			// Using a promiseStream for the peeked results ensures that we use the CPU to populate the map
+			// and the disk concurrently
+			state PromiseStream<Standalone<VectorRef<RemappedPage>>> remapStream;
+			state Future<Void> remapRecoverActor;
+			remapRecoverActor = self->remapQueue.peekAllExt(remapStream);
+			try {
+				loop choose {
+					when(Standalone<VectorRef<RemappedPage>> remaps = waitNext(remapStream.getFuture())) {
+						debug_printf("DWALPager(%s) recovery. remaps size: %d, queueEntries: %d\n",
+						             self->filename.c_str(),
+						             remaps.size(),
+						             self->remapQueue.numEntries);
+						for (auto& r : remaps) {
+							self->remappedPages[r.originalPageID][r.version] = r.newPageID;
+						}
+					}
+					when(wait(remapRecoverActor)) { remapRecoverActor = Never(); }
+				}
+			} catch (Error& e) {
+				if (e.code() != error_code_end_of_stream) {
+					throw;
+				}
+			}
+
+			debug_printf("DWALPager(%s) recovery complete. RemappedPagesMap: %s\n",
+			             self->filename.c_str(),
+			             toString(self->remappedPages).c_str());
+
+			debug_printf("DWALPager(%s) recovery complete. destroy extent cache\n", self->filename.c_str());
+			wait(self->extentCache.clear());
 
 			// If the header was recovered from the backup at Page 1 then write and sync it to Page 0 before continuing.
 			// If this fails, the backup header is still in tact for the next recovery attempt.
@@ -1473,7 +1939,6 @@ public:
 
 				// Wait for all outstanding writes to complete
 				wait(self->operations.signalAndCollapse());
-
 				// Sync header
 				wait(self->pageFile->sync());
 				debug_printf("DWALPager(%s) Header recovery complete.\n", self->filename.c_str());
@@ -1483,7 +1948,17 @@ public:
 			// header)
 			self->updateCommittedHeader();
 			self->addLatestSnapshot();
+
+			// Reset the remapQueue head reader for normal reads
+			self->remapQueue.resetHeadReader();
+
 			self->remapCleanupFuture = remapCleanup(self);
+			TraceEvent(SevInfo, "RedwoodRecovered")
+			    .detail("FileName", self->filename.c_str())
+			    .detail("CommittedVersion", self->pHeader->committedVersion)
+			    .detail("LogicalPageSize", self->logicalPageSize)
+			    .detail("PhysicalPageSize", self->physicalPageSize)
+			    .detail("RemapEntries", self->remapQueue.numEntries);
 		} else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully
 			// committed. A new pager will be created in its place.
@@ -1496,6 +1971,10 @@ public:
 
 			// Now that the header page has been allocated, set page size to desired
 			self->setPageSize(self->desiredPageSize);
+
+			// Now set the extent size, do this always after setting the page size as
+			// extent size is a multiple of page size
+			self->setExtentSize(self->desiredExtentSize);
 
 			// Write new header using desiredPageSize
 			self->pHeader->formatVersion = Header::FORMAT_VERSION;
@@ -1510,15 +1989,22 @@ public:
 			self->pHeader->pageCount = 2;
 
 			// Create queues
-			self->freeList.create(self, self->newLastPageID(), "FreeList");
-			self->delayedFreeList.create(self, self->newLastPageID(), "DelayedFreeList");
-			self->remapQueue.create(self, self->newLastPageID(), "RemapQueue");
+			self->pHeader->queueCount = 0;
+			self->freeList.create(self, self->newLastPageID(), "FreeList", self->newLastQueueID(), false);
+			self->delayedFreeList.create(self, self->newLastPageID(), "DelayedFreeList", self->newLastQueueID(), false);
+			self->extentFreeList.create(self, self->newLastPageID(), "ExtentFreeList", self->newLastQueueID(), false);
+			self->extentUsedList.create(self, self->newLastPageID(), "ExtentUsedList", self->newLastQueueID(), false);
+			LogicalPageID extID = self->newLastExtentID();
+			self->remapQueue.create(self, extID, "RemapQueue", self->newLastQueueID(), true);
+			self->extentUsedList.pushBack({ self->remapQueue.queueID, extID });
 
 			// The first commit() below will flush the queues and update the queue states in the header,
 			// but since the queues will not be used between now and then their states will not change.
 			// In order to populate lastCommittedHeader, update the header now with the queue states.
 			self->pHeader->freeList = self->freeList.getState();
 			self->pHeader->delayedFreeList = self->delayedFreeList.getState();
+			self->pHeader->extentFreeList = self->extentFreeList.getState();
+			self->pHeader->extentUsedList = self->extentUsedList.getState();
 			self->pHeader->remapQueue = self->remapQueue.getState();
 
 			// Set remaining header bytes to \xff
@@ -1528,6 +2014,9 @@ public:
 
 			// Since there is no previously committed header use the initial header for the initial commit.
 			self->updateCommittedHeader();
+
+			// TODO: Double check this - need to do this as extentUsedList was pushed into
+			self->addLatestSnapshot();
 
 			self->remapCleanupFuture = Void();
 			wait(self->commit());
@@ -1541,6 +2030,46 @@ public:
 		return Void();
 	}
 
+	ACTOR static void extentCacheClear_impl(DWALPager* self) { wait(self->extentCache.clear()); }
+
+	void extentCacheClear() override { extentCacheClear_impl(this); }
+
+	// get a list of used extents for a given extent based queue (for testing purpose)
+	ACTOR static Future<Standalone<VectorRef<LogicalPageID>>> getUsedExtents_impl(DWALPager* self, QueueID queueID) {
+		state Standalone<VectorRef<LogicalPageID>> extentIDs;
+
+		extentIDs.reserve(extentIDs.arena(),
+		                  self->extentUsedList.numEntries); // TODO this is overreserving. is that a problem?
+
+		Standalone<VectorRef<ExtentUsedListEntry>> extents = wait(self->extentUsedList.peekAll());
+		debug_printf("DWALPager(%s) ExtentUsedList size: %d.\n", self->filename.c_str(), extents.size());
+		if (extents.size() > 1) {
+			for (int i = 1; i < extents.size() - 1; i++) {
+				if (extents[i].queueID == queueID) {
+					LogicalPageID extID = extents[i].extentID;
+					debug_printf("DWALPager Extents: ID: %s ", toString(extID).c_str());
+					extentIDs.push_back(extentIDs.arena(), extID);
+				}
+			}
+		}
+		return extentIDs;
+	}
+
+	Future<Standalone<VectorRef<LogicalPageID>>> getUsedExtents(QueueID queueID) override {
+		return getUsedExtents_impl(this, queueID);
+	}
+
+	void pushExtentUsedList(QueueID queueID, LogicalPageID extID) override {
+		extentUsedList.pushBack({ queueID, extID });
+	}
+
+	// Allocate a new queueID
+	QueueID newLastQueueID() override {
+		QueueID id = pHeader->queueCount;
+		++pHeader->queueCount;
+		return id;
+	}
+
 	Reference<ArenaPage> newPageBuffer() override {
 		return Reference<ArenaPage>(new ArenaPage(logicalPageSize, physicalPageSize));
 	}
@@ -1550,6 +2079,9 @@ public:
 	// TODO: This is abstraction breaking.  This should probably be stored as a member, calculated once on construction
 	// by creating an ArenaPage and getting its usable size.
 	int getUsablePageSize() const override { return logicalPageSize - sizeof(ArenaPage::Checksum); }
+	int getPhysicalPageSize() const override { return physicalPageSize; }
+	int getLogicalPageSize() const override { return logicalPageSize; }
+	int getPagesPerExtent() const override { return pagesPerExtent; }
 
 	// Get a new, previously available page ID.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to, until it is returned to the pager via freePage()
@@ -1582,7 +2114,7 @@ public:
 		return id;
 	};
 
-	// Grow the pager file by pone page and return it
+	// Grow the pager file by one page and return it
 	LogicalPageID newLastPageID() {
 		LogicalPageID id = pHeader->pageCount;
 		++pHeader->pageCount;
@@ -1590,6 +2122,41 @@ public:
 	}
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
+
+	// Get a new, previously available extent and it's first page ID.  The page will be considered in-use after the next
+	// commit regardless of whether or not it was written to, until it is returned to the pager via freePage()
+	ACTOR static Future<LogicalPageID> newExtentPageID_impl(DWALPager* self, QueueID queueID) {
+		// First try the free list
+		Optional<LogicalPageID> freeExtentID = wait(self->extentFreeList.pop());
+		if (freeExtentID.present()) {
+			debug_printf("DWALPager(%s) remapQueue newExtentPageID() returning %s from free list\n",
+			             self->filename.c_str(),
+			             toString(freeExtentID.get()).c_str());
+			self->extentUsedList.pushBack({ queueID, freeExtentID.get() });
+			self->extentUsedList.getState();
+			return freeExtentID.get();
+		}
+
+		// Lastly, add a new extent to the pager
+		LogicalPageID id = self->newLastExtentID();
+		debug_printf("DWALPager(%s) remapQueue newExtentPageID() returning %s at end of file\n",
+		             self->filename.c_str(),
+		             toString(id).c_str());
+		self->extentUsedList.pushBack({ queueID, id });
+		self->extentUsedList.getState();
+		return id;
+	}
+
+	// Grow the pager file by one extent and return it
+	// We reserve all the pageIDs within the extent during this step
+	// That translates to extentID being same as the return first pageID
+	LogicalPageID newLastExtentID() {
+		LogicalPageID id = pHeader->pageCount;
+		pHeader->pageCount += pagesPerExtent;
+		return id;
+	}
+
+	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
 	Future<Void> writePhysicalPage(PhysicalPageID pageID, Reference<ArenaPage> page, bool header = false) {
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
@@ -1601,6 +2168,11 @@ public:
 		++g_redwoodMetrics.pagerDiskWrite;
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		page->updateChecksum(pageID);
+		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
+		             filename.c_str(),
+		             toString(pageID).c_str(),
+		             page->calculateChecksum(pageID),
+		             page->getChecksum());
 
 		if (memoryOnly) {
 			return Void();
@@ -1610,11 +2182,12 @@ public:
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
 		Future<Void> f =
 		    holdWhile(page, map(pageFile->write(page->begin(), blockSize, (int64_t)pageID * blockSize), [=](Void) {
-			              debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
+			              debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
 			                           filename.c_str(),
 			                           (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
 			                           toString(pageID).c_str(),
-			                           page->begin());
+			                           page->begin(),
+			                           (pageID * blockSize));
 			              return Void();
 		              }));
 		operations.add(f);
@@ -1759,6 +2332,18 @@ public:
 		freeUnmappedPage(pageID, v);
 	};
 
+	ACTOR static void freeExtent_impl(DWALPager* self, LogicalPageID pageID) {
+		self->extentFreeList.pushBack(pageID);
+		Optional<ExtentUsedListEntry> freeExtent = wait(self->extentUsedList.pop());
+		// Optional<LogicalPageID> freeExtentPageID = wait(self->extentUsedList.pop());
+		if (freeExtent.present()) {
+			debug_printf("DWALPager(%s) freeExtentPageID() popped %s from used list\n",
+			             self->filename.c_str(),
+			             toString(freeExtent.get().extentID).c_str());
+		}
+	}
+	void freeExtent(LogicalPageID pageID) override { freeExtent_impl(this, pageID); }
+
 	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
@@ -1795,7 +2380,7 @@ public:
 				debug_printf(
 				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageID).c_str());
 				Error e = checksum_failed();
-				TraceEvent(SevError, "DWALPagerChecksumFailed")
+				TraceEvent(SevError, "RedwoodChecksumFailed")
 				    .detail("Filename", self->filename.c_str())
 				    .detail("PageID", pageID)
 				    .detail("PageSize", self->physicalPageSize)
@@ -1877,6 +2462,10 @@ public:
 				             v,
 				             toString(j->second).c_str());
 				pageID = j->second;
+				if (pageID == invalidLogicalPageID)
+					debug_printf(
+					    "DWALPager(%s) remappedPagesMap: %s\n", filename.c_str(), toString(remappedPages).c_str());
+
 				ASSERT(pageID != invalidLogicalPageID);
 			}
 		} else {
@@ -1898,6 +2487,123 @@ public:
 		return readPage(physicalID, cacheable, noHit, fromCache);
 	}
 
+	void releaseExtentReadLock() override { concurrentExtentReads->release(); }
+
+	// Read the physical extent at given pageID
+	// NOTE that we use the same interface (<ArenaPage>) for the extent as the page
+	ACTOR static Future<Reference<ArenaPage>> readPhysicalExtent(DWALPager* self,
+	                                                             PhysicalPageID pageID,
+	                                                             int readSize = 0) {
+		// First take the concurrentExtentReads lock to avoid issuing too many reads concurrently
+		wait(self->concurrentExtentReads->take());
+
+		ASSERT(!self->memoryOnly);
+		++g_redwoodMetrics.pagerDiskRead;
+
+		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
+			wait(delay(0, TaskPriority::DiskRead));
+		}
+
+		// readSize may not be equal to the physical extent size (for the first and last extents)
+		if (!readSize)
+			readSize = self->physicalExtentSize;
+
+		state Reference<ArenaPage> extent = Reference<ArenaPage>(new ArenaPage(self->logicalPageSize, readSize));
+
+		// physicalReadSize is the size of disk read we intend to issue
+		auto physicalReadSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_READ_SIZE;
+		auto parallelReads = readSize / physicalReadSize;
+		auto lastReadSize = readSize % physicalReadSize;
+
+		debug_printf(
+		    "DWALPager(%s) op=readPhysicalExtentStart %s readSize %d offset %d physicalReadSize %d parallelReads %d\n",
+		    self->filename.c_str(),
+		    toString(pageID).c_str(),
+		    readSize,
+		    (int64_t)pageID * (self->physicalPageSize),
+		    physicalReadSize,
+		    parallelReads);
+
+		// we split the extent read into a number of parallel disk reads based on the determined physical
+		// disk read size. All those reads are issued in parallel and their futures are stored into the following
+		// reads vector
+		std::vector<Future<int>> reads;
+		int i;
+		int64_t startOffset = (int64_t)pageID * (self->physicalPageSize);
+		int64_t currentOffset;
+		for (i = 0; i < parallelReads; i++) {
+			currentOffset = i * physicalReadSize;
+			debug_printf("DWALPager(%s) current offset %d\n", self->filename.c_str(), currentOffset);
+			reads.push_back(
+			    self->pageFile->read(extent->mutate() + currentOffset, physicalReadSize, startOffset + currentOffset));
+		}
+
+		// Handle the last read separately as it may be smaller than physicalReadSize
+		if (lastReadSize) {
+			currentOffset = i * physicalReadSize;
+			debug_printf("DWALPager(%s) iter %d current offset %d lastReadSize %d\n",
+			             self->filename.c_str(),
+			             i,
+			             currentOffset,
+			             lastReadSize);
+			reads.push_back(
+			    self->pageFile->read(extent->mutate() + currentOffset, lastReadSize, startOffset + currentOffset));
+		}
+
+		// wait for all the parallel read futures for the given extent
+		wait(waitForAll(reads));
+
+		debug_printf("DWALPager(%s) op=readPhysicalExtentComplete %s ptr=%p bytes=%d file offset=%d\n",
+		             self->filename.c_str(),
+		             toString(pageID).c_str(),
+		             extent->begin(),
+		             readSize,
+		             (pageID * self->physicalPageSize));
+
+		return extent;
+	}
+
+	Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) override {
+		debug_printf("DWALPager(%s) op=readExtent %s\n", filename.c_str(), toString(pageID).c_str());
+		PageCacheEntry* pCacheEntry = extentCache.getIfExists(pageID);
+		if (pCacheEntry != nullptr) {
+			debug_printf("DWALPager(%s) Cache Entry exists for %s\n", filename.c_str(), toString(pageID).c_str());
+			return pCacheEntry->readFuture;
+		}
+
+		LogicalPageID headPageID = pHeader->remapQueue.headPageID;
+		LogicalPageID tailPageID = pHeader->remapQueue.tailPageID;
+		int readSize = physicalExtentSize;
+		bool headExt = false;
+		bool tailExt = false;
+		debug_printf("DWALPager(%s) #extentPages: %d, headPageID: %s, tailPageID: %s\n",
+		             filename.c_str(),
+		             pagesPerExtent,
+		             toString(headPageID).c_str(),
+		             toString(tailPageID).c_str());
+		if (headPageID >= pageID && ((headPageID - pageID) < pagesPerExtent))
+			headExt = true;
+		if ((tailPageID - pageID) < pagesPerExtent)
+			tailExt = true;
+		if (headExt && tailExt) {
+			readSize = (tailPageID - headPageID + 1) * physicalPageSize;
+		} else if (headExt)
+			readSize = (pagesPerExtent - (headPageID - pageID)) * physicalPageSize;
+		else if (tailExt)
+			readSize = (tailPageID - pageID + 1) * physicalPageSize;
+
+		PageCacheEntry& cacheEntry = extentCache.get(pageID);
+		if (!cacheEntry.initialized()) {
+			cacheEntry.writeFuture = Void();
+			cacheEntry.readFuture =
+			    forwardError(readPhysicalExtent(this, (PhysicalPageID)pageID, readSize), errorPromise);
+			debug_printf("DWALPager(%s) Set the cacheEntry readFuture for page: %s\n",
+			             filename.c_str(),
+			             toString(pageID).c_str());
+		}
+		return cacheEntry.readFuture;
+	}
+
 	// Get snapshot as of the most recent committed version of the pager
 	Reference<IPagerSnapshot> getReadSnapshot(Version v) override;
 	void addLatestSnapshot();
@@ -1917,6 +2623,10 @@ public:
 	// Calculate the *effective* oldest version, which can be older than the one set in the last commit since we
 	// are allowing active snapshots to temporarily delay page reuse.
 	Version effectiveOldestVersion() {
+		if (snapshots.empty()) {
+			debug_printf("DWALPager(%s) snapshots list empty\n", filename.c_str());
+			return pLastCommittedHeader->oldestVersion;
+		}
 		return std::min(pLastCommittedHeader->oldestVersion, snapshots.front().version);
 	}
 
@@ -2063,6 +2773,10 @@ public:
 
 		// Cutoff is the version we can pop to
 		state RemappedPage cutoff(oldestRetainedVersion - self->remapCleanupWindow);
+		debug_printf("DWALPager(%s) remapCleanup cutoff %s oldestRetailedVersion=%" PRId64 " \n",
+		             self->filename.c_str(),
+		             ::toString(cutoff).c_str(),
+		             oldestRetainedVersion);
 
 		// Minimum version we must pop to before obeying stop command.
 		state Version minStopVersion =
@@ -2107,8 +2821,10 @@ public:
 	ACTOR static Future<Void> flushQueues(DWALPager* self) {
 		ASSERT(self->remapCleanupFuture.isReady());
 
-		// Flush remap queue separately, it's not involved in free page management
+		// Flush remap queue and related queues separately, they are not involved in free page management
 		wait(self->remapQueue.flush());
+		wait(self->extentFreeList.flush());
+		wait(self->extentUsedList.flush());
 
 		// Flush the free list and delayed free list queues together as they are used by freePage() and newPageID()
 		// Since each queue's preFlush can create work for the other, we must see preflush return false for both
@@ -2152,6 +2868,8 @@ public:
 		wait(flushQueues(self));
 
 		self->pHeader->remapQueue = self->remapQueue.getState();
+		self->pHeader->extentFreeList = self->extentFreeList.getState();
+		self->pHeader->extentUsedList = self->extentUsedList.getState();
 		self->pHeader->freeList = self->freeList.getState();
 		self->pHeader->delayedFreeList = self->delayedFreeList.getState();
 
@@ -2233,6 +2951,10 @@ public:
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->pageCache.clear());
 
+		debug_printf("DWALPager(%s) shutdown remappedPagesMap: %s\n",
+		             self->filename.c_str(),
+		             toString(self->remappedPages).c_str());
+
 		// Unreference the file and clear
 		self->pageFile.clear();
 		if (dispose) {
@@ -2275,6 +2997,10 @@ public:
 		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
 	}
 
+	int64_t getPageCacheCount() override { return (int64_t)pageCache.count(); }
+	int64_t getPageCount() override { return pHeader->pageCount; }
+	int64_t getExtentCacheCount() override { return (int64_t)extentCache.count(); }
+
 	ACTOR static Future<Void> getUserPageCount_cleanup(DWALPager* self) {
 		// Wait for the remap eraser to finish all of its work (not triggering stop)
 		wait(self->remapCleanupFuture);
@@ -2282,14 +3008,22 @@ public:
 		// Flush queues so there are no pending freelist operations
 		wait(flushQueues(self));
 
+		debug_printf("DWALPager getUserPageCount_cleanup\n");
+		self->freeList.getState();
+		self->delayedFreeList.getState();
+		self->extentFreeList.getState();
+		self->extentUsedList.getState();
+		self->remapQueue.getState();
 		return Void();
 	}
 
 	// Get the number of pages in use by the pager's user
 	Future<int64_t> getUserPageCount() override {
 		return map(getUserPageCount_cleanup(this), [=](Void) {
-			int64_t userPages = pHeader->pageCount - 2 - freeList.numPages - freeList.numEntries -
-			                    delayedFreeList.numPages - delayedFreeList.numEntries - remapQueue.numPages;
+			int64_t userPages =
+			    pHeader->pageCount - 2 - freeList.numPages - freeList.numEntries - delayedFreeList.numPages -
+			    delayedFreeList.numEntries - ((((remapQueue.numPages - 1) / pagesPerExtent) + 1) * pagesPerExtent) -
+			    extentFreeList.numPages - (pagesPerExtent * extentFreeList.numEntries) - extentUsedList.numPages;
 
 			debug_printf("DWALPager(%s) userPages=%" PRId64 " totalPageCount=%" PRId64 " freeQueuePages=%" PRId64
 			             " freeQueueCount=%" PRId64 " delayedFreeQueuePages=%" PRId64 " delayedFreeQueueCount=%" PRId64
@@ -2320,11 +3054,15 @@ private:
 #pragma pack(push, 1)
 	// Header is the format of page 0 of the database
 	struct Header {
-		static constexpr int FORMAT_VERSION = 2;
+		static constexpr int FORMAT_VERSION = 3;
 		uint16_t formatVersion;
+		uint32_t queueCount;
 		uint32_t pageSize;
 		int64_t pageCount;
+		uint32_t extentSize;
 		FIFOQueue<LogicalPageID>::QueueState freeList;
+		FIFOQueue<LogicalPageID>::QueueState extentFreeList; // free list for extents
+		FIFOQueue<ExtentUsedListEntry>::QueueState extentUsedList; // in-use list for extents
 		FIFOQueue<DelayedFreePage>::QueueState delayedFreeList;
 		FIFOQueue<RemappedPage>::QueueState remapQueue;
 		Version committedVersion;
@@ -2373,6 +3111,10 @@ private:
 	int physicalPageSize;
 	int logicalPageSize; // In simulation testing it can be useful to use a small logical page size
 
+	// Extents are multi-page blocks used by the FIFO queues
+	int physicalExtentSize;
+	int pagesPerExtent;
+
 	int64_t pageCacheBytes;
 
 	// The header will be written to / read from disk as a smallestPhysicalBlock sized chunk.
@@ -2380,6 +3122,7 @@ private:
 	Header* pHeader;
 
 	int desiredPageSize;
+	int desiredExtentSize;
 
 	Reference<ArenaPage> lastCommittedHeaderPage;
 	Header* pLastCommittedHeader;
@@ -2389,6 +3132,9 @@ private:
 
 	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 	PageCacheT pageCache;
+
+	typedef ObjectCache<LogicalPageID, PageCacheEntry> ExtentCacheT;
+	ExtentCacheT extentCache;
 
 	Promise<Void> closedPromise;
 	Promise<Void> errorPromise;
@@ -2407,7 +3153,10 @@ private:
 	DelayedFreePageQueueT delayedFreeList;
 
 	RemapQueueT remapQueue;
+	LogicalPageQueueT extentFreeList;
+	ExtentUsedListQueueT extentUsedList;
 	Version remapCleanupWindow;
+	Reference<FlowLock> concurrentExtentReads;
 	std::unordered_set<PhysicalPageID> remapDestinationsSimOnly;
 
 	struct SnapshotEntry {
@@ -3557,7 +4306,8 @@ public:
 			self->m_pager->setCommitVersion(latest);
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
-			self->m_lazyClearQueue.create(self->m_pager, newQueuePage, "LazyClearQueue");
+			self->m_lazyClearQueue.create(
+			    self->m_pager, newQueuePage, "LazyClearQueue", self->m_pager->newLastQueueID(), false);
 			self->m_header.lazyDeleteQueue = self->m_lazyClearQueue.getState();
 			self->m_pager->setMetaKey(self->m_header.asKeyRef());
 			wait(self->m_pager->commit());
@@ -3657,6 +4407,7 @@ public:
 		// From the pager's perspective the only pages that should be in use are the btree root and
 		// the previously mentioned lazy delete queue page.
 		int64_t userPageCount = wait(self->m_pager->getUserPageCount());
+		debug_printf("clearAllAndCheckSanity: userPageCount: %d\n", userPageCount);
 		ASSERT(userPageCount == 2);
 
 		return Void();
@@ -6200,6 +6951,7 @@ public:
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
+		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
 		int64_t pageCacheBytes =
 		    g_network->isSimulated()
 		        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
@@ -6208,7 +6960,12 @@ public:
 		Version remapCleanupWindow =
 		    BUGGIFY ? deterministicRandom()->randomInt64(0, 1000) : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW;
 
-		IPager2* pager = new DWALPager(pageSize, filePrefix, pageCacheBytes, remapCleanupWindow);
+		IPager2* pager = new DWALPager(pageSize,
+		                               extentSize,
+		                               filePrefix,
+		                               pageCacheBytes,
+		                               remapCleanupWindow,
+		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 		m_tree = new VersionedBTree(pager, filePrefix);
 		m_init = catchError(init_impl(this));
 	}
@@ -7974,7 +8731,10 @@ TEST_CASE("/redwood/correctness/btree") {
 
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
-
+	state int extentSize =
+	    params.getInt("extentSize")
+	        .orDefault(deterministicRandom()->coinflip() ? SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE
+	                                                     : deterministicRandom()->randomInt(4096, 32768));
 	state int64_t targetPageOps = params.getInt("targetPageOps").orDefault(shortTest ? 50000 : 1000000);
 	state bool pagerMemoryOnly =
 	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
@@ -8003,6 +8763,8 @@ TEST_CASE("/redwood/correctness/btree") {
 	    params.getInt("remapCleanupWindow")
 	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, versionIncrement * 50));
 	state int maxVerificationMapEntries = params.getInt("maxVerificationMapEntries").orDefault(300e3);
+	state int concurrentExtentReads =
+	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
 	printf("\n");
 	printf("targetPageOps: %" PRId64 "\n", targetPageOps);
@@ -8010,6 +8772,7 @@ TEST_CASE("/redwood/correctness/btree") {
 	printf("serialTest: %d\n", serialTest);
 	printf("shortTest: %d\n", shortTest);
 	printf("pageSize: %d\n", pageSize);
+	printf("extentSize: %d\n", extentSize);
 	printf("maxKeySize: %d\n", maxKeySize);
 	printf("maxValueSize: %d\n", maxValueSize);
 	printf("maxCommitSize: %d\n", maxCommitSize);
@@ -8028,7 +8791,8 @@ TEST_CASE("/redwood/correctness/btree") {
 	deleteFile(fileName);
 
 	printf("Initializing...\n");
-	pager = new DWALPager(pageSize, fileName, cacheSizeBytes, remapCleanupWindow, pagerMemoryOnly);
+	pager = new DWALPager(
+	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
 
@@ -8234,7 +8998,8 @@ TEST_CASE("/redwood/correctness/btree") {
 				wait(closedFuture);
 
 				printf("Reopening btree from disk.\n");
-				IPager2* pager = new DWALPager(pageSize, fileName, cacheSizeBytes, remapCleanupWindow);
+				IPager2* pager = new DWALPager(
+				    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
 				btree = new VersionedBTree(pager, fileName);
 				wait(btree->init());
 
@@ -8274,7 +9039,8 @@ TEST_CASE("/redwood/correctness/btree") {
 	state Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
-	btree = new VersionedBTree(new DWALPager(pageSize, fileName, cacheSizeBytes, 0), fileName);
+	btree = new VersionedBTree(new DWALPager(pageSize, extentSize, fileName, cacheSizeBytes, 0, concurrentExtentReads),
+	                           fileName);
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
@@ -8346,7 +9112,9 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 	deleteFile(pagerFile);
 
 	int pageSize = 4096;
-	state IPager2* pager = new DWALPager(pageSize, pagerFile, 0, 0);
+	int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
+	state IPager2* pager =
+	    new DWALPager(pageSize, extentSize, pagerFile, 0, 0, SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
 	wait(success(pager->init()));
 	state LogicalPageID id = wait(pager->newPageID());
@@ -8367,6 +9135,172 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 	return Void();
 }
 
+template <int size>
+struct ExtentQueueEntry {
+	uint8_t entry[size];
+
+	bool operator<(const ExtentQueueEntry& rhs) const { return entry < rhs.entry; }
+
+	std::string toString() const {
+		return format("{%s}", StringRef((const uint8_t*)entry, size).toHexString().c_str());
+	}
+};
+
+typedef FIFOQueue<ExtentQueueEntry<16>> ExtentQueueT;
+TEST_CASE(":/redwood/performance/extentQueue") {
+	state ExtentQueueT m_extentQueue;
+	state ExtentQueueT::QueueState extentQueueState;
+
+	state DWALPager* pager;
+	// If a test file is passed in by environment then don't write new data to it.
+	state bool reload = getenv("TESTFILE") == nullptr;
+	state std::string fileName = reload ? "unittest.redwood" : getenv("TESTFILE");
+
+	if (reload) {
+		printf("Deleting old test data\n");
+		deleteFile(fileName);
+	}
+
+	printf("Filename: %s\n", fileName.c_str());
+	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
+	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
+	state int64_t cacheSizeBytes = params.getInt("cacheSizeBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	// Choose a large remapCleanupWindow to avoid popping the queue
+	state Version remapCleanupWindow = params.getInt("remapCleanupWindow").orDefault(1e16);
+	state int numEntries = params.getInt("numEntries").orDefault(10e6);
+	state int concurrentExtentReads =
+	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
+	state int targetCommitSize = deterministicRandom()->randomInt(2e6, 30e6);
+	state int currentCommitSize = 0;
+	state int64_t cumulativeCommitSize = 0;
+
+	printf("pageSize: %d\n", pageSize);
+	printf("extentSize: %d\n", extentSize);
+	printf("cacheSizeBytes: %" PRId64 "\n", cacheSizeBytes);
+	printf("remapCleanupWindow: %" PRId64 "\n", remapCleanupWindow);
+
+	// Do random pushes into the queue and commit periodically
+	if (reload) {
+		pager =
+		    new DWALPager(pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
+
+		wait(success(pager->init()));
+
+		LogicalPageID extID = pager->newLastExtentID();
+		m_extentQueue.create(pager, extID, "ExtentQueue", pager->newLastQueueID(), true);
+		pager->pushExtentUsedList(m_extentQueue.queueID, extID);
+
+		state int v;
+		state ExtentQueueEntry<16> e;
+		generateRandomData(e.entry, 16);
+		state int sinceYield = 0;
+		for (v = 1; v <= numEntries; ++v) {
+			// Sometimes do a commit
+			if (currentCommitSize >= targetCommitSize) {
+				printf("currentCommitSize: %d, cumulativeCommitSize: %d, pageCacheCount: %d\n",
+				       currentCommitSize,
+				       cumulativeCommitSize,
+				       pager->getPageCacheCount());
+				wait(m_extentQueue.flush());
+				wait(pager->commit());
+				cumulativeCommitSize += currentCommitSize;
+				targetCommitSize = deterministicRandom()->randomInt(2e6, 30e6);
+				currentCommitSize = 0;
+			}
+
+			// push a random entry into the queue
+			m_extentQueue.pushBack(e);
+			currentCommitSize += 16;
+
+			// yield periodically to avoid overflowing the stack
+			if (++sinceYield >= 100) {
+				sinceYield = 0;
+				wait(yield());
+			}
+		}
+		cumulativeCommitSize += currentCommitSize;
+		printf(
+		    "Final cumulativeCommitSize: %d, pageCacheCount: %d\n", cumulativeCommitSize, pager->getPageCacheCount());
+		wait(m_extentQueue.flush());
+		extentQueueState = m_extentQueue.getState();
+		printf("Commit ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
+		pager->setMetaKey(extentQueueState.asKeyRef());
+		wait(pager->commit());
+
+		Future<Void> onClosed = pager->onClosed();
+		pager->close();
+		wait(onClosed);
+	}
+
+	printf("Reopening pager file from disk.\n");
+	pager = new DWALPager(pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
+	wait(success(pager->init()));
+
+	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
+
+	// reopen the pager from disk
+	state Key meta = pager->getMetaKey();
+	memcpy(&extentQueueState, meta.begin(), meta.size());
+	extentQueueState.fromKeyRef(meta);
+	printf("Recovered ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
+	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered");
+
+	state double intervalStart = timer();
+	state double start = intervalStart;
+	state Standalone<VectorRef<LogicalPageID>> extentIDs = wait(pager->getUsedExtents(m_extentQueue.queueID));
+
+	// fire read requests for all used extents
+	state int i;
+	for (i = 1; i < extentIDs.size() - 1; i++) {
+		LogicalPageID extID = extentIDs[i];
+		pager->readExtent(extID);
+	}
+
+	state PromiseStream<Standalone<VectorRef<ExtentQueueEntry<16>>>> resultStream;
+	state Future<Void> queueRecoverActor;
+	queueRecoverActor = m_extentQueue.peekAllExt(resultStream);
+	state int entriesRead = 0;
+	try {
+		loop choose {
+			when(Standalone<VectorRef<ExtentQueueEntry<16>>> entries = waitNext(resultStream.getFuture())) {
+				entriesRead += entries.size();
+				if (entriesRead == m_extentQueue.numEntries)
+					break;
+			}
+			when(wait(queueRecoverActor)) { queueRecoverActor = Never(); }
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_end_of_stream) {
+			throw;
+		}
+	}
+
+	state double elapsed = timer() - start;
+	printf("Completed fastpath extent queue recovery: elapsed=%f entriesRead=%d recoveryRate=%f MB/s\n",
+	       elapsed,
+	       entriesRead,
+	       cumulativeCommitSize / elapsed / 1e6);
+
+	printf("pageCacheCount: %d extentCacheCount: %d\n", pager->getPageCacheCount(), pager->getExtentCacheCount());
+
+	pager->extentCacheClear();
+	m_extentQueue.resetHeadReader();
+
+	printf("Starting ExtentQueue SlowPath Recovery from Disk.\n");
+	intervalStart = timer();
+	start = intervalStart;
+	// peekAll the queue using regular slow path
+	Standalone<VectorRef<ExtentQueueEntry<16>>> entries = wait(m_extentQueue.peekAll());
+
+	elapsed = timer() - start;
+	printf("Completed slowpath extent queue recovery: elapsed=%f entriesRead=%d recoveryRate=%f MB/s\n",
+	       elapsed,
+	       entries.size(),
+	       cumulativeCommitSize / elapsed / 1e6);
+
+	return Void();
+}
+
 TEST_CASE(":/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
@@ -8375,6 +9309,7 @@ TEST_CASE(":/redwood/performance/set") {
 
 	state std::string fileName = params.get("fileName").orDefault("unittest.redwood");
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
+	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
 	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
 	state int nodeCount = params.getInt("nodeCount").orDefault(1e9);
 	state int maxRecordsPerCommit = params.getInt("maxRecordsPerCommit").orDefault(20000);
@@ -8390,6 +9325,8 @@ TEST_CASE(":/redwood/performance/set") {
 	state char lastKeyChar = params.get("lastKeyChar").orDefault("m")[0];
 	state Version remapCleanupWindow =
 	    params.getInt("remapCleanupWindow").orDefault(SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
+	state int concurrentExtentReads =
+	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 	state bool openExisting = params.getInt("openExisting").orDefault(0);
 	state bool insertRecords = !openExisting || params.getInt("insertRecords").orDefault(0);
 	state int concurrentSeeks = params.getInt("concurrentSeeks").orDefault(64);
@@ -8398,6 +9335,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state int scans = params.getInt("scans").orDefault(20000);
 
 	printf("pageSize: %d\n", pageSize);
+	printf("extentSize: %d\n", extentSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
 	printf("trailingIntegerIndexRange: %d\n", nodeCount);
 	printf("maxChangesPerCommit: %d\n", maxRecordsPerCommit);
@@ -8424,7 +9362,8 @@ TEST_CASE(":/redwood/performance/set") {
 		deleteFile(fileName);
 	}
 
-	DWALPager* pager = new DWALPager(pageSize, fileName, pageCacheBytes, remapCleanupWindow);
+	DWALPager* pager =
+	    new DWALPager(pageSize, extentSize, fileName, pageCacheBytes, remapCleanupWindow, concurrentExtentReads);
 	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
