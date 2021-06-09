@@ -1933,8 +1933,7 @@ public:
 			// Reset the remapQueue head reader for normal reads
 			self->remapQueue.resetHeadReader();
 
-			self->remapCleanupFuture = Void();
-			//self->remapCleanupFuture = remapCleanup(self);
+			self->remapCleanupFuture = remapCleanup(self);
 			TraceEvent(SevInfo, "RedwoodRecovered")
 			    .detail("FileName", self->filename.c_str())
 			    .detail("CommittedVersion", self->pHeader->committedVersion)
