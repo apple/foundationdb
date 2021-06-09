@@ -2346,7 +2346,7 @@ private:
 #pragma pack(push, 1)
 	// Header is the format of page 0 of the database
 	struct Header {
-		static constexpr int FORMAT_VERSION = 2;
+		static constexpr int FORMAT_VERSION = 3;
 		uint16_t formatVersion;
 		uint32_t pageSize;
 		int64_t pageCount;
@@ -3283,7 +3283,7 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 10;
+		static constexpr int FORMAT_VERSION = 11;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
