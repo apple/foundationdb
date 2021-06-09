@@ -1483,7 +1483,16 @@ public:
 			// header)
 			self->updateCommittedHeader();
 			self->addLatestSnapshot();
-			self->remapCleanupFuture = remapCleanup(self);
+
+			// Delay the remap clean by some time immediately post recovery to avoid overwhelming the system
+			double startDelay = SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_START_DELAY;
+			self->remapCleanupDelay = map(delay(startDelay), [=](Void) {
+																 //TraceEvent(SevInfo, "RedwoodRemapCleanupStart").detail("Delay", startDelay).detail("Filename", self->filename);
+																 return Void();
+															 });
+			//self->remapCleanupFuture = remapCleanup(self);
+			TraceEvent(SevInfo, "RedwoodRemapCleanupStart").detail("Delay", startDelay).detail("Filename", self->filename);
+			self->remapCleanupFuture = self->remapCleanupDelay.isReady() ? remapCleanup(self) : Void();
 		} else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully
 			// committed. A new pager will be created in its place.
@@ -2065,9 +2074,15 @@ public:
 		state RemappedPage cutoff(oldestRetainedVersion - self->remapCleanupWindow);
 
 		// Minimum version we must pop to before obeying stop command.
+		// This is based a minimum percebtage of the gao we want to close. i.e.
+		// from the beginning of the queue to the cutoff
+		state Optional<RemappedPage> rp = wait(self->remapQueue.peek());
 		state Version minStopVersion =
-		    cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10)
-		                              : (self->remapCleanupWindow * SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG));
+			( cutoff.version - (rp.present() ? rp.get().version : 0)) *
+			(BUGGIFY ? deterministicRandom()->random01()
+			 : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_MIN_PROGRESS);
+			//cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10)
+			//				         : (self->remapCleanupWindow * SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG));
 		self->remapDestinationsSimOnly.clear();
 
 		state int sinceYield = 0;
@@ -2396,6 +2411,7 @@ private:
 	SignalableActorCollection operations;
 	Future<Void> recoverFuture;
 	Future<Void> remapCleanupFuture;
+	Future<Void> remapCleanupDelay;
 	bool remapCleanupStop;
 
 	Reference<IAsyncFile> pageFile;
