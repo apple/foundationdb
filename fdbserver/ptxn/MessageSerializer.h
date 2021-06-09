@@ -216,7 +216,7 @@ public:
 	const Version& getVersion() const;
 
 	// Broadcasts the span context to all storage teams. After this function is called, for any storage team, the first
-	// write will always prepose this SpanContextMessage before the mutation.
+	// write will always prepend this SpanContextMessage before the mutation.
 	void broadcastSpanContext(const SpanContextMessage&);
 
 	// Writes a mutation to a given stoarge team.
@@ -296,6 +296,7 @@ public:
 		pointer operator->() const;
 
 		// Prefix operator++
+		// Increasing the iterator beyond end() will cause undefined behavior.
 		iterator& operator++();
 
 		// Postfix operator++, this is more expensive and should be avoided.

@@ -306,9 +306,9 @@ SubsequencedMessageDeserializer::iterator& SubsequencedMessageDeserializer::iter
 		}
 	}
 
-	// Current version section is not completely consumed
+	// Consume this section
 	++itemIndex;
-
+	// NOTE This peek assumes the serializer never pad between Subsequence and the following message.
 	const MutationRef::Type type = static_cast<MutationRef::Type>(
 	    *(deserializer.peekBytes(sizeof(Subsequence) + sizeof(MutationRef::Type)) + sizeof(Subsequence)));
 

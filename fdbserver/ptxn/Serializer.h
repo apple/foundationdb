@@ -125,8 +125,9 @@ public:
 //
 //   | Main Header | Section Header | Item | Item | ... | Section Header | Item | ... |
 //
-// Main Header and Section Header must have a fixed size. Each Item is an object that being serialized into a StringRef,
+// Main Header and Section Header *must* have a fixed size. Each Item is an object that being serialized into a StringRef,
 // and the user must provide informations (e.g. object type, length, etc.) to deserialize them.
+// Main Header and Section Header *should* inherit from MultipleItemHeaderBase
 // It is obvious that TwoLevelHeaderedItemSerializer can be implemented using HeaderedItemsSerializer. The reason not
 // use this strategy is that one additional memory copy will be included when a new section is opened.
 template <typename MainHeader, typename SectionHeader>
@@ -202,6 +203,21 @@ public:
 
 		++numItemsCurrentSection;
 		++numItems;
+	}
+
+	// Writes an serialized section
+	void writeSerializedSection(StringRef serialized) {
+		ASSERT(!isAllItemsCompleted() && isSectionCompleted());
+
+		BinaryReader reader(serialized, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+		section_header_t sectionHeader;
+		reader >> sectionHeader;
+
+		numItemsCurrentSection = sectionHeader.numItems;
+		numItems += sectionHeader.numItems;
+		++numSections;
+
+		writer.serializeBytes(serialized);
 	}
 
 	// Returns the size of the main header, in bytes
