@@ -51,9 +51,10 @@ namespace SummarizeTest
             bool traceToStdout = false;
             try
             {
+                string joshuaSeed = System.Environment.GetEnvironmentVariable("JOSHUA_SEED");
                 byte[] seed = new byte[4];
                 new System.Security.Cryptography.RNGCryptoServiceProvider().GetBytes(seed);
-                random = new Random(new BinaryReader(new MemoryStream(seed)).ReadInt32());
+                random = new Random(joshuaSeed != null ? Int32.Parse(joshuaSeed) : new BinaryReader(new MemoryStream(seed)).ReadInt32());
 
                 if (args.Length < 1)
                     return UsageMessage();
