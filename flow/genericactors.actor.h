@@ -1278,7 +1278,7 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 // Usage:
 //   Lock lock = wait(mutex.take());
 //   lock.release();  // Next waiter will get the lock, OR
-//   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise OR
+//   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise
 //   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
 struct FlowMutex {
 	FlowMutex() { lastPromise.send(Void()); }
