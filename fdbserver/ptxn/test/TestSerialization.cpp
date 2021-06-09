@@ -388,9 +388,7 @@ void write(ptxn::SubsequencedMessageSerializer& serializer) {
 	serializer.startVersionWriting(version);
 
 	// Serializing a mutationRef requires the writer include a serialization protocol version.
-	BinaryWriter writer(IncludeVersion());
-	writer << mutationRef;
-	Standalone<StringRef> serialized = writer.toValue();
+	Standalone<StringRef> serialized = BinaryWriter::toValue(mutationRef, IncludeVersion());
 	StringRef serializedWithoutVersionOptions(serialized.begin() + ptxn::SerializerVersionOptionBytes,
 	                                          serialized.size() - ptxn::SerializerVersionOptionBytes);
 

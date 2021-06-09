@@ -333,10 +333,10 @@ public:
 		reader >> item;
 	}
 
-	// Return true if reached the end of serialized data
+	// Returns true if reached the end of serialized data
 	bool allConsumed() const { return reader.empty(); }
 
-	// Peek raw bytes, but doesn't consume the bytes
+	// Peeks raw bytes, but doesn't consume the bytes
 	const uint8_t* peekBytes(int nBytes) const { return reinterpret_cast<const uint8_t*>(reader.peekBytes(nBytes)); }
 };
 
@@ -348,10 +348,10 @@ struct MultipleItemHeaderBase {
 	SerializationProtocolVersion protocolVersion;
 
 	// Number of items
-	size_t numItems;
+	size_t numItems = 0;
 
 	// The raw length, i.e. the number of bytes, in this message, excluding the header
-	size_t length;
+	size_t length = 0;
 
 	explicit MultipleItemHeaderBase(SerializationProtocolVersion protocolVersion_)
 	  : protocolVersion(protocolVersion_) {}

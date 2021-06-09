@@ -31,7 +31,6 @@ namespace ptxn {
 SubsequencedMessageSerializer::SubsequencedMessageSerializer(const StorageTeamID& storageTeamID) {
 	header.storageTeamID = storageTeamID;
 	header.lastVersion = invalidVersion;
-	header.lastSubsequence = invalidSubsequence;
 }
 
 void SubsequencedMessageSerializer::startVersionWriting(const Version& version) {
@@ -42,16 +41,15 @@ void SubsequencedMessageSerializer::startVersionWriting(const Version& version) 
 		header.firstVersion = version;
 	}
 	header.lastVersion = version;
-	header.lastSubsequence = invalidSubsequence;
+	header.length = serializer.getTotalBytes() - serializer.getMainHeaderBytes();
+
+	sectionHeader.version = version;
 
 	serializer.startNewSection();
 }
 
 void SubsequencedMessageSerializer::write(const SubsequenceMutationItem& subsequenceMutationItem) {
-	ASSERT(subsequenceMutationItem.subsequence > header.lastSubsequence);
-
-	header.lastSubsequence = subsequenceMutationItem.subsequence;
-	serializer.writeItem(subsequenceMutationItem);
+	writeImpl(subsequenceMutationItem);
 }
 
 void SubsequencedMessageSerializer::write(const Subsequence& subsequence, const MutationRef& mutation) {
@@ -59,10 +57,7 @@ void SubsequencedMessageSerializer::write(const Subsequence& subsequence, const 
 }
 
 void SubsequencedMessageSerializer::write(const SubsequenceSpanContextItem& subsequenceSpanContextItem) {
-	ASSERT(subsequenceSpanContextItem.subsequence > header.lastSubsequence);
-
-	header.lastSubsequence = subsequenceSpanContextItem.subsequence;
-	serializer.writeItem(subsequenceSpanContextItem);
+	writeImpl(subsequenceSpanContextItem);
 }
 
 void SubsequencedMessageSerializer::write(const Subsequence& subsequence, const SpanContextMessage& spanContext) {
@@ -70,10 +65,7 @@ void SubsequencedMessageSerializer::write(const Subsequence& subsequence, const 
 }
 
 void SubsequencedMessageSerializer::write(const SubsequenceLogProtocolMessageItem& subsequenceLogProtocolMessageItem) {
-	ASSERT(subsequenceLogProtocolMessageItem.subsequence > header.lastSubsequence);
-
-	header.lastSubsequence = subsequenceLogProtocolMessageItem.subsequence;
-	serializer.writeItem(subsequenceLogProtocolMessageItem);
+	writeImpl(subsequenceLogProtocolMessageItem);
 }
 
 void SubsequencedMessageSerializer::write(const Subsequence& subsequence,
@@ -98,10 +90,7 @@ void SubsequencedMessageSerializer::write(const Subsequence& subsequence, const 
 }
 
 void SubsequencedMessageSerializer::write(const SubsequenceSerializedMessageItem& subsequenceSerializedMessageItem) {
-	ASSERT(subsequenceSerializedMessageItem.subsequence > header.lastSubsequence);
-
-	header.lastSubsequence = subsequenceSerializedMessageItem.subsequence;
-	serializer.writeItem(subsequenceSerializedMessageItem);
+	writeImpl(subsequenceSerializedMessageItem);
 }
 
 void SubsequencedMessageSerializer::write(const Subsequence& subsequence, StringRef serializedMessage) {
@@ -113,7 +102,7 @@ const Version& SubsequencedMessageSerializer::getCurrentVersion() const {
 }
 
 const Subsequence& SubsequencedMessageSerializer::getCurrentSubsequence() const {
-	return header.lastSubsequence;
+	return sectionHeader.lastSubsequence;
 }
 
 void SubsequencedMessageSerializer::completeVersionWriting() {
@@ -125,13 +114,19 @@ void SubsequencedMessageSerializer::completeVersionWriting() {
 
 	serializer.completeSectionWriting();
 
-	details::SubsequencedItemsHeader sectionHeader;
-
-	sectionHeader.version = header.lastVersion;
 	sectionHeader.numItems = serializer.getNumItemsCurrentSection();
-	sectionHeader.length = serializer.getTotalBytes() - header.length;
-
+	// | Main Header | Section Header | Data ... | Section Header | Data ... |
+	// ^---------serializer.getTotalBytes()----------------------------------^
+	//               ^-----------header.length---^
+	// ^-------------^ getMainHeaderBytes()      ^----------------^ getSectionHeaderBytes()
+	// NOTE: At this stage header.length does not include the current section.
+	sectionHeader.length = serializer.getTotalBytes() - header.length - serializer.getMainHeaderBytes() -
+	                       serializer.getSectionHeaderBytes();
 	serializer.writeSectionHeader(sectionHeader);
+
+	header.length = serializer.getTotalBytes() - serializer.getMainHeaderBytes();
+
+	sectionHeader = details::SubsequencedItemsHeader();
 }
 
 void SubsequencedMessageSerializer::completeMessageWriting() {
@@ -204,7 +199,6 @@ StringRef ProxySubsequencedMessageSerializer::getSerialized(const StorageTeamID&
 std::unordered_map<StorageTeamID, Standalone<StringRef>> ProxySubsequencedMessageSerializer::getAllSerialized() {
 	std::unordered_map<StorageTeamID, Standalone<StringRef>> result;
 	for (auto& [storageTeamID, serializer] : serializers) {
-
 		result[storageTeamID] = getSerialized(storageTeamID);
 	}
 	return result;

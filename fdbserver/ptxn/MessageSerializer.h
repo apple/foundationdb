@@ -51,21 +51,18 @@ struct MessageHeader : MultipleItemHeaderBase {
 	// The last version that being serialized
 	Version lastVersion = invalidVersion;
 
-	// The last subsequence that being serialized
-	Subsequence lastSubsequence = 0;
-
 	MessageHeader() : MultipleItemHeaderBase(MessageSerializationProtocolVersion) {}
 
 	template <typename Reader>
 	void loadFromArena(Reader& reader) {
 		MultipleItemHeaderBase::loadFromArena(reader);
-		reader >> storageTeamID >> firstVersion >> lastVersion >> lastSubsequence;
+		reader >> storageTeamID >> firstVersion >> lastVersion;
 	}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		MultipleItemHeaderBase::serialize(ar);
-		serializer(ar, storageTeamID, firstVersion, lastVersion, lastSubsequence);
+		serializer(ar, storageTeamID, firstVersion, lastVersion);
 	}
 };
 
@@ -73,7 +70,10 @@ struct SubsequencedItemsHeader : MultipleItemHeaderBase {
 	static constexpr FileIdentifier file_identifier = 340226;
 
 	// The version of the following mutations
-	Version version;
+	Version version = invalidVersion;
+
+	// The latest subsequence that being serialized
+	Subsequence lastSubsequence = invalidSubsequence;
 
 	SubsequencedItemsHeader() : MultipleItemHeaderBase(MessageSerializationProtocolVersion) {}
 
@@ -116,6 +116,17 @@ private:
 	// The header of the whole message
 	details::MessageHeader header;
 
+	// The header of current section
+	details::SubsequencedItemsHeader sectionHeader;
+
+	template <typename SubsequencedMessageItem>
+	void writeImpl(const SubsequencedMessageItem& item) {
+		ASSERT(item.subsequence > sectionHeader.lastSubsequence);
+
+		sectionHeader.lastSubsequence = item.subsequence;
+		serializer.writeItem(item);
+	}
+
 public:
 	SubsequencedMessageSerializer(const StorageTeamID&);
 
@@ -148,6 +159,9 @@ public:
 
 	// Writes a serialized message to the serializer
 	void write(const Subsequence&, StringRef);
+
+	// Writes a serialized section to the serializer
+	// void writeSection()
 
 	// Gets the current version being written
 	const Version& getCurrentVersion() const;
