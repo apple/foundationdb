@@ -80,4 +80,17 @@ static void bench_memcmp(benchmark::State& state) {
 		benchmark::DoNotOptimize(memcmp(b1.get(), b2.get(), kLength));
 	}
 }
+
+static void bench_memcpy(benchmark::State& state) {
+	constexpr int kLength = 10000;
+	std::unique_ptr<char[]> b1{ new char[kLength] };
+	std::unique_ptr<char[]> b2{ new char[kLength] };
+	memset(b1.get(), 0, kLength);
+
+	while (state.KeepRunning()) {
+		benchmark::DoNotOptimize(memcpy(b2.get(), b1.get(), kLength));
+	}
+}
+
 BENCHMARK(bench_memcmp);
+BENCHMARK(bench_memcpy);
