@@ -35,6 +35,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/DeterministicRandom.h"
@@ -3084,7 +3085,7 @@ struct CLIOptions {
 				return FDB_EXIT_ERROR;
 			}
 			syn = syn.substr(7);
-			knobs.push_back(std::make_pair(syn, args.OptionArg()));
+			knobs.emplace_back(syn, args.OptionArg());
 			break;
 		}
 		case OPT_DEBUG_TLS:

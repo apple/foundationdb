@@ -57,7 +57,8 @@ set(FDBCLIENT_SRCS
   SpecialKeySpace.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
-  RestoreWorkerInterface.actor.h
+  RestoreInterface.cpp
+  RestoreInterface.h
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h

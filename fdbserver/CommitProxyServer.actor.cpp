@@ -42,6 +42,7 @@
 #include "fdbserver/ProxyCommitData.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/RestoreUtil.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -1460,7 +1461,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.push_back(it->interf);
 			maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 		}
-		rep.results.push_back(std::make_pair(r.range(), ssis));
+		rep.results.emplace_back(r.range(), ssis);
 	} else if (!req.reverse) {
 		int count = 0;
 		for (auto r = commitData->keyInfo.rangeContaining(req.begin);
@@ -1472,7 +1473,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 				ssis.push_back(it->interf);
 				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.push_back(std::make_pair(r.range(), ssis));
+			rep.results.emplace_back(r.range(), ssis);
 			count++;
 		}
 	} else {
@@ -1485,7 +1486,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 				ssis.push_back(it->interf);
 				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.push_back(std::make_pair(r.range(), ssis));
+			rep.results.emplace_back(r.range(), ssis);
 			if (r == commitData->keyInfo.ranges().begin()) {
 				break;
 			}

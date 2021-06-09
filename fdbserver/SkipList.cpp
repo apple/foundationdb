@@ -355,8 +355,10 @@ public:
 		// pre: !finished()
 		force_inline void prefetch() {
 			Node* next = x->getNext(level - 1);
-			_mm_prefetch((const char*)next, _MM_HINT_T0);
-			_mm_prefetch((const char*)next + 64, _MM_HINT_T0);
+			if (next) {
+				_mm_prefetch((const char*)next, _MM_HINT_T0);
+				_mm_prefetch((const char*)next + 64, _MM_HINT_T0);
+			}
 		}
 
 		// pre: !finished()

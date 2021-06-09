@@ -729,7 +729,7 @@ public:
 			specialCounter(cc, "DurableVersion", [self]() { return self->durableVersion.get(); });
 			specialCounter(cc, "DesiredOldestVersion", [self]() { return self->desiredOldestVersion.get(); });
 			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
-			specialCounter(cc, "LocalRate", [self] { return self->currentRate() * 100; });
+			specialCounter(cc, "LocalRate", [self] { return int64_t(self->currentRate() * 100); });
 
 			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
 

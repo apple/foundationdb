@@ -31,6 +31,7 @@
 #include "flow/UnitTest.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -1806,7 +1807,7 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(
 			++futureItr;
 		}
 
-		results.push_back(std::make_pair(servers[i], serverResults));
+		results.emplace_back(servers[i], serverResults);
 	}
 
 	return results;
