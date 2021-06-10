@@ -198,27 +198,20 @@ std::unordered_map<StorageTeamID, Standalone<StringRef>> ProxySubsequencedMessag
 	return result;
 }
 
-SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const Standalone<StringRef>& serialized_)
-  : endIterator(serialized_.arena(), serialized_, true) {
-	reset(serialized_.arena(), serialized_);
+SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const StringRef serialized_)
+  : endIterator(serialized_, true) {
+	reset(serialized_);
 }
 
-SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const Arena& serializedArena_,
-                                                                 const StringRef serialized_)
-  : endIterator(serializedArena_, serialized_, true) {
-	reset(serializedArena_, serialized_);
-}
-
-void SubsequencedMessageDeserializer::reset(const Arena& serializedArena_, const StringRef serialized_) {
+void SubsequencedMessageDeserializer::reset(const StringRef serialized_) {
 	ASSERT(serialized_.size() > 0);
 
-	serializedArena = serializedArena_;
 	serialized = serialized_;
 
-	DeserializerImpl deserializer(serializedArena, serialized);
+	DeserializerImpl deserializer(serialized);
 	header = deserializer.deserializeAsMainHeader();
 
-	endIterator = iterator(serializedArena, serialized, true);
+	endIterator = iterator(serialized, true);
 }
 
 const StorageTeamID& SubsequencedMessageDeserializer::getStorageTeamID() const {
@@ -236,10 +229,9 @@ const Version& SubsequencedMessageDeserializer::getFirstVersion() const {
 const Version& SubsequencedMessageDeserializer::getLastVersion() const {
 	return header.lastVersion;
 }
-SubsequencedMessageDeserializer::iterator::iterator(const Arena& serializedArena_,
-                                                    StringRef serialized_,
+SubsequencedMessageDeserializer::iterator::iterator(StringRef serialized_,
                                                     bool isEndIterator)
-  : deserializer(serializedArena_, serialized_), rawSerializedData(serialized_) {
+  : deserializer(serialized_), rawSerializedData(serialized_) {
 
 	header = deserializer.deserializeAsMainHeader();
 
@@ -328,7 +320,7 @@ SubsequencedMessageDeserializer::iterator SubsequencedMessageDeserializer::begin
 	// Since the iterator is setting to a state that it is located at the end of a version section,
 	// doing a prefix ++ will trigger it read a new version section, and place itself to the beginning
 	// of the items in the section.
-	return ++iterator(serializedArena, serialized, false);
+	return ++iterator(serialized, false);
 }
 
 const SubsequencedMessageDeserializer::iterator& SubsequencedMessageDeserializer::end() const {

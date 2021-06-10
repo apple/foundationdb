@@ -185,7 +185,7 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 	serializer.writeHeader(TestSerializerHeader{ 10, 11, 12 });
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	TestDeserializer deserializer(serialized.arena(), serialized);
+	TestDeserializer deserializer(serialized);
 
 	TestSerializerHeader mainHeader = deserializer.deserializeAsMainHeader();
 	ASSERT_EQ(mainHeader.item1, 10);
@@ -429,7 +429,7 @@ bool testSerialization() {
 	printTiming << "Serialization" << std::endl;
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
+	SubsequencedMessageDeserializer deserializer(serialized);
 	SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
 
 	ASSERT(deserializer.getStorageTeamID() == storageTeamID);
@@ -461,7 +461,7 @@ bool testSerializationEmpty() {
 	serializer.completeMessageWriting();
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
+	SubsequencedMessageDeserializer deserializer(serialized);
 	SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
 
 	ASSERT(iterator == deserializer.cend());
@@ -513,7 +513,7 @@ bool testDeserializerIterators() {
 
 	auto serialized = serializer.getSerialized();
 
-	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
+	SubsequencedMessageDeserializer deserializer(serialized);
 
 	ASSERT(deserializer.getStorageTeamID() == storageTeamID);
 	ASSERT_EQ(deserializer.getNumVersions(), 2);
@@ -612,13 +612,13 @@ bool testDeserializerReset() {
 	serializer2.completeMessageWriting();
 	Standalone<StringRef> serialized2 = serializer2.getSerialized();
 
-	SubsequencedMessageDeserializer deserializer(serialized1.arena(), serialized1);
+	SubsequencedMessageDeserializer deserializer(serialized1);
 	auto iter1 = deserializer.begin();
 	ASSERT(*iter1++ == DATA1[0]);
 	ASSERT(*iter1++ == DATA1[1]);
 	ASSERT(iter1 == deserializer.end());
 
-	deserializer.reset(serialized2.arena(), serialized2);
+	deserializer.reset(serialized2);
 	auto iter2 = deserializer.begin();
 	ASSERT(*iter2++ == DATA2[0]);
 	ASSERT(iter2 == deserializer.end());

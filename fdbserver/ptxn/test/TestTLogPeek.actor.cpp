@@ -73,7 +73,7 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext) {
 	       pOriginalMessage->version < beginVersion)
 		++pOriginalMessage;
 
-	SubsequencedMessageDeserializer deserializer(reply.arena, reply.data);
+	SubsequencedMessageDeserializer deserializer(reply.data);
 	// We *CANNOT* do a
 	//   std::equal(deserializer.begin(), deserializer.end(), expectedBegin, expectedEnd)
 	// where expectedBegin/expectedEnd refer to iterators to the data in FakeTLog messages. Because the FakeTLog/TLog

@@ -66,15 +66,18 @@ struct PeekRemoteContext {
 	// accessible even the deserializer gets destructed.
 	Arena* pAttachArena;
 
+	Arena* pWorkArena;
+
 	PeekRemoteContext(const Optional<UID>& debugID_,
 	                  const StorageTeamID& storageTeamID_,
 	                  Version* pLastVersion_,
 	                  const std::vector<TLogInterfaceBase*>& pInterfaces_,
 	                  SubsequencedMessageDeserializer* pDeserializer_,
 	                  SubsequencedMessageDeserializer::iterator* pDeserializerIterator_,
+					  Arena* pWorkArena_,
 	                  Arena* pAttachArena_ = nullptr)
 	  : debugID(debugID_), storageTeamID(storageTeamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
-	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pAttachArena(pAttachArena_) {
+	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pWorkArena(pWorkArena_), pAttachArena(pAttachArena_) {
 
 		for (const auto pTLogInterface : pTLogInterfaces) {
 			ASSERT(pTLogInterface != nullptr);
@@ -99,7 +102,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	try {
 		state TLogPeekReply reply = wait(pTLogInterface->peek.getReply(request));
 
-		peekRemoteContext.pDeserializer->reset(reply.arena, reply.data);
+		peekRemoteContext.pDeserializer->reset(reply.data);
 		*peekRemoteContext.pLastVersion = peekRemoteContext.pDeserializer->getLastVersion();
 		*peekRemoteContext.pDeserializerIterator = peekRemoteContext.pDeserializer->begin();
 
@@ -111,6 +114,8 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 		if (peekRemoteContext.pAttachArena != nullptr) {
 			peekRemoteContext.pAttachArena->dependsOn(reply.arena);
 		}
+
+		(*peekRemoteContext.pWorkArena) = reply.arena;
 
 		return true;
 	} catch (Error& error) {
@@ -283,6 +288,7 @@ Future<bool> StorageTeamPeekCursor::remoteMoreAvailableImpl() {
 	                          pTLogInterfaces,
 	                          &deserializer,
 	                          &deserializerIter,
+							  &workArena,
 	                          pAttachArena);
 
 	return peekRemote(context);

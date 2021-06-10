@@ -126,6 +126,11 @@ class StorageTeamPeekCursor : public PeekCursorBase {
 	SubsequencedMessageDeserializer deserializer;
 	SubsequencedMessageDeserializer::iterator deserializerIter;
 
+	// When the cursor checks remoteMoreAvailable, it depends on an ACTOR which accepts TLogPeekReply. TLogPeekReply will
+	// include an Arena and a StringRef, representing serialized data. We need to add a reference to the Arena so it will
+	// not be GCed after the ACTOR terminates.
+	Arena workArena;
+
 	// Returns the begin verion for the cursor. The cursor will start from the begin version.
 	const Version& getBeginVersion() const;
 

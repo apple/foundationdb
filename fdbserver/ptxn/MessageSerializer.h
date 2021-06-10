@@ -261,7 +261,6 @@ using ConstInputIteratorBase = std::iterator<std::input_iterator_tag, T, size_t,
 
 class SubsequencedMessageDeserializer {
 private:
-	Arena serializedArena;
 	StringRef serialized;
 
 	using DeserializerImpl =
@@ -296,11 +295,10 @@ public:
 		// Store the deserialized data
 		VersionSubsequenceMessage currentItem;
 
-		// serializedArena_ is the arena that used to store the serialized data
 		// serialized_ refers to the serialized data
 		// If isEndIterator, then the iterator indicates the end of the serialized data. The behavior of dereferencing
 		// the iterator is undefined.
-		iterator(const Arena& serializedArena_, StringRef serialized_, bool isEndIterator = false);
+		iterator(StringRef serialized_, bool isEndIterator = false);
 
 	public:
 		bool operator==(const iterator& another) const;
@@ -323,15 +321,12 @@ private:
 public:
 	using const_iterator = iterator;
 
-	SubsequencedMessageDeserializer(const Standalone<StringRef>& serialized_);
-
-	// serializedArena_ is the arena that used to store the serialized data
 	// serialized_ refers to the serialized data
-	SubsequencedMessageDeserializer(const Arena& serializedArena_, const StringRef serialized_);
+	SubsequencedMessageDeserializer(const StringRef serialized_);
 
-	// Resets the deserializer with new arena and StringRef, see comments in constructor
+	// Resets the deserializer with new StringRef, see comments in constructor
 	// NOTE: All iterators will be invalidated after reset.
-	void reset(const Arena&, const StringRef);
+	void reset(const StringRef);
 
 	// Gets the team ID
 	const StorageTeamID& getStorageTeamID() const;

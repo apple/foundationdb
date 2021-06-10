@@ -40,7 +40,7 @@ ACTOR Future<Void> fakeStorageServer_PassivelyReceive(
 
 	loop choose {
 		when(StorageServerPushRequest request = waitNext(pStorageServerInterface->pushRequests.getFuture())) {
-			SubsequencedMessageDeserializer deserializer(request.arena, request.messages);
+			SubsequencedMessageDeserializer deserializer(request.messages);
 			verifyMessagesInRecord(pTestDriverContext->commitRecord,
 			                       request.version,
 			                       request.storageTeamID,
