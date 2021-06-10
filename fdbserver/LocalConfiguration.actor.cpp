@@ -130,11 +130,11 @@ class LocalConfigurationImpl {
 	std::unique_ptr<IKnobCollection> testKnobCollection;
 
 	IKnobCollection& getKnobs() {
-		return testKnobCollection ? *testKnobCollection : *g_knobs;
+		return testKnobCollection ? *testKnobCollection : IKnobCollection::getMutableGlobalKnobCollection();
 	}
 
 	IKnobCollection const& getKnobs() const {
-		return testKnobCollection ? *testKnobCollection : *g_knobs;
+		return testKnobCollection ? *testKnobCollection : IKnobCollection::getGlobalKnobCollection();
 	}
 
 	CounterCollection cc;

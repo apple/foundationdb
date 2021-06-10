@@ -51,8 +51,10 @@ struct LowLatencyWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {
-			g_knobs->setKnob("min_delay_cc_worst_fit_candidacy_seconds", KnobValueRef::create(double{5.0}));
-			g_knobs->setKnob("max_delay_cc_worst_fit_candidacy_seconds", KnobValueRef::create(double{10.0}));
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("min_delay_cc_worst_fit_candidacy_seconds",
+			                                                          KnobValueRef::create(double{ 5.0 }));
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("max_delay_cc_worst_fit_candidacy_seconds",
+			                                                          KnobValueRef::create(double{ 10.0 }));
 		}
 		return Void();
 	}

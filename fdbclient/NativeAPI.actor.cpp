@@ -1870,8 +1870,8 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		std::string knobValueString = optionValue.substr(eq + 1);
 
 		try {
-			auto knobValue = g_knobs->parseKnobValue(knobName, knobValueString);
-			g_knobs->setKnob(knobName, knobValue);
+			auto knobValue = IKnobCollection::parseKnobValue(knobName, knobValueString, IKnobCollection::Type::CLIENT);
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
 			fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());

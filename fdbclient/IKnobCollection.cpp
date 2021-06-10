@@ -71,5 +71,18 @@ KnobValue IKnobCollection::parseKnobValue(std::string const& knobName, std::stri
 	UNSTOPPABLE_ASSERT(false);
 }
 
-std::unique_ptr<IKnobCollection> g_knobs =
+std::unique_ptr<IKnobCollection> IKnobCollection::globalKnobCollection =
     IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
+
+void IKnobCollection::setGlobalKnobCollection(Type type, Randomize randomize, IsSimulated isSimulated) {
+	globalKnobCollection = create(type, randomize, isSimulated);
+	FLOW_KNOBS = &globalKnobCollection->getFlowKnobs();
+}
+
+IKnobCollection const& IKnobCollection::getGlobalKnobCollection() {
+	return *globalKnobCollection;
+}
+
+IKnobCollection& IKnobCollection::getMutableGlobalKnobCollection() {
+	return *globalKnobCollection;
+}

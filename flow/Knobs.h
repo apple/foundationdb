@@ -285,7 +285,7 @@ public:
 	void initialize(Randomize, IsSimulated);
 };
 
-extern FlowKnobs globalFlowKnobs;
-#define FLOW_KNOBS (static_cast<FlowKnobs const*>(&globalFlowKnobs))
+extern FlowKnobs bootstrapGlobalFlowKnobs;
+extern FlowKnobs const* FLOW_KNOBS;
 
 #endif

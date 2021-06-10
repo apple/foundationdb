@@ -22,4 +22,4 @@
 
 #include "fdbclient/IKnobCollection.h"
 
-#define SERVER_KNOBS (&g_knobs->getServerKnobs())
+#define SERVER_KNOBS (&IKnobCollection::getGlobalKnobCollection().getServerKnobs())

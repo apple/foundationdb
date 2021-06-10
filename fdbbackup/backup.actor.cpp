@@ -3704,12 +3704,12 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		g_knobs = IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
-
+		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
-				auto knobValue = g_knobs->parseKnobValue(knobName, knobValueString);
-				g_knobs->setKnob(knobName, knobValue);
+				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+				g_knobs.setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
 					fprintf(stderr,
@@ -3731,7 +3731,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs->initialize(Randomize::NO, IsSimulated::NO);
+		g_knobs.initialize(Randomize::NO, IsSimulated::NO);
 
 		if (trace) {
 			if (!traceLogGroup.empty())

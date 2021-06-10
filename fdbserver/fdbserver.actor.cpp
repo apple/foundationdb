@@ -1646,18 +1646,20 @@ int main(int argc, char* argv[]) {
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
-		g_knobs = IKnobCollection::create(IKnobCollection::Type::SERVER,
-		                                  Randomize::YES,
-		                                  role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
-		g_knobs->setKnob("log_directory", KnobValue::create(opts.logFolder));
+		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,
+		                                         Randomize::YES,
+		                                         role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("log_directory", KnobValue::create(opts.logFolder));
 		if (role != ServerRole::Simulation) {
-			g_knobs->setKnob("commit_batches_mem_bytes_hard_limit", KnobValue::create(int64_t{ opts.memLimit }));
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("commit_batches_mem_bytes_hard_limit",
+			                                                          KnobValue::create(int64_t{ opts.memLimit }));
 		}
 
 		for (const auto& [knobName, knobValueString] : opts.knobs) {
 			try {
-				auto knobValue = g_knobs->parseKnobValue(knobName, knobValueString);
-				g_knobs->setKnob(knobName, knobValue);
+				auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+				g_knobs.setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
 					fprintf(stderr,
@@ -1677,9 +1679,11 @@ int main(int argc, char* argv[]) {
 				}
 			}
 		}
-		g_knobs->setKnob("server_mem_limit", KnobValue::create(int64_t{ opts.memLimit }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("server_mem_limit",
+		                                                          KnobValue::create(int64_t{ opts.memLimit }));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs->initialize(Randomize::YES, role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
+		IKnobCollection::getMutableGlobalKnobCollection().initialize(
+		    Randomize::YES, role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);

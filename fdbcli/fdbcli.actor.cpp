@@ -3008,10 +3008,11 @@ struct CLIOptions {
 			return;
 		}
 
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
-				auto knobValue = g_knobs->parseKnobValue(knobName, knobValueString);
-				g_knobs->setKnob(knobName, knobValue);
+				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+				g_knobs.setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
 					fprintf(stderr,
@@ -3033,7 +3034,7 @@ struct CLIOptions {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs->initialize(Randomize::YES, IsSimulated::NO);
+		g_knobs.initialize(Randomize::NO, IsSimulated::NO);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -4832,7 +4833,7 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-	g_knobs = IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
 
 #ifdef __unixish__
 	struct sigaction act;

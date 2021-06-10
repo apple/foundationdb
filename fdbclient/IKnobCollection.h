@@ -28,6 +28,8 @@
 #include "flow/Knobs.h"
 
 class IKnobCollection {
+	static std::unique_ptr<IKnobCollection> globalKnobCollection;
+
 public:
 	enum class Type {
 		CLIENT,
@@ -35,6 +37,7 @@ public:
 		TEST,
 	};
 
+	static std::unique_ptr<IKnobCollection> create(Type, Randomize, IsSimulated);
 	virtual void initialize(Randomize randomize, IsSimulated isSimulated) = 0;
 	virtual void reset(Randomize randomize, IsSimulated isSimulated) = 0;
 	virtual FlowKnobs const& getFlowKnobs() const = 0;
@@ -47,7 +50,8 @@ public:
 	// Result indicates whether or not knob was successfully set:
 	virtual bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) = 0;
 	void setKnob(std::string const& knobName, KnobValueRef const& knobValue);
-	static std::unique_ptr<IKnobCollection> create(Type, Randomize, IsSimulated);
-};
 
-extern std::unique_ptr<IKnobCollection> g_knobs;
+	static void setGlobalKnobCollection(Type, Randomize, IsSimulated);
+	static IKnobCollection const& getGlobalKnobCollection();
+	static IKnobCollection& getMutableGlobalKnobCollection();
+};
