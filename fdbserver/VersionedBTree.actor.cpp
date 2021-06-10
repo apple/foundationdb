@@ -1487,11 +1487,13 @@ public:
 			// Delay the remap clean by some time immediately post recovery to avoid overwhelming the system
 			double startDelay = SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_START_DELAY;
 			self->remapCleanupDelay = map(delay(startDelay), [=](Void) {
-																 //TraceEvent(SevInfo, "RedwoodRemapCleanupStart").detail("Delay", startDelay).detail("Filename", self->filename);
-																 return Void();
-															 });
-			//self->remapCleanupFuture = remapCleanup(self);
-			TraceEvent(SevInfo, "RedwoodRemapCleanupStart").detail("Delay", startDelay).detail("Filename", self->filename);
+				//TraceEvent(SevInfo, "RedwoodRemapCleanupStart").detail("Delay", startDelay).detail("Filename", self->filename);
+				return Void();
+			});
+			// self->remapCleanupFuture = remapCleanup(self);
+			TraceEvent(SevInfo, "RedwoodRemapCleanupStart")
+			    .detail("Delay", startDelay)
+			    .detail("Filename", self->filename);
 			self->remapCleanupFuture = self->remapCleanupDelay.isReady() ? remapCleanup(self) : Void();
 		} else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully
@@ -2074,15 +2076,14 @@ public:
 		state RemappedPage cutoff(oldestRetainedVersion - self->remapCleanupWindow);
 
 		// Minimum version we must pop to before obeying stop command.
-		// This is based a minimum percebtage of the gao we want to close. i.e.
+		// This is based a minimum percentage of the version gap we want to close. i.e.
 		// from the beginning of the queue to the cutoff
 		state Optional<RemappedPage> rp = wait(self->remapQueue.peek());
 		state Version minStopVersion =
-			( cutoff.version - (rp.present() ? rp.get().version : 0)) *
-			(BUGGIFY ? deterministicRandom()->random01()
-			 : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_MIN_PROGRESS);
-			//cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10)
-			//				         : (self->remapCleanupWindow * SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG));
+		    (cutoff.version - (rp.present() ? rp.get().version : 0)) *
+		    (BUGGIFY ? deterministicRandom()->random01() : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_MIN_PROGRESS);
+		// cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10)
+		//				         : (self->remapCleanupWindow * SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG));
 		self->remapDestinationsSimOnly.clear();
 
 		state int sinceYield = 0;
@@ -7582,7 +7583,8 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		    { deterministicRandom()->randomInt(prev.k, next.k), deterministicRandom()->randomInt(prev.v, next.v) });
 	};
 
-	// Build a set of N unique items, where no consecutive items are in the set, a requirement of the seek behavior tests.
+	// Build a set of N unique items, where no consecutive items are in the set, a requirement of the seek behavior
+	// tests.
 	std::set<IntIntPair> uniqueItems;
 	while (uniqueItems.size() < N) {
 		IntIntPair p = randomPair();
