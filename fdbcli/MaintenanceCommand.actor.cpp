@@ -41,8 +41,11 @@ ACTOR Future<Void> printHealthyZone(Reference<IDatabase> db) {
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			RangeResult res = wait(
-			    safeThreadFutureToFuture(tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY)));
+			// We need to keep the future as the returned standalone is not guaranteed to manage its memory when
+			// using an external client, but the ThreadFuture holds a reference to the memory
+			state ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
 			ASSERT(res.size() <= 1);
 			if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
@@ -70,8 +73,10 @@ ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			RangeResult res = wait(
-			    safeThreadFutureToFuture(tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY)));
+			// hold the returned standalone object's memory
+			state ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
 			ASSERT(res.size() <= 1);
 			if (!clearSSFailureZoneString && res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 				if (printWarning) {
@@ -100,8 +105,10 @@ ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db,
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			RangeResult res = wait(
-			    safeThreadFutureToFuture(tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY)));
+			// hold the returned standalone object's memory
+			state ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
 			ASSERT(res.size() <= 1);
 			if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 				if (printWarning) {
