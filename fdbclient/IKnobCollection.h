@@ -27,32 +27,27 @@
 #include "fdbclient/ServerKnobs.h"
 #include "flow/Knobs.h"
 
-class TestKnobs : public KnobsImpl<TestKnobs> {
-public:
-	TestKnobs();
-	int64_t TEST_LONG;
-	int TEST_INT;
-	double TEST_DOUBLE;
-	bool TEST_BOOL;
-	std::string TEST_STRING;
-	bool operator==(TestKnobs const&) const;
-	bool operator!=(TestKnobs const&) const;
-	void initialize();
-};
-
 class IKnobCollection {
 public:
-	virtual void initialize(bool randomize = false, bool isSimulated = false) = 0;
-	virtual void reset(bool randomize = false, bool isSimulated = false) = 0;
+	enum class Type {
+		CLIENT,
+		SERVER,
+		TEST,
+	};
+
+	virtual void initialize(Randomize randomize, IsSimulated isSimulated) = 0;
+	virtual void reset(Randomize randomize, IsSimulated isSimulated) = 0;
 	virtual FlowKnobs const& getFlowKnobs() const = 0;
 	virtual ClientKnobs const& getClientKnobs() const = 0;
 	virtual ServerKnobs const& getServerKnobs() const = 0;
 	virtual class TestKnobs const& getTestKnobs() const = 0;
-	virtual KnobValue parseKnobValue(std::string const& knobName, std::string const& knobValue) const = 0;
-	virtual void setKnob(std::string const& knobName, KnobValueRef const& knobValue) = 0;
-	static KnobValue parseKnobValue(std::string const& knobName, std::string const& knobValue, bool includeServerKnobs);
-	static std::unique_ptr<IKnobCollection> createClientKnobCollection(bool randomize, bool isSimulated);
-	static std::unique_ptr<IKnobCollection> createServerKnobCollection(bool randomize, bool isSimulated);
+	virtual Optional<KnobValue> tryParseKnobValue(std::string const& knobName, std::string const& knobValue) const = 0;
+	KnobValue parseKnobValue(std::string const& knobName, std::string const& knobValue) const;
+	static KnobValue parseKnobValue(std::string const& knobName, std::string const& knobValue, Type);
+	// Result indicates whether or not knob was successfully set:
+	virtual bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) = 0;
+	void setKnob(std::string const& knobName, KnobValueRef const& knobValue);
+	static std::unique_ptr<IKnobCollection> create(Type, Randomize, IsSimulated);
 };
 
 extern std::unique_ptr<IKnobCollection> g_knobs;

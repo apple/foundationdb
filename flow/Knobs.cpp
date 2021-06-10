@@ -23,17 +23,18 @@
 #include <cmath>
 #include <cinttypes>
 
-std::unique_ptr<FlowKnobs> globalFlowKnobs = std::make_unique<FlowKnobs>();
-FlowKnobs const* FLOW_KNOBS = globalFlowKnobs.get();
+FlowKnobs::FlowKnobs(Randomize randomize, IsSimulated isSimulated) {
+	initialize(randomize, isSimulated);
+}
+
+FlowKnobs globalFlowKnobs(Randomize::NO, IsSimulated::NO);
 
 #define init(knob, value) initKnob(knob, value, #knob)
 
-FlowKnobs::FlowKnobs() {
-	initialize();
-}
-
 // clang-format off
-void FlowKnobs::initialize(bool randomize, bool isSimulated) {
+void FlowKnobs::initialize(Randomize _randomize, IsSimulated _isSimulated) {
+	bool const randomize = _randomize == Randomize::YES;
+	bool const isSimulated = _isSimulated == IsSimulated::YES;
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );

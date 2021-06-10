@@ -233,8 +233,8 @@ public:
 	double TAG_THROTTLE_RECHECK_INTERVAL;
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
 
-	ClientKnobs();
-	void initialize(bool randomize = false);
+	ClientKnobs(Randomize randomize);
+	void initialize(Randomize randomize);
 };
 
 #endif

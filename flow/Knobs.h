@@ -34,6 +34,9 @@
 struct NoKnobFound {};
 using ParsedKnobValue = std::variant<NoKnobFound, int, double, int64_t, bool, std::string>;
 
+enum class IsSimulated { NO, YES };
+enum class Randomize { NO, YES };
+
 class Knobs {
 protected:
 	Knobs() = default;
@@ -278,12 +281,11 @@ public:
 	bool HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS;
 	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
 	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
-
-	FlowKnobs();
-	void initialize(bool randomize = false, bool isSimulated = false);
+	FlowKnobs(Randomize, IsSimulated);
+	void initialize(Randomize, IsSimulated);
 };
 
-extern std::unique_ptr<FlowKnobs> globalFlowKnobs;
-extern FlowKnobs const* FLOW_KNOBS;
+extern FlowKnobs globalFlowKnobs;
+#define FLOW_KNOBS (static_cast<FlowKnobs const*>(&globalFlowKnobs))
 
 #endif

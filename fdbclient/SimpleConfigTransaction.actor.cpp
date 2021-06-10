@@ -128,7 +128,8 @@ public:
 			toCommit.annotation.description = KeyRef(toCommit.arena, value);
 		} else {
 			ConfigKey configKey = ConfigKeyRef::decodeKey(key);
-			auto knobValue = IKnobCollection::parseKnobValue(configKey.knobName.toString(), value.toString(), true);
+			auto knobValue = IKnobCollection::parseKnobValue(
+			    configKey.knobName.toString(), value.toString(), IKnobCollection::Type::TEST);
 			toCommit.mutations.emplace_back_deep(toCommit.arena, ConfigKeyRef::decodeKey(key), knobValue.contents());
 		}
 	}

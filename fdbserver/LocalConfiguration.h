@@ -29,6 +29,8 @@
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
+enum class IsTest { NO, YES };
+
 class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;
 
@@ -36,7 +38,7 @@ public:
 	LocalConfiguration(std::string const& dataFolder,
 	                   std::string const& configPath,
 	                   std::map<std::string, std::string> const& manualKnobOverrides,
-	                   bool isTest = false);
+	                   IsTest isTest = IsTest::NO);
 	LocalConfiguration(LocalConfiguration&&);
 	LocalConfiguration& operator=(LocalConfiguration&&);
 	~LocalConfiguration();

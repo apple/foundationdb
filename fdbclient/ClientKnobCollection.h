@@ -20,53 +20,23 @@
 
 #pragma once
 
+#include "fdbclient/IKnobCollection.h"
+#include "fdbclient/KnobsImpl.h"
+#include "flow/Knobs.h"
+
 class ClientKnobCollection : public IKnobCollection {
 	FlowKnobs flowKnobs;
 	ClientKnobs clientKnobs;
 
 public:
-	ClientKnobCollection(bool randomize = false, bool isSimulated = false) { initialize(randomize, isSimulated); }
-
-	void initialize(bool randomize = false, bool isSimulated = false) override {
-		flowKnobs.initialize(randomize, isSimulated);
-		clientKnobs.initialize(randomize);
-	}
-
-	void reset(bool randomize = false, bool isSimulated = false) override {
-		flowKnobs.reset(randomize, isSimulated);
-		clientKnobs.reset(randomize);
-	}
-
+	ClientKnobCollection(Randomize randomize, IsSimulated isSimulated);
+	void initialize(Randomize randomize, IsSimulated isSimulated) override;
+	void reset(Randomize randomize, IsSimulated isSimulated) override;
 	FlowKnobs const& getFlowKnobs() const override { return flowKnobs; }
-
-	FlowKnobs& getMutableFlowKnobs() { return flowKnobs; }
-
 	ClientKnobs const& getClientKnobs() const override { return clientKnobs; }
-
 	ClientKnobs& getMutableClientKnobs() { return clientKnobs; }
-
 	ServerKnobs const& getServerKnobs() const override { throw internal_error(); }
-
 	TestKnobs const& getTestKnobs() const override { throw internal_error(); }
-
-	KnobValue parseKnobValue(std::string const& knobName, std::string const& knobValue) const override {
-		auto parsedKnobValue = flowKnobs.parseKnobValue(knobName, knobValue);
-		if (!std::holds_alternative<NoKnobFound>(parsedKnobValue)) {
-			return KnobValueRef::create(parsedKnobValue);
-		}
-		parsedKnobValue = clientKnobs.parseKnobValue(knobName, knobValue);
-		if (!std::holds_alternative<NoKnobFound>(parsedKnobValue)) {
-			return KnobValueRef::create(parsedKnobValue);
-		}
-		throw invalid_option();
-	}
-
-	void setKnob(std::string const& knobName, KnobValueRef const& knobValue) override {
-		// Assert because we should validate inputs beforehand
-		ASSERT(knobValue.setKnob(knobName, flowKnobs) || knobValue.setKnob(knobName, clientKnobs));
-	}
+	Optional<KnobValue> tryParseKnobValue(std::string const& knobName, std::string const& knobValue) const override;
+	bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) override;
 };
-
-std::unique_ptr<IKnobCollection> createClientKnobs(bool randomize = false, bool isSimulated = false) {
-	return std::make_unique<ClientKnobCollection>(randomize, isSimulated);
-}

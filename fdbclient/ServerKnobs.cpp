@@ -22,11 +22,13 @@
 
 #define init(knob, value) initKnob(knob, value, #knob)
 
-ServerKnobs::ServerKnobs() {
-	initialize();
+ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
+	initialize(randomize, clientKnobs, isSimulated);
 }
 
-void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSimulated) {
+void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsSimulated _isSimulated) {
+	bool const randomize = _randomize == Randomize::YES;
+	bool const isSimulated = _isSimulated == IsSimulated::YES;
 	// clang-format off
 	// Versions
 	init( VERSIONS_PER_SECOND,                                   1e6 );

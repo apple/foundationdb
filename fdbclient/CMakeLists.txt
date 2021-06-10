@@ -15,6 +15,8 @@ set(FDBCLIENT_SRCS
   BackupContainerLocalDirectory.h
   BackupContainerS3BlobStore.actor.cpp
   BackupContainerS3BlobStore.h
+  ClientKnobCollection.cpp
+  ClientKnobCollection.h
   ClientLogEvents.h
   ClientWorkerInterface.h
   ClusterInterface.h
@@ -80,6 +82,8 @@ set(FDBCLIENT_SRCS
   S3BlobStore.actor.cpp
   Schemas.cpp
   Schemas.h
+  ServerKnobCollection.cpp
+  ServerKnobCollection.h
   ServerKnobs.cpp
   ServerKnobs.h
   SimpleConfigTransaction.h
@@ -97,6 +101,8 @@ set(FDBCLIENT_SRCS
   TagThrottle.h
   TaskBucket.actor.cpp
   TaskBucket.h
+  TestKnobCollection.cpp
+  TestKnobCollection.h
   ThreadSafeTransaction.cpp
   ThreadSafeTransaction.h
   Tuple.cpp

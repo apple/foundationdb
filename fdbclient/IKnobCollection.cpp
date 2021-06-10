@@ -21,54 +21,55 @@
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/ClientKnobCollection.h"
 #include "fdbclient/ServerKnobCollection.h"
+#include "fdbclient/TestKnobCollection.h"
 
-#define init(knob, value) initKnob(knob, value, #knob)
-
-TestKnobs::TestKnobs() {
-	initialize();
+std::unique_ptr<IKnobCollection> IKnobCollection::create(Type type, Randomize randomize, IsSimulated isSimulated) {
+	if (type == Type::CLIENT) {
+		return std::make_unique<ClientKnobCollection>(randomize, isSimulated);
+	} else if (type == Type::SERVER) {
+		return std::make_unique<ServerKnobCollection>(randomize, isSimulated);
+	} else if (type == Type::TEST) {
+		return std::make_unique<TestKnobCollection>(randomize, isSimulated);
+	}
+	UNSTOPPABLE_ASSERT(false);
 }
 
-void TestKnobs::initialize() {
-	init(TEST_LONG, 0);
-	init(TEST_INT, 0);
-	init(TEST_DOUBLE, 0.0);
-	init(TEST_BOOL, false);
-	init(TEST_STRING, "");
+KnobValue IKnobCollection::parseKnobValue(std::string const& knobName, std::string const& knobValue) const {
+	auto result = tryParseKnobValue(knobName, knobValue);
+	if (!result.present()) {
+		throw invalid_option();
+	}
+	return result.get();
 }
 
-bool TestKnobs::operator==(TestKnobs const& rhs) const {
-	return (TEST_LONG == rhs.TEST_LONG) && (TEST_INT == rhs.TEST_INT) && (TEST_DOUBLE == rhs.TEST_DOUBLE) &&
-	       (TEST_BOOL == rhs.TEST_BOOL) && (TEST_STRING == rhs.TEST_STRING);
-}
-
-bool TestKnobs::operator!=(TestKnobs const& rhs) const {
-	return !(*this == rhs);
-}
-
-std::unique_ptr<IKnobCollection> IKnobCollection::createClientKnobCollection(bool randomize, bool isSimulated) {
-	return std::make_unique<ClientKnobCollection>(randomize, isSimulated);
-}
-
-std::unique_ptr<IKnobCollection> IKnobCollection::createServerKnobCollection(bool randomize, bool isSimulated) {
-	return std::make_unique<ServerKnobCollection>(randomize, isSimulated);
-}
-
-KnobValue IKnobCollection::parseKnobValue(std::string const& knobName,
-                                          std::string const& knobValue,
-                                          bool includeServerKnobs) {
-	// TODO: Ideally it should not be necessary to create a template object to parse knobs
-	static std::unique_ptr<IKnobCollection> clientKnobCollection, serverKnobCollection;
-	if (includeServerKnobs) {
-		if (!serverKnobCollection) {
-			serverKnobCollection = createServerKnobCollection(false, false);
-		}
-		return serverKnobCollection->parseKnobValue(knobName, knobValue);
-	} else {
-		if (!clientKnobCollection) {
-			clientKnobCollection = createClientKnobCollection(false, false);
-		}
-		return clientKnobCollection->parseKnobValue(knobName, knobValue);
+void IKnobCollection::setKnob(std::string const& knobName, KnobValueRef const& knobValue) {
+	if (!trySetKnob(knobName, knobValue)) {
+		TraceEvent(SevError, "FailedToSetKnob").detail("KnobName", knobName).detail("KnobValue", knobValue.toString());
+		throw internal_error();
 	}
 }
 
-std::unique_ptr<IKnobCollection> g_knobs = IKnobCollection::createClientKnobCollection(false, false);
+KnobValue IKnobCollection::parseKnobValue(std::string const& knobName, std::string const& knobValue, Type type) {
+	// TODO: Ideally it should not be necessary to create a template object to parse knobs
+	static std::unique_ptr<IKnobCollection> clientKnobCollection, serverKnobCollection, testKnobCollection;
+	if (type == Type::CLIENT) {
+		if (!clientKnobCollection) {
+			clientKnobCollection = create(type, Randomize::NO, IsSimulated::NO);
+		}
+		return clientKnobCollection->parseKnobValue(knobName, knobValue);
+	} else if (type == Type::SERVER) {
+		if (!serverKnobCollection) {
+			serverKnobCollection = create(type, Randomize::NO, IsSimulated::NO);
+		}
+		return serverKnobCollection->parseKnobValue(knobName, knobValue);
+	} else if (type == Type::TEST) {
+		if (!testKnobCollection) {
+			testKnobCollection = create(type, Randomize::NO, IsSimulated::NO);
+		}
+		return testKnobCollection->parseKnobValue(knobName, knobValue);
+	}
+	UNSTOPPABLE_ASSERT(false);
+}
+
+std::unique_ptr<IKnobCollection> g_knobs =
+    IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);

@@ -659,6 +659,6 @@ public:
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
-	ServerKnobs();
-	void initialize(bool randomize = false, ClientKnobs* clientKnobs = nullptr, bool isSimulated = false);
+	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
+	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };

@@ -1,5 +1,5 @@
 /*
- * ServerKnobCollection.h
+ * TestKnobCollection.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,21 +20,34 @@
 
 #pragma once
 
-#include "fdbclient/ClientKnobCollection.h"
 #include "fdbclient/IKnobCollection.h"
+#include "fdbclient/ServerKnobCollection.h"
 
-class ServerKnobCollection : public IKnobCollection {
-	ClientKnobCollection clientKnobCollection;
-	ServerKnobs serverKnobs;
+class TestKnobs : public KnobsImpl<TestKnobs> {
+public:
+	TestKnobs();
+	int64_t TEST_LONG;
+	int TEST_INT;
+	double TEST_DOUBLE;
+	bool TEST_BOOL;
+	std::string TEST_STRING;
+	bool operator==(TestKnobs const&) const;
+	bool operator!=(TestKnobs const&) const;
+	void initialize();
+};
+
+class TestKnobCollection : public IKnobCollection {
+	ServerKnobCollection serverKnobCollection;
+	TestKnobs testKnobs;
 
 public:
-	ServerKnobCollection(Randomize randomize, IsSimulated isSimulated);
+	TestKnobCollection(Randomize randomize, IsSimulated isSimulated);
 	void initialize(Randomize randomize, IsSimulated isSimulated) override;
 	void reset(Randomize randomize, IsSimulated isSimulated) override;
-	FlowKnobs const& getFlowKnobs() const override { return clientKnobCollection.getFlowKnobs(); }
-	ClientKnobs const& getClientKnobs() const override { return clientKnobCollection.getClientKnobs(); }
-	ServerKnobs const& getServerKnobs() const override { return serverKnobs; }
-	TestKnobs const& getTestKnobs() const override { throw internal_error(); }
+	FlowKnobs const& getFlowKnobs() const override { return serverKnobCollection.getFlowKnobs(); }
+	ClientKnobs const& getClientKnobs() const override { return serverKnobCollection.getClientKnobs(); }
+	ServerKnobs const& getServerKnobs() const override { return serverKnobCollection.getServerKnobs(); }
+	TestKnobs const& getTestKnobs() const override { return testKnobs; }
 	Optional<KnobValue> tryParseKnobValue(std::string const& knobName, std::string const& knobValue) const override;
 	bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) override;
 };

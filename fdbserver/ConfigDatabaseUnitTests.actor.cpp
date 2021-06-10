@@ -20,6 +20,7 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IConfigTransaction.h"
+#include "fdbclient/TestKnobCollection.h"
 #include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/IConfigDatabaseNode.h"
 #include "fdbserver/LocalConfiguration.h"
@@ -157,12 +158,13 @@ public:
 	ReadFromLocalConfigEnvironment(std::string const& dataDir,
 	                               std::string const& configPath,
 	                               std::map<std::string, std::string> const& manualKnobOverrides)
-	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, true), consumer(Never()) {}
+	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::YES), consumer(Never()) {
+	}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, true);
+		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, IsTest::YES);
 		return setup();
 	}
 

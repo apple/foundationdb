@@ -97,7 +97,8 @@ public:
 	explicit ManualKnobOverrides(std::map<std::string, std::string> const& overrides) {
 		for (const auto& [knobName, knobValueString] : overrides) {
 			try {
-				auto knobValue = IKnobCollection::parseKnobValue(knobName, knobValueString, true);
+				auto knobValue =
+				    IKnobCollection::parseKnobValue(knobName, knobValueString, IKnobCollection::Type::SERVER);
 				this->overrides[stringToKeyRef(knobName)] = knobValue;
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option) {
@@ -129,12 +130,10 @@ class LocalConfigurationImpl {
 	std::unique_ptr<IKnobCollection> testKnobCollection;
 
 	IKnobCollection& getKnobs() {
-		ASSERT(testKnobCollection);
 		return testKnobCollection ? *testKnobCollection : *g_knobs;
 	}
 
 	IKnobCollection const& getKnobs() const {
-		ASSERT(testKnobCollection);
 		return testKnobCollection ? *testKnobCollection : *g_knobs;
 	}
 
@@ -202,11 +201,12 @@ class LocalConfigurationImpl {
 
 	void updateInMemoryState(Version lastSeenVersion) {
 		this->lastSeenVersion = lastSeenVersion;
-		getKnobs().reset();
+		// TODO: Support randomization?
+		getKnobs().reset(Randomize::NO, g_network->isSimulated() ? IsSimulated::YES : IsSimulated::NO);
 		configKnobOverrides.update(getKnobs());
 		manualKnobOverrides.update(getKnobs());
 		// Must reinitialize in order to update dependent knobs
-		getKnobs().initialize();
+		getKnobs().initialize(Randomize::NO, g_network->isSimulated() ? IsSimulated::YES : IsSimulated::NO);
 	}
 
 	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
@@ -297,13 +297,15 @@ public:
 	LocalConfigurationImpl(std::string const& dataFolder,
 	                       std::string const& configPath,
 	                       std::map<std::string, std::string> const& manualKnobOverrides,
-	                       bool isTest)
+	                       IsTest isTest)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"), cc("LocalConfiguration"),
 	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
 	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
 	    manualKnobOverrides(manualKnobOverrides) {
-		if (isTest) {
-			testKnobCollection = IKnobCollection::createServerKnobCollection(true, g_network->isSimulated());
+		if (isTest == IsTest::YES) {
+			testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST,
+			                                             Randomize::NO,
+			                                             g_network->isSimulated() ? IsSimulated::YES : IsSimulated::NO);
 		}
 		logger = traceCounters(
 		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
@@ -349,7 +351,7 @@ public:
 LocalConfiguration::LocalConfiguration(std::string const& dataFolder,
                                        std::string const& configPath,
                                        std::map<std::string, std::string> const& manualKnobOverrides,
-                                       bool isTest)
+                                       IsTest isTest)
   : impl(std::make_unique<LocalConfigurationImpl>(dataFolder, configPath, manualKnobOverrides, isTest)) {}
 
 LocalConfiguration::LocalConfiguration(LocalConfiguration&&) = default;

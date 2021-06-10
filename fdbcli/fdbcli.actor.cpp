@@ -3033,8 +3033,7 @@ struct CLIOptions {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		globalFlowKnobs->initialize(true);
-		g_knobs->initialize(true);
+		g_knobs->initialize(Randomize::YES, IsSimulated::NO);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -4833,7 +4832,7 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-	g_knobs = IKnobCollection::createClientKnobCollection(false, false);
+	g_knobs = IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
 
 #ifdef __unixish__
 	struct sigaction act;

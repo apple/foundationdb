@@ -3704,7 +3704,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		g_knobs = IKnobCollection::createClientKnobCollection(false, false);
+		g_knobs = IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
 
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
@@ -3731,7 +3731,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs->initialize(true, false);
+		g_knobs->initialize(Randomize::NO, IsSimulated::NO);
 
 		if (trace) {
 			if (!traceLogGroup.empty())
