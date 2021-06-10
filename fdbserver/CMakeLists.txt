@@ -27,7 +27,6 @@ set(FDBSERVER_SRCS
   IKeyValueContainer.h
   IKeyValueStore.h
   IPager.h
-  IVersionedStore.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
