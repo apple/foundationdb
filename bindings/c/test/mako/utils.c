@@ -73,7 +73,7 @@ int digits(int num) {
 void genkey(char* str, char* prefix, int prefixlen, int prefixpadding, int num, int rows, int len) {
         const int rowdigit = digits(rows);
         const int prefixoffset = prefixpadding ? len - (prefixlen + rowdigit) - 1 : 0;
-        char* prefixstr = (char*)malloc(sizeof(char) * (prefixlen + rowdigit + 1));
+        char* prefixstr = (char*)alloca(sizeof(char) * (prefixlen + rowdigit + 1));
         snprintf(prefixstr, prefixlen + rowdigit + 1, "%s%0.*d", prefix, rowdigit, num);
         memset(str, 'x', len);
         memcpy(str + prefixoffset, prefixstr, prefixlen + rowdigit);
