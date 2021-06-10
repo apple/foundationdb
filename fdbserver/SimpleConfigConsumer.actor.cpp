@@ -135,19 +135,19 @@ public:
 SimpleConfigConsumer::SimpleConfigConsumer(ConfigFollowerInterface const& cfi,
                                            double pollingInterval,
                                            Optional<double> compactionInterval)
-  : impl(std::make_unique<SimpleConfigConsumerImpl>(cfi, pollingInterval, compactionInterval)) {}
+  : _impl(std::make_unique<SimpleConfigConsumerImpl>(cfi, pollingInterval, compactionInterval)) {}
 
 SimpleConfigConsumer::SimpleConfigConsumer(ServerCoordinators const& coordinators,
                                            double pollingInterval,
                                            Optional<double> compactionInterval)
-  : impl(std::make_unique<SimpleConfigConsumerImpl>(coordinators, pollingInterval, compactionInterval)) {}
+  : _impl(std::make_unique<SimpleConfigConsumerImpl>(coordinators, pollingInterval, compactionInterval)) {}
 
 Future<Void> SimpleConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
-	return impl->consume(broadcaster);
+	return impl().consume(broadcaster);
 }
 
 SimpleConfigConsumer::~SimpleConfigConsumer() = default;
 
 UID SimpleConfigConsumer::getID() const {
-	return impl->getID();
+	return impl().getID();
 }

@@ -469,14 +469,14 @@ public:
 };
 
 SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& folder)
-  : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(folder)) {}
+  : _impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(folder)) {}
 
 SimpleConfigDatabaseNode::~SimpleConfigDatabaseNode() = default;
 
 Future<Void> SimpleConfigDatabaseNode::serve(ConfigTransactionInterface const& cti) {
-	return impl->serve(cti);
+	return impl().serve(cti);
 }
 
 Future<Void> SimpleConfigDatabaseNode::serve(ConfigFollowerInterface const& cfi) {
-	return impl->serve(cfi);
+	return impl().serve(cfi);
 }

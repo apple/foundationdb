@@ -25,7 +25,9 @@
 #include "fdbclient/IConfigTransaction.h"
 
 class PaxosConfigTransaction final : public IConfigTransaction, public FastAllocated<PaxosConfigTransaction> {
-	std::unique_ptr<class PaxosConfigTransactionImpl> impl;
+	std::unique_ptr<class PaxosConfigTransactionImpl> _impl;
+	PaxosConfigTransactionImpl const& impl() const { return *_impl; }
+	PaxosConfigTransactionImpl& impl() { return *_impl; }
 
 public:
 	PaxosConfigTransaction(Database const&);

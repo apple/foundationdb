@@ -214,15 +214,15 @@ public:
 }; // SimpleConfigTransactionImpl
 
 Future<Version> SimpleConfigTransaction::getReadVersion() {
-	return impl->getReadVersion();
+	return impl().getReadVersion();
 }
 
 Optional<Version> SimpleConfigTransaction::getCachedReadVersion() const {
-	return impl->getCachedReadVersion();
+	return impl().getCachedReadVersion();
 }
 
 Future<Optional<Value>> SimpleConfigTransaction::get(Key const& key, bool snapshot) {
-	return impl->get(key);
+	return impl().get(key);
 }
 
 Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector const& begin,
@@ -230,7 +230,7 @@ Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector
                                                                      int limit,
                                                                      bool snapshot,
                                                                      bool reverse) {
-	return impl->getRange(KeyRangeRef(begin.getKey(), end.getKey()));
+	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
 Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector begin,
@@ -238,27 +238,27 @@ Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector
                                                                      GetRangeLimits limits,
                                                                      bool snapshot,
                                                                      bool reverse) {
-	return impl->getRange(KeyRangeRef(begin.getKey(), end.getKey()));
+	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
 void SimpleConfigTransaction::set(KeyRef const& key, ValueRef const& value) {
-	impl->set(key, value);
+	impl().set(key, value);
 }
 
 void SimpleConfigTransaction::clear(KeyRef const& key) {
-	impl->clear(key);
+	impl().clear(key);
 }
 
 Future<Void> SimpleConfigTransaction::commit() {
-	return impl->commit();
+	return impl().commit();
 }
 
 Version SimpleConfigTransaction::getCommittedVersion() const {
-	return impl->getCommittedVersion();
+	return impl().getCommittedVersion();
 }
 
 int64_t SimpleConfigTransaction::getApproximateSize() const {
-	return impl->getApproximateSize();
+	return impl().getApproximateSize();
 }
 
 void SimpleConfigTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
@@ -266,7 +266,7 @@ void SimpleConfigTransaction::setOption(FDBTransactionOptions::Option option, Op
 }
 
 Future<Void> SimpleConfigTransaction::onError(Error const& e) {
-	return impl->onError(e);
+	return impl().onError(e);
 }
 
 void SimpleConfigTransaction::cancel() {
@@ -275,25 +275,25 @@ void SimpleConfigTransaction::cancel() {
 }
 
 void SimpleConfigTransaction::reset() {
-	return impl->reset();
+	return impl().reset();
 }
 
 void SimpleConfigTransaction::fullReset() {
-	return impl->fullReset();
+	return impl().fullReset();
 }
 
 void SimpleConfigTransaction::debugTransaction(UID dID) {
-	impl->debugTransaction(dID);
+	impl().debugTransaction(dID);
 }
 
 void SimpleConfigTransaction::checkDeferredError() const {
-	impl->checkDeferredError(deferredError);
+	impl().checkDeferredError(deferredError);
 }
 
 SimpleConfigTransaction::SimpleConfigTransaction(Database const& cx)
-  : impl(std::make_unique<SimpleConfigTransactionImpl>(cx)) {}
+  : _impl(std::make_unique<SimpleConfigTransactionImpl>(cx)) {}
 
 SimpleConfigTransaction::SimpleConfigTransaction(ConfigTransactionInterface const& cti)
-  : impl(std::make_unique<SimpleConfigTransactionImpl>(cti)) {}
+  : _impl(std::make_unique<SimpleConfigTransactionImpl>(cti)) {}
 
 SimpleConfigTransaction::~SimpleConfigTransaction() = default;

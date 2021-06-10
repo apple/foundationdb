@@ -32,7 +32,9 @@
 enum class IsTest { NO, YES };
 
 class LocalConfiguration {
-	std::unique_ptr<class LocalConfigurationImpl> impl;
+	std::unique_ptr<class LocalConfigurationImpl> _impl;
+	LocalConfigurationImpl& impl() { return *_impl; }
+	LocalConfigurationImpl const& impl() const { return *_impl; }
 
 public:
 	LocalConfiguration(std::string const& dataFolder,

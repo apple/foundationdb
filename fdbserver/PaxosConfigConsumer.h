@@ -23,7 +23,9 @@
 #include "fdbserver/IConfigConsumer.h"
 
 class PaxosConfigConsumer : public IConfigConsumer {
-	std::unique_ptr<class PaxosConfigConsumer> impl;
+	std::unique_ptr<class PaxosConfigConsumerImpl> _impl;
+	PaxosConfigConsumerImpl const& impl() const { return *_impl; }
+	PaxosConfigConsumerImpl& impl() { return *_impl; }
 
 public:
 	PaxosConfigConsumer(ServerCoordinators const& cfi,

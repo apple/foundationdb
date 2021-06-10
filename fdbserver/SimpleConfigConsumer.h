@@ -25,7 +25,9 @@
 #include <memory>
 
 class SimpleConfigConsumer : public IConfigConsumer {
-	std::unique_ptr<class SimpleConfigConsumerImpl> impl;
+	std::unique_ptr<class SimpleConfigConsumerImpl> _impl;
+	SimpleConfigConsumerImpl const& impl() const { return *_impl; }
+	SimpleConfigConsumerImpl& impl() { return *_impl; }
 
 public:
 	SimpleConfigConsumer(ServerCoordinators const& coordinators,

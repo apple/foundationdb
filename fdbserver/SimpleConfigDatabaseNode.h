@@ -23,7 +23,9 @@
 #include "fdbserver/IConfigDatabaseNode.h"
 
 class SimpleConfigDatabaseNode : public IConfigDatabaseNode {
-	std::unique_ptr<class SimpleConfigDatabaseNodeImpl> impl;
+	std::unique_ptr<class SimpleConfigDatabaseNodeImpl> _impl;
+	SimpleConfigDatabaseNodeImpl const& impl() const { return *_impl; }
+	SimpleConfigDatabaseNodeImpl& impl() { return *_impl; }
 
 public:
 	SimpleConfigDatabaseNode(std::string const& folder);

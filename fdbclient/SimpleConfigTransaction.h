@@ -31,7 +31,9 @@
 #include "flow/flow.h"
 
 class SimpleConfigTransaction final : public IConfigTransaction, public FastAllocated<SimpleConfigTransaction> {
-	std::unique_ptr<class SimpleConfigTransactionImpl> impl;
+	std::unique_ptr<class SimpleConfigTransactionImpl> _impl;
+	SimpleConfigTransactionImpl const& impl() const { return *_impl; }
+	SimpleConfigTransactionImpl& impl() { return *_impl; }
 
 public:
 	SimpleConfigTransaction(ConfigTransactionInterface const&);
