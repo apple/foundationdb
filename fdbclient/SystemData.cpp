@@ -648,16 +648,15 @@ std::string encodeExcludedServersKey(AddressExclusion const& addr) {
 	return excludedServersPrefix.toString() + addr.toString();
 }
 
-const KeyRangeRef excludedLocalityKeys(LiteralStringRef("\xff/conf/excludedlocality/"),
-                                       LiteralStringRef("\xff/conf/excludedlocality0"));
+const KeyRangeRef excludedLocalityKeys(LiteralStringRef("\xff/conf/excluded_locality/"),
+                                       LiteralStringRef("\xff/conf/excluded_locality0"));
 const KeyRef excludedLocalityPrefix = excludedLocalityKeys.begin;
-const KeyRef excludedLocalityVersionKey = LiteralStringRef("\xff/conf/excludedlocality");
+const KeyRef excludedLocalityVersionKey = LiteralStringRef("\xff/conf/excluded_locality");
 std::string decodeExcludedLocalityKey(KeyRef const& key) {
 	ASSERT(key.startsWith(excludedLocalityPrefix));
 	return key.removePrefix(excludedLocalityPrefix).toString();
 }
 std::string encodeExcludedLocalityKey(std::string const& locality) {
-	// FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
 	return excludedLocalityPrefix.toString() + locality;
 }
 
@@ -678,16 +677,15 @@ std::string encodeFailedServersKey(AddressExclusion const& addr) {
 	return failedServersPrefix.toString() + addr.toString();
 }
 
-const KeyRangeRef failedLocalityKeys(LiteralStringRef("\xff/conf/failedlocality/"),
-                                     LiteralStringRef("\xff/conf/failedlocality0"));
+const KeyRangeRef failedLocalityKeys(LiteralStringRef("\xff/conf/failed_locality/"),
+                                     LiteralStringRef("\xff/conf/failed_locality0"));
 const KeyRef failedLocalityPrefix = failedLocalityKeys.begin;
-const KeyRef failedLocalityVersionKey = LiteralStringRef("\xff/conf/failedlocality");
+const KeyRef failedLocalityVersionKey = LiteralStringRef("\xff/conf/failed_locality");
 std::string decodeFailedLocalityKey(KeyRef const& key) {
 	ASSERT(key.startsWith(failedLocalityPrefix));
 	return key.removePrefix(failedLocalityPrefix).toString();
 }
 std::string encodeFailedLocalityKey(std::string const& locality) {
-	// FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
 	return failedLocalityPrefix.toString() + locality;
 }
 

@@ -280,6 +280,7 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
+// Special key management api for excluding localities (exclude_locality)
 class ExcludedLocalitiesRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ExcludedLocalitiesRangeImpl(KeyRangeRef kr);
@@ -290,6 +291,7 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
+// Special key management api for excluding localities with failed option (failed_locality)
 class FailedLocalitiesRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit FailedLocalitiesRangeImpl(KeyRangeRef kr);

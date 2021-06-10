@@ -2391,6 +2391,7 @@ ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool
 	return err;
 }
 
+// Includes the servers that could be ipaddresses or localities back to the cluster.
 ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 	std::vector<AddressExclusion> addresses;
 	state std::vector<std::string> localities;
@@ -2403,6 +2404,7 @@ ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 			failed = true;
 		} else if (t->startsWith(ExcludeLocalityKeyDcIdPrefix) || t->startsWith(ExcludeLocalityKeyMachineIdPrefix) ||
 		           t->startsWith(ExcludeLocalityKeyProcessIdPrefix) || t->startsWith(ExcludeLocalityKeyZoneIdPrefix)) {
+			// if the token starts with any locality prefix.
 			localities.push_back(t->toString());
 		} else {
 			auto a = AddressExclusion::parse(*t);
@@ -2427,6 +2429,7 @@ ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 			wait(makeInterruptable(includeServers(db, addresses, failed)));
 		}
 		if (!localities.empty()) {
+			// includes the servers that belong to given localities.
 			wait(makeInterruptable(includeLocalities(db, &localities, failed, all)));
 		}
 	}
@@ -2488,6 +2491,7 @@ ACTOR Future<bool> exclude(Database db,
 				if (localityAddresses.empty()) {
 					noMatchLocalities.push_back(t->toString());
 				} else {
+					// add all the server ipaddresses that belong to the given localities to the exclusionSet.
 					std::copy(localityAddresses.begin(), localityAddresses.end(), back_inserter(exclusionVector));
 					exclusionSet.insert(localityAddresses.begin(), localityAddresses.end());
 				}
@@ -2509,7 +2513,7 @@ ACTOR Future<bool> exclude(Database db,
 		}
 
 		if (exclusionAddresses.empty() && exclusionLocalities.empty()) {
-			fprintf(stderr, "ERROR: Atleast one valid network endpoint address or a locality is not provided\n");
+			fprintf(stderr, "ERROR: At least one valid network endpoint address or a locality is not provided\n");
 			return true;
 		}
 

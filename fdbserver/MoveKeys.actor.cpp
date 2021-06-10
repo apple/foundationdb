@@ -1083,7 +1083,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 			     success(fFailedLocZoneID) && success(fExclLocMachineID) && success(fFailedLocMachineID) &&
 			     success(fExclLocProcessID) && success(fFailedLocProcessID));
 
-			// If we have been added to the excluded/failed state servers list, we have to fail
+			// If we have been added to the excluded/failed state servers or localities list, we have to fail
 			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() ||
 			    fFailIP.get().present() || fExclProc2.get().present() || fExclIP2.get().present() ||
 			    fFailProc2.get().present() || fFailIP2.get().present() || fExclLocDCID.get().present() ||

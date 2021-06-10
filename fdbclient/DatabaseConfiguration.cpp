@@ -632,6 +632,7 @@ std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 	return addrs;
 }
 
+// checks if the locality is excluded or not by checking if the key is present.
 bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) const {
 	return (locality.dcId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() +
 	                                                                  locality.dcId().get().toString()))
@@ -669,6 +670,9 @@ bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) con
 	                                    : false);
 }
 
+// checks if this machineid of given locality is excluded.
+// A machine can be excluded either as part of dcid exclustion or zoneid exclusion
+// or this explicit machineid exclusion.
 bool DatabaseConfiguration::isMachineExcluded(const LocalityData& locality) const {
 	return (locality.dcId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() +
 	                                                                  locality.dcId().get().toString()))
@@ -697,6 +701,7 @@ bool DatabaseConfiguration::isMachineExcluded(const LocalityData& locality) cons
 	                                    : false);
 }
 
+// Gets the list of already excluded localities (with failed option)
 std::set<std::string> DatabaseConfiguration::getExcludedLocalities() const {
 	// TODO: revisit all const_cast usages
 	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();

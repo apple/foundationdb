@@ -1596,6 +1596,7 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 	}
 }
 
+// excludes localities by setting the keys in api version below 7.0
 void excludeLocalities(Transaction& tr, std::unordered_set<std::string>* localities, bool failed) {
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1615,6 +1616,8 @@ void excludeLocalities(Transaction& tr, std::unordered_set<std::string>* localit
 	TraceEvent("ExcludeLocalitiesCommit").detail("Localities", describe(*localities)).detail("ExcludeFailed", failed);
 }
 
+// Exclude the servers matching the given set of localities from use as state servers.
+// excludes localities by setting the keys.
 ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string>* localities, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
 		state ReadYourWritesTransaction ryw(cx);
@@ -1757,6 +1760,8 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 	}
 }
 
+// Remove the given localities from the exclusion list.
+// include localities by clearing the keys.
 ACTOR Future<Void> includeLocalities(Database cx, vector<std::string>* localities, bool failed, bool includeAll) {
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
@@ -1912,6 +1917,7 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers(Database cx) {
 	}
 }
 
+// Get the current list of excluded localities by reading the keys.
 ACTOR Future<vector<std::string>> getExcludedLocalities(Transaction* tr) {
 	state RangeResult r = wait(tr->getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
@@ -1931,12 +1937,13 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Transaction* tr) {
 	return excludedLocalities;
 }
 
+// Get the list of excluded localities by reading the keys.
 ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			vector<std::string> exclusions = wait(getExcludedLocalities(&tr));
 			return exclusions;
@@ -1946,6 +1953,8 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
 	}
 }
 
+// Decodes the locality string to a pair of locality prefix and its value.
+// The prefix could be dcid, processid, machineid, processid.
 std::pair<std::string, std::string> decodeLocality(std::string& locality) {
 	StringRef localityRef(locality.c_str());
 	if (localityRef.startsWith(ExcludeLocalityKeyDcIdPrefix)) {
@@ -1965,6 +1974,8 @@ std::pair<std::string, std::string> decodeLocality(std::string& locality) {
 	return std::make_pair("", "");
 }
 
+// Returns the list of IPAddresses of the workers that match the given locality.
+// Example: locality="dcid:primary" returns all the ip addresses of the workers in the primary dc.
 std::set<AddressExclusion> getAddressesByLocality(std::vector<ProcessData>& workers, std::string locality) {
 	std::pair<std::string, std::string> localityKeyValue = decodeLocality(locality);
 

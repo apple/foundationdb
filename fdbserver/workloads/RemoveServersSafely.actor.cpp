@@ -455,6 +455,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		int localitiesCount = localities.size();
 		int nToKill3 = deterministicRandom()->randomInt(std::min(localitiesCount, minMachinesToKill),
 		                                                std::min(localitiesCount, maxMachinesToKill) + 1);
+		// get random subset of localities.
 		state std::set<std::string> toKill3 = random_subset(localities, nToKill3);
 
 		TraceEvent("RemoveAndKillLocalities")
@@ -479,6 +480,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("Kill3Size", toKill3.size())
 		    .detail("ToKill3", describe(toKill3))
 		    .detail("ClusterAvailable", g_simulator.isAvailable());
+		// exclude localities
 		wait(reportErrors(
 		    timeoutError(removeAndKillLocalities(self, cx, toKill3, bClearedFirst ? &toKill2 : nullptr, failed),
 		                 self->kill3Timeout),
@@ -766,11 +768,13 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return subset;
 	}
 
+	// creates a random set of size n from given unordered_set.
 	template <class T>
 	static std::set<T> random_subset(std::unordered_set<T>& s, int n) {
 		return random_subset(std::vector<T>(s.begin(), s.end()), n);
 	}
 
+	// creates a random set of size n from given set.
 	template <class T>
 	static std::set<T> random_subset(std::set<T>& s, int n) {
 		return random_subset(std::vector<T>(s.begin(), s.end()), n);
@@ -781,6 +785,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		                                  machineProcesses[kill].count(AddressExclusion(process.ip, process.port)) > 0);
 	}
 
+	// Returns the list of IPAddresses of the workers that match the given list of localities.
 	ACTOR Future<std::set<AddressExclusion>> getLocalitiesAddresses(Database cx, std::set<std::string> localities) {
 		state Transaction tr(cx);
 		state std::vector<ProcessData> workers = wait(getWorkers(&tr));
@@ -793,6 +798,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return addressesSet;
 	}
 
+	// Finds the safe localities list that can be excluded from the killable safeProcesses list.
+	// If excluding based on a particular locality of the safe process, kills any other process, that
+	// particular locality is not included in the killable safeLocalities list.
 	std::set<std::string> getSafeLocalitiesToKill(std::vector<ISimulator::ProcessInfo*> const& safeProcesses) {
 		std::unordered_map<std::string, int> safeLocalitiesCount;
 		for (const auto& processInfo : safeProcesses) {
@@ -837,7 +845,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return safeLocalities;
 	}
 
-	// Attempts to exclude a set of processes, and once the exclusion is successful it kills them.
+	// Attempts to exclude a set of localities, and once the exclusion is successful it kills them.
 	// If markExcludeAsFailed is true, then it is an error if we cannot complete the exclusion.
 	ACTOR static Future<Void> removeAndKillLocalities(RemoveServersSafelyWorkload* self,
 	                                                  Database cx,
@@ -862,6 +870,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 
 		state std::set<std::string> toKillMarkFailedSet;
+		// if markExcludedasFailed is true, get random subset of tokill, check for
+		// safe exclusions and exclude them with failed option.
 		if (markExcludeAsFailed) {
 			state int retries = 0;
 			loop {
@@ -914,9 +924,11 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("FailedLocalities", describe(toKillMarkFailedUnorderedSet))
 		    .detail("ClusterAvailable", g_simulator.isAvailable())
 		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
+		// exclude localities with failed option as true
 		if (markExcludeAsFailed) {
 			wait(excludeLocalities(cx, &toKillMarkFailedUnorderedSet, true));
 		}
+		// exclude localities with failed option as false.
 		wait(excludeLocalities(cx, &toKillUnorderedSet));
 
 		TraceEvent("RemoveAndKillLocalities", functionId)
@@ -926,6 +938,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Update the g_simulator processes list with the process ids
+	// of the workers, that are generated as part of worker creation.
 	ACTOR static Future<Void> updateProcessIds(Database cx) {
 		Transaction tr(cx);
 		std::vector<ProcessData> workers = wait(getWorkers(&tr));

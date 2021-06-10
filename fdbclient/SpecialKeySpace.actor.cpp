@@ -78,10 +78,10 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	  KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "excludedlocality",
-	  KeyRangeRef(LiteralStringRef("excludedlocality/"), LiteralStringRef("excludedlocality0"))
+	  KeyRangeRef(LiteralStringRef("excluded_locality/"), LiteralStringRef("excluded_locality0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "failedlocality",
-	  KeyRangeRef(LiteralStringRef("failedlocality/"), LiteralStringRef("failedlocality0"))
+	  KeyRangeRef(LiteralStringRef("failed_locality/"), LiteralStringRef("failed_locality0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "consistencycheck",
@@ -2120,6 +2120,7 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 	return msg;
 }
 
+// Clears the special management api keys excludeLocality and failedLocality.
 void includeLocalities(ReadYourWritesTransaction* ryw) {
 	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2153,6 +2154,8 @@ void includeLocalities(ReadYourWritesTransaction* ryw) {
 	}
 }
 
+// Reads the excludedlocality and failed locality keys using managment api,
+// parses them and returns the list.
 bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
                              bool failed,
                              std::unordered_set<std::string>& localities,
@@ -2196,6 +2199,8 @@ bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
 	return true;
 }
 
+// On commit, parses the special exclusion keys and get the localities to be excluded, check for exclusions
+// and add them to the exclusion list. Also, clears the special management api keys with includeLocalities.
 ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTransaction* ryw, bool failed) {
 	state Optional<std::string> result;
 	state std::unordered_set<std::string> localities;
@@ -2242,6 +2247,7 @@ Key ExcludedLocalitiesRangeImpl::encode(const KeyRef& key) const {
 }
 
 Future<Optional<std::string>> ExcludedLocalitiesRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	// exclude locality with failed option as false.
 	return excludeLocalityCommitActor(ryw, false);
 }
 
@@ -2267,5 +2273,6 @@ Key FailedLocalitiesRangeImpl::encode(const KeyRef& key) const {
 }
 
 Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	// exclude locality with failed option as true.
 	return excludeLocalityCommitActor(ryw, true);
 }
