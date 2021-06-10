@@ -317,14 +317,26 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["regions"] = getRegionJSON();
 	}
 
+	// Add to the `proxies` count for backwards compatibility with tools built before 7.0.
+	int32_t proxyCount = -1;
 	if (desiredTLogCount != -1 || isOverridden("logs")) {
 		result["logs"] = desiredTLogCount;
 	}
 	if (commitProxyCount != -1 || isOverridden("commit_proxies")) {
 		result["commit_proxies"] = commitProxyCount;
+		if (proxyCount != -1) {
+			proxyCount += commitProxyCount;
+		} else {
+			proxyCount = commitProxyCount;
+		}
 	}
 	if (grvProxyCount != -1 || isOverridden("grv_proxies")) {
 		result["grv_proxies"] = grvProxyCount;
+		if (proxyCount != -1) {
+			proxyCount += grvProxyCount;
+		} else {
+			proxyCount = grvProxyCount;
+		}
 	}
 	if (resolverCount != -1 || isOverridden("resolvers")) {
 		result["resolvers"] = resolverCount;
@@ -349,6 +361,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	}
 	if (autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS || isOverridden("auto_logs")) {
 		result["auto_logs"] = autoDesiredTLogCount;
+	}
+	if (proxyCount != -1) {
+		result["proxies"] = proxyCount;
 	}
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
