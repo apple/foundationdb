@@ -905,7 +905,73 @@ private:
 	}
 };
 
-// ------------------------------------------------------------------
+// DeltaTree2 is a memory mappable binary tree of T objects such that each node's item is
+// stored as a Delta which can reproduce the node's T item given either
+//    - The node's greatest lesser ancestor, called the "left parent"
+//    - The node's least greater ancestor, called the "right parent"
+//  One of these ancestors will also happen to be the node's direct parent.
+//
+// The Delta type is intended to make use of ordered prefix compression and borrow all
+// available prefix bytes from the ancestor T which shares the most prefix bytes with
+// the item T being encoded.  If T is implemented properly, this results in perfect
+// prefix compression while performing O(log n) comparisons for a seek.
+//
+// T requirements
+//
+//    Must be compatible with Standalone<T> and must implement the following additional things:
+//
+//    // Return the common prefix length between *this and T
+//    // skipLen is a hint, representing the length that is already known to be common.
+//    int getCommonPrefixLen(const T& other, int skipLen) const;
+//
+//    // Compare *this to rhs, returns < 0 for less than, 0 for equal, > 0 for greater than
+//    // skipLen is a hint, representing the length that is already known to be common.
+//    int compare(const T &rhs, int skipLen) const;
+//
+//    // Writes to d a delta which can create *this from base
+//    // commonPrefix is a hint, representing the length that is already known to be common.
+//    // DeltaT's size need not be static, for more details see below.
+//    void writeDelta(DeltaT &d, const T &base, int commonPrefix) const;
+//
+//    // Returns the size in bytes of the DeltaT required to recreate *this from base
+//    int deltaSize(const T &base) const;
+//
+//    // A type which represents the parts of T that either borrowed from the base T
+//    // or can be borrowed by other T's using the first T as a base
+//    // Partials must allocate any heap storage in the provided Arena for any operation.
+//    typedef Partial;
+//
+//    // Update cache with the Partial for *this, storing any heap memory for the Partial in arena
+//    void updateCache(Optional<Partial> cache, Arena& arena) const;
+//
+//    // For debugging, return a useful human-readable string representation of *this
+//    std::string toString() const;
+//
+// DeltaT requirements
+//
+//    DeltaT can be variable sized, larger than sizeof(DeltaT), and implement the following:
+//
+//    // Returns the size in bytes of this specific DeltaT instance
+//    int size();
+//
+//    // Apply *this to base and return the resulting T
+//    // Store the Partial for T into cache, allocating any heap memory for the Partial in arena
+//    T apply(Arena& arena, const T& base, Optional<T::Partial>& cache);
+//
+//    // Recreate T from *this and the Partial for T
+//    T apply(const T::Partial& cache);
+//
+//    // Set or retrieve a boolean flag representing which base ancestor the DeltaT is to be applied to
+//    void setPrefixSource(bool val);
+//    bool getPrefixSource() const;
+//
+//    // Set of retrieve a boolean flag representing that a DeltaTree node has been erased
+//    void setDeleted(bool val);
+//    bool getDeleted() const;
+//
+//    // For debugging, return a useful human-readable string representation of *this
+//    std::string toString() const;
+//
 #pragma pack(push, 1)
 template <typename T, typename DeltaT = typename T::Delta>
 struct DeltaTree2 {
@@ -921,8 +987,11 @@ struct DeltaTree2 {
 		uint8_t maxHeight; // Maximum height of tree after any insertion.  Value of 0 means no insertions done.
 		bool largeNodes; // Node size, can be calculated as capacity > SmallSizeLimit but it will be used a lot
 	};
+
+	// Node is not fixed size.  Most node methods require the context of whether the node is in small or large
+	// offset mode, passed as a boolean
 	struct Node {
-		// Offsets are relative to the start of the tree
+		// Offsets are relative to the start of the DeltaTree
 		union {
 			struct {
 				uint32_t leftChild;
@@ -984,6 +1053,16 @@ struct DeltaTree2 {
 	int capacity() const { return size() + nodeBytesFree; }
 
 public:
+	// DecodedNode represents a Node of a DeltaTree and its T::Partial.
+	// DecodedNodes are created on-demand, as DeltaTree Nodes are visited by a Cursor.
+	// DecodedNodes link together to form a binary tree with the same Node relationships as their
+	// corresponding DeltaTree Nodes.  Additionally, DecodedNodes store links to their left and
+	// right ancestors which correspond to possible base Nodes on which the Node's Delta is based.
+	//
+	// DecodedNode links are not pointers, but rather indices to be looked up in the DecodeCache
+	// defined below.  An index value of -1 is uninitialized, meaning it is not yet known whether
+	// the corresponding DeltaTree Node link is non-null in any version of the DeltaTree which is
+	// using or has used the DecodeCache.
 	struct DecodedNode {
 		DecodedNode(int nodeOffset, int leftParentIndex, int rightParentIndex)
 		  : nodeOffset(nodeOffset), leftParentIndex(leftParentIndex), rightParentIndex(rightParentIndex),
@@ -1008,6 +1087,12 @@ public:
 		}
 	};
 #pragma pack(pop)
+
+	// The DecodeCache is a reference counted structure that stores DecodedNodes by an integer index
+	// and can be shared across a series of updated copies of a DeltaTree.
+	//
+	// DecodedNodes are stored in a contiguous vector, which sometimes must be expanded, so care
+	// must be taken to resolve DecodedNode pointers again after the DecodeCache has new entries added.
 	struct DecodeCache : FastAllocated<DecodeCache>, ReferenceCounted<DecodeCache> {
 		DecodeCache(const T& lowerBound = T(), const T& upperBound = T())
 		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound) {
