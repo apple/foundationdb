@@ -28,6 +28,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "flow/IndexedSet.h"
+#include "flow/Histogram.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
@@ -52,6 +53,7 @@ public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
+	std::vector<Reference<Histogram>> tlogPushDistTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector<LocalityData> tLogLocalities; // Stores the localities of the log servers

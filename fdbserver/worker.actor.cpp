@@ -613,6 +613,62 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 	}
 }
 
+ACTOR Future<Void> peerHealthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                     WorkerInterface interf) {
+	try {
+		loop {
+			auto* allPeers = FlowTransport::transport().getAllPeers();
+			UpdatePeerHealthRequest req;
+			std::string degradedString;
+			for (auto& [address, peer] : *allPeers) {
+				if (peer->pingLatenciesForChecking.getPopulationSize() > 10) {
+					if (peer->pingLatenciesForChecking.median() > SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
+					    peer->timeoutCount / (double)(peer->pingLatenciesForChecking.getPopulationSize()) >
+					        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+						// This is a degraded peer.
+						req.degradedPeers.push_back(address);
+						degradedString += address.toString() + " ";
+					}
+				}
+				TraceEvent("WorkerPeerHealthMonitor")
+				    .detail("Peer", address)
+				    .detail("Elapsed", now() - peer->lastForCheckingTime)
+				    .detail("MinLatency", peer->pingLatenciesForChecking.min())
+				    .detail("MaxLatency", peer->pingLatenciesForChecking.max())
+				    .detail("MeanLatency", peer->pingLatenciesForChecking.mean())
+				    .detail("MedianLatency", peer->pingLatenciesForChecking.median())
+				    .detail("P90Latency", peer->pingLatenciesForChecking.percentile(0.90))
+				    .detail("Count", peer->pingLatenciesForChecking.getPopulationSize())
+				    .detail("TimeoutCount", peer->timeoutCount)
+				    .detail("DegradedPeerCount", req.degradedPeers.size())
+				    .detail("HasCC", ccInterface->get().present())
+				    .detail("medianLatencyBad",
+				            peer->pingLatenciesForChecking.median() > SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD)
+				    .detail("medianLatencyAgain", peer->pingLatenciesForChecking.median())
+				    .detail("latencyThreshould", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD)
+				    .detail("timeoutPercentage",
+				            peer->timeoutCount / (double)(peer->pingLatenciesForChecking.getPopulationSize()));
+				peer->lastForCheckingTime = now();
+				peer->pingLatenciesForChecking.clear();
+				peer->timeoutCount = 0;
+			}
+			if (!req.degradedPeers.empty() && ccInterface->get().present()) {
+				TraceEvent("WorkerPeerHealthMonitorRequest").detail("DegradedPeers", degradedString);
+				req.selfAddress = FlowTransport::transport().getLocalAddress();
+				ccInterface->get().get().updatePeerHealth.send(req);
+			}
+			choose {
+				when(wait(delay(SERVER_KNOBS->PEER_HEALTH_MONITOR_INTERVAL))) {}
+				when(wait(ccInterface->onChange())) {}
+			}
+		}
+	} catch (Error& err) {
+		TraceEvent("PeerHealthMonitorError").error(err);
+	}
+
+	return Void();
+}
+
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS)
 // A set of threads that should be profiled
 std::set<std::thread::id> profiledThreads;
@@ -1207,6 +1263,10 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		                                       dbInfo,
 		                                       connFile,
 		                                       issues));
+
+		if (SERVER_KNOBS->ENABLE_PEER_HEALTH_MONITOR) {
+			errorForwarders.add(peerHealthMonitor(ccInterface, interf));
+		}
 
 		TraceEvent("RecoveriesComplete", interf.id());
 

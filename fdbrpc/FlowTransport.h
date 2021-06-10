@@ -142,6 +142,10 @@ struct Peer : public ReferenceCounted<Peer> {
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
 
+	ContinuousSample<double> pingLatenciesForChecking;
+	int timeoutCount;
+	double lastForCheckingTime;
+
 	Reference<AsyncVar<Optional<ProtocolVersion>>> protocolVersion;
 
 	// Cleared every time stats are logged for this peer.
@@ -184,6 +188,8 @@ public:
 
 	// Returns all local NetworkAddress.
 	NetworkAddressList getLocalAddresses() const;
+
+	std::unordered_map<NetworkAddress, Reference<struct Peer>>* getAllPeers();
 
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
