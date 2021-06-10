@@ -1188,7 +1188,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			self->toCommit.addTxsTag();
 		}
 		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
-		// FIXME
+		// FIXME(rdar://78341241)
 		// self->pTeamMessageBuilder.writeMessage(StringRef(m.begin(), m.size()), ptxn::txsTeam);
 		firstMessage = false;
 	}
