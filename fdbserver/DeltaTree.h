@@ -26,8 +26,13 @@
 #include "fdbserver/Knobs.h"
 #include <string.h>
 
+#define DELTATREE_DEBUG 0
+
+#if DELTATREE_DEBUG
+#define deltatree_printf(...) printf(__VA_ARGS__)
+#else
 #define deltatree_printf(...)
-// #define deltatree_printf(...) printf(__VA_ARGS__)
+#endif
 
 typedef uint64_t Word;
 // Get the number of prefix bytes that are the same between a and b, up to their common length of cl
