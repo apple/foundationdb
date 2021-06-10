@@ -78,7 +78,6 @@ void genkey(char* str, char* prefix, int prefixlen, int prefixpadding, int num, 
         memset(str, 'x', len);
         memcpy(str + prefixoffset, prefixstr, prefixlen + rowdigit);
         str[len - 1] = '\0';
-        free(prefixstr);
 }
 
 /* This is another sorting algorithm used to calculate latency parameters */
