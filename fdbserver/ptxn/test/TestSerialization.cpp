@@ -122,7 +122,7 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 	using TestSerializer = ptxn::TwoLevelHeaderedItemsSerializer<TestSerializerHeader, TestSerializerSectionHeader>;
 	using TestDeserializer = ptxn::TwoLevelHeaderedItemsDeserializer<TestSerializerHeader, TestSerializerSectionHeader>;
 
-	ptxn::test::print::PrintTiming printTiming("test/headeredSerializer");
+	ptxn::test::print::PrintTiming printTiming("test/twoLevelHeaderedSerializer");
 
 	TestSerializer serializer;
 
@@ -336,10 +336,7 @@ void write(ptxn::SubsequencedMessageSerializer& serializer) {
 }
 
 void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
-	auto mutation = std::get<MutationRef>(iterator->message);
-
-	ASSERT_EQ(mutation.type, MutationRef::NoOp);
-	++iterator;
+	// The empty version section should not be touched by iterator
 }
 
 } // namespace S4
@@ -635,6 +632,8 @@ bool testDeserializerReset() {
 TEST_CASE("/fdbserver/ptxn/test/SubsequencedMessageSerializer/normal") {
 	using namespace testSubsequencedMessageSerializer;
 
+	ptxn::test::print::PrintTiming printTiming("test/SubsequencedMessageSerializer");
+
 	ASSERT(testSerialization());
 	ASSERT(testSerializationEmpty());
 	ASSERT(testDeserializerIterators());
@@ -803,6 +802,8 @@ bool testWriteMessage(const UnitTestParameters& params) {
 
 TEST_CASE("/fdbserver/ptxn/test/ProxySubsequenceMessageSerializer/normal") {
 	using namespace testProxySubsequenceMessageSerializer;
+
+	ptxn::test::print::PrintTiming printTiming("test/ProxySubsequenceMessageSerializer");
 
 	ASSERT(testWriteMessage(params));
 

@@ -106,12 +106,6 @@ const Subsequence& SubsequencedMessageSerializer::getCurrentSubsequence() const 
 }
 
 void SubsequencedMessageSerializer::completeVersionWriting() {
-	// If a version exists, yet has 0 items (an empty commit), a NOOP is injected to avoid version skipping. Since the
-	// NOOP basically does nothing, it has the maximum subsequence number, which *hopefully* will never be reached.
-	if (serializer.getNumItemsCurrentSection() == 0) {
-		write(MAX_SUBSEQUENCE, MutationRef{ MutationRef::NoOp, ""_sr, ""_sr });
-	}
-
 	serializer.completeSectionWriting();
 
 	sectionHeader.numItems = serializer.getNumItemsCurrentSection();

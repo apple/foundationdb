@@ -26,8 +26,7 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    # This should match *ALL* SubsequencedMessageSerializer test cases
-    testsMatching = '/fdbserver/ptxn/test/SubsequencedMessageSerializer'
+    testsMatching = '/fdbserver/ptxn/test/SubsequencedMessageSerializer/normal'
 
 [[test]]
 testTitle = 'Test ProxySubsequenceMessageSerializer'
@@ -37,7 +36,7 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/ProxySubsequenceMessageSerializer'
+    testsMatching = '/fdbserver/ptxn/test/ProxySubsequenceMessageSerializer/normal'
 
 [[test]]
 testTitle = 'Test SubsequencedMessageSerializer -- Huge amount of data'
