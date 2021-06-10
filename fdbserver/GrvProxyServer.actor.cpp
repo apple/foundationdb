@@ -189,8 +189,8 @@ struct GrvTransactionRateInfo {
 
 	void disable() {
 		disabled = true;
-		rate = 0;
-		smoothRate.reset(0);
+		// Use smoothRate.setTotal(0) instead of setting rate to 0 so txns will not be throttled immediately.
+		smoothRate.setTotal(0);
 	}
 
 	void setRate(double rate) {
@@ -389,13 +389,15 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>>
 					                             TaskPriority::ProxyGRVTimer));
 				}
 
-				++stats->txnRequestIn;
-				stats->txnStartIn += req.transactionCount;
 				if (req.priority >= TransactionPriority::IMMEDIATE) {
+					++stats->txnRequestIn;
+					stats->txnStartIn += req.transactionCount;
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					systemQueue->push_back(req);
 					systemQueue->span.addParent(req.spanContext);
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
+					++stats->txnRequestIn;
+					stats->txnStartIn += req.transactionCount;
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					defaultQueue->push_back(req);
 					defaultQueue->span.addParent(req.spanContext);
@@ -405,12 +407,13 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>>
 					if (batchRateInfo->rate <= (1.0 / proxiesCount)) {
 						req.reply.sendError(batch_transaction_throttled());
 						stats->txnThrottled += req.transactionCount;
-						continue;
+					} else {
+						++stats->txnRequestIn;
+						stats->txnStartIn += req.transactionCount;
+						stats->txnBatchPriorityStartIn += req.transactionCount;
+						batchQueue->push_back(req);
+						batchQueue->span.addParent(req.spanContext);
 					}
-
-					stats->txnBatchPriorityStartIn += req.transactionCount;
-					batchQueue->push_back(req);
-					batchQueue->span.addParent(req.spanContext);
 				}
 			}
 		}
