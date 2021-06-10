@@ -170,6 +170,9 @@ class TestConfig {
 			if (attrib == "maxTLogVersion") {
 				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
+			if (attrib == "disableTss") {
+				sscanf(value.c_str(), "%d", &disableTss);
+			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
@@ -186,6 +189,8 @@ public:
 	bool startIncompatibleProcess = false;
 	int logAntiQuorum = -1;
 	bool isFirstTestInRestart = false;
+	// 7.0 cannot be downgraded to 6.3 after enabling TSS, so disable TSS for 6.3 downgrade tests
+	bool disableTss = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
@@ -234,6 +239,7 @@ public:
 		    .add("logAntiQuorum", &logAntiQuorum)
 		    .add("storageEngineExcludeTypes", &storageEngineExcludeTypes)
 		    .add("maxTLogVersion", &maxTLogVersion)
+		    .add("disableTss", &disableTss)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -1191,7 +1197,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	}
 
 	int tssCount = 0;
-	if (!testConfig.simpleConfig && deterministicRandom()->random01() < 0.25) {
+	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
 	}
