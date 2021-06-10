@@ -73,7 +73,8 @@ ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool
 
 struct ProxyStats {
 	CounterCollection cc;
-	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
+	Counter systemAndDefaultTxnRequestIn, systemAndDefaultTxnRequestOut, systemAndDefaultTxnRequestErrors;
+	Counter batchTxnRequestIn, batchTxnRequestOut, batchTxnRequestErrors;
 	Counter txnStartIn, txnStartOut, txnStartBatch;
 	Counter txnSystemPriorityStartIn, txnSystemPriorityStartOut;
 	Counter txnBatchPriorityStartIn, txnBatchPriorityStartOut;
@@ -155,8 +156,12 @@ struct ProxyStats {
 	                    int64_t* commitBatchesMemBytesCountPtr)
 	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()), maxComputeNS(0), minComputeNS(1e12),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
-	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
-	    txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
+	    systemAndDefaultTxnRequestIn("SystemAndDefaultTxnRequestIn", cc),
+	    systemAndDefaultTxnRequestOut("SystemAndDefaultTxnRequestOut", cc),
+	    systemAndDefaultTxnRequestErrors("SystemAndDefaultTxnRequestErrors", cc),
+	    batchTxnRequestIn("BatchTxnRequestIn", cc), batchTxnRequestOut("BatchTxnRequestOut", cc),
+	    batchTxnRequestErrors("BatchTxnRequestErrors", cc), txnStartIn("TxnStartIn", cc),
+	    txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
 	    txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
 	    txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
 	    txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
@@ -398,53 +403,103 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 	loop choose {
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
-			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
-			    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
-				++stats->txnRequestErrors;
-				// FIXME: send an error instead of giving an unreadable version when the client can support the error:
-				// req.reply.sendError(proxy_memory_limit_exceeded());
-				GetReadVersionReply rep;
-				rep.version = 1;
-				rep.locked = true;
-				req.reply.send(rep);
-				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
-			} else {
-				stats->addRequest(req.transactionCount);
-				// TODO: check whether this is reasonable to do in the fast path
-				for (auto tag : req.tags) {
-					(*transactionTagCounter)[tag.first] += tag.second;
-				}
-
-				if (req.debugID.present())
-					g_traceBatch.addEvent("TransactionDebug",
-					                      req.debugID.get().first(),
-					                      "MasterProxyServer.queueTransactionStartRequests.Before");
-
-				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
-					forwardPromise(GRVTimer,
-					               delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)),
-					                             TaskPriority::ProxyGRVTimer));
-				}
-
-				++stats->txnRequestIn;
-				stats->txnStartIn += req.transactionCount;
-				if (req.priority >= TransactionPriority::IMMEDIATE) {
-					stats->txnSystemPriorityStartIn += req.transactionCount;
-					systemQueue->push_back(req);
-				} else if (req.priority >= TransactionPriority::DEFAULT) {
-					stats->txnDefaultPriorityStartIn += req.transactionCount;
-					defaultQueue->push_back(req);
+			if (SERVER_KNOBS->BATCH_TXN_ALWAYS_QUEUING_REQ) {
+				if (req.priority >= TransactionPriority::DEFAULT &&
+				    stats->systemAndDefaultTxnRequestIn.getValue() - stats->systemAndDefaultTxnRequestOut.getValue() >
+				        SERVER_KNOBS->START_TRANSACTION_SYSTEM_AND_DEFAULT_MAX_QUEUE_SIZE) {
+					++stats->systemAndDefaultTxnRequestErrors;
+					// FIXME: send an error instead of giving an unreadable version when the client can support the
+					// error: req.reply.sendError(proxy_memory_limit_exceeded());
+					GetReadVersionReply rep;
+					rep.version = 1;
+					rep.locked = true;
+					req.reply.send(rep);
+					TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
+				} else if (req.priority < TransactionPriority::DEFAULT &&
+				           stats->batchTxnRequestIn.getValue() - stats->batchTxnRequestOut.getValue() >
+				               SERVER_KNOBS->START_TRANSACTION_BATCH_MAX_QUEUE_SIZE) {
+					++stats->batchTxnRequestErrors;
+					// FIXME: send an error instead of giving an unreadable version when the client can support the
+					// error: req.reply.sendError(proxy_memory_limit_exceeded());
+					GetReadVersionReply rep;
+					rep.version = 1;
+					rep.locked = true;
+					req.reply.send(rep);
+					TraceEvent(SevWarnAlways, "ProxyBatchQueueSizeExceeded").suppressFor(60);
 				} else {
-					// Return error for batch_priority GRV requests
-					int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
-					if (batchRateInfo->rate <= (1.0 / proxiesCount)) {
-						req.reply.sendError(batch_transaction_throttled());
-						stats->txnThrottled += req.transactionCount;
-						continue;
+					stats->addRequest(req.transactionCount);
+					// TODO: check whether this is reasonable to do in the fast path
+					for (auto tag : req.tags) {
+						(*transactionTagCounter)[tag.first] += tag.second;
 					}
 
-					stats->txnBatchPriorityStartIn += req.transactionCount;
-					batchQueue->push_back(req);
+					if (req.debugID.present())
+						g_traceBatch.addEvent("TransactionDebug",
+						                      req.debugID.get().first(),
+						                      "MasterProxyServer.queueTransactionStartRequests.Before");
+
+					if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
+						forwardPromise(GRVTimer,
+						               delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)),
+						                             TaskPriority::ProxyGRVTimer));
+					}
+
+					stats->txnStartIn += req.transactionCount;
+					if (req.priority >= TransactionPriority::IMMEDIATE) {
+						++stats->systemAndDefaultTxnRequestIn;
+						stats->txnSystemPriorityStartIn += req.transactionCount;
+						systemQueue->push_back(req);
+					} else if (req.priority >= TransactionPriority::DEFAULT) {
+						++stats->systemAndDefaultTxnRequestIn;
+						stats->txnDefaultPriorityStartIn += req.transactionCount;
+						defaultQueue->push_back(req);
+					} else {
+						++stats->batchTxnRequestIn;
+						stats->txnBatchPriorityStartIn += req.transactionCount;
+						batchQueue->push_back(req);
+					}
+				}
+			} else {
+				// BATCH_TXN_ALWAYS_QUEUING_REQ = false, the old path.
+				if (stats->systemAndDefaultTxnRequestIn.getValue() - stats->systemAndDefaultTxnRequestOut.getValue() >
+				    SERVER_KNOBS->START_TRANSACTION_SYSTEM_AND_DEFAULT_MAX_QUEUE_SIZE) {
+					++stats->systemAndDefaultTxnRequestErrors;
+					// FIXME: send an error instead of giving an unreadable version when the client can support the
+					// error: req.reply.sendError(proxy_memory_limit_exceeded());
+					GetReadVersionReply rep;
+					rep.version = 1;
+					rep.locked = true;
+					req.reply.send(rep);
+					TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
+				} else {
+					stats->addRequest(req.transactionCount);
+					// TODO: check whether this is reasonable to do in the fast path
+					for (auto tag : req.tags) {
+						(*transactionTagCounter)[tag.first] += tag.second;
+					}
+
+					if (req.debugID.present())
+						g_traceBatch.addEvent("TransactionDebug",
+						                      req.debugID.get().first(),
+						                      "MasterProxyServer.queueTransactionStartRequests.Before");
+
+					if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
+						forwardPromise(GRVTimer,
+						               delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)),
+						                             TaskPriority::ProxyGRVTimer));
+					}
+
+					++stats->systemAndDefaultTxnRequestIn;
+					if (req.priority >= TransactionPriority::IMMEDIATE) {
+						stats->txnSystemPriorityStartIn += req.transactionCount;
+						systemQueue->push_back(req);
+					} else if (req.priority >= TransactionPriority::DEFAULT) {
+						stats->txnDefaultPriorityStartIn += req.transactionCount;
+						defaultQueue->push_back(req);
+					} else {
+						stats->txnBatchPriorityStartIn += req.transactionCount;
+						batchQueue->push_back(req);
+					}
 				}
 			}
 		}
@@ -901,10 +956,10 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 
 			//			if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
 			//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
-			//describe(tags)).detail("BackupMutation", backupMutation.toString()) 					.detail("BackupMutationSize",
-			//val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
-			//					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData",
-			//backupMutation.param1);
+			// describe(tags)).detail("BackupMutation", backupMutation.toString())
+			// .detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath",
+			// logRangeMutation.first) 					.detail("PartIndex", part).detail("PartIndexEndian",
+			// bigEndian32(part)).detail("PartData", backupMutation.param1);
 			//			}
 		}
 	}
@@ -997,7 +1052,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	}
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined
-	///and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
+	/// and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 
 	// Queuing pre-resolution commit processing
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber - 1);
@@ -1112,7 +1167,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterResolution");
 
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but
-	///doesn't need to be)
+	/// doesn't need to be)
 	TEST(self->latestLocalCommitBatchLogging.get() < localBatchNumber - 1); // Queuing post-resolution commit processing
 	wait(self->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
 	wait(yield(TaskPriority::ProxyCommitYield1));
@@ -1489,7 +1544,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 
 	//TraceEvent("ProxyPush", self->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion)
 	//	.detail("TransactionsSubmitted", trs.size()).detail("TransactionsCommitted", commitCount).detail("TxsPopTo",
-	//msg.popTo);
+	// msg.popTo);
 
 	if (prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), commitVersion);
@@ -1552,7 +1607,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	self->logSystem->popTxs(msg.popTo);
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for
-	///latency)
+	/// latency)
 	if (prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMinCommittedVersion(UID(), commitVersion);
 
@@ -1756,6 +1811,9 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 		if (request.priority >= TransactionPriority::DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(duration);
+			++stats->systemAndDefaultTxnRequestOut;
+		} else {
+			++stats->batchTxnRequestOut;
 		}
 
 		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
@@ -1789,7 +1847,6 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 
 		request.reply.send(reply);
-		++stats->txnRequestOut;
 	}
 
 	return Void();
@@ -1907,6 +1964,11 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy,
 
 			if (req.priority < TransactionPriority::DEFAULT &&
 			    !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+				if (SERVER_KNOBS->BATCH_TXN_ALWAYS_QUEUING_REQ) {
+					req.reply.sendError(batch_transaction_throttled());
+					batchQueue.pop_front();
+					stats->txnThrottled += req.transactionCount;
+				}
 				break;
 			} else if (req.priority < TransactionPriority::IMMEDIATE &&
 			           !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
