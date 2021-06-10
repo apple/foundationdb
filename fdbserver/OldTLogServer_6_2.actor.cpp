@@ -2813,7 +2813,10 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		removed.push_back(errorOr(logData->removed));
 		logsByVersion.emplace_back(ver, id1);
 
-		TraceEvent("TLogPersistentStateRestore", self->dbgid).detail("LogId", logData->logId).detail("Ver", ver);
+		TraceEvent("TLogPersistentStateRestore", self->dbgid)
+			.detail("LogId", logData->logId)
+			.detail("Ver", ver)
+			.detail("RecoveryCount", logData->recoveryCount);
 		// Restore popped keys.  Pop operations that took place after the last (committed) updatePersistentDataVersion
 		// might be lost, but that is fine because we will get the corresponding data back, too.
 		tagKeys = prefixRange(rawId.withPrefix(persistTagPoppedKeys.begin));
@@ -3050,7 +3053,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->popOrder.push_back(recruited.id());
 	self->spillOrder.push_back(recruited.id());
 
-	TraceEvent("TLogStart", logData->logId);
+	TraceEvent("TLogStart", logData->logId).detail("RecoveryCount", logData->recoveryCount);
 
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;
