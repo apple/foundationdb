@@ -937,7 +937,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	}
 
 	int tssCount = 0;
-	if (!testConfig.simpleConfig && deterministicRandom()->random01() < 0.25) {
+	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
 	}
@@ -1725,6 +1725,9 @@ void checkTestConf(const char* testFile, TestConfig* testConfig) {
 		}
 		if (attrib == "restartInfoLocation") {
 			testConfig->isFirstTestInRestart = true;
+		}
+		if (attrib == "disableTss") {
+			sscanf(value.c_str(), "%d", &testConfig->disableTss);
 		}
 	}
 
