@@ -346,7 +346,6 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 	return idx;
 }
 
-const KeyRef tssMappingChangeKey = LiteralStringRef("\xff\x02/tssMappingChangeKey");
 const KeyRangeRef tssMappingKeys(LiteralStringRef("\xff/tss/"), LiteralStringRef("\xff/tss0"));
 
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));

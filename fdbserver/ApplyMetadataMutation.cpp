@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/MutationList.h"
+#include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Notified.h"
@@ -64,6 +65,7 @@ void applyMetadataMutations(SpanID const& spanContext,
                             NotifiedVersion* commitVersion,
                             std::map<UID, Reference<StorageInfo>>* storageCache,
                             std::map<Tag, Version>* tag_popped,
+                            std::unordered_map<UID, StorageServerInterface>* tssMapping,
                             bool initialCommit) {
 	// std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
@@ -72,7 +74,9 @@ void applyMetadataMutations(SpanID const& spanContext,
 	// tss + find partner's tag to send the private mutation. Since the removeStorageServer transaction clears both the
 	// storage list and server tag, we have to enforce ordering, proccessing the server tag first, and postpone the
 	// server list clear until the end;
+	// Similarly, the TSS mapping change key needs to read the server list at the end of the commit
 	std::vector<KeyRangeRef> tssServerListToRemove;
+	std::vector<std::pair<UID, UID>> tssMappingToAdd;
 
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
@@ -237,6 +241,29 @@ void applyMetadataMutations(SpanID const& spanContext,
 							(*storageCache)[id] = storageInfo;
 						} else {
 							cacheItr->second->interf = interf;
+						}
+					}
+				}
+			} else if (m.param1.startsWith(tssMappingKeys.begin)) {
+				if (!initialCommit) {
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
+					if (tssMapping) {
+						// Normally uses key backed map, so have to use same unpacking code here.
+						UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
+						UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
+
+						tssMappingToAdd.push_back(std::pair(ssId, tssId));
+
+						// send private mutation to SS that it now has a TSS pair
+						if (toCommit) {
+							MutationRef privatized = m;
+							privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+
+							Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
+							if (tagV.present()) {
+								toCommit->addTag(decodeServerTagValue(tagV.get()));
+								toCommit->writeTypedMessage(privatized);
+							}
 						}
 					}
 				}
@@ -430,7 +457,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 					}
 					// Might be a tss removal, which doesn't store a tag there.
 					// Chained if is a little verbose, but avoids unecessary work
-					if (!initialCommit && !serverKeysCleared.size()) {
+					if (toCommit && !initialCommit && !serverKeysCleared.size()) {
 						KeyRangeRef maybeTssRange = range & serverTagKeys;
 						if (maybeTssRange.singleKeyRange()) {
 							UID id = decodeServerTagKey(maybeTssRange.begin);
@@ -481,6 +508,19 @@ void applyMetadataMutations(SpanID const& spanContext,
 				}
 				if (!initialCommit)
 					txnStateStore->clear(range & serverTagHistoryKeys);
+			}
+			if (tssMappingKeys.intersects(range)) {
+				if (!initialCommit) {
+					KeyRangeRef rangeToClear = range & tssMappingKeys;
+					ASSERT(rangeToClear.singleKeyRange());
+					txnStateStore->clear(rangeToClear);
+					if (tssMapping) {
+						// Normally uses key backed map, so have to use same unpacking code here.
+						UID ssId =
+						    Codec<UID>::unpack(Tuple::unpack(rangeToClear.begin.removePrefix(tssMappingKeys.begin)));
+						tssMapping->erase(ssId);
+					}
+				}
 			}
 			if (range.contains(coordinatorsKey)) {
 				if (!initialCommit)
@@ -615,6 +655,13 @@ void applyMetadataMutations(SpanID const& spanContext,
 		txnStateStore->clear(range);
 	}
 
+	for (auto& tssPair : tssMappingToAdd) {
+		// read tss server list from txn state store and add it to tss mapping
+		StorageServerInterface tssi =
+		    decodeServerListValue(txnStateStore->readValue(serverListKeyFor(tssPair.second)).get().get());
+		(*tssMapping)[tssPair.first] = tssi;
+	}
+
 	// If we accumulated private mutations for cached key-ranges, we also need to
 	// tag them with the relevant storage servers. This is done to make the storage
 	// servers aware of the cached key-ranges
@@ -713,6 +760,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 	                       &proxyCommitData.committedVersion,
 	                       &proxyCommitData.storageCache,
 	                       &proxyCommitData.tag_popped,
+	                       &proxyCommitData.tssMapping,
 	                       initialCommit);
 }
 
@@ -742,5 +790,6 @@ void applyMetadataMutations(SpanID const& spanContext,
 	                       /* commitVersion= */ nullptr,
 	                       /* storageCache= */ nullptr,
 	                       /* tag_popped= */ nullptr,
+	                       /* tssMapping= */ nullptr,
 	                       /* initialCommit= */ false);
 }

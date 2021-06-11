@@ -122,38 +122,50 @@ NetworkOptions::NetworkOptions()
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
-void DatabaseContext::maybeAddTssMapping(StorageServerInterface const& ssi) {
-	// add tss mapping if server is new
+void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi) {
+	auto result = tssMapping.find(ssi.id());
+	// Update tss endpoint mapping if ss isn't in mapping, or the interface it mapped to changed
+	if (result == tssMapping.end() ||
+	    result->second.getValue.getEndpoint().token.first() != tssi.getValue.getEndpoint().token.first()) {
+		Reference<TSSMetrics> metrics;
+		if (result == tssMapping.end()) {
+			// new TSS pairing
+			metrics = makeReference<TSSMetrics>();
+			tssMetrics[tssi.id()] = metrics;
+			tssMapping[ssi.id()] = tssi;
+		} else {
+			if (result->second.id() == tssi.id()) {
+				metrics = tssMetrics[tssi.id()];
+			} else {
+				TEST(true); // SS now maps to new TSS! This will probably never happen in practice
+				tssMetrics.erase(result->second.id());
+				metrics = makeReference<TSSMetrics>();
+				tssMetrics[tssi.id()] = metrics;
+			}
+			result->second = tssi;
+		}
 
-	Optional<StorageServerInterface> tssPair = clientInfo->get().getTssPair(ssi.id());
-	if (tssPair.present()) {
-		addTssMapping(ssi, tssPair.get());
+		queueModel.updateTssEndpoint(ssi.getValue.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getValue.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKey.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKey.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKeyValues.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.watchValue.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.watchValue.getEndpoint(), metrics));
 	}
 }
 
-// calling getInterface potentially recursively is weird, but since this function is only called when an entry is
-// created/changed, the recursive call should never recurse itself.
-void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi) {
-	Reference<StorageServerInfo> tssInfo = StorageServerInfo::getInterface(this, tssi, clientLocality);
-	Reference<StorageServerInfo> ssInfo = StorageServerInfo::getInterface(this, ssi, clientLocality);
-
-	Reference<TSSMetrics> metrics = makeReference<TSSMetrics>();
-	tssMetrics[tssi.id()] = metrics;
-
-	// Add each read data request we want to duplicate to TSS to endpoint mapping (getValue, getKey, getKeyValues,
-	// watchValue)
-	queueModel.updateTssEndpoint(
-	    ssInfo->interf.getValue.getEndpoint().token.first(),
-	    TSSEndpointData(tssi.id(), tssInfo->interf.getValue.getEndpoint(), metrics, clientInfo->get().id));
-	queueModel.updateTssEndpoint(
-	    ssInfo->interf.getKey.getEndpoint().token.first(),
-	    TSSEndpointData(tssi.id(), tssInfo->interf.getKey.getEndpoint(), metrics, clientInfo->get().id));
-	queueModel.updateTssEndpoint(
-	    ssInfo->interf.getKeyValues.getEndpoint().token.first(),
-	    TSSEndpointData(tssi.id(), tssInfo->interf.getKeyValues.getEndpoint(), metrics, clientInfo->get().id));
-	queueModel.updateTssEndpoint(
-	    ssInfo->interf.watchValue.getEndpoint().token.first(),
-	    TSSEndpointData(tssi.id(), tssInfo->interf.watchValue.getEndpoint(), metrics, clientInfo->get().id));
+void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
+	auto result = tssMapping.find(ssi.id());
+	if (result != tssMapping.end()) {
+		tssMetrics.erase(ssi.id());
+		tssMapping.erase(result);
+		queueModel.removeTssEndpoint(ssi.getValue.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKey.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKeyValues.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.watchValue.getEndpoint().token.first());
+	}
 }
 
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
@@ -170,12 +182,10 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 				//       changes.
 
 				it->second->interf = ssi;
-				cx->maybeAddTssMapping(ssi);
 			} else {
 				it->second->notifyContextDestroyed();
 				Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
 				cx->server_interf[ssi.id()] = loc.getPtr();
-				cx->maybeAddTssMapping(ssi);
 				return loc;
 			}
 		}
@@ -185,7 +195,6 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 
 	Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
 	cx->server_interf[ssi.id()] = loc.getPtr();
-	cx->maybeAddTssMapping(ssi);
 	return loc;
 }
 
@@ -813,45 +822,6 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	}
 }
 
-// updates tss mapping when set of tss servers changes
-ACTOR static Future<Void> monitorTssChange(DatabaseContext* cx) {
-	state vector<std::pair<UID, StorageServerInterface>> curTssMapping;
-	curTssMapping = cx->clientInfo->get().tssMapping;
-
-	loop {
-		wait(cx->clientInfo->onChange());
-		if (cx->clientInfo->get().tssMapping != curTssMapping) {
-			// To optimize size of the ClientDBInfo payload, we could eventually change CC to just send a tss change
-			// id/generation, and have client reread the mapping here if it changed. It's a very minor optimization
-			// though, and would cause extra read load.
-			ClientDBInfo clientInfo = cx->clientInfo->get();
-			curTssMapping = clientInfo.tssMapping;
-
-			std::unordered_set<UID> seenTssIds;
-
-			if (curTssMapping.size()) {
-				for (const auto& it : curTssMapping) {
-					seenTssIds.insert(it.second.id());
-
-					if (cx->server_interf.count(it.first)) {
-						cx->addTssMapping(cx->server_interf[it.first]->interf, it.second);
-					}
-				}
-			}
-
-			for (auto it = cx->tssMetrics.begin(); it != cx->tssMetrics.end();) {
-				if (seenTssIds.count(it->first)) {
-					it++;
-				} else {
-					it = cx->tssMetrics.erase(it);
-				}
-			}
-
-			cx->queueModel.removeOldTssData(clientInfo.id);
-		}
-	}
-}
-
 ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	state Reference<ReadYourWritesTransaction> tr;
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
@@ -860,7 +830,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 		// find ss pair id so we can remove it from the mapping
 		state UID tssPairID;
 		bool found = false;
-		for (const auto& it : cx->clientInfo->get().tssMapping) {
+		for (const auto& it : cx->tssMapping) {
 			if (it.second.id() == tssID) {
 				tssPairID = it.first;
 				found = true;
@@ -870,7 +840,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 		if (found) {
 			TraceEvent(SevWarnAlways, "TSS_KillMismatch").detail("TSSID", tssID.toString());
 			TEST(true); // killing TSS because it got mismatch
-			
+
 			// TODO we could write something to the system keyspace and then have DD listen to that keyspace and then DD
 			// do exactly this, so why not just cut out the middle man (or the middle system keys, as it were)
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(cx)));
@@ -883,7 +853,6 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 					tr->clear(serverTagKeyFor(tssID));
 					tssMapDB.erase(tr, tssPairID);
 
-					tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 					wait(tr->commit());
 
 					break;
@@ -1152,10 +1121,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	GlobalConfig::create(this, clientInfo);
-
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
-	monitorTssInfoChange = monitorTssChange(this);
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
@@ -1758,7 +1724,9 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                         /*switchable*/ true);
 	}
 
-	return Database(db);
+	auto database = Database(db);
+	GlobalConfig::create(database, clientInfo, std::addressof(clientInfo->get()));
+	return database;
 }
 
 Database Database::createDatabase(std::string connFileName,
@@ -2218,6 +2186,29 @@ ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInt
 	return serverInterfaces;
 }
 
+void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
+	// Since a ss -> tss mapping is included in resultsTssMapping iff that SS is in results and has a tss pair,
+	// all SS in results that do not have a mapping present must not have a tss pair.
+	std::unordered_map<UID, const StorageServerInterface*> ssiById;
+	for (const auto& [_, shard] : reply.results) {
+		for (auto& ssi : shard) {
+			ssiById[ssi.id()] = &ssi;
+		}
+	}
+
+	for (const auto& mapping : reply.resultsTssMapping) {
+		auto ssi = ssiById.find(mapping.first);
+		ASSERT(ssi != ssiById.end());
+		cx->addTssMapping(*ssi->second, mapping.second);
+		ssiById.erase(mapping.first);
+	}
+
+	// if SS didn't have a mapping above, it's still in the ssiById map, so remove its tss mapping
+	for (const auto& it : ssiById) {
+		cx->removeTssMapping(*it.second);
+	}
+}
+
 // If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key).
 // Otherwise returns the shard containing key
 ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Database cx,
@@ -2250,6 +2241,7 @@ ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Da
 				ASSERT(rep.results.size() == 1);
 
 				auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
+				updateTssMappings(cx, rep);
 				return std::make_pair(KeyRange(rep.results[0].first, rep.arena), locationInfo);
 			}
 		}
@@ -2313,6 +2305,7 @@ ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocatio
 					                     cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
 					wait(yield());
 				}
+				updateTssMappings(cx, rep);
 
 				return results;
 			}
@@ -5884,4 +5877,24 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 		throw snap_invalid_uid_string();
 	}
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
+}
+
+ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, bool lock_aware) {
+    state ReadYourWritesTransaction tr(cx);
+    loop {
+        try {
+            tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if(lock_aware) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			}
+
+            tr.set(perpetualStorageWiggleKey, enable ? LiteralStringRef("1") : LiteralStringRef("0"));
+            wait(tr.commit());
+            break;
+        }
+        catch (Error& e) {
+            wait(tr.onError(e));
+        }
+    }
+    return Void();
 }

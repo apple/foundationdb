@@ -138,6 +138,11 @@ else()
   add_library(fdb_java SHARED fdbJNI.cpp)
   add_library(java_workloads SHARED JavaWorkload.cpp)
 endif()
+
+if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+  target_link_options(java_workloads PRIVATE "LINKER:--version-script=${CMAKE_SOURCE_DIR}/bindings/c/external_workload.map,-z,nodelete")
+endif()
+
 target_include_directories(fdb_java PRIVATE ${JNI_INCLUDE_DIRS})
 # libfdb_java.so is loaded by fdb-java.jar and doesn't need to depened on jvm shared libraries.
 target_link_libraries(fdb_java PRIVATE fdb_c)

@@ -170,7 +170,10 @@ class TestConfig {
 			if (attrib == "maxTLogVersion") {
 				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
-                        if (attrib == "restartInfoLocation") {
+			if (attrib == "disableTss") {
+				sscanf(value.c_str(), "%d", &disableTss);
+			}
+			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
 		}
@@ -186,6 +189,8 @@ public:
 	bool startIncompatibleProcess = false;
 	int logAntiQuorum = -1;
 	bool isFirstTestInRestart = false;
+	// 7.0 cannot be downgraded to 6.3 after enabling TSS, so disable TSS for 6.3 downgrade tests
+	bool disableTss = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
@@ -203,6 +208,23 @@ public:
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
 
+	bool tomlKeyPresent(const toml::value& data, std::string key) {
+		if (data.is_table()) {
+			for (const auto& [k, v] : data.as_table()) {
+				if (k == key || tomlKeyPresent(v, key)) {
+					return true;
+				}
+			}
+		} else if (data.is_array()) {
+			for (const auto& v : data.as_array()) {
+				if (tomlKeyPresent(v, key)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	void readFromConfig(const char* testFile) {
 		if (isIniFile(testFile)) {
 			loadIniFile(testFile);
@@ -217,6 +239,7 @@ public:
 		    .add("logAntiQuorum", &logAntiQuorum)
 		    .add("storageEngineExcludeTypes", &storageEngineExcludeTypes)
 		    .add("maxTLogVersion", &maxTLogVersion)
+		    .add("disableTss", &disableTss)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -247,6 +270,10 @@ public:
 				if (stderrSeverity.present()) {
 					TraceEvent("StderrSeverity").detail("NewSeverity", stderrSeverity.get());
 				}
+			}
+			// look for restartInfoLocation to mark isFirstTestInRestart
+			if (!isFirstTestInRestart) {
+				isFirstTestInRestart = tomlKeyPresent(file, "restartInfoLocation");
 			}
 		} catch (std::exception& e) {
 			std::cerr << e.what() << std::endl;
@@ -1173,7 +1200,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	}
 
 	int tssCount = 0;
-	if (!testConfig.simpleConfig && deterministicRandom()->random01() < 0.25) {
+	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
 	}
@@ -1185,13 +1212,24 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	//	}
 	//	set_config("memory");
 	//  set_config("memory-radixtree-beta");
+
+    if (deterministicRandom()->random01() < 0.5) {
+        set_config("perpetual_storage_wiggle=0");
+    } else {
+        set_config("perpetual_storage_wiggle=1");
+    }
+// 	set_config("perpetual_storage_wiggle=1");
 	if (testConfig.simpleConfig) {
 		db.desiredTLogCount = 1;
 		db.commitProxyCount = 1;
 		db.grvProxyCount = 1;
 		db.resolverCount = 1;
 	}
-	int replication_type = testConfig.simpleConfig ? 1 : (std::max(testConfig.minimumReplication, datacenters > 4 ? deterministicRandom()->randomInt(1, 3) : std::min(deterministicRandom()->randomInt(0, 6), 3)));
+	int replication_type = testConfig.simpleConfig
+	                           ? 1
+	                           : (std::max(testConfig.minimumReplication,
+	                                       datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
+	                                                       : std::min(deterministicRandom()->randomInt(0, 6), 3)));
 	if (testConfig.config.present()) {
 		set_config(testConfig.config.get());
 	} else {

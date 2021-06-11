@@ -263,6 +263,8 @@ TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	gkvReq.begin = firstGreaterOrEqual(StringRef(a, s_a));
 	gkvReq.end = firstGreaterOrEqual(StringRef(a, s_b));
 	gkvReq.version = 5;
+	gkvReq.limit = 100;
+	gkvReq.limitBytes = 1000;
 
 	GetKeyValuesReply gkvReplyEmpty;
 	GetKeyValuesReply gkvReplyOne;

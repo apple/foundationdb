@@ -40,6 +40,7 @@ struct Tuple {
 	Tuple& append(int64_t);
 	// There are some ambiguous append calls in fdbclient, so to make it easier
 	// to add append for floats and doubles, name them differently for now.
+	Tuple& appendBool(bool);
 	Tuple& appendFloat(float);
 	Tuple& appendDouble(double);
 	Tuple& appendNull();
@@ -51,7 +52,7 @@ struct Tuple {
 		return append(t);
 	}
 
-	enum ElementType { NULL_TYPE, INT, BYTES, UTF8, FLOAT, DOUBLE };
+	enum ElementType { NULL_TYPE, INT, BYTES, UTF8, BOOL, FLOAT, DOUBLE };
 
 	// this is number of elements, not length of data
 	size_t size() const { return offsets.size(); }
@@ -59,6 +60,7 @@ struct Tuple {
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
 	int64_t getInt(size_t index, bool allow_incomplete = false) const;
+	bool getBool(size_t index) const;
 	float getFloat(size_t index) const;
 	double getDouble(size_t index) const;
 

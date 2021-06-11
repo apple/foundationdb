@@ -171,7 +171,6 @@ void ClientKnobs::initialize(Randomize _randomize) {
 	init( BACKUP_STATUS_DELAY,                    40.0 );
 	init( BACKUP_STATUS_JITTER,                   0.05 );
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
-	init( RESTORE_IGNORE_LOG_FILES,              false );
 	init( FASTRESTORE_ATOMICOP_WEIGHT,               1 ); if( randomize && BUGGIFY ) { FASTRESTORE_ATOMICOP_WEIGHT = deterministicRandom()->random01() * 200 + 1; }
 
 	// Configuration

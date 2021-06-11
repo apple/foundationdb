@@ -3358,7 +3358,7 @@ int main(int argc, char* argv[]) {
 				deleteData = true;
 				break;
 			case OPT_MIN_CLEANUP_SECONDS:
-				knobs.push_back(std::make_pair("min_cleanup_seconds", args->OptionArg()));
+				knobs.emplace_back("min_cleanup_seconds", args->OptionArg());
 				break;
 			case OPT_FORCE:
 				forceAction = true;
@@ -3453,7 +3453,7 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				syn = syn.substr(7);
-				knobs.push_back(std::make_pair(syn, args->OptionArg()));
+				knobs.emplace_back(syn, args->OptionArg());
 				break;
 			}
 			case OPT_BACKUPKEYS:
@@ -4211,7 +4211,7 @@ int main(int argc, char* argv[]) {
 					s = s.substr(LiteralStringRef("struct ").size());
 #endif
 
-				typeNames.push_back(std::make_pair(s, i->first));
+				typeNames.emplace_back(s, i->first);
 			}
 			std::sort(typeNames.begin(), typeNames.end());
 			for (int i = 0; i < typeNames.size(); i++) {

@@ -993,7 +993,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				allHealthy = true;
 				anyWithSource = false;
 				bestTeams.clear();
-				// Get team from teamCollections in diffrent DCs and find the best one
+				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
 					double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 					if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
@@ -1032,7 +1032,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 						anyWithSource = true;
 					}
 
-					bestTeams.push_back(std::make_pair(bestTeam.first.get(), bestTeam.second));
+					bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 					tciIndex++;
 				}
 				if (foundTeams && anyHealthy) {
@@ -1550,6 +1550,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
+                                         PromiseStream<Promise<int>> getUnhealthyRelocationCount,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
@@ -1679,6 +1680,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount.getFuture())) {
+					r.send(self.unhealthyRelocations);
+				}
 			}
 		}
 	} catch (Error& e) {

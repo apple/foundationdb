@@ -600,8 +600,8 @@ public:
 			std::vector<std::tuple<ProcessClass::Fitness, int, bool, int, Field>> orderedFields;
 			for (auto& it : fieldsWithMin) {
 				auto& fitness = field_fitness[it];
-				orderedFields.push_back(std::make_tuple(
-				    std::get<0>(fitness), std::get<1>(fitness), std::get<2>(fitness), field_count[it], it));
+				orderedFields.emplace_back(
+				    std::get<0>(fitness), std::get<1>(fitness), std::get<2>(fitness), field_count[it], it);
 			}
 			std::sort(orderedFields.begin(), orderedFields.end());
 			int totalFields = desired / minPerField;
@@ -1693,19 +1693,36 @@ public:
 		if (req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
 			if (regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
+				TraceEvent("CCSwitchPrimaryDc", id)
+				    .detail("CCDcId", clusterControllerDcId.get())
+				    .detail("OldPrimaryDcId", regions[0].dcId)
+				    .detail("NewPrimaryDcId", regions[1].dcId);
 				std::swap(regions[0], regions[1]);
 			}
 
 			if (regions[1].dcId == clusterControllerDcId.get() &&
 			    (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
 				if (regions[1].priority >= 0) {
+					TraceEvent("CCSwitchPrimaryDcVersionDifference", id)
+					    .detail("CCDcId", clusterControllerDcId.get())
+					    .detail("OldPrimaryDcId", regions[0].dcId)
+					    .detail("NewPrimaryDcId", regions[1].dcId);
 					std::swap(regions[0], regions[1]);
 				} else {
 					TraceEvent(SevWarnAlways, "CCDcPriorityNegative")
 					    .detail("DcId", regions[1].dcId)
-					    .detail("Priority", regions[1].priority);
+					    .detail("Priority", regions[1].priority)
+					    .detail("FindWorkersInDc", regions[0].dcId)
+					    .detail("Warning", "Failover did not happen but CC is in remote DC");
 				}
 			}
+
+			TraceEvent("CCFindWorkersForConfiguration", id)
+			    .detail("CCDcId", clusterControllerDcId.get())
+			    .detail("Region0DcId", regions[0].dcId)
+			    .detail("Region1DcId", regions[1].dcId)
+			    .detail("DatacenterVersionDifference", datacenterVersionDifference)
+			    .detail("VersionDifferenceUpdated", versionDifferenceUpdated);
 
 			bool setPrimaryDesired = false;
 			try {
@@ -1720,6 +1737,10 @@ public:
 				} else if (regions[0].dcId == clusterControllerDcId.get()) {
 					return reply.get();
 				}
+				TraceEvent(SevWarn, "CCRecruitmentFailed", id)
+				    .detail("Reason", "Recruited Txn system and CC are in different DCs")
+				    .detail("CCDcId", clusterControllerDcId.get())
+				    .detail("RecruitedTxnSystemDcId", regions[0].dcId);
 				throw no_more_servers();
 			} catch (Error& e) {
 				if (!goodRemoteRecruitmentTime.isReady() && regions[1].dcId != clusterControllerDcId.get()) {
@@ -1729,7 +1750,9 @@ public:
 				if (e.code() != error_code_no_more_servers || regions[1].priority < 0) {
 					throw;
 				}
-				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id).error(e);
+				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDc", id)
+				    .detail("SetPrimaryDesired", setPrimaryDesired)
+				    .error(e);
 				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId);
 				if (!setPrimaryDesired) {
 					vector<Optional<Key>> dcPriority;
@@ -3391,7 +3414,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
-		clientInfo.tssMapping = db->clientInfo->get().tssMapping;
 		db->clientInfo->set(clientInfo);
 		dbInfo.client = db->clientInfo->get();
 	}
@@ -3869,118 +3891,6 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 	}
 }
 
-// Monitors the tss mapping change key for changes,
-// and broadcasts the new tss mapping to the rest of the cluster in ClientDBInfo.
-ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
-	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-	loop {
-		state Reference<ReadYourWritesTransaction> tr =
-		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->db.db));
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
-				std::vector<std::pair<UID, UID>> tssResults =
-				    wait(tssMapDB.getRange(tr, UID(), Optional<UID>(), CLIENT_KNOBS->TOO_MANY));
-				ASSERT(tssResults.size() < CLIENT_KNOBS->TOO_MANY);
-
-				state std::unordered_map<UID, UID> tssIdMap;
-				std::set<UID> seenTssIds;
-
-				for (auto& it : tssResults) {
-					tssIdMap[it.first] = it.second;
-					// ensure two storage servers don't map to same TSS
-					ASSERT(seenTssIds.insert(it.second).second);
-					// ensure a storage server doesn't accidentally map to itself (unless we're in HACK_IDENTITY_MAPPING
-					// mode)
-					ASSERT(SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING || it.first != it.second);
-				}
-
-				state std::vector<std::pair<UID, StorageServerInterface>> newMapping;
-				state std::map<UID, StorageServerInterface> oldMapping;
-				state bool mappingChanged = false;
-
-				state ClientDBInfo clientInfo = self->db.clientInfo->get();
-
-				for (auto& it : clientInfo.tssMapping) {
-					oldMapping[it.first] = it.second;
-					if (!tssIdMap.count(it.first)) {
-						TraceEvent("TSS_MappingRemoved", self->id)
-						    .detail("SSID", it.first)
-						    .detail("TSSID", it.second.id());
-						mappingChanged = true;
-					}
-				}
-
-				for (auto& it : tssIdMap) {
-					bool ssAlreadyPaired = oldMapping.count(it.first);
-
-					state Optional<UID> oldTssId;
-					state Optional<UID> oldGetValueEndpoint;
-
-					if (ssAlreadyPaired) {
-						auto interf = oldMapping[it.first];
-						// check if this SS maps to a new TSS
-						oldTssId = Optional<UID>(interf.id());
-						oldGetValueEndpoint = Optional<UID>(interf.getValue.getEndpoint().token);
-						if (interf.id() != it.second) {
-							TraceEvent("TSS_MappingChanged", self->id)
-							    .detail("SSID", it.first)
-							    .detail("TSSID", it.second)
-							    .detail("OldTSSID", interf.id());
-							mappingChanged = true;
-						}
-					} else {
-						TraceEvent("TSS_MappingAdded", self->id).detail("SSID", it.first).detail("TSSID", it.second);
-						mappingChanged = true;
-					}
-
-					state UID ssid = it.first;
-					state UID tssid = it.second;
-					// request storage server interface for tssid, add it to results
-					Optional<Value> tssiVal = wait(tr->get(serverListKeyFor(it.second)));
-
-					// because we read the tss mapping in the same transaction, there can be no races with tss removal
-					// and the tss interface must exist
-					ASSERT(tssiVal.present());
-
-					StorageServerInterface tssi = decodeServerListValue(tssiVal.get());
-					if (oldTssId.present() && tssi.id() == oldTssId.get() && oldGetValueEndpoint.present() &&
-					    oldGetValueEndpoint.get() != tssi.getValue.getEndpoint().token) {
-						mappingChanged = true;
-					}
-					newMapping.push_back(std::pair<UID, StorageServerInterface>(ssid, tssi));
-				}
-
-				// if nothing changed, skip updating
-				if (mappingChanged) {
-					clientInfo.id = deterministicRandom()->randomUniqueID();
-					clientInfo.tssMapping = newMapping;
-					self->db.clientInfo->set(clientInfo);
-
-					ServerDBInfo serverInfo = self->db.serverInfo->get();
-					// also change server db info so workers get new mapping
-					serverInfo.id = deterministicRandom()->randomUniqueID();
-					serverInfo.infoGeneration = ++self->db.dbInfoCount;
-					serverInfo.client = clientInfo;
-					self->db.serverInfo->set(serverInfo);
-				}
-
-				state Future<Void> tssChangeFuture = tr->watch(tssMappingChangeKey);
-
-				wait(tr->commit());
-				wait(tssChangeFuture);
-
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-	}
-}
-
 // Monitors the global configuration version key for changes. When changes are
 // made, the global configuration history is read and any updates are sent to
 // all processes in the system by updating the ClientDBInfo object. The
@@ -3994,7 +3904,7 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
-				state ClientDBInfo clientInfo = db->clientInfo->get();
+				state ClientDBInfo clientInfo = db->serverInfo->get().client;
 
 				if (globalConfigVersion.present()) {
 					// Since the history keys end with versionstamps, they
@@ -4052,6 +3962,14 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					}
 
 					clientInfo.id = deterministicRandom()->randomUniqueID();
+					// Update ServerDBInfo so fdbserver processes receive updated history.
+					ServerDBInfo serverInfo = db->serverInfo->get();
+					serverInfo.id = deterministicRandom()->randomUniqueID();
+					serverInfo.infoGeneration = ++db->dbInfoCount;
+					serverInfo.client = clientInfo;
+					db->serverInfo->set(serverInfo);
+
+					// Update ClientDBInfo so client processes receive updated history.
 					db->clientInfo->set(clientInfo);
 				}
 
@@ -4539,7 +4457,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
-	self.addActor.send(monitorTSSMapping(&self));
+	// self.addActor.send(monitorTSSMapping(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
 	                                 self.id,

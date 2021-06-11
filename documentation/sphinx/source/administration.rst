@@ -59,7 +59,7 @@ It can be stopped and prevented from starting at boot as follows::
 Start, stop and restart behavior
 =================================
 
-These commands above start and stop the master ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
+These commands above start and stop the ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
 
 After any child process has terminated by any reason, ``fdbmonitor`` tries to restart it. See :ref:`restarting parameters <configuration-restarting>`.
 
