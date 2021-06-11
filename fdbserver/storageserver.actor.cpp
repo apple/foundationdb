@@ -180,6 +180,7 @@ struct StorageServerDisk {
 	void makeNewStorageServerDurable();
 	bool makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft);
 	void makeVersionDurable(Version version);
+	void makeTssQuarantineDurable();
 	Future<bool> restoreDurableState();
 
 	void changeLogProtocol(Version version, ProtocolVersion protocol);
@@ -540,6 +541,22 @@ public:
 		}
 	}
 
+	// If a TSS is "in quarantine", it means it has incorrect data. It is effectively in a "zombie" state where it
+	// rejects all read requests and ignores all non-private mutations and data movements, but otherwise is still part
+	// of the cluster. The purpose of this state is to "freeze" the TSS state after a mismatch so a human operator can
+	// investigate, but preventing a new storage process from replacing the TSS on the worker. It will still get removed
+	// from the cluster if it falls behind on the mutation stream, or if its tss pair gets removed and its tag is no
+	// longer valid.
+	bool isTSSInQuarantine() { return tssPairID.present() && tssInQuarantine; }
+
+	void startTssQuarantine() {
+		if (!tssInQuarantine) {
+			// persist quarantine so it's still quarantined if rebooted
+			storage.makeTssQuarantineDurable();
+		}
+		tssInQuarantine = true;
+	}
+
 	StorageServerDisk storage;
 
 	KeyRangeMap<Reference<ShardInfo>> shards;
@@ -585,6 +602,8 @@ public:
 	Optional<UID> tssPairID; // if this server is a tss, this is the id of its (ss) pair
 	Optional<UID> ssPairID; // if this server is an ss, this is the id of its (tss) pair
 	Optional<double> tssFaultInjectTime;
+	bool tssInQuarantine;
+
 	Key sk;
 	Reference<AsyncVar<ServerDBInfo>> db;
 	Database cx;
@@ -787,7 +806,7 @@ public:
 	    primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), shuttingDown(false),
 	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
-	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
+	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()), tssInQuarantine(false),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
 	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
 	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0) {
@@ -914,10 +933,10 @@ public:
 	template <class Request>
 	bool shouldRead(const Request& request) {
 		auto rate = currentRate();
-		if (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD &&
-		    deterministicRandom()->random01() >
-		        std::max(SERVER_KNOBS->STORAGE_DURABILITY_LAG_MIN_RATE,
-		                 rate / SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD)) {
+		if (isTSSInQuarantine() || (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD &&
+		                            deterministicRandom()->random01() >
+		                                std::max(SERVER_KNOBS->STORAGE_DURABILITY_LAG_MIN_RATE,
+		                                         rate / SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD))) {
 			sendErrorWithPenalty(request.reply, server_overloaded(), getPenalty());
 			++counters.readsRejected;
 			return false;
@@ -3188,6 +3207,7 @@ static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("Foundation
                                                     LiteralStringRef("FoundationDB/StorageServer/1/5"));
 static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
 static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
+static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
 
 // (Potentially) change with the durable version or when fetchKeys completes
 static const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
@@ -3264,12 +3284,16 @@ private:
 			ASSERT(m.type == MutationRef::SetValue && m.param1.startsWith(data->sk));
 			KeyRangeRef keys(startKey.removePrefix(data->sk), m.param1.removePrefix(data->sk));
 
-			// add changes in shard assignment to the mutation log
-			setAssignedStatus(data, keys, nowAssigned);
+			// ignore data movements for tss in quarantine
+			if (!data->isTSSInQuarantine()) {
+				// add changes in shard assignment to the mutation log
+				setAssignedStatus(data, keys, nowAssigned);
 
-			// The changes for version have already been received (and are being processed now).  We need
-			// to fetch the data for change.version-1 (changes from versions < change.version)
-			changeServerKeys(data, keys, nowAssigned, currentVersion - 1, CSK_UPDATE);
+				// The changes for version have already been received (and are being processed now).  We need to fetch
+				// the data for change.version-1 (changes from versions < change.version)
+				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, CSK_UPDATE);
+			}
+
 			processedStartKey = false;
 		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(data->sk)) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -3307,7 +3331,8 @@ private:
 			bool matchesThisServer = serverTagKey == data->thisServerID;
 			bool matchesTssPair = data->isTss() ? serverTagKey == data->tssPairID.get() : false;
 			if ((m.type == MutationRef::SetValue && !data->isTss() && !matchesThisServer) ||
-			    (m.type == MutationRef::ClearRange && (matchesThisServer || (data->isTss() && matchesTssPair)))) {
+			    (m.type == MutationRef::ClearRange &&
+			     ((!data->isTSSInQuarantine() && matchesThisServer) || (data->isTss() && matchesTssPair)))) {
 				throw worker_removed();
 			}
 			if (!data->isTss() && m.type == MutationRef::ClearRange && data->ssPairID.present() &&
@@ -3323,12 +3348,32 @@ private:
 			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
 			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 			data->addMutationToMutationLog(mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2));
-		} else if (m.type == MutationRef::SetValue && m.param1.substr(1).startsWith(tssMappingKeys.begin)) {
+		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
+		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
 			if (!data->isTss()) {
 				UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.substr(1).removePrefix(tssMappingKeys.begin)));
-				UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
 				ASSERT(ssId == data->thisServerID);
-				data->setSSWithTssPair(tssId);
+				if (m.type == MutationRef::SetValue) {
+					UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
+					data->setSSWithTssPair(tssId);
+				} else {
+					data->clearSSWithTssPair();
+				}
+			}
+		} else if (m.param1.substr(1).startsWith(tssQuarantineKeys.begin) &&
+		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
+			if (data->isTss()) {
+				UID ssId = decodeTssQuarantineKey(m.param1.substr(1));
+				ASSERT(ssId == data->thisServerID);
+				if (m.type == MutationRef::SetValue) {
+					TEST(true); // Putting TSS in quarantine
+					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID);
+					data->startTssQuarantine();
+				} else {
+					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID);
+					// dipose of this TSS
+					throw worker_removed();
+				}
 			}
 		} else {
 			ASSERT(false); // Unknown private mutation
@@ -3579,13 +3624,21 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				Span span("SS:update"_loc, { spanContext });
 				span.addTag("key"_sr, msg.param1);
 
+				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
+				// quarantine.
 				if (g_network->isSimulated() && data->isTss() &&
 				    g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations &&
 				    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
-				    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) && msg.param1.size() &&
-				    msg.param1[0] != 0xff && deterministicRandom()->random01() < 0.05) {
+				    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
+				    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
+				    deterministicRandom()->random01() < 0.05) {
 					TraceEvent(SevWarnAlways, "TSSInjectDropMutation", data->thisServerID)
 					    .detail("Mutation", msg.toString())
+					    .detail("Version", cloneCursor2->version().toString());
+				} else if (data->isTSSInQuarantine() &&
+				           (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff)) {
+					TraceEvent("TSSQuarantineDropMutation", data->thisServerID)
+					    .suppressFor(10.0)
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
 					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);
@@ -3945,6 +3998,11 @@ void StorageServerDisk::makeVersionDurable(Version version) {
 	//     .detail("ToVersion", version);
 }
 
+// Update data->storage to persist tss quarantine state
+void StorageServerDisk::makeTssQuarantineDurable() {
+	storage->set(KeyValueRef(persistTssQuarantine, LiteralStringRef("1")));
+}
+
 void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion protocol) {
 	data->addMutationToMutationLogOrStorage(
 	    version,
@@ -4061,6 +4119,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fID = storage->readValue(persistID);
 	state Future<Optional<Value>> ftssPairID = storage->readValue(persistTssPairID);
+	state Future<Optional<Value>> fTssQuarantine = storage->readValue(persistTssQuarantine);
 	state Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
 	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
 	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
@@ -4073,7 +4132,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	    restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
 	TraceEvent("ReadingDurableState", data->thisServerID);
-	wait(waitForAll(std::vector{ fFormat, fID, ftssPairID, fVersion, fLogProtocol, fPrimaryLocality }));
+	wait(waitForAll(std::vector{ fFormat, fID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID);
@@ -4097,6 +4156,14 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		data->setTssPair(BinaryReader::fromStringRef<UID>(ftssPairID.get().get(), Unversioned()));
 	}
 
+	// It's a bit sketchy to rely on an untrusted storage engine to persist its quarantine state when the quarantine
+	// state means the storage engine already had a durability or correctness error, but it should get re-quarantined
+	// very quickly because of a mismatch if it starts trying to do things again
+	if (fTssQuarantine.get().present()) {
+		TEST(true); // TSS restarted while quarantined
+		data->tssInQuarantine = true;
+	}
+
 	data->sk = serverKeysPrefixFor((data->tssPairID.present()) ? data->tssPairID.get() : data->thisServerID)
 	               .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 
@@ -4118,6 +4185,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		                     ? allKeys.end
 		                     : available[availableLoc + 1].key.removePrefix(persistShardAvailableKeys.begin));
 		ASSERT(!keys.empty());
+
 		bool nowAvailable = available[availableLoc].value != LiteralStringRef("0");
 		/*if(nowAvailable)
 		  TraceEvent("AvailableShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
@@ -4796,6 +4864,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	if (e.code() == error_code_please_reboot) {
 		// do nothing.
 	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
+		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be investigated?
 		persistentData->dispose();
 	} else {
 		persistentData->close();
@@ -5026,7 +5095,9 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 			tr->set(serverListKeyFor(ssi.id()), serverListValue(ssi));
 
 			// add itself back to tss mapping
-			tssMapDB.set(tr, self->tssPairID.get(), ssi.id());
+			if (!self->isTSSInQuarantine()) {
+				tssMapDB.set(tr, self->tssPairID.get(), ssi.id());
+			}
 
 			wait(tr->commit());
 			self->tag = myTag;
