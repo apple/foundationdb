@@ -3987,7 +3987,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 	for (const auto& info : self->pid2server_info[self->wigglingPid.get()]) {
 		excludedServerIds.push_back(info->id);
 	}
-	if (self->teams.size() > 1 && _exclusionSafetyCheck(excludedServerIds, self)) { // pre-check health status
+	if (self->healthyTeamCount > 1 && _exclusionSafetyCheck(excludedServerIds, self)) { // pre-check health status
 		TEST(true); // start the first wiggling
 
 		auto fv = self->excludeStorageServersForWiggle(self->wigglingPid.get());
@@ -4019,7 +4019,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				for (const auto& info : self->pid2server_info[self->wigglingPid.get()]) {
 					excludedServerIds.push_back(info->id);
 				}
-				if (self->teams.size() > 1 && _exclusionSafetyCheck(excludedServerIds, self)) {
+				if (self->healthyTeamCount > 1 && _exclusionSafetyCheck(excludedServerIds, self)) {
 					TEST(true); // start wiggling
 
 					auto fv = self->excludeStorageServersForWiggle(pid);
@@ -4072,7 +4072,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD && !isPaused) {
 					pauseWiggle.trigger();
 				} else if (isPaused && count < SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD &&
-				           self->teams.size() > 1 && _exclusionSafetyCheck(excludedServerIds, self)) {
+				           self->healthyTeamCount > 1 && _exclusionSafetyCheck(excludedServerIds, self)) {
 					restart.trigger();
 				}
 				ddQueueCheck = delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow);
