@@ -52,7 +52,7 @@ void applyMetadataMutations(SpanID const& spanContext,
                             Arena& arena,
                             VectorRef<MutationRef> const& mutations,
                             IKeyValueStore* txnStateStore,
-                            LogPushData* toCommit,
+                            LogPushData* toCommit, // non-null if these mutations were part of a new commit handled by this commit proxy
                             bool& confChange,
                             Reference<ILogSystem> logSystem,
                             Version popVersion,
@@ -66,7 +66,8 @@ void applyMetadataMutations(SpanID const& spanContext,
                             std::map<UID, Reference<StorageInfo>>* storageCache,
                             std::map<Tag, Version>* tag_popped,
                             std::unordered_map<UID, StorageServerInterface>* tssMapping,
-                            bool initialCommit) {
+                            bool initialCommit // true if the mutations were already written to the txnStateStore as part of recovery
+) {
 	// std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
 
@@ -245,24 +246,45 @@ void applyMetadataMutations(SpanID const& spanContext,
 					}
 				}
 			} else if (m.param1.startsWith(tssMappingKeys.begin)) {
+				// Normally uses key backed map, so have to use same unpacking code here.
+				UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
+				UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
 				if (!initialCommit) {
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
-					if (tssMapping) {
-						// Normally uses key backed map, so have to use same unpacking code here.
-						UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
-						UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
+				}
+				if (tssMapping) {
+					tssMappingToAdd.push_back(std::pair(ssId, tssId));
+				}
 
-						tssMappingToAdd.push_back(std::pair(ssId, tssId));
+				if (toCommit) {
+					// send private mutation to SS that it now has a TSS pair
+					MutationRef privatized = m;
+					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 
-						// send private mutation to SS that it now has a TSS pair
-						if (toCommit) {
-							MutationRef privatized = m;
-							privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+					Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
+					if (tagV.present()) {
+						toCommit->addTag(decodeServerTagValue(tagV.get()));
+						toCommit->writeTypedMessage(privatized);
+					}
+				}
+			} else if (m.param1.startsWith(tssQuarantineKeys.begin)) {
+				if (!initialCommit) {
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 
-							Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
-							if (tagV.present()) {
-								toCommit->addTag(decodeServerTagValue(tagV.get()));
-								toCommit->writeTypedMessage(privatized);
+					if (toCommit) {
+						UID tssId = decodeTssQuarantineKey(m.param1);
+						Optional<Value> ssiV = txnStateStore->readValue(serverListKeyFor(tssId)).get();
+						if (ssiV.present()) {
+							StorageServerInterface ssi = decodeServerListValue(ssiV.get());
+							if (ssi.isTss()) {
+								Optional<Value> tagV =
+								    txnStateStore->readValue(serverTagKeyFor(ssi.tssPairID.get())).get();
+								if (tagV.present()) {
+									MutationRef privatized = m;
+									privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+									toCommit->addTag(decodeServerTagValue(tagV.get()));
+									toCommit->writeTypedMessage(privatized);
+								}
 							}
 						}
 					}
@@ -510,15 +532,52 @@ void applyMetadataMutations(SpanID const& spanContext,
 					txnStateStore->clear(range & serverTagHistoryKeys);
 			}
 			if (tssMappingKeys.intersects(range)) {
+				KeyRangeRef rangeToClear = range & tssMappingKeys;
+				ASSERT(rangeToClear.singleKeyRange());
+
+				// Normally uses key backed map, so have to use same unpacking code here.
+				UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
 				if (!initialCommit) {
-					KeyRangeRef rangeToClear = range & tssMappingKeys;
+					txnStateStore->clear(rangeToClear);
+				}
+
+				if (tssMapping) {
+					tssMapping->erase(ssId);
+				}
+
+				if (toCommit) {
+					// send private mutation to SS to notify that it no longer has a tss pair
+					Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
+					if (tagV.present()) {
+						MutationRef privatized = m;
+						privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+						toCommit->addTag(decodeServerTagValue(tagV.get()));
+						toCommit->writeTypedMessage(privatized);
+					}
+				}
+			}
+			if (tssQuarantineKeys.intersects(range)) {
+				if (!initialCommit) {
+					KeyRangeRef rangeToClear = range & tssQuarantineKeys;
 					ASSERT(rangeToClear.singleKeyRange());
 					txnStateStore->clear(rangeToClear);
-					if (tssMapping) {
-						// Normally uses key backed map, so have to use same unpacking code here.
-						UID ssId =
-						    Codec<UID>::unpack(Tuple::unpack(rangeToClear.begin.removePrefix(tssMappingKeys.begin)));
-						tssMapping->erase(ssId);
+
+					if (toCommit) {
+						UID tssId = decodeTssQuarantineKey(m.param1);
+						Optional<Value> ssiV = txnStateStore->readValue(serverListKeyFor(tssId)).get();
+						if (ssiV.present()) {
+							StorageServerInterface ssi = decodeServerListValue(ssiV.get());
+							if (ssi.isTss()) {
+								Optional<Value> tagV =
+								    txnStateStore->readValue(serverTagKeyFor(ssi.tssPairID.get())).get();
+								if (tagV.present()) {
+									MutationRef privatized = m;
+									privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+									toCommit->addTag(decodeServerTagValue(tagV.get()));
+									toCommit->writeTypedMessage(privatized);
+								}
+							}
+						}
 					}
 				}
 			}

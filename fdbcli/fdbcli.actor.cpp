@@ -24,6 +24,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/Status.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -495,10 +496,10 @@ void initHelp() {
 	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will "
 	    "succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-	    "configure [new] "
+	    "configure [new|tss]"
 	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
 	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
-	    "perpetual_storage_wiggle=<WIGGLE_SPEED>",
+	    "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -685,6 +686,12 @@ void initHelp() {
 	    CommandHelp("triggerddteaminfolog",
 	                "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
+	helpMap["tssq"] =
+	    CommandHelp("tssq start|stop <StorageUID>",
+	                "start/stop tss quarantine",
+	                "Toggles Quarantine mode for a Testing Storage Server. Quarantine will happen automatically if the "
+	                "TSS is detected to have incorrect data, but can also be initiated manually. You can also remove a "
+	                "TSS from quarantine once your investigation is finished, which will destroy the TSS process.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -1882,6 +1889,75 @@ ACTOR Future<Void> triggerDDTeamInfoLog(Database db) {
 			wait(tr.onError(e));
 		}
 	}
+}
+
+ACTOR Future<Void> tssQuarantineList(Database db) {
+	state ReadYourWritesTransaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			RangeResult result = wait(tr.getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY));
+			// shouldn't have many quarantined TSSes
+			ASSERT(!result.more);
+			printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");
+			for (auto& it : result) {
+				printf("  %s\n", decodeTssQuarantineKey(it.key).toString().c_str());
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<bool> tssQuarantine(Database db, bool enable, UID tssId) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			// Do some validation first to make sure the command is valid
+			Optional<Value> serverListValue = wait(tr->get(serverListKeyFor(tssId)));
+			if (!serverListValue.present()) {
+				printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
+				return false;
+			}
+			state StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+			if (!ssi.isTss()) {
+				printf("Cannot quarantine Non-TSS storage ID %s!\n", tssId.toString().c_str());
+				return false;
+			}
+
+			Optional<Value> currentQuarantineValue = wait(tr->get(tssQuarantineKeyFor(tssId)));
+			if (enable && currentQuarantineValue.present()) {
+				printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
+				return false;
+			} else if (!enable && !currentQuarantineValue.present()) {
+				printf("TSS %s is not in quarantine, cannot remove from quarantine!.\n", tssId.toString().c_str());
+				return false;
+			}
+
+			if (enable) {
+				tr->set(tssQuarantineKeyFor(tssId), LiteralStringRef(""));
+				// remove server from TSS mapping when quarantine is enabled
+				tssMapDB.erase(tr, ssi.tssPairID.get());
+			} else {
+				tr->clear(tssQuarantineKeyFor(tssId));
+			}
+
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	printf("Successfully %s TSS %s\n", enable ? "quarantined" : "removed", tssId.toString().c_str());
+	return true;
 }
 
 ACTOR Future<Void> timeWarning(double when, const char* msg) {
@@ -3434,6 +3510,31 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
 					wait(triggerDDTeamInfoLog(db));
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "tssq")) {
+					if (tokens.size() == 2) {
+						if (tokens[1] != LiteralStringRef("list")) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(tssQuarantineList(db));
+						}
+					}
+					if (tokens.size() == 3) {
+						if ((tokens[1] != LiteralStringRef("start") && tokens[1] != LiteralStringRef("stop")) ||
+						    (tokens[2].size() != 32) || !std::all_of(tokens[2].begin(), tokens[2].end(), &isxdigit)) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							bool enable = tokens[1] == LiteralStringRef("start");
+							UID tssId = UID::fromString(tokens[2].toString());
+							bool err = wait(tssQuarantine(db, enable, tssId));
+							if (err)
+								is_error = true;
+						}
+					}
 					continue;
 				}
 

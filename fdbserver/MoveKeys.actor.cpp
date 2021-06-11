@@ -1253,7 +1253,14 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 					TraceEvent(SevError, "TSSIdentityMappingEnabled");
 					tssMapDB.erase(tr, serverID);
 				} else if (tssPairID.present()) {
+					// remove the TSS from the mapping
 					tssMapDB.erase(tr, tssPairID.get());
+					// remove the TSS from quarantine, if it was in quarantine
+					Key tssQuarantineKey = tssQuarantineKeyFor(serverID);
+					Optional<Value> tssInQuarantine = wait(tr->get(tssQuarantineKey));
+					if (tssInQuarantine.present()) {
+						tr->clear(tssQuarantineKeyFor(serverID));
+					}
 				}
 
 				retry = true;
