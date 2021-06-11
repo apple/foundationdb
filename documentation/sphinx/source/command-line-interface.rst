@@ -503,3 +503,21 @@ Disables writing from ``fdbcli`` (the default). In this mode, attempting to set 
 ``writemode on``
 
 Enables writing from ``fdbcli``.
+
+tssq
+----
+
+Utility commands for handling quarantining Testing Storage Servers. For more information on this, see :ref:`testing-storage-server`.
+
+``tssq start <StorageUID>``
+
+Manually quarantines a TSS process, if it is not already quarantined.
+
+``tssq stop <StorageUID>``
+
+Removes a TSS process from quarantine, disposing of the TSS and allowing Data Distribution to recruit a new storage process on the worker.
+
+``tssq list``:
+
+Lists the storage UIDs of all TSS processes currently in quarantine.
+

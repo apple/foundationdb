@@ -17,7 +17,7 @@ The TSS feature allows FoundationDB to run an "untrusted" storage engine (the *t
 
 This allows a FoundationDB cluster operator to validate the correctness and performance of a different storage engine on the exact cluster workload before migrating data to the different storage engine.
 
-A Testing Storage Server is paired to a normal Storage Server. Both servers in the pair recieve the exact same requests, and contain the exact same data. The SS and TSS' responses are compared to ensure that they match, and performance metrics are recorded for the pair.
+A Testing Storage Server is paired to a normal Storage Server. Both servers in a new pair start empty and take on exactly the same data and serve exactly the same read requests. The SS and TSS responses are compared client-side to ensure that they match, and performance metrics are recorded for the pair.
 
 Configuring TSS
 ===============
@@ -57,9 +57,14 @@ Quarantined TSS
 If a *TSS Mismatch* is detected for a given TSS, instead of killing the TSS, it will be put into a *quarantined* state. In this state, the TSS doesn't respond to any data requests, but is still recruited on the worker, preventing a new storage process from replacing it.
 This is so that the cluster operator can investigate the storage engine file of the TSS's *testing storage engine* to determine the cause of the data inconsistency.
 
-You can also manually quarantine a TSS, or dispose of a quarantined TSS once you're done investigating using the FDB :ref:`command line interface <command-line-interface>`.
+You can also manually quarantine a TSS, or dispose of a quarantined TSS once you're done investigating using the ``tssq`` command in the FDB :ref:`command line interface <command-line-interface>`.
 
-TODO include exact commands once implemented.
+The typical flow of operations would be
+
+* ``tssq start <StorageUID>``: manually quarantines a TSS process, if it is not already quarantined.
+* ``tssq list``: lists all TSS processes currently in quarantine to see if any were automatically quarantined.
+* Investigate the quarantined TSS to determine the cause of the mismatch.
+* ``tssq stop <StorageUID>``: remove a TSS process from quarantine, disposing of the TSS and allowing Data Distribution to recruit a new storage process on the worker.
 
 The Storage Consistency Check will also check TSS processes against the rest of that shard's team, and fail if there is a mismatch, but it will not automatically quarantine the offending TSS.
 
@@ -112,4 +117,8 @@ Caveats
 
 Despite its usefulness, the TSS feature does not give a perfect performance comparison of the storage engine(s) under test.
 
-Because it is only enabled on a small percentage of the cluster and only compares single storage processes for the same workload, it may miss potential aggregate performance problems, such as the testing storage engine overall consuming more cpu/memory. It is not a substitute for full-cluster performance and correctness testing or simulation testing.
+Because it is only enabled on a small percentage of the cluster and only compares single storage processes for the same workload, it may miss potential aggregate performance problems, such as the testing storage engine overall consuming more cpu/memory, especially on a host with many storage instances.
+
+TSS testing using the recommended small number of TSS pairs may also miss performance pathologies from workloads not experienced by the specific storage teams with TSS pairs in their membership.
+
+TSS testing is not a substitute for full-cluster performance and correctness testing or simulation testing.
