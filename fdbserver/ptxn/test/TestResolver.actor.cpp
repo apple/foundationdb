@@ -113,7 +113,7 @@ bool trackerTest() {
 		ASSERT_EQ(tracker.getCommitVersion(team), cv2);
 	}
 	for (const auto team : removedTeams) {
-		ASSERT_EQ(tracker.getCommitVersion(team), initialVersion);
+		ASSERT_EQ(tracker.getCommitVersion(team), invalidVersion);
 	}
 	std::pair<ptxn::StorageTeamID, Version> p = tracker.mostLaggingTeam();
 	ASSERT_EQ(p.second, cv1);
