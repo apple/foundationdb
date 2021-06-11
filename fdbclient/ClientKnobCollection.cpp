@@ -47,5 +47,5 @@ Optional<KnobValue> ClientKnobCollection::tryParseKnobValue(std::string const& k
 }
 
 bool ClientKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) {
-	return knobValue.setKnob(knobName, flowKnobs) || knobValue.setKnob(knobName, clientKnobs);
+	return knobValue.visitSetKnob(knobName, flowKnobs) || knobValue.visitSetKnob(knobName, clientKnobs);
 }

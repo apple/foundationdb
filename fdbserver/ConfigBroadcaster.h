@@ -39,7 +39,7 @@ class ConfigBroadcaster {
 	ConfigBroadcasterImpl const& impl() const { return *_impl; }
 
 public:
-	explicit ConfigBroadcaster(ServerCoordinators const&, Optional<bool> useTestConfigDB);
+	explicit ConfigBroadcaster(ServerCoordinators const&, UseConfigDB);
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();

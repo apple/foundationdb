@@ -22,9 +22,9 @@
 #include "fdbserver/PaxosConfigConsumer.h"
 #include "fdbserver/SimpleConfigConsumer.h"
 
-std::unique_ptr<IConfigConsumer> IConfigConsumer::createSimple(ConfigFollowerInterface const& cfi,
-                                                               double pollingInterval,
-                                                               Optional<double> compactionInterval) {
+std::unique_ptr<IConfigConsumer> IConfigConsumer::createTestSimple(ConfigFollowerInterface const& cfi,
+                                                                   double pollingInterval,
+                                                                   Optional<double> compactionInterval) {
 	return std::make_unique<SimpleConfigConsumer>(cfi, pollingInterval, compactionInterval);
 }
 

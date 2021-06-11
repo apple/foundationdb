@@ -2014,7 +2014,7 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy(
     Future<Void> recoveredDiskFiles,
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
-    Optional<bool> useTestConfigDB) {
+    UseConfigDB useConfigDB) {
 	state Future<Void> monitor = monitorLeaderRemotely(connFile, currentCC);
 	state Future<Void> timeout;
 
@@ -2041,7 +2041,7 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy(
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
 				wait(clusterController(
-				    connFile, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, useTestConfigDB));
+				    connFile, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, useConfigDB));
 				return Void();
 			}
 		}
@@ -2070,12 +2070,12 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string whitelistBinPaths,
                         std::string configPath,
                         std::map<std::string, std::string> manualKnobOverrides,
-                        Optional<bool> useTestConfigDB) {
+                        UseConfigDB useConfigDB) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
 	state LocalConfiguration localConfig(dataFolder, configPath, manualKnobOverrides);
 
-	if (useTestConfigDB.present()) {
+	if (useConfigDB != UseConfigDB::DISABLED) {
 		wait(localConfig.initialize());
 	}
 
@@ -2099,7 +2099,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		if (coordFolder.size()) {
 			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
 			// their files
-			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder, coordinators.ccf, useTestConfigDB)));
+			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder, coordinators.ccf, useConfigDB)));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
@@ -2113,7 +2113,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 
-		if (useTestConfigDB.present()) {
+		if (useConfigDB != UseConfigDB::DISABLED) {
 			actors.push_back(
 			    reportErrors(localConfig.consume(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(
 			                     dbInfo, [](auto const& info) { return info.configBroadcaster; })),
@@ -2125,18 +2125,14 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 			actors.push_back(reportErrors(monitorLeader(connFile, cc), "ClusterController"));
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
-			actors.push_back(reportErrors(monitorLeaderRemotelyWithDelayedCandidacy(connFile,
-			                                                                        cc,
-			                                                                        asyncPriorityInfo,
-			                                                                        recoveredDiskFiles.getFuture(),
-			                                                                        localities,
-			                                                                        dbInfo,
-			                                                                        useTestConfigDB),
-			                              "ClusterController"));
+			actors.push_back(reportErrors(
+			    monitorLeaderRemotelyWithDelayedCandidacy(
+			        connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo, useConfigDB),
+			    "ClusterController"));
 		} else {
 			actors.push_back(reportErrors(
 			    clusterController(
-			        connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, useTestConfigDB),
+			        connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, useConfigDB),
 			    "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));

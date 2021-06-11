@@ -53,28 +53,6 @@ class KnobValueRef {
 		Value operator()(double) const;
 	};
 
-	struct ToStringFunc {
-		std::string operator()(int) const;
-		std::string operator()(int64_t) const;
-		std::string operator()(bool) const;
-		std::string operator()(ValueRef) const;
-		std::string operator()(double) const;
-	};
-
-	template <class KnobsType>
-	class SetKnobFunc {
-		KnobsType* knobs;
-		std::string const* knobName;
-
-	public:
-		SetKnobFunc(KnobsType& knobs, std::string const& knobName) : knobs(&knobs), knobName(&knobName) {}
-		template <class T>
-		bool operator()(T const& v) const {
-			return knobs->setKnob(*knobName, v);
-		}
-		bool operator()(StringRef const& v) const { return knobs->setKnob(*knobName, v.toString()); }
-	};
-
 public:
 	static constexpr FileIdentifier file_identifier = 9297109;
 
@@ -97,22 +75,16 @@ public:
 		return std::holds_alternative<KeyRef>(value) ? std::get<KeyRef>(value).expectedSize() : 0;
 	}
 
-	template <class KnobsType>
-	bool setKnob(KnobsType& knobs, KeyRef knobName) {
-		return std::visit(value, [&knobs, knobName](auto& v) { return knobs.setKnob(knobName, v); });
-	}
+	Value toValue() const { return std::visit(ToValueFunc{}, value); }
+
+	// Returns true if and only if the knob was successfully found and set
+	bool visitSetKnob(std::string const& knobName, Knobs& knobs) const;
+
+	std::string toString() const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, value);
-	}
-
-	std::string toString() const { return std::visit(ToStringFunc{}, value); }
-
-	Value toValue() const { return std::visit(ToValueFunc{}, value); }
-
-	bool setKnob(std::string const& knobName, Knobs& knobs) const {
-		return std::visit(SetKnobFunc<Knobs>{ knobs, knobName }, value);
 	}
 };
 
@@ -226,3 +198,9 @@ struct ConfigCommitAnnotationRef {
 	}
 };
 using ConfigCommitAnnotation = Standalone<ConfigCommitAnnotationRef>;
+
+enum class UseConfigDB {
+	DISABLED,
+	SIMPLE,
+	PAXOS,
+};

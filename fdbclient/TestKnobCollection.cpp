@@ -49,7 +49,7 @@ Optional<KnobValue> TestKnobCollection::tryParseKnobValue(std::string const& kno
 }
 
 bool TestKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) {
-	return serverKnobCollection.trySetKnob(knobName, knobValue) || knobValue.setKnob(knobName, testKnobs);
+	return serverKnobCollection.trySetKnob(knobName, knobValue) || knobValue.visitSetKnob(knobName, testKnobs);
 }
 
 #define init(knob, value) initKnob(knob, value, #knob)

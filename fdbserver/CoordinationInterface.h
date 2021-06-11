@@ -231,6 +231,8 @@ public:
 	std::vector<ConfigFollowerInterface> configServers;
 };
 
-Future<Void> coordinationServer(std::string const& dataFolder, Reference<ClusterConnectionFile> const& ccf, Optional<bool> const &useTestConfigDB);
+Future<Void> coordinationServer(std::string const& dataFolder,
+                                Reference<ClusterConnectionFile> const& ccf,
+                                UseConfigDB const& useConfigDB);
 
 #endif

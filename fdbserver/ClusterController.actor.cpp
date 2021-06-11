@@ -4513,20 +4513,22 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
                                          LocalityData locality,
-                                         Optional<bool> useTestConfigDB) {
+                                         UseConfigDB useConfigDB) {
 	state ClusterControllerData self(interf, locality, coordinators);
-	state ConfigBroadcaster configBroadcaster(coordinators, useTestConfigDB);
+	state ConfigBroadcaster configBroadcaster(coordinators, useConfigDB);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
-	if (useTestConfigDB.present()) {
+	if (useConfigDB != UseConfigDB::DISABLED) {
 		self.addActor.send(configBroadcaster.serve(self.db.serverInfo->get().configBroadcaster));
 	}
 	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
-	self.addActor.send(
-	    statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators, useTestConfigDB.present() ? &configBroadcaster : nullptr));
+	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
+	                                &self,
+	                                coordinators,
+	                                (useConfigDB == UseConfigDB::DISABLED) ? nullptr : &configBroadcaster));
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
@@ -4645,7 +4647,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
-                                     Optional<bool> useTestConfigDB) {
+                                     UseConfigDB useConfigDB) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -4672,7 +4674,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, useTestConfigDB));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, useConfigDB));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -4696,14 +4698,13 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> connFile,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     Optional<bool> useTestConfigDB) {
+                                     UseConfigDB useConfigDB) {
 	wait(recoveredDiskFiles);
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators(connFile);
-			wait(
-			    clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, useTestConfigDB));
+			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, useConfigDB));
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
 				throw; // Expected to terminate fdbserver

@@ -134,8 +134,8 @@ class ConfigBroadcasterImpl {
 	Counter snapshotRequest;
 	Future<Void> logger;
 
-	void sendChangesReply(ConfigBroadcastFollowerGetChangesRequest const& req,
-	                      Standalone<VectorRef<VersionedConfigMutationsRef>> const& changes) const {
+	template <class Changes>
+	void sendChangesReply(ConfigBroadcastFollowerGetChangesRequest const& req, Changes const& changes) const {
 		ASSERT_LT(req.lastSeenVersion, mostRecentVersion);
 		ConfigBroadcastFollowerGetChangesReply reply;
 		reply.mostRecentVersion = mostRecentVersion;
@@ -293,17 +293,16 @@ public:
 		TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
 	}
 
-	ConfigBroadcasterImpl(ServerCoordinators const& coordinators, Optional<bool> useTestConfigDB)
-	  : ConfigBroadcasterImpl() {
-		if (useTestConfigDB.present()) {
-			if (useTestConfigDB.get()) {
+	ConfigBroadcasterImpl(ServerCoordinators const& coordinators, UseConfigDB useConfigDB) : ConfigBroadcasterImpl() {
+		if (useConfigDB != UseConfigDB::DISABLED) {
+			if (useConfigDB == UseConfigDB::SIMPLE) {
 				consumer = IConfigConsumer::createSimple(coordinators, 0.5, Optional<double>{});
 			} else {
 				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, Optional<double>{});
 			}
 			TraceEvent(SevDebug, "BroadcasterStartingConsumer", id)
 			    .detail("Consumer", consumer->getID())
-			    .detail("UsingSimpleConsumer", useTestConfigDB.get());
+			    .detail("UsingSimpleConsumer", useConfigDB == UseConfigDB::SIMPLE);
 		}
 	}
 
@@ -368,8 +367,8 @@ public:
 ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
   : _impl(std::make_unique<ConfigBroadcasterImpl>(cfi)) {}
 
-ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, Optional<bool> useTestConfigDB)
-  : _impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, useTestConfigDB)) {}
+ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, UseConfigDB useConfigDB)
+  : _impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, useConfigDB)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigBroadcaster&&) = default;
 

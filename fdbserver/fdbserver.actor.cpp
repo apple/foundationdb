@@ -92,7 +92,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_IGNORE_CONFIG_DB, OPT_USE_TEST_CONFIG_DB
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -176,7 +176,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config_path",               SO_REQ_SEP },
-	{ OPT_IGNORE_CONFIG_DB,      "--ignore_config_db",          SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use_test_config_db",        SO_NONE },
 
 #ifndef TLS_DISABLED
@@ -982,7 +981,7 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
-	Optional<bool> useTestConfigDB{ true };
+	UseConfigDB useConfigDB;
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1441,13 +1440,8 @@ private:
 			case OPT_CONFIG_PATH:
 				configPath = args.OptionArg();
 				break;
-			case OPT_IGNORE_CONFIG_DB:
-				useTestConfigDB = {};
-				break;
 			case OPT_USE_TEST_CONFIG_DB:
-				if (useTestConfigDB.present()) {
-					useTestConfigDB = true;
-				}
+				useConfigDB = UseConfigDB::SIMPLE;
 				break;
 
 #ifndef TLS_DISABLED
@@ -1986,7 +1980,7 @@ int main(int argc, char* argv[]) {
 				                      opts.whitelistBinPaths,
 				                      opts.configPath,
 				                      opts.manualKnobOverrides,
-				                      opts.useTestConfigDB));
+				                      opts.useConfigDB));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
