@@ -25,6 +25,10 @@
 
 #include "fdbclient/FDBTypes.h"
 
+/*
+ * KnobValueRefs are stored in the configuration database, and in local configuration files. They are created from
+ * ParsedKnobValue objects, so it is assumed that the value type is correct for the corresponding knob name
+ */
 class KnobValueRef {
 	std::variant<int, double, int64_t, bool, ValueRef> value;
 	template <class T>
@@ -114,6 +118,10 @@ public:
 
 using KnobValue = Standalone<KnobValueRef>;
 
+/*
+ * In the configuration database, each key contains a configuration class (or no configuration class, in the case of
+ * global updates), and a knob name
+ */
 struct ConfigKeyRef {
 	static constexpr FileIdentifier file_identifier = 5918726;
 
@@ -151,6 +159,9 @@ inline bool operator<(ConfigKeyRef const& lhs, ConfigKeyRef const& rhs) {
 	}
 }
 
+/*
+ * Only set and point clear configuration database mutations are currently permitted.
+ */
 class ConfigMutationRef {
 	ConfigKeyRef key;
 	// Empty value means this is a clear mutation
@@ -192,6 +203,11 @@ public:
 };
 using ConfigMutation = Standalone<ConfigMutationRef>;
 
+/*
+ * Each configuration database commit is annotated with:
+ *   - A description (set manually by the client)
+ *   - A commit timestamp (automatically generated at commit time)
+ */
 struct ConfigCommitAnnotationRef {
 	KeyRef description;
 	double timestamp{ 0.0 };

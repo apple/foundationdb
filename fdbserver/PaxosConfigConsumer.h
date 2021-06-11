@@ -22,6 +22,9 @@
 
 #include "fdbserver/IConfigConsumer.h"
 
+/*
+ * A fault-tolerant configuration database consumer implementation
+ */
 class PaxosConfigConsumer : public IConfigConsumer {
 	std::unique_ptr<class PaxosConfigConsumerImpl> _impl;
 	PaxosConfigConsumerImpl const& impl() const { return *_impl; }

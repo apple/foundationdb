@@ -27,15 +27,20 @@
 #include "flow/flow.h"
 #include <memory>
 
+/*
+ * An IConfigConsumer instantiation is used by the ConfigBroadcaster to consume
+ * updates from the configuration database nodes. A consumer sends mutations to a broadcaster
+ * once they are confirmed to be committed.
+ */
 class IConfigConsumer {
 public:
 	virtual ~IConfigConsumer() = default;
 	virtual Future<Void> consume(ConfigBroadcaster& broadcaster) = 0;
 	virtual UID getID() const = 0;
 
-	static std::unique_ptr<IConfigConsumer> createSimple(ConfigFollowerInterface const& cfi,
-	                                                     double pollingInterval,
-	                                                     Optional<double> compactionInterval);
+	static std::unique_ptr<IConfigConsumer> createTestSimple(ConfigFollowerInterface const& cfi,
+	                                                         double pollingInterval,
+	                                                         Optional<double> compactionInterval);
 	static std::unique_ptr<IConfigConsumer> createSimple(ServerCoordinators const& coordinators,
 	                                                     double pollingInterval,
 	                                                     Optional<double> compactionInterval);

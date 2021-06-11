@@ -29,8 +29,20 @@
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
+// To be used effectively as a boolean parameter with added type safety
 enum class IsTest { NO, YES };
 
+/*
+ * Each worker maintains a LocalConfiguration object used to update its knob collection.
+ * When a worker starts, the following steps are executed:
+ *    - Apply manual knob updates
+ *    - Read the local configuration file (with "localconf" prefix)
+ *      - If the stored configuration path does not match the current configuration path, delete the local configuration
+ * file
+ *      - Otherwise, apply knob updates from the local configuration file (without overriding manual knob overrides)
+ *    - Register with the broadcaster to receive new updates for the relevant configuration classes
+ *      - Persist these updates when received, and restart if necessary
+ */
 class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> _impl;
 	LocalConfigurationImpl& impl() { return *_impl; }

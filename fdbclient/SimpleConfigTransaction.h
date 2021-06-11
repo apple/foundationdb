@@ -30,6 +30,11 @@
 #include "flow/Error.h"
 #include "flow/flow.h"
 
+/*
+ * A configuration transaction implementation that interacts with a simple (test-only) implementation of
+ * the configuration database. All configuration database data is assumed to live on a single node
+ * (the lowest coordinator by IP address), so there is no fault tolerance.
+ */
 class SimpleConfigTransaction final : public IConfigTransaction, public FastAllocated<SimpleConfigTransaction> {
 	std::unique_ptr<class SimpleConfigTransactionImpl> _impl;
 	SimpleConfigTransactionImpl const& impl() const { return *_impl; }

@@ -1899,6 +1899,10 @@ Future<U> operator>>(Future<T> const& lhs, Future<U> const& rhs) {
 	return runAfter(lhs, rhs);
 }
 
+/*
+ * IDependentAsyncVar is similar to AsyncVar, but it decouples the input and output, so the translation unit
+ * responsible for handling the output does not need to have knowledge of how the output is generated
+ */
 template <class Output>
 class IDependentAsyncVar : public ReferenceCounted<IDependentAsyncVar<Output>> {
 public:

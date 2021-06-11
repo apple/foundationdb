@@ -27,6 +27,9 @@
 
 #include <memory>
 
+/*
+ * Interface for a single node in the configuration database, run on coordinators
+ */
 class IConfigDatabaseNode : public ReferenceCounted<IConfigDatabaseNode> {
 public:
 	virtual Future<Void> serve(ConfigTransactionInterface const&) = 0;

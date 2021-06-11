@@ -27,6 +27,11 @@
 #include "fdbclient/ISingleThreadTransaction.h"
 #include "fdbclient/NativeAPI.actor.h"
 
+/*
+ * Configuration transactions are used by clients to update the configuration database, in order
+ * to dynamically update knobs. The interface is similar to that of regular transactions, but simpler, and
+ * many virtual methods of ISingleThreadTransaction are disallowed here
+ */
 class IConfigTransaction : public ISingleThreadTransaction {
 protected:
 	IConfigTransaction() = default;

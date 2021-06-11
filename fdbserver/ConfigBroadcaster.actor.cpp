@@ -47,6 +47,9 @@ void remove(Container& container, K const& k) {
 	container.erase(it);
 }
 
+// PendingRequestStore stores a set of pending ConfigBroadcastFollowerGetChangesRequests,
+// indexed, by configuration class. When an update is received, replies are sent for all
+// pending requests with affected configuration classes
 class PendingRequestStore {
 	using Req = ConfigBroadcastFollowerGetChangesRequest;
 	std::map<Key, std::set<Endpoint::Token>> configClassToTokens;
@@ -131,8 +134,8 @@ class ConfigBroadcasterImpl {
 	Counter snapshotRequest;
 	Future<Void> logger;
 
-	template <class Changes>
-	void sendChangesReply(ConfigBroadcastFollowerGetChangesRequest const& req, Changes const& changes) const {
+	void sendChangesReply(ConfigBroadcastFollowerGetChangesRequest const& req,
+	                      Standalone<VectorRef<VersionedConfigMutationsRef>> const& changes) const {
 		ASSERT_LT(req.lastSeenVersion, mostRecentVersion);
 		ConfigBroadcastFollowerGetChangesReply reply;
 		reply.mostRecentVersion = mostRecentVersion;
@@ -189,7 +192,8 @@ class ConfigBroadcasterImpl {
 						TraceEvent(SevDebug, "ConfigBroadcasterRegisteringChangeRequest", impl->id)
 						    .detail("Peer", req.reply.getEndpoint().getPrimaryAddress())
 						    .detail("MostRecentVersion", impl->mostRecentVersion)
-						    .detail("ReqLastSeenVersion", req.lastSeenVersion); // TODO: Trace config class as well
+						    .detail("ReqLastSeenVersion", req.lastSeenVersion)
+						    .detail("ConfigClass", req.configClassSet);
 						impl->pending.addRequest(req);
 					}
 				}
@@ -284,18 +288,18 @@ public:
 		notifyOutdatedRequests();
 	}
 
-	ConfigBroadcasterImpl(ConfigFollowerInterface const& configSource) : ConfigBroadcasterImpl() {
-		consumer = IConfigConsumer::createSimple(configSource, 0.5, Optional<double>{});
+	ConfigBroadcasterImpl(ConfigFollowerInterface const& cfi) : ConfigBroadcasterImpl() {
+		consumer = IConfigConsumer::createTestSimple(cfi, 0.5, Optional<double>{});
 		TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
 	}
 
-	ConfigBroadcasterImpl(ServerCoordinators const& configSource, Optional<bool> useTestConfigDB)
+	ConfigBroadcasterImpl(ServerCoordinators const& coordinators, Optional<bool> useTestConfigDB)
 	  : ConfigBroadcasterImpl() {
 		if (useTestConfigDB.present()) {
 			if (useTestConfigDB.get()) {
-				consumer = IConfigConsumer::createSimple(configSource, 0.5, Optional<double>{});
+				consumer = IConfigConsumer::createSimple(coordinators, 0.5, Optional<double>{});
 			} else {
-				consumer = IConfigConsumer::createPaxos(configSource, 0.5, Optional<double>{});
+				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, Optional<double>{});
 			}
 			TraceEvent(SevDebug, "BroadcasterStartingConsumer", id)
 			    .detail("Consumer", consumer->getID())
@@ -362,10 +366,10 @@ public:
 };
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
-  : impl(std::make_unique<ConfigBroadcasterImpl>(cfi)) {}
+  : _impl(std::make_unique<ConfigBroadcasterImpl>(cfi)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, Optional<bool> useTestConfigDB)
-  : impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, useTestConfigDB)) {}
+  : _impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, useTestConfigDB)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigBroadcaster&&) = default;
 
@@ -374,13 +378,13 @@ ConfigBroadcaster& ConfigBroadcaster::operator=(ConfigBroadcaster&&) = default;
 ConfigBroadcaster::~ConfigBroadcaster() = default;
 
 Future<Void> ConfigBroadcaster::serve(ConfigBroadcastFollowerInterface const& cbfi) {
-	return impl->serve(this, cbfi);
+	return impl().serve(this, cbfi);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
                                      Version mostRecentVersion,
                                      Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl->applyChanges(changes, mostRecentVersion, annotations);
+	impl().applyChanges(changes, mostRecentVersion, annotations);
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
@@ -389,7 +393,7 @@ void ConfigBroadcaster::applySnapshotAndChanges(
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl->applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion, annotations);
+	impl().applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion, annotations);
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
@@ -398,19 +402,19 @@ void ConfigBroadcaster::applySnapshotAndChanges(
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl->applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion, annotations);
+	impl().applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion, annotations);
 }
 
 UID ConfigBroadcaster::getID() const {
-	return impl->getID();
+	return impl().getID();
 }
 
 JsonBuilderObject ConfigBroadcaster::getStatus() const {
-	return impl->getStatus();
+	return impl().getStatus();
 }
 
 void ConfigBroadcaster::compact(Version compactionVersion) {
-	impl->compact(compactionVersion);
+	impl().compact(compactionVersion);
 }
 
 namespace {

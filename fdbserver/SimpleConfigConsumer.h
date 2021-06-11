@@ -24,6 +24,11 @@
 #include "fdbserver/LocalConfiguration.h"
 #include <memory>
 
+/*
+ * A test-only configuration database consumer implementation that interacts with a single-node
+ * configuration database. It assumed that a single coordinator (the lowest coordinator by IP address)
+ * stores all data, so there is no fault tolerance.
+ */
 class SimpleConfigConsumer : public IConfigConsumer {
 	std::unique_ptr<class SimpleConfigConsumerImpl> _impl;
 	SimpleConfigConsumerImpl const& impl() const { return *_impl; }

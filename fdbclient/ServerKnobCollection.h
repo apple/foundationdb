@@ -23,6 +23,10 @@
 #include "fdbclient/ClientKnobCollection.h"
 #include "fdbclient/IKnobCollection.h"
 
+/*
+ * Stores both flow knobs, client knobs, and server knobs. Attempting to access test knobs
+ * results in a run-time error
+ */
 class ServerKnobCollection : public IKnobCollection {
 	ClientKnobCollection clientKnobCollection;
 	ServerKnobs serverKnobs;

@@ -47,6 +47,11 @@ public:
 	}
 };
 
+template <>
+struct Traceable<ConfigClassSet> : std::true_type {
+	static std::string toString(ConfigClassSet const& value) { return describe(value.getClasses()); }
+};
+
 struct ConfigBroadcastFollowerGetSnapshotReply {
 	static constexpr FileIdentifier file_identifier = 8701983;
 	Version version{ 0 };
@@ -109,6 +114,10 @@ struct ConfigBroadcastFollowerGetChangesRequest {
 	}
 };
 
+/*
+ * The ConfigBroadcaster serves a ConfigBroadcastFollowerInterface which all
+ * workers use to fetch updates.
+ */
 class ConfigBroadcastFollowerInterface {
 	UID _id;
 

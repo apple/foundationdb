@@ -148,6 +148,10 @@ struct ConfigFollowerCompactRequest {
 	}
 };
 
+/*
+ * Configuration database nodes serve a ConfigFollowerInterface which contains well known endpoints,
+ * used by workers to receive configuration database updates
+ */
 class ConfigFollowerInterface {
 	UID _id;
 

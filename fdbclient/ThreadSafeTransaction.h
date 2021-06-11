@@ -69,7 +69,7 @@ public: // Internal use only
 };
 
 // An implementation of ITransaction that serializes operations onto the network thread and interacts with the
-// lower-level client APIs exposed by NativeAPI and ReadYourWrites.
+// lower-level client APIs exposed by ISingleThreadTransaction
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type);

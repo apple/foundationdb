@@ -27,6 +27,14 @@
 #include "fdbclient/ServerKnobs.h"
 #include "flow/Knobs.h"
 
+/*
+ * Each IKnobCollection instantiation stores several Knobs objects, and when parsing or setting a knob,
+ * these Knobs objects will be traversed in order, until the requested knob name is found. The order of traversal is:
+ *  - FlowKnobs
+ *  - ClientKnobs
+ *  - ServerKnobs
+ *  - TestKnobs
+ */
 class IKnobCollection {
 	static std::unique_ptr<IKnobCollection> globalKnobCollection;
 

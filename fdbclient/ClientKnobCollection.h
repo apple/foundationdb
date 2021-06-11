@@ -24,6 +24,10 @@
 #include "fdbclient/KnobsImpl.h"
 #include "flow/Knobs.h"
 
+/*
+ * Stores both flow knobs and client knobs, attempting to access server knobs or test knobs
+ * results in a run-time error
+ */
 class ClientKnobCollection : public IKnobCollection {
 	FlowKnobs flowKnobs;
 	ClientKnobs clientKnobs;

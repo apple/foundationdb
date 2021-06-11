@@ -51,11 +51,6 @@ void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& 
 	versionedMutations.emplace_back_deep(versionedMutations.arena(), version, mutation);
 }
 
-Value longToValue(int64_t v) {
-	auto s = format("%ld", v);
-	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
-}
-
 class WriteToTransactionEnvironment {
 	std::string dataDir;
 	ConfigTransactionInterface cti;
@@ -64,6 +59,11 @@ class WriteToTransactionEnvironment {
 	Future<Void> ctiServer;
 	Future<Void> cfiServer;
 	Version lastWrittenVersion{ 0 };
+
+	static Value longToValue(int64_t v) {
+		auto s = format("%ld", v);
+		return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
+	}
 
 	ACTOR template <class T>
 	static Future<Void> set(WriteToTransactionEnvironment* self,
@@ -399,6 +399,7 @@ public:
 	Future<Void> getError() const { return writeTo.getError() || readFrom.getError() || broadcastServer; }
 };
 
+// These functions give a common interface to all environments, to improve code reuse
 template <class Env, class... Args>
 Future<Void> set(Env& env, Args&&... args) {
 	return waitOrError(env.set(std::forward<Args>(args)...), env.getError());

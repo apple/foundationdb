@@ -31,9 +31,12 @@
 #include <variant>
 #include <optional>
 
+// NOTE: Directly using KnobValueRef as the return type for Knobs::parseKnobValue would result
+// in a cyclic dependency, so we use this intermediate ParsedKnobValue type
 struct NoKnobFound {};
 using ParsedKnobValue = std::variant<NoKnobFound, int, double, int64_t, bool, std::string>;
 
+// To be used as effectively boolean parameters with added type safety
 enum class IsSimulated { NO, YES };
 enum class Randomize { NO, YES };
 
@@ -285,6 +288,7 @@ public:
 	void initialize(Randomize, IsSimulated);
 };
 
+// Flow knobs are needed before the knob collections are available, so a global FlowKnobs object is used to bootstrap
 extern FlowKnobs bootstrapGlobalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
 

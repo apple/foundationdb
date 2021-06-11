@@ -26,6 +26,9 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 
+/*
+ * Used by ThreadSafeTransaction to execute perform normal or configuration transactions on the network thread
+ */
 class ISingleThreadTransaction : public ReferenceCounted<ISingleThreadTransaction> {
 protected:
 	ISingleThreadTransaction() = default;

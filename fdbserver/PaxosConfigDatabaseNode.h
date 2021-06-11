@@ -22,6 +22,9 @@
 
 #include "fdbserver/IConfigDatabaseNode.h"
 
+/*
+ * Fault-tolerant configuration database node implementation
+ */
 class PaxosConfigDatabaseNode : public IConfigDatabaseNode {
 	std::unique_ptr<class PaxosConfigDatabaseNodeImpl> impl;
 

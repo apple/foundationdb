@@ -24,6 +24,9 @@
 
 #include "fdbclient/IConfigTransaction.h"
 
+/*
+ * Fault-tolerant configuration transaction implementation
+ */
 class PaxosConfigTransaction final : public IConfigTransaction, public FastAllocated<PaxosConfigTransaction> {
 	std::unique_ptr<class PaxosConfigTransactionImpl> _impl;
 	PaxosConfigTransactionImpl const& impl() const { return *_impl; }

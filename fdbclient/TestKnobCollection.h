@@ -36,6 +36,10 @@ public:
 	void initialize();
 };
 
+/*
+ * Stores both flow knobs, client knobs, server knobs, and test knobs. As the name implies, this class is only meant to
+ * be used for testing
+ */
 class TestKnobCollection : public IKnobCollection {
 	ServerKnobCollection serverKnobCollection;
 	TestKnobs testKnobs;

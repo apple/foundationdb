@@ -163,6 +163,10 @@ struct ConfigTransactionGetKnobsRequest {
 	}
 };
 
+/*
+ * Configuration database nodes serve a ConfigTransactionInterface which contains well known endpoints,
+ * used by clients to transactionally update the configuration database
+ */
 struct ConfigTransactionInterface {
 	UID _id;
 

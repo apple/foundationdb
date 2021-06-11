@@ -153,6 +153,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return lastCompactedVersion;
 	}
 
+	// Returns all commit annotations between for commits with version in [startVersion, endVersion]
 	ACTOR static Future<Standalone<VectorRef<VersionedConfigCommitAnnotationRef>>>
 	getAnnotations(SimpleConfigDatabaseNodeImpl* self, Version startVersion, Version endVersion) {
 		Key startKey = versionedAnnotationKey(startVersion);
@@ -169,6 +170,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return result;
 	}
 
+	// Returns all mutations with version in [startVersion, endVersion]
 	ACTOR static Future<Standalone<VectorRef<VersionedConfigMutationRef>>>
 	getMutations(SimpleConfigDatabaseNodeImpl* self, Version startVersion, Version endVersion) {
 		Key startKey = versionedMutationKey(startVersion, 0);
@@ -207,6 +209,8 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
+	// New transactions increment the database's current live version. This effectively serves as a lock, providing
+	// serializability
 	ACTOR static Future<Void> getNewVersion(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetVersionRequest req) {
 		state Version currentVersion = wait(getLiveTransactionVersion(self));
 		self->kvStore->set(KeyValueRef(liveTransactionVersionKey, BinaryWriter::toValue(++currentVersion, IncludeVersion())));
@@ -242,6 +246,9 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
+	// Retrieve all configuration classes that contain explicitly defined knobs
+	// TODO: Currently it is possible that extra configuration classes may be returned, we
+	// may want to fix this to clean up the contract
 	ACTOR static Future<Void> getConfigClasses(SimpleConfigDatabaseNodeImpl* self,
 	                                           ConfigTransactionGetConfigClassesRequest req) {
 		Version currentVersion = wait(getLiveTransactionVersion(self));
@@ -275,6 +282,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
+	// Retrieve all knobs explicitly defined for the specified configuration class
 	ACTOR static Future<Void> getKnobs(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
 		Version currentVersion = wait(getLiveTransactionVersion(self));
 		if (req.version != currentVersion) {
@@ -387,6 +395,9 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
+	// Apply mutations from the WAL in mutationKeys into the kvKeys key space.
+	// Periodic compaction prevents the database from growing too large, and improve read performance.
+	// However, commit annotations for compacted mutations are lost
 	ACTOR static Future<Void> compact(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerCompactRequest req) {
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeCompacting", self->id)
