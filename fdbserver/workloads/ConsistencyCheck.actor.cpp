@@ -1777,7 +1777,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				if (!found) {
 					TraceEvent("ConsistencyCheck_NoStorage")
 					    .detail("Address", addr)
-					    .detail("ProcessId", workers[i].interf.locality.processId())
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
 					missingStorage.push_back(workers[i].interf.locality.dcId());
