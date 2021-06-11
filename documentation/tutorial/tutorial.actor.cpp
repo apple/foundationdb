@@ -396,15 +396,15 @@ ACTOR Future<Void> fdbStatusStresser() {
 
 std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
 	{ "timer", &simpleTimer }, // ./tutorial timer
-	// { "promiseDemo", &promiseDemo }, // ./tutorial promiseDemo
-	// { "triggerDemo", &triggerDemo }, // ./tutorial triggerDemo
-	// { "echoServer", &echoServer }, // ./tutorial -p 6666 echoServer
-	// { "echoClient", &echoClient }, // ./tutorial -s 127.0.0.1:6666 echoClient
-	// { "kvStoreServer", &kvStoreServer }, // ./tutorial -p 6666 kvStoreServer
-	// { "kvSimpleClient", &kvSimpleClient }, // ./tutorial -s 127.0.0.1:6666 kvSimpleClient
-	// { "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
-	// { "fdbClient", &fdbClient }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
-	// { "fdbStatusStresser", &fdbStatusStresser }
+	{ "promiseDemo", &promiseDemo }, // ./tutorial promiseDemo
+	{ "triggerDemo", &triggerDemo }, // ./tutorial triggerDemo
+	{ "echoServer", &echoServer }, // ./tutorial -p 6666 echoServer
+	{ "echoClient", &echoClient }, // ./tutorial -s 127.0.0.1:6666 echoClient
+	{ "kvStoreServer", &kvStoreServer }, // ./tutorial -p 6666 kvStoreServer
+	{ "kvSimpleClient", &kvSimpleClient }, // ./tutorial -s 127.0.0.1:6666 kvSimpleClient
+	{ "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
+	{ "fdbClient", &fdbClient }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
+	{ "fdbStatusStresser", &fdbStatusStresser }
 }; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser
 
 int main(int argc, char* argv[]) {
