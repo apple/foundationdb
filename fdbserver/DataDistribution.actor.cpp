@@ -630,6 +630,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
 	AsyncVar<bool> disableFailingLaggingServers;
 	Optional<Key> wigglingPid; // Process id of current wiggling storage server;
+    Reference<AsyncVar<bool>> pauseWiggle;
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
@@ -654,6 +655,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	int optimalTeamCount;
 	AsyncVar<bool> zeroOptimalTeams;
+
+    bool bestTeamStuck = false;
 
 	bool isTssRecruiting; // If tss recruiting is waiting on a pair, don't consider DD recruiting for the purposes of QuietDB
 
@@ -1007,8 +1010,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 
 				// Log BestTeamStuck reason when we have healthy teams but they do not have healthy free space
-				if (g_network->isSimulated() && randomTeams.empty() && !self->zeroHealthyTeams->get()) {
-					TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
+				if (randomTeams.empty() && !self->zeroHealthyTeams->get()) {
+					self->bestTeamStuck = true;
+					if(g_network->isSimulated()) {
+						TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
+					}
+				}
+				else {
+					self->bestTeamStuck = false;
 				}
 
 				for (int i = 0; i < randomTeams.size(); i++) {
@@ -3962,6 +3971,25 @@ ACTOR Future<std::pair<Future<Void>, Value>> watchPerpetualStoragePIDChange(DDTe
 	return std::make_pair(watchFuture, ret);
 }
 
+// periodically check whether the cluster is healthy if we continue perpetual wiggle
+ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self) {
+	loop {
+        Promise<int> countp;
+        self->getUnhealthyRelocationCount.send(countp);
+        int count = wait(countp.getFuture());
+		// pause wiggle when
+		// a. DDQueue is busy with unhealthy relocation request
+		// b. no healthy team
+		// c. the overall disk space is not enough
+        if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD || self->healthyTeamCount == 0 || self->bestTeamStuck) {
+            self->pauseWiggle->set(true);
+        }
+        else {
+            self->pauseWiggle->set(false);
+        }
+        wait(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow));
+    }
+}
 // Watches the value (pid) change of \xff/storageWigglePID, and adds storage servers held on process of which the
 // Process Id is “pid” into excludeServers which prevent recruiting the wiggling storage servers and let teamTracker
 // start to move data off the affected teams. The wiggling process of current storage servers will be paused if the
@@ -3972,56 +4000,31 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
                                            const DDEnabledState* ddEnabledState) {
 	state Future<Void> watchFuture = Never();
 	state Future<Void> moveFinishFuture = Never();
-	state Debouncer pauseWiggle(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY);
-	state AsyncTrigger restart;
-	state Future<Void> ddQueueCheck =
-	    delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistributionLow);
+	state Future<Void> ddQueueCheck = clusterHealthCheckForPerpetualWiggle(self);
 	state int movingCount = 0;
-	state bool isPaused = false;
 	state vector<UID> excludedServerIds;
 	state std::pair<Future<Void>, Value> res = wait(watchPerpetualStoragePIDChange(self));
 	ASSERT(!self->wigglingPid.present()); // only single process wiggle is allowed
 	self->wigglingPid = Optional<Key>(res.second);
 
-	// start with the initial pid
-	for (const auto& info : self->pid2server_info[self->wigglingPid.get()]) {
-		excludedServerIds.push_back(info->id);
-	}
-	if (self->teams.size() > 1 && _exclusionSafetyCheck(excludedServerIds, self)) { // pre-check health status
-		TEST(true); // start the first wiggling
-
-		auto fv = self->excludeStorageServersForWiggle(self->wigglingPid.get());
-		movingCount = fv.size();
-		moveFinishFuture = waitForAll(fv);
-		TraceEvent("PerpetualStorageWiggleInitialStart", self->distributorId)
-		    .detail("ProcessId", self->wigglingPid.get())
-		    .detail("StorageCount", movingCount);
-	} else {
-		isPaused = true;
-		TraceEvent("PerpetualStorageWiggleInitialPause", self->distributorId)
-		    .detail("ProcessId", self->wigglingPid.get());
-	}
-
 	loop {
-		choose {
-			when(wait(stopSignal->onTrigger())) { break; }
-			when(wait(watchFuture)) {
-				ASSERT(!self->wigglingPid.present()); // the previous wiggle must be finished
-				watchFuture = Never();
-
-				// read new pid and set the next watch Future
-				wait(store(res, watchPerpetualStoragePIDChange(self)));
-				self->wigglingPid = Optional<Key>(res.second);
-				StringRef pid = self->wigglingPid.get();
-
-				// pre-check health status
+		if (self->wigglingPid.present()) {
+			StringRef pid = self->wigglingPid.get();
+			if (self->pauseWiggle->get()) {
+				TEST(true); // paused because cluster is unhealthy
+				moveFinishFuture = Never();
+				self->includeStorageServersForWiggle();
+				TraceEvent("PerpetualStorageWigglePause", self->distributorId)
+				    .detail("ProcessId", pid)
+				    .detail("StorageCount", movingCount);
+			} else {
+				// pre-check whether wiggling chosen servers still satisfy replica requirement
 				excludedServerIds.clear();
 				for (const auto& info : self->pid2server_info[self->wigglingPid.get()]) {
 					excludedServerIds.push_back(info->id);
 				}
-				if (self->teams.size() > 1 && _exclusionSafetyCheck(excludedServerIds, self)) {
+				if (_exclusionSafetyCheck(excludedServerIds, self)) {
 					TEST(true); // start wiggling
-
 					auto fv = self->excludeStorageServersForWiggle(pid);
 					movingCount = fv.size();
 					moveFinishFuture = waitForAll(fv);
@@ -4029,20 +4032,24 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 					    .detail("ProcessId", pid)
 					    .detail("StorageCount", movingCount);
 				} else {
-					pauseWiggle.trigger();
+					TEST(true); // skip wiggling current process
+					TraceEvent("PerpetualStorageWiggleSkip", self->distributorId).detail("ProcessId", pid.toString());
+
+					self->wigglingPid.reset();
+					watchFuture = res.first;
+					finishStorageWiggleSignal.send(Void());
 				}
 			}
-			when(wait(restart.onTrigger())) {
-				if (self->wigglingPid.present()) {
-					TEST(true); // restart paused wiggling
-					StringRef pid = self->wigglingPid.get();
-					auto fv = self->excludeStorageServersForWiggle(pid);
-					moveFinishFuture = waitForAll(fv);
-					TraceEvent("PerpetualStorageWiggleRestart", self->distributorId)
-					    .detail("ProcessId", pid)
-					    .detail("StorageCount", fv.size());
-					isPaused = false;
-				}
+		}
+		
+		choose {
+			when(wait(stopSignal->onTrigger())) { break; }
+			when(wait(watchFuture)) {
+				ASSERT(!self->wigglingPid.present()); // the previous wiggle must be finished
+				watchFuture = Never();
+				// read new pid and set the next watch Future
+				wait(store(res, watchPerpetualStoragePIDChange(self)));
+				self->wigglingPid = Optional<Key>(res.second);
 			}
 			when(wait(moveFinishFuture)) {
 				TEST(true); // finish wiggling this process
@@ -4059,36 +4066,8 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				watchFuture = res.first;
 				finishStorageWiggleSignal.send(Void());
 			}
-			when(wait(self->zeroHealthyTeams->onChange())) {
-				if (self->zeroHealthyTeams->get() && !isPaused) {
-					pauseWiggle.trigger();
-				}
-			}
-			when(wait(ddQueueCheck)) { // check health status periodically
-				Promise<int> countp;
-				self->getUnhealthyRelocationCount.send(countp);
-				int count = wait(countp.getFuture());
-
-				if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD && !isPaused) {
-					pauseWiggle.trigger();
-				} else if (isPaused && count < SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD &&
-				           self->teams.size() > 1 && _exclusionSafetyCheck(excludedServerIds, self)) {
-					restart.trigger();
-				}
-				ddQueueCheck = delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow);
-			}
-			when(wait(pauseWiggle.onTrigger())) {
-				if (self->wigglingPid.present()) {
-					TEST(true); // paused because cluster is unhealthy
-					StringRef pid = self->wigglingPid.get();
-					isPaused = true;
-					moveFinishFuture = Never();
-					self->includeStorageServersForWiggle();
-					TraceEvent("PerpetualStorageWigglePause", self->distributorId)
-					    .detail("ProcessId", pid)
-					    .detail("StorageCount", movingCount);
-				}
-			}
+			when(wait(ddQueueCheck)) {}
+			when(wait(self->pauseWiggle->onChange())) {}
 		}
 	}
 
@@ -4112,7 +4091,9 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 	state PromiseStream<Void> finishStorageWiggleSignal;
 	state SignalableActorCollection collection;
 	state bool started = false;
-	loop {
+    teamCollection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
+
+    loop {
 		state ReadYourWritesTransaction tr(teamCollection->cx);
 		loop {
 			try {
@@ -4138,6 +4119,7 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 					wait(collection.signalAndReset());
 					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId);
 					started = false;
+					teamCollection->pauseWiggle->set(true);
 				}
 				wait(watchFuture);
 				break;
