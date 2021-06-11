@@ -448,7 +448,7 @@ struct LineageProperties : LineagePropertiesBase {
 	}
 };
 
-struct ActorLineage : ThreadUnsafeReferenceCounted<ActorLineage> {
+struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage> {
 	friend class LocalLineage;
 
 	struct Property {
@@ -541,7 +541,8 @@ public:
 };
 
 extern std::atomic<bool> startSampling;
-extern thread_local Reference<ActorLineage> currentLineage;
+// TODO: ThreadUnsafe?
+extern thread_local LineageReference<ActorLineage>* currentLineage;
 
 struct StackLineage : LineageProperties<StackLineage> {
 	static const std::string_view name;
@@ -549,25 +550,35 @@ struct StackLineage : LineageProperties<StackLineage> {
 };
 
 Reference<ActorLineage> getCurrentLineage();
-void replaceLineage(Reference<ActorLineage> lineage);
+void replaceLineage(LineageReference<ActorLineage>* lineage);
 
 // This class can be used in order to modify all lineage properties
 // of actors created within a (non-actor) scope
 struct LocalLineage {
-	Reference<ActorLineage> lineage = Reference<ActorLineage>{ new ActorLineage() };
-	Reference<ActorLineage> oldLineage;
+	LineageReference<ActorLineage> lineage = LineageReference<ActorLineage>{ new ActorLineage() };
+	LineageReference<ActorLineage>* oldLineage;
 	LocalLineage() {
 		oldLineage = currentLineage;
-		replaceLineage(lineage);
+		replaceLineage(&lineage);
 	}
 	~LocalLineage() {
 		replaceLineage(oldLineage);
 	}
 };
 
+// TODO: No longer want this because we are now setting a global instead of just the field in a class
 struct restore_lineage {
-	Reference<ActorLineage> prev;
-	restore_lineage() : prev(currentLineage) {}
+	// Reference<ActorLineage> lineage;
+	LineageReference<ActorLineage>* prev;
+	// LineageReference<ActorLineage> prev;
+	// restore_lineage() : prev(*currentLineage) {
+	restore_lineage() : prev(currentLineage) {
+		// if (currentLineage != nullptr && currentLineage->isValid()) {
+			// prev = *currentLineage;
+		// }
+		// prev = currentLineage;
+		// replaceLineage(lineage);
+	}
 	~restore_lineage() {
 		replaceLineage(prev);
 	}
@@ -1148,22 +1159,53 @@ static inline void destruct(T& t) {
 	t.~T();
 }
 
+// TODO: Rename, move to better spot (above)
+struct CurrentLineageReplace {
+	LineageReference<ActorLineage>* oldLineage;
+	CurrentLineageReplace(LineageReference<ActorLineage>* with) : oldLineage(currentLineage) {
+		// currentLineage = with;
+		replaceLineage(with);
+	}
+	~CurrentLineageReplace() {
+		// currentLineage = oldLineage;
+		replaceLineage(oldLineage);
+	}
+};
+
 template <class ReturnValue>
 struct Actor : SAV<ReturnValue> {
-	Reference<ActorLineage> lineage = currentLineage;
+	// LineageReference<ActorLineage>* prev = currentLineage;
+	LineageReference<ActorLineage> lineage = *currentLineage;
+	// Reference<ActorLineage> lineage;
 	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
 	                         // group #
 
 	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) {
 		/*++actorCount;*/
-		replaceLineage(lineage);
+		// if (currentLineage != nullptr && currentLineage->isValid()) {
+		// 	lineage = *currentLineage;
+		// }
+		// replaceLineage(&lineage);
+		// lineage.referencesSelf = false;
+		// currentLineage = &lineage;
 	}
-	//~Actor() { --actorCount; }
+	~Actor() {
+		//--actorCount;
+		// replaceLineage(new LineageReference<ActorLineage>());
+		// replaceLineage(prev);
+	}
 
 	Reference<ActorLineage> setLineage() {
-		auto res = currentLineage;
-		replaceLineage(lineage);
+		Reference<ActorLineage> res = *currentLineage;
+		// if (currentLineage != nullptr && currentLineage->isValid()) {
+			// res = *currentLineage;
+		// }
+		replaceLineage(&lineage);
 		return res;
+	}
+
+	LineageReference<ActorLineage>* lineageAddr() {
+		return std::addressof(lineage);
 	}
 };
 
@@ -1171,30 +1213,50 @@ template <>
 struct Actor<void> {
 	// This specialization is for a void actor (one not returning a future, hence also uncancellable)
 
-	Reference<ActorLineage> lineage = currentLineage;
+	// LineageReference<ActorLineage>* prev = currentLineage;
+	LineageReference<ActorLineage> lineage = *currentLineage;
+	// Reference<ActorLineage> lineage;
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
 	Actor() : actor_wait_state(0) {
 		/*++actorCount;*/
-		replaceLineage(lineage);
+		// if (currentLineage != nullptr && currentLineage->isValid()) {
+		// 	lineage = *currentLineage;
+		// }
+		// replaceLineage(&lineage);
+		// lineage.referencesSelf = false;
+		// currentLineage = &lineage;
 	}
-	//~Actor() { --actorCount; }
+	~Actor() {
+		//--actorCount;
+		// replaceLineage(new LineageReference<ActorLineage>());
+		// replaceLineage(prev);
+	}
 
 	Reference<ActorLineage> setLineage() {
-		auto res = currentLineage;
-		replaceLineage(lineage);
+		Reference<ActorLineage> res = *currentLineage;
+		// if (currentLineage != nullptr && currentLineage->isValid()) {
+			// res = *currentLineage;
+		// }
+		replaceLineage(&lineage);
 		return res;
+	}
+
+	LineageReference<ActorLineage>* lineageAddr() {
+		return std::addressof(lineage);
 	}
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
 	virtual void fire(ValueType const& value) override {
-		auto _ = static_cast<ActorType*>(this)->setLineage();
+		// auto _ = static_cast<ActorType*>(this)->setLineage();
+		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
 	virtual void error(Error e) override {
-		auto _ = static_cast<ActorType*>(this)->setLineage();
+		// auto _ = static_cast<ActorType*>(this)->setLineage();
+		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };
@@ -1202,15 +1264,18 @@ struct ActorCallback : Callback<ValueType> {
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
 	void fire(ValueType const& value) override {
-		auto _ = static_cast<ActorType*>(this)->setLineage();
+		// auto _ = static_cast<ActorType*>(this)->setLineage();
+		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
 	void fire(ValueType&& value) override {
-		auto _ = static_cast<ActorType*>(this)->setLineage();
+		// auto _ = static_cast<ActorType*>(this)->setLineage();
+		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
 	}
 	void error(Error e) override {
-		auto _ = static_cast<ActorType*>(this)->setLineage();
+		// auto _ = static_cast<ActorType*>(this)->setLineage();
+		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };

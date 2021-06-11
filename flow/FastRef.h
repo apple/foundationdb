@@ -194,4 +194,14 @@ bool operator!=(const Reference<P>& lhs, const Reference<P>& rhs) {
 	return !(lhs == rhs);
 }
 
+template <class P>
+class LineageReference : public Reference<P> {
+// TODO: Make private
+public:
+	LineageReference() : Reference<P>(nullptr), referencesSelf(false) {}
+	explicit LineageReference(P* ptr) : Reference<P>(ptr), referencesSelf(false) {}
+	LineageReference(const LineageReference& r) : Reference<P>(r), referencesSelf(false) {}
+	bool referencesSelf;
+};
+
 #endif

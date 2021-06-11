@@ -21,7 +21,7 @@
 #include "fdbclient/StackLineage.h"
 
 std::vector<StringRef> getActorStackTrace() {
-	return currentLineage->stack(&StackLineage::actorName);
+	return (*currentLineage)->stack(&StackLineage::actorName);
 }
 
 namespace {

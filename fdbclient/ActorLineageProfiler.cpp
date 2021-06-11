@@ -29,6 +29,11 @@
 
 using namespace std::literals;
 
+// TODO: For debugging, remove
+LineageReference<ActorLineage>* curLineage() {
+	return currentLineage;
+}
+
 class Packer : public msgpack::packer<msgpack::sbuffer> {
 	struct visitor_t {
 		using VisitorMap = std::unordered_map<std::type_index, std::function<void(std::any const&, Packer& packer)>>;
@@ -244,8 +249,15 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 	return res;
 }
 
-void sample(const Reference<ActorLineage>& lineage) {
-	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage]() {
+// void sample(const Reference<ActorLineage>& lineage) {
+void sample(Reference<ActorLineage>* ptr) {
+	// boost::asio::post(ActorLineageProfiler::instance().context(), [lineage]() {
+	// 	SampleCollection::instance().collect(lineage);
+	// });
+	if (!ptr->isValid()) {
+		return;
+	}
+	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage = Reference<ActorLineage>::addRef(ptr->getPtr())]() {
 		SampleCollection::instance().collect(lineage);
 	});
 }
