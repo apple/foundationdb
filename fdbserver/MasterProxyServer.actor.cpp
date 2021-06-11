@@ -73,7 +73,8 @@ ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool
 
 struct ProxyStats {
 	CounterCollection cc;
-	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
+	Counter systemAndDefaultTxnRequestIn, systemAndDefaultTxnRequestOut, systemAndDefaultTxnRequestErrors;
+	Counter batchTxnRequestIn, batchTxnRequestOut, batchTxnRequestErrors;
 	Counter txnStartIn, txnStartOut, txnStartBatch;
 	Counter txnSystemPriorityStartIn, txnSystemPriorityStartOut;
 	Counter txnBatchPriorityStartIn, txnBatchPriorityStartOut;
@@ -155,8 +156,12 @@ struct ProxyStats {
 	                    int64_t* commitBatchesMemBytesCountPtr)
 	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()), maxComputeNS(0), minComputeNS(1e12),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
-	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
-	    txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
+	    systemAndDefaultTxnRequestIn("SystemAndDefaultTxnRequestIn", cc),
+	    systemAndDefaultTxnRequestOut("SystemAndDefaultTxnRequestOut", cc),
+	    systemAndDefaultTxnRequestErrors("SystemAndDefaultTxnRequestErrors", cc),
+	    batchTxnRequestIn("BatchTxnRequestIn", cc), batchTxnRequestOut("BatchTxnRequestOut", cc),
+	    batchTxnRequestErrors("BatchTxnRequestErrors", cc), txnStartIn("TxnStartIn", cc),
+	    txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
 	    txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
 	    txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
 	    txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
@@ -402,9 +407,10 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 	loop choose {
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
-			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
-			    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
-				++stats->txnRequestErrors;
+			if (req.priority >= TransactionPriority::DEFAULT &&
+			    stats->systemAndDefaultTxnRequestIn.getValue() - stats->systemAndDefaultTxnRequestOut.getValue() >
+			        SERVER_KNOBS->START_SYSTEM_AND_DEFAULT_TRANSACTION_MAX_QUEUE_SIZE) {
+				++stats->systemAndDefaultTxnRequestErrors;
 				// FIXME: send an error instead of giving an unreadable version when the client can support the error:
 				// req.reply.sendError(proxy_memory_limit_exceeded());
 				GetReadVersionReply rep;
@@ -412,6 +418,17 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 				rep.locked = true;
 				req.reply.send(rep);
 				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
+			} else if (req.priority < TransactionPriority::DEFAULT &&
+			           stats->batchTxnRequestIn.getValue() - stats->batchTxnRequestOut.getValue() >
+			               SERVER_KNOBS->START_BATCH_TRANSACTION_MAX_QUEUE_SIZE) {
+				++stats->batchTxnRequestErrors;
+				// FIXME: send an error instead of giving an unreadable version when the client can support the error:
+				// req.reply.sendError(proxy_memory_limit_exceeded());
+				GetReadVersionReply rep;
+				rep.version = 1;
+				rep.locked = true;
+				req.reply.send(rep);
+				TraceEvent(SevWarnAlways, "ProxyBatchTxnThresholdExceeded").suppressFor(60);
 			} else {
 				stats->addRequest(req.transactionCount);
 				// TODO: check whether this is reasonable to do in the fast path
@@ -431,12 +448,12 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 				}
 
 				if (req.priority >= TransactionPriority::IMMEDIATE) {
-					++stats->txnRequestIn;
+					++stats->systemAndDefaultTxnRequestIn;
 					stats->txnStartIn += req.transactionCount;
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					systemQueue->push_back(req);
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
-					++stats->txnRequestIn;
+					++stats->systemAndDefaultTxnRequestIn;
 					stats->txnStartIn += req.transactionCount;
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					defaultQueue->push_back(req);
@@ -447,7 +464,7 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 						req.reply.sendError(batch_transaction_throttled());
 						stats->txnThrottled += req.transactionCount;
 					} else {
-						++stats->txnRequestIn;
+						++stats->batchTxnRequestIn;
 						stats->txnStartIn += req.transactionCount;
 						stats->txnBatchPriorityStartIn += req.transactionCount;
 						batchQueue->push_back(req);
@@ -1796,7 +1813,11 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 
 		request.reply.send(reply);
-		++stats->txnRequestOut;
+		if (request.priority >= TransactionPriority::DEFAULT) {
+			++stats->systemAndDefaultTxnRequestOut;
+		} else {
+			++stats->batchTxnRequestOut;
+		}
 	}
 
 	return Void();

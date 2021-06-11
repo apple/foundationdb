@@ -1764,11 +1764,14 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(
-	    getServerMetrics(db->get().client.proxies,
-	                     address_workers,
-	                     std::vector<std::string>{
-	                         "GRVLatencyMetrics", "CommitLatencyMetrics", "GRVLatencyBands", "CommitLatencyBands", "CommitBatchingWindowSize" }));
+	vector<std::pair<MasterProxyInterface, EventMap>> results =
+	    wait(getServerMetrics(db->get().client.proxies,
+	                          address_workers,
+	                          std::vector<std::string>{ "GRVLatencyMetrics",
+	                                                    "CommitLatencyMetrics",
+	                                                    "GRVLatencyBands",
+	                                                    "CommitLatencyBands",
+	                                                    "CommitBatchingWindowSize" }));
 
 	return results;
 }
@@ -1902,7 +1905,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 			txnBatchPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnBatchPriorityStartOut")));
 			txnCommitOutSuccess.updateValues(StatusCounter(ps.getValue("TxnCommitOutSuccess")));
 			txnKeyLocationOut.updateValues(StatusCounter(ps.getValue("KeyServerLocationOut")));
-			txnMemoryErrors.updateValues(StatusCounter(ps.getValue("TxnRequestErrors")));
+			txnMemoryErrors.updateValues(StatusCounter(ps.getValue("SystemAndDefaultTxnRequestErrors")));
+			txnMemoryErrors.updateValues(StatusCounter(ps.getValue("BatchTxnRequestErrors")));
 			txnMemoryErrors.updateValues(StatusCounter(ps.getValue("KeyServerLocationErrors")));
 			txnMemoryErrors.updateValues(StatusCounter(ps.getValue("TxnCommitErrors")));
 		}
