@@ -131,7 +131,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PRIORITY_RECOVER_MOVE,                                 110 );
 	init( PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,                 120 );
 	init( PRIORITY_REBALANCE_OVERUTILIZED_TEAM,                  121 );
-	init( PRIORITY_PERPETUAL_STORAGE_WIGGLE,                     140 );
+	init( PRIORITY_PERPETUAL_STORAGE_WIGGLE,                     139 );
 	init( PRIORITY_TEAM_HEALTHY,                                 140 );
 	init( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER,               150 );
 	init( PRIORITY_TEAM_REDUNDANT,                               200 );
