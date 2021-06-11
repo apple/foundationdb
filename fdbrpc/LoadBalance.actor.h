@@ -77,16 +77,22 @@ struct LoadBalancedReply {
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply);
 Optional<LoadBalancedReply> getLoadBalancedReply(const void*);
 
-ACTOR template <class Req, class Resp>
+ACTOR template <class Req, class Resp, class Interface, class Multi>
 Future<Void> tssComparison(Req req,
                            Future<ErrorOr<Resp>> fSource,
                            Future<ErrorOr<Resp>> fTss,
-                           TSSEndpointData tssData) {
+                           TSSEndpointData tssData,
+                           uint64_t srcEndpointId,
+                           Reference<MultiInterface<Multi>> ssTeam,
+                           RequestStream<Req> Interface::*channel) {
 	state double startTime = now();
 	state Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT);
 	state int finished = 0;
 	state double srcEndTime;
 	state double tssEndTime;
+	// we want to record ss/tss errors to metrics
+	state int srcErrorCode = error_code_success;
+	state int tssErrorCode = error_code_success;
 
 	loop {
 		choose {
@@ -108,11 +114,6 @@ Future<Void> tssComparison(Req req,
 			}
 		}
 	}
-
-	// we want to record ss/tss errors to metrics
-	int srcErrorCode = error_code_success;
-	int tssErrorCode = error_code_success;
-
 	++tssData.metrics->requests;
 
 	if (src.isError()) {
@@ -137,15 +138,82 @@ Future<Void> tssComparison(Req req,
 			// apples
 			tssData.metrics->recordLatency(req, srcEndTime - startTime, tssEndTime - startTime);
 
-			// expect mismatches in drop mutations mode.
-			Severity traceSeverity =
-			    (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
-			        ? SevWarnAlways
-			        : SevError;
-
-			if (!TSS_doCompare(req, src.get(), tss.get().get(), traceSeverity, tssData.tssId)) {
+			if (!TSS_doCompare(src.get(), tss.get().get())) {
 				TEST(true); // TSS Mismatch
-				++tssData.metrics->mismatches;
+				state TraceEvent mismatchEvent(
+				    (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+				        ? SevWarnAlways
+				        : SevError,
+				    TSS_mismatchTraceName(req));
+				mismatchEvent.detail("TSSID", tssData.tssId);
+
+				if (FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_VERIFY_SS && ssTeam->size() > 1) {
+					TEST(true); // checking TSS mismatch against rest of storage team
+
+					// if there is more than 1 SS in the team, attempt to verify that the other SS servers have the same
+					// data
+					state std::vector<Future<ErrorOr<Resp>>> restOfTeamFutures;
+					restOfTeamFutures.reserve(ssTeam->size() - 1);
+					for (int i = 0; i < ssTeam->size(); i++) {
+						RequestStream<Req> const* si = &ssTeam->get(i, channel);
+						if (si->getEndpoint().token.first() !=
+						    srcEndpointId) { // don't re-request to SS we already have a response from
+							resetReply(req);
+							restOfTeamFutures.push_back(si->tryGetReply(req));
+						}
+					}
+
+					wait(waitForAllReady(restOfTeamFutures));
+
+					int numError = 0;
+					int numMatchSS = 0;
+					int numMatchTSS = 0;
+					int numMatchNeither = 0;
+					for (Future<ErrorOr<Resp>> f : restOfTeamFutures) {
+						if (!f.canGet() || f.get().isError()) {
+							numError++;
+						} else {
+							Optional<LoadBalancedReply> fLB = getLoadBalancedReply(&f.get().get());
+							if (fLB.present() && fLB.get().error.present()) {
+								numError++;
+							} else if (TSS_doCompare(src.get(), f.get().get())) {
+								numMatchSS++;
+							} else if (TSS_doCompare(tss.get().get(), f.get().get())) {
+								numMatchTSS++;
+							} else {
+								numMatchNeither++;
+							}
+						}
+					}
+					mismatchEvent.detail("TeamCheckErrors", numError)
+					    .detail("TeamCheckMatchSS", numMatchSS)
+					    .detail("TeamCheckMatchTSS", numMatchTSS)
+					    .detail("TeamCheckMatchNeither", numMatchNeither);
+				}
+				if (tssData.metrics->shouldRecordDetailedMismatch()) {
+					TSS_traceMismatch(mismatchEvent, req, src.get(), tss.get().get());
+
+					TEST(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Full TSS Mismatch
+					TEST(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Partial TSS Mismatch and storing
+					                                                         // the rest in FDB
+
+					if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
+						mismatchEvent.disable();
+						UID mismatchUID = deterministicRandom()->randomUniqueID();
+						tssData.metrics->recordDetailedMismatchData(mismatchUID, mismatchEvent.getFields().toString());
+
+						// record a summarized trace event instead
+						TraceEvent summaryEvent((g_network->isSimulated() &&
+						                         g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+						                            ? SevWarnAlways
+						                            : SevError,
+						                        TSS_mismatchTraceName(req));
+						summaryEvent.detail("TSSID", tssData.tssId).detail("MismatchId", mismatchUID);
+					}
+				} else {
+					// don't record trace event
+					mismatchEvent.disable();
+				}
 			}
 		} else if (tssLB.present() && tssLB.get().error.present()) {
 			tssErrorCode = tssLB.get().error.get().code();
@@ -169,7 +237,7 @@ Future<Void> tssComparison(Req req,
 }
 
 // Stores state for a request made by the load balancer
-template <class Request>
+template <class Request, class Interface, class Multi>
 struct RequestData : NonCopyable {
 	typedef ErrorOr<REPLY_TYPE(Request)> Reply;
 
@@ -187,7 +255,9 @@ struct RequestData : NonCopyable {
 	static void maybeDuplicateTSSRequest(RequestStream<Request> const* stream,
 	                                     Request& request,
 	                                     QueueModel* model,
-	                                     Future<Reply> ssResponse) {
+	                                     Future<Reply> ssResponse,
+	                                     Reference<MultiInterface<Multi>> alternatives,
+	                                     RequestStream<Request> Interface::*channel) {
 		if (model) {
 			// Send parallel request to TSS pair, if it exists
 			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
@@ -198,34 +268,43 @@ struct RequestData : NonCopyable {
 				// FIXME: optimize to avoid creating new netNotifiedQueue for each message
 				RequestStream<Request> tssRequestStream(tssData.get().endpoint);
 				Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(request);
-				model->addActor.send(tssComparison(request, ssResponse, fTssResult, tssData.get()));
+				model->addActor.send(tssComparison(request,
+				                                   ssResponse,
+				                                   fTssResult,
+				                                   tssData.get(),
+				                                   stream->getEndpoint().token.first(),
+				                                   alternatives,
+				                                   channel));
 			}
 		}
 	}
 
 	// Initializes the request state and starts it, possibly after a backoff delay
-	void startRequest(double backoff,
-	                  bool triedAllOptions,
-	                  RequestStream<Request> const* stream,
-	                  Request& request,
-	                  QueueModel* model) {
+	void startRequest(
+	    double backoff,
+	    bool triedAllOptions,
+	    RequestStream<Request> const* stream,
+	    Request& request,
+	    QueueModel* model,
+	    Reference<MultiInterface<Multi>> alternatives, // alternatives and channel passed through for TSS check
+	    RequestStream<Request> Interface::*channel) {
 		modelHolder = Reference<ModelHolder>();
 		requestStarted = false;
 
 		if (backoff > 0) {
 			response = mapAsync<Void, std::function<Future<Reply>(Void)>, Reply>(
-			    delay(backoff), [this, stream, &request, model](Void _) {
+			    delay(backoff), [this, stream, &request, model, alternatives, channel](Void _) {
 				    requestStarted = true;
 				    modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
 				    Future<Reply> resp = stream->tryGetReply(request);
-				    maybeDuplicateTSSRequest(stream, request, model, resp);
+				    maybeDuplicateTSSRequest(stream, request, model, resp, alternatives, channel);
 				    return resp;
 			    });
 		} else {
 			requestStarted = true;
 			modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
 			response = stream->tryGetReply(request);
-			maybeDuplicateTSSRequest(stream, request, model, response);
+			maybeDuplicateTSSRequest(stream, request, model, response, alternatives, channel);
 		}
 
 		requestProcessed = false;
@@ -363,8 +442,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
     bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = nullptr) {
 
-	state RequestData<Request> firstRequestData;
-	state RequestData<Request> secondRequestData;
+	state RequestData<Request, Interface, Multi> firstRequestData;
+	state RequestData<Request, Interface, Multi> secondRequestData;
 
 	state Optional<uint64_t> firstRequestEndpoint;
 	state Future<Void> secondDelay = Never();
@@ -577,7 +656,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			firstRequestEndpoint = Optional<uint64_t>();
 		} else if (firstRequestData.isValid()) {
 			// Issue a second request, the first one is taking a long time.
-			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model);
+			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 			state bool firstFinished = false;
 
 			loop choose {
@@ -606,7 +685,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			}
 		} else {
 			// Issue a request, if it takes too long to get a reply, go around the loop
-			firstRequestData.startRequest(backoff, triedAllOptions, stream, request, model);
+			firstRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 
 			loop {
