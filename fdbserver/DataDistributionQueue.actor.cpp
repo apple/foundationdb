@@ -993,7 +993,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				allHealthy = true;
 				anyWithSource = false;
 				bestTeams.clear();
-				// Get team from teamCollections in different DCs and find the best one
+				// Get team from teamCollections in diffrent DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
 					double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 					if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
