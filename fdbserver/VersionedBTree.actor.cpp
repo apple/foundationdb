@@ -1484,17 +1484,21 @@ public:
 			self->updateCommittedHeader();
 			self->addLatestSnapshot();
 
+			self->lastNumRemapEntries = self->remapQueue.numEntries;
+			self->remapCleanupFuture = remapCleanup(self);
+
+			/*
 			// Delay the remap clean by some time immediately post recovery to avoid overwhelming the system
 			double startDelay = SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_START_DELAY;
 			self->remapCleanupDelay = map(delay(startDelay), [=](Void) {
 				//TraceEvent(SevInfo, "RedwoodRemapCleanupStart").detail("Delay", startDelay).detail("Filename", self->filename);
 				return Void();
 			});
-			// self->remapCleanupFuture = remapCleanup(self);
 			TraceEvent(SevInfo, "RedwoodRemapCleanupStart")
 			    .detail("Delay", startDelay)
 			    .detail("Filename", self->filename);
 			self->remapCleanupFuture = self->remapCleanupDelay.isReady() ? remapCleanup(self) : Void();
+	        */
 		} else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully
 			// committed. A new pager will be created in its place.
@@ -2075,6 +2079,9 @@ public:
 		// Cutoff is the version we can pop to
 		state RemappedPage cutoff(oldestRetainedVersion - self->remapCleanupWindow);
 
+		state int work = (1.0 + SERVER_KNOBS->REMAP_GAIN_RATIO) * ( self->remapQueue.numEntries - self->lastNumRemapEntries );
+		self->lastNumRemapEntries = self->remapQueue.numEntries;
+
 		// Minimum version we must pop to before obeying stop command.
 		// This is based a minimum percentage of the version gap we want to close. i.e.
 		// from the beginning of the queue to the cutoff
@@ -2087,6 +2094,7 @@ public:
 		self->remapDestinationsSimOnly.clear();
 
 		state int sinceYield = 0;
+		state int popped = 0;
 		loop {
 			state Optional<RemappedPage> p = wait(self->remapQueue.pop(cutoff));
 			debug_printf("DWALPager(%s) remapCleanup popped %s\n", self->filename.c_str(), ::toString(p).c_str());
@@ -2095,6 +2103,7 @@ public:
 			if (!p.present()) {
 				break;
 			}
+			popped++;
 
 			Future<Void> task = removeRemapEntry(self, p.get(), oldestRetainedVersion);
 			if (!task.isReady()) {
@@ -2103,7 +2112,8 @@ public:
 
 			// If the stop flag is set and we've reached the minimum stop version according the the allowed lag then
 			// stop.
-			if (self->remapCleanupStop && p.get().version >= minStopVersion) {
+			//if (self->remapCleanupStop && p.get().version >= minStopVersion) {
+			if (popped == work) {
 				break;
 			}
 
@@ -2414,6 +2424,7 @@ private:
 	Future<Void> remapCleanupFuture;
 	Future<Void> remapCleanupDelay;
 	bool remapCleanupStop;
+	int64_t lastNumRemapEntries;
 
 	Reference<IAsyncFile> pageFile;
 

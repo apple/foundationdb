@@ -656,6 +656,7 @@ public:
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_MIN_PROGRESS; // Minimum progress a remap remover should make before stopping if asked to do so by commit
 	double REDWOOD_REMAP_CLEANUP_START_DELAY; // Remap remover waits this amount of time before starting post recovery
+	double REMAP_GAIN_RATIO;
 	double REDWOOD_LOGGING_INTERVAL;
 
 	// Server request latency measurement
