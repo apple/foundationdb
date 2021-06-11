@@ -52,7 +52,7 @@ void applyMetadataMutations(SpanID const& spanContext,
                             Arena& arena,
                             VectorRef<MutationRef> const& mutations,
                             IKeyValueStore* txnStateStore,
-                            LogPushData* toCommit,
+                            LogPushData* toCommit, // non-null if these mutations were part of a new commit handled by this commit proxy
                             bool& confChange,
                             Reference<ILogSystem> logSystem,
                             Version popVersion,
@@ -66,7 +66,8 @@ void applyMetadataMutations(SpanID const& spanContext,
                             std::map<UID, Reference<StorageInfo>>* storageCache,
                             std::map<Tag, Version>* tag_popped,
                             std::unordered_map<UID, StorageServerInterface>* tssMapping,
-                            bool initialCommit) {
+                            bool initialCommit // true if the mutations were already written to the txnStateStore as part of recovery
+) {
 	// std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
 
