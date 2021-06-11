@@ -280,8 +280,12 @@ struct TransactionRateInfo {
 
 	void disable() {
 		disabled = true;
-		rate = 0;
-		smoothRate.reset(0);
+		if (SERVER_KNOBS->DECAY_TXN_RATE_ON_LEASE_EXPIRATION) {
+			// Use smoothRate.setTotal(0) instead of setting rate to 0 so txns will not be throttled immediately.
+			smoothRate.setTotal(0);
+		} else {
+			smoothRate.reset(0);
+		}
 	}
 
 	void setRate(double rate) {
@@ -426,12 +430,14 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 					                             TaskPriority::ProxyGRVTimer));
 				}
 
-				++stats->txnRequestIn;
-				stats->txnStartIn += req.transactionCount;
 				if (req.priority >= TransactionPriority::IMMEDIATE) {
+					++stats->txnRequestIn;
+					stats->txnStartIn += req.transactionCount;
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					systemQueue->push_back(req);
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
+					++stats->txnRequestIn;
+					stats->txnStartIn += req.transactionCount;
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					defaultQueue->push_back(req);
 				} else {
@@ -440,11 +446,12 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 					if (batchRateInfo->rate <= (1.0 / proxiesCount)) {
 						req.reply.sendError(batch_transaction_throttled());
 						stats->txnThrottled += req.transactionCount;
-						continue;
+					} else {
+						++stats->txnRequestIn;
+						stats->txnStartIn += req.transactionCount;
+						stats->txnBatchPriorityStartIn += req.transactionCount;
+						batchQueue->push_back(req);
 					}
-
-					stats->txnBatchPriorityStartIn += req.transactionCount;
-					batchQueue->push_back(req);
 				}
 			}
 		}
@@ -901,10 +908,10 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 
 			//			if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
 			//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
-			//describe(tags)).detail("BackupMutation", backupMutation.toString()) 					.detail("BackupMutationSize",
-			//val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
-			//					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData",
-			//backupMutation.param1);
+			// describe(tags)).detail("BackupMutation", backupMutation.toString())
+			// .detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath",
+			// logRangeMutation.first) 					.detail("PartIndex", part).detail("PartIndexEndian",
+			// bigEndian32(part)).detail("PartData", backupMutation.param1);
 			//			}
 		}
 	}
@@ -997,7 +1004,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	}
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined
-	///and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
+	/// and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 
 	// Queuing pre-resolution commit processing
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber - 1);
@@ -1112,7 +1119,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterResolution");
 
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but
-	///doesn't need to be)
+	/// doesn't need to be)
 	TEST(self->latestLocalCommitBatchLogging.get() < localBatchNumber - 1); // Queuing post-resolution commit processing
 	wait(self->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
 	wait(yield(TaskPriority::ProxyCommitYield1));
@@ -1489,7 +1496,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 
 	//TraceEvent("ProxyPush", self->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion)
 	//	.detail("TransactionsSubmitted", trs.size()).detail("TransactionsCommitted", commitCount).detail("TxsPopTo",
-	//msg.popTo);
+	// msg.popTo);
 
 	if (prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), commitVersion);
@@ -1552,7 +1559,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	self->logSystem->popTxs(msg.popTo);
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for
-	///latency)
+	/// latency)
 	if (prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMinCommittedVersion(UID(), commitVersion);
 

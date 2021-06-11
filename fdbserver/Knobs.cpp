@@ -401,6 +401,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( RESET_RESOLVER_BATCHES,                                 200 );
 	init( RESET_MASTER_DELAY,                                   300.0 );
 	init( RESET_RESOLVER_DELAY,                                 300.0 );
+	init( DECAY_TXN_RATE_ON_LEASE_EXPIRATION,                    true ); if( randomize && BUGGIFY ) DECAY_TXN_RATE_ON_LEASE_EXPIRATION = false;
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
