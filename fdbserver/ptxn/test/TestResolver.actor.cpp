@@ -28,6 +28,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/Config.h"
+#include "fdbserver/ptxn/TeamVersionTracker.h"
 #include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/Utils.h"
@@ -63,7 +64,7 @@ std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
 		r.prevVersion = pv;
 		r.version = current;
 		r.lastReceivedVersion = prevVersion;
-		r.teams = getRandomTeams(teams);
+		r.updatedTeams = getRandomTeams(teams);
 
 		pv = current;
 		current += increment;
@@ -80,6 +81,44 @@ int findBatch(std::vector<ResolveTransactionBatchRequest> batches, Version v) {
 	}
 	ASSERT(false);
 	return -1;
+}
+
+bool trackerTest() {
+	ptxn::TeamVersionTracker tracker;
+	std::vector<ptxn::StorageTeamID> teams;
+	const int totalTeams = 10;
+	for (int i = 0; i < totalTeams; i++) {
+		teams.emplace_back(0, i);
+	}
+	const Version initialVersion = 100;
+	tracker.addTeams(teams, initialVersion);
+	ASSERT_EQ(tracker.getCommitVersion({0, 1}), initialVersion);
+	ASSERT_EQ(tracker.getMaxCommitVersion(), initialVersion);
+
+	std::vector<ptxn::StorageTeamID> updatedTeams, newTeams, removedTeams;
+	for (int i = 0; i < totalTeams/2; i++) {
+		updatedTeams.emplace_back(0, i);
+		newTeams.emplace_back(0, totalTeams + i);
+		removedTeams.emplace_back(0, totalTeams - i - 1);
+	}
+	const Version cv1 = 200, cv2 = 200;
+	tracker.updateTeams(updatedTeams, cv1);
+	tracker.addTeams(newTeams, cv2);
+	tracker.removeTeams(removedTeams);
+
+	for (const auto team : updatedTeams) {
+		ASSERT_EQ(tracker.getCommitVersion(team), cv1);
+	}
+	for (const auto team : newTeams) {
+		ASSERT_EQ(tracker.getCommitVersion(team), cv2);
+	}
+	for (const auto team : removedTeams) {
+		ASSERT_EQ(tracker.getCommitVersion(team), initialVersion);
+	}
+	std::pair<ptxn::StorageTeamID, Version> p = tracker.mostLaggingTeam();
+	ASSERT_EQ(p.second, cv1);
+
+	return true;
 }
 
 } // anonymous namespace
@@ -114,7 +153,7 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 		req.lastReceivedVersion = -1;
 		// triggers debugging trace events at Resolvers
 		req.debugID = deterministicRandom()->randomUniqueID();
-		req.teams = teams;
+		req.newTeams = teams;
 
 		replies.push_back(brokenPromiseToNever(r->resolve.getReply(req)));
 	}
@@ -156,14 +195,16 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 		int idx = findBatch(batches, v); // the i'th request
 
 		auto& pcvGot = replies[idx].get().previousCommitVersions;
-		ASSERT_EQ(batches[idx].teams.size(), pcvGot.size());
-		for (const auto& team : batches[idx].teams) {
+		ASSERT_EQ(batches[idx].updatedTeams.size(), pcvGot.size());
+		for (const auto& team : batches[idx].updatedTeams) {
 			auto it = pcvGot.find(team);
 			ASSERT(it != pcvGot.end());
 			ASSERT_EQ(pcv[team], it->second);
 			pcv[team] = batches[idx].version;
 		}
 	}
+
+	ASSERT(trackerTest());
 
 	return Void();
 }
