@@ -157,8 +157,6 @@ set(FDBSERVER_SRCS
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
-  # TODO: Fix and reenable this workload
-  #workloads/ConfigurationDatabase.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
   workloads/CommitBugCheck.actor.cpp
@@ -175,7 +173,6 @@ set(FDBSERVER_SRCS
   workloads/DiskDurabilityTest.actor.cpp
   workloads/Downgrade.actor.cpp
   workloads/DummyWorkload.actor.cpp
-  workloads/DynamicKnobs.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
   workloads/FileSystem.actor.cpp

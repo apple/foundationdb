@@ -1,5 +1,0 @@
-[[test]]
-testTitle='DynamicKnobs'
-
-    [[test.workload]]
-    testName='DynamicKnobs'
