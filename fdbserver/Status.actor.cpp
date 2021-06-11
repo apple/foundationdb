@@ -2022,7 +2022,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 			txnSystemPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnSystemPriorityStartOut")));
 			txnDefaultPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnDefaultPriorityStartOut")));
 			txnBatchPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnBatchPriorityStartOut")));
-			txnMemoryErrors.updateValues(StatusCounter(gps.getValue("TxnRequestErrors")));
+			txnMemoryErrors.updateValues(StatusCounter(gps.getValue("SystemAndDefaultTxnRequestErrors")));
+			txnMemoryErrors.updateValues(StatusCounter(gps.getValue("BatchTxnRequestErrors")));
 		}
 
 		for (auto& cps : commitProxyStats) {

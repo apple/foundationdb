@@ -363,7 +363,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( START_TRANSACTION_MAX_REQUESTS_TO_START,             10000 );
 	init( START_TRANSACTION_RATE_WINDOW,                         2.0 );
 	init( START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,             10.0 );
-	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
+	init( START_SYSTEM_AND_DEFAULT_TRANSACTION_MAX_QUEUE_SIZE,   1e6 );
+	init( START_BATCH_TRANSACTION_MAX_QUEUE_SIZE,                1e5 ); if( randomize && BUGGIFY ) START_BATCH_TRANSACTION_MAX_QUEUE_SIZE = 1000;
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
 
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,         0.0005 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE = 0.005;
