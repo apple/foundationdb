@@ -2055,6 +2055,7 @@ public:
 			// TODO: Double check this - need to do this as extentUsedList was pushed into
 			self->addLatestSnapshot();
 
+			self->lastNumRemapEntries = self->remapQueue.numEntries;
 			self->remapCleanupFuture = Void();
 			wait(self->commit());
 		}
@@ -2818,17 +2819,17 @@ public:
 		             oldestRetainedVersion);
 
 		state int work = (1.0 + SERVER_KNOBS->REMAP_GAIN_RATIO) * ( self->remapQueue.numEntries - self->lastNumRemapEntries );
-		self->lastNumRemapEntries = self->remapQueue.numEntries;
+		//debug_printf_always("DWALPager(%s) remapCleanup work %d numEntries %d\n", self->filename.c_str(), work, self->lastNumRemapEntries);
 
 		// Minimum version we must pop to before obeying stop command.
 		// This is based a minimum percentage of the version gap we want to close. i.e.
 		// from the beginning of the queue to the cutoff
-		state Optional<RemappedPage> rp = wait(self->remapQueue.peek());
+		//state Optional<RemappedPage> rp = wait(self->remapQueue.peek());
+		//    (cutoff.version - (rp.present() ? rp.get().version : 0)) *
+		//  (BUGGIFY ? deterministicRandom()->random01() : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_MIN_PROGRESS);
 		state Version minStopVersion =
-		    (cutoff.version - (rp.present() ? rp.get().version : 0)) *
-		    (BUGGIFY ? deterministicRandom()->random01() : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_MIN_PROGRESS);
-		// cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10)
-		//				         : (self->remapCleanupWindow * SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG));
+		 cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10)
+						   : (self->remapCleanupWindow * (0.1)/*SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG*/));
 		self->remapDestinationsSimOnly.clear();
 
 		state int sinceYield = 0;
@@ -2852,6 +2853,7 @@ public:
 			// stop.
 			//if (self->remapCleanupStop && p.get().version >= minStopVersion) {
 			if (popped == work) {
+				//debug_printf_always("DWALPager(%s) remapCleanup work %d popped %d\n", self->filename.c_str(), work, popped);
 				break;
 			}
 
@@ -2865,6 +2867,7 @@ public:
 		debug_printf("DWALPager(%s) remapCleanup stopped (stop=%d)\n", self->filename.c_str(), self->remapCleanupStop);
 		signal.send(Void());
 		wait(tasks.getResult());
+		self->lastNumRemapEntries = self->remapQueue.numEntries;
 		return Void();
 	}
 
