@@ -100,7 +100,8 @@ struct ProxyStats {
 	LatencySample batchTxnGRVTimeInQueue;
 
 	LatencySample commitLatencySample;
-	LatencySample grvLatencySample;
+	LatencySample grvLatencySample; // GRV latency metric sample of default priority
+	LatencySample grvBatchLatencySample; // GRV latency metric sample of batched priority
 
 	LatencyBands commitLatencyBands;
 	LatencyBands grvLatencyBands;
@@ -184,6 +185,10 @@ struct ProxyStats {
 	                     id,
 	                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    grvBatchLatencySample("GRVBatchLatencyMetrics",
+	                          id,
+	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -1775,6 +1780,9 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 	double end = g_network->timer();
 	for (GetReadVersionRequest const& request : requests) {
 		double duration = end - request.requestTime();
+		if (request.priority == TransactionPriority::BATCH) {
+			stats->grvBatchLatencySample.addMeasurement(duration);
+		}
 		if (request.priority == TransactionPriority::DEFAULT) {
 			stats->grvLatencySample.addMeasurement(duration);
 		}
