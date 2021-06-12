@@ -603,11 +603,21 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
+			JsonBuilderObject priorityStats;
+
+			// GRV Latency metrics are grouped according to priority (currently batch or default).
+			// Other priorities can be added in the future.
 			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
 			if (grvLatencyMetrics.size()) {
-				JsonBuilderObject priorityStats;
-				// We only report default priority now, but this allows us to add other priorities if we want them
 				priorityStats["default"] = addLatencyStatistics(grvLatencyMetrics);
+			}
+			TraceEventFields const& grvBatchMetrics = metrics.at("GRVBatchLatencyMetrics");
+			if (grvBatchMetrics.size()) {
+				priorityStats["batch"] = addLatencyStatistics(grvBatchMetrics);
+			}
+
+			// Add GRV Latency metrics (for all priorities) to parent node.
+			if (priorityStats.size()) {
 				obj["grv_latency_statistics"] = priorityStats;
 			}
 
@@ -1764,11 +1774,15 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(
-	    getServerMetrics(db->get().client.proxies,
-	                     address_workers,
-	                     std::vector<std::string>{
-	                         "GRVLatencyMetrics", "CommitLatencyMetrics", "GRVLatencyBands", "CommitLatencyBands", "CommitBatchingWindowSize" }));
+	vector<std::pair<MasterProxyInterface, EventMap>> results =
+	    wait(getServerMetrics(db->get().client.proxies,
+	                          address_workers,
+	                          std::vector<std::string>{ "GRVLatencyMetrics",
+	                                                    "GRVBatchLatencyMetrics",
+	                                                    "CommitLatencyMetrics",
+	                                                    "GRVLatencyBands",
+	                                                    "CommitLatencyBands",
+	                                                    "CommitBatchingWindowSize" }));
 
 	return results;
 }
