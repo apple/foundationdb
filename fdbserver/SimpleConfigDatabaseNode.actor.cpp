@@ -97,8 +97,6 @@ TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutati
 class SimpleConfigDatabaseNodeImpl {
 	UID id;
 	OnDemandStore kvStore;
-	std::map<std::string, std::string> config;
-
 	CounterCollection cc;
 
 	// Follower counters

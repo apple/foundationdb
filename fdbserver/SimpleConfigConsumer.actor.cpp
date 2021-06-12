@@ -67,6 +67,7 @@ class SimpleConfigConsumerImpl {
 						te.detail("Op", "Clear");
 					}
 				}
+				ASSERT_GE(reply.mostRecentVersion, self->lastSeenVersion);
 				if (reply.mostRecentVersion > self->lastSeenVersion) {
 					self->lastSeenVersion = reply.mostRecentVersion;
 					broadcaster->applyChanges(reply.changes, reply.mostRecentVersion, reply.annotations);
@@ -95,17 +96,12 @@ class SimpleConfigConsumerImpl {
 		    .detail("AnnotationsSize", reply.annotations.size());
 		broadcaster->applySnapshotAndChanges(
 		    std::move(reply.snapshot), reply.snapshotVersion, reply.changes, reply.changesVersion, reply.annotations);
+		ASSERT_GE(reply.changesVersion, self->lastSeenVersion);
 		self->lastSeenVersion = reply.changesVersion;
 		return Void();
 	}
 
 	static ConfigFollowerInterface getConfigFollowerInterface(ConfigFollowerInterface const& cfi) { return cfi; }
-
-	static ConfigFollowerInterface getConfigFollowerInterface(ClusterConnectionString const& ccs) {
-		auto coordinators = ccs.coordinators();
-		std::sort(coordinators.begin(), coordinators.end());
-		return ConfigFollowerInterface(coordinators[0]);
-	}
 
 	static ConfigFollowerInterface getConfigFollowerInterface(ServerCoordinators const& coordinators) {
 		return ConfigFollowerInterface(coordinators.configServers[0]);

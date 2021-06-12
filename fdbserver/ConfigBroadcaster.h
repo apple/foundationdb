@@ -30,7 +30,7 @@
 
 /*
  * The configuration broadcaster runs on the cluster controller. The broadcaster listens uses
- * and IConfigConsumer instantitation to consume updates from the configuration database, and broadcasts
+ * an IConfigConsumer instantitation to consume updates from the configuration database, and broadcasts
  * these updates to all workers' local configurations
  */
 class ConfigBroadcaster {

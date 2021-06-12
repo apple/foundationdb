@@ -130,7 +130,7 @@ public:
 			ConfigKey configKey = ConfigKeyRef::decodeKey(key);
 			auto knobValue = IKnobCollection::parseKnobValue(
 			    configKey.knobName.toString(), value.toString(), IKnobCollection::Type::TEST);
-			toCommit.mutations.emplace_back_deep(toCommit.arena, ConfigKeyRef::decodeKey(key), knobValue.contents());
+			toCommit.mutations.emplace_back_deep(toCommit.arena, configKey, knobValue.contents());
 		}
 	}
 
