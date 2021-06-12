@@ -22,11 +22,11 @@
 // which are RestoreController, RestoreLoader, and RestoreApplier
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
-#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_G_H
-#include "fdbclient/RestoreWorkerInterface.actor.g.h"
-#elif !defined(FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_H)
-#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
+#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H
+#include "fdbserver/RestoreWorkerInterface.actor.g.h"
+#elif !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H)
+#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H
 
 #include <sstream>
 #include <string>
@@ -707,57 +707,29 @@ struct RestoreUpdateRateRequest : TimedRequest {
 	}
 };
 
-struct RestoreRequest {
-	constexpr static FileIdentifier file_identifier = 16035338;
-
-	int index;
-	Key tagName;
-	Key url;
-	Version targetVersion;
-	KeyRange range;
-	UID randomUid;
-
-	// Every key in backup will first removePrefix and then addPrefix;
-	// Simulation testing does not cover when both addPrefix and removePrefix exist yet.
-	Key addPrefix;
-	Key removePrefix;
-
-	ReplyPromise<struct RestoreCommonReply> reply;
-
-	RestoreRequest() = default;
-	explicit RestoreRequest(const int index,
-	                        const Key& tagName,
-	                        const Key& url,
-	                        Version targetVersion,
-	                        const KeyRange& range,
-	                        const UID& randomUid,
-	                        Key& addPrefix,
-	                        Key removePrefix)
-	  : index(index), tagName(tagName), url(url), targetVersion(targetVersion), range(range), randomUid(randomUid),
-	    addPrefix(addPrefix), removePrefix(removePrefix) {}
-
-	// To change this serialization, ProtocolVersion::RestoreRequestValue must be updated, and downgrades need to be
-	// considered
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, index, tagName, url, targetVersion, range, randomUid, addPrefix, removePrefix, reply);
-	}
-
-	std::string toString() const {
-		std::stringstream ss;
-		ss << "index:" << std::to_string(index) << " tagName:" << tagName.contents().toString()
-		   << " url:" << url.contents().toString() << " targetVersion:" << std::to_string(targetVersion)
-		   << " range:" << range.toString() << " randomUid:" << randomUid.toString()
-		   << " addPrefix:" << addPrefix.toString() << " removePrefix:" << removePrefix.toString();
-		return ss.str();
-	}
-};
-
 std::string getRoleStr(RestoreRole role);
 
 ////--- Interface functions
 ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality);
 ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality, std::string coordFolder);
+
+extern const KeyRef restoreLeaderKey;
+extern const KeyRangeRef restoreWorkersKeys;
+extern const KeyRef restoreStatusKey; // To be used when we measure fast restore performance
+extern const KeyRangeRef restoreRequestKeys;
+extern const KeyRangeRef restoreApplierKeys;
+extern const KeyRef restoreApplierTxnValue;
+
+const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version);
+std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key);
+const Key restoreWorkerKeyFor(UID const& workerID);
+const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
+RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
+Version decodeRestoreRequestDoneVersionValue(ValueRef const& value);
+RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
+const Key restoreStatusKeyFor(StringRef statusType);
+const Value restoreStatusValue(double val);
+Value restoreRequestDoneVersionValue(Version readVersion);
 
 #include "flow/unactorcompiler.h"
 #endif

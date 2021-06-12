@@ -380,11 +380,14 @@ ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddres
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(NetworkAddress remote)
   : getLeader(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_GETLEADER)),
-    openDatabase(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)) {}
+    openDatabase(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)),
+    checkDescriptorMutable(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE)) {}
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 	getLeader.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskPriority::Coordination);
 	openDatabase.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_OPENDATABASE, TaskPriority::Coordination);
+	checkDescriptorMutable.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE,
+	                                             TaskPriority::Coordination);
 }
 
 // Nominee is the worker among all workers that are considered as leader by a coordinator
@@ -431,9 +434,9 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const vector<Optional<LeaderInfo
 	maskedNominees.reserve(nominees.size());
 	for (int i = 0; i < nominees.size(); i++) {
 		if (nominees[i].present()) {
-			maskedNominees.push_back(std::make_pair(
+			maskedNominees.emplace_back(
 			    UID(nominees[i].get().changeID.first() & LeaderInfo::changeIDMask, nominees[i].get().changeID.second()),
-			    i));
+			    i);
 		}
 	}
 
@@ -496,7 +499,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<ClusterConn
 			if (leader.get().first.forward) {
 				TraceEvent("MonitorLeaderForwarding")
 				    .detail("NewConnStr", leader.get().first.serializedInfo.toString())
-				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString()).trackLatest("MonitorLeaderForwarding");
+				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString())
+				    .trackLatest("MonitorLeaderForwarding");
 				info.intermediateConnFile = makeReference<ClusterConnectionFile>(
 				    connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				return info;
@@ -582,7 +586,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 			auto& entry = issueMap[it];
 			entry.count++;
 			if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+				entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
 			}
 		}
 		if (ci.second.versions.size()) {
@@ -593,19 +597,19 @@ OpenDatabaseRequest ClientData::getRequest() {
 				auto& entry = versionMap[it];
 				entry.count++;
 				if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-					entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+					entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
 				}
 			}
 			auto& maxEntry = maxProtocolMap[maxProtocol];
 			maxEntry.count++;
 			if (maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				maxEntry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+				maxEntry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
 			}
 		} else {
 			auto& entry = versionMap[ClientVersionRef()];
 			entry.count++;
 			if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+				entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
 			}
 		}
 	}
