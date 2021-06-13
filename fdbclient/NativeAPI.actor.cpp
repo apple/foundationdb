@@ -3316,7 +3316,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
-					state AnnotateActor annotation(getCurrentLineage());
+					// state AnnotateActor annotation(getCurrentLineage());
 					GetKeyValuesReply _rep =
 					    wait(loadBalance(cx.getPtr(),
 					                     beginServer.second,

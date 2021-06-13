@@ -1257,7 +1257,7 @@ struct ActorCallback : Callback<ValueType> {
 	}
 	virtual void error(Error e) override {
 		// auto _ = static_cast<ActorType*>(this)->setLineage();
-		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
+		// CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };
@@ -1266,17 +1266,17 @@ template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
 	void fire(ValueType const& value) override {
 		// auto _ = static_cast<ActorType*>(this)->setLineage();
-		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
+		// CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
 	void fire(ValueType&& value) override {
 		// auto _ = static_cast<ActorType*>(this)->setLineage();
-		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
+		// CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
 	}
 	void error(Error e) override {
 		// auto _ = static_cast<ActorType*>(this)->setLineage();
-		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
+		// CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };
