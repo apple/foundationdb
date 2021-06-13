@@ -37,6 +37,9 @@ typedef uint32_t LogicalPageID;
 typedef uint32_t PhysicalPageID;
 #define invalidLogicalPageID std::numeric_limits<LogicalPageID>::max()
 
+typedef uint32_t QueueID;
+#define invalidQueueID std::numeric_limits<QueueID>::max()
+
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
 public:
@@ -55,9 +58,6 @@ public:
 	~ArenaPage() {
 		if (userData != nullptr && userDataDestructor != nullptr) {
 			userDataDestructor(userData);
-		}
-		if (buffer != nullptr) {
-			VALGRIND_MAKE_MEM_UNDEFINED(buffer, bufferSize);
 		}
 	}
 
@@ -128,10 +128,7 @@ public:
 
 class IPagerSnapshot {
 public:
-	virtual Future<Reference<const ArenaPage>> getPhysicalPage(LogicalPageID pageID,
-	                                                           bool cacheable,
-	                                                           bool nohit,
-	                                                           bool* fromCache = nullptr) = 0;
+	virtual Future<Reference<const ArenaPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool nohit) = 0;
 	virtual bool tryEvictPage(LogicalPageID id) = 0;
 	virtual Version getVersion() const = 0;
 
@@ -153,10 +150,16 @@ public:
 	// For a given pager instance, separate calls to this function must return the same value.
 	// Only valid to call after recovery is complete.
 	virtual int getUsablePageSize() const = 0;
+	virtual int getPhysicalPageSize() const = 0;
+	virtual int getLogicalPageSize() const = 0;
+	virtual int getPagesPerExtent() const = 0;
 
 	// Allocate a new page ID for a subsequent write.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to.
 	virtual Future<LogicalPageID> newPageID() = 0;
+
+	virtual Future<LogicalPageID> newExtentPageID(QueueID queueID) = 0;
+	virtual QueueID newLastQueueID() = 0;
 
 	// Replace the contents of a page with new data across *all* versions.
 	// Existing holders of a page reference for pageID, read from any version,
@@ -172,6 +175,8 @@ public:
 	// Free pageID to be used again after the commit that moves oldestVersion past v
 	virtual void freePage(LogicalPageID pageID, Version v) = 0;
 
+	virtual void freeExtent(LogicalPageID pageID) = 0;
+
 	// If id is remapped, delete the original as of version v and return the page it was remapped to.  The caller
 	// is then responsible for referencing and deleting the returned page ID.
 	virtual LogicalPageID detachRemappedPage(LogicalPageID id, Version v) = 0;
@@ -183,10 +188,16 @@ public:
 	// Cacheable indicates that the page should be added to the page cache (if applicable?) as a result of this read.
 	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
 	// considered likely to be needed soon.
-	virtual Future<Reference<ArenaPage>> readPage(LogicalPageID pageID,
-	                                              bool cacheable = true,
-	                                              bool noHit = false,
-	                                              bool* fromCache = nullptr) = 0;
+	virtual Future<Reference<ArenaPage>> readPage(LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
+	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
+	virtual void releaseExtentReadLock() = 0;
+
+	// Temporary methods for testing
+	virtual Future<Standalone<VectorRef<LogicalPageID>>> getUsedExtents(QueueID queueID) = 0;
+	virtual void pushExtentUsedList(QueueID queueID, LogicalPageID extID) = 0;
+	virtual void extentCacheClear() = 0;
+	virtual int64_t getPageCacheCount() = 0;
+	virtual int64_t getExtentCacheCount() = 0;
 
 	// Get a snapshot of the metakey and all pages as of the version v which must be >= getOldestVersion()
 	// Note that snapshots at any version may still see the results of updatePage() calls.
@@ -206,6 +217,8 @@ public:
 	virtual void setCommitVersion(Version v) = 0;
 
 	virtual StorageBytes getStorageBytes() const = 0;
+
+	virtual int64_t getPageCount() = 0;
 
 	// Count of pages in use by the pager client (including retained old page versions)
 	virtual Future<int64_t> getUserPageCount() = 0;

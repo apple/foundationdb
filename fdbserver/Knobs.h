@@ -134,6 +134,7 @@ public:
 	int PRIORITY_RECOVER_MOVE;
 	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
 	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
 	int PRIORITY_TEAM_HEALTHY;
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
 	int PRIORITY_TEAM_REDUNDANT;
@@ -168,6 +169,9 @@ public:
 	double SERVER_LIST_DELAY;
 	double RECRUITMENT_IDLE_DELAY;
 	double STORAGE_RECRUITMENT_DELAY;
+	bool TSS_HACK_IDENTITY_MAPPING;
+	double TSS_RECRUITMENT_TIMEOUT;
+	double TSS_DD_CHECK_INTERVAL;
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
@@ -201,6 +205,7 @@ public:
 	int DD_TEAMS_INFO_PRINT_INTERVAL;
 	int DD_TEAMS_INFO_PRINT_YIELD_COUNT;
 	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
+	int DD_STORAGE_WIGGLE_PAUSE_THRESHOLD; // How many unhealthy relocations are ongoing will pause storage wiggle
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -217,10 +222,6 @@ public:
 
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
-
-	// Redwood Storage Engine
-	int PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT;
-	int PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN;
 
 	// KeyValueStore SQLITE
 	int CLEAR_BUFFER_SIZE;
@@ -564,6 +565,8 @@ public:
 
 	// Coordination
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
+	bool ENABLE_CROSS_CLUSTER_SUPPORT; // Allow a coordinator to serve requests whose connection string does not match
+	                                   // the local descriptor
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;
@@ -642,8 +645,10 @@ public:
 	double FASTRESTORE_RATE_UPDATE_SECONDS; // how long to update appliers target write rate
 
 	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
+	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
+	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
+	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
 	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
-	int REDWOOD_COMMIT_CONCURRENT_READS; // Max number of concurrent reads done to support commit operations
 	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
 	                                         // once

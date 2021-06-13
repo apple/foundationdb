@@ -225,6 +225,10 @@ struct DatabaseConfiguration {
 	int32_t storageTeamSize;
 	KeyValueStoreType storageServerStoreType;
 
+	// Testing StorageServers
+	int32_t desiredTSSCount;
+	KeyValueStoreType testingStorageServerStoreType;
+
 	// Remote TLogs
 	int32_t desiredLogRouterCount;
 	int32_t remoteDesiredTLogCount;
@@ -238,6 +242,9 @@ struct DatabaseConfiguration {
 	int32_t usableRegions; // Number of regions which have a replica of the database.
 	int32_t repopulateRegionAntiQuorum;
 	std::vector<RegionInfo> regions;
+
+	// Perpetual Storage Setting
+	int32_t perpetualStorageWiggleSpeed;
 
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;

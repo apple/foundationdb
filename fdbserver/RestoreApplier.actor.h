@@ -35,10 +35,10 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

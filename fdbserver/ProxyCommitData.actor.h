@@ -158,6 +158,7 @@ struct ProxyCommitData {
 	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
+	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	std::map<Tag, Version> tag_popped;
 	Deque<std::pair<Version, Version>> txsPopVersions;
 	Version lastTxsPop;

@@ -168,6 +168,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 				traceDiskUsage.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.diskUsage);
 			}
 			TraceEvent traceTLogQueue("TLogQueue");
+			traceTLogQueue.setMaxFieldLength(10000).setMaxEventLength(11000);
 			for (const auto& ss : healthMetrics.tLogQueue) {
 				self->detailedWorstTLogQueue = std::max(self->detailedWorstTLogQueue, ss.second);
 				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);

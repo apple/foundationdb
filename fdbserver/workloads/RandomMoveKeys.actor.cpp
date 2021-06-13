@@ -162,12 +162,13 @@ struct MoveKeysWorkload : TestWorkload {
 		// The real data distribution algorithm doesn't want to deal with multiple servers
 		// with the same address having keys.  So if there are two servers with the same address,
 		// don't use either one (so we don't have to find out which of them, if any, already has keys).
+		// Also get rid of tss since we don't want to move a shard to a tss.
 		std::map<NetworkAddress, int> count;
 		for (int s = 0; s < servers.size(); s++)
 			count[servers[s].address()]++;
 		int o = 0;
 		for (int s = 0; s < servers.size(); s++)
-			if (count[servers[s].address()] == 1)
+			if (count[servers[s].address()] == 1 && !servers[s].isTss())
 				servers[o++] = servers[s];
 		servers.resize(o);
 	}

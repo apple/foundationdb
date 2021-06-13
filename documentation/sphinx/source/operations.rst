@@ -26,6 +26,8 @@ Ready to operate an externally accessible FoundationDB cluster? You'll find what
 
 * :doc:`transaction-tagging` gives an overview of transaction tagging, including details about throttling particular tags.
 
+* :doc:`tss` gives an overview of the Testing Storage Server feature of FoundationDB, which allows you to safely run an untrusted storage engine in a production cluster.
+
 .. toctree::
  :maxdepth: 2
  :titlesonly:
@@ -41,3 +43,4 @@ Ready to operate an externally accessible FoundationDB cluster? You'll find what
  disk-snapshot-backup
  platforms
  transaction-tagging
+ tss

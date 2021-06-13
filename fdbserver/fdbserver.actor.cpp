@@ -36,7 +36,6 @@
 #include <boost/interprocess/managed_shared_memory.hpp>
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
@@ -52,6 +51,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/NetworkTest.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "fdbserver/Status.h"
@@ -1050,7 +1050,7 @@ private:
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				syn = syn.substr(7);
-				knobs.push_back(std::make_pair(syn, args.OptionArg()));
+				knobs.emplace_back(syn, args.OptionArg());
 				break;
 			}
 			case OPT_UNITTESTPARAM: {
@@ -1359,10 +1359,10 @@ private:
 				}
 				// SOMEDAY: ideally we'd have some better way to express that a knob should be elevated to formal
 				// parameter
-				knobs.push_back(std::make_pair(
+				knobs.emplace_back(
 				    "page_cache_4k",
-				    format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the
-				                                             // next smaller multiple of 4K.
+				    format("%ld", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to the
+				                                            // next smaller multiple of 4K.
 				break;
 			case OPT_BUGGIFY:
 				if (!strcmp(args.OptionArg(), "on"))
@@ -2143,7 +2143,7 @@ int main(int argc, char* argv[]) {
 					s = s.substr(LiteralStringRef("struct ").size());
 #endif
 
-				typeNames.push_back(std::make_pair(s, i->first));
+				typeNames.emplace_back(s, i->first);
 			}
 			std::sort(typeNames.begin(), typeNames.end());
 			for (int i = 0; i < typeNames.size(); i++) {

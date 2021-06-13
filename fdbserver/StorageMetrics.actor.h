@@ -112,7 +112,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	int64_t addAndExpire(KeyRef key, int64_t metric, double expiration) {
 		int64_t x = add(key, metric);
 		if (x)
-			queue.push_back(std::make_pair(expiration, std::make_pair(*sample.find(key), -x)));
+			queue.emplace_back(expiration, std::make_pair(*sample.find(key), -x));
 		return x;
 	}
 

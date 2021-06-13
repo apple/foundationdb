@@ -234,6 +234,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( BASIC_LOAD_BALANCE_MIN_CPU,                         0.05 ); //do not adjust LB probabilities if the proxies are less than 5% utilized
 	init( BASIC_LOAD_BALANCE_BUCKETS,                           40 ); //proxies bin recent GRV requests into 40 time bins
 	init( BASIC_LOAD_BALANCE_COMPUTE_PRECISION,              10000 ); //determines how much of the LB usage is holding the CPU usage of the proxy
+	init( LOAD_BALANCE_TSS_TIMEOUT,                            5.0 );
 
 	// Health Monitor
 	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;
