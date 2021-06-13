@@ -58,6 +58,7 @@ Reference<ActorLineage> getCurrentLineage() {
 
 		currentLineage->setPtrUnsafe(new ActorLineage());
 		currentLineage->referencesSelf = true;
+		// currentLineage = &rootLineage; // TODO: Undo
 	}
 	return *currentLineage;
 }

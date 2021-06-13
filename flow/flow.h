@@ -1169,6 +1169,7 @@ struct CurrentLineageReplace {
 	~CurrentLineageReplace() {
 		// currentLineage = oldLineage;
 		replaceLineage(oldLineage);
+		// replaceLineage(new LineageReference<ActorLineage>());
 	}
 };
 
@@ -1251,7 +1252,7 @@ template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
 	virtual void fire(ValueType const& value) override {
 		// auto _ = static_cast<ActorType*>(this)->setLineage();
-		CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr());
+		// CurrentLineageReplace _(static_cast<ActorType*>(this)->lineageAddr()); // TODO: Add back
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
 	virtual void error(Error e) override {
