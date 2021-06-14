@@ -483,7 +483,9 @@ inline Key keyAfter(const KeyRef& key) {
 
 	Standalone<StringRef> r;
 	uint8_t* s = new (r.arena()) uint8_t[key.size() + 1];
-	memcpy(s, key.begin(), key.size());
+	if (key.size() > 0) {
+		memcpy(s, key.begin(), key.size());
+	}
 	s[key.size()] = 0;
 	((StringRef&)r) = StringRef(s, key.size() + 1);
 	return r;
