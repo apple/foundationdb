@@ -232,7 +232,7 @@ struct SystemStatisticsState;
 
 struct IPAddress;
 
-SystemStatistics getSystemStatistics(std::string dataFolder,
+SystemStatistics getSystemStatistics(std::string const& dataFolder,
                                      const IPAddress* ip,
                                      SystemStatisticsState** statState,
                                      bool logDetails);
@@ -369,7 +369,7 @@ std::vector<std::string> listFiles(std::string const& directory, std::string con
 // returns directory names relative to directory
 std::vector<std::string> listDirectories(std::string const& directory);
 
-void findFilesRecursively(std::string path, std::vector<std::string>& out);
+void findFilesRecursively(std::string const& path, std::vector<std::string>& out);
 
 // Tag the given file as "temporary", i.e. not really needing commits to disk
 void makeTemporary(const char* filename);

@@ -548,11 +548,11 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	return true; // All of the above options currently require recovery to take effect
 }
 
-inline static KeyValueRef* lower_bound(VectorRef<KeyValueRef>& config, KeyRef const& key) {
+static KeyValueRef* lower_bound(VectorRef<KeyValueRef>& config, KeyRef const& key) {
 	return std::lower_bound(config.begin(), config.end(), KeyValueRef(key, ValueRef()), KeyValueRef::OrderByKey());
 }
-inline static KeyValueRef const* lower_bound(VectorRef<KeyValueRef> const& config, KeyRef const& key) {
-	return lower_bound(const_cast<VectorRef<KeyValueRef>&>(config), key);
+static KeyValueRef const* lower_bound(VectorRef<KeyValueRef> const& config, KeyRef const& key) {
+	return std::lower_bound(config.begin(), config.end(), KeyValueRef(key, ValueRef()), KeyValueRef::OrderByKey());
 }
 
 void DatabaseConfiguration::applyMutation(MutationRef m) {
@@ -664,7 +664,7 @@ void DatabaseConfiguration::fromKeyValues(Standalone<VectorRef<KeyValueRef>> raw
 }
 
 bool DatabaseConfiguration::isOverridden(std::string key) const {
-	key = configKeysPrefix.toString() + key;
+	key = configKeysPrefix.toString() + std::move(key);
 
 	if (mutableConfiguration.present()) {
 		return mutableConfiguration.get().find(key) != mutableConfiguration.get().end();
