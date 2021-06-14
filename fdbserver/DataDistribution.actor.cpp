@@ -1012,11 +1012,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// Log BestTeamStuck reason when we have healthy teams but they do not have healthy free space
 				if (randomTeams.empty() && !self->zeroHealthyTeams->get()) {
 					self->bestTeamStuck = true;
-					if(g_network->isSimulated()) {
+					if (g_network->isSimulated()) {
 						TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
 					}
-				}
-				else {
+				} else {
 					self->bestTeamStuck = false;
 				}
 
@@ -3974,21 +3973,21 @@ ACTOR Future<std::pair<Future<Void>, Value>> watchPerpetualStoragePIDChange(DDTe
 // periodically check whether the cluster is healthy if we continue perpetual wiggle
 ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self) {
 	loop {
-        Promise<int> countp;
-        self->getUnhealthyRelocationCount.send(countp);
-        int count = wait(countp.getFuture());
+		Promise<int> countp;
+		self->getUnhealthyRelocationCount.send(countp);
+		int count = wait(countp.getFuture());
 		// pause wiggle when
 		// a. DDQueue is busy with unhealthy relocation request
 		// b. no healthy team
 		// c. the overall disk space is not enough
-        if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD || self->healthyTeamCount == 0 || self->bestTeamStuck) {
-            self->pauseWiggle->set(true);
-        }
-        else {
-            self->pauseWiggle->set(false);
-        }
-        wait(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow));
-    }
+		if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD || self->healthyTeamCount == 0 ||
+		    self->bestTeamStuck) {
+			self->pauseWiggle->set(true);
+		} else {
+			self->pauseWiggle->set(false);
+		}
+		wait(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow));
+	}
 }
 // Watches the value (pid) change of \xff/storageWigglePID, and adds storage servers held on process of which the
 // Process Id is “pid” into excludeServers which prevent recruiting the wiggling storage servers and let teamTracker
@@ -4041,7 +4040,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				}
 			}
 		}
-		
+
 		choose {
 			when(wait(stopSignal->onTrigger())) { break; }
 			when(wait(watchFuture)) {
@@ -4091,9 +4090,9 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 	state PromiseStream<Void> finishStorageWiggleSignal;
 	state SignalableActorCollection collection;
 	state bool started = false;
-    teamCollection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
+	teamCollection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
 
-    loop {
+	loop {
 		state ReadYourWritesTransaction tr(teamCollection->cx);
 		loop {
 			try {
