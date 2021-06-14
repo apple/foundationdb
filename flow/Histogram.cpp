@@ -77,7 +77,7 @@ void HistogramRegistry::unregisterHistogram(Histogram* h) {
 	ASSERT(count == 1);
 }
 
-Histogram* HistogramRegistry::lookupHistogram(std::string name) {
+Histogram* HistogramRegistry::lookupHistogram(std::string const& name) {
 	auto h = histograms.find(name);
 	if (h == histograms.end()) {
 		return nullptr;
