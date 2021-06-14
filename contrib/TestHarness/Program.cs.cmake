@@ -247,7 +247,6 @@ namespace SummarizeTest
             string testFile = null;
             string testDir = "";
             string oldServerName = "";
-            bool noSim = false;
 
             if (Directory.Exists(testFolder))
             {
@@ -256,10 +255,9 @@ namespace SummarizeTest
                 if( Directory.Exists(Path.Combine(testFolder, "slow")) ) poolSize += 5;
                 if( Directory.Exists(Path.Combine(testFolder, "fast")) ) poolSize += 14;
                 if( Directory.Exists(Path.Combine(testFolder, "restarting")) ) poolSize += 1;
-                if( Directory.Exists(Path.Combine(testFolder, "noSim")) ) poolSize += 1;
 
                 if( poolSize == 0 ) {
-                    Console.WriteLine("Passed folder ({0}) did not have a fast, slow, rare, restarting, or noSim sub-folder", testFolder);
+                    Console.WriteLine("Passed folder ({0}) did not have a fast, slow, rare, or restarting sub-folder", testFolder);
                     return 1;
                 }
                 int selection = random.Next(poolSize);
@@ -275,20 +273,11 @@ namespace SummarizeTest
                         testDir = Path.Combine(testFolder, "restarting");
                     else
                     {
-                        if (Directory.Exists(Path.Combine(testFolder, "noSim"))) selectionWindow += 1;
+                        if (Directory.Exists(Path.Combine(testFolder, "slow"))) selectionWindow += 5;
                         if (selection < selectionWindow)
-                        {
-                            testDir = Path.Combine(testFolder, "noSim");
-                            noSim = true;
-                        }
+                            testDir = Path.Combine(testFolder, "slow");
                         else
-                        {
-                            if (Directory.Exists(Path.Combine(testFolder, "slow"))) selectionWindow += 5;
-                            if (selection < selectionWindow)
-                                testDir = Path.Combine(testFolder, "slow");
-                            else
-                                testDir = Path.Combine(testFolder, "fast");
-                        }
+                            testDir = Path.Combine(testFolder, "fast");
                     }
                 }
                 string[] files = Directory.GetFiles(testDir, "*", SearchOption.AllDirectories);
@@ -353,11 +342,11 @@ namespace SummarizeTest
                     bool useNewPlugin = (oldServerName == fdbserverName) || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
                     bool useToml = File.Exists(testFile + "-1.toml");
                     string testFile1 = useToml ? testFile + "-1.toml" : testFile + "-1.txt";
-                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout, noSim);
+                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout);
                     if (result == 0)
                     {
                         string testFile2 = useToml ? testFile + "-2.toml" : testFile + "-2.txt";
-                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout, noSim);
+                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout);
                     }
                 }
                 else
@@ -365,13 +354,13 @@ namespace SummarizeTest
                     int expectedUnseed = -1;
                     if (!useValgrind && unseedCheck)
                     {
-                        result = RunTest(fdbserverName, tlsPluginFile, null, null, seed, buggify, testFile, runDir, Guid.NewGuid().ToString(), -1, out expectedUnseed, out retryableError, logOnRetryableError, false, false, false, "", traceToStdout, noSim);
+                        result = RunTest(fdbserverName, tlsPluginFile, null, null, seed, buggify, testFile, runDir, Guid.NewGuid().ToString(), -1, out expectedUnseed, out retryableError, logOnRetryableError, false, false, false, "", traceToStdout);
                     }
 
                     if (!retryableError)
                     {
                         int unseed;
-                        result = RunTest(fdbserverName, tlsPluginFile, summaryFileName, errorFileName, seed, buggify, testFile, runDir, Guid.NewGuid().ToString(), expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, false, "", traceToStdout, noSim);
+                        result = RunTest(fdbserverName, tlsPluginFile, summaryFileName, errorFileName, seed, buggify, testFile, runDir, Guid.NewGuid().ToString(), expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, false, "", traceToStdout);
                     }
                 }
 
@@ -386,7 +375,7 @@ namespace SummarizeTest
 
         private static int RunTest(string fdbserverName, string tlsPluginFile, string summaryFileName, string errorFileName, int seed,
             bool buggify, string testFile, string runDir, string uid, int expectedUnseed, out int unseed, out bool retryableError, bool logOnRetryableError, bool useValgrind, bool restarting = false,
-            bool willRestart = false, string oldBinaryName = "", bool traceToStdout = false, bool noSim = false)
+            bool willRestart = false, string oldBinaryName = "", bool traceToStdout = false)
         {
             unseed = -1;
 
@@ -420,17 +409,16 @@ namespace SummarizeTest
                         tlsPluginArg = "--tls_plugin=" + tlsPluginFile;
                     }
                     process.StartInfo.RedirectStandardOutput = true;
-                    string role = (noSim) ? "test" : "simulation";
                     var args = "";
                     if (willRestart && oldBinaryName.EndsWith("alpha6"))
                     {
-                        args = string.Format("-Rs 1000000000 -r {0} {1} -s {2} -f \"{3}\" -b {4} {5} --crash",
-                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
+                        args = string.Format("-Rs 1000000000 -r simulation {0} -s {1} -f \"{2}\" -b {3} {4} --crash",
+                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
                     }
                     else
                     {
-                        args = string.Format("-Rs 1GB -r {0} {1} -s {2} -f \"{3}\" -b {4} {5} --crash",
-                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
+                        args = string.Format("-Rs 1GB -r simulation {0} -s {1} -f \"{2}\" -b {3} {4} --crash",
+                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
                     }
                     if (restarting) args = args + " --restarting";
                     if (useValgrind && !willRestart)
