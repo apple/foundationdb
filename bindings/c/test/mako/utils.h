@@ -47,8 +47,9 @@ int compute_thread_portion(int val, int p_idx, int t_idx, int total_p, int total
 int digits(int num);
 
 /* generate a key for a given key number */
+/* prefix is "mako" by default, prefixpadding = 1 means 'x' will be in front rather than trailing the keyname */
 /* len is the buffer size, key length + null */
-void genkey(char* str, int num, int rows, int len);
+void genkey(char* str, char* prefix, int prefixlen, int prefixpadding, int num, int rows, int len);
 
 #if 0
 // The main function is to sort arr[] of size n using Radix Sort

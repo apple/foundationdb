@@ -222,10 +222,6 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 
-	// Redwood Storage Engine
-	int PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT;
-	int PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN;
-
 	// KeyValueStore SQLITE
 	int CLEAR_BUFFER_SIZE;
 	double READ_VALUE_TIME_ESTIMATE;
@@ -644,8 +640,10 @@ public:
 	double FASTRESTORE_RATE_UPDATE_SECONDS; // how long to update appliers target write rate
 
 	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
+	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
+	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
+	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
 	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
-	int REDWOOD_COMMIT_CONCURRENT_READS; // Max number of concurrent reads done to support commit operations
 	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
 	                                         // once
