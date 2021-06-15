@@ -284,6 +284,8 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx,
 	return result;
 }
 
+// Helper function to extract he maximum SQ size of all provided messages. All futures in the
+// messages vector have to be ready.
 int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& messages,
                             const std::vector<StorageServerInterface>& servers) {
 
@@ -315,6 +317,7 @@ int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& message
 	return maxQueueSize;
 }
 
+// Timeout wrapper when getting the storage metrics. This will do some additional tracing
 ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface wi) {
 	state Future<TraceEventFields> result =
 	    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
@@ -608,6 +611,8 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 	return Void();
 }
 
+// Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
+// requires the database to be available and healthy in order to succeed.
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                         std::string phase,

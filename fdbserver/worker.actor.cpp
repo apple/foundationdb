@@ -1536,6 +1536,12 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				activeSharedTLog->set(logData.uid);
 			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
+				// We want to prevent double recruiting on a worker unless we try to recruit something
+				// with a different storage engine (otherwise storage migration won't work for certain
+				// configuration). Additionally we also need to allow double recruitment for seed servers.
+				// The reason for this is that a storage will only remove itself if after it was able
+				// to read the system key space. But if recovery fails right after a `configure new ...`
+				// was run it won't be able to do so.
 				if (!storageCache.exists(req.reqId) &&
 				    (std::all_of(runningStorages.begin(),
 				                 runningStorages.end(),

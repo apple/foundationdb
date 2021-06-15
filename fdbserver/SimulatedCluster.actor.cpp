@@ -53,17 +53,19 @@ const int MACHINE_REBOOT_TIME = 10;
 
 bool destructed = false;
 
+// given a std::variant T, this templated class will define type which will be a variant of all types in T plus Args...
 template <class T, class... Args>
-struct concatenate_variant_t;
+struct variant_add_t;
 
 template <class... Args1, class... Args2>
-struct concatenate_variant_t<std::variant<Args1...>, Args2...> {
+struct variant_add_t<std::variant<Args1...>, Args2...> {
 	using type = std::variant<Args1..., Args2...>;
 };
 
 template <class T, class... Args>
-using concatenate_variant = typename concatenate_variant_t<T, Args...>::type;
+using variant_add = typename variant_add_t<T, Args...>::type;
 
+// variant_with_optional_t::type will be a std::variant<Args..., Optional<Args>...>
 template <class... Args>
 struct variant_with_optional_t;
 
@@ -74,12 +76,13 @@ struct variant_with_optional_t<Single> {
 
 template <class Head, class... Tail>
 struct variant_with_optional_t<Head, Tail...> {
-	using type = concatenate_variant<typename variant_with_optional_t<Tail...>::type, Head, Optional<Head>>;
+	using type = variant_add<typename variant_with_optional_t<Tail...>::type, Head, Optional<Head>>;
 };
 
 template <class... Args>
 using variant_with_optional = typename variant_with_optional_t<Args...>::type;
 
+// Expects a std::variant and will make a pointer out of each argument
 template <class T>
 struct add_pointers_t;
 
