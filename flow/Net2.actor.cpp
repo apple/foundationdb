@@ -1435,9 +1435,6 @@ void Net2::run() {
 			checkForSlowTask(tscBegin, timestampCounter(), taskEnd - taskBegin, TaskPriority::RunCycleFunction);
 		}
 
-		// replaceLineage(LineageReference<ActorLineage>());
-		// currentLineage = nullptr;
-		// replaceLineage(nullptr);
 		double sleepTime = 0;
 		bool b = ready.empty();
 		if (b) {

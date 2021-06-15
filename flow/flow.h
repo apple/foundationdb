@@ -572,12 +572,12 @@ struct StackLineage : LineageProperties<StackLineage> {
 	StringRef actorName;
 };
 
-struct CurrentLineageScope {
+struct LineageScope {
 	LineageReference* oldLineage;
-	CurrentLineageScope(LineageReference* with) : oldLineage(currentLineage) {
+	LineageScope(LineageReference* with) : oldLineage(currentLineage) {
 		replaceLineage(with);
 	}
-	~CurrentLineageScope() {
+	~LineageScope() {
 		replaceLineage(oldLineage);
 	}
 };
@@ -1191,7 +1191,6 @@ struct Actor<void> {
 	// This specialization is for a void actor (one not returning a future, hence also uncancellable)
 
 	LineageReference lineage = *currentLineage;
-	// Reference<ActorLineage> lineage;
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
 	Actor() : actor_wait_state(0) { /*++actorCount;*/ }
@@ -1205,11 +1204,11 @@ struct Actor<void> {
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
 	virtual void fire(ValueType const& value) override {
-		CurrentLineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
 	virtual void error(Error e) override {
-		CurrentLineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };
@@ -1217,15 +1216,15 @@ struct ActorCallback : Callback<ValueType> {
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
 	void fire(ValueType const& value) override {
-		CurrentLineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
 	void fire(ValueType&& value) override {
-		CurrentLineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
 	}
 	void error(Error e) override {
-		CurrentLineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };
