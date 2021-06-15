@@ -128,7 +128,7 @@ public:
 // Main Header and Section Header *must* have a fixed size. Each Item is an object that being serialized into a StringRef,
 // and the user must provide informations (e.g. object type, length, etc.) to deserialize them.
 // Main Header and Section Header *should* inherit from MultipleItemHeaderBase
-// It is obvious that TwoLevelHeaderedItemSerializer can be implemented using HeaderedItemsSerializer. The reason not
+// It is obvious that TwoLevelHeaderedItemSerializer can be implemented using HeaderedItemsSerializer. The reason of not
 // use this strategy is that one additional memory copy will be included when a new section is opened.
 template <typename MainHeader, typename SectionHeader>
 class TwoLevelHeaderedItemsSerializer {
