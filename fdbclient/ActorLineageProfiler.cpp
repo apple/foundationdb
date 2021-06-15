@@ -249,15 +249,9 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 	return res;
 }
 
-// void sample(const Reference<ActorLineage>& lineage) {
-void sample(Reference<ActorLineage>* ptr) {
-	// boost::asio::post(ActorLineageProfiler::instance().context(), [lineage]() {
-	// 	SampleCollection::instance().collect(lineage);
-	// });
-	if (!ptr->isValid()) {
-		return;
-	}
-	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage = Reference<ActorLineage>::addRef(ptr->getPtr())]() {
+void sample(Reference<ActorLineage>* p) {
+	if (!p->isValid()) { return; }
+	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage = Reference<ActorLineage>::addRef(p->getPtr())]() {
 		SampleCollection::instance().collect(lineage);
 	});
 }
