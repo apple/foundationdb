@@ -117,7 +117,7 @@ class LogParser:
                     continue
                 if 'Type' not in obj:
                     continue
-                if obj['Severity'] == '40':
+                if obj['Severity'] == '40' and obj.get('ErrorIsInjectedFault', None) != '1':
                     self.fail()
                 if self.name is not None:
                     obj['testname'] = self.name
