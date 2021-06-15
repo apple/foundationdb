@@ -452,8 +452,6 @@ namespace actorcompiler
                     fullClassName,
                     string.Join(", ", actor.parameters.Select(p => p.name).ToArray()));
 
-            // if (actor.IsCancellable())
-            //     writer.WriteLine("\trestore_lineage _;");
             if (actor.returnType != null)
                 writer.WriteLine("\treturn Future<{1}>({0});", newActor, actor.returnType);
             else
@@ -1288,8 +1286,8 @@ namespace actorcompiler
             constructor.WriteLine("{");
             constructor.Indent(+1);
             ProbeEnter(constructor, actor.name);
-            constructor.WriteLine("CurrentLineageReplace _(&this->lineage);");
-            // constructor.WriteLine("getCurrentLineage()->modify(&StackLineage::actorName) = LiteralStringRef(\"{0}\");", actor.name);
+            constructor.WriteLine("CurrentLineageScope _(&this->lineage);");
+            constructor.WriteLine("getCurrentLineage()->modify(&StackLineage::actorName) = LiteralStringRef(\"{0}\");", actor.name);
             constructor.WriteLine("this->{0};", body.call());
             ProbeExit(constructor, actor.name);
             WriteFunction(writer, constructor, constructor.BodyText);

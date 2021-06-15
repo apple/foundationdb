@@ -27,17 +27,13 @@
 #include <cinttypes>
 
 
-LineageReference<ActorLineage> rootLineage;
-// LineageReference<ActorLineage> rootLineage(new ActorLineage());
 std::atomic<bool> startSampling = false;
-// TODO: Fix this (ideally get rid of allocation, otherwise memory leak?)
-thread_local LineageReference<ActorLineage>* currentLineage = &rootLineage;//new LineageReference<ActorLineage>();
+LineageReference rootLineage;
+thread_local LineageReference* currentLineage = &rootLineage;
 
 LineagePropertiesBase::~LineagePropertiesBase() {}
 
-ActorLineage::ActorLineage() : properties(), parent(*currentLineage) {
-	// TraceEvent("LUKAS_ActorLineage").detail("CurrentLineagePtr", reinterpret_cast<uintptr_t>(currentLineage)).detail("CurrentLineageRefPtr", reinterpret_cast<uintptr_t>(currentLineage->getPtr()));
-}
+ActorLineage::ActorLineage() : properties(), parent(*currentLineage) {}
 
 ActorLineage::~ActorLineage() {
 	for (auto property : properties) {
@@ -46,55 +42,19 @@ ActorLineage::~ActorLineage() {
 }
 
 Reference<ActorLineage> getCurrentLineage() {
-	// if (!currentLineage.isValid()/* || currentLineage == currentLineage->getParent()*/) {
-	if (!currentLineage->isValid() || !currentLineage->referencesSelf) {
-		// replaceLineage(LineageReference<ActorLineage>{ new ActorLineage() });
-		// *currentLineage = LineageReference<ActorLineage>{ new ActorLineage() };
-
-		// ActorLineage* lineage = new ActorLineage();
-		// *currentLineage = LineageReference<ActorLineage>::addRef(lineage);
-		// *currentLineage = LineageReference<ActorLineage>(new ActorLineage());
-		// currentLineage->referencesSelf = true;
-		// TraceEvent("LUKAS_getCurrent").detail("Ptr", reinterpret_cast<uintptr_t>(currentLineage->getPtr()));
-
-		currentLineage->setPtrUnsafe(new ActorLineage());
-		currentLineage->referencesSelf = true;
-		// currentLineage = &rootLineage; // TODO: Undo
-		// currentLineage->referencesSelf = true;
+	if (!currentLineage->isValid() || !currentLineage->isAllocated()) {
+		currentLineage->allocate();
 	}
 	return *currentLineage;
 }
 
-// void sample(const Reference<ActorLineage>& lineage);
 void sample(Reference<ActorLineage>* ptr);
 
-void replaceLineage(LineageReference<ActorLineage>* lineage) {
-	// if (lineage.isValid()) {
-	// 	auto name = lineage->get(&StackLineage::actorName);
-	// 	if (name.has_value()) {
-	// 		TraceEvent("LUKAS_replaceLineage").detail("Name", name.value());
-	// 	}
-	// }
-	// if (currentLineage->isValid()) {
-	// 	auto name = (*currentLineage)->get(&StackLineage::actorName);
-	// 	if (name.has_value()) {
-	// 		TraceEvent("LUKAS_replaceLineageCurrentLineage").detail("Name", name.value());
-	// 	}
-	// }
-	// TraceEvent("LUKAS_replaceLineage").detail("Ptr", reinterpret_cast<uintptr_t>(lineage));
-	// TraceEvent("LUKAS_replaceLineage2").detail("IsValid", lineage->isValid()).detail("PtrPtr", reinterpret_cast<uintptr_t>(lineage->getPtr()));
+void replaceLineage(LineageReference* lineage) {
 	if (!startSampling) {
 		currentLineage = lineage;
 	} else {
 		startSampling = false;
-		// if (currentLineage->isValid()) {
-		// 	std::string stack = "";
-		// 	auto vec = (*currentLineage)->stack(&StackLineage::actorName);
-		// 	for (const auto& str : vec) {
-		// 		stack += std::string(reinterpret_cast<const char*>(str.begin()), str.size()) + " ";
-		// 	}
-		// 	TraceEvent("LUKAS_replaceLineage").detail("Stack", stack);
-		// }
 		sample(currentLineage);
 		currentLineage = lineage;
 	}

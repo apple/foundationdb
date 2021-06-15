@@ -30,7 +30,7 @@
 using namespace std::literals;
 
 // TODO: For debugging, remove
-LineageReference<ActorLineage>* curLineage() {
+LineageReference* curLineage() {
 	return currentLineage;
 }
 

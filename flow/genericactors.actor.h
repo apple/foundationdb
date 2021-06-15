@@ -1565,11 +1565,7 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 
 	void destroy() override { delete this; }
 
-	Reference<ActorLineage> setLineage() {
-		return *currentLineage;
-	}
-
-	LineageReference<ActorLineage>* lineageAddr() {
+	LineageReference* lineageAddr() {
 		return currentLineage;
 	}
 
