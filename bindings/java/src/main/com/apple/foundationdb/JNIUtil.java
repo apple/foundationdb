@@ -30,7 +30,7 @@ import java.io.OutputStream;
  * Utility for loading a dynamic library from the classpath.
  *
  */
-class JNIUtil {
+public class JNIUtil {
 	private static final String SEPARATOR = "/";
 	private static final String LOADABLE_PREFIX = "FDB_LIBRARY_PATH_";
 	private static final String TEMPFILE_PREFIX = "fdbjni";
@@ -96,7 +96,7 @@ class JNIUtil {
 		File exported;
 
 		try {
-			exported = exportResource(path);
+			exported = exportResource(path, libName);
 		}
 		catch (IOException e) {
 			throw new UnsatisfiedLinkError(e.getMessage());
@@ -111,6 +111,19 @@ class JNIUtil {
 				// EAT, since we do not care that an eager deletion did not work...
 			}
 		}
+	}
+
+	/**
+	 * Export a library from classpath resources to a temporary file.
+	 *
+	 * @param libName the name of the library to attempt to export. This name should be
+	 *  undecorated with file extensions and, in the case of *nix, "lib" prefixes.
+	 * @return the exported temporary file
+	 */
+	public static File exportLibrary(String libName) throws IOException {
+		OS os = getRunningOS();
+		String path = getPath(os, libName);
+		return exportResource(path, libName);
 	}
 
 	/**
@@ -131,20 +144,21 @@ class JNIUtil {
 	 * Export a resource from the classpath to a temporary file.
 	 *
 	 * @param path the relative path of the file to load from the classpath
+	 * @param name an optional descriptive name to include in the temporary file's path
 	 *
 	 * @return the absolute path to the exported file
 	 * @throws IOException
 	 */
-	private static File exportResource(String path) throws IOException {
+	private static File exportResource(String path, String name) throws IOException {
 		InputStream resource = JNIUtil.class.getResourceAsStream(path);
 		if(resource == null)
 			throw new IllegalStateException("Embedded library jar:" + path + " not found");
-		File f = saveStreamAsTempFile(resource);
+		File f = saveStreamAsTempFile(resource, name);
 		return f;
 	}
 
-	private static File saveStreamAsTempFile(InputStream resource) throws IOException {
-		File f = File.createTempFile(TEMPFILE_PREFIX, TEMPFILE_SUFFIX);
+	private static File saveStreamAsTempFile(InputStream resource, String name) throws IOException {
+		File f = File.createTempFile(name.length() > 0 ? name : TEMPFILE_PREFIX, TEMPFILE_SUFFIX);
 		FileOutputStream outputStream = new FileOutputStream(f);
 		copyStream(resource, outputStream);
 		outputStream.flush();
