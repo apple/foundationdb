@@ -359,7 +359,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>>
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetConsistentReadVersion;
 	loop choose {
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
-			auto lineage = make_scoped_lineage(&TransactionLineage::txID, req.spanContext.first());
+			// auto lineage = make_scoped_lineage(&TransactionLineage::txID, req.spanContext.first());
 			// getCurrentLineage()->modify(&TransactionLineage::txID) =
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >

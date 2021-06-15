@@ -27,7 +27,8 @@
 #include <cinttypes>
 
 
-LineageReference<ActorLineage> rootLineage(new ActorLineage());
+LineageReference<ActorLineage> rootLineage;
+// LineageReference<ActorLineage> rootLineage(new ActorLineage());
 std::atomic<bool> startSampling = false;
 // TODO: Fix this (ideally get rid of allocation, otherwise memory leak?)
 thread_local LineageReference<ActorLineage>* currentLineage = &rootLineage;//new LineageReference<ActorLineage>();
@@ -56,10 +57,10 @@ Reference<ActorLineage> getCurrentLineage() {
 		// currentLineage->referencesSelf = true;
 		// TraceEvent("LUKAS_getCurrent").detail("Ptr", reinterpret_cast<uintptr_t>(currentLineage->getPtr()));
 
-		// currentLineage->setPtrUnsafe(new ActorLineage());
-		// currentLineage->referencesSelf = true;
-		currentLineage = &rootLineage; // TODO: Undo
+		currentLineage->setPtrUnsafe(new ActorLineage());
 		currentLineage->referencesSelf = true;
+		// currentLineage = &rootLineage; // TODO: Undo
+		// currentLineage->referencesSelf = true;
 	}
 	return *currentLineage;
 }
