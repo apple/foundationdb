@@ -448,7 +448,7 @@ struct LineageProperties : LineagePropertiesBase {
 	}
 };
 
-struct ActorLineage : ThreadUnsafeReferenceCounted<ActorLineage> {
+struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage> {
 	friend class LocalLineage;
 
 	struct Property {
