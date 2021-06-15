@@ -220,7 +220,7 @@ private:
 
 	// Prepares writing a message:
 	//     * Create a new StorageTeam serializer if necessary.
-	//     * Write SpanContextMessage if exists/not preposed.
+	//     * Write SpanContextMessage if exists and is not prepended yet.
 	void prepareWriteMessage(const StorageTeamID& storageTeamID);
 
 public:
