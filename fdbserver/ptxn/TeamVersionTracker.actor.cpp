@@ -37,6 +37,12 @@ void TeamVersionTracker::addTeams(const std::vector<StorageTeamID>& teams, Versi
 	}
 }
 
+void TeamVersionTracker::removeTeams(const std::vector<StorageTeamID>& teams) {
+	for (const auto& team : teams) {
+		versions.erase(team);
+	}
+}
+
 std::map<StorageTeamID, Version> TeamVersionTracker::updateTeams(const std::vector<StorageTeamID>& teams,
                                                                  Version commitVersion) {
 	if (commitVersion > maxCV) {

@@ -41,6 +41,9 @@ public:
 	// Adds "teams" to the tracker with their "beginVersion", i.e., first PCV.
 	void addTeams(const std::vector<StorageTeamID>& teams, Version beginVersion);
 
+	// Removes stale "teams" from this tracker.
+	void removeTeams(const std::vector<StorageTeamID>& teams);
+
 	// Updates "teams" with new commitVersion. Returns each team's PCV in a map.
 	std::map<StorageTeamID, Version> updateTeams(const std::vector<StorageTeamID>& teams, Version commitVersion);
 

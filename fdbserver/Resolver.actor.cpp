@@ -111,10 +111,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 	    req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
 	state ProxyRequestsInfo& proxyInfo = self->proxyInfoMap[proxyAddress];
 
-	if (req.prevVersion < 0) {
-		// The first request, set teams' beginVersion
-		self->versionTracker.addTeams(req.teams, req.version);
-	}
+	self->versionTracker.addTeams(req.newTeams, req.version);
+	self->versionTracker.removeTeams(req.staleTeams);
 
 	++self->resolveBatchIn;
 
@@ -185,7 +183,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 		// Update team versions
 		if (req.prevVersion >= 0) { // Not first request
-			reply.previousCommitVersions = self->versionTracker.updateTeams(req.teams, req.version);
+			reply.previousCommitVersions = self->versionTracker.updateTeams(req.updatedTeams, req.version);
 		}
 
 		// Detect conflicts

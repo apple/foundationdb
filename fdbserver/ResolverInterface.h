@@ -112,7 +112,9 @@ struct ResolveTransactionBatchRequest {
 	VectorRef<int> txnStateTransactions;
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
-	std::vector<ptxn::StorageTeamID> teams; // Teams updated in this batch
+	std::vector<ptxn::StorageTeamID> updatedTeams; // Teams updated in this batch
+	std::vector<ptxn::StorageTeamID> newTeams; // New teams added in this batch
+	std::vector<ptxn::StorageTeamID> staleTeams; // Teams that become stale in this batch
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -126,7 +128,9 @@ struct ResolveTransactionBatchRequest {
 		           arena,
 		           debugID,
 		           spanContext,
-		           teams);
+		           updatedTeams,
+		           newTeams,
+		           staleTeams);
 	}
 };
 
