@@ -1014,13 +1014,6 @@ struct SharedLogsValue {
 	  : actor(actor), uid(uid), requests(requests) {}
 };
 
-ACTOR template <class T>
-Future<Void> sendDelayedError(ReplyPromise<T> reply, Error e, double d) {
-	wait(delay(d));
-	reply.sendError(e);
-	return Void();
-}
-
 ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 LocalityData locality,
@@ -1612,7 +1605,10 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					forwardPromise(req.reply, storageCache.get(req.reqId));
 				} else {
 					TraceEvent("AttemptedDoubleRecruitement", interf.id()).detail("ForRole", "StorageServer");
-					errorForwarders.add(sendDelayedError(req.reply, recruitment_failed(), 0.5));
+					errorForwarders.add(map(delay(0.5), [reply = req.reply](Void) {
+						reply.sendError(recruitment_failed());
+						return Void();
+					}));
 				}
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
