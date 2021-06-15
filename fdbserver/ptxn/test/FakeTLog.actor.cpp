@@ -24,9 +24,9 @@
 #include <iostream>
 #include <vector>
 
-#include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
+#include "fdbserver/ptxn/MessageTypes.h"
+#include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/test/Utils.h"
-#include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "fdbserver/ptxn/StorageServerInterface.h"
 
 #include "flow/actorcompiler.h" // has to be the last file included
@@ -37,7 +37,8 @@ namespace ptxn::test {
 void generateRandomMutations(const Version& initialVersion,
                              const int numMutations,
                              Arena& mutationRefArena,
-                             VectorRef<VersionSubsequenceMutation>& mutations) {
+                             VectorRef<VersionSubsequenceMessage>& mutations) {
+	print::PrintTiming printTiming("generateRandomMutations");
 	Version currentVersion = initialVersion;
 	Subsequence currentSubsequence = 1;
 	for (int i = 0; i < numMutations; ++i) {
@@ -55,26 +56,27 @@ void generateRandomMutations(const Version& initialVersion,
 		    mutationRefArena, currentVersion, currentSubsequence++, MutationRef(MutationRef::SetValue, key, value));
 	}
 
-	std::cout << __FUNCTION__ << ">> Generated " << numMutations << " random mutations, version range ["
-	          << mutations.front().version << "," << mutations.back().version << " ]." << std::endl;
+	printTiming << "Generated " << numMutations << " random mutations, version range [" << mutations.front().version
+	            << "," << mutations.back().version << " ]." << std::endl;
 }
 
 // Randomly distributes the mutations to teams in the same TLog server
-void distributeMutations(Arena& mutationRefArena,
-                         std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMutation>>& teamedMutations,
+void distributeMutations(Arena& arena,
+                         std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMessage>>& storageTeamMessages,
                          const std::vector<StorageTeamID>& storageTeamIDs,
-                         const VectorRef<VersionSubsequenceMutation>& mutations) {
-	std::cout << __FUNCTION__ << ">> Distributing " << mutations.size() << " mutations to " << storageTeamIDs.size()
-	          << "teams." << std::endl;
+                         const VectorRef<VersionSubsequenceMessage>& messages) {
+	print::PrintTiming printTiming("distributeMutations");
+	printTiming << "Distributing " << messages.size() << " mutations to " << storageTeamIDs.size() << "teams."
+	            << std::endl;
 
-	for (const auto& mutation : mutations) {
+	for (const auto& message : messages) {
 		const StorageTeamID& storageTeamID = randomlyPick(storageTeamIDs);
-		teamedMutations[storageTeamID].push_back(mutationRefArena, mutation);
+		storageTeamMessages[storageTeamID].push_back(arena, message);
 	}
 
 	for (const auto& storageTeamID : storageTeamIDs) {
-		std::cout << __FUNCTION__ << ">> Team " << storageTeamID.toString() << " has " << teamedMutations[storageTeamID].size()
-		          << " mutations." << std::endl;
+		printTiming << "Team " << storageTeamID.toString() << " has " << storageTeamMessages[storageTeamID].size()
+		            << " mutations." << std::endl;
 	}
 }
 
@@ -92,15 +94,16 @@ void fillTLogWithRandomMutations(std::shared_ptr<FakeTLogContext> pContext,
 
 	// Generate mutations
 	pContext->persistenceArena = Arena();
-	pContext->mutations.clear();
-	pContext->allMutations.resize(pContext->persistenceArena, 0);
+	pContext->storageTeamMessages.clear();
+	pContext->allMessages.resize(pContext->persistenceArena, 0);
 
-	generateRandomMutations(initialVersion, numMutations, pContext->persistenceArena, pContext->allMutations);
-	distributeMutations(pContext->persistenceArena, pContext->mutations, pContext->storageTeamIDs, pContext->allMutations);
+	generateRandomMutations(initialVersion, numMutations, pContext->persistenceArena, pContext->allMessages);
+	distributeMutations(
+	    pContext->persistenceArena, pContext->storageTeamMessages, pContext->storageTeamIDs, pContext->allMessages);
 
 	// Update versions
 	pContext->versions.clear();
-	for (const auto& item : pContext->allMutations) {
+	for (const auto& item : pContext->allMessages) {
 		pContext->versions.push_back(item.version);
 	}
 	std::sort(std::begin(pContext->versions), std::end(pContext->versions));
@@ -109,60 +112,63 @@ void fillTLogWithRandomMutations(std::shared_ptr<FakeTLogContext> pContext,
 }
 
 void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
-                              const TLogCommitRequest& commitRequest,
-                              ProxyTLogMessageHeader& header,
-                              std::vector<SubsequenceMutationItem>& seqMutations) {
-	proxyTLogPushMessageDeserializer(commitRequest.arena, commitRequest.messages, header, seqMutations);
+                              const TLogCommitRequest& commitRequest) {
+	SubsequencedMessageDeserializer deserializer(commitRequest.messages);
 
-	std::vector<MutationRef> mutations;
-	std::transform(seqMutations.begin(),
-	               seqMutations.end(),
-	               std::back_inserter(mutations),
-	               [](const SubsequenceMutationItem& item) { return item.mutation(); });
-	verifyMutationsInRecord(pFakeTLogContext->pTestDriverContext->commitRecord,
-	                        commitRequest.version,
-	                        commitRequest.storageTeamID,
-	                        mutations,
-	                        [](CommitValidationRecord& record) { record.tLogValidated = true; });
+	verifyMessagesInRecord(pFakeTLogContext->pTestDriverContext->commitRecord,
+	                       commitRequest.version,
+	                       commitRequest.storageTeamID,
+	                       deserializer,
+	                       [](CommitValidationRecord& record) { record.tLogValidated = true; });
 
 	// "Persist" the data into memory
-	for (auto& seqMutation : seqMutations) {
-		const auto& subsequence = seqMutation.subsequence;
-		const auto& mutation = seqMutation.mutation();
-		pFakeTLogContext->mutations[commitRequest.storageTeamID].push_back(
-		    pFakeTLogContext->persistenceArena,
-		    { commitRequest.version,
-		      subsequence,
-		      MutationRef(pFakeTLogContext->persistenceArena,
-		                  static_cast<MutationRef::Type>(mutation.type),
-		                  mutation.param1,
-		                  mutation.param2) });
+	for (const auto& vsm : deserializer) {
+		if (vsm.message.getType() == Message::Type::MUTATION_REF) {
+			const auto& version = vsm.version;
+			const auto& subsequence = vsm.subsequence;
+			const auto& mutation = std::get<MutationRef>(vsm.message);
+			pFakeTLogContext->storageTeamMessages[commitRequest.storageTeamID].push_back(
+			    pFakeTLogContext->persistenceArena,
+			    { version,
+			      subsequence,
+			      Message(MutationRef(pFakeTLogContext->persistenceArena,
+			                          static_cast<MutationRef::Type>(mutation.type),
+			                          mutation.param1,
+			                          mutation.param2)) });
+		} else {
+			pFakeTLogContext->storageTeamMessages[commitRequest.storageTeamID].push_back(
+			    pFakeTLogContext->persistenceArena, vsm);
+		}
 	}
 
 	commitRequest.reply.send(TLogCommitReply{ 0 });
 }
 
 Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
+	print::PrintTiming printTiming("FakeTLogPeek");
+
 	const StorageTeamID storageTeamID = request.storageTeamID;
-	if (pFakeTLogContext->mutations.find(request.storageTeamID) == pFakeTLogContext->mutations.end()) {
-		std::cout << __FUNCTION__ << ">> Team ID " << request.storageTeamID.toString() << " not found." << std::endl;
+	if (pFakeTLogContext->storageTeamMessages.find(request.storageTeamID) ==
+	    pFakeTLogContext->storageTeamMessages.end()) {
+
+		printTiming << "Team ID " << request.storageTeamID.toString() << " not found." << std::endl;
 		request.reply.sendError(teamid_not_found());
 		return Void();
 	}
 
-	const VectorRef<VersionSubsequenceMutation>& mutations = pFakeTLogContext->mutations[storageTeamID];
+	const VectorRef<VersionSubsequenceMessage>& messages = pFakeTLogContext->storageTeamMessages[storageTeamID];
 
 	Version firstVersion = invalidVersion;
 	Version lastVersion = invalidVersion;
 	Version endVersion = MAX_VERSION;
 	bool haveUnclosedVersionSection = false;
-	TLogStorageServerMessageSerializer serializer(storageTeamID);
+	SubsequencedMessageSerializer serializer(storageTeamID);
 
 	if (request.endVersion.present() && request.endVersion.get() != invalidVersion) {
 		endVersion = request.endVersion.get();
 	}
 
-	for (const auto& mutation : mutations) {
+	for (const auto& mutation : messages) {
 		const Version currentVersion = mutation.version;
 
 		// Have not reached the expected version
@@ -172,8 +178,8 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 
 		// The serialized data size is too big, cutoff here
 		if (serializer.getTotalBytes() >= pFakeTLogContext->maxBytesPerPeek && lastVersion != currentVersion) {
-			std::cout << __FUNCTION__ << ">> Stopped serializing due to the reply size limit: Serialized "
-			          << serializer.getTotalBytes() << " Limit " << pFakeTLogContext->maxBytesPerPeek << std::endl;
+			printTiming << "Stopped serializing due to the reply size limit: Serialized " << serializer.getTotalBytes()
+			            << " Limit " << pFakeTLogContext->maxBytesPerPeek << std::endl;
 			break;
 		}
 
@@ -197,8 +203,8 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 		}
 
 		const Subsequence subsequence = mutation.subsequence;
-		const MutationRef mutationRef = mutation.mutation;
-		serializer.writeSubsequenceMutationRef(subsequence, mutationRef);
+		const auto& message = mutation.message;
+		serializer.write(subsequence, message);
 
 		lastVersion = currentVersion;
 	}
@@ -216,37 +222,44 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 	return Void();
 }
 
+Future<StorageServerPushReply> forwardTLogCommitToStorageServer(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
+                                                                const TLogCommitRequest& commitRequest) {
+
+	const StorageTeamID& storageTeamID = commitRequest.storageTeamID;
+	StorageServerPushRequest request;
+	request.spanID = commitRequest.spanID;
+	request.storageTeamID = storageTeamID;
+	request.version = commitRequest.version;
+	request.arena = commitRequest.arena;
+	request.messages = commitRequest.messages;
+
+	std::shared_ptr<StorageServerInterface_PassivelyReceive> storageServerInterface =
+	    std::dynamic_pointer_cast<StorageServerInterface_PassivelyReceive>(
+	        pFakeTLogContext->pTestDriverContext->getStorageServerInterface(storageTeamID));
+	ASSERT(storageServerInterface != nullptr);
+
+	return storageServerInterface->pushRequests.getReply(request);
+}
+
 ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
 	state std::shared_ptr<TestDriverContext> pTestDriverContext = pFakeTLogContext->pTestDriverContext;
 	state std::shared_ptr<TLogInterface_ActivelyPush> pTLogInterface =
 	    std::dynamic_pointer_cast<TLogInterface_ActivelyPush>(pFakeTLogContext->pTLogInterface);
+	state print::PrintTiming printTiming("FakeTLog");
 
 	ASSERT(pTLogInterface);
 
 	loop choose {
 		when(TLogCommitRequest commitRequest = waitNext(pTLogInterface->commit.getFuture())) {
-			ProxyTLogMessageHeader header;
-			std::vector<SubsequenceMutationItem> seqMutations;
-			processTLogCommitRequest(pFakeTLogContext, commitRequest, header, seqMutations);
+			state StorageTeamID storageTeamID(commitRequest.storageTeamID);
+			printTiming << "Received commitRequest version = " << commitRequest.version << std::endl;
+			processTLogCommitRequest(pFakeTLogContext, commitRequest);
 
-			StorageServerPushRequest request;
-			request.spanID = commitRequest.spanID;
-			request.storageTeamID = commitRequest.storageTeamID;
-			request.arena = Arena();
-			for (auto iter = std::begin(seqMutations); iter != std::end(seqMutations); ++iter) {
-				const auto& mutation = iter->mutation();
-				request.mutations.emplace_back(request.arena,
-				                               MutationRef(request.arena,
-				                                           static_cast<MutationRef::Type>(mutation.type),
-				                                           mutation.param1,
-				                                           mutation.param2));
-			}
-			request.version = commitRequest.version;
+			printTiming << concatToString("Push the message to storage servers, storage team id = ", storageTeamID)
+			            << std::endl;
+			StorageServerPushReply reply = wait(forwardTLogCommitToStorageServer(pFakeTLogContext, commitRequest));
 
-			std::shared_ptr<StorageServerInterface_PassivelyReceive> pStorageServerInterface =
-			    std::dynamic_pointer_cast<StorageServerInterface_PassivelyReceive>(
-			        pTestDriverContext->getStorageServerInterface(commitRequest.storageTeamID));
-			state StorageServerPushReply reply = wait(pStorageServerInterface->pushRequests.getReply(request));
+			printTiming << concatToString("Complete push, storage team id = ", storageTeamID) << std::endl;
 		}
 		when(TLogPeekRequest peekRequest = waitNext(pTLogInterface->peek.getFuture())) {
 			fakeTLogPeek(peekRequest, pFakeTLogContext);
@@ -258,14 +271,13 @@ ACTOR Future<Void> fakeTLog_PassivelyProvide(std::shared_ptr<FakeTLogContext> pF
 	state std::shared_ptr<TestDriverContext> pTestDriverContext = pFakeTLogContext->pTestDriverContext;
 	state std::shared_ptr<TLogInterface_PassivelyPull> pTLogInterface =
 	    std::dynamic_pointer_cast<TLogInterface_PassivelyPull>(pFakeTLogContext->pTLogInterface);
+	state print::PrintTiming printTiming("FakeTLog");
 
 	ASSERT(pTLogInterface);
 
 	loop choose {
 		when(TLogCommitRequest commitRequest = waitNext(pTLogInterface->commit.getFuture())) {
-			state ProxyTLogMessageHeader header;
-			state std::vector<SubsequenceMutationItem> seqMutations;
-			processTLogCommitRequest(pFakeTLogContext, commitRequest, header, seqMutations);
+			processTLogCommitRequest(pFakeTLogContext, commitRequest);
 		}
 		when(TLogPeekRequest peekRequest = waitNext(pTLogInterface->peek.getFuture())) {
 			fakeTLogPeek(peekRequest, pFakeTLogContext);

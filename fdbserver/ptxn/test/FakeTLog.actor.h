@@ -28,11 +28,11 @@
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/MessageTypes.h"
+#include "fdbserver/ptxn/StorageServerInterface.h"
 #include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/TLogInterface.h"
-#include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
-#include "fdbserver/ptxn/StorageServerInterface.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -53,13 +53,15 @@ struct FakeTLogContext {
 	// Stores the unique versions the mutations have been used, in ascending order
 	std::vector<Version> versions;
 
+	// Arena used for storing messages. NOTE The arena in the TestDriverContext is not used, as FakeTLogContext would
+	// keep its own version of data, to simulate the "persistence" behavior.
 	Arena persistenceArena;
 
 	// All mutations stored in the TLog
-	VectorRef<VersionSubsequenceMutation> allMutations;
+	VectorRef<VersionSubsequenceMessage> allMessages;
 
 	// Mutations grouped by teams
-	std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMutation>> mutations;
+	std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMessage>> storageTeamMessages;
 };
 
 // Fill the FakeTLog server with random mutations

@@ -39,7 +39,7 @@ const Standalone<StringRef>& emptyCursorHeader() {
 	static Standalone<StringRef> empty;
 	if (empty.size() == 0) {
 		StorageTeamID storageTeamID;
-		ptxn::TLogStorageServerMessageSerializer serializer(storageTeamID);
+		ptxn::SubsequencedMessageSerializer serializer(storageTeamID);
 		serializer.completeMessageWriting();
 		empty = serializer.getSerialized();
 	}
@@ -57,10 +57,10 @@ struct PeekRemoteContext {
 	const std::vector<TLogInterfaceBase*>& pTLogInterfaces;
 
 	// Deserializer
-	TLogStorageServerMessageDeserializer* pDeserializer;
+	SubsequencedMessageDeserializer* pDeserializer;
 
 	// Deserializer iterator
-	TLogStorageServerMessageDeserializer::iterator* pDeserializerIterator;
+	SubsequencedMessageDeserializer::iterator* pDeserializerIterator;
 
 	// If not null, attach the arena in the reply to this arena, so the mutations will still be
 	// accessible even the deserializer gets destructed.
@@ -70,8 +70,8 @@ struct PeekRemoteContext {
 	                  const StorageTeamID& storageTeamID_,
 	                  Version* pLastVersion_,
 	                  const std::vector<TLogInterfaceBase*>& pInterfaces_,
-	                  TLogStorageServerMessageDeserializer* pDeserializer_,
-	                  TLogStorageServerMessageDeserializer::iterator* pDeserializerIterator_,
+	                  SubsequencedMessageDeserializer* pDeserializer_,
+	                  SubsequencedMessageDeserializer::iterator* pDeserializerIterator_,
 	                  Arena* pAttachArena_ = nullptr)
 	  : debugID(debugID_), storageTeamID(storageTeamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
 	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pAttachArena(pAttachArena_) {
@@ -127,7 +127,7 @@ struct MergedPeekCursorContext {
 // Add a cursor to the CursorHeap, the cursor must hasRemaining()
 void addCursorToCursorHeap(MergedPeekCursor::CursorContainer::iterator iter, MergedPeekCursor::CursorHeap& heap) {
 	ASSERT((*iter)->hasRemaining());
-	const VersionSubsequenceMutation& mutation = (*iter)->get();
+	const VersionSubsequenceMessage& mutation = (*iter)->get();
 	heap.emplace(mutation.version, mutation.subsequence, iter);
 }
 
@@ -232,7 +232,7 @@ Future<bool> PeekCursorBase::remoteMoreAvailable() {
 	return remoteMoreAvailableImpl();
 }
 
-const VersionSubsequenceMutation& PeekCursorBase::get() const {
+const VersionSubsequenceMessage& PeekCursorBase::get() const {
 	return getImpl();
 }
 
@@ -292,7 +292,7 @@ void StorageTeamPeekCursor::nextImpl() {
 	++deserializerIter;
 }
 
-const VersionSubsequenceMutation& StorageTeamPeekCursor::getImpl() const {
+const VersionSubsequenceMessage& StorageTeamPeekCursor::getImpl() const {
 	return *deserializerIter;
 }
 
@@ -334,7 +334,7 @@ void MergedPeekCursor::nextImpl() {
 	}
 }
 
-const VersionSubsequenceMutation& MergedPeekCursor::getImpl() const {
+const VersionSubsequenceMessage& MergedPeekCursor::getImpl() const {
 	return (*cursorHeap.top().pCursorPtr)->get();
 }
 

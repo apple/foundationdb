@@ -33,6 +33,7 @@
 #include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/test/FakeProxy.actor.h"
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
+#include "fdbserver/ptxn/test/FakeSequencer.actor.h"
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
 #include "fdbserver/ptxn/test/Utils.h"
@@ -48,8 +49,8 @@ namespace ptxn::test {
 
 CommitRecord::CommitRecord(const Version& version_,
                            const StorageTeamID& storageTeamID_,
-                           std::vector<MutationRef>&& mutations_)
-  : version(version_), storageTeamID(storageTeamID_), mutations(std::move(mutations_)) {}
+                           std::vector<Message>&& messages_)
+  : version(version_), storageTeamID(storageTeamID_), messages(std::move(messages_)) {}
 
 bool CommitValidationRecord::validated() const {
 	return tLogValidated && storageServerValidated;
@@ -83,6 +84,11 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 
 	context->commitVersionGap = 10000;
 	context->skipCommitValidation = options.skipCommitValidation;
+
+	// Prepare sequencer
+	context->sequencerInterface = std::make_shared<MasterInterface>();
+	context->sequencerInterface->initEndpoints();
+
 	// Prepare Proxies
 	context->numProxies = options.numProxies;
 
@@ -146,16 +152,24 @@ std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogInterface(const Sto
 	return tLogGroupLeaders.at(storageTeamIDTLogGroupIDMapper.at(storageTeamID));
 }
 
-std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(const StorageTeamID& storageTeamID) {
+std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(
+    const StorageTeamID& storageTeamID) {
 	return storageTeamIDStorageServerInterfaceMapper.at(storageTeamID);
 }
 
-std::pair<Version, Version> TestDriverContext::getCommitVersionPair(const StorageTeamID& storageTeamId) {
+std::pair<Version, Version> TestDriverContext::getCommitVersionPair(const StorageTeamID& storageTeamId, const Version& currentVersion) {
 	ASSERT(storageTeamIDTLogGroupIDMapper.count(storageTeamId));
 	Version prevVersion = tLogGroupVersion[storageTeamIDTLogGroupIDMapper.at(storageTeamId)];
-	Version commitVersion = prevVersion + commitVersionGap;
+	Version commitVersion = currentVersion;
 	tLogGroupVersion[storageTeamIDTLogGroupIDMapper.at(storageTeamId)] = commitVersion;
 	return { prevVersion, commitVersion };
+}
+
+void startFakeSequencer(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext) {
+	std::shared_ptr<FakeSequencerContext> pFakeSequencerContext = std::make_shared<FakeSequencerContext>();
+	pFakeSequencerContext->pTestDriverContext = pTestDriverContext;
+	pFakeSequencerContext->pSequencerInterface = pTestDriverContext->sequencerInterface;
+	actors.emplace_back(fakeSequencer(pFakeSequencerContext));
 }
 
 void startFakeProxy(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext) {
@@ -210,36 +224,70 @@ bool isAllRecordsValidated(const std::vector<CommitRecord>& records) {
 	return true;
 }
 
-void verifyMutationsInRecord(std::vector<CommitRecord>& records,
-                             const Version& version,
-                             const StorageTeamID& storageTeamID,
-                             const std::vector<MutationRef>& mutations,
-                             std::function<void(CommitValidationRecord&)> validateUpdater) {
-	for (auto& record : records) {
-		if (record.version == version && record.storageTeamID == storageTeamID && record.mutations.size() == mutations.size()) {
-			bool isSame = true;
-			for (size_t i = 0; i < mutations.size(); ++i) {
-				if (!(record.mutations[i].type == mutations[i].type &&
-				      record.mutations[i].param1 == mutations[i].param1 &&
-				      record.mutations[i].param2 == mutations[i].param2)) {
-					isSame = false;
-					break;
-				}
-			}
-			if (isSame) {
-				validateUpdater(record.validation);
-				return;
-			}
+// For messages with a given version and storage team ID, check if messages match previous committed records.
+void verifyMessagesInRecord(std::vector<CommitRecord>& records,
+                            const Version& version,
+                            const StorageTeamID& storageTeamID,
+                            const SubsequencedMessageDeserializer& deserializedMessages,
+                            std::function<void(CommitValidationRecord&)> validateUpdater) {
+
+	print::PrintTiming printTiming("verifyMessagesInRecord");
+
+	// Locate the record matching given storageTeamID/version
+	size_t recordIndex = 0;
+	for (; recordIndex < records.size(); ++recordIndex) {
+		const auto& record = records[recordIndex];
+		if (record.version == version && record.storageTeamID == storageTeamID) {
+			break;
 		}
 	}
 
-	print::printCommitRecord(records);
-	std::cout << "\n\nLooking for: Version " << version << "\tTeam ID: " << storageTeamID.toString() << "\n";
-	for (const auto& mutation : mutations) {
-		std::cout << "\t\t\t" << mutation.toString() << std::endl;
+	if (recordIndex == records.size()) {
+		printTiming << concatToString(
+		                   "Message not found in records: Version = ", version, " Storage Team ID: ", storageTeamID)
+		            << std::endl;
+		print::printCommitRecords(records);
+		throw internal_error_msg("Messages not found");
 	}
 
-	throw internal_error_msg("Mutations does not match previous record");
+	// Check each message to see they match
+	auto& record = records[recordIndex];
+	int index = 0;
+	auto recordedIter = record.messages.cbegin();
+	auto incomingIter = deserializedMessages.cbegin();
+
+	while (recordedIter != record.messages.cend() && incomingIter != deserializedMessages.cend()) {
+		const auto recordedMessage = *recordedIter;
+		const auto incomingMessage = incomingIter->message;
+
+		if (recordedMessage != incomingMessage) {
+			std::string errorOutput;
+			errorOutput += concatToString("Version = ", version, "  ");
+			errorOutput += concatToString("StorageTeamID = ", storageTeamID, "  ");
+			errorOutput += concatToString(" Messages not match at index ", index, ":\n");
+			errorOutput += concatToString(std::setw(20), "Deserialized: ", incomingMessage, "\n");
+			errorOutput += concatToString(std::setw(20), "Record: ", recordedMessage, "\n");
+			printTiming << errorOutput << std::endl;
+			print::printCommitRecords(records);
+			throw internal_error_msg("Message not consistent");
+		}
+
+		++recordedIter;
+		++incomingIter;
+		++index;
+	}
+
+	while (incomingIter != deserializedMessages.cend()) {
+		printTiming << concatToString("Extra item from deserialized messages: ", *incomingIter++);
+		throw internal_error_msg("Extra item(s) found in deserialized messages");
+	}
+
+	while (recordedIter != record.messages.cend()) {
+		printTiming << concatToString("Extra item from recorded messages: ", *recordedIter++);
+		throw internal_error_msg("Extra item(s) found in recorded messages");
+	}
+
+	validateUpdater(record.validation);
 }
 
 } // namespace ptxn::test
@@ -250,10 +298,9 @@ TEST_CASE("/fdbserver/ptxn/test/driver") {
 	TestDriverOptions options(params);
 
 	std::shared_ptr<TestDriverContext> context = initTestDriverContext(options);
-	std::cout << 1 << std::endl;
 	std::vector<Future<Void>> actors;
-	std::cout << 2 << std::endl;
 
+	startFakeSequencer(actors, context);
 	startFakeProxy(actors, context);
 	startFakeTLog(actors, context);
 	startFakeStorageServer(actors, context);

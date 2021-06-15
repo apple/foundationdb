@@ -32,9 +32,19 @@
 #include "flow/String.h"
 
 using Version = int64_t;
+enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
+
+using Subsequence = uint32_t;
+enum {
+	// Subseequence should be a number equal or larger than 1. See comments for:
+	//     * LogSystem.h:LogPushData
+	//     * ptxn/MessageSerializer.h:ptxn::ProxySubsequencedMessageSerializer::subsequence
+	invalidSubsequence = 0,
+	MAX_SUBSEQUENCE = std::numeric_limits<Subsequence>::max()
+};
+
 using LogEpoch = uint64_t;
 using Sequence = uint64_t;
-using Subsequence = uint32_t;
 using KeyRef = StringRef;
 using ValueRef = StringRef;
 using Generation = uint64_t;
@@ -64,7 +74,7 @@ using StorageTeamID = UID;
 // Transaction subsystem state (txnState) team.
 const StorageTeamID txsTeam = UID(1, 1);
 
-}	// namespace ptxn
+} // namespace ptxn
 
 #pragma pack(push, 1)
 struct Tag {
@@ -486,8 +496,6 @@ using KeyRange = Standalone<KeyRangeRef>;
 using KeyValue = Standalone<KeyValueRef>;
 using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
-
-enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline Key keyAfter(const KeyRef& key) {
 	if (key == LiteralStringRef("\xff\xff"))

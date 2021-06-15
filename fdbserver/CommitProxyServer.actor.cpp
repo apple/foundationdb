@@ -23,10 +23,10 @@
 #include <tuple>
 
 #include "fdbclient/Atomic.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/sim_validation.h"
@@ -41,12 +41,13 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/ProxyCommitData.actor.h"
+#include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/RestoreUtil.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -309,7 +310,7 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
                                       const std::map<Key, MutationListRef>* logRangeMutations,
                                       LogPushData* toCommit,
-                                      ptxn::ProxyTLogPushMessageSerializer* teamMessageBuilder,
+                                      std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer> pTeamMessageBuilder,
                                       Version commitVersion,
                                       double* computeDuration,
                                       double* computeStart) {
@@ -319,9 +320,9 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 	state BinaryWriter valueWriter(Unversioned());
 
 	toCommit->addTransactionInfo(SpanID());
-	teamMessageBuilder->addTransactionInfo(SpanID());
+	pTeamMessageBuilder->broadcastSpanContext(SpanID());
 
-	// TODO: write mutations in teamMessageBuilder for each team
+	// TODO: write mutations in pTeamMessageBuilder for each team
 	// Note: a clear range mutation may appear multiple times in different teams.
 
 	// Serialize the log range mutations within the map
@@ -426,7 +427,7 @@ struct CommitBatchContext {
 	LogPushData toCommit;
 
 	// Serializer for buffering teams' mutation messages to TLog Groups
-	ptxn::ProxyTLogPushMessageSerializer teamMessageBuilder;
+	std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer> pTeamMessageBuilder;
 
 	int batchOperations = 0;
 
@@ -642,6 +643,8 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	self->commitVersion = versionReply.version;
 	self->prevVersion = versionReply.prevVersion;
 
+	self->pTeamMessageBuilder.reset(new ptxn::ProxySubsequencedMessageSerializer(self->commitVersion));
+
 	for (auto it : versionReply.resolverChanges) {
 		auto rs = pProxyCommitData->keyResolvers.modify(it.range);
 		for (auto r = rs.begin(); r != rs.end(); ++r)
@@ -840,7 +843,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
-			// TODO: pass self->teamMessageBuilder in as well?
+			// TODO: pass self->pTeamMessageBuilder in as well?
 			applyMetadataMutations(trs[t].spanContext,
 			                       *pProxyCommitData,
 			                       self->arena,
@@ -903,7 +906,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
 
 		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
-		self->teamMessageBuilder.addTransactionInfo(trs[self->transactionNum].spanContext);
+		self->pTeamMessageBuilder->broadcastSpanContext(trs[self->transactionNum].spanContext);
 
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			if (self->yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
@@ -965,7 +968,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				self->toCommit.writeTypedMessage(m);
 
 				auto& teams = pProxyCommitData->keyInfo[m.param1].teams;
-				self->teamMessageBuilder.writeMessage(m, teams);
+				self->pTeamMessageBuilder->write(m, teams);
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
@@ -1028,7 +1031,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				self->teamMessageBuilder.writeMessage(m, storageTeams);
+				self->pTeamMessageBuilder->write(m, storageTeams);
 			} else {
 				UNREACHABLE();
 			}
@@ -1123,7 +1126,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		wait(addBackupMutations(pProxyCommitData,
 		                        &self->logRangeMutations,
 		                        &self->toCommit,
-		                        &self->teamMessageBuilder,
+		                        self->pTeamMessageBuilder,
 		                        self->commitVersion,
 		                        &self->computeDuration,
 		                        &self->computeStart));
@@ -1186,7 +1189,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			self->toCommit.addTxsTag();
 		}
 		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
-		self->teamMessageBuilder.writeMessage(StringRef(m.begin(), m.size()), ptxn::txsTeam);
+		// FIXME(rdar://78341241)
+		// self->pTeamMessageBuilder.writeMessage(StringRef(m.begin(), m.size()), ptxn::txsTeam);
 		firstMessage = false;
 	}
 

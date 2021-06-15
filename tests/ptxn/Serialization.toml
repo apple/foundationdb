@@ -19,33 +19,33 @@ startDelay = 0
     testsMatching = '/fdbserver/ptxn/test/twoLevelHeaderedSerializer'
 
 [[test]]
-testTitle = 'Test ProxyTLogPushMessageSerializer'
+testTitle = 'Test SubsequencedMessageSerializer'
 useDB = false
 startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer'
+    testsMatching = '/fdbserver/ptxn/test/SubsequencedMessageSerializer/normal'
 
 [[test]]
-testTitle = 'Test TLogStorageServerPeekMessageSerializer'
+testTitle = 'Test ProxySubsequenceMessageSerializer'
 useDB = false
 startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/serialization'
+    testsMatching = '/fdbserver/ptxn/test/ProxySubsequenceMessageSerializer/normal'
 
 [[test]]
-testTitle = 'Test TLogStorageServerPeekMessageSerializer -- Huge amount of data'
+testTitle = 'Test SubsequencedMessageSerializer -- Huge amount of data'
 useDB = false
 startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/hugeData'
+    testsMatching = '/fdbserver/ptxn/test/SubsequencedMessageSerializer/timing'
 
-    numMutations = 32768
+    numMutations = 131072

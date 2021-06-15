@@ -24,7 +24,7 @@
 #include <unordered_map>
 #include <utility>
 
-#include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
+#include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/test/Utils.h"
 #include "fdbserver/ptxn/TLogInterface.h"
@@ -38,59 +38,112 @@ namespace ptxn::test {
 const double CHECK_PERSIST_INTERVAL = 0.1;
 const int MAX_CHECK_TIMES = 10;
 
+namespace {
+
+std::vector<std::pair<StorageTeamID, Message>> prepareMessage(const std::vector<StorageTeamID>& storageTeamIDs,
+                                                              Arena& mutationsArena) {
+	std::vector<std::pair<StorageTeamID, Message>> messages;
+	for (int _ = 0; _ < deterministicRandom()->randomInt(1, 12); ++_) {
+		StorageTeamID storageTeamID = randomlyPick(storageTeamIDs);
+
+		messages.emplace_back(randomlyPick(storageTeamIDs),
+		                      Message(std::in_place_type<MutationRef>,
+		                              mutationsArena,
+		                              MutationRef::SetValue,
+		                              StringRef(format("Key%d", deterministicRandom()->randomInt(0, 100))),
+		                              StringRef(format("Value%d", deterministicRandom()->randomInt(0, 100)))));
+	}
+
+	return messages;
+}
+
+void recordMessages(const std::vector<std::pair<StorageTeamID, Message>>& messages,
+                    const Version& version,
+                    std::vector<CommitRecord>& commitRecord) {
+
+	std::unordered_map<StorageTeamID, std::vector<Message>> storageTeamMessages;
+	for (const auto& [storageTeamID, message] : messages) {
+		storageTeamMessages[storageTeamID].push_back(message);
+	}
+	for (auto& [storageTeamID, messages] : storageTeamMessages) {
+		commitRecord.emplace_back(version, storageTeamID, std::move(messages));
+	}
+}
+
+} // anonymous namespace
+
 ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext) {
 	state std::shared_ptr<TestDriverContext> pTestDriverContext = pFakeProxyContext->pTestDriverContext;
+	state std::shared_ptr<MasterInterface> pSequencerInterface =
+	    pFakeProxyContext->pTestDriverContext->sequencerInterface;
 	state int numStorageTeams = pFakeProxyContext->pTestDriverContext->numStorageTeamIDs;
+	state std::vector<std::pair<StorageTeamID, Message>> fakeMessages;
 	state std::vector<CommitRecord>& commitRecord = pFakeProxyContext->pTestDriverContext->commitRecord;
-	state int i = 0;
+	state int version = 0;
+	state int commitCount = 0;
+	state std::vector<Future<TLogCommitReply>> tLogCommitReplies;
+	state print::PrintTiming printTiming(concatToString("fakeProxy ", pFakeProxyContext->proxyID));
+
 	loop {
-		std::cout << "Proxy" << pFakeProxyContext->proxyID << " Commit " << i << std::endl;
+		printTiming << "Commit " << commitCount << std::endl;
 
-		std::unordered_map<StorageTeamID, std::vector<MutationRef>> fakeMutations;
-		ProxyTLogPushMessageSerializer serializer;
+		fakeMessages = prepareMessage(pTestDriverContext->storageTeamIDs, pTestDriverContext->mutationsArena);
 
-		for (int _ = 0; _ < deterministicRandom()->randomInt(1, 12); ++_) {
-			StorageTeamID storageTeamID{ pTestDriverContext->storageTeamIDs[deterministicRandom()->randomInt(0, numStorageTeams)] };
-			MutationRef mutation(pTestDriverContext->mutationsArena,
-			                     MutationRef::SetValue,
-			                     StringRef(format("Key%d", deterministicRandom()->randomInt(0, 100))),
-			                     StringRef(format("Value%d", deterministicRandom()->randomInt(0, 100))));
-			serializer.writeMessage(mutation, storageTeamID);
+		// Pre-resolution: get the version of the commit
+		GetCommitVersionRequest commitVersionRequest(UID(), commitCount, commitCount - 1, UID());
+		state GetCommitVersionReply commitVersionReply =
+		    wait(pSequencerInterface->getCommitVersion.getReply(commitVersionRequest));
 
-			fakeMutations[storageTeamID].push_back(mutation);
+		recordMessages(fakeMessages, commitVersionReply.version, commitRecord);
+
+		// Resolve
+		// FIXME use the resolver role
+		/*
+		ResolveTransactionBatchRequest resolveRequest;
+		resolveRequest.prevVersion = commitVersionReply.prevVersion;
+		resolveRequest.version = commitVersionReply.version;
+		resolveRequest.lastReceivedVersion = commitVersionReply.prevVersion;
+		// FIXME we do not need all teams
+		resolveRequest.teams = pTestDriverContext->storageTeamIDs;
+		state ResolveTransactionBatchReply resolveReply =
+		    wait(randomlyPick(pTestDriverContext->resolverInterfaces)->resolve.getReply(resolveRequest));
+		    */
+
+		// TLog
+		ProxySubsequencedMessageSerializer serializer(commitVersionReply.version);
+		for (const auto& [storageTeamID, message] : fakeMessages) {
+			serializer.write(std::get<MutationRef>(message), storageTeamID);
 		}
 
-		state std::vector<Future<TLogCommitReply>> replies;
-
-		std::unordered_map<StorageTeamID, Standalone<StringRef>> messages = serializer.getAllSerialized();
-		for (const auto& [team, message] : messages) {
-			auto commitVersionPair = pTestDriverContext->getCommitVersionPair(team);
-			// Here we use move semantic in order to keep the mutations in arena
-			// 	pTestDriverContext->mutationsArena
-			commitRecord.emplace_back(commitVersionPair.second, team, std::move(fakeMutations[team]));
+		std::unordered_map<StorageTeamID, Standalone<StringRef>> serialized = serializer.getAllSerialized();
+		for (const auto& [storageTeamID, messages] : serialized) {
+			auto commitVersionPair = pTestDriverContext->getCommitVersionPair(storageTeamID, commitVersionReply.version);
+			printTiming << commitVersionReply.prevVersion << '\t' << commitVersionReply.version << std::endl;
+			printTiming << storageTeamID.toString() << '\t' << commitVersionPair.first << '\t'
+			            << commitVersionPair.second << std::endl;
 			TLogCommitRequest request(deterministicRandom()->randomUniqueID(),
-			                          team,
-			                          message.arena(),
-			                          message,
+			                          storageTeamID,
+			                          messages.arena(),
+			                          messages,
 			                          commitVersionPair.first,
 			                          commitVersionPair.second,
+			                          // commitVersionReply.prevVersion,
+			                          // commitVersionReply.version,
 			                          0,
 			                          0,
 			                          Optional<UID>(deterministicRandom()->randomUniqueID()));
-			replies.push_back(pTestDriverContext->getTLogInterface(team)->commit.getReply(request));
+			tLogCommitReplies.push_back(pTestDriverContext->getTLogInterface(storageTeamID)->commit.getReply(request));
 		}
 
-		print::printCommitRecord(pTestDriverContext->commitRecord);
+		wait(waitForAll(tLogCommitReplies));
 
-		wait(waitForAll(replies));
-
-		if (++i == pFakeProxyContext->numCommits) {
+		if (++commitCount == pFakeProxyContext->numCommits) {
 			break;
 		}
 	}
 
 	if (pTestDriverContext->skipCommitValidation) {
-		std::cout << "Skipped commit persistence validation\n";
+		printTiming << "Skipping commit persistence validation" << std::endl;
 		return Void();
 	}
 

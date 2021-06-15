@@ -22,7 +22,6 @@
 
 #include <iostream>
 #include <iomanip>
-#include <string>
 #include <stdexcept>
 
 #include "fdbserver/ptxn/test/Driver.h"
@@ -130,14 +129,14 @@ void print(const TestDriverOptions& option) {
 }
 
 void print(const CommitRecord& record) {
-	std::cout << std::endl << ">> ptxn/test/Driver.h:CommitRecord;" << std::endl;
+	std::cout << std::endl << ">> ptxn/test/Driver.h:CommitRecord:" << std::endl;
 
 	std::cout << formatKVPair("Verson", record.version) << std::endl
 	          << formatKVPair("storageTeamID", record.storageTeamID) << std::endl;
 
-	std::cout << formatKVPair("Muations", record.mutations.size()) << std::endl;
-	for (const auto& mutation : record.mutations) {
-		std::cout << mutation.toString() << std::endl;
+	std::cout << formatKVPair("Muations", record.messages.size()) << std::endl;
+	for (const auto& message : record.messages) {
+		std::cout << "\t" << message << std::endl;
 	}
 }
 
@@ -149,8 +148,8 @@ void print(const ptxn::test::TestTLogPeekOptions& option) {
 	          << formatKVPair("Intial version", option.initialVersion) << std::endl;
 }
 
-void printCommitRecord(const std::vector<CommitRecord>& records) {
-	std::cout << "Commits from Proxy: \n\n";
+void printCommitRecords(const std::vector<CommitRecord>& records) {
+	std::cout << ">> ptxn/test/Driver.h:std::vector<CommitRecord>:" << std::endl;
 	Version currentVersion = 0;
 	for (const auto& record : records) {
 		if (record.version != currentVersion) {
@@ -158,8 +157,8 @@ void printCommitRecord(const std::vector<CommitRecord>& records) {
 			currentVersion = record.version;
 		}
 		std::cout << "\t\tTeam ID: " << record.storageTeamID.toString() << std::endl;
-		for (const auto& mutation : record.mutations) {
-			std::cout << "\t\t\t" << mutation.toString() << std::endl;
+		for (const auto& message : record.messages) {
+			std::cout << "\t\t\t" << message << std::endl;
 		}
 	}
 }
@@ -170,8 +169,8 @@ void printNotValidatedRecords(const std::vector<CommitRecord>& records) {
 		if (record.validation.validated())
 			continue;
 		std::cout << "\tVersion: " << record.version << "\tTeam ID: " << record.storageTeamID.toString() << std::endl;
-		for (const auto& mutation : record.mutations) {
-			std::cout << "\t\t\t" << mutation.toString() << std::endl;
+		for (const auto& message : record.messages) {
+			std::cout << "\t\t\t" << message.toString() << std::endl;
 		}
 
 		if (!record.validation.tLogValidated) {
@@ -181,6 +180,36 @@ void printNotValidatedRecords(const std::vector<CommitRecord>& records) {
 			std::cout << "\tStorageServer has not validated the reception of this commit." << std::endl;
 		}
 	}
+}
+
+PrintTiming::DummyOStream operator<<(PrintTiming& printTiming, std::ostream& (*manip)(std::ostream&)) {
+	printTiming << "" << manip;
+	return PrintTiming::DummyOStream();
+}
+
+PrintTiming::DummyOStream operator<<(PrintTiming& printTiming, std::ios_base& (*manip)(std::ios_base&)) {
+	printTiming << "" << manip;
+	return PrintTiming::DummyOStream();
+}
+
+PrintTiming::DummyOStream&& operator<<(PrintTiming::DummyOStream&& stream, std::ostream& (*manip)(std::ostream&)) {
+	std::cout << manip;
+	return std::move(stream);
+}
+
+PrintTiming::DummyOStream&& operator<<(PrintTiming::DummyOStream&& stream, std::ios_base& (*manip)(std::ios_base&)) {
+	std::cout << manip;
+	return std::move(stream);
+}
+
+PrintTiming::PrintTiming(const std::string& functionName_)
+  : functionName(functionName_), startTime(clock_t::now()), lastTagTime(clock_t::now()) {
+
+	(*this) << "Start" << std::endl;
+}
+
+PrintTiming::~PrintTiming() {
+	(*this) << "Terminate, duration = " << duration_t(clock_t::now() - startTime).count() << "s" << std::endl;
 }
 
 } // namespace print

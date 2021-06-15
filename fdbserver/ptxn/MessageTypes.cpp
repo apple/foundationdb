@@ -22,28 +22,86 @@
 
 namespace ptxn {
 
-VersionSubsequenceMutation::VersionSubsequenceMutation() {}
-
-VersionSubsequenceMutation::VersionSubsequenceMutation(const Version& version_,
-                                                       const Subsequence& subsequence_,
-                                                       const MutationRef& mutation_)
-  : version(version_), subsequence(subsequence_), mutation(mutation_) {}
-
-bool VersionSubsequenceMutation::operator==(const VersionSubsequenceMutation& another) const {
-	return version == another.version && subsequence == another.subsequence && mutation.type == another.mutation.type &&
-	       mutation.param1 == another.mutation.param1 && mutation.param2 == another.mutation.param2;
+Message::Type Message::getType() const {
+	return static_cast<Type>(this->index());
 }
 
-bool VersionSubsequenceMutation::operator!=(const VersionSubsequenceMutation& another) const {
+std::string Message::toString() const {
+	std::string result;
+
+	switch (getType()) {
+	case Type::MUTATION_REF:
+		result = concatToString(result, "Mutation     ", std::get<MutationRef>(*this));
+		break;
+	case Type::SPAN_CONTEXT_MESSAGE:
+		result = concatToString(result, "Span Context ", std::get<SpanContextMessage>(*this));
+		break;
+	case Type::LOG_PROTOCOL_MESSAGE:
+		result = concatToString(result, "Log Protocol ", std::get<LogProtocolMessage>(*this));
+		break;
+	case Type::UNDEFINED:
+		result = concatToString(result, "Undefined value");
+	default:
+		UNREACHABLE();
+	}
+
+	return result;
+}
+
+bool Message::operator==(const Message& another) const {
+	if (getType() != another.getType()) {
+		return false;
+	}
+	switch (getType()) {
+	case Type::MUTATION_REF:
+		return std::get<MutationRef>(*this) == std::get<MutationRef>(another);
+	case Type::SPAN_CONTEXT_MESSAGE:
+		return std::get<SpanContextMessage>(*this) == std::get<SpanContextMessage>(another);
+	case Type::LOG_PROTOCOL_MESSAGE:
+		return std::get<LogProtocolMessage>(*this) == std::get<LogProtocolMessage>(another);
+	case Type::UNDEFINED:
+		return true;
+	default:
+		UNREACHABLE();
+	}
+}
+
+bool Message::operator!=(const Message& another) const {
 	return !(*this == another);
 }
 
-std::string VersionSubsequenceMutation::toString() const {
-	return concatToString("Version ", version, "\tSubsequence ", subsequence, "\tMutation ", mutation.toString());
+VersionSubsequenceMessage::VersionSubsequenceMessage(const Version& version_, const Subsequence& subsequence_)
+  : version(version_), subsequence(subsequence_) {}
+
+VersionSubsequenceMessage::VersionSubsequenceMessage(const Version& version_,
+                                                     const Subsequence& subsequence_,
+                                                     const Message& message_)
+  : version(version_), subsequence(subsequence_), message(message_) {}
+
+std::string VersionSubsequenceMessage::toString() const {
+	std::string result = concatToString("Version ", version, "\tSubsequence ", subsequence, "\t", message);
+	return result;
 }
 
-std::ostream& operator<<(std::ostream& stream, const VersionSubsequenceMutation& mutation) {
-	stream << mutation.toString();
+bool VersionSubsequenceMessage::operator==(const VersionSubsequenceMessage& another) const {
+	if (!(version == another.version && subsequence == another.subsequence &&
+	      message.getType() == another.message.getType())) {
+		return false;
+	}
+	return message == another.message;
+}
+
+bool VersionSubsequenceMessage::operator!=(const VersionSubsequenceMessage& another) const {
+	return !(*this == another);
+}
+
+std::ostream& operator<<(std::ostream& stream, const Message& message) {
+	stream << concatToString(message);
+	return stream;
+}
+
+std::ostream& operator<<(std::ostream& stream, const VersionSubsequenceMessage& vsm) {
+	stream << concatToString(vsm);
 	return stream;
 }
 

@@ -55,6 +55,10 @@ struct LogProtocolMessage {
 
 	std::string toString() const { return format("code: %d", MutationRef::Reserved_For_LogProtocolMessage); }
 
+	// FIXME check version
+	bool operator==(const LogProtocolMessage& another) const { return true; }
+	bool operator!=(const LogProtocolMessage& another) const { return !(*this == another); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		uint8_t poly = MutationRef::Reserved_For_LogProtocolMessage;
@@ -64,7 +68,7 @@ struct LogProtocolMessage {
 
 	static bool startsLogProtocolMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_LogProtocolMessage; }
 	template <class Ar>
-	static bool isNextIn(Ar& ar) {
+	static bool isNextIn(const Ar& ar) {
 		return startsLogProtocolMessage(*(const uint8_t*)ar.peekBytes(1));
 	}
 };

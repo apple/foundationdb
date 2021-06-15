@@ -62,7 +62,7 @@ struct TLogCommitRequest {
 	// Arena
 	Arena arena;
 
-	// Messages (store the mutation data)
+	// Serialized messages
 	StringRef messages;
 
 	// Versions

@@ -46,6 +46,8 @@ Future<Void> initializeTLogForPeekTest(MessageTransferModel transferModel, std::
 
 // Randomly peek data from FakeTLog and verify if the data is consistent
 ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext) {
+	state print::PrintTiming printTiming("peekAndCheck");
+
 	state std::vector<StorageTeamID>& storageTeamIDs = pContext->storageTeamIDs;
 	state std::vector<Version>& versions = pContext->versions;
 
@@ -61,26 +63,27 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext) {
 	state TLogPeekReply reply = wait(pContext->pTLogInterface->peek.getReply(request));
 	print::print(reply);
 
-	// Locate the mutations in TLog storage
-	int mutationsCount = 0;
-	VersionSubsequenceMutation* pOriginalMutation = pContext->mutations[storageTeamID].begin();
-	// Because the mutations are *randomly* distributed over teams, and we are picking up version from *ALL* versions,
+	// Locate the messages in TLog storage
+	int messagesCount = 0;
+	VersionSubsequenceMessage* pOriginalMessage = pContext->storageTeamMessages[storageTeamID].begin();
+	// Because the messages are *randomly* distributed over teams, and we are picking up version from *ALL* versions,
 	// it is entirely possible that for one team, a version is missing. It is then necesssary to check for boundary, and
 	// we check for less than beginVersion rather than equal to beginVersion.
-	while (pOriginalMutation != pContext->mutations[storageTeamID].end() && pOriginalMutation->version < beginVersion)
-		++pOriginalMutation;
+	while (pOriginalMessage != pContext->storageTeamMessages[storageTeamID].end() &&
+	       pOriginalMessage->version < beginVersion)
+		++pOriginalMessage;
 
-	TLogStorageServerMessageDeserializer deserializer(reply.arena, reply.data);
+	SubsequencedMessageDeserializer deserializer(reply.arena, reply.data);
 	// We *CANNOT* do a
 	//   std::equal(deserializer.begin(), deserializer.end(), expectedBegin, expectedEnd)
-	// where expectedBegin/expectedEnd refer to iterators to the data in FakeTLog mutations. Because the FakeTLog/TLog
+	// where expectedBegin/expectedEnd refer to iterators to the data in FakeTLog messages. Because the FakeTLog/TLog
 	// might return less data if the size of the serialized data is too big.
-	for (TLogStorageServerMessageDeserializer::iterator iter = deserializer.begin(); iter != deserializer.end();
-	     ++iter, ++pOriginalMutation, ++mutationsCount) {
-		ASSERT(*iter == *pOriginalMutation);
+	for (SubsequencedMessageDeserializer::iterator iter = deserializer.begin(); iter != deserializer.end();
+	     ++iter, ++pOriginalMessage, ++messagesCount) {
+		ASSERT(*iter == *pOriginalMessage);
 	}
 
-	std::cout << __FUNCTION__ << ">> Checked " << mutationsCount << " mutations." << std::endl;
+	printTiming << "Checked " << messagesCount << " ." << std::endl;
 
 	return Void();
 }
@@ -95,7 +98,8 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/readFromSerialization") {
 	state int numPeeks = 0;
 	state Future<Void> tLog;
 
-	ptxn::test::fillTLogWithRandomMutations(pContext, options.initialVersion, options.numMutations, options.numStorageTeams);
+	ptxn::test::fillTLogWithRandomMutations(
+	    pContext, options.initialVersion, options.numMutations, options.numStorageTeams);
 	tLog = ptxn::test::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext);
 
 	loop {
@@ -115,24 +119,24 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/StorageTeamPeekCursor") {
 	state Future<Void> tLog;
 	state std::shared_ptr<ptxn::StorageTeamPeekCursor> pCursor;
 	state ptxn::StorageTeamID storageTeamID;
+	state ptxn::test::print::PrintTiming printTiming("TestStorageTeamPeekCursor");
 
 	// Limit the size of reply, to force multiple peeks
 	pContext->maxBytesPerPeek = params.getInt("maxBytesPerPeek").orDefault(32 * 1024);
-	ptxn::test::fillTLogWithRandomMutations(pContext, options.initialVersion, options.numMutations, options.numStorageTeams);
+	ptxn::test::fillTLogWithRandomMutations(
+	    pContext, options.initialVersion, options.numMutations, options.numStorageTeams);
 	tLog = ptxn::test::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext);
 
 	storageTeamID = ptxn::test::randomlyPick(pContext->storageTeamIDs);
-	pCursor =
-	    std::make_shared<ptxn::StorageTeamPeekCursor>(options.initialVersion, storageTeamID, pContext->pTLogInterface.get());
+	pCursor = std::make_shared<ptxn::StorageTeamPeekCursor>(
+	    options.initialVersion, storageTeamID, pContext->pTLogInterface.get());
 	state size_t index = 0;
 	loop {
-		std::cout << "TestServerTeamPeekCursor"
-		          << ">> Querying team " << storageTeamID.toString() << " from version: " << pCursor->getLastVersion()
-		          << std::endl;
+		printTiming << "Querying team " << storageTeamID.toString() << " from version: " << pCursor->getLastVersion()
+		            << std::endl;
 		state bool remoteDataAvailable = wait(pCursor->remoteMoreAvailable());
 		if (!remoteDataAvailable) {
-			std::cout << "TestServerTeamPeekCursor"
-			          << ">> TLog reported no more mutations available." << std::endl;
+			printTiming << "TLog reported no more messages available." << std::endl;
 			break;
 		}
 
@@ -142,22 +146,21 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/StorageTeamPeekCursor") {
 		//    next
 		// e.g.
 		// while (pCursor->hasRemaining()) {
-		//     ASSERT(pCursor->get() == pContext->mutations[storageTeamID][index++]);
+		//     ASSERT(pCursor->get() == pContext->storageTeamMessages[storageTeamID][index++]);
 		//     pCursor->next();
 		// }
 		// the other way is to use iterators. Yet the iterator here is *NOT* standard input iterator, see comments in
 		// PeekCursorBase::iterator. In this implementation we use iterators since iterators are implemented using the
 		// methods above.
 
-		for (const ptxn::VersionSubsequenceMutation& mutation : *pCursor) {
-			ASSERT(mutation == pContext->mutations[storageTeamID][index++]);
+		for (const ptxn::VersionSubsequenceMessage& message : *pCursor) {
+			ASSERT(message == pContext->storageTeamMessages[storageTeamID][index++]);
 		}
 	}
 
-	std::cout << "TestServerTeamPeekCursor"
-	          << ">> Checked " << index << " mutations out of " << pContext->mutations[storageTeamID].size() << " mutations."
-	          << std::endl;
-	ASSERT_EQ(index, pContext->mutations[storageTeamID].size());
+	printTiming << "Checked " << index << " messages out of " << pContext->storageTeamMessages[storageTeamID].size()
+	            << " messages." << std::endl;
+	ASSERT_EQ(index, pContext->storageTeamMessages[storageTeamID].size());
 
 	return Void();
 }
@@ -167,10 +170,12 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/base") {
 	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext = std::make_shared<ptxn::test::FakeTLogContext>();
 	state Future<Void> tLog;
 	state std::vector<std::unique_ptr<ptxn::PeekCursorBase>> cursorPtrs;
+	state ptxn::test::print::PrintTiming printTiming("TestMergedPeekCursor");
 
 	// Limit the size of reply, to force multiple peeks
 	pContext->maxBytesPerPeek = params.getInt("maxBytesPerPeek").orDefault(32 * 1024);
-	ptxn::test::fillTLogWithRandomMutations(pContext, options.initialVersion, options.numMutations, options.numStorageTeams);
+	ptxn::test::fillTLogWithRandomMutations(
+	    pContext, options.initialVersion, options.numMutations, options.numStorageTeams);
 	tLog = ptxn::test::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext);
 
 	for (auto storageTeamID : pContext->storageTeamIDs) {
@@ -184,20 +189,18 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/base") {
 	loop {
 		state bool remoteDataAvailable = wait(pMergedCursor->remoteMoreAvailable());
 		if (!remoteDataAvailable) {
-			std::cout << "TestMergedPeekCursor"
-			          << ">> TLog reported no more mutations available." << std::endl;
+			printTiming << "TLog reported no more messages available." << std::endl;
 			break;
 		}
 
-		for (const ptxn::VersionSubsequenceMutation& mutation : *pMergedCursor) {
-			ASSERT(mutation == pContext->allMutations[index++]);
+		for (const ptxn::VersionSubsequenceMessage& message : *pMergedCursor) {
+			ASSERT(message == pContext->allMessages[index++]);
 		}
 	}
 
-	std::cout << "TestServerTeamPeekCursor"
-	          << ">> Checked " << index << " mutations out of " << pContext->allMutations.size() << " mutations."
-	          << std::endl;
-	ASSERT_EQ(index, pContext->allMutations.size());
+	printTiming << "Checked " << index << " messages out of " << pContext->allMessages.size() << " messages."
+	            << std::endl;
+	ASSERT_EQ(index, pContext->allMessages.size());
 
 	return Void();
 }
@@ -224,7 +227,7 @@ const int NUM_TEAMS = 4;
 Future<Void> initializeTLogForCursorTest(std::shared_ptr<FakeTLogContext>& pContext) {
 	auto& storageTeamIDs = pContext->storageTeamIDs;
 	auto& versions = pContext->versions;
-	auto& allMutations = pContext->allMutations;
+	auto& allMessages = pContext->allMessages;
 	Arena& arena = pContext->persistenceArena;
 
 	for (int _ = 0; _ < NUM_TEAMS; ++_) {
@@ -235,64 +238,68 @@ Future<Void> initializeTLogForCursorTest(std::shared_ptr<FakeTLogContext>& pCont
 	for (int _v = 0; _v < NUM_VERSIONS; ++_v, version += STEP_VERSION) {
 		Subsequence subsequence = 1;
 		for (int _m = 0; _m < NUM_MUTATIONS_PER_VERSION; ++_m, ++subsequence) {
-			allMutations.push_back(arena,
-			                       { version,
-			                         subsequence,
-			                         { MutationRef::SetValue,
-			                           StringRef(arena, deterministicRandom()->randomAlphaNumeric(10)),
-			                           StringRef(arena, deterministicRandom()->randomAlphaNumeric(100)) } });
+			allMessages.push_back(arena,
+			                      { version,
+			                        subsequence,
+			                        Message(std::in_place_type<MutationRef>,
+			                                MutationRef::SetValue,
+			                                StringRef(arena, deterministicRandom()->randomAlphaNumeric(10)),
+			                                StringRef(arena, deterministicRandom()->randomAlphaNumeric(100))) });
 		}
 		versions.push_back(version);
 	}
 
 	int index = 0;
-	for (const auto& item : pContext->allMutations) {
+	for (const auto& item : pContext->allMessages) {
 		const auto& storageTeamID = storageTeamIDs[index++];
 		index %= NUM_TEAMS;
 
-		pContext->mutations[storageTeamID].emplace_back(arena, item.version, item.subsequence, item.mutation);
+		pContext->storageTeamMessages[storageTeamID].emplace_back(arena, item.version, item.subsequence, item.message);
 	}
 
 	return initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext);
 }
 
-// For expectedMutationIndex:
+// For expectedMessageIndex:
 //    first: the index in the storageTeamIDs array
-//    second: the index in the VectorRef<VersionSubsequenceMutation>
-// The mutation can be accessed by:
-//     mutations[storageTeamIDs[first]][second]
+//    second: the index in the VectorRef<VersionSubsequenceMessage>
+// The message can be accessed by:
+//     messages[storageTeamIDs[first]][second]
 // See comments in initializeTLogForCursorTest
 ACTOR Future<Void> verifyCursorDataMatchTLogData(std::shared_ptr<FakeTLogContext> pContext,
                                                  std::shared_ptr<PeekCursorBase> pCursor,
-                                                 std::vector<std::pair<int, int>> expectedMutationIndex) {
+                                                 std::vector<std::pair<int, int>> expectedMessageIndex) {
 
 	state std::vector<StorageTeamID>& storageTeamIDs = pContext->storageTeamIDs;
-	state std::unordered_map<ptxn::StorageTeamID, VectorRef<ptxn::VersionSubsequenceMutation>>& mutations =
-	    pContext->mutations;
-	state std::vector<std::pair<int, int>>::const_iterator expectedMutationIter;
+	state std::unordered_map<ptxn::StorageTeamID, VectorRef<ptxn::VersionSubsequenceMessage>>& storageTeamMessages =
+	    pContext->storageTeamMessages;
+	state std::vector<std::pair<int, int>>::const_iterator expectedMessageIter;
 	state PeekCursorBase::iterator iter = pCursor->begin();
 
-	// We *CANNOT* initialize the expectedMutationIndex in the definition line, as `state` makes expectedMutationIndex
-	// there different from expectedMutationIndex here. The expectedMutationIndex there is the vector passed in to the
-	// constructor, and the expectedMutationIndex here is the local copy of the original vector.
-	expectedMutationIter = expectedMutationIndex.begin();
+	// We *CANNOT* initialize the expectedMessageIndex in the definition line, as `state` makes expectedMessageIndex
+	// there different from expectedMessageIndex here. The expectedMessageIndex there is the vector passed in to the
+	// constructor, and the expectedMessageIndex here is the local copy of the original vector.
+	expectedMessageIter = expectedMessageIndex.begin();
 	loop {
 		bool hasMore = wait(pCursor->remoteMoreAvailable());
 		ASSERT(hasMore);
 
 		iter = pCursor->begin();
-		while (iter != pCursor->end() && expectedMutationIter != expectedMutationIndex.end()) {
-			if (*iter != mutations[storageTeamIDs[expectedMutationIter->first]][expectedMutationIter->second]) {
-				std::cerr << "Expected: "
-				          << mutations[storageTeamIDs[expectedMutationIter->first]][expectedMutationIter->second] << std::endl;
+		while (iter != pCursor->end() && expectedMessageIter != expectedMessageIndex.end()) {
+			if (*iter != storageTeamMessages[storageTeamIDs[expectedMessageIter->first]][expectedMessageIter->second]) {
+				std::cerr
+				    << "Expected: "
+				    << storageTeamMessages[storageTeamIDs[expectedMessageIter->first]][expectedMessageIter->second]
+				    << std::endl;
 				std::cerr << "Actual:   " << *iter << std::endl;
-				ASSERT(*iter == mutations[storageTeamIDs[expectedMutationIter->first]][expectedMutationIter->second]);
+				ASSERT(*iter ==
+				       storageTeamMessages[storageTeamIDs[expectedMessageIter->first]][expectedMessageIter->second]);
 			}
 
 			++iter;
-			++expectedMutationIter;
+			++expectedMessageIter;
 		}
-		if (expectedMutationIter == expectedMutationIndex.end()) {
+		if (expectedMessageIter == expectedMessageIndex.end()) {
 			break;
 		}
 	}
@@ -323,8 +330,10 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/addCursorOnTheF
 	wait(ptxn::test::verifyCursorDataMatchTLogData(
 	    pContext, pCursor, { { 2, 0 }, { 2, 1 }, { 0, 2 }, { 1, 2 }, { 2, 2 } }));
 
-	pCursor->addCursor(std::make_unique<ptxn::StorageTeamPeekCursor>(
-	    ptxn::test::TEST_INITIAL_VERSION + ptxn::test::STEP_VERSION * 2, storageTeamIDs[3], pContext->pTLogInterface.get()));
+	pCursor->addCursor(
+	    std::make_unique<ptxn::StorageTeamPeekCursor>(ptxn::test::TEST_INITIAL_VERSION + ptxn::test::STEP_VERSION * 2,
+	                                                  storageTeamIDs[3],
+	                                                  pContext->pTLogInterface.get()));
 	ASSERT_EQ(pCursor->getNumActiveCursors(), 4);
 	wait(ptxn::test::verifyCursorDataMatchTLogData(
 	    pContext, pCursor, { { 0, 3 }, { 1, 3 }, { 2, 3 }, { 0, 4 }, { 1, 4 }, { 2, 4 }, { 3, 4 } }));
@@ -373,15 +382,15 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo") {
 	}
 	bool hasMore = wait(pCursor->remoteMoreAvailable());
 	ASSERT(hasMore);
-	ASSERT(*pCursor->begin() == pContext->mutations[storageTeamIDs[0]][0]);
+	ASSERT(*pCursor->begin() == pContext->storageTeamMessages[storageTeamIDs[0]][0]);
 
 	// Advance to an non-existing version: the cursor should move to the next closest version, first subsequence
 	wait(advanceTo(pCursor.get(), ptxn::test::TEST_INITIAL_VERSION + (ptxn::test::STEP_VERSION - 1), 2));
-	ASSERT(*pCursor->begin() == pContext->mutations[storageTeamIDs[0]][2]);
+	ASSERT(*pCursor->begin() == pContext->storageTeamMessages[storageTeamIDs[0]][2]);
 
 	// Advance to a specific version/subsequence
 	wait(advanceTo(pCursor.get(), ptxn::test::TEST_INITIAL_VERSION + ptxn::test::STEP_VERSION * 2, 3));
-	ASSERT(*pCursor->begin() == pContext->mutations[storageTeamIDs[2]][4]);
+	ASSERT(*pCursor->begin() == pContext->storageTeamMessages[storageTeamIDs[2]][4]);
 
 	// Advance to the end
 	wait(advanceTo(pCursor.get(), ptxn::test::TEST_INITIAL_VERSION + ptxn::test::STEP_VERSION * 3 + 1, 0));

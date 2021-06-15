@@ -40,12 +40,12 @@ ACTOR Future<Void> fakeStorageServer_PassivelyReceive(
 
 	loop choose {
 		when(StorageServerPushRequest request = waitNext(pStorageServerInterface->pushRequests.getFuture())) {
-			std::vector<MutationRef> mutations(request.mutations.begin(), request.mutations.end());
-			verifyMutationsInRecord(pTestDriverContext->commitRecord,
-			                        request.version,
-			                        request.storageTeamID,
-			                        mutations,
-			                        [](CommitValidationRecord& record) { record.storageServerValidated = true; });
+			SubsequencedMessageDeserializer deserializer(request.arena, request.messages);
+			verifyMessagesInRecord(pTestDriverContext->commitRecord,
+			                       request.version,
+			                       request.storageTeamID,
+			                       deserializer,
+			                       [](CommitValidationRecord& record) { record.storageServerValidated = true; });
 			request.reply.send(StorageServerPushReply());
 		}
 	}
