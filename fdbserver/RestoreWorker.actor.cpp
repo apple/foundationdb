@@ -189,7 +189,7 @@ ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self) {
 	loop {
 		std::vector<std::pair<UID, RestoreSimpleRequest>> requests;
 		for (auto& worker : self->workerInterfaces) {
-			requests.push_back(std::make_pair(worker.first, RestoreSimpleRequest()));
+			requests.emplace_back(worker.first, RestoreSimpleRequest());
 		}
 		wait(sendBatchRequests(&RestoreWorkerInterface::heartbeat, self->workerInterfaces, requests));
 		wait(delay(60.0));

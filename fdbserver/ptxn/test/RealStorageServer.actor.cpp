@@ -109,7 +109,9 @@ struct StorageServerTestDriver : ServerTestDriver {
 		mockLogSystem->cursor = self->mockPeekCursor.castTo<ILogSystem::IPeekCursor>();
 
 		std::cout << "Starting Storage Server." << std::endl;
-		state Future<Void> ss = storageServer(data, ssi, self->tag, storageReady, dbInfo, folder, mockLogSystem);
+		const Version tssSeedVersion = 0;
+		state Future<Void> ss =
+		    storageServer(data, ssi, self->tag, tssSeedVersion, storageReady, dbInfo, folder, mockLogSystem);
 		std::cout << "Storage Server started." << std::endl;
 
 		self->actors.add(ss);

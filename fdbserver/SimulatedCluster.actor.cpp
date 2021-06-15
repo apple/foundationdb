@@ -170,11 +170,16 @@ class TestConfig {
 			if (attrib == "maxTLogVersion") {
 				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
+			if (attrib == "disableTss") {
+				sscanf(value.c_str(), "%d", &disableTss);
+			}
+			if (attrib == "restartInfoLocation") {
+				isFirstTestInRestart = true;
+			}
 		}
 
 		ifs.close();
 	}
-
 
 public:
 	int extraDB = 0;
@@ -183,6 +188,9 @@ public:
 	bool configureLocked = false;
 	bool startIncompatibleProcess = false;
 	int logAntiQuorum = -1;
+	bool isFirstTestInRestart = false;
+	// 7.0 cannot be downgraded to 6.3 after enabling TSS, so disable TSS for 6.3 downgrade tests
+	bool disableTss = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
@@ -200,6 +208,23 @@ public:
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
 
+	bool tomlKeyPresent(const toml::value& data, std::string key) {
+		if (data.is_table()) {
+			for (const auto& [k, v] : data.as_table()) {
+				if (k == key || tomlKeyPresent(v, key)) {
+					return true;
+				}
+			}
+		} else if (data.is_array()) {
+			for (const auto& v : data.as_array()) {
+				if (tomlKeyPresent(v, key)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	void readFromConfig(const char* testFile) {
 		if (isIniFile(testFile)) {
 			loadIniFile(testFile);
@@ -214,6 +239,7 @@ public:
 		    .add("logAntiQuorum", &logAntiQuorum)
 		    .add("storageEngineExcludeTypes", &storageEngineExcludeTypes)
 		    .add("maxTLogVersion", &maxTLogVersion)
+		    .add("disableTss", &disableTss)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -235,6 +261,8 @@ public:
 				for (const auto& [key, value] : conf) {
 					if (key == "ClientInfoLogging") {
 						setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
+					} else if (key == "restartInfoLocation") {
+						isFirstTestInRestart = true;
 					} else {
 						builder.set(key, value);
 					}
@@ -242,6 +270,10 @@ public:
 				if (stderrSeverity.present()) {
 					TraceEvent("StderrSeverity").detail("NewSeverity", stderrSeverity.get());
 				}
+			}
+			// look for restartInfoLocation to mark isFirstTestInRestart
+			if (!isFirstTestInRestart) {
+				isFirstTestInRestart = tomlKeyPresent(file, "restartInfoLocation");
 			}
 		} catch (std::exception& e) {
 			std::cerr << e.what() << std::endl;
@@ -708,8 +740,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				// Copy the file pointers to a vector because the map may be modified while we are killing files
 				std::vector<AsyncFileNonDurable*> files;
 				for (auto fileItr = machineCache.begin(); fileItr != machineCache.end(); ++fileItr) {
-					ASSERT(fileItr->second.isReady());
-					files.push_back((AsyncFileNonDurable*)fileItr->second.get().getPtr());
+					ASSERT(fileItr->second.get().isReady());
+					files.push_back((AsyncFileNonDurable*)fileItr->second.get().get().getPtr());
 				}
 
 				std::vector<Future<Void>> killFutures;
@@ -725,7 +757,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			for (auto it : machineCache) {
 				filenames.insert(it.first);
 				closingStr += it.first + ", ";
-				ASSERT(it.second.isReady() && !it.second.isError());
+				ASSERT(it.second.get().canGet());
 			}
 
 			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingFiles) {
@@ -1138,6 +1170,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 			storage_engine_type = deterministicRandom()->randomInt(0, 4);
 		}
 	}
+
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
@@ -1162,6 +1195,13 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
+
+	int tssCount = 0;
+	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
+		// 1 or 2 tss
+		tssCount = deterministicRandom()->randomInt(1, 3);
+	}
+
 	//	if (deterministicRandom()->random01() < 0.5) {
 	//		set_config("ssd");
 	//	} else {
@@ -1169,20 +1209,27 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	//	}
 	//	set_config("memory");
 	//  set_config("memory-radixtree-beta");
+
+    if (deterministicRandom()->random01() < 0.5) {
+        set_config("perpetual_storage_wiggle=0");
+    } else {
+        set_config("perpetual_storage_wiggle=1");
+    }
+// 	set_config("perpetual_storage_wiggle=1");
 	if (testConfig.simpleConfig) {
 		db.desiredTLogCount = 1;
 		db.commitProxyCount = 1;
 		db.grvProxyCount = 1;
 		db.resolverCount = 1;
 	}
+	int replication_type = testConfig.simpleConfig
+	                           ? 1
+	                           : (std::max(testConfig.minimumReplication,
+	                                       datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
+	                                                       : std::min(deterministicRandom()->randomInt(0, 6), 3)));
 	if (testConfig.config.present()) {
 		set_config(testConfig.config.get());
 	} else {
-		int replication_type = testConfig.simpleConfig
-		                           ? 1
-		                           : (std::max(testConfig.minimumReplication,
-		                                       datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
-		                                                       : std::min(deterministicRandom()->randomInt(0, 6), 3)));
 		switch (replication_type) {
 		case 0: {
 			TEST(true); // Simulated cluster using custom redundancy mode
@@ -1240,7 +1287,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 			if (deterministicRandom()->random01() < 0.5)
 				set_config(format("log_spill:=%d", TLogSpillType::DEFAULT));
 		}
-		
+
 		if (deterministicRandom()->random01() < 0.5) {
 			set_config("backup_worker_enabled:=1");
 		}
@@ -1494,6 +1541,28 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	} else {
 		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28) / machine_count + 2);
 	}
+
+	// reduce tss to half of extra non-seed servers that can be recruited in usable regions.
+	tssCount =
+	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
+
+	if (!testConfig.config.present() && tssCount > 0) {
+		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
+		set_config(confStr);
+		double tssRandom = deterministicRandom()->random01();
+		if (tssRandom > 0.5) {
+			// normal tss mode
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledNormal;
+		} else if (tssRandom < 0.25 && !testConfig.isFirstTestInRestart) {
+			// fault injection - don't enable in first test in restart because second test won't know it intentionally
+			// lost data
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledDropMutations;
+		} else {
+			// delay injection
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledAddDelay;
+		}
+		printf("enabling tss for simulation in mode %d: %s\n", g_simulator.tssMode, confStr.c_str());
+	}
 }
 
 // Configures the system according to the given specifications in order to run
@@ -1517,6 +1586,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		startingConfigString += " locked";
 	}
 	for (auto kv : startingConfigJSON) {
+		if ("tss_storage_engine" == kv.first) {
+			continue;
+		}
 		startingConfigString += " ";
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
@@ -1529,6 +1601,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		} else {
 			ASSERT(false);
 		}
+	}
+
+	// handle tss_storage_engine separately because the passthrough needs the enum ordinal, but it's serialized to json
+	// as the string name
+	if (simconfig.db.desiredTSSCount > 0) {
+		startingConfigString += format(" tss_storage_engine:=%d", simconfig.db.testingStorageServerStoreType);
 	}
 
 	if (g_simulator.originalRegions != "") {
@@ -1605,6 +1683,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	TEST(!useIPv6); // Use IPv4
 
 	vector<NetworkAddress> coordinatorAddresses;
+	vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
 	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
 		int nonPrimaryDcs = dataCenters / 2;
@@ -1614,6 +1693,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 				auto ip = makeIPAddressForSim(useIPv6, { 2, dc, 1, m });
 				coordinatorAddresses.push_back(
 				    NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
+				auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
+				extraCoordinatorAddresses.push_back(
+				    NetworkAddress(extraIp, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
 				TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
 			}
 		}
@@ -1642,6 +1724,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 					auto ip = makeIPAddressForSim(useIPv6, { 2, dc, 1, m });
 					coordinatorAddresses.push_back(
 					    NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
+					auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
+					extraCoordinatorAddresses.push_back(
+					    NetworkAddress(extraIp, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
 					TraceEvent("SelectedCoordinator")
 					    .detail("Address", coordinatorAddresses.back())
 					    .detail("M", m)
@@ -1678,11 +1763,13 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
 	if (testConfig.extraDB == 1) {
 		// The DR database can be either a new database or itself
-		g_simulator.extraDB = new ClusterConnectionString(
-		    coordinatorAddresses, BUGGIFY ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0"));
+		g_simulator.extraDB =
+		    BUGGIFY ? new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"))
+		            : new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
 	} else if (testConfig.extraDB == 2) {
 		// The DR database is a new database
-		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
+		g_simulator.extraDB =
+		    new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
 	} else if (testConfig.extraDB == 3) {
 		// The DR database is the same database
 		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));

@@ -716,15 +716,10 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 		TraceEvent("MasterRecoveryState", self->dbgid)
 		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
 		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
-		    .detail("RequiredTLogs", self->configuration.tLogReplicationFactor)
-		    .detail("DesiredTLogs", self->configuration.getDesiredLogs())
+		    .detail("Conf", self->configuration.toString())
 		    .detail("RequiredCommitProxies", 1)
-		    .detail("DesiredCommitProxies", self->configuration.getDesiredCommitProxies())
 		    .detail("RequiredGrvProxies", 1)
-		    .detail("DesiredGrvProxies", self->configuration.getDesiredGrvProxies())
 		    .detail("RequiredResolvers", 1)
-		    .detail("DesiredResolvers", self->configuration.getDesiredResolvers())
-		    .detail("StoreType", self->configuration.storageServerStoreType)
 		    .trackLatest("MasterRecoveryState");
 
 	// FIXME: we only need log routers for the same locality as the master
@@ -737,14 +732,25 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    wait(brokenPromiseToNever(self->clusterController.recruitFromConfiguration.getReply(
 	        RecruitFromConfigurationRequest(self->configuration, self->lastEpochEnd == 0, maxLogRouters))));
 
+	std::string primaryDcIds, remoteDcIds;
+
 	self->primaryDcId.clear();
 	self->remoteDcIds.clear();
 	if (recruits.dcId.present()) {
 		self->primaryDcId.push_back(recruits.dcId);
+		if (!primaryDcIds.empty()) {
+			primaryDcIds += ',';
+		}
+		primaryDcIds += printable(recruits.dcId);
 		if (self->configuration.regions.size() > 1) {
-			self->remoteDcIds.push_back(recruits.dcId.get() == self->configuration.regions[0].dcId
-			                                ? self->configuration.regions[1].dcId
-			                                : self->configuration.regions[0].dcId);
+			Key remoteDcId = recruits.dcId.get() == self->configuration.regions[0].dcId
+			                     ? self->configuration.regions[1].dcId
+			                     : self->configuration.regions[0].dcId;
+			self->remoteDcIds.push_back(remoteDcId);
+			if (!remoteDcIds.empty()) {
+				remoteDcIds += ',';
+			}
+			remoteDcIds += printable(remoteDcId);
 		}
 	}
 	self->backupWorkers.swap(recruits.backupWorkers);
@@ -760,6 +766,8 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .detail("OldLogRouters", recruits.oldLogRouters.size())
 	    .detail("StorageServers", recruits.storageServers.size())
 	    .detail("BackupWorkers", self->backupWorkers.size())
+	    .detail("PrimaryDcIds", primaryDcIds)
+	    .detail("RemoteDcIds", remoteDcIds)
 	    .trackLatest("MasterRecoveryState");
 
 	// Recruit TLog groups

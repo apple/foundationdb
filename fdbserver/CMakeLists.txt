@@ -27,7 +27,6 @@ set(FDBSERVER_SRCS
   IKeyValueContainer.h
   IKeyValueStore.h
   IPager.h
-  IVersionedStore.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
@@ -82,6 +81,8 @@ set(FDBSERVER_SRCS
   RestoreLoader.actor.cpp
   RestoreWorker.actor.h
   RestoreWorker.actor.cpp
+  RestoreWorkerInterface.actor.cpp
+  RestoreWorkerInterface.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
   ServerDBInfo.actor.h
@@ -146,6 +147,8 @@ set(FDBSERVER_SRCS
   TLogServer.actor.cpp
   TLogGroup.actor.h
   TLogGroup.actor.cpp
+  TSSMappingUtil.actor.h
+  TSSMappingUtil.actor.cpp
   VersionedBTree.actor.cpp
   VFSAsync.h
   VFSAsync.cpp

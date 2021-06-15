@@ -27,6 +27,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -2122,7 +2123,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			std::vector<Reference<AsyncVar<bool>>> failed;
 
 			for (const auto& logVar : logServers.back()->logServers) {
-				allLogServers.push_back(std::make_pair(logVar, coreSet.tLogPolicy));
+				allLogServers.emplace_back(logVar, coreSet.tLogPolicy);
 				failed.push_back(makeReference<AsyncVar<bool>>());
 				failureTrackers.push_back(monitorLog(logVar, failed.back()));
 			}
@@ -2134,7 +2135,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			for (const auto& logSet : oldLogData.back().tLogs) {
 				for (const auto& logVar : logSet->logServers) {
-					allLogServers.push_back(std::make_pair(logVar, logSet->tLogPolicy));
+					allLogServers.emplace_back(logVar, logSet->tLogPolicy);
 				}
 			}
 		}

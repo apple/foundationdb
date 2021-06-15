@@ -44,6 +44,7 @@
 #include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/RestoreUtil.h"
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -1464,11 +1465,26 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	return Void();
 }
 
+// Add tss mapping data to the reply, if any of the included storage servers have a TSS pair
+void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
+                        ProxyCommitData* commitData,
+                        std::unordered_set<UID>& included,
+                        UID ssId) {
+	if (!included.count(ssId)) {
+		auto mappingItr = commitData->tssMapping.find(ssId);
+		if (mappingItr != commitData->tssMapping.end()) {
+			reply.resultsTssMapping.push_back(*mappingItr);
+		}
+		included.insert(ssId);
+	}
+}
+
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
+	std::unordered_set<UID> tssMappingsIncluded;
 	GetKeyServerLocationsReply rep;
 	if (!req.end.present()) {
 		auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin)
@@ -1477,8 +1493,9 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 		ssis.reserve(r.value().src_info.size());
 		for (auto& it : r.value().src_info) {
 			ssis.push_back(it->interf);
+			maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 		}
-		rep.results.push_back(std::make_pair(r.range(), ssis));
+		rep.results.emplace_back(r.range(), ssis);
 	} else if (!req.reverse) {
 		int count = 0;
 		for (auto r = commitData->keyInfo.rangeContaining(req.begin);
@@ -1488,8 +1505,9 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
+				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.push_back(std::make_pair(r.range(), ssis));
+			rep.results.emplace_back(r.range(), ssis);
 			count++;
 		}
 	} else {
@@ -1500,8 +1518,9 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
+				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.push_back(std::make_pair(r.range(), ssis));
+			rep.results.emplace_back(r.range(), ssis);
 			if (r == commitData->keyInfo.ranges().begin()) {
 				break;
 			}

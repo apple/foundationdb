@@ -407,5 +407,10 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;
 }
+
+// Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
+// will be 1. Otherwise, the value will be 0.
+ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, bool lock_aware = false);
+
 #include "flow/unactorcompiler.h"
 #endif
