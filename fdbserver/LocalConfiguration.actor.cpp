@@ -236,6 +236,7 @@ class LocalConfigurationImpl {
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		++self->changeRequestsFetched;
 		for (const auto& versionedMutation : changes) {
+			ASSERT_GT(versionedMutation.version, self->lastSeenVersion);
 			++self->mutations;
 			const auto& mutation = versionedMutation.mutation;
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());

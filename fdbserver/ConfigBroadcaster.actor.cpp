@@ -34,10 +34,9 @@ bool matchesConfigClass(ConfigClassSet const& configClassSet, Optional<KeyRef> c
 
 // Helper functions for STL containers, with flow-friendly error handling
 template <class MapContainer, class K>
-auto get(MapContainer&& m, K const& k) -> decltype(m.at(k)) {
-	auto&& mapContainer = std::forward<MapContainer>(m);
-	auto it = mapContainer.find(k);
-	ASSERT(it != mapContainer.end());
+auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
+	auto it = m.find(k);
+	ASSERT(it != m.end());
 	return it->second;
 }
 template <class Container, class K>
@@ -48,7 +47,7 @@ void remove(Container& container, K const& k) {
 }
 
 // PendingRequestStore stores a set of pending ConfigBroadcastFollowerGetChangesRequests,
-// indexed, by configuration class. When an update is received, replies are sent for all
+// indexed by configuration class. When an update is received, replies are sent for all
 // pending requests with affected configuration classes
 class PendingRequestStore {
 	using Req = ConfigBroadcastFollowerGetChangesRequest;
@@ -189,6 +188,7 @@ class ConfigBroadcasterImpl {
 					if (req.lastSeenVersion < impl->mostRecentVersion) {
 						impl->sendChangesReply(req, impl->mutationHistory);
 					} else {
+						TEST(req.lastSeenVersion > impl->mostRecentVersion); // Worker is ahead of ConfigBroadcaster
 						TraceEvent(SevDebug, "ConfigBroadcasterRegisteringChangeRequest", impl->id)
 						    .detail("Peer", req.reply.getEndpoint().getPrimaryAddress())
 						    .detail("MostRecentVersion", impl->mostRecentVersion)
