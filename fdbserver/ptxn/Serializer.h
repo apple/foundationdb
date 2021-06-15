@@ -129,7 +129,7 @@ public:
 // and the user must provide informations (e.g. object type, length, etc.) to deserialize them.
 // Main Header and Section Header *should* inherit from MultipleItemHeaderBase
 // It is obvious that TwoLevelHeaderedItemSerializer can be implemented using HeaderedItemsSerializer. The reason of not
-// use this strategy is that one additional memory copy will be included when a new section is opened.
+// using this strategy is that one additional memory copy will be included when a new section is opened.
 template <typename MainHeader, typename SectionHeader>
 class TwoLevelHeaderedItemsSerializer {
 	BinaryWriter writer;
