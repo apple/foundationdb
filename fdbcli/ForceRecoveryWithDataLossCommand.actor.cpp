@@ -38,7 +38,6 @@ ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db
 	return true;
 }
 
-// hidden commands, no help text for now
 CommandFactory forceRecoveryWithDataLossFactory(
     "force_recovery_with_data_loss",
     CommandHelp("force_recovery_with_data_loss <DCID>",
