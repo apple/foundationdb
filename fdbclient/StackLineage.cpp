@@ -25,5 +25,5 @@ std::vector<StringRef> getActorStackTrace() {
 }
 
 namespace {
-StackLineageCollector stackLineageCollector;
+// StackLineageCollector stackLineageCollector;
 }

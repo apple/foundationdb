@@ -1287,7 +1287,7 @@ namespace actorcompiler
             constructor.Indent(+1);
             ProbeEnter(constructor, actor.name);
             constructor.WriteLine("LineageScope _(&this->lineage);");
-            constructor.WriteLine("getCurrentLineage()->modify(&StackLineage::actorName) = LiteralStringRef(\"{0}\");", actor.name);
+            // constructor.WriteLine("getCurrentLineage()->modify(&StackLineage::actorName) = LiteralStringRef(\"{0}\");", actor.name);
             constructor.WriteLine("this->{0};", body.call());
             ProbeExit(constructor, actor.name);
             WriteFunction(writer, constructor, constructor.BodyText);
