@@ -346,6 +346,26 @@ ACTOR Future<Void> getRate(UID myID,
 	}
 }
 
+// Respond with an error to the GetReadVersion request when the GRV limit is hit.
+void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, GrvProxyStats* stats) {
+	++stats->txnRequestErrors;
+	req->reply.sendError(proxy_memory_limit_exceeded());
+	if (req->priority == TransactionPriority::IMMEDIATE) {
+		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededSystem").suppressFor(60);
+	} else if (req->priority == TransactionPriority::DEFAULT) {
+		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededDefault").suppressFor(60);
+	} else {
+		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededBatch").suppressFor(60);
+	}
+}
+
+// Drop a GetReadVersion request from a queue, by responding an error to the request.
+void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue, GrvProxyStats* stats) {
+	proxyGRVThresholdExceeded(&queue->front(), stats);
+	queue->pop_front();
+}
+
+// Put a GetReadVersion request into the queue corresponding to its priority.
 ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>> db,
                                                SpannedDeque<GetReadVersionRequest>* systemQueue,
                                                SpannedDeque<GetReadVersionRequest>* defaultQueue,
@@ -361,16 +381,30 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>>
 	loop choose {
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
+			bool canBeQueued = true;
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
 			    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
-				++stats->txnRequestErrors;
-				// FIXME: send an error instead of giving an unreadable version when the client can support the error:
-				// req.reply.sendError(proxy_memory_limit_exceeded());
-				GetReadVersionReply rep;
-				rep.version = 1;
-				rep.locked = true;
-				req.reply.send(rep);
-				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
+				// When the limit is hit, try to drop requests from the lower priority queues.
+				if (req.priority == TransactionPriority::BATCH) {
+					canBeQueued = false;
+				} else if (req.priority == TransactionPriority::DEFAULT) {
+					if (!batchQueue->empty()) {
+						dropRequestFromQueue(batchQueue, stats);
+					} else {
+						canBeQueued = false;
+					}
+				} else {
+					if (!batchQueue->empty()) {
+						dropRequestFromQueue(batchQueue, stats);
+					} else if (!defaultQueue->empty()) {
+						dropRequestFromQueue(defaultQueue, stats);
+					} else {
+						canBeQueued = false;
+					}
+				}
+			}
+			if (!canBeQueued) {
+				proxyGRVThresholdExceeded(&req, stats);
 			} else {
 				stats->addRequest(req.transactionCount);
 				// TODO: check whether this is reasonable to do in the fast path

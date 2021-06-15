@@ -4976,9 +4976,6 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	if (trLogInfo)
 		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(
 		    startTime, cx->clientLocality.dcId(), latency, priority, rep.version));
-	if (rep.version == 1 && rep.locked) {
-		throw proxy_memory_limit_exceeded();
-	}
 	if (rep.locked && !lockAware)
 		throw database_locked();
 
