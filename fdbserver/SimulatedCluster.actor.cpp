@@ -39,6 +39,7 @@
 #include "fdbclient/versions.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
+#include "flow/TypeTraits.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -58,50 +59,85 @@ bool destructed = false;
 class TestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
-		std::unordered_map<std::string_view, std::function<void(value_type const&)>> confMap;
+		using base_variant = std::variant<int, bool, std::string, std::vector<int>>;
+		using types =
+		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
+		std::unordered_map<std::string_view, types> confMap;
+
+		struct visitor {
+			const value_type& value;
+			visitor(const value_type& v) : value(v) {}
+			void operator()(int* val) const { *val = value.as_integer(); }
+			void operator()(Optional<int>* val) const { *val = value.as_integer(); }
+			void operator()(bool* val) const { *val = value.as_boolean(); }
+			void operator()(Optional<bool>* val) const { *val = value.as_boolean(); }
+			void operator()(std::string* val) const { *val = value.as_string(); }
+			void operator()(Optional<std::string>* val) const { *val = value.as_string(); }
+			void operator()(std::vector<int>* val) const {
+				auto arr = value.as_array();
+				for (const auto& i : arr) {
+					val->emplace_back(i.as_integer());
+				}
+			}
+			void operator()(Optional<std::vector<int>>* val) const {
+				std::vector<int> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+		};
+
+		struct trace_visitor {
+			std::string key;
+			TraceEvent& evt;
+			trace_visitor(std::string const& key, TraceEvent& e) : key("Key" + key), evt(e) {}
+			void operator()(int* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(Optional<int>* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(bool* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(Optional<bool>* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(std::string* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(Optional<std::string>* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(std::vector<int>* val) const {
+				if (val->empty()) {
+					evt.detail(key.c_str(), "[]");
+					return;
+				}
+				std::stringstream value;
+				value << "[" << val->at(0);
+				for (int i = 1; i < val->size(); ++i) {
+					value << "," << val->at(i);
+				}
+				value << "]";
+				evt.detail(key.c_str(), value.str());
+			}
+			void operator()(Optional<std::vector<int>>* val) const {
+				std::vector<int> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+		};
 
 	public:
-		ConfigBuilder& add(std::string_view key, int* value) {
-			confMap.emplace(key, [value](value_type const& v) { *value = v.as_integer(); });
+		~ConfigBuilder() {
+			TraceEvent evt("SimulatorConfigFromToml");
+			for (const auto& p : confMap) {
+				std::visit(trace_visitor(std::string(p.first), evt), p.second);
+			}
+		}
+
+		template <class V>
+		ConfigBuilder& add(std::string_view key, V value) {
+			confMap.emplace(key, value);
 			return *this;
 		}
-		ConfigBuilder& add(std::string_view key, Optional<int>* value) {
-			confMap.emplace(key, [value](value_type const& v) { *value = v.as_integer(); });
-			return *this;
-		}
-		ConfigBuilder& add(std::string_view key, bool* value) {
-			confMap.emplace(key, [value](value_type const& v) { *value = v.as_boolean(); });
-			return *this;
-		}
-		ConfigBuilder& add(std::string_view key, Optional<bool>* value) {
-			confMap.emplace(key, [value](value_type const& v) { *value = v.as_boolean(); });
-			return *this;
-		}
-		ConfigBuilder& add(std::string_view key, std::string* value) {
-			confMap.emplace(key, [value](value_type const& v) { *value = v.as_string(); });
-			return *this;
-		}
-		ConfigBuilder& add(std::string_view key, Optional<std::string>* value) {
-			confMap.emplace(key, [value](value_type const& v) { *value = v.as_string(); });
-			return *this;
-		}
-		ConfigBuilder& add(std::string_view key, std::vector<int>* value) {
-			confMap.emplace(key, [value](value_type const& v) {
-				auto arr = v.as_array();
-				for (const auto& i : arr) {
-					value->push_back(i.as_integer());
-				}
-			});
-			return *this;
-		}
-		void set(std::string const& key, value_type const& val) {
+
+		void set(std::string_view key, const value_type& value) {
 			auto iter = confMap.find(key);
 			if (iter == confMap.end()) {
 				std::cerr << "Unknown configuration attribute " << key << std::endl;
-				TraceEvent("UnknownConfigurationAttribute").detail("Name", key);
+				TraceEvent("UnknownConfigurationAttribute").detail("Name", std::string(key));
 				throw unknown_error();
 			}
-			iter->second(val);
+			std::visit(visitor(value), iter->second);
 		}
 	};
 
@@ -279,6 +315,13 @@ public:
 			std::cerr << e.what() << std::endl;
 			TraceEvent("TOMLParseError").detail("Error", printable(e.what()));
 			throw unknown_error();
+		}
+		// Verify that we can use the passed config
+		if (simpleConfig) {
+			if (minimumRegions > 1) {
+				TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
+				flushAndExit(0);
+			}
 		}
 	}
 };
@@ -1744,6 +1787,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		}
 	}
 
+	ASSERT(coordinatorAddresses.size() > 0);
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
 	for (int i = 0; i < (coordinatorAddresses.size() / 2) + 1; i++) {
 		TraceEvent("ProtectCoordinator")
