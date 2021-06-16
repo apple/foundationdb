@@ -23,6 +23,7 @@
 #include <ostream>
 #include <sstream>
 #include <toml.hpp>
+#include "Trace.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
@@ -1092,8 +1093,14 @@ struct SimulationConfig {
 	int machine_count; // Total, not per DC.
 	int processes_per_machine;
 	int coordinators;
+	bool generateFearless;
 
 private:
+	void setDataCenters(const TestConfig& testConfig);
+	void setStorageEngine(const TestConfig& testConfig);
+	void setRandomConfig();
+	void setSimpleConfig();
+	void setSpecificConfig(const TestConfig& testConfig);
 	void generateNormalConfig(const TestConfig& testConfig);
 };
 
@@ -1113,16 +1120,10 @@ void SimulationConfig::set_config(std::string config) {
 StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
-// Generates and sets an appropriate configuration for the database according to
-// the provided testConfig. Some attributes are randomly generated for more coverage
-// of different combinations
-void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
-	set_config("new");
-	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
-	// if we do not remove the surplus server and machine teams, the simulation test will report error.
-	// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
-	bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
-	bool generateFearless =
+
+// Sets generateFearless and number of dataCenters
+void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
+	generateFearless =
 	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
 	if (testConfig.generateFearless.present()) {
 		// overwrite whatever decision we made before
@@ -1133,32 +1134,15 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	        ? 1
 	        : (generateFearless ? (testConfig.minimumReplication > 0 || deterministicRandom()->random01() < 0.5 ? 4 : 6)
 	                            : deterministicRandom()->randomInt(1, 4));
+
+	// Overwrite with specific option if present
 	if (testConfig.datacenters.present()) {
 		datacenters = testConfig.datacenters.get();
 	}
-	if (testConfig.desiredTLogCount.present()) {
-		db.desiredTLogCount = testConfig.desiredTLogCount.get();
-	} else if (deterministicRandom()->random01() < 0.25) {
-		db.desiredTLogCount = deterministicRandom()->randomInt(1, 7);
-	}
+}
 
-	if (testConfig.commitProxyCount.present()) {
-		db.commitProxyCount = testConfig.commitProxyCount.get();
-	} else if (deterministicRandom()->random01() < 0.25) {
-		db.commitProxyCount = deterministicRandom()->randomInt(1, 7);
-	}
-
-	if (testConfig.grvProxyCount.present()) {
-		db.grvProxyCount = testConfig.grvProxyCount.get();
-	} else if (deterministicRandom()->random01() < 0.25) {
-		db.grvProxyCount = deterministicRandom()->randomInt(1, 4);
-	}
-
-	if (testConfig.resolverCount.present()) {
-		db.resolverCount = testConfig.resolverCount.get();
-	} else if (deterministicRandom()->random01() < 0.25) {
-		db.resolverCount = deterministicRandom()->randomInt(1, 7);
-	}
+// Sets storage engine based on testConfig details
+void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
@@ -1195,32 +1179,85 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
+}
+
+// Set the randomly generated options of the config. Compiled here to easily observe and trace random options
+void SimulationConfig::setRandomConfig() {
+	if (deterministicRandom()->random01() < 0.25) {
+		db.desiredTLogCount = deterministicRandom()->randomInt(1, 7);
+	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.commitProxyCount = deterministicRandom()->randomInt(1, 7);
+	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.grvProxyCount = deterministicRandom()->randomInt(1, 4);
+	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.resolverCount = deterministicRandom()->randomInt(1, 7);
+	}
+	// TraceEvent("SimulatedConfigRandom")
+	// 	.detail("DesiredTLogCount", db.desiredTLogCount)
+	// 	.detail("CommitProxyCount", db.commitProxyCount)
+	// 	.detail("GRVProxyCount", db.grvProxyCount)
+	// 	.detail("ResolverCount", db.resolverCount);
+
+	if (deterministicRandom()->random01() < 0.5) {
+		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 0);
+		set_config("perpetual_storage_wiggle=0");
+	} else {
+		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 1);
+		set_config("perpetual_storage_wiggle=1");
+	}
+}
+
+// Overwrite DB with simple options, used when simpleConfig is true in the TestConfig
+void SimulationConfig::setSimpleConfig() {
+	db.desiredTLogCount = 1;
+	db.commitProxyCount = 1;
+	db.grvProxyCount = 1;
+	db.resolverCount = 1;
+}
+
+// Overwrite previous options with ones specified by TestConfig
+void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
+	if (testConfig.desiredTLogCount.present()) {
+		db.desiredTLogCount = testConfig.desiredTLogCount.get();
+	}
+	if (testConfig.commitProxyCount.present()) {
+		db.commitProxyCount = testConfig.commitProxyCount.get();
+	}
+	if (testConfig.grvProxyCount.present()) {
+		db.grvProxyCount = testConfig.grvProxyCount.get();
+	}
+	if (testConfig.resolverCount.present()) {
+		db.resolverCount = testConfig.resolverCount.get();
+	}
+}
+
+// Generates and sets an appropriate configuration for the database according to
+// the provided testConfig. Some attributes are randomly generated for more coverage
+// of different combinations
+void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
+	set_config("new");
+	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
+	// if we do not remove the surplus server and machine teams, the simulation test will report error.
+	// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
+	bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
+
+	// Some of these options will overwrite one another so the ordering is important.
+	// This is a bit inefficient but separates the different types of option setting paths for better readability.
+	setDatacenters(testConfig);
+	setRandomConfig();
+	if (testConfig.simpleConfig) {
+		setSimpleConfig();
+	}
+	setSpecificConfig(testConfig);
+	setStorageEngine(testConfig);
 
 	int tssCount = 0;
 	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
-	}
-
-	//	if (deterministicRandom()->random01() < 0.5) {
-	//		set_config("ssd");
-	//	} else {
-	//		set_config("memory");
-	//	}
-	//	set_config("memory");
-	//  set_config("memory-radixtree-beta");
-
-    if (deterministicRandom()->random01() < 0.5) {
-        set_config("perpetual_storage_wiggle=0");
-    } else {
-        set_config("perpetual_storage_wiggle=1");
-    }
-// 	set_config("perpetual_storage_wiggle=1");
-	if (testConfig.simpleConfig) {
-		db.desiredTLogCount = 1;
-		db.commitProxyCount = 1;
-		db.grvProxyCount = 1;
-		db.resolverCount = 1;
 	}
 	int replication_type = testConfig.simpleConfig
 	                           ? 1
