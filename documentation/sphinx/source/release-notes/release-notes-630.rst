@@ -5,6 +5,13 @@ Release Notes
 #############
 
 
+6.3.15
+======
+* Added several counters to the master metrics to count the number of requests of each type received. `(PR #4829) <https://github.com/apple/foundationdb/pull/4829>`_
+* Added ``RecoveryCount`` to trace events when tLog begins. `(PR #4944) <https://github.com/apple/foundationdb/pull/4944>`_
+* Added metrics to compare the bandwidth used by data distributions and updates. `(PR #4907) <https://github.com/apple/foundationdb/pull/4907>`_
+* Fixed batch txn throttling. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
+
 6.3.14
 ======
 * Fixed fdbbackup start command that automatically configures database with backup workers to only do so when using partitioned logs. `(PR #4863) <https://github.com/apple/foundationdb/pull/4863>`_
