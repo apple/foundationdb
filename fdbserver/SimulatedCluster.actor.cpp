@@ -39,6 +39,7 @@
 #include "fdbclient/versions.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
+#include "flow/TypeTraits.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -53,53 +54,14 @@ const int MACHINE_REBOOT_TIME = 10;
 
 bool destructed = false;
 
-// given a std::variant T, this templated class will define type which will be a variant of all types in T plus Args...
-template <class T, class... Args>
-struct variant_add_t;
-
-template <class... Args1, class... Args2>
-struct variant_add_t<std::variant<Args1...>, Args2...> {
-	using type = std::variant<Args1..., Args2...>;
-};
-
-template <class T, class... Args>
-using variant_add = typename variant_add_t<T, Args...>::type;
-
-// variant_with_optional_t::type will be a std::variant<Args..., Optional<Args>...>
-template <class... Args>
-struct variant_with_optional_t;
-
-template <class Single>
-struct variant_with_optional_t<Single> {
-	using type = std::variant<Single, Optional<Single>>;
-};
-
-template <class Head, class... Tail>
-struct variant_with_optional_t<Head, Tail...> {
-	using type = variant_add<typename variant_with_optional_t<Tail...>::type, Head, Optional<Head>>;
-};
-
-template <class... Args>
-using variant_with_optional = typename variant_with_optional_t<Args...>::type;
-
-// Expects a std::variant and will make a pointer out of each argument
-template <class T>
-struct add_pointers_t;
-
-template <class... Elems>
-struct add_pointers_t<std::variant<Elems...>> {
-	using type = std::variant<Elems*...>;
-};
-
-template <class T>
-using add_pointers = typename add_pointers_t<T>::type;
-
 // Configuration details specified in workload test files that change the simulation
 // environment details
 class TestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
-		using types = add_pointers<variant_with_optional<int, bool, std::string, std::vector<int>>>;
+		using base_variant = std::variant<int, bool, std::string, std::vector<int>>;
+		using types =
+		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
 		std::unordered_map<std::string_view, types> confMap;
 
 		struct visitor {
