@@ -600,12 +600,6 @@ void initHelp() {
 	    CommandHelp("getversion",
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
-	helpMap["advanceversion"] = CommandHelp(
-	    "advanceversion <VERSION>",
-	    "Force the cluster to recover at the specified version",
-	    "Forces the cluster to recover at the specified version. If the specified version is larger than the current "
-	    "version of the cluster, the cluster version is advanced "
-	    "to the specified version via a forced recovery.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -647,22 +641,6 @@ void initHelp() {
 	                                 "namespace for all the profiling-related commands.",
 	                                 "Different types support different actions.  Run `profile` to get a list of "
 	                                 "types, and iteratively explore the help.\n");
-	helpMap["force_recovery_with_data_loss"] =
-	    CommandHelp("force_recovery_with_data_loss <DCID>",
-	                "Force the database to recover into DCID",
-	                "A forced recovery will cause the database to lose the most recently committed mutations. The "
-	                "amount of mutations that will be lost depends on how far behind the remote datacenter is. This "
-	                "command will change the region configuration to have a positive priority for the chosen DCID, and "
-	                "a negative priority for all other DCIDs. This command will set usable_regions to 1. If the "
-	                "database has already recovered, this command does nothing.\n");
-	helpMap["maintenance"] = CommandHelp(
-	    "maintenance [on|off] [ZONEID] [SECONDS]",
-	    "mark a zone for maintenance",
-	    "Calling this command with `on' prevents data distribution from moving data away from the processes with the "
-	    "specified ZONEID. Data distribution will automatically be turned back on for ZONEID after the specified "
-	    "SECONDS have elapsed, or after a storage server with a different ZONEID fails. Only one ZONEID can be marked "
-	    "for maintenance. Calling this command with no arguments will display any ongoing maintenance. Calling this "
-	    "command with `off' will disable maintenance.\n");
 	helpMap["throttle"] =
 	    CommandHelp("throttle <on|off|enable auto|disable auto|list> [ARGS]",
 	                "view and control throttled tags",
@@ -695,7 +673,6 @@ void initHelp() {
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
-	hiddenCommands.insert("snapshot");
 }
 
 void printVersion() {
@@ -3597,14 +3574,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "snapshot")) {
-					if (tokens.size() < 2) {
-						printUsage(tokens[0]);
+					bool _result = wait(snapshotCommandActor(db2, tokens));
+					if (!_result)
 						is_error = true;
-					} else {
-						bool err = wait(createSnapshot(db, tokens));
-						if (err)
-							is_error = true;
-					}
 					continue;
 				}
 
@@ -3759,19 +3731,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "advanceversion")) {
-					if (tokens.size() != 2) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(advanceVersionCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						Version v;
-						int n = 0;
-						if (sscanf(tokens[1].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[1].size()) {
-							printUsage(tokens[0]);
-							is_error = true;
-						} else {
-							wait(makeInterruptable(advanceVersion(db, v)));
-						}
-					}
 					continue;
 				}
 
@@ -3907,43 +3869,24 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
-					if (tokens.size() != 2) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(forceRecoveryWithDataLossCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-						continue;
-					}
-					wait(makeInterruptable(forceRecovery(db->getConnectionFile(), tokens[1])));
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "maintenance")) {
-					if (tokens.size() == 1) {
-						wait(makeInterruptable(printHealthyZone(db)));
-					} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
-						bool clearResult = wait(makeInterruptable(clearHealthyZone(db, true)));
-						is_error = !clearResult;
-					} else if (tokens.size() == 4 && tokencmp(tokens[1], "on")) {
-						double seconds;
-						int n = 0;
-						auto secondsStr = tokens[3].toString();
-						if (sscanf(secondsStr.c_str(), "%lf%n", &seconds, &n) != 1 || n != secondsStr.size()) {
-							printUsage(tokens[0]);
-							is_error = true;
-						} else {
-							bool setResult = wait(makeInterruptable(setHealthyZone(db, tokens[2], seconds, true)));
-							is_error = !setResult;
-						}
-					} else {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(maintenanceCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-					}
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					getTransaction(db, tr, tr2, options, intrans);
-					bool _result = wait(consistencyCheckCommandActor(tr2, tokens));
-					is_error = !_result;
+					bool _result = wait(makeInterruptable(consistencyCheckCommandActor(tr2, tokens)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
