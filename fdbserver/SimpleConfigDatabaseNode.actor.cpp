@@ -302,7 +302,11 @@ class SimpleConfigDatabaseNodeImpl {
 		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
 		for (const auto& versionedMutation : mutations) {
 			if (versionedMutation.mutation.getConfigClass().castTo<Key>() == req.configClass) {
-				knobSet.insert(versionedMutation.mutation.getKnobName());
+				if (versionedMutation.mutation.isSet()) {
+					knobSet.insert(versionedMutation.mutation.getKnobName());
+				} else {
+					knobSet.erase(versionedMutation.mutation.getKnobName());
+				}
 			}
 		}
 		Standalone<VectorRef<KeyRef>> knobNames;
