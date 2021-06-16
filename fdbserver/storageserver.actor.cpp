@@ -2651,6 +2651,40 @@ public:
 	}
 };
 
+ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
+	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
+	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
+
+	try {
+		loop {
+			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
+			limits.minRows = 0;
+			state RangeResult rep = wait(tr->getRange(begin, end, limits, true));
+			if (!rep.more) {
+				rep.readThrough = keys.end;
+			}
+			results.send(rep);
+
+			if (!rep.more) {
+				results.sendError(end_of_stream());
+				return Void();
+			}
+
+			if (rep.readThrough.present()) {
+				begin = firstGreaterOrEqual(rep.readThrough.get());
+			} else {
+				begin = firstGreaterThan(rep.end()[-1].key);
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		results.sendError(e);
+		throw;
+	}
+}
+
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
@@ -2731,7 +2765,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			tr.setVersion(fetchVersion);
 			tr.info.taskID = TaskPriority::FetchKeys;
 			state PromiseStream<RangeResult> results;
-			state Future<Void> hold = tr.getRangeStream(results, keys, GetRangeLimits(), true);
+			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING
+			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), true)
+			                              : tryGetRange(results, &tr, keys);
 			state Key nfk = keys.begin;
 
 			try {
