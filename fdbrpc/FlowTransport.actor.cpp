@@ -308,6 +308,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				    .detail("Count", peer->pingLatencies.getPopulationSize())
 				    .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived)
 				    .detail("BytesSent", peer->bytesSent - peer->lastLoggedBytesSent)
+				    .detail("TimeoutCount", peer->timeoutCount)
 				    .detail("ConnectOutgoingCount", peer->connectOutgoingCount)
 				    .detail("ConnectIncomingCount", peer->connectIncomingCount)
 				    .detail("ConnectFailedCount", peer->connectFailedCount)
@@ -324,6 +325,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				peer->connectLatencies.clear();
 				peer->lastLoggedBytesReceived = peer->bytesReceived;
 				peer->lastLoggedBytesSent = peer->bytesSent;
+				peer->timeoutCount = 0;
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
 			} else if (it == self->orderedAddresses.begin()) {
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
@@ -475,6 +477,7 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 		loop {
 			choose {
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					peer->timeoutCount++;
 					if (startingBytes == peer->bytesReceived) {
 						if (peer->destination.isPublic()) {
 							peer->pingLatencies.addSample(now() - startTime);
@@ -793,7 +796,7 @@ Peer::Peer(TransportData* transport, NetworkAddress const& destination)
     reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
     incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
     pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
-    bytesSent(0), lastLoggedBytesSent(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
+    bytesSent(0), lastLoggedBytesSent(0), timeoutCount(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
     connectFailedCount(0), connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1),
     protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())) {
 	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
@@ -1430,6 +1433,10 @@ NetworkAddressList FlowTransport::getLocalAddresses() const {
 
 NetworkAddress FlowTransport::getLocalAddress() const {
 	return self->localAddresses.address;
+}
+
+std::unordered_map<NetworkAddress, Reference<struct Peer>>* FlowTransport::getAllPeers() {
+	return &self->peers;
 }
 
 std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompatiblePeers() {
