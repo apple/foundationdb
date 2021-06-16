@@ -214,7 +214,7 @@ endfunction()
 
 function(fdb_install)
   if(NOT WIN32 AND NOT OPEN_FOR_IDE)
-    set(one_value_options COMPONENT DESTINATION EXPORT DESTINATION_SUFFIX)
+    set(one_value_options COMPONENT DESTINATION EXPORT DESTINATION_SUFFIX RENAME)
     set(multi_value_options TARGETS FILES PROGRAMS DIRECTORY)
     cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
@@ -237,6 +237,9 @@ function(fdb_install)
       get_install_dest(${pkg} ${destination} install_path)
       string(TOLOWER "${pkg}" package)
       if(install_export)
+        if(IN_RENAME)
+          message(FATAL_ERROR "RENAME for EXPORT target not implemented")
+        endif()
         install(
           EXPORT "${IN_EXPORT}-${package}"
           DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
@@ -248,11 +251,20 @@ function(fdb_install)
           set(export_args EXPORT "${IN_EXPORT}-${package}")
         endif()
         if(NOT ${install_path} STREQUAL "")
-          install(
-            ${args}
-            ${export_args}
-            DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
-            COMPONENT "${IN_COMPONENT}-${package}")
+          if(IN_RENAME)
+            install(
+              ${args}
+              ${export_args}
+              DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+              COMPONENT "${IN_COMPONENT}-${package}"
+              RENAME ${IN_RENAME})
+          else()
+            install(
+              ${args}
+              ${export_args}
+              DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+              COMPONENT "${IN_COMPONENT}-${package}")
+          endif()
         endif()
       endif()
     endforeach()

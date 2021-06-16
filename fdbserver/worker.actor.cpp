@@ -22,6 +22,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbrpc/Locality.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
@@ -139,12 +140,14 @@ Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
                         bool enableLocalityLoadBalance,
                         bool lockAware) {
 	auto info = makeReference<AsyncVar<ClientDBInfo>>();
-	return DatabaseContext::create(info,
-	                               extractClientInfo(db, info),
-	                               enableLocalityLoadBalance ? db->get().myLocality : LocalityData(),
-	                               enableLocalityLoadBalance,
-	                               taskID,
-	                               lockAware);
+	auto cx = DatabaseContext::create(info,
+	                                  extractClientInfo(db, info),
+	                                  enableLocalityLoadBalance ? db->get().myLocality : LocalityData(),
+	                                  enableLocalityLoadBalance,
+	                                  taskID,
+	                                  lockAware);
+	GlobalConfig::create(cx, db, std::addressof(db->get().client));
+	return cx;
 }
 
 struct ErrorInfo {
@@ -1266,7 +1269,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 						notUpdated = interf.updateServerDBInfo.getEndpoint();
 					} else if (localInfo.infoGeneration > dbInfo->get().infoGeneration ||
 					           dbInfo->get().clusterInterface != ccInterface->get().get()) {
-
 						TraceEvent("GotServerDBInfoChange")
 						    .detail("ChangeID", localInfo.id)
 						    .detail("MasterID", localInfo.master.id())

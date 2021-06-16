@@ -6,7 +6,7 @@ clearAfterTest = false
 
     [[test.workload]]
     testName = 'DifferentClustersSameRV'
-    testDuration = 150
+    testDuration = 500
     switchAfter = 50
     keyToRead = 'someKey'
     keyToWatch = 'anotherKey'

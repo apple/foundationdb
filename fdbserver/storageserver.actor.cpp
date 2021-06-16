@@ -544,6 +544,8 @@ public:
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage
 	                    // server
 
+	Optional<UID> sourceTLogID; // the tLog from which the latest batch of versions were fetched
+
 	ProtocolVersion logProtocol;
 
 	Reference<ILogSystem> logSystem;
@@ -679,6 +681,8 @@ public:
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
 		Counter readsRejected;
+		Counter fetchedVersions;
+		Counter fetchesFromLogs;
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
@@ -697,6 +701,7 @@ public:
 		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
 		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
 		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
+		    fetchedVersions("FetchedVersions", cc), fetchesFromLogs("FetchesFromLogs", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -708,7 +713,8 @@ public:
 			specialCounter(cc, "DurableVersion", [self]() { return self->durableVersion.get(); });
 			specialCounter(cc, "DesiredOldestVersion", [self]() { return self->desiredOldestVersion.get(); });
 			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
-			specialCounter(cc, "LocalRate", [self] { return self->currentRate() * 100; });
+			specialCounter(cc, "LocalRate", [self] { return int64_t(self->currentRate() * 100); });
+
 			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
 			specialCounter(
 			    cc, "FetchKeysFetchActive", [self]() { return self->fetchKeysParallelismLock.activePermits(); });
@@ -3659,9 +3665,23 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
 
+			data->counters.fetchedVersions += (ver - data->version.get());
+			++data->counters.fetchesFromLogs;
+			Optional<UID> curSourceTLogID = cursor->getCurrentPeekLocation();
+
+			if (curSourceTLogID != data->sourceTLogID) {
+				data->sourceTLogID = curSourceTLogID;
+
+				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
+				    .detail("SourceTLogID",
+				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
+				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
+			}
+
 			data->noRecentUpdates.set(false);
 			data->lastUpdate = now();
 			data->version.set(ver); // Triggers replies to waiting gets for new version(s)
+
 			setDataVersion(data->thisServerID, data->version.get());
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();

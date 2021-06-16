@@ -959,8 +959,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	GlobalConfig::create(this, clientInfo);
-
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
@@ -1558,7 +1556,9 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                         /*switchable*/ true);
 	}
 
-	return Database(db);
+	auto database = Database(db);
+	GlobalConfig::create(database, clientInfo, std::addressof(clientInfo->get()));
+	return database;
 }
 
 Database Database::createDatabase(std::string connFileName,
@@ -2240,7 +2240,7 @@ ACTOR Future<Optional<Value>> getValue(Future<Version> version,
 
 			state GetValueReply reply;
 			try {
-				if (CLIENT_BUGGIFY) {
+				if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
 					throw deterministicRandom()->randomChoice(
 					    std::vector<Error>{ transaction_too_old(), future_version() });
 				}
@@ -3083,7 +3083,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 				++cx->transactionPhysicalReads;
 				state GetKeyValuesReply rep;
 				try {
-					if (CLIENT_BUGGIFY) {
+					if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}

@@ -9,6 +9,7 @@ RUN yum install -y \
   nc \
   net-tools \
   perf \
+  perl \
   python38 \
   python3-pip \
   strace \
@@ -16,11 +17,16 @@ RUN yum install -y \
   traceroute \
   telnet \
   tcpdump \
+  unzip \
   vim
 
 #todo: nload, iperf, numademo
 
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.0.30.zip" -o "awscliv2.zip" \
+    &&  unzip awscliv2.zip && ./aws/install && rm -rf aws
+
 COPY misc/tini-amd64.sha256sum /tmp/
+COPY misc/flamegraph.sha256sum /tmp/
 # Adding tini as PID 1 https://github.com/krallin/tini
 ARG TINI_VERSION=v0.19.0
 RUN curl -sLO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64 && \
@@ -30,6 +36,13 @@ RUN curl -sLO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/
 
 COPY sidecar/requirements.txt /tmp
 RUN pip3 install -r /tmp/requirements.txt
+
+# Install flamegraph
+RUN curl -sLO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/stackcollapse-perf.pl && \
+  curl -sLO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/flamegraph.pl && \
+  sha256sum -c /tmp/flamegraph.sha256sum && \
+  chmod +x stackcollapse-perf.pl flamegraph.pl && \
+  mv stackcollapse-perf.pl flamegraph.pl /usr/bin
 
 # TODO: Only used by sidecar
 RUN groupadd --gid 4059 fdb && \

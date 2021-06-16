@@ -592,6 +592,8 @@ public:
 	bool isValid() const { return sav != 0; }
 	bool isReady() const { return sav->isSet(); }
 	bool isError() const { return sav->isError(); }
+	// returns true if get can be called on this future (counterpart of canBeSet on Promises)
+	bool canGet() const { return isValid() && isReady() && !isError(); }
 	Error& getError() const {
 		ASSERT(isError());
 		return sav->error_state;

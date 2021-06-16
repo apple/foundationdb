@@ -955,10 +955,26 @@ that process, and wait for necessary data to be moved away.
    Maintenance mode will be unable to use until the key is cleared, which is the same as the fdbcli command ``datadistribution enable ssfailure``.
    While the key is set, any commit that tries to set a key in the range will fail with the ``special_keys_api_failure`` error.
 #. ``\xff\xff/management/data_distribution/<mode|rebalance_ignored>`` Read/write. Changing these two keys will change the two corresponding system keys ``\xff/dataDistributionMode`` and ``\xff\x02/rebalanceDDIgnored``. The value of ``\xff\xff/management/data_distribution/mode`` is a literal text of ``0`` (disable) or ``1`` (enable). Transactions committed with invalid values will throw ``special_keys_api_failure`` . The value of ``\xff\xff/management/data_distribution/rebalance_ignored`` is empty. If present, it means data distribution is disabled for rebalance. Any transaction committed with non-empty value for this key will throw ``special_keys_api_failure``. For more details, see help text of ``fdbcli`` command ``datadistribution``.
+#. ``\xff\xff/management/consistency_check_suspended`` Read/write. Set or read this key will set or read the underlying system key ``\xff\x02/ConsistencyCheck/Suspend``. The value of this special key is unused thus if present, will be empty. In particular, if the key exists, then consistency is suspended. For more details, see help text of ``fdbcli`` command ``consistencycheck``.
+#. ``\xff\xff/management/db_locked`` Read/write. A single key that can be read and modified. Set the key will lock the database and clear the key will unlock. If the database is already locked, then the commit will fail with the ``special_keys_api_failure`` error. For more details, see help text of ``fdbcli`` command ``lock`` and ``unlock``.
+#. ``\xff\xff/management/auto_coordinators`` Read-only. A single key, if read, will return a set of processes which is able to satisfy the current redundency level and serve as new coordinators. The return value is formatted as a comma delimited string of network addresses of coordinators, i.e. ``<ip:port>,<ip:port>,...,<ip:port>``.
 
 An exclusion is syntactically either an ip address (e.g. ``127.0.0.1``), or
 an ip address and port (e.g. ``127.0.0.1:4500``). If no port is specified,
 then all processes on that host match the exclusion.
+
+Configuration module
+~~~~~~~~~~~~~~~~~~~~
+
+The configuration module is for changing the cluster configuration.
+For example, you can change a process type or update coordinators by manipulating related special keys through transactions.
+
+#. ``\xff\xff/configuration/process/class_type/<address> := <class_type>`` Read/write. Reading keys in the range will retrieve processes' class types. Setting keys in the range will update processes' class types. The process matching ``<address>`` will be assigned to the given class type if the commit is successful. The valid class types are ``storage``, ``transaction``, ``resolution``, etc. A full list of class type can be found via ``fdbcli`` command ``help setclass``. Clearing keys is forbidden in the range. Instead, you can set the type as ``default``, which will clear the assigned class type if existing. For more details, see help text of ``fdbcli`` command ``setclass``.
+#. ``\xff\xff/configuration/process/class_source/<address> := <class_source>`` Read-only. Reading keys in the range will retrieve processes' class source. The class source is one of ``command_line``, ``configure_auto``, ``set_class`` and ``invalid``, indicating the source that the process's class type comes from.
+#. ``\xff\xff/configuration/coordinators/processes := <ip:port>,<ip:port>,...,<ip:port>`` Read/write. A single key, if read, will return a comma delimited string of coordinators' network addresses. Thus to provide a new set of cooridinators, set the key with a correct formatted string of new coordinators' network addresses. As there's always the need to have coordinators, clear on the key is forbidden and a transaction will fail with the ``special_keys_api_failure`` error if the clear is committed. For more details, see help text of ``fdbcli`` command ``coordinators``.
+#. ``\xff\xff/configuration/coordinators/cluster_description := <new_description>`` Read/write. A single key, if read, will return the cluster description. Thus modifying the key will update the cluster decription. The new description needs to match ``[A-Za-z0-9_]+``, otherwise, the ``special_keys_api_failure`` error will be thrown. In addition, clear on the key is meaningless thus forbidden. For more details, see help text of ``fdbcli`` command ``coordinators``.
+
+The ``<address>`` here is the network address of the corresponding process. Thus the general form is ``ip:port``.
 
 Error message module
 ~~~~~~~~~~~~~~~~~~~~
