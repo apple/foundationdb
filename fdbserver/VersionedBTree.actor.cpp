@@ -809,6 +809,8 @@ public:
 			if (offset == p->endOffset) {
 				debug_printf("FIFOQueue::Cursor(%s) Page exhausted\n", toString().c_str());
 				LogicalPageID oldPageID = pageID;
+				LogicalPageID extentCurPageID = p->extentCurPageID;
+				LogicalPageID extentEndPageID = p->extentEndPageID;
 				pageID = p->nextPageID;
 				offset = p->nextOffset;
 
@@ -820,19 +822,21 @@ public:
 				if (mode == POP) {
 					--queue->numPages;
 				}
+
 				page.clear();
 				debug_printf("FIFOQueue::Cursor(%s) readNext page exhausted, moved to new page\n", toString().c_str());
-
-				if (mode == POP && !queue->usesExtents) {
-					// Freeing the old page must happen after advancing the cursor and clearing the page reference
-					// because freePage() could cause a push onto a queue that causes a newPageID() call which could
-					// pop() from this very same queue. Queue pages are freed at version 0 because they can be reused
-					// after the next commit.
-					queue->pager->freePage(oldPageID, 0);
-				} else if (queue->usesExtents && (p->extentCurPageID == p->extentEndPageID)) {
-					// Figure out the beginning of the extent
-					int pagesPerExtent = queue->pagesPerExtent;
-					queue->pager->freeExtent(oldPageID - pagesPerExtent + 1);
+				if (mode == POP) {
+					if(!queue->usesExtents) {
+						// Freeing the old page must happen after advancing the cursor and clearing the page reference
+						// because freePage() could cause a push onto a queue that causes a newPageID() call which could
+						// pop() from this very same queue. Queue pages are freed at version 0 because they can be reused
+						// after the next commit.
+						queue->pager->freePage(oldPageID, 0);
+					} else if (extentCurPageID == extentEndPageID) {
+						// Figure out the beginning of the extent
+						int pagesPerExtent = queue->pagesPerExtent;
+						queue->pager->freeExtent(oldPageID - pagesPerExtent + 1);
+					}
 				}
 			}
 
