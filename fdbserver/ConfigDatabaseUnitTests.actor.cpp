@@ -133,7 +133,7 @@ class ReadFromLocalConfigEnvironment {
 	                                          Optional<int64_t> expected) {
 		state double lastMismatchTime = now();
 		loop {
-			if (localConfiguration->getTestKnobs().TEST_LONG == (expected.present() ? expected.get() : 0)) {
+			if (localConfiguration->getTestKnobs().TEST_LONG == expected.orDefault(0)) {
 				return Void();
 			}
 			if (now() > lastMismatchTime + 1.0) {

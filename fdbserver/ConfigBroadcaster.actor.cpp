@@ -81,6 +81,8 @@ public:
 						auto req = get(tokenToRequest, token);
 						if (req.lastSeenVersion < change.version) {
 							tokenSet.insert(token);
+						} else {
+							TEST(true); // Worker is ahead of config broadcaster
 						}
 					}
 				}

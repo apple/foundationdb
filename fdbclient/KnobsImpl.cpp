@@ -1,5 +1,5 @@
 /*
- * Knobs.cpp
+ * KnobsImpl.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -109,8 +109,8 @@ void ClientKnobs::initialize(Randomize _randomize) {
 
 	// Core
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
-	init( LOG_RANGE_BLOCK_SIZE,                    1e6 ); //Dependent on CORE_VERSIONSPERSECOND
-	init( MUTATION_BLOCK_SIZE,	            	  10000 );
+	init( LOG_RANGE_BLOCK_SIZE, CORE_VERSIONSPERSECOND );
+	init( MUTATION_BLOCK_SIZE,	            	  10000);
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );

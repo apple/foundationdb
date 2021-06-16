@@ -177,5 +177,6 @@ TEST_CASE("/flow/genericactors/DependentAsyncVar") {
 	state Future<Void> subscriber2 =
 	    testSubscriber(IDependentAsyncVar<int>::create(input, [](auto const& var) { return var.unchanged; }), {});
 	wait(subscriber1 && testPublisher(input));
+	ASSERT(!subscriber2.isReady());
 	return Void();
 }

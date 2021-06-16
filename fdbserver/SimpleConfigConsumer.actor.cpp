@@ -76,6 +76,7 @@ class SimpleConfigConsumerImpl {
 			} catch (Error& e) {
 				++self->failedChangeRequest;
 				if (e.code() == error_code_version_already_compacted) {
+					TEST(true); // SimpleConfigConsumer get version_already_compacted error
 					wait(getSnapshotAndChanges(self, broadcaster));
 				} else {
 					throw e;

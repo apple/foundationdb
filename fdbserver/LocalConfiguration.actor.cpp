@@ -102,6 +102,7 @@ public:
 				this->overrides[stringToKeyRef(knobName)] = knobValue;
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option) {
+					TEST(true); // Attempted to manually set invalid knob option
 					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
 					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
 				} else {
@@ -181,7 +182,7 @@ class LocalConfigurationImpl {
 		state ConfigKnobOverrides storedConfigPath =
 		    BinaryReader::fromStringRef<ConfigKnobOverrides>(storedConfigPathValue.get(), IncludeVersion());
 		if (!storedConfigPath.hasSameConfigPath(self->configKnobOverrides)) {
-			// All local information is outdated
+			TEST(true); // All local information is outdated
 			wait(clearKVStore(self));
 			wait(saveConfigPath(self));
 			self->updateInMemoryState(lastSeenVersion);
@@ -393,4 +394,12 @@ Future<Void> LocalConfiguration::addChanges(Standalone<VectorRef<VersionedConfig
 
 UID LocalConfiguration::getID() const {
 	return impl().getID();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/InvalidManualKnobOverride") {
+	std::map<std::string, std::string> invalidOverrides;
+	invalidOverrides["knob_name_that_does_not_exist"] = "";
+	// Should only trace and not throw an error:
+	ManualKnobOverrides manualKnobOverrides(invalidOverrides);
+	return Void();
 }

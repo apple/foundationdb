@@ -185,8 +185,7 @@ void FlowKnobs::initialize(Randomize _randomize, IsSimulated _isSimulated) {
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	// FIXME: Undo
-	init( MIN_TRACE_SEVERITY,                  isSimulated ? 1 : 5 ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );
