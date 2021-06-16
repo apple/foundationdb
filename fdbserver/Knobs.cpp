@@ -623,6 +623,11 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             10.0 );
 	init( MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             30.0 );
 	init( DBINFO_FAILED_DELAY,                                   1.0 );
+	init( ENABLE_WORKER_HEALTH_MONITOR,                        false );
+	init( WORKER_HEALTH_MONITOR_INTERVAL,                       60.0 );
+	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.90 );
+	init( PEER_LATENCY_DEGRADATION_THRESHOLD,                   0.05 );
+	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
