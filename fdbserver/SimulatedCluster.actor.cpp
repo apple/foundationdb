@@ -937,7 +937,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	}
 
 	int tssCount = 0;
-	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
+	if (!simple && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
 	}
@@ -1265,7 +1265,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	tssCount =
 	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
 
-	if (!testConfig.config.present() && tssCount > 0) {
+	if (tssCount > 0) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
 		set_config(confStr);
 		double tssRandom = deterministicRandom()->random01();
