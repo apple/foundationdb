@@ -325,17 +325,6 @@ boost::asio::io_context& ActorLineageProfilerT::context() {
 
 SampleIngestor::~SampleIngestor() {}
 
-// Callback used to update the sampling profilers run frequency whenever the
-// frequency changes.
-void samplingProfilerUpdateFrequency(std::optional<std::any> freq) {
-	double frequency = 0;
-	if (freq.has_value()) {
-		frequency = std::any_cast<double>(freq.value());
-	}
-	TraceEvent(SevInfo, "SamplingProfilerUpdateFrequency").detail("Frequency", frequency);
-	ActorLineageProfiler::instance().setFrequency(frequency);
-}
-
 void ProfilerConfigT::reset(std::map<std::string, std::string> const& config) {
 	bool expectNoMore = false, useFluentD = false, useTCP = false;
 	std::string endpoint;
@@ -397,6 +386,17 @@ std::map<std::string, std::string> ProfilerConfigT::getConfig() const {
 		ingestor->getConfig(res);
 	}
 	return res;
+}
+
+// Callback used to update the sampling profilers run frequency whenever the
+// frequency changes.
+void samplingProfilerUpdateFrequency(std::optional<std::any> freq) {
+	double frequency = 0;
+	if (freq.has_value()) {
+		frequency = std::any_cast<double>(freq.value());
+	}
+	TraceEvent(SevInfo, "SamplingProfilerUpdateFrequency").detail("Frequency", frequency);
+	ActorLineageProfiler::instance().setFrequency(frequency);
 }
 
 // Callback used to update the sample collector window size.
