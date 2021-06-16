@@ -105,6 +105,15 @@ public:
 					TEST(true); // Attempted to manually set invalid knob option
 					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
 					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
+				} else if (e.code() == error_code_invalid_option_value) {
+					TEST(true); // Invalid manually set knob value
+					fprintf(stderr,
+					        "WARNING: Invalid value '%s' for knob option '%s'\n",
+					        knobValueString.c_str(),
+					        knobName.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue")
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
 				} else {
 					throw e;
 				}
@@ -396,9 +405,17 @@ UID LocalConfiguration::getID() const {
 	return impl().getID();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/InvalidManualKnobOverride") {
+TEST_CASE("/fdbserver/ConfigDB/InvalidManualKnobName") {
 	std::map<std::string, std::string> invalidOverrides;
 	invalidOverrides["knob_name_that_does_not_exist"] = "";
+	// Should only trace and not throw an error:
+	ManualKnobOverrides manualKnobOverrides(invalidOverrides);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/InvalidManualKnobValue") {
+	std::map<std::string, std::string> invalidOverrides;
+	invalidOverrides["test_int"] = "not_an_int";
 	// Should only trace and not throw an error:
 	ManualKnobOverrides manualKnobOverrides(invalidOverrides);
 	return Void();
