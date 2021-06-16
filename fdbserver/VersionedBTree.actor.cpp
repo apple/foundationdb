@@ -832,7 +832,7 @@ public:
 						// pop() from this very same queue. Queue pages are freed at version 0 because they can be reused
 						// after the next commit.
 						queue->pager->freePage(oldPageID, 0);
-					} else if (queue->usesExtents && (extentCurPageID == extentEndPageID)) {
+					} else if (extentCurPageID == extentEndPageID) {
 						// Figure out the beginning of the extent
 						int pagesPerExtent = queue->pagesPerExtent;
 						queue->pager->freeExtent(oldPageID - pagesPerExtent + 1);
