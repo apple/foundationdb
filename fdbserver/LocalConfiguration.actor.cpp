@@ -55,7 +55,9 @@ public:
 				configClassToKnobToValue[configPath.back()] = {};
 			}
 		} else {
+			TEST(true); // Invalid configuration path
 			fprintf(stderr, "WARNING: Invalid configuration path: `%s'\n", paramString.c_str());
+			throw invalid_config_path();
 		}
 	}
 	ConfigClassSet getConfigClassSet() const { return ConfigClassSet(configPath); }
@@ -70,9 +72,19 @@ public:
 		// Apply global overrides
 		const auto& knobToValue = configClassToKnobToValue.at({});
 		for (const auto& [knobName, knobValue] : knobToValue) {
-			knobCollection.setKnob(knobName.toString(), knobValue);
+			try {
+				knobCollection.setKnob(knobName.toString(), knobValue);
+			} catch (Error &e) {
+				if (e.code() == error_code_invalid_option_value) {
+					TEST(true); // invalid knob in configuration database
+					TraceEvent(SevWarnAlways, "InvalidKnobOptionValue")
+						.detail("KnobName", knobName)
+						.detail("KnobValue", knobValue.toString());
+				} else {
+					throw e;
+				}
+			}
 		}
-
 		// Apply specific overrides
 		for (const auto& configClass : configPath) {
 			const auto& knobToValue = configClassToKnobToValue.at(configClass);
@@ -405,7 +417,7 @@ UID LocalConfiguration::getID() const {
 	return impl().getID();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/InvalidManualKnobName") {
+TEST_CASE("/fdbserver/ConfigDB/ManualKnobOverrides/InvalidName") {
 	std::map<std::string, std::string> invalidOverrides;
 	invalidOverrides["knob_name_that_does_not_exist"] = "";
 	// Should only trace and not throw an error:
@@ -413,10 +425,38 @@ TEST_CASE("/fdbserver/ConfigDB/InvalidManualKnobName") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/InvalidManualKnobValue") {
+TEST_CASE("/fdbserver/ConfigDB/ManualKnobOverrides/InvalidValue") {
 	std::map<std::string, std::string> invalidOverrides;
 	invalidOverrides["test_int"] = "not_an_int";
 	// Should only trace and not throw an error:
 	ManualKnobOverrides manualKnobOverrides(invalidOverrides);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/ConfigKnobOverrides/InvalidConfigPath") {
+	try {
+		ConfigKnobOverrides configKnobOverrides("#invalid_config_path");
+		ASSERT(false);
+	} catch (Error &e) {
+		ASSERT_EQ(e.code(), error_code_invalid_config_path);
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/ConfigKnobOverrides/InvalidName") {
+	ConfigKnobOverrides configKnobOverrides;
+	configKnobOverrides.set({}, "knob_name_that_does_not_exist"_sr, KnobValueRef::create(ParsedKnobValue(int{1})));
+	auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
+	// Should only trace and not throw an error:
+	configKnobOverrides.update(*testKnobCollection);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/ConfigKnobOverrides/InvalidValue") {
+	ConfigKnobOverrides configKnobOverrides;
+	configKnobOverrides.set({}, "test_int"_sr, KnobValueRef::create(ParsedKnobValue("not_an_int")));
+	auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
+	// Should only trace and not throw an error:
+	configKnobOverrides.update(*testKnobCollection);
 	return Void();
 }
