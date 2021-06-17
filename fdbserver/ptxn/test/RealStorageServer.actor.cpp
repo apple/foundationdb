@@ -120,10 +120,17 @@ struct StorageServerTestDriver : ServerTestDriver {
 		return Void();
 	}
 
+	ACTOR static Future<Void> verifyGetValueFromId(StorageServerTestDriver* self, int id, Version version) {
+		auto idStr = std::to_string(id);
+		wait(verifyGetValue(
+		    self, Standalone<StringRef>("Key-" + idStr), version, Standalone<StringRef>("Value-" + idStr)));
+		return Void();
+	}
+
 	ACTOR static Future<Void> verifyGetValue(StorageServerTestDriver* self,
-	                                         KeyRef key,
+	                                         Key key,
 	                                         Version version,
-	                                         ValueRef expectedValue) {
+	                                         Value expectedValue) {
 		wait(switchToServerProcess(self));
 
 		GetValueRequest getValueRequest = GetValueRequest(UID(), // spanContext
@@ -131,12 +138,14 @@ struct StorageServerTestDriver : ServerTestDriver {
 		                                                  version,
 		                                                  Optional<TagSet>(), // tags
 		                                                  Optional<UID>()); // debugID
+		std::cout << "Sending getValue request for key " << key.toString() << std::endl;
+
 		self->ssi.getValue.send(getValueRequest);
 
 		GetValueReply getValueReply = wait(getValueRequest.reply.getFuture());
 		const Value& value = getValueReply.value.get();
-		std::cout << "Get value: " << value.toString() << std::endl;
-		ASSERT(value == expectedValue);
+		std::cout << "Get value: " << value.toString() << ", expected " << expectedValue.toString() << std::endl;
+		ASSERT(value.compare(expectedValue) == 0);
 
 		wait(switchBack(self));
 		return Void();
@@ -145,28 +154,39 @@ struct StorageServerTestDriver : ServerTestDriver {
 } // namespace ptxn
 
 TEST_CASE("fdbserver/ptxn/test/storageserver") {
-
 	state ptxn::StorageServerTestDriver driver;
 
-	// Set the mock cursor with some input.
-	Arena arena;
-	MutationRef mutation(arena, MutationRef::SetValue, "Hello"_sr, "World"_sr);
-	std::string message = BinaryWriter::toValue(mutation, AssumeVersion(currentProtocolVersion)).toString();
-	std::vector<Tag> tags = { driver.tag };
-	state std::vector<MockPeekCursor::OneVersionMessages> allVersionMessages = { MockPeekCursor::OneVersionMessages(
-		8, // version
-		{ MockPeekCursor::MessageAndTags(message, tags) }) };
-	driver.mockPeekCursor = makeReference<MockPeekCursor>(allVersionMessages, arena);
+	// TODO: Manage all props in the driver and set default values when the PR is finalized.
+	int nMutationsPerMore = params.getInt("nMutationsPerMore").get();
+	Optional<int> maxMutations = params.getInt("maxMutations").castTo<int>();
+	state int advanceVersionsPerMutation = params.getInt("advanceVersionsPerMutation").get();
 
-	loop choose{ when(wait(ptxn::StorageServerTestDriver::runStorageServer(&driver))){
-		std::cout << "Storage serves exited unexpectedly" << std::endl;
-	ASSERT(false);
+	Arena arena;
+	VectorRef<Tag> tags;
+	tags.push_back(arena, driver.tag);
+	auto supplier = VersionedMessageSupplier(0, tags, advanceVersionsPerMutation);
+	driver.mockPeekCursor = makeReference<MockPeekCursor>(nMutationsPerMore, maxMutations, supplier, arena);
+
+	int verifyId = params.getInt("verifyId").get();
+	state Future<Void> verify = ptxn::StorageServerTestDriver::verifyGetValueFromId(
+	    &driver,
+	    verifyId,
+	    // Other versions after commitVersion should work too.
+	    VersionedMessageSupplier::commitVersion(verifyId, advanceVersionsPerMutation));
+
+	loop choose{
+		when(wait(ptxn::StorageServerTestDriver::runStorageServer(&driver))) {
+		    std::cout << "Storage serves exited unexpectedly" << std::endl;
+	        ASSERT(false);
         }
-        when(wait(ptxn::StorageServerTestDriver::verifyGetValue(&driver, "Hello"_sr, 8, "World"_sr))) {
+        when(wait(verify)) {
 	        break;
         }
         when(wait(driver.actors.getResult())) {}
     };
+
+    // TODO: Visualize trace log to see how the version in memory and the version in storage advanced. Problem 1: No
+    // trace log sometimes. Problem 2: How to not run as simulation?
 
     return Void();
 }
