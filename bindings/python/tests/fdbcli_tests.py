@@ -246,7 +246,7 @@ def datadistribution(logger):
 def transaction(logger):
     """This test will cover the transaction related fdbcli commands.
         In particular, 
-        'begin', 'commit', 'rollback', 'option'
+        'begin', 'rollback', 'option'
         'getversion', 'get', 'getrange', 'clear', 'clearrange', 'set', 'commit'
     """
     err1 = run_fdbcli_command_and_get_error('set', 'key', 'value')
