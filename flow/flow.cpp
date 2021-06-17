@@ -48,7 +48,7 @@ Reference<ActorLineage> getCurrentLineage() {
 	return *currentLineage;
 }
 
-void sample(Reference<ActorLineage>* p);
+void sample(LineageReference* lineagePtr);
 
 void replaceLineage(LineageReference* lineage) {
 	if (!startSampling) {

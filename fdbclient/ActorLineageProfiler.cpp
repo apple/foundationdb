@@ -22,6 +22,7 @@
 #include "flow/singleton.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/NameLineage.h"
 #include <msgpack.hpp>
 #include <memory>
 #include <boost/endian/conversion.hpp>
@@ -249,9 +250,10 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 	return res;
 }
 
-void sample(Reference<ActorLineage>* p) {
-	if (!p->isValid()) { return; }
-	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage = Reference<ActorLineage>::addRef(p->getPtr())]() {
+void sample(LineageReference* lineagePtr) {
+	if (!lineagePtr->isValid()) { return; }
+	(*lineagePtr)->modify(&NameLineage::actorName) = lineagePtr->actorName();
+	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage = LineageReference::addRef(lineagePtr->getPtr())]() {
 		SampleCollection::instance().collect(lineage);
 	});
 }

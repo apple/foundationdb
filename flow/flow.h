@@ -547,18 +547,24 @@ public:
 // getCurrentLineage()).
 class LineageReference : public Reference<ActorLineage> {
 public:
-	LineageReference() : Reference<ActorLineage>(nullptr), allocated(false) {}
-	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), allocated(false) {}
-	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), allocated(false) {}
+	LineageReference() : Reference<ActorLineage>(nullptr), allocated_(false) {}
+	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), allocated_(false) {}
+	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), allocated_(false) {}
 
+	void setActorName(const char* name) { actorName_ = name; }
+	const char* actorName() { return actorName_; }
 	void allocate() {
 		Reference<ActorLineage>::setPtrUnsafe(new ActorLineage());
-		allocated = true;
+		allocated_ = true;
 	}
-	bool isAllocated() { return allocated; }
+	bool isAllocated() { return allocated_; }
 
 private:
-	bool allocated;
+	// The actor name has to be a property of the LineageReference because all
+	// actors store their own LineageReference copy, but not all actors point
+	// to their own ActorLineage.
+	const char* actorName_;
+	bool allocated_;
 };
 
 extern std::atomic<bool> startSampling;

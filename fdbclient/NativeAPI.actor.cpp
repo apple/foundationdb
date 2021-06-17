@@ -44,6 +44,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/NameLineage.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
@@ -90,6 +91,7 @@ using std::pair;
 namespace {
 
 TransactionLineageCollector transactionLineageCollector;
+NameLineageCollector nameLineageCollector;
 
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(

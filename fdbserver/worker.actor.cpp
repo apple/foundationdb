@@ -2171,7 +2171,6 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		auto asyncPriorityInfo =
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
-		ActorLineageProfiler::instance().setFrequency(10);
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
