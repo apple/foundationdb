@@ -563,10 +563,11 @@ public:
 	double MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS;
 	double DBINFO_FAILED_DELAY;
 	bool ENABLE_WORKER_HEALTH_MONITOR;
-	double WORKER_HEALTH_MONITOR_INTERVAL;
-	double PEER_LATENCY_DEGRADATION_PERCENTILE;
-	double PEER_LATENCY_DEGRADATION_THRESHOLD;
-	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD;
+	double WORKER_HEALTH_MONITOR_INTERVAL; // Interval between two health monitor health check.
+	int PEER_LATENCY_CHECK_MIN_POPULATION; // The minimum number of latency samples required to check a peer.
+	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health.
+	double PEER_LATENCY_DEGRADATION_THRESHOLD; // The latency threshold to consider a peer degraded.
+	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD; // The percentage of timeout to consider a peer degraded.
 
 	// Test harness
 	double WORKER_POLL_DELAY;

@@ -592,7 +592,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	const auto& dbi = dbInfo->get();
 
-	if (dbi.master.addresses().contain(address)) {
+	if (dbi.master.addresses().contains(address)) {
 		return true;
 	}
 
@@ -620,7 +620,7 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 				continue;
 			}
 
-			if (tlog.interf().addresses().contain(address)) {
+			if (tlog.interf().addresses().contains(address)) {
 				return true;
 			}
 		}
@@ -629,7 +629,7 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	return false;
 }
 
-bool addressInDbAndPrimaryDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+bool addressesInDbAndPrimaryDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	return addressInDbAndPrimaryDc(addresses.address, dbInfo) ||
 	       (addresses.secondaryAddress.present() && addressInDbAndPrimaryDc(addresses.secondaryAddress.get(), dbInfo));
 }
@@ -681,12 +681,12 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
 		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-		    addressInDbAndPrimaryDc(interf.addresses(), dbInfo) && ccInterface->get().present()) {
+		    addressesInDbAndPrimaryDc(interf.addresses(), dbInfo) && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
-			auto* allPeers = FlowTransport::transport().getAllPeers();
-			for (auto& [address, peer] : *allPeers) {
-				if (peer->pingLatencies.getPopulationSize() < 50) {
-					// Ignore peers that do not have enough samples.
+			const auto& allPeers = FlowTransport::transport().getAllPeers();
+			for (const auto& [address, peer] : allPeers) {
+				if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
+					// Ignore peers that don't have enough samples.
 					// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a regular
 					//              basis, which may affect the measurement count. Currently,
 					//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval, so
@@ -708,6 +708,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 				        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
 					// This is a degraded peer.
 					TraceEvent("HealthMonitorDetectDegradedPeer")
+					    .suppressFor(30)
 					    .detail("Peer", address)
 					    .detail("Elapsed", now() - peer->lastLoggedTime)
 					    .detail("MinLatency", peer->pingLatencies.min())
