@@ -165,8 +165,8 @@ void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool fai
 
 // Exclude the servers matching the given set of localities from use as state servers.  Returns as soon as the change
 // is durable, without necessarily waiting for the servers to be evacuated.
-ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string>* localities, bool failed = false);
-void excludeLocalities(Transaction& tr, std::unordered_set<std::string>* localities, bool failed = false);
+ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed = false);
+void excludeLocalities(Transaction& tr, std::unordered_set<std::string> localities, bool failed = false);
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given
 // IP.  A NetworkAddress() means all servers (don't exclude anything)
@@ -174,7 +174,7 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 
 // Remove the given localities from the exclusion list.
 ACTOR Future<Void> includeLocalities(Database cx,
-                                     vector<std::string>* localities,
+                                     vector<std::string> localities,
                                      bool failed = false,
                                      bool includeAll = false);
 
@@ -190,7 +190,7 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr);
 ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx);
 ACTOR Future<vector<std::string>> getExcludedLocalities(Transaction* tr);
 
-std::set<AddressExclusion> getAddressesByLocality(std::vector<ProcessData>& workers, std::string locality);
+std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers, const std::string& locality);
 
 // Check for the given, previously excluded servers to be evacuated (no longer used for state).  If waitForExclusion is
 // true, this actor returns once it is safe to shut down all such machines without impacting fault tolerance, until and

@@ -35,7 +35,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	bool enabled, killProcesses;
 	int minMachinesToKill, maxMachinesToKill, maxSafetyCheckRetries;
 	double minDelay, maxDelay;
-	double kill1Timeout, kill2Timeout, kill3Timeout;
+	double kill1Timeout, kill2Timeout;
 
 	std::set<AddressExclusion> toKill1, toKill2;
 	std::map<AddressExclusion, Optional<Standalone<StringRef>>> machine_ids; // ip -> Locality Zone id
@@ -52,7 +52,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		maxDelay = getOption(options, LiteralStringRef("maxDelay"), 60.0);
 		kill1Timeout = getOption(options, LiteralStringRef("kill1Timeout"), 60.0);
 		kill2Timeout = getOption(options, LiteralStringRef("kill2Timeout"), 6000.0);
-		kill3Timeout = getOption(options, LiteralStringRef("kill3Timeout"), 6000.0);
 		killProcesses = deterministicRandom()->random01() < 0.5;
 		if (g_network->isSimulated()) {
 			g_simulator.allowLogSetKills = false;
@@ -144,7 +143,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		if (!enabled)
 			return Void();
 		double delay = deterministicRandom()->random01() * (maxDelay - minDelay) + minDelay;
-		return workloadMain(this, cx, delay, toKill1, toKill2, minMachinesToKill, maxMachinesToKill);
+		return workloadMain(this, cx, delay, toKill1, toKill2);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -338,9 +337,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	                                       Database cx,
 	                                       double waitSeconds,
 	                                       std::set<AddressExclusion> toKill1,
-	                                       std::set<AddressExclusion> toKill2,
-	                                       int minMachinesToKill,
-	                                       int maxMachinesToKill) {
+	                                       std::set<AddressExclusion> toKill2) {
 		wait(updateProcessIds(cx));
 		wait(delay(waitSeconds));
 
@@ -381,6 +378,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		// Include the servers, if unable to exclude
 		// Reinclude when buggify is on to increase the surface area of the next set of excludes
+		state bool failed = true;
 		if (!bClearedFirst || BUGGIFY) {
 			// Get the updated list of processes which may have changed due to reboots, deletes, etc
 			TraceEvent("RemoveAndKill")
@@ -389,6 +387,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("ToKill", describe(toKill1))
 			    .detail("ClusterAvailable", g_simulator.isAvailable());
 			wait(includeServers(cx, vector<AddressExclusion>(1)));
+			wait(includeLocalities(cx, vector<std::string>(), failed, true));
+			wait(includeLocalities(cx, vector<std::string>(), !failed, true));
 			self->includeAddresses(toKill1);
 		}
 
@@ -425,85 +425,16 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("ToKill", describe(toKill2))
 		    .detail("ClusterAvailable", g_simulator.isAvailable());
 
-		// Reinclude all of the machine, if buggified
-		if (BUGGIFY) {
-			// Get the updated list of processes which may have changed due to reboots, deletes, etc
-			TraceEvent("RemoveAndKill")
-			    .detail("Step", "include all second")
-			    .detail("KillTotal", toKill2.size())
-			    .detail("ToKill", describe(toKill2))
-			    .detail("ClusterAvailable", g_simulator.isAvailable());
-			wait(includeServers(cx, vector<AddressExclusion>(1)));
-			self->includeAddresses(toKill2);
-		}
-
-		std::unordered_set<std::string> localities;
-		auto processes = getServers();
-		// collecting all localities
-		for (const auto& it : processes) {
-			if (it->locality.dcId().present())
-				localities.insert(ExcludeLocalityKeyDcIdPrefix.toString() + it->locality.dcId().get().toString());
-			if (it->locality.zoneId().present())
-				localities.insert(ExcludeLocalityKeyZoneIdPrefix.toString() + it->locality.zoneId().get().toString());
-			if (it->locality.machineId().present())
-				localities.insert(ExcludeLocalityKeyMachineIdPrefix.toString() +
-				                  it->locality.machineId().get().toString());
-			if (it->locality.processId().present())
-				localities.insert(ExcludeLocalityKeyProcessIdPrefix.toString() +
-				                  it->locality.processId().get().toString());
-		}
-		int localitiesCount = localities.size();
-		int nToKill3 = deterministicRandom()->randomInt(std::min(localitiesCount, minMachinesToKill),
-		                                                std::min(localitiesCount, maxMachinesToKill) + 1);
-		// get random subset of localities.
-		state std::set<std::string> toKill3 = random_subset(localities, nToKill3);
-
-		TraceEvent("RemoveAndKillLocalities")
-		    .detail("LocalitiesSize", localities.size())
-		    .detail("Kill3Size", toKill3.size())
-		    .detail("ToKill3", describe(toKill3));
-
-		// toKill3 may kill too many servers to make cluster unavailable.
-		// Get the processes in toKill3 that are safe to kill
-		state std::set<AddressExclusion> toKill3Addresses = wait(self->getLocalitiesAddresses(cx, toKill3));
-		killProcArray = self->protectServers(toKill3Addresses);
-
-		// Update the kill networks to the killable localities
-		toKill3 = self->getSafeLocalitiesToKill(killProcArray);
-		state bool failed =
-		    deterministicRandom()->randomInt(0, 2) ? true : false; // excluding with random failed option
-
-		TraceEvent("RemoveAndKillLocalities")
-		    .detail("Step", "exclude third list")
-		    .detail("ToKill3AddressesSize", toKill3Addresses.size())
-		    .detail("KillProcArraySize", killProcArray.size())
-		    .detail("Kill3Size", toKill3.size())
-		    .detail("ToKill3", describe(toKill3))
+		// Get the updated list of processes which may have changed due to reboots, deletes, etc
+		TraceEvent("RemoveAndKill")
+		    .detail("Step", "include all second")
+		    .detail("KillTotal", toKill2.size())
+		    .detail("ToKill", describe(toKill2))
 		    .detail("ClusterAvailable", g_simulator.isAvailable());
-		// exclude localities
-		wait(reportErrors(
-		    timeoutError(removeAndKillLocalities(self, cx, toKill3, bClearedFirst ? &toKill2 : nullptr, failed),
-		                 self->kill3Timeout),
-		    "RemoveServersSafelyError",
-		    UID()));
-
-		TraceEvent("RemoveAndKillLocalities")
-		    .detail("Step", "excluded thrid list")
-		    .detail("Kill3Size", toKill3.size())
-		    .detail("ToKill3", describe(toKill3))
-		    .detail("ClusterAvailable", g_simulator.isAvailable());
-
-		// Reinclude all of the machine, if buggified
-		if (BUGGIFY) {
-			// Get the updated list of processes which may have changed due to reboots, deletes, etc
-			TraceEvent("RemoveAndKillLocalities")
-			    .detail("Step", "include all third")
-			    .detail("Kill3Size", toKill3.size())
-			    .detail("ToKill3", describe(toKill3))
-			    .detail("ClusterAvailable", g_simulator.isAvailable());
-			vector<std::string> emptyLocalities;
-			wait(includeLocalities(cx, &emptyLocalities, failed, true));
-		}
+		wait(includeServers(cx, vector<AddressExclusion>(1)));
+		wait(includeLocalities(cx, vector<std::string>(), failed, true));
+		wait(includeLocalities(cx, vector<std::string>(), !failed, true));
+		self->includeAddresses(toKill2);
 
 		return Void();
 	}
@@ -591,7 +522,10 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("Step", "Including all")
 		    .detail("ClusterAvailable", g_simulator.isAvailable())
 		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
+		state bool failed = true;
 		wait(includeServers(cx, vector<AddressExclusion>(1)));
+		wait(includeLocalities(cx, vector<std::string>(), failed, true));
+		wait(includeLocalities(cx, vector<std::string>(), !failed, true));
 		TraceEvent("RemoveAndKill", functionId)
 		    .detail("Step", "Included all")
 		    .detail("ClusterAvailable", g_simulator.isAvailable())
@@ -692,20 +626,60 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("FailedAddresses", describe(toKillMarkFailedArray))
 		    .detail("ClusterAvailable", g_simulator.isAvailable())
 		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
+
+		state bool excludeLocalitiesInsteadOfServers = deterministicRandom()->coinflip();
 		if (markExcludeAsFailed) {
-			wait(excludeServers(cx, toKillMarkFailedArray, true));
+			if (excludeLocalitiesInsteadOfServers) {
+				state std::unordered_set<std::string> toKillLocalitiesFailed =
+				    self->getLocalitiesFromAddresses(toKillMarkFailedArray);
+				TraceEvent("RemoveAndKill", functionId)
+				    .detail("Step", "Excluding localities with failed option")
+				    .detail("FailedAddressesSize", toKillMarkFailedArray.size())
+				    .detail("FailedAddresses", describe(toKillMarkFailedArray))
+				    .detail("FailedLocaitiesSize", toKillLocalitiesFailed.size())
+				    .detail("FailedLocaities", describe(toKillLocalitiesFailed));
+
+				wait(excludeLocalities(cx, toKillLocalitiesFailed, true));
+			} else {
+				TraceEvent("RemoveAndKill", functionId)
+				    .detail("Step", "Excluding servers with failed option")
+				    .detail("FailedAddressesSize", toKillMarkFailedArray.size())
+				    .detail("FailedAddresses", describe(toKillMarkFailedArray));
+
+				wait(excludeServers(cx, toKillMarkFailedArray, true));
+			}
 		}
-		wait(excludeServers(cx, toKillArray));
+
+		if (excludeLocalitiesInsteadOfServers) {
+			state std::unordered_set<std::string> toKillLocalities = self->getLocalitiesFromAddresses(toKillArray);
+			TraceEvent("RemoveAndKill", functionId)
+			    .detail("Step", "Excluding localities without failed option")
+			    .detail("AddressesSize", toKillArray.size())
+			    .detail("Addresses", describe(toKillArray))
+			    .detail("LocaitiesSize", toKillLocalities.size())
+			    .detail("Locaities", describe(toKillLocalities));
+
+			wait(excludeLocalities(cx, toKillLocalities, false));
+		} else {
+			TraceEvent("RemoveAndKill", functionId)
+			    .detail("Step", "Excluding servers without failed option")
+			    .detail("AddressesSize", toKillArray.size())
+			    .detail("Addresses", describe(toKillArray));
+
+			wait(excludeServers(cx, toKillArray));
+		}
 
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough
 		// servers left alive to do a coordinators auto (?)
 		if (toKill.size()) {
-			// Wait for removal to be safe
-			TraceEvent("RemoveAndKill", functionId)
-			    .detail("Step", "Wait For Server Exclusion")
-			    .detail("Addresses", describe(toKill))
-			    .detail("ClusterAvailable", g_simulator.isAvailable());
-			wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
+			if (!excludeLocalitiesInsteadOfServers) {
+				// Wait for removal to be safe
+				TraceEvent("RemoveAndKill", functionId)
+				    .detail("Step", "Wait For Server Exclusion")
+				    .detail("Addresses", describe(toKill))
+				    .detail("ClusterAvailable", g_simulator.isAvailable());
+				wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
+			}
 
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "coordinators auto")
@@ -768,181 +742,63 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return subset;
 	}
 
-	// creates a random set of size n from given unordered_set.
-	template <class T>
-	static std::set<T> random_subset(std::unordered_set<T>& s, int n) {
-		return random_subset(std::vector<T>(s.begin(), s.end()), n);
-	}
-
-	// creates a random set of size n from given set.
-	template <class T>
-	static std::set<T> random_subset(std::set<T>& s, int n) {
-		return random_subset(std::vector<T>(s.begin(), s.end()), n);
-	}
-
 	bool killContainsProcess(AddressExclusion kill, NetworkAddress process) {
 		return kill.excludes(process) || (machineProcesses.find(kill) != machineProcesses.end() &&
 		                                  machineProcesses[kill].count(AddressExclusion(process.ip, process.port)) > 0);
 	}
 
-	// Returns the list of IPAddresses of the workers that match the given list of localities.
-	ACTOR Future<std::set<AddressExclusion>> getLocalitiesAddresses(Database cx, std::set<std::string> localities) {
-		state Transaction tr(cx);
-		state std::vector<ProcessData> workers = wait(getWorkers(&tr));
-		state std::set<AddressExclusion> addressesSet;
-		for (const auto& l : localities) {
-			std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, l);
-			addressesSet.insert(localityAddresses.begin(), localityAddresses.end());
-		}
-
-		return addressesSet;
-	}
-
-	// Finds the safe localities list that can be excluded from the killable safeProcesses list.
+	// Finds the localities list that can be excluded from the safe killable addresses list.
 	// If excluding based on a particular locality of the safe process, kills any other process, that
-	// particular locality is not included in the killable safeLocalities list.
-	std::set<std::string> getSafeLocalitiesToKill(std::vector<ISimulator::ProcessInfo*> const& safeProcesses) {
-		std::unordered_map<std::string, int> safeLocalitiesCount;
-		for (const auto& processInfo : safeProcesses) {
-			if (processInfo->locality.dcId().present())
-				safeLocalitiesCount[ExcludeLocalityKeyDcIdPrefix.toString() +
-				                    processInfo->locality.dcId().get().toString()]++;
-			if (processInfo->locality.machineId().present())
-				safeLocalitiesCount[ExcludeLocalityKeyMachineIdPrefix.toString() +
-				                    processInfo->locality.machineId().get().toString()]++;
-			if (processInfo->locality.processId().present())
-				safeLocalitiesCount[ExcludeLocalityKeyProcessIdPrefix.toString() +
-				                    processInfo->locality.processId().get().toString()]++;
-			if (processInfo->locality.zoneId().present())
-				safeLocalitiesCount[ExcludeLocalityKeyZoneIdPrefix.toString() +
-				                    processInfo->locality.zoneId().get().toString()]++;
-		}
-
-		auto processes = getServers();
+	// particular locality is not included in the killable localities list.
+	std::unordered_set<std::string> getLocalitiesFromAddresses(const std::vector<AddressExclusion>& addresses) {
 		std::unordered_map<std::string, int> allLocalitiesCount;
+		std::unordered_map<std::string, int> killableLocalitiesCount;
+		auto processes = getServers();
 		for (const auto& processInfo : processes) {
 			if (processInfo->locality.dcId().present())
 				allLocalitiesCount[ExcludeLocalityKeyDcIdPrefix.toString() +
 				                   processInfo->locality.dcId().get().toString()]++;
+			if (processInfo->locality.zoneId().present())
+				allLocalitiesCount[ExcludeLocalityKeyZoneIdPrefix.toString() +
+				                   processInfo->locality.zoneId().get().toString()]++;
 			if (processInfo->locality.machineId().present())
 				allLocalitiesCount[ExcludeLocalityKeyMachineIdPrefix.toString() +
 				                   processInfo->locality.machineId().get().toString()]++;
 			if (processInfo->locality.processId().present())
 				allLocalitiesCount[ExcludeLocalityKeyProcessIdPrefix.toString() +
 				                   processInfo->locality.processId().get().toString()]++;
-			if (processInfo->locality.zoneId().present())
-				allLocalitiesCount[ExcludeLocalityKeyZoneIdPrefix.toString() +
-				                   processInfo->locality.zoneId().get().toString()]++;
+
+			AddressExclusion pAddr(processInfo->address.ip, processInfo->address.port);
+			if (std::find(addresses.begin(), addresses.end(), pAddr) != addresses.end()) {
+				if (processInfo->locality.dcId().present())
+					killableLocalitiesCount[ExcludeLocalityKeyDcIdPrefix.toString() +
+					                        processInfo->locality.dcId().get().toString()]++;
+				if (processInfo->locality.zoneId().present())
+					killableLocalitiesCount[ExcludeLocalityKeyZoneIdPrefix.toString() +
+					                        processInfo->locality.zoneId().get().toString()]++;
+				if (processInfo->locality.machineId().present())
+					killableLocalitiesCount[ExcludeLocalityKeyMachineIdPrefix.toString() +
+					                        processInfo->locality.machineId().get().toString()]++;
+				if (processInfo->locality.processId().present())
+					killableLocalitiesCount[ExcludeLocalityKeyProcessIdPrefix.toString() +
+					                        processInfo->locality.processId().get().toString()]++;
+			}
 		}
 
-		std::set<std::string> safeLocalities;
-		for (const auto& l : safeLocalitiesCount) {
+		std::unordered_set<std::string> toKillLocalities;
+		for (const auto& l : killableLocalitiesCount) {
 			if (l.second == allLocalitiesCount[l.first]) {
-				safeLocalities.insert(l.first);
+				toKillLocalities.insert(l.first);
 			}
 		}
 
-		return safeLocalities;
-	}
-
-	// Attempts to exclude a set of localities, and once the exclusion is successful it kills them.
-	// If markExcludeAsFailed is true, then it is an error if we cannot complete the exclusion.
-	ACTOR static Future<Void> removeAndKillLocalities(RemoveServersSafelyWorkload* self,
-	                                                  Database cx,
-	                                                  std::set<std::string> toKill,
-	                                                  std::set<AddressExclusion>* pIncAddrs,
-	                                                  bool markExcludeAsFailed) {
-		state UID functionId = nondeterministicRandom()->randomUniqueID();
-
-		// First clear the exclusion list and exclude the given list
-		TraceEvent("RemoveAndKillLocalities", functionId)
-		    .detail("Step", "Including all")
-		    .detail("ClusterAvailable", g_simulator.isAvailable())
-		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
-		wait(includeServers(cx, vector<AddressExclusion>(1)));
-		TraceEvent("RemoveAndKillLocalities", functionId)
-		    .detail("Step", "Included all")
-		    .detail("ClusterAvailable", g_simulator.isAvailable())
-		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
-		// Reinclude the addresses that were excluded, if present
-		if (pIncAddrs) {
-			self->includeAddresses(*pIncAddrs);
-		}
-
-		state std::set<std::string> toKillMarkFailedSet;
-		// if markExcludedasFailed is true, get random subset of tokill, check for
-		// safe exclusions and exclude them with failed option.
-		if (markExcludeAsFailed) {
-			state int retries = 0;
-			loop {
-				state bool safe = false;
-				toKillMarkFailedSet = random_subset(toKill, deterministicRandom()->randomInt(0, toKill.size() + 1));
-				state std::set<AddressExclusion> toKillMarkFailedAddressesSet =
-				    wait(self->getLocalitiesAddresses(cx, toKillMarkFailedSet));
-				state std::vector<AddressExclusion> toKillMarkFailedAddressesVector(
-				    toKillMarkFailedAddressesSet.begin(), toKillMarkFailedAddressesSet.end());
-				TraceEvent("RemoveAndKillLocalities", functionId)
-				    .detail("Step", "SafetyCheck")
-				    .detail("Exclusion Localities", describe(toKillMarkFailedSet))
-				    .detail("Exclusion Addresses", describe(toKillMarkFailedAddressesSet));
-				choose {
-					when(bool _safe = wait(checkSafeExclusions(cx, toKillMarkFailedAddressesVector))) {
-						safe = _safe && self->protectServers(toKillMarkFailedAddressesSet).size() ==
-						                    toKillMarkFailedAddressesSet.size();
-					}
-					when(wait(delay(5.0))) {
-						TraceEvent("RemoveAndKillLocalities", functionId)
-						    .detail("Step", "SafetyCheckTimedOut")
-						    .detail("Exclusion Localities", describe(toKillMarkFailedSet))
-						    .detail("Exclusion Addresses", describe(toKillMarkFailedAddressesSet));
-					}
-				}
-				if (retries == self->maxSafetyCheckRetries) {
-					// Do not mark as failed if limit is reached
-					TraceEvent("RemoveAndKillLocalities", functionId)
-					    .detail("Step", "SafetyCheckLimitReached")
-					    .detail("Retries", retries);
-					markExcludeAsFailed = false;
-					safe = true;
-				}
-				if (safe)
-					break;
-				retries++;
-			}
-		}
-
-		state std::unordered_set<std::string> toKillUnorderedSet;
-		state std::unordered_set<std::string> toKillMarkFailedUnorderedSet;
-		toKillUnorderedSet.insert(toKill.begin(), toKill.end());
-		toKillMarkFailedUnorderedSet.insert(toKillMarkFailedSet.begin(), toKillMarkFailedSet.end());
-
-		TraceEvent("RemoveAndKillLocalities", functionId)
-		    .detail("Step", "Activate Localities Exclusion")
-		    .detail("KillLocalitiesSize", toKill.size())
-		    .detail("ToKill", describe(toKill))
-		    .detail("Localities", describe(toKillUnorderedSet))
-		    .detail("FailedLocalities", describe(toKillMarkFailedUnorderedSet))
-		    .detail("ClusterAvailable", g_simulator.isAvailable())
-		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
-		// exclude localities with failed option as true
-		if (markExcludeAsFailed) {
-			wait(excludeLocalities(cx, &toKillMarkFailedUnorderedSet, true));
-		}
-		// exclude localities with failed option as false.
-		wait(excludeLocalities(cx, &toKillUnorderedSet));
-
-		TraceEvent("RemoveAndKillLocalities", functionId)
-		    .detail("Step", "done")
-		    .detail("ClusterAvailable", g_simulator.isAvailable());
-
-		return Void();
+		return toKillLocalities;
 	}
 
 	// Update the g_simulator processes list with the process ids
 	// of the workers, that are generated as part of worker creation.
 	ACTOR static Future<Void> updateProcessIds(Database cx) {
-		Transaction tr(cx);
-		std::vector<ProcessData> workers = wait(getWorkers(&tr));
+		std::vector<ProcessData> workers = wait(getWorkers(cx));
 		std::unordered_map<NetworkAddress, int> addressToIndexMap;
 		for (int i = 0; i < workers.size(); i++) {
 			addressToIndexMap[workers[i].address] = i;
