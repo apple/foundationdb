@@ -72,7 +72,7 @@ extern double P_EXPENSIVE_VALIDATION;
 enum class BuggifyType : uint8_t { General = 0, Client };
 bool isBuggifyEnabled(BuggifyType type);
 void clearBuggifySections(BuggifyType type);
-int getSBVar(std::string file, int line, BuggifyType);
+int getSBVar(std::string const& file, int line, BuggifyType);
 void enableBuggify(bool enabled,
                    BuggifyType type); // Currently controls buggification and (randomized) expensive validation
 bool validationIsEnabled(BuggifyType type);
@@ -83,8 +83,8 @@ bool validationIsEnabled(BuggifyType type);
 #define EXPENSIVE_VALIDATION                                                                                           \
 	(validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
-extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
-extern Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit = "");
+extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
+extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");
 extern std::string format(const char* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.

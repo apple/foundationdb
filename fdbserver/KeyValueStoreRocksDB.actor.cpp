@@ -455,7 +455,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	StorageBytes getStorageBytes() const override {
 		uint64_t live = 0;
-		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kEstimateLiveDataSize, &live));
+		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
 
 		int64_t free;
 		int64_t total;
@@ -488,7 +488,7 @@ IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
 
 namespace {
 
-TEST_CASE("fdbserver/KeyValueStoreRocksDB/Reopen") {
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/Reopen") {
 	state const std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 

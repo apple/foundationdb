@@ -745,7 +745,21 @@ ACTOR Future<Void> monitorHighMemory(int64_t threshold) {
 	return Void();
 }
 
-ACTOR Future<Void> storageServerRollbackRebooter(Future<Void> prevStorageServer,
+struct TrackRunningStorage {
+	UID self;
+	KeyValueStoreType storeType;
+	std::set<std::pair<UID, KeyValueStoreType>>* runningStorages;
+	TrackRunningStorage(UID self,
+	                    KeyValueStoreType storeType,
+	                    std::set<std::pair<UID, KeyValueStoreType>>* runningStorages)
+	  : self(self), storeType(storeType), runningStorages(runningStorages) {
+		runningStorages->emplace(self, storeType);
+	}
+	~TrackRunningStorage() { runningStorages->erase(std::make_pair(self, storeType)); };
+};
+
+ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
+                                                 Future<Void> prevStorageServer,
                                                  KeyValueStoreType storeType,
                                                  std::string filename,
                                                  UID id,
@@ -756,6 +770,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(Future<Void> prevStorageServer,
                                                  ActorCollection* filesClosed,
                                                  int64_t memoryLimit,
                                                  IKeyValueStore* store) {
+	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
 		if (!e.isError())
@@ -1040,6 +1055,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
+	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
 	interf.initEndpoints();
 
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
@@ -1152,7 +1168,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connFile);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors(f, kv, s.storeID, kvClosed);
-				f = storageServerRollbackRebooter(f,
+				f = storageServerRollbackRebooter(&runningStorages,
+				                                  f,
 				                                  s.storeType,
 				                                  s.filename,
 				                                  recruited.id(),
@@ -1514,7 +1531,17 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				activeSharedTLog->set(logData.uid);
 			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
-				if (!storageCache.exists(req.reqId)) {
+				// We want to prevent double recruiting on a worker unless we try to recruit something
+				// with a different storage engine (otherwise storage migration won't work for certain
+				// configuration). Additionally we also need to allow double recruitment for seed servers.
+				// The reason for this is that a storage will only remove itself if after it was able
+				// to read the system key space. But if recovery fails right after a `configure new ...`
+				// was run it won't be able to do so.
+				if (!storageCache.exists(req.reqId) &&
+				    (std::all_of(runningStorages.begin(),
+				                 runningStorages.end(),
+				                 [&req](const auto& p) { return p.second != req.storeType; }) ||
+				     req.seedTag != invalidTag)) {
 
 					bool isTss = req.tssPairIDAndVersion.present();
 
@@ -1563,7 +1590,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                               folder);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
-					s = storageServerRollbackRebooter(s,
+					s = storageServerRollbackRebooter(&runningStorages,
+					                                  s,
 					                                  req.storeType,
 					                                  filename,
 					                                  recruited.id(),
@@ -1575,8 +1603,15 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                                  memoryLimit,
 					                                  data);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
-				} else
+				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
+				} else {
+					TraceEvent("AttemptedDoubleRecruitement", interf.id()).detail("ForRole", "StorageServer");
+					errorForwarders.add(map(delay(0.5), [reply = req.reply](Void) {
+						reply.sendError(recruitment_failed());
+						return Void();
+					}));
+				}
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
 				CommitProxyInterface recruited;

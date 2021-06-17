@@ -67,6 +67,7 @@ set(FLOW_SRCS
   Tracing.h
   Tracing.actor.cpp
   TreeBenchmark.h
+  TypeTraits.h
   UnitTest.cpp
   UnitTest.h
   XmlTraceLogFormatter.cpp
