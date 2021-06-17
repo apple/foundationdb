@@ -47,6 +47,7 @@
 
 #include "fdbcli/FlowLineNoise.h"
 #include "fdbcli/fdbcli.actor.h"
+#include "flow/ThreadHelper.actor.h"
 
 #include <cinttypes>
 #include <type_traits>
@@ -3602,9 +3603,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						state std::string passPhrase = deterministicRandom()->randomAlphaNumeric(10);
 						warn.cancel(); // don't warn while waiting on user input
 						printf("Unlocking the database is a potentially dangerous operation.\n");
+						printf("%s\n", passPhrase.c_str());
+						fflush(stdout);
 						Optional<std::string> input = wait(linenoise.read(
-						    format("Repeat the following passphrase if you would like to proceed (%s) : ",
-						           passPhrase.c_str())));
+						    format("Repeat the above passphrase if you would like to proceed:")));
 						warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db);
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
@@ -3766,9 +3768,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for (auto it : address_interface) {
-							if (db->apiVersionAtLeast(700))
-								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
-								    .reboot.send(RebootRequest());
+							if (db->apiVersionAtLeast(700)) {
+							wait(success(safeThreadFutureToFuture(db2->rebootWorker(it.second.first, false, 0))));
+								// BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+								//     .reboot.send(RebootRequest());
+							}
 							else
 								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
 						}
