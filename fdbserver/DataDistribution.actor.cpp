@@ -4093,7 +4093,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection,
                                                  const DDEnabledState* ddEnabledState) {
 	state int speed = 0;
-	state AsyncVar<bool> stopWiggleSignal(false);
+	state AsyncVar<bool> stopWiggleSignal(true);
 	state PromiseStream<Void> finishStorageWiggleSignal;
 	state SignalableActorCollection collection;
 	teamCollection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
@@ -4119,11 +4119,13 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 					collection.add(perpetualStorageWiggler(
 					    &stopWiggleSignal, finishStorageWiggleSignal, teamCollection, ddEnabledState));
 					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId);
-				} else if (speed == 0 && !stopWiggleSignal.get()) {
-					stopWiggleSignal.set(true);
-					wait(collection.signalAndReset());
+				} else if (speed == 0) {
+					if (!stopWiggleSignal.get()) {
+						stopWiggleSignal.set(true);
+						wait(collection.signalAndReset());
+						teamCollection->pauseWiggle->set(true);
+					}
 					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId);
-					teamCollection->pauseWiggle->set(true);
 				}
 				wait(watchFuture);
 				break;
