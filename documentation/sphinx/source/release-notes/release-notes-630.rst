@@ -7,10 +7,11 @@ Release Notes
 
 6.3.15
 ======
-* Added several counters to the master metrics to count the number of requests of each type received. `(PR #4829) <https://github.com/apple/foundationdb/pull/4829>`_
-* Added ``RecoveryCount`` to trace events when tLog begins. `(PR #4944) <https://github.com/apple/foundationdb/pull/4944>`_
+* Added several counters to the ``MasterMetrics`` trace event to count the number of requests of each type received. `(PR #4829) <https://github.com/apple/foundationdb/pull/4829>`_
+* Added ``RecoveryCount`` to trace events when a transaction log begins. `(PR #4944) <https://github.com/apple/foundationdb/pull/4944>`_
 * Added metrics to compare the bandwidth used by data distributions and updates. `(PR #4907) <https://github.com/apple/foundationdb/pull/4907>`_
-* Fixed batch txn throttling. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
+* Batch transactions could be throttled with an error when the latency between ratekeeper and some proxies was high. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
+* Fix accounting issue that could cause higher priority GRV requests to be rejected after many batch priority requests have been rejected on a proxy. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
 
 6.3.14
 ======
