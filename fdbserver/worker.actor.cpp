@@ -275,6 +275,7 @@ ACTOR Future<Void> loadedPonger(FutureStream<LoadedPingRequest> pings) {
 }
 
 StringRef fileStoragePrefix = LiteralStringRef("storage-");
+StringRef testingStoragePrefix = LiteralStringRef("testingstorage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
@@ -318,6 +319,7 @@ std::string filenameFromSample(KeyValueStoreType storeType, std::string folder, 
 }
 
 std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std::string prefix, UID id) {
+
 	if (storeType == KeyValueStoreType::SSD_BTREE_V1)
 		return joinPath(folder, prefix + id.toString() + ".fdb");
 	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
@@ -329,6 +331,7 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, prefix + id.toString() + ".rocksdb");
 
+	TraceEvent(SevError, "UnknownStoreType").detail("StoreType", storeType.toString());
 	UNREACHABLE();
 }
 
@@ -447,6 +450,9 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 		if (filename.startsWith(fileStoragePrefix)) {
 			store.storedComponent = DiskStore::Storage;
 			prefix = fileStoragePrefix;
+		} else if (filename.startsWith(testingStoragePrefix)) {
+			store.storedComponent = DiskStore::Storage;
+			prefix = testingStoragePrefix;
 		} else if (filename.startsWith(fileVersionedLogDataPrefix)) {
 			store.storedComponent = DiskStore::TLogData;
 			// Use the option string that's in the file rather than tLogOptions.toPrefix(),
@@ -738,6 +744,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(Future<Void> prevStorageServer,
                                                  std::string filename,
                                                  UID id,
                                                  LocalityData locality,
+                                                 bool isTss,
                                                  Reference<AsyncVar<ServerDBInfo>> db,
                                                  std::string folder,
                                                  ActorCollection* filesClosed,
@@ -755,6 +762,9 @@ ACTOR Future<Void> storageServerRollbackRebooter(Future<Void> prevStorageServer,
 		StorageServerInterface recruited;
 		recruited.uniqueID = id;
 		recruited.locality = locality;
+		recruited.tssPairID =
+		    isTss ? Optional<UID>(UID()) : Optional<UID>(); // set this here since we use its presence to determine
+		                                                    // whether this server is a tss or not
 		recruited.initEndpoints();
 
 		DUMPTOKEN(recruited.getValue);
@@ -1096,14 +1106,27 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
+				// std::string doesn't have startsWith
+				std::string tssPrefix = testingStoragePrefix.toString();
+				// TODO might be more efficient to mark a boolean on DiskStore in getDiskStores, but that kind of breaks
+				// the abstraction since DiskStore also applies to storage cache + tlog
+				bool isTss = s.filename.find(tssPrefix) != std::string::npos;
+				Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
+
 				StorageServerInterface recruited;
 				recruited.uniqueID = s.storeID;
 				recruited.locality = locality;
+				recruited.tssPairID =
+				    isTss ? Optional<UID>(UID())
+				          : Optional<UID>(); // presence of optional is used as source of truth for tss vs not. Value
+				                             // gets overridden later in restoreDurableState
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
-				startRole(Role::STORAGE_SERVER, recruited.id(), interf.id(), details, "Restored");
+				details["IsTSS"] = isTss ? "Yes" : "No";
+
+				startRole(ssRole, recruited.id(), interf.id(), details, "Restored");
 
 				DUMPTOKEN(recruited.getValue);
 				DUMPTOKEN(recruited.getKey);
@@ -1128,12 +1151,13 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				                                  s.filename,
 				                                  recruited.id(),
 				                                  recruited.locality,
+				                                  isTss,
 				                                  dbInfo,
 				                                  folder,
 				                                  &filesClosed,
 				                                  memoryLimit,
 				                                  kv);
-				errorForwarders.add(forwardError(errors, Role::STORAGE_SERVER, recruited.id(), f));
+				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				std::string logQueueBasename;
 				const std::string filename = basename(s.filename);
@@ -1485,13 +1509,19 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
 				if (!storageCache.exists(req.reqId)) {
+
+					bool isTss = req.tssPairIDAndVersion.present();
+
 					StorageServerInterface recruited(req.interfaceId);
 					recruited.locality = locality;
+					recruited.tssPairID = isTss ? req.tssPairIDAndVersion.get().first : Optional<UID>();
 					recruited.initEndpoints();
 
 					std::map<std::string, std::string> details;
 					details["StorageEngine"] = req.storeType.toString();
-					startRole(Role::STORAGE_SERVER, recruited.id(), interf.id(), details);
+					details["IsTSS"] = std::to_string(isTss);
+					Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
+					startRole(ssRole, recruited.id(), interf.id(), details);
 
 					DUMPTOKEN(recruited.getValue);
 					DUMPTOKEN(recruited.getKey);
@@ -1509,13 +1539,22 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					// printf("Recruited as storageServer\n");
 
 					std::string filename =
-					    filenameFromId(req.storeType, folder, fileStoragePrefix.toString(), recruited.id());
+					    filenameFromId(req.storeType,
+					                   folder,
+					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
+					                   recruited.id());
 					IKeyValueStore* data = openKVStore(req.storeType, filename, recruited.id(), memoryLimit);
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
-					Future<Void> s = storageServer(data, recruited, req.seedTag, storageReady, dbInfo, folder);
+					Future<Void> s = storageServer(data,
+					                               recruited,
+					                               req.seedTag,
+					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
+					                               storageReady,
+					                               dbInfo,
+					                               folder);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(s,
@@ -1523,12 +1562,13 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                                  filename,
 					                                  recruited.id(),
 					                                  recruited.locality,
+					                                  isTss,
 					                                  dbInfo,
 					                                  folder,
 					                                  &filesClosed,
 					                                  memoryLimit,
 					                                  data);
-					errorForwarders.add(forwardError(errors, Role::STORAGE_SERVER, recruited.id(), s));
+					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else
 					forwardPromise(req.reply, storageCache.get(req.reqId));
 			}
@@ -2109,6 +2149,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 
 const Role Role::WORKER("Worker", "WK", false);
 const Role Role::STORAGE_SERVER("StorageServer", "SS");
+const Role Role::TESTING_STORAGE_SERVER("TestingStorageServer", "ST");
 const Role Role::TRANSACTION_LOG("TLog", "TL");
 const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
 const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");
