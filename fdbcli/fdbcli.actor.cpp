@@ -2391,7 +2391,7 @@ ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool
 	return err;
 }
 
-// Includes the servers that could be ipaddresses or localities back to the cluster.
+// Includes the servers that could be IP addresses or localities back to the cluster.
 ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 	std::vector<AddressExclusion> addresses;
 	state std::vector<std::string> localities;
@@ -2423,14 +2423,14 @@ ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 		std::vector<AddressExclusion> includeAll;
 		includeAll.push_back(AddressExclusion());
 		wait(makeInterruptable(includeServers(db, includeAll, failed)));
-		wait(makeInterruptable(includeLocalities(db, &localities, failed, all)));
+		wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
 	} else {
 		if (!addresses.empty()) {
 			wait(makeInterruptable(includeServers(db, addresses, failed)));
 		}
 		if (!localities.empty()) {
 			// includes the servers that belong to given localities.
-			wait(makeInterruptable(includeLocalities(db, &localities, failed, all)));
+			wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
 		}
 	}
 	return false;
@@ -2492,7 +2492,7 @@ ACTOR Future<bool> exclude(Database db,
 					noMatchLocalities.push_back(t->toString());
 				} else {
 					// add all the server ipaddresses that belong to the given localities to the exclusionSet.
-					std::copy(localityAddresses.begin(), localityAddresses.end(), back_inserter(exclusionVector));
+					exclusionVector.insert(exclusionVector.end(), localityAddresses.begin(), localityAddresses.end());
 					exclusionSet.insert(localityAddresses.begin(), localityAddresses.end());
 				}
 				exclusionLocalities.insert(t->toString());
@@ -2632,7 +2632,7 @@ ACTOR Future<bool> exclude(Database db,
 			wait(makeInterruptable(excludeServers(db, exclusionAddresses, markFailed)));
 		}
 		if (!exclusionLocalities.empty()) {
-			wait(makeInterruptable(excludeLocalities(db, &exclusionLocalities, markFailed)));
+			wait(makeInterruptable(excludeLocalities(db, exclusionLocalities, markFailed)));
 		}
 
 		if (waitForAllExcluded) {

@@ -106,8 +106,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force",
 	                                               "failed/force",
-	                                               "excludedlocality/force",
-	                                               "failedlocality/force" };
+	                                               "excluded_locality/force",
+	                                               "failed_locality/force" };
 
 std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
 
@@ -2211,7 +2211,7 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 		return result;
 	// If force option is not set, we need to do safety check
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
-	    failed ? "failedlocality" : "excludedlocality", "force")];
+	    failed ? "failed_locality" : "excluded_locality", "force")];
 	// only do safety check when we have localities to be excluded and the force option key is not set
 	if (localities.size() && !(force.first && force.second.present())) {
 		bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, failed, &result));
@@ -2219,7 +2219,7 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 			return result;
 	}
 
-	excludeLocalities(ryw->getTransaction(), &localities, failed);
+	excludeLocalities(ryw->getTransaction(), localities, failed);
 	includeLocalities(ryw);
 
 	return result;

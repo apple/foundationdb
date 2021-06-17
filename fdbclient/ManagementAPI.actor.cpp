@@ -1597,7 +1597,7 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 }
 
 // excludes localities by setting the keys in api version below 7.0
-void excludeLocalities(Transaction& tr, std::unordered_set<std::string>* localities, bool failed) {
+void excludeLocalities(Transaction& tr, std::unordered_set<std::string> localities, bool failed) {
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1606,35 +1606,35 @@ void excludeLocalities(Transaction& tr, std::unordered_set<std::string>* localit
 	auto localityVersionKey = failed ? failedLocalityVersionKey : excludedLocalityVersionKey;
 	tr.addReadConflictRange(singleKeyRange(localityVersionKey)); // To conflict with parallel includeLocalities
 	tr.set(localityVersionKey, excludeVersionKey);
-	for (const auto& l : *localities) {
+	for (const auto& l : localities) {
 		if (failed) {
 			tr.set(encodeFailedLocalityKey(l), StringRef());
 		} else {
 			tr.set(encodeExcludedLocalityKey(l), StringRef());
 		}
 	}
-	TraceEvent("ExcludeLocalitiesCommit").detail("Localities", describe(*localities)).detail("ExcludeFailed", failed);
+	TraceEvent("ExcludeLocalitiesCommit").detail("Localities", describe(localities)).detail("ExcludeFailed", failed);
 }
 
 // Exclude the servers matching the given set of localities from use as state servers.
 // excludes localities by setting the keys.
-ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string>* localities, bool failed) {
+ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
-				            failed ? "failedlocality" : "excludedlocality", "force"),
+				            failed ? "failed_locality" : "excluded_locality", "force"),
 				        ValueRef());
-				for (const auto& l : *localities) {
+				for (const auto& l : localities) {
 					Key addr = failed
 					               ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
 					               : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
 					ryw.set(addr, ValueRef());
 				}
 				TraceEvent("ExcludeLocalitiesSpecialKeySpaceCommit")
-				    .detail("Localities", describe(*localities))
+				    .detail("Localities", describe(localities))
 				    .detail("ExcludeFailed", failed);
 
 				wait(ryw.commit());
@@ -1762,7 +1762,7 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 
 // Remove the given localities from the exclusion list.
 // include localities by clearing the keys.
-ACTOR Future<Void> includeLocalities(Database cx, vector<std::string>* localities, bool failed, bool includeAll) {
+ACTOR Future<Void> includeLocalities(Database cx, vector<std::string> localities, bool failed, bool includeAll) {
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
 		state ReadYourWritesTransaction ryw(cx);
@@ -1776,7 +1776,7 @@ ACTOR Future<Void> includeLocalities(Database cx, vector<std::string>* localitie
 						ryw.clear(SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
 					}
 				} else {
-					for (const auto& l : *localities) {
+					for (const auto& l : localities) {
 						Key locality =
 						    failed ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
 						           : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
@@ -1784,7 +1784,7 @@ ACTOR Future<Void> includeLocalities(Database cx, vector<std::string>* localitie
 					}
 				}
 				TraceEvent("IncludeLocalitiesCommit")
-				    .detail("Localities", describe(*localities))
+				    .detail("Localities", describe(localities))
 				    .detail("Failed", failed)
 				    .detail("IncludeAll", includeAll);
 
@@ -1822,7 +1822,7 @@ ACTOR Future<Void> includeLocalities(Database cx, vector<std::string>* localitie
 						tr.clear(excludedLocalityKeys);
 					}
 				} else {
-					for (const auto& l : *localities) {
+					for (const auto& l : localities) {
 						if (failed) {
 							tr.clear(encodeFailedLocalityKey(l));
 						} else {
@@ -1832,7 +1832,7 @@ ACTOR Future<Void> includeLocalities(Database cx, vector<std::string>* localitie
 				}
 
 				TraceEvent("IncludeLocalitiesCommit")
-				    .detail("Localities", describe(*localities))
+				    .detail("Localities", describe(localities))
 				    .detail("Failed", failed)
 				    .detail("IncludeAll", includeAll);
 
@@ -1955,7 +1955,7 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
 
 // Decodes the locality string to a pair of locality prefix and its value.
 // The prefix could be dcid, processid, machineid, processid.
-std::pair<std::string, std::string> decodeLocality(std::string& locality) {
+std::pair<std::string, std::string> decodeLocality(const std::string& locality) {
 	StringRef localityRef(locality.c_str());
 	if (localityRef.startsWith(ExcludeLocalityKeyDcIdPrefix)) {
 		return std::make_pair(LocalityData::keyDcId.toString(),
@@ -1976,7 +1976,8 @@ std::pair<std::string, std::string> decodeLocality(std::string& locality) {
 
 // Returns the list of IPAddresses of the workers that match the given locality.
 // Example: locality="dcid:primary" returns all the ip addresses of the workers in the primary dc.
-std::set<AddressExclusion> getAddressesByLocality(std::vector<ProcessData>& workers, std::string locality) {
+std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers,
+                                                  const std::string& locality) {
 	std::pair<std::string, std::string> localityKeyValue = decodeLocality(locality);
 
 	std::set<AddressExclusion> localityAddresses;
