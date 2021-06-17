@@ -187,7 +187,7 @@ public:
 	NetworkAddressList getLocalAddresses() const;
 
 	// Returns all peers that the FlowTransport is monitoring.
-	std::unordered_map<NetworkAddress, Reference<struct Peer>>* getAllPeers();
+	const std::unordered_map<NetworkAddress, Reference<Peer>>& getAllPeers() const;
 
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();

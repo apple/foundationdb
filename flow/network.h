@@ -298,7 +298,7 @@ struct NetworkAddressList {
 		return address.toString() + ", " + secondaryAddress.get().toString();
 	}
 
-	bool contain(const NetworkAddress& r) const {
+	bool contains(const NetworkAddress& r) const {
 		return address == r || (secondaryAddress.present() && secondaryAddress.get() == r);
 	}
 

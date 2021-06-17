@@ -1394,8 +1394,8 @@ NetworkAddress FlowTransport::getLocalAddress() const {
 	return self->localAddresses.address;
 }
 
-std::unordered_map<NetworkAddress, Reference<struct Peer>>* FlowTransport::getAllPeers() {
-	return &self->peers;
+const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAllPeers() const {
+	return self->peers;
 }
 
 std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompatiblePeers() {
