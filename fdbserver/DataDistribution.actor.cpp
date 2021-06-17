@@ -660,6 +660,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	Promise<UID> removeFailedServer;
 
+	Reference<AsyncVar<Optional<struct ServerDBInfo>>> dbInfo;
+
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
 		LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*)storageServerSet.getPtr();
@@ -697,7 +699,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 bool primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy,
 	                 PromiseStream<GetMetricsRequest> getShardMetrics,
-	                 Promise<UID> removeFailedServer)
+	                 Promise<UID> removeFailedServer,
+					 Reference<AsyncVar<struct ServerDBInfo>> const& dbInfo)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false),
 	    teamBuilder(Void()), badTeamRemover(Void()), checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()),
@@ -712,7 +715,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
 	    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
 	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
-	    getShardMetrics(getShardMetrics), removeFailedServer(removeFailedServer) {
+	    getShardMetrics(getShardMetrics), removeFailedServer(removeFailedServer), dbInfo(dbInfo) {
 		if (!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest("DDTrackerStarting");
 		}
@@ -1321,7 +1324,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		addTeam(newTeamServers, isInitialTeam);
 	}
 
-	void addTeam(const vector<Reference<TCServerInfo>>& newTeamServers,
+	ACTOR Future<Void> addTeam(const vector<Reference<TCServerInfo>>& newTeamServers,
 	             bool isInitialTeam,
 	             bool redundantTeam = false) {
 		auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
@@ -1334,13 +1337,22 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
 		if (badTeam) {
 			badTeams.push_back(teamInfo);
-			return;
+			return Void();
 		}
 
 		// For a good team, we add it to teams and create machine team for it when necessary
 		teams.push_back(teamInfo);
 		for (int i = 0; i < newTeamServers.size(); ++i) {
 			newTeamServers[i]->teams.push_back(teamInfo);
+		}
+
+		if (dbInfo->get().present()) {
+			state Future<ErrorOr<Void>> proxyReply = dbInfo->get().get().client.commitProxies[0].ssTeamChange.tryGetReply(SSTeamChangeRequest());
+			try {
+				wait(throwErrorOr(proxyReply));
+			} catch (Error& e) {
+				throw e;
+			}
 		}
 
 		// Find or create machine team for the server team
@@ -1375,6 +1387,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// Update server team information for consistency check in simulation
 			traceTeamCollectionInfo();
 		}
+
+		return Void();
 	}
 
 	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
@@ -5212,7 +5226,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    true,
 			    processingUnhealthy,
 			    getShardMetrics,
-			    removeFailedServer);
+			    removeFailedServer,
+				self->dbInfo);
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
 				remoteTeamCollection =
@@ -5229,7 +5244,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    false,
 				                                    processingUnhealthy,
 				                                    getShardMetrics,
-				                                    removeFailedServer);
+				                                    removeFailedServer,
+													self->dbInfo);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(

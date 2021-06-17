@@ -1784,6 +1784,11 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 	return Void();
 }
 
+ACTOR Future<Void> proxyApplySSTeamChange(SSTeamChangeRequest ssTeamChangeReq) {
+	ssTeamChangeReq.reply.send(Void());
+	return Void();
+}
+
 ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
                                           Reference<AsyncVar<ServerDBInfo>> db,
                                           UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost) {
@@ -2035,6 +2040,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			}
 			addActor.send(broadcastTxnRequest(req, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 			wait(yield());
+		}
+		when(SSTeamChangeRequest ssTeamChangeReq = waitNext(proxy.ssTeamChange.getFuture())) {
+			addActor.send(proxyApplySSTeamChange(ssTeamChangeReq));
 		}
 	}
 }

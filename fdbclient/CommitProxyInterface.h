@@ -60,6 +60,7 @@ struct CommitProxyInterface {
 	RequestStream<struct ProxySnapRequest> proxySnapReq;
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
+	RequestStream<struct SSTeamChangeRequest> ssTeamChange;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -85,6 +86,8 @@ struct CommitProxyInterface {
 			exclusionSafetyCheckReq =
 			    RequestStream<struct ExclusionSafetyCheckRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
+			ssTeamChange =
+				RequestStream<struct SSTeamChangeRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 		}
 	}
 
@@ -101,6 +104,7 @@ struct CommitProxyInterface {
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
+		streams.push_back(ssTeamChange.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -506,6 +510,19 @@ struct ExclusionSafetyCheckRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, exclusions, reply);
+	}
+};
+
+struct SSTeamChangeRequest {
+	constexpr static FileIdentifier file_identifier = 13852702; // TODO: how to choose this value?
+	// TODO: Add info about SS team changes
+	ReplyPromise<Void> reply;
+
+	explicit SSTeamChangeRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar);
 	}
 };
 
