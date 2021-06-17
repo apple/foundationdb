@@ -117,7 +117,7 @@ class LogParser:
                     continue
                 if 'Type' not in obj:
                     continue
-                if obj['Severity'] == '40':
+                if obj['Severity'] == '40' and obj.get('ErrorIsInjectedFault', None) != '1':
                     self.fail()
                 if self.name is not None:
                     obj['testname'] = self.name
@@ -390,7 +390,11 @@ def run_simulation_test(basedir, options):
             os.remove(trace)
     if options.keep_simdirs == 'NONE' or options.keep_simdirs == 'FAILED' and res:
         print("Delete {}".format(os.path.join(wd, 'simfdb')))
-        shutil.rmtree(os.path.join(wd, 'simfdb'))
+        # Don't fail if the directory doesn't exist.
+        try:
+            shutil.rmtree(os.path.join(wd, 'simfdb'))
+        except FileNotFoundError:
+            pass
     if len(os.listdir(wd)) == 0:
         print("Delete {} - empty".format(wd))
         os.rmdir(wd)
