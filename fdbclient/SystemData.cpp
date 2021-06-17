@@ -302,6 +302,63 @@ bool serverHasKey(ValueRef storedValue) {
 	return storedValue == serverKeysTrue;
 }
 
+const KeyRef storageTeamIdKeyPrefix = LiteralStringRef("\xff/storageTeams/");
+
+const Key storageTeamIdKey(UID teamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(storageTeamIdKeyPrefix);
+	wr << teamId;
+	return wr.toValue();
+}
+
+UID storageTeamIdKeyDecode(const KeyRef& key) {
+	UID teamId;
+	BinaryReader rd(key.removePrefix(storageTeamIdKeyPrefix), Unversioned());
+	rd >> teamId;
+	return teamId;
+}
+
+std::vector<UID> decodeStorageTeams(const ValueRef& value) {
+	return BinaryReader::fromStringRef<std::vector<UID>>(value, Unversioned());
+}
+
+const KeyRef storageServerToTeamIdKeyPrefix = LiteralStringRef("\xff/storageServerToTeam/");
+const Key storageServerToTeamIdKey(UID serverId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(storageServerToTeamIdKeyPrefix);
+	wr << serverId;
+	return wr.toValue();
+}
+
+const KeyRef storageServerListToTeamIdKeyPrefix = LiteralStringRef("\xff/storageServerListToTeamId/");
+const Key storageServerListToTeamIdKey(std::vector<UID> servers) {
+	BinaryWriter wr(Unversioned());
+	std::sort(servers.begin(), servers.end());
+	wr.serializeBytes(storageServerToTeamIdKeyPrefix);
+	wr << servers.size();
+	for (auto& s : servers) {
+		wr << s;
+	}
+	return wr.toValue();
+}
+
+const Value encodeStorageTeams(const std::vector<UID>& value) {
+	BinaryWriter wr(Unversioned());
+	wr << value.size();
+	for (auto& v : value) {
+		wr << v;
+	}
+	return wr.toValue();
+}
+
+const KeyRef shardToTeamIdKeyPrefix = LiteralStringRef("\xff/storageShardToTeam/");
+const Key shardToTeamIdKey(const KeyRange& keys) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(shardToTeamIdKeyPrefix);
+	wr << keys;
+	return wr.toValue();
+}
+
 const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
 
 const Key cacheKeysKey(uint16_t idx, const KeyRef& key) {
