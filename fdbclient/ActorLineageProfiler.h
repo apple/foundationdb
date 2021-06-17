@@ -127,10 +127,11 @@ private:
 	std::vector<IALPCollectorBase*> collectors;
 	std::map<WaitState, Getter> getSamples;
 	SampleCollectorT() {}
+	std::map<std::string_view, std::any> collect(ActorLineage* lineage);
 
 public:
 	void addCollector(IALPCollectorBase* collector) { collectors.push_back(collector); }
-	std::shared_ptr<Sample> collect(ActorLineage* lineage);
+	std::shared_ptr<Sample> collect();
 	void addGetter(WaitState waitState, Getter const& getter) { getSamples[waitState] = getter; };
 };
 
@@ -146,6 +147,7 @@ class SampleCollection_t {
 	std::atomic<double> windowSize = 0.0;
 	std::deque<std::shared_ptr<Sample>> data;
 	ProfilerConfig config;
+	Reference<ActorLineage> _currentLineage;
 
 public:
 	/**
@@ -161,13 +163,10 @@ public:
 	 * \param to The max age of all returned samples.
 	 */
 	std::vector<std::shared_ptr<Sample>> get(double from = 0.0, double to = std::numeric_limits<double>::max()) const;
-	/**
-	 * Collects all new samples from the sample collector and stores them in the collection.
-	 */
-	void refresh();
 	void collect(const Reference<ActorLineage>& lineage);
 	const SampleCollector& collector() const { return _collector; }
 	SampleCollector& collector() { return _collector; }
+	Reference<ActorLineage> getCurrentLineage() { return _currentLineage; }
 };
 
 using SampleCollection = crossbow::singleton<SampleCollection_t>;

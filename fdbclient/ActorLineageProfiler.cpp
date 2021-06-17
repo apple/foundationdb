@@ -169,13 +169,8 @@ IALPCollectorBase::IALPCollectorBase() {
 	SampleCollector::instance().addCollector(this);
 }
 
-std::shared_ptr<Sample> SampleCollectorT::collect(ActorLineage* lineage) {
+std::map<std::string_view, std::any> SampleCollectorT::collect(ActorLineage* lineage) {
 	ASSERT(lineage != nullptr);
-	auto sample = std::make_shared<Sample>();
-	double time = g_network->now();
-	sample->time = time;
-
-	Packer packer;
 	std::map<std::string_view, std::any> out;
 	for (auto& collector : collectors) {
 		auto val = collector->collect(lineage);
@@ -183,37 +178,36 @@ std::shared_ptr<Sample> SampleCollectorT::collect(ActorLineage* lineage) {
 			out[collector->name()] = val.value();
 		}
 	}
-	if (!out.empty()) {
-		packer.pack(out);
-		sample->data[WaitState::Running] = packer.getbuf();
+	return out;
+}
+
+std::shared_ptr<Sample> SampleCollectorT::collect() {
+	auto sample = std::make_shared<Sample>();
+	double time = g_network->now();
+	sample->time = time;
+	for (auto& p : getSamples) {
+		Packer packer;
+		std::vector<std::map<std::string_view, std::any>> samples;
+		auto sampleVec = p.second();
+		for (auto& val : sampleVec) {
+			auto m = collect(val.getPtr());
+			if (!m.empty()) {
+				samples.emplace_back(std::move(m));
+			}
+		}
+		if (!samples.empty()) {
+			packer.pack(samples);
+			sample->data[p.first] = packer.getbuf();
+		}
 	}
 	return sample;
 }
 
-// TODO: Remove
-void SampleCollection_t::refresh() {
-	if (data.empty()) {
-		return;
-	}
-	auto min = std::min(data.back()->time - windowSize, data.back()->time);
-	double oldest = data.front()->time;
-	// we don't need to check for data.empty() in this loop (or the inner loop) as we know that we will end
-	// up with at least one entry which is the most recent sample
-	while (oldest < min) {
-		Lock _{ mutex };
-		// we remove at most 10 elements at a time. This is so we don't block the main thread for too long.
-		for (int i = 0; i < 10 && oldest < min; ++i) {
-			data.pop_front();
-			oldest = data.front()->time;
-		}
-	}
-}
-
 void SampleCollection_t::collect(const Reference<ActorLineage>& lineage) {
-	if (!lineage.isValid()) {
-		return;
-	}
-	auto sample = _collector->collect(lineage.getPtr());
+	ASSERT(lineage.isValid());
+	_currentLineage = lineage;
+	auto sample = _collector->collect();
+	ASSERT(sample);
 	{
 		Lock _{ mutex };
 		data.emplace_back(sample);
@@ -231,9 +225,7 @@ void SampleCollection_t::collect(const Reference<ActorLineage>& lineage) {
 		}
 	}
 	// TODO: Should only call ingest when deleting from memory
-	if (sample.get() != 0) {
-		config->ingest(sample);
-	}
+	config->ingest(sample);
 }
 
 std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0*/,
@@ -280,7 +272,6 @@ struct ProfilerImpl {
 		if (ec) {
 			return;
 		}
-		// collection->refresh();
 		startSampling = true;
 		timer = boost::asio::steady_timer(context, std::chrono::microseconds(1000000 / frequency));
 		timer.async_wait([this](auto const& ec) { profileHandler(ec); });
@@ -297,20 +288,15 @@ struct ProfilerImpl {
 	}
 };
 
-// TODO: Remove
 ActorLineageProfilerT::ActorLineageProfilerT() : impl(new ProfilerImpl()) {
-	// collection->collector()->addGetter(WaitState::Network,
-	//                                    std::bind(&ActorLineageSet::copy, std::ref(g_network->getActorLineageSet())));
-	// collection->collector()->addGetter(
-	//     WaitState::Disk,
-	//     std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet())));
-	// collection->collector()->addGetter(WaitState::Running, []() {
-	// 	auto res = currentLineageThreadSafe.get();
-	// 	if (res.isValid()) {
-	// 		return std::vector<Reference<ActorLineage>>({ res });
-	// 	}
-	// 	return std::vector<Reference<ActorLineage>>();
-	// });
+	collection->collector()->addGetter(WaitState::Network,
+	                                   std::bind(&ActorLineageSet::copy, std::ref(g_network->getActorLineageSet())));
+	collection->collector()->addGetter(
+	    WaitState::Disk,
+	    std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet())));
+	collection->collector()->addGetter(WaitState::Running, []() {
+		return std::vector<Reference<ActorLineage>>({ SampleCollection::instance().getCurrentLineage() });
+	});
 }
 
 ActorLineageProfilerT::~ActorLineageProfilerT() {

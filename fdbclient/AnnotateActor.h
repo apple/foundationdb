@@ -33,10 +33,10 @@ struct AnnotateActor {
 
 	AnnotateActor() : set(false) {}
 
-	AnnotateActor(Reference<ActorLineage> lineage) : set(true) {
-		index = g_network->getActorLineageSet().insert(lineage);
-		if (index == ActorLineageSet::npos) {
-			set = false;
+	AnnotateActor(LineageReference* lineage) : set(false) {
+		if (lineage->getPtr() != 0) {
+			index = g_network->getActorLineageSet().insert(*lineage);
+			set = (index != ActorLineageSet::npos);
 		}
 	}
 

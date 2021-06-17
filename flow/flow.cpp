@@ -41,7 +41,7 @@ ActorLineage::~ActorLineage() {
 	}
 }
 
-Reference<ActorLineage> getCurrentLineage() {
+LineageReference getCurrentLineage() {
 	if (!currentLineage->isValid() || !currentLineage->isAllocated()) {
 		currentLineage->allocate();
 	}

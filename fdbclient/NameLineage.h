@@ -33,7 +33,10 @@ struct NameLineageCollector : IALPCollector<NameLineage> {
 	NameLineageCollector() : IALPCollector() {}
 	std::optional<std::any> collect(ActorLineage* lineage) override {
 		auto str = lineage->get(&NameLineage::actorName);
-		ASSERT(str.has_value());
-		return std::string_view(*str, std::strlen(*str));
+		if (str.has_value()) {
+			return std::string_view(*str, std::strlen(*str));
+		} else {
+			return {};
+		}
 	}
 };

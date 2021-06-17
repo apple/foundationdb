@@ -547,9 +547,9 @@ public:
 // getCurrentLineage()).
 class LineageReference : public Reference<ActorLineage> {
 public:
-	LineageReference() : Reference<ActorLineage>(nullptr), allocated_(false) {}
-	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), allocated_(false) {}
-	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), allocated_(false) {}
+	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
+	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
+	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
 
 	void setActorName(const char* name) { actorName_ = name; }
 	const char* actorName() { return actorName_; }
@@ -570,7 +570,7 @@ private:
 extern std::atomic<bool> startSampling;
 extern thread_local LineageReference* currentLineage;
 
-Reference<ActorLineage> getCurrentLineage();
+LineageReference getCurrentLineage();
 void replaceLineage(LineageReference* lineage);
 
 struct StackLineage : LineageProperties<StackLineage> {
