@@ -507,9 +507,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
                                       Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
                                       Reference<AsyncVar<bool>> degraded,
-                                      PromiseStream<ErrorInfo> errors,
-                                      LocalityData locality,
-                                      Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                       Reference<ClusterConnectionFile> connFile,
                                       Reference<AsyncVar<std::set<std::string>>> issues) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
@@ -1287,9 +1284,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		                                       ddInterf,
 		                                       rkInterf,
 		                                       degraded,
-		                                       errors,
-		                                       locality,
-		                                       dbInfo,
 		                                       connFile,
 		                                       issues));
 
