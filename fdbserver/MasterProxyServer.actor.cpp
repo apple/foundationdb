@@ -99,7 +99,8 @@ struct ProxyStats {
 	LatencySample batchTxnGRVTimeInQueue;
 
 	LatencySample commitLatencySample;
-	LatencySample grvLatencySample;
+	LatencySample grvLatencySample; // GRV latency metric sample of default priority
+	LatencySample grvBatchLatencySample; // GRV latency metric sample of batched priority
 
 	LatencyBands commitLatencyBands;
 	LatencyBands grvLatencyBands;
@@ -179,6 +180,10 @@ struct ProxyStats {
 	                     id,
 	                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    grvBatchLatencySample("GRVBatchLatencyMetrics",
+	                          id,
+	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -387,6 +392,31 @@ ACTOR Future<Void> getRate(UID myID,
 	}
 }
 
+// Respond with an unreadable version to the GetReadVersion request when the GRV limit is hit.
+void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, ProxyStats* stats) {
+	++stats->txnRequestErrors;
+	// FIXME: send an error instead of giving an unreadable version when the client can support the error:
+	// req.reply.sendError(proxy_memory_limit_exceeded());
+	GetReadVersionReply rep;
+	rep.version = 1;
+	rep.locked = true;
+	req->reply.send(rep);
+	if (req->priority == TransactionPriority::IMMEDIATE) {
+		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededSystem").suppressFor(60);
+	} else if (req->priority == TransactionPriority::DEFAULT) {
+		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededDefault").suppressFor(60);
+	} else {
+		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededBatch").suppressFor(60);
+	}
+}
+
+// Drop a GetReadVersion request from a queue, by responding an error to the request.
+void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue, ProxyStats* stats) {
+	proxyGRVThresholdExceeded(&queue->front(), stats);
+	queue->pop_front();
+}
+
+// Put a GetReadVersion request into the queue corresponding to its priority.
 ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo>> db,
                                                  Deque<GetReadVersionRequest>* systemQueue,
                                                  Deque<GetReadVersionRequest>* defaultQueue,
@@ -402,16 +432,30 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 	loop choose {
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
+			bool canBeQueued = true;
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
 			    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
-				++stats->txnRequestErrors;
-				// FIXME: send an error instead of giving an unreadable version when the client can support the error:
-				// req.reply.sendError(proxy_memory_limit_exceeded());
-				GetReadVersionReply rep;
-				rep.version = 1;
-				rep.locked = true;
-				req.reply.send(rep);
-				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
+				// When the limit is hit, try to drop requests from the lower priority queues.
+				if (req.priority == TransactionPriority::BATCH) {
+					canBeQueued = false;
+				} else if (req.priority == TransactionPriority::DEFAULT) {
+					if (!batchQueue->empty()) {
+						dropRequestFromQueue(batchQueue, stats);
+					} else {
+						canBeQueued = false;
+					}
+				} else {
+					if (!batchQueue->empty()) {
+						dropRequestFromQueue(batchQueue, stats);
+					} else if (!defaultQueue->empty()) {
+						dropRequestFromQueue(defaultQueue, stats);
+					} else {
+						canBeQueued = false;
+					}
+				}
+			}
+			if (!canBeQueued) {
+				proxyGRVThresholdExceeded(&req, stats);
 			} else {
 				stats->addRequest(req.transactionCount);
 				// TODO: check whether this is reasonable to do in the fast path
@@ -1758,6 +1802,9 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 	double end = g_network->timer();
 	for (GetReadVersionRequest const& request : requests) {
 		double duration = end - request.requestTime();
+		if (request.priority == TransactionPriority::BATCH) {
+			stats->grvBatchLatencySample.addMeasurement(duration);
+		}
 		if (request.priority == TransactionPriority::DEFAULT) {
 			stats->grvLatencySample.addMeasurement(duration);
 		}
