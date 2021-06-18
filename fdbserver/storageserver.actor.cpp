@@ -3446,6 +3446,15 @@ private:
 	}
 };
 
+ACTOR Future<Void> tssDelayForever() {
+	loop {
+		wait(delay(5.0));
+		if (g_simulator.speedUpSimulation) {
+			return Void();
+		}
+	}
+}
+
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
@@ -3466,12 +3475,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 
 		if (g_network->isSimulated() && data->isTss() && g_simulator.tssMode == ISimulator::TSSMode::EnabledAddDelay &&
-		    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now()) {
+		    !g_simulator.speedUpSimulation && data->tssFaultInjectTime.present() &&
+		    data->tssFaultInjectTime.get() < now()) {
 			if (deterministicRandom()->random01() < 0.01) {
 				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID);
 				// small random chance to just completely get stuck here, each tss should eventually hit this in this
 				// mode
-				wait(Never());
+				wait(tssDelayForever());
 			} else {
 				// otherwise pause for part of a second
 				double delayTime = deterministicRandom()->random01();
@@ -3666,7 +3676,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
 				// quarantine.
-				if (g_network->isSimulated() && data->isTss() &&
+				if (g_network->isSimulated() && data->isTss() && !g_simulator.speedUpSimulation &&
 				    g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations &&
 				    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
 				    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
