@@ -20,8 +20,8 @@
 
 #pragma once
 
+#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/IKnobCollection.h"
-#include "fdbclient/KnobsImpl.h"
 #include "flow/Knobs.h"
 
 /*

@@ -17,6 +17,8 @@ set(FDBCLIENT_SRCS
   BackupContainerS3BlobStore.h
   ClientKnobCollection.cpp
   ClientKnobCollection.h
+  ClientKnobs.cpp
+  ClientKnobs.h
   ClientLogEvents.h
   ClientWorkerInterface.h
   ClusterInterface.h
@@ -51,8 +53,6 @@ set(FDBCLIENT_SRCS
   KeyRangeMap.actor.cpp
   KeyRangeMap.h
   Knobs.h
-  KnobsImpl.cpp
-  KnobsImpl.h
   IKnobCollection.cpp
   IKnobCollection.h
   ManagementAPI.actor.cpp

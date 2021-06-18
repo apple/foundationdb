@@ -22,8 +22,8 @@
 
 #include <memory>
 
+#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/ConfigKnobs.h"
-#include "fdbclient/KnobsImpl.h"
 #include "fdbclient/ServerKnobs.h"
 #include "flow/Knobs.h"
 
