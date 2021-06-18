@@ -44,7 +44,9 @@ KnobValue IKnobCollection::parseKnobValue(std::string const& knobName, std::stri
 
 void IKnobCollection::setKnob(std::string const& knobName, KnobValueRef const& knobValue) {
 	if (!trySetKnob(knobName, knobValue)) {
-		TraceEvent(SevError, "FailedToSetKnob").detail("KnobName", knobName).detail("KnobValue", knobValue.toString());
+		TraceEvent(SevWarnAlways, "FailedToSetKnob")
+		    .detail("KnobName", knobName)
+		    .detail("KnobValue", knobValue.toString());
 		throw invalid_option_value();
 	}
 }

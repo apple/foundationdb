@@ -56,7 +56,9 @@ public:
 			}
 		} else {
 			TEST(true); // Invalid configuration path
-			fprintf(stderr, "WARNING: Invalid configuration path: `%s'\n", paramString.c_str());
+			if (!g_network->isSimulated()) {
+				fprintf(stderr, "WARNING: Invalid configuration path: `%s'\n", paramString.c_str());
+			}
 			throw invalid_config_path();
 		}
 	}
@@ -115,14 +117,18 @@ public:
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option) {
 					TEST(true); // Attempted to manually set invalid knob option
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
+					if (!g_network->isSimulated()) {
+						fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
+					}
 					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
 				} else if (e.code() == error_code_invalid_option_value) {
 					TEST(true); // Invalid manually set knob value
-					fprintf(stderr,
-					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        knobValueString.c_str(),
-					        knobName.c_str());
+					if (!g_network->isSimulated()) {
+						fprintf(stderr,
+						        "WARNING: Invalid value '%s' for knob option '%s'\n",
+						        knobValueString.c_str(),
+						        knobName.c_str());
+					}
 					TraceEvent(SevWarnAlways, "InvalidKnobValue")
 					    .detail("Knob", printable(knobName))
 					    .detail("Value", printable(knobValueString));
