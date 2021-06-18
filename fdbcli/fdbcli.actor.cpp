@@ -3775,11 +3775,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for (auto it : address_interface) {
-							if (db->apiVersionAtLeast(700))
-								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
-								    .reboot.send(RebootRequest());
-							else
-								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
+							BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+							    .reboot.send(RebootRequest());
 						}
 						if (address_interface.size() == 0) {
 							fprintf(stderr,
@@ -3799,13 +3796,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if (!is_error) {
 							for (int i = 1; i < tokens.size(); i++) {
-								if (db->apiVersionAtLeast(700))
-									BinaryReader::fromStringRef<ClientWorkerInterface>(
-									    address_interface[tokens[i]].first, IncludeVersion())
-									    .reboot.send(RebootRequest());
-								else
-									tr->set(LiteralStringRef("\xff\xff/reboot_worker"),
-									        address_interface[tokens[i]].first);
+								BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[tokens[i]].first,
+								                                                   IncludeVersion())
+								    .reboot.send(RebootRequest());
 							}
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 						}
@@ -3862,13 +3855,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								tr->setOption(FDBTransactionOptions::TIMEOUT,
 								              StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
 								for (int i = 2; i < tokens.size(); i++) {
-									if (db->apiVersionAtLeast(700))
-										BinaryReader::fromStringRef<ClientWorkerInterface>(
-										    address_interface[tokens[i]].first, IncludeVersion())
-										    .reboot.send(RebootRequest(false, false, seconds));
-									else
-										tr->set(LiteralStringRef("\xff\xff/suspend_worker"),
-										        address_interface[tokens[i]].first);
+									BinaryReader::fromStringRef<ClientWorkerInterface>(
+									    address_interface[tokens[i]].first, IncludeVersion())
+									    .reboot.send(RebootRequest(false, false, seconds));
 								}
 								printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
 							}
@@ -4203,11 +4192,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for (auto it : address_interface) {
-							if (db->apiVersionAtLeast(700))
-								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
-								    .reboot.send(RebootRequest(false, true));
-							else
-								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
+							BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+							    .reboot.send(RebootRequest(false, true));
 						}
 						if (address_interface.size() == 0) {
 							fprintf(stderr,
@@ -4227,13 +4213,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if (!is_error) {
 							for (int i = 1; i < tokens.size(); i++) {
-								if (db->apiVersionAtLeast(700))
-									BinaryReader::fromStringRef<ClientWorkerInterface>(
-									    address_interface[tokens[i]].first, IncludeVersion())
-									    .reboot.send(RebootRequest(false, true));
-								else
-									tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"),
-									        address_interface[tokens[i]].first);
+								BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[tokens[i]].first,
+								                                                   IncludeVersion())
+								    .reboot.send(RebootRequest(false, true));
 							}
 							printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
 						}
