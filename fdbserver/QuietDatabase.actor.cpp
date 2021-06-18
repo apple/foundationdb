@@ -308,13 +308,10 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncV
 			    .detail("SS", servers[i].id());
 			throw attribute_not_found();
 		}
-		// Ignore TSS in add delay mode since it can purposefully freeze forever
-		if (!servers[i].isTss() || !g_network->isSimulated() ||
-		    g_simulator.tssMode != ISimulator::TSSMode::EnabledAddDelay) {
-			messages.push_back(timeoutError(itr->second.eventLogRequest.getReply(EventLogRequest(
-			                                    StringRef(servers[i].id().toString() + "/StorageMetrics"))),
-			                                1.0));
-		}
+
+		messages.push_back(timeoutError(itr->second.eventLogRequest.getReply(
+		                                    EventLogRequest(StringRef(servers[i].id().toString() + "/StorageMetrics"))),
+		                                1.0));
 	}
 
 	wait(waitForAll(messages));
