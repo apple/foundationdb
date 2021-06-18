@@ -135,7 +135,7 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
-	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), "coordination");
+	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), "coordination-");
 	state Future<Void> actor = localGenerationReg(reg, &store);
 	state Key the_key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 10)));
 
@@ -652,7 +652,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
-	state OnDemandStore store(dataFolder, myID, "coordination");
+	state OnDemandStore store(dataFolder, myID, "coordination-");
 	state ConfigTransactionInterface configTransactionInterface;
 	state ConfigFollowerInterface configFollowerInterface;
 	state Reference<IConfigDatabaseNode> configDatabaseNode;
