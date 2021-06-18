@@ -28,7 +28,7 @@ Starting and stopping
 
 After installation, FoundationDB is set to start automatically. You can manually start and stop the database with the commands shown below.
 
-These commands start and stop the master ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
+These commands start and stop the ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
 
 Linux
 -----

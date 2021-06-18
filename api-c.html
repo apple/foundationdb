@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.13',
+        VERSION:     '6.3.15',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -604,11 +604,12 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 <dl class="function">
 <dt id="c.fdb_transaction_get_estimated_range_size_bytes">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_estimated_range_size_bytes</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;tr</em>, uint8_t const*<em>&nbsp;begin_key_name</em>, int<em>&nbsp;begin_key_name_length</em>, uint8_t const*<em>&nbsp;end_key_name</em>, int<em>&nbsp;end_key_name_length</em><span class="sig-paren">)</span></dt>
-<dt id="c.range.">
-Returns an estimated byte size of the key <code class="descname">range.</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
-<dt id="c.accurate.">
-.. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be <code class="descname">accurate.</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
-<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the estimated size of the key range given. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the size, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+<dd><p>Returns an estimated byte size of the key range.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.</p>
+</div>
+<p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the estimated size of the key range given. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the size, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 </dd></dl>
 
 <dl class="function">
@@ -1006,7 +1007,7 @@ const char* <code class="descname">fdb_get_error</code><span class="sig-paren">(
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 04, 2021.<br/>
+      Last updated on Jun 17, 2021.<br/>
     </p>
   </div>
 </footer>

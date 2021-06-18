@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.13',
+        VERSION:     '6.3.15',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -110,7 +110,6 @@
 <li><a class="reference internal" href="#conflict-ranges">Conflict ranges</a></li>
 <li><a class="reference internal" href="#versions">Versions</a></li>
 <li><a class="reference internal" href="#transaction-misc-functions">Transaction misc functions</a></li>
-<li><a class="reference internal" href="#api-python-transaction-options">Transaction misc functions</a></li>
 <li><a class="reference internal" href="#transaction-options">Transaction options</a></li>
 </ul>
 </li>
@@ -197,7 +196,6 @@
 <li><a class="reference internal" href="#conflict-ranges">Conflict ranges</a></li>
 <li><a class="reference internal" href="#versions">Versions</a></li>
 <li><a class="reference internal" href="#transaction-misc-functions">Transaction misc functions</a></li>
-<li><a class="reference internal" href="#api-python-transaction-options">Transaction misc functions</a></li>
 <li><a class="reference internal" href="#transaction-options">Transaction options</a></li>
 </ul>
 </li>
@@ -1125,22 +1123,22 @@ both the caching and the increased network bandwidth.</p>
 <dl class="method">
 <dt id="fdb.Transaction.get_estimated_range_size_bytes">
 <code class="descclassname">Transaction.</code><code class="descname">get_estimated_range_size_bytes</code><span class="sig-paren">(</span><em>begin_key</em>, <em>end_key</em><span class="sig-paren">)</span></dt>
-<dd><p>Get the estimated byte size of the given key range. Returns a <a class="reference internal" href="#fdb.FutureInt64" title="fdb.FutureInt64"><code class="xref py py-class docutils literal"><span class="pre">FutureInt64</span></code></a>.
-.. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.</p>
+<dd><p>Gets the estimated byte size of the given key range. Returns a <a class="reference internal" href="#fdb.FutureInt64" title="fdb.FutureInt64"><code class="xref py py-class docutils literal"><span class="pre">FutureInt64</span></code></a>.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.</p>
+</div>
 </dd></dl>
 
-</div>
-<div class="section" id="api-python-transaction-options">
-<span id="id2"></span><h3>Transaction misc functions</h3>
 <dl class="method">
 <dt id="fdb.Transaction.get_approximate_size">
 <code class="descclassname">Transaction.</code><code class="descname">get_approximate_size</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
-<dd><p>Gets the the approximate transaction size so far, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges.. Returns a <a class="reference internal" href="#fdb.FutureInt64" title="fdb.FutureInt64"><code class="xref py py-class docutils literal"><span class="pre">FutureInt64</span></code></a>.</p>
+<dd><p>Gets the the approximate transaction size so far, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. Returns a <a class="reference internal" href="#fdb.FutureInt64" title="fdb.FutureInt64"><code class="xref py py-class docutils literal"><span class="pre">FutureInt64</span></code></a>.</p>
 </dd></dl>
 
 </div>
 <div class="section" id="transaction-options">
-<h3>Transaction options</h3>
+<span id="api-python-transaction-options"></span><h3>Transaction options</h3>
 <p>Transaction options alter the behavior of FoundationDB transactions. FoundationDB defaults to extremely safe transaction behavior, and we have worked hard to make the performance excellent with the default setting, so you should not often need to use transaction options.</p>
 <span class="target" id="api-python-snapshot-ryw"></span><dl class="method">
 <dt id="fdb.Transaction.options.set_snapshot_ryw_disable">
@@ -2042,7 +2040,7 @@ this subspace and the passed tuple.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 04, 2021.<br/>
+      Last updated on Jun 17, 2021.<br/>
     </p>
   </div>
 </footer>

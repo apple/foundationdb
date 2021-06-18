@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.13',
+        VERSION:     '6.3.15',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -264,7 +264,7 @@
 <div class="section" id="starting-and-stopping">
 <span id="administration-running-foundationdb"></span><h2>Starting and stopping</h2>
 <p>After installation, FoundationDB is set to start automatically. You can manually start and stop the database with the commands shown below.</p>
-<p>These commands start and stop the master <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process, which in turn starts <code class="docutils literal"><span class="pre">fdbserver</span></code> and <code class="docutils literal"><span class="pre">backup-agent</span></code> processes.  See <a class="reference internal" href="#administration-fdbmonitor"><span class="std std-ref">fdbmonitor and fdbserver</span></a> for details.</p>
+<p>These commands start and stop the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process, which in turn starts <code class="docutils literal"><span class="pre">fdbserver</span></code> and <code class="docutils literal"><span class="pre">backup-agent</span></code> processes.  See <a class="reference internal" href="#administration-fdbmonitor"><span class="std std-ref">fdbmonitor and fdbserver</span></a> for details.</p>
 <div class="section" id="linux">
 <h3>Linux</h3>
 <p>On Linux, FoundationDB is started and stopped using the <code class="docutils literal"><span class="pre">service</span></code> command as follows:</p>
@@ -1006,13 +1006,13 @@ From the output of <code class="docutils literal"><span class="pre">status</span
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_6.3.13-1_amd64.deb \
-foundationdb-server_6.3.13-1_amd64.deb
+user&#64;host$ sudo dpkg -i foundationdb-clients_6.3.15-1_amd64.deb \
+foundationdb-server_6.3.15-1_amd64.deb
 </pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.3.13-1.el7.x86_64.rpm \
-foundationdb-server-6.3.13-1.el7.x86_64.rpm
+user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.3.15-1.el7.x86_64.rpm \
+foundationdb-server-6.3.15-1.el7.x86_64.rpm
 </pre>
 <p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> API. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </div>
@@ -1093,7 +1093,7 @@ foundationdb-server-6.3.13-1.el7.x86_64.rpm
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 04, 2021.<br/>
+      Last updated on Jun 17, 2021.<br/>
     </p>
   </div>
 </footer>

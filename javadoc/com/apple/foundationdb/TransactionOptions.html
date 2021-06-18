@@ -26,7 +26,7 @@
     catch(err) {
     }
 //-->
-var data = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":10,"i7":10,"i8":10,"i9":42,"i10":10,"i11":10,"i12":10,"i13":10,"i14":10,"i15":10,"i16":10,"i17":10,"i18":10,"i19":42,"i20":10,"i21":10,"i22":10,"i23":10,"i24":10,"i25":10,"i26":10,"i27":10,"i28":10,"i29":10,"i30":10,"i31":10,"i32":42,"i33":10,"i34":10,"i35":10};
+var data = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":10,"i7":10,"i8":10,"i9":10,"i10":42,"i11":10,"i12":10,"i13":10,"i14":10,"i15":10,"i16":10,"i17":10,"i18":10,"i19":10,"i20":42,"i21":10,"i22":10,"i23":10,"i24":10,"i25":10,"i26":10,"i27":10,"i28":10,"i29":10,"i30":10,"i31":10,"i32":10,"i33":42,"i34":10,"i35":10,"i36":10};
 var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"],32:["t6","Deprecated Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
@@ -197,221 +197,228 @@ extends java.lang.Object</pre>
 </tr>
 <tr id="i3" class="rowColor">
 <td class="colFirst"><code>void</code></td>
+<th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setBypassUnreadable()">setBypassUnreadable</a></span>()</code></th>
+<td class="colLast">
+<div class="block">Allows <code>get</code> operations to read from sections of keyspace that have become unreadable because of versionstamp operations.</div>
+</td>
+</tr>
+<tr id="i4" class="altColor">
+<td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setCausalReadDisable()">setCausalReadDisable</a></span>()</code></th>
 <td class="colLast">&nbsp;</td>
 </tr>
-<tr id="i4" class="altColor">
+<tr id="i5" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setCausalReadRisky()">setCausalReadRisky</a></span>()</code></th>
 <td class="colLast">
 <div class="block">The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.</div>
 </td>
 </tr>
-<tr id="i5" class="rowColor">
+<tr id="i6" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setCausalWriteRisky()">setCausalWriteRisky</a></span>()</code></th>
 <td class="colLast">
 <div class="block">The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault.</div>
 </td>
 </tr>
-<tr id="i6" class="altColor">
+<tr id="i7" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setDebugRetryLogging(java.lang.String)">setDebugRetryLogging</a></span>&#8203;(java.lang.String&nbsp;value)</code></th>
 <td class="colLast">&nbsp;</td>
 </tr>
-<tr id="i7" class="rowColor">
+<tr id="i8" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setDebugTransactionIdentifier(java.lang.String)">setDebugTransactionIdentifier</a></span>&#8203;(java.lang.String&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Sets a client provided identifier for the transaction that will be used in scenarios like tracing or profiling.</div>
 </td>
 </tr>
-<tr id="i8" class="altColor">
+<tr id="i9" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setDurabilityDatacenter()">setDurabilityDatacenter</a></span>()</code></th>
 <td class="colLast">&nbsp;</td>
 </tr>
-<tr id="i9" class="rowColor">
+<tr id="i10" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setDurabilityDevNullIsWebScale()">setDurabilityDevNullIsWebScale</a></span>()</code></th>
 <td class="colLast">
 <div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
 </td>
 </tr>
-<tr id="i10" class="altColor">
+<tr id="i11" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setDurabilityRisky()">setDurabilityRisky</a></span>()</code></th>
 <td class="colLast">&nbsp;</td>
 </tr>
-<tr id="i11" class="rowColor">
+<tr id="i12" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setIncludePortInAddress()">setIncludePortInAddress</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Addresses returned by get_addresses_for_key include the port when enabled.</div>
 </td>
 </tr>
-<tr id="i12" class="altColor">
+<tr id="i13" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setInitializeNewDatabase()">setInitializeNewDatabase</a></span>()</code></th>
 <td class="colLast">
 <div class="block">This is a write-only transaction which sets the initial configuration.</div>
 </td>
 </tr>
-<tr id="i13" class="rowColor">
+<tr id="i14" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setLockAware()">setLockAware</a></span>()</code></th>
 <td class="colLast">
 <div class="block">The transaction can read and write to locked databases, and is responsible for checking that it took the lock.</div>
 </td>
 </tr>
-<tr id="i14" class="altColor">
+<tr id="i15" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setLogTransaction()">setLogTransaction</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Enables tracing for this transaction and logs results to the client trace logs.</div>
 </td>
 </tr>
-<tr id="i15" class="rowColor">
+<tr id="i16" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setMaxRetryDelay(long)">setMaxRetryDelay</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Set the maximum amount of backoff delay incurred in the call to <code>onError</code> if the error is retryable.</div>
 </td>
 </tr>
-<tr id="i16" class="altColor">
+<tr id="i17" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setNextWriteNoWriteConflictRange()">setNextWriteNoWriteConflictRange</a></span>()</code></th>
 <td class="colLast">
 <div class="block">The next write performed on this transaction will not generate a write conflict range.</div>
 </td>
 </tr>
-<tr id="i17" class="rowColor">
+<tr id="i18" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setPriorityBatch()">setPriorityBatch</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Specifies that this transaction should be treated as low priority and that default priority transactions will be processed first.</div>
 </td>
 </tr>
-<tr id="i18" class="altColor">
+<tr id="i19" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setPrioritySystemImmediate()">setPrioritySystemImmediate</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Specifies that this transaction should be treated as highest priority and that lower priority transactions should block behind this one.</div>
 </td>
 </tr>
-<tr id="i19" class="rowColor">
+<tr id="i20" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setReadAheadDisable()">setReadAheadDisable</a></span>()</code></th>
 <td class="colLast">
 <div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
 </td>
 </tr>
-<tr id="i20" class="altColor">
+<tr id="i21" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setReadLockAware()">setReadLockAware</a></span>()</code></th>
 <td class="colLast">
 <div class="block">The transaction can read from locked databases.</div>
 </td>
 </tr>
-<tr id="i21" class="rowColor">
+<tr id="i22" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setReadSystemKeys()">setReadSystemKeys</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Allows this transaction to read system keys (those that start with the byte 0xFF).</div>
 </td>
 </tr>
-<tr id="i22" class="altColor">
+<tr id="i23" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setReadYourWritesDisable()">setReadYourWritesDisable</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version.</div>
 </td>
 </tr>
-<tr id="i23" class="rowColor">
+<tr id="i24" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setReportConflictingKeys()">setReportConflictingKeys</a></span>()</code></th>
 <td class="colLast">
 <div class="block">The transaction can retrieve keys that are conflicting with other transactions.</div>
 </td>
 </tr>
-<tr id="i24" class="altColor">
+<tr id="i25" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setRetryLimit(long)">setRetryLimit</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Set a maximum number of retries after which additional calls to <code>onError</code> will throw the most recently seen error code.</div>
 </td>
 </tr>
-<tr id="i25" class="rowColor">
+<tr id="i26" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setServerRequestTracing()">setServerRequestTracing</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Sets an identifier for server tracing of this transaction.</div>
 </td>
 </tr>
-<tr id="i26" class="altColor">
+<tr id="i27" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setSizeLimit(long)">setSizeLimit</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Set the transaction size limit in bytes.</div>
 </td>
 </tr>
-<tr id="i27" class="rowColor">
+<tr id="i28" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setSnapshotRywDisable()">setSnapshotRywDisable</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Snapshot read operations will not see the results of writes done in the same transaction.</div>
 </td>
 </tr>
-<tr id="i28" class="altColor">
+<tr id="i29" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setSnapshotRywEnable()">setSnapshotRywEnable</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Snapshot read operations will see the results of writes done in the same transaction.</div>
 </td>
 </tr>
-<tr id="i29" class="rowColor">
+<tr id="i30" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setSpecialKeySpaceRelaxed()">setSpecialKeySpaceRelaxed</a></span>()</code></th>
 <td class="colLast">
 <div class="block">By default, the special key space will only allow users to read from exactly one module (a subspace in the special key space).</div>
 </td>
 </tr>
-<tr id="i30" class="altColor">
+<tr id="i31" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTag(java.lang.String)">setTag</a></span>&#8203;(java.lang.String&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Adds a tag to the transaction that can be used to apply manual targeted throttling.</div>
 </td>
 </tr>
-<tr id="i31" class="rowColor">
+<tr id="i32" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTimeout(long)">setTimeout</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled.</div>
 </td>
 </tr>
-<tr id="i32" class="altColor">
+<tr id="i33" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionLoggingEnable(java.lang.String)">setTransactionLoggingEnable</a></span>&#8203;(java.lang.String&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
 </td>
 </tr>
-<tr id="i33" class="rowColor">
+<tr id="i34" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionLoggingMaxFieldLength(long)">setTransactionLoggingMaxFieldLength</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated.</div>
 </td>
 </tr>
-<tr id="i34" class="altColor">
+<tr id="i35" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setUsedDuringCommitProtectionDisable()">setUsedDuringCommitProtectionDisable</a></span>()</code></th>
 <td class="colLast">
 <div class="block">By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well.</div>
 </td>
 </tr>
-<tr id="i35" class="rowColor">
+<tr id="i36" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setUseProvisionalProxies()">setUseProvisionalProxies</a></span>()</code></th>
 <td class="colLast">
@@ -811,6 +818,16 @@ public&nbsp;void&nbsp;setTransactionLoggingEnable&#8203;(java.lang.String&nbsp;v
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>value</code> - String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters.</dd>
 </dl>
+</li>
+</ul>
+<a id="setBypassUnreadable()">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setBypassUnreadable</h4>
+<pre class="methodSignature">public&nbsp;void&nbsp;setBypassUnreadable()</pre>
+<div class="block">Allows <code>get</code> operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp.</div>
 </li>
 </ul>
 <a id="setCausalReadDisable()">

@@ -26,7 +26,7 @@
     catch(err) {
     }
 //-->
-var data = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":10,"i7":10,"i8":10,"i9":10,"i10":10,"i11":10,"i12":10,"i13":10};
+var data = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":10,"i7":10,"i8":10,"i9":10,"i10":10,"i11":10,"i12":10,"i13":10,"i14":10};
 var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
@@ -225,47 +225,54 @@ extends java.lang.Object</pre>
 </tr>
 <tr id="i7" class="rowColor">
 <td class="colFirst"><code>void</code></td>
+<th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionBypassUnreadable()">setTransactionBypassUnreadable</a></span>()</code></th>
+<td class="colLast">
+<div class="block">Allows <code>get</code> operations to read from sections of keyspace that have become unreadable because of versionstamp operations.</div>
+</td>
+</tr>
+<tr id="i8" class="altColor">
+<td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionCausalReadRisky()">setTransactionCausalReadRisky</a></span>()</code></th>
 <td class="colLast">
 <div class="block">The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.</div>
 </td>
 </tr>
-<tr id="i8" class="altColor">
+<tr id="i9" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionIncludePortInAddress()">setTransactionIncludePortInAddress</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Addresses returned by get_addresses_for_key include the port when enabled.</div>
 </td>
 </tr>
-<tr id="i9" class="rowColor">
+<tr id="i10" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionLoggingMaxFieldLength(long)">setTransactionLoggingMaxFieldLength</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option.</div>
 </td>
 </tr>
-<tr id="i10" class="altColor">
+<tr id="i11" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionMaxRetryDelay(long)">setTransactionMaxRetryDelay</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Set the maximum amount of backoff delay incurred in the call to <code>onError</code> if the error is retryable.</div>
 </td>
 </tr>
-<tr id="i11" class="rowColor">
+<tr id="i12" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionRetryLimit(long)">setTransactionRetryLimit</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Set a maximum number of retries after which additional calls to <code>onError</code> will throw the most recently seen error code.</div>
 </td>
 </tr>
-<tr id="i12" class="altColor">
+<tr id="i13" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionSizeLimit(long)">setTransactionSizeLimit</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
 <div class="block">Set the maximum transaction size in bytes.</div>
 </td>
 </tr>
-<tr id="i13" class="rowColor">
+<tr id="i14" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setTransactionTimeout(long)">setTransactionTimeout</a></span>&#8203;(long&nbsp;value)</code></th>
 <td class="colLast">
@@ -479,6 +486,16 @@ extends java.lang.Object</pre>
 <h4>setTransactionIncludePortInAddress</h4>
 <pre class="methodSignature">public&nbsp;void&nbsp;setTransactionIncludePortInAddress()</pre>
 <div class="block">Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect.</div>
+</li>
+</ul>
+<a id="setTransactionBypassUnreadable()">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setTransactionBypassUnreadable</h4>
+<pre class="methodSignature">public&nbsp;void&nbsp;setTransactionBypassUnreadable()</pre>
+<div class="block">Allows <code>get</code> operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the <code>bypass_unreadable</code> option of each transaction created by this database. See the transaction option description for more information.</div>
 </li>
 </ul>
 <a id="getOptionConsumer()">

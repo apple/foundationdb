@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.13',
+        VERSION:     '6.3.15',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -1109,14 +1109,17 @@ both the caching and the increased network bandwidth.</p>
 <dl class="method">
 <dt id="FDB::Transaction.get_estimated_range_size_bytes">
 <code class="descclassname">Transaction.</code><code class="descname">get_estimated_range_size_bytes</code><span class="sig-paren">(</span><em>begin_key</em>, <em>end_key</em><span class="sig-paren">)</span></dt>
-<dd><p>Get the estimated byte size of the given key range. Returns a <a class="reference internal" href="#FDB::Int64Future" title="FDB::Int64Future"><code class="xref rb rb-class docutils literal"><span class="pre">Int64Future</span></code></a>.
-.. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.</p>
+<dd><p>Gets the estimated byte size of the given key range. Returns a <a class="reference internal" href="#FDB::Int64Future" title="FDB::Int64Future"><code class="xref rb rb-class docutils literal"><span class="pre">Int64Future</span></code></a>.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.</p>
+</div>
 </dd></dl>
 
 <dl class="method">
 <dt id="FDB::Transaction.get_approximate_size">
 <code class="descclassname">Transaction.</code><code class="descname">get_approximate_size</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; Int64Future</dt>
-<dd><p>Gets the the approximate transaction size so far, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges.. Returns a <a class="reference internal" href="#FDB::Int64Future" title="FDB::Int64Future"><code class="xref rb rb-class docutils literal"><span class="pre">Int64Future</span></code></a>.</p>
+<dd><p>Gets the the approximate transaction size so far, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. Returns a <a class="reference internal" href="#FDB::Int64Future" title="FDB::Int64Future"><code class="xref rb rb-class docutils literal"><span class="pre">Int64Future</span></code></a>.</p>
 </dd></dl>
 
 </div>
@@ -1876,7 +1879,7 @@ of the UUID bytes.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 04, 2021.<br/>
+      Last updated on Jun 17, 2021.<br/>
     </p>
   </div>
 </footer>
