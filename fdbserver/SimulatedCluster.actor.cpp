@@ -1133,6 +1133,7 @@ struct SimulationConfig {
 
 	// Simulation layout
 	int datacenters;
+	int replication_type;
 	int machine_count; // Total, not per DC.
 	int processes_per_machine;
 	int coordinators;
@@ -1141,8 +1142,9 @@ private:
 	void setRandomConfig();
 	void setSimpleConfig();
 	void setSpecificConfig(const TestConfig& testConfig);
-	void setDataCenters(const TestConfig& testConfig);
+	void setDatacenters(const TestConfig& testConfig);
 	void setStorageEngine(const TestConfig& testConfig);
+	void setRegions(const TestConfig& testConfig);
 	void setReplicationType(const TestConfig& testConfig);
 	void setMachineCount(const TestConfig& testConfig);
 	void setCoordinators(const TestConfig& testConfig);
@@ -1288,11 +1290,11 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 
 // Sets replication type and TLogSpillType and Version
 void SimulationConfig::setReplicationType(const TestConfig& testConfig) {
-	int replication_type = testConfig.simpleConfig
-	                           ? 1
-	                           : (std::max(testConfig.minimumReplication,
-	                                       datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
-	                                                       : std::min(deterministicRandom()->randomInt(0, 6), 3)));
+	replication_type = testConfig.simpleConfig
+	                       ? 1
+	                       : (std::max(testConfig.minimumReplication,
+	                                   datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
+	                                                   : std::min(deterministicRandom()->randomInt(0, 6), 3)));
 	if (testConfig.config.present()) {
 		set_config(testConfig.config.get());
 	} else {
