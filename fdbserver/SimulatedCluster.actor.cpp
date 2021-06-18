@@ -23,7 +23,6 @@
 #include <ostream>
 #include <sstream>
 #include <toml.hpp>
-#include "Trace.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
