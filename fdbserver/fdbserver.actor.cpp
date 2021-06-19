@@ -981,7 +981,7 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
-	UseConfigDB useConfigDB;
+	UseConfigDB useConfigDB{ UseConfigDB::DISABLED };
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
