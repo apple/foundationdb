@@ -38,114 +38,6 @@ KeyRef stringToKeyRef(std::string const& s) {
 	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 }
 
-class ConfigKnobOverrides {
-	Standalone<VectorRef<KeyRef>> configPath;
-	std::map<Optional<Key>, std::map<Key, KnobValue>> configClassToKnobToValue;
-
-public:
-	ConfigKnobOverrides() = default;
-	explicit ConfigKnobOverrides(std::string const& paramString) {
-		configClassToKnobToValue[{}] = {};
-		if (std::all_of(paramString.begin(), paramString.end(), [](char c) {
-			    return isalpha(c) || isdigit(c) || c == '/' || c == '-';
-		    })) {
-			StringRef s = stringToKeyRef(paramString);
-			while (s.size()) {
-				configPath.push_back_deep(configPath.arena(), s.eat("/"_sr));
-				configClassToKnobToValue[configPath.back()] = {};
-			}
-		} else {
-			TEST(true); // Invalid configuration path
-			if (!g_network->isSimulated()) {
-				fprintf(stderr, "WARNING: Invalid configuration path: `%s'\n", paramString.c_str());
-			}
-			throw invalid_config_path();
-		}
-	}
-	ConfigClassSet getConfigClassSet() const { return ConfigClassSet(configPath); }
-	void set(Optional<KeyRef> configClass, KeyRef knobName, KnobValueRef value) {
-		configClassToKnobToValue[configClass.castTo<Key>()][knobName] = value;
-	}
-	void remove(Optional<KeyRef> configClass, KeyRef knobName) {
-		configClassToKnobToValue[configClass.castTo<Key>()].erase(knobName);
-	}
-
-	void update(IKnobCollection& knobCollection) const {
-		// Apply global overrides
-		const auto& knobToValue = configClassToKnobToValue.at({});
-		for (const auto& [knobName, knobValue] : knobToValue) {
-			try {
-				knobCollection.setKnob(knobName.toString(), knobValue);
-			} catch (Error &e) {
-				if (e.code() == error_code_invalid_option_value) {
-					TEST(true); // invalid knob in configuration database
-					TraceEvent(SevWarnAlways, "InvalidKnobOptionValue")
-						.detail("KnobName", knobName)
-						.detail("KnobValue", knobValue.toString());
-				} else {
-					throw e;
-				}
-			}
-		}
-		// Apply specific overrides
-		for (const auto& configClass : configPath) {
-			const auto& knobToValue = configClassToKnobToValue.at(configClass);
-			for (const auto& [knobName, knobValue] : knobToValue) {
-				knobCollection.setKnob(knobName.toString(), knobValue);
-			}
-		}
-	}
-
-	bool hasSameConfigPath(ConfigKnobOverrides const& other) const { return configPath == other.configPath; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, configPath);
-	}
-};
-
-class ManualKnobOverrides {
-	std::map<Key, KnobValue> overrides;
-
-public:
-	explicit ManualKnobOverrides(std::map<std::string, std::string> const& overrides) {
-		for (const auto& [knobName, knobValueString] : overrides) {
-			try {
-				auto knobValue =
-				    IKnobCollection::parseKnobValue(knobName, knobValueString, IKnobCollection::Type::TEST);
-				this->overrides[stringToKeyRef(knobName)] = knobValue;
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option) {
-					TEST(true); // Attempted to manually set invalid knob option
-					if (!g_network->isSimulated()) {
-						fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
-					}
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
-				} else if (e.code() == error_code_invalid_option_value) {
-					TEST(true); // Invalid manually set knob value
-					if (!g_network->isSimulated()) {
-						fprintf(stderr,
-						        "WARNING: Invalid value '%s' for knob option '%s'\n",
-						        knobValueString.c_str(),
-						        knobName.c_str());
-					}
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					throw e;
-				}
-			}
-		}
-	}
-
-	void update(IKnobCollection& knobCollection) {
-		for (const auto& [knobName, knobValue] : overrides) {
-			knobCollection.setKnob(knobName.toString(), knobValue);
-		}
-	}
-};
-
 } // namespace
 
 class LocalConfigurationImpl {
@@ -153,9 +45,115 @@ class LocalConfigurationImpl {
 	OnDemandStore kvStore;
 	Future<Void> initFuture;
 	Version lastSeenVersion{ 0 };
-	ManualKnobOverrides manualKnobOverrides;
-	ConfigKnobOverrides configKnobOverrides;
 	std::unique_ptr<IKnobCollection> testKnobCollection;
+
+	class ConfigKnobOverrides {
+		Standalone<VectorRef<KeyRef>> configPath;
+		std::map<Optional<Key>, std::map<Key, KnobValue>> configClassToKnobToValue;
+
+	public:
+		ConfigKnobOverrides() = default;
+		explicit ConfigKnobOverrides(std::string const& paramString) {
+			configClassToKnobToValue[{}] = {};
+			if (std::all_of(paramString.begin(), paramString.end(), [](char c) {
+				    return isalpha(c) || isdigit(c) || c == '/' || c == '-';
+			    })) {
+				StringRef s = stringToKeyRef(paramString);
+				while (s.size()) {
+					configPath.push_back_deep(configPath.arena(), s.eat("/"_sr));
+					configClassToKnobToValue[configPath.back()] = {};
+				}
+			} else {
+				TEST(true); // Invalid configuration path
+				if (!g_network->isSimulated()) {
+					fprintf(stderr, "WARNING: Invalid configuration path: `%s'\n", paramString.c_str());
+				}
+				throw invalid_config_path();
+			}
+		}
+		ConfigClassSet getConfigClassSet() const { return ConfigClassSet(configPath); }
+		void set(Optional<KeyRef> configClass, KeyRef knobName, KnobValueRef value) {
+			configClassToKnobToValue[configClass.castTo<Key>()][knobName] = value;
+		}
+		void remove(Optional<KeyRef> configClass, KeyRef knobName) {
+			configClassToKnobToValue[configClass.castTo<Key>()].erase(knobName);
+		}
+
+		void update(IKnobCollection& knobCollection) const {
+			// Apply global overrides
+			const auto& knobToValue = configClassToKnobToValue.at({});
+			for (const auto& [knobName, knobValue] : knobToValue) {
+				try {
+					knobCollection.setKnob(knobName.toString(), knobValue);
+				} catch (Error& e) {
+					if (e.code() == error_code_invalid_option_value) {
+						TEST(true); // invalid knob in configuration database
+						TraceEvent(SevWarnAlways, "InvalidKnobOptionValue")
+						    .detail("KnobName", knobName)
+						    .detail("KnobValue", knobValue.toString());
+					} else {
+						throw e;
+					}
+				}
+			}
+			// Apply specific overrides
+			for (const auto& configClass : configPath) {
+				const auto& knobToValue = configClassToKnobToValue.at(configClass);
+				for (const auto& [knobName, knobValue] : knobToValue) {
+					knobCollection.setKnob(knobName.toString(), knobValue);
+				}
+			}
+		}
+
+		bool hasSameConfigPath(ConfigKnobOverrides const& other) const { return configPath == other.configPath; }
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, configPath);
+		}
+	} configKnobOverrides;
+
+	class ManualKnobOverrides {
+		std::map<Key, KnobValue> overrides;
+
+	public:
+		explicit ManualKnobOverrides(std::map<std::string, std::string> const& overrides) {
+			for (const auto& [knobName, knobValueString] : overrides) {
+				try {
+					auto knobValue =
+					    IKnobCollection::parseKnobValue(knobName, knobValueString, IKnobCollection::Type::TEST);
+					this->overrides[stringToKeyRef(knobName)] = knobValue;
+				} catch (Error& e) {
+					if (e.code() == error_code_invalid_option) {
+						TEST(true); // Attempted to manually set invalid knob option
+						if (!g_network->isSimulated()) {
+							fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
+						}
+						TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
+					} else if (e.code() == error_code_invalid_option_value) {
+						TEST(true); // Invalid manually set knob value
+						if (!g_network->isSimulated()) {
+							fprintf(stderr,
+							        "WARNING: Invalid value '%s' for knob option '%s'\n",
+							        knobValueString.c_str(),
+							        knobName.c_str());
+						}
+						TraceEvent(SevWarnAlways, "InvalidKnobValue")
+						    .detail("Knob", printable(knobName))
+						    .detail("Value", printable(knobValueString));
+					} else {
+						throw e;
+					}
+				}
+			}
+		}
+
+		void update(IKnobCollection& knobCollection) {
+			for (const auto& [knobName, knobValue] : overrides) {
+				knobCollection.setKnob(knobName.toString(), knobValue);
+			}
+		}
+	} manualKnobOverrides;
 
 	IKnobCollection& getKnobs() {
 		return testKnobCollection ? *testKnobCollection : IKnobCollection::getMutableGlobalKnobCollection();
@@ -375,6 +373,46 @@ public:
 	}
 
 	UID getID() const { return id; }
+
+	static void testManualKnobOverridesInvalidName() {
+		std::map<std::string, std::string> invalidOverrides;
+		invalidOverrides["knob_name_that_does_not_exist"] = "";
+		// Should only trace and not throw an error:
+		ManualKnobOverrides manualKnobOverrides(invalidOverrides);
+	}
+
+	static void testManualKnobOverridesInvalidValue() {
+		std::map<std::string, std::string> invalidOverrides;
+		invalidOverrides["test_int"] = "not_an_int";
+		// Should only trace and not throw an error:
+		ManualKnobOverrides manualKnobOverrides(invalidOverrides);
+	}
+
+	static void testConfigKnobOverridesInvalidConfigPath() {
+		try {
+			ConfigKnobOverrides configKnobOverrides("#invalid_config_path");
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_invalid_config_path);
+		}
+	}
+
+	static void testConfigKnobOverridesInvalidName() {
+		ConfigKnobOverrides configKnobOverrides;
+		configKnobOverrides.set(
+		    {}, "knob_name_that_does_not_exist"_sr, KnobValueRef::create(ParsedKnobValue(int{ 1 })));
+		auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
+		// Should only trace and not throw an error:
+		configKnobOverrides.update(*testKnobCollection);
+	}
+
+	static void testConfigKnobOverridesInvalidValue() {
+		ConfigKnobOverrides configKnobOverrides;
+		configKnobOverrides.set({}, "test_int"_sr, KnobValueRef::create(ParsedKnobValue("not_an_int")));
+		auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
+		// Should only trace and not throw an error:
+		configKnobOverrides.update(*testKnobCollection);
+	}
 };
 
 LocalConfiguration::LocalConfiguration(std::string const& dataFolder,
@@ -424,45 +462,26 @@ UID LocalConfiguration::getID() const {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ManualKnobOverrides/InvalidName") {
-	std::map<std::string, std::string> invalidOverrides;
-	invalidOverrides["knob_name_that_does_not_exist"] = "";
-	// Should only trace and not throw an error:
-	ManualKnobOverrides manualKnobOverrides(invalidOverrides);
+	LocalConfigurationImpl::testManualKnobOverridesInvalidName();
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ManualKnobOverrides/InvalidValue") {
-	std::map<std::string, std::string> invalidOverrides;
-	invalidOverrides["test_int"] = "not_an_int";
-	// Should only trace and not throw an error:
-	ManualKnobOverrides manualKnobOverrides(invalidOverrides);
+	LocalConfigurationImpl::testManualKnobOverridesInvalidValue();
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ConfigKnobOverrides/InvalidConfigPath") {
-	try {
-		ConfigKnobOverrides configKnobOverrides("#invalid_config_path");
-		ASSERT(false);
-	} catch (Error &e) {
-		ASSERT_EQ(e.code(), error_code_invalid_config_path);
-	}
+	LocalConfigurationImpl::testConfigKnobOverridesInvalidConfigPath();
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ConfigKnobOverrides/InvalidName") {
-	ConfigKnobOverrides configKnobOverrides;
-	configKnobOverrides.set({}, "knob_name_that_does_not_exist"_sr, KnobValueRef::create(ParsedKnobValue(int{1})));
-	auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
-	// Should only trace and not throw an error:
-	configKnobOverrides.update(*testKnobCollection);
+	LocalConfigurationImpl::testConfigKnobOverridesInvalidName();
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ConfigKnobOverrides/InvalidValue") {
-	ConfigKnobOverrides configKnobOverrides;
-	configKnobOverrides.set({}, "test_int"_sr, KnobValueRef::create(ParsedKnobValue("not_an_int")));
-	auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
-	// Should only trace and not throw an error:
-	configKnobOverrides.update(*testKnobCollection);
+	LocalConfigurationImpl::testConfigKnobOverridesInvalidValue();
 	return Void();
 }

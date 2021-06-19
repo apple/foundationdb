@@ -46,79 +46,77 @@ void remove(Container& container, K const& k) {
 	container.erase(it);
 }
 
-// PendingRequestStore stores a set of pending ConfigBroadcastFollowerGetChangesRequests,
-// indexed by configuration class. When an update is received, replies are sent for all
-// pending requests with affected configuration classes
-class PendingRequestStore {
-	using Req = ConfigBroadcastFollowerGetChangesRequest;
-	std::map<Key, std::set<Endpoint::Token>> configClassToTokens;
-	std::map<Endpoint::Token, Req> tokenToRequest;
+} // namespace
 
-public:
-	void addRequest(Req const& req) {
-		auto token = req.reply.getEndpoint().token;
-		tokenToRequest[token] = req;
-		for (const auto& configClass : req.configClassSet.getClasses()) {
-			configClassToTokens[configClass].insert(token);
+class ConfigBroadcasterImpl {
+	// PendingRequestStore stores a set of pending ConfigBroadcastFollowerGetChangesRequests,
+	// indexed by configuration class. When an update is received, replies are sent for all
+	// pending requests with affected configuration classes
+	class PendingRequestStore {
+		using Req = ConfigBroadcastFollowerGetChangesRequest;
+		std::map<Key, std::set<Endpoint::Token>> configClassToTokens;
+		std::map<Endpoint::Token, Req> tokenToRequest;
+
+	public:
+		void addRequest(Req const& req) {
+			auto token = req.reply.getEndpoint().token;
+			tokenToRequest[token] = req;
+			for (const auto& configClass : req.configClassSet.getClasses()) {
+				configClassToTokens[configClass].insert(token);
+			}
 		}
-	}
 
-	std::vector<Req> getRequestsToNotify(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes) const {
-		std::set<Endpoint::Token> tokenSet;
-		for (const auto& change : changes) {
-			if (!change.mutation.getConfigClass().present()) {
-				// Update everything
-				for (const auto& [token, req] : tokenToRequest) {
-					if (req.lastSeenVersion < change.version) {
-						tokenSet.insert(token);
-					}
-				}
-			} else {
-				Key configClass = change.mutation.getConfigClass().get();
-				if (configClassToTokens.count(configClass)) {
-					auto tokens = get(configClassToTokens, Key(change.mutation.getConfigClass().get()));
-					for (const auto& token : tokens) {
-						auto req = get(tokenToRequest, token);
+		std::vector<Req> getRequestsToNotify(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes) const {
+			std::set<Endpoint::Token> tokenSet;
+			for (const auto& change : changes) {
+				if (!change.mutation.getConfigClass().present()) {
+					// Update everything
+					for (const auto& [token, req] : tokenToRequest) {
 						if (req.lastSeenVersion < change.version) {
 							tokenSet.insert(token);
-						} else {
-							TEST(true); // Worker is ahead of config broadcaster
+						}
+					}
+				} else {
+					Key configClass = change.mutation.getConfigClass().get();
+					if (configClassToTokens.count(configClass)) {
+						auto tokens = get(configClassToTokens, Key(change.mutation.getConfigClass().get()));
+						for (const auto& token : tokens) {
+							auto req = get(tokenToRequest, token);
+							if (req.lastSeenVersion < change.version) {
+								tokenSet.insert(token);
+							} else {
+								TEST(true); // Worker is ahead of config broadcaster
+							}
 						}
 					}
 				}
 			}
-		}
-		std::vector<Req> result;
-		for (const auto& token : tokenSet) {
-			result.push_back(get(tokenToRequest, token));
-		}
-		return result;
-	}
-
-	std::vector<Req> getOutdatedRequests(Version newSnapshotVersion) {
-		std::vector<Req> result;
-		for (const auto& [token, req] : tokenToRequest) {
-			if (req.lastSeenVersion < newSnapshotVersion) {
-				result.push_back(req);
+			std::vector<Req> result;
+			for (const auto& token : tokenSet) {
+				result.push_back(get(tokenToRequest, token));
 			}
+			return result;
 		}
-		return result;
-	}
 
-	void removeRequest(Req const& req) {
-		auto token = req.reply.getEndpoint().token;
-		for (const auto& configClass : req.configClassSet.getClasses()) {
-			remove(get(configClassToTokens, configClass), token);
-			// TODO: Don't leak config classes
+		std::vector<Req> getOutdatedRequests(Version newSnapshotVersion) {
+			std::vector<Req> result;
+			for (const auto& [token, req] : tokenToRequest) {
+				if (req.lastSeenVersion < newSnapshotVersion) {
+					result.push_back(req);
+				}
+			}
+			return result;
 		}
-		remove(tokenToRequest, token);
-	}
-};
 
-} // namespace
-
-class ConfigBroadcasterImpl {
-	PendingRequestStore pending;
+		void removeRequest(Req const& req) {
+			auto token = req.reply.getEndpoint().token;
+			for (const auto& configClass : req.configClassSet.getClasses()) {
+				remove(get(configClassToTokens, configClass), token);
+				// TODO: Don't leak config classes
+			}
+			remove(tokenToRequest, token);
+		}
+	} pending;
 	std::map<ConfigKey, KnobValue> snapshot;
 	std::deque<VersionedConfigMutation> mutationHistory;
 	std::deque<VersionedConfigCommitAnnotation> annotationHistory;
@@ -364,6 +362,8 @@ public:
 	}
 
 	UID getID() const { return id; }
+
+	static void runPendingRequestStoreTest(bool includeGlobalMutation, int expectedMatches);
 };
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
@@ -446,7 +446,9 @@ ConfigBroadcastFollowerGetChangesRequest getTestRequest(Version lastSeenVersion,
 	return ConfigBroadcastFollowerGetChangesRequest{ lastSeenVersion, ConfigClassSet{ configClassesVector } };
 }
 
-void runPendingRequestStoreTest(bool includeGlobalMutation, int expectedMatches) {
+} // namespace
+
+void ConfigBroadcasterImpl::runPendingRequestStoreTest(bool includeGlobalMutation, int expectedMatches) {
 	PendingRequestStore pending;
 	for (Version v = 0; v < 5; ++v) {
 		pending.addRequest(getTestRequest(v, {}));
@@ -465,14 +467,12 @@ void runPendingRequestStoreTest(bool includeGlobalMutation, int expectedMatches)
 	}
 }
 
-} // namespace
-
 TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Internal/PendingRequestStore/Simple") {
-	runPendingRequestStoreTest(false, 2);
+	ConfigBroadcasterImpl::runPendingRequestStoreTest(false, 2);
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Internal/PendingRequestStore/GlobalMutation") {
-	runPendingRequestStoreTest(true, 4);
+	ConfigBroadcasterImpl::runPendingRequestStoreTest(true, 4);
 	return Void();
 }
