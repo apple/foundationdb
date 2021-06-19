@@ -38,6 +38,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StatusClient.h"
@@ -166,6 +167,7 @@ struct StorageServerDisk {
 	void makeNewStorageServerDurable();
 	bool makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft);
 	void makeVersionDurable(Version version);
+	void makeTssQuarantineDurable();
 	Future<bool> restoreDurableState();
 
 	void changeLogProtocol(Version version, ProtocolVersion protocol);
@@ -463,7 +465,7 @@ public:
 	void byteSampleApplyClear(KeyRangeRef range, Version ver);
 
 	void popVersion(Version v, bool popAllTags = false) {
-		if (logSystem) {
+		if (logSystem && !isTss()) {
 			if (v > poppedAllAfter) {
 				popAllTags = true;
 				poppedAllAfter = std::numeric_limits<Version>::max();
@@ -510,6 +512,37 @@ public:
 		return mLV.push_back_deep(mLV.arena(), m);
 	}
 
+	void setTssPair(UID pairId) {
+		tssPairID = Optional<UID>(pairId);
+
+		// Set up tss fault injection here, only if we are in simulated mode and with fault injection.
+		// With fault injection enabled, the tss will start acting normal for a bit, then after the specified delay
+		// start behaving incorrectly.
+		if (g_network->isSimulated() && !g_simulator.speedUpSimulation &&
+		    g_simulator.tssMode >= ISimulator::TSSMode::EnabledAddDelay) {
+			tssFaultInjectTime = now() + deterministicRandom()->randomInt(60, 300);
+			TraceEvent(SevWarnAlways, "TSSInjectFaultEnabled", thisServerID)
+			    .detail("Mode", g_simulator.tssMode)
+			    .detail("At", tssFaultInjectTime.get());
+		}
+	}
+
+	// If a TSS is "in quarantine", it means it has incorrect data. It is effectively in a "zombie" state where it
+	// rejects all read requests and ignores all non-private mutations and data movements, but otherwise is still part
+	// of the cluster. The purpose of this state is to "freeze" the TSS state after a mismatch so a human operator can
+	// investigate, but preventing a new storage process from replacing the TSS on the worker. It will still get removed
+	// from the cluster if it falls behind on the mutation stream, or if its tss pair gets removed and its tag is no
+	// longer valid.
+	bool isTSSInQuarantine() { return tssPairID.present() && tssInQuarantine; }
+
+	void startTssQuarantine() {
+		if (!tssInQuarantine) {
+			// persist quarantine so it's still quarantined if rebooted
+			storage.makeTssQuarantineDurable();
+		}
+		tssInQuarantine = true;
+	}
+
 	StorageServerDisk storage;
 
 	KeyRangeMap<Reference<ShardInfo>> shards;
@@ -552,6 +585,11 @@ public:
 	Reference<ILogSystem::IPeekCursor> logCursor;
 
 	UID thisServerID;
+	Optional<UID> tssPairID; // if this server is a tss, this is the id of its (ss) pair
+	Optional<UID> ssPairID; // if this server is an ss, this is the id of its (tss) pair
+	Optional<double> tssFaultInjectTime;
+	bool tssInQuarantine;
+
 	Key sk;
 	Reference<AsyncVar<ServerDBInfo>> db;
 	Database cx;
@@ -739,7 +777,7 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false), shuttingDown(false),
 	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
-	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
+	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()), tssInQuarantine(false),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
 	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
 	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0) {
@@ -784,6 +822,14 @@ public:
 		mutableData().createNewVersion(ver);
 		mutableData().forgetVersionsBefore(ver);
 	}
+
+	bool isTss() const { return tssPairID.present(); }
+
+	bool isSSWithTSSPair() const { return ssPairID.present(); }
+
+	void setSSWithTssPair(UID idOfTSS) { ssPairID = Optional<UID>(idOfTSS); }
+
+	void clearSSWithTssPair() { ssPairID = Optional<UID>(); }
 
 	// This is the maximum version that might be read from storage (the minimum version is durableVersion)
 	Version storageVersion() const { return oldestVersion.get(); }
@@ -858,10 +904,10 @@ public:
 	template <class Request>
 	bool shouldRead(const Request& request) {
 		auto rate = currentRate();
-		if (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD &&
-		    deterministicRandom()->random01() >
-		        std::max(SERVER_KNOBS->STORAGE_DURABILITY_LAG_MIN_RATE,
-		                 rate / SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD)) {
+		if (isTSSInQuarantine() || (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD &&
+		                            deterministicRandom()->random01() >
+		                                std::max(SERVER_KNOBS->STORAGE_DURABILITY_LAG_MIN_RATE,
+		                                         rate / SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD))) {
 			sendErrorWithPenalty(request.reply, server_overloaded(), getPenalty());
 			++counters.readsRejected;
 			return false;
@@ -1723,7 +1769,9 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	if (sel.offset <= 1 && sel.offset >= 0)
 		maxBytes = std::numeric_limits<int>::max();
 	else
-		maxBytes = BUGGIFY ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
+		maxBytes = (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::Disabled && BUGGIFY)
+		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
+		               : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 
 	state GetKeyValuesReply rep = wait(
 	    readRange(data,
@@ -1780,10 +1828,10 @@ ACTOR Future<Key> findKey(StorageServer* data,
 			// This is possible if key/value pairs are very large and only one result is returned on a last less than
 			// query SOMEDAY: graceful handling of exceptionally sized values
 			ASSERT(returnKey != sel.getKey());
-
 			return returnKey;
-		} else
+		} else {
 			return forward ? range.end : range.begin;
+		}
 	}
 }
 
@@ -1854,6 +1902,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		                             : findKey(data, req.end, version, shard, &offset2, span.context);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
+
 		if (req.debugID.present())
 			g_traceBatch.addEvent(
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
@@ -2158,6 +2207,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 	try {
 		state Version version = wait(waitForVersion(data, req.version, req.spanContext));
+
 		state uint64_t changeCounter = data->shardChangeCounter;
 		state KeyRange shard = getShardKeyRange(data, req.sel);
 
@@ -3073,32 +3123,30 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
-	//TraceEvent("ChangeServerKeys", data->thisServerID)
-	//	.detail("KeyBegin", keys.begin)
-	//	.detail("KeyEnd", keys.end)
-	//	.detail("NowAssigned", nowAssigned)
-	//	.detail("Version", version)
-	//	.detail("Context", changeServerKeysContextName[(int)context]);
+	// TraceEvent("ChangeServerKeys", data->thisServerID)
+	//     .detail("KeyBegin", keys.begin)
+	//     .detail("KeyEnd", keys.end)
+	//     .detail("NowAssigned", nowAssigned)
+	//     .detail("Version", version)
+	//     .detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
-	// DEBUG_KEY_RANGE( nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys );
+	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys);
 
 	bool isDifferent = false;
 	auto existingShards = data->shards.intersectingRanges(keys);
 	for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
 		if (nowAssigned != it->value()->assigned()) {
 			isDifferent = true;
-			/*TraceEvent("CSKRangeDifferent", data->thisServerID)
-			  .detail("KeyBegin", it->range().begin)
-			  .detail("KeyEnd", it->range().end);*/
+			TraceEvent("CSKRangeDifferent", data->thisServerID)
+			    .detail("KeyBegin", it->range().begin)
+			    .detail("KeyEnd", it->range().end);
 			break;
 		}
 	}
 	if (!isDifferent) {
-		//TraceEvent("CSKShortCircuit", data->thisServerID)
-		//	.detail("KeyBegin", keys.begin)
-		//	.detail("KeyEnd", keys.end);
+		// TraceEvent("CSKShortCircuit", data->thisServerID).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
 		return;
 	}
 
@@ -3136,13 +3184,13 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
-		/*TraceEvent("CSKRange", data->thisServerID)
-		    .detail("KeyBegin", range.begin)
-		    .detail("KeyEnd", range.end)
-		    .detail("Available", dataAvailable)
-		    .detail("NowAssigned", nowAssigned)
-		    .detail("NewestAvailable", r->value())
-		    .detail("ShardState0", data->shards[range.begin]->debugDescribeState());*/
+		// TraceEvent("CSKRange", data->thisServerID)
+		//     .detail("KeyBegin", range.begin)
+		//     .detail("KeyEnd", range.end)
+		//     .detail("Available", dataAvailable)
+		//     .detail("NowAssigned", nowAssigned)
+		//     .detail("NewestAvailable", r->value())
+		//     .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
 		if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(r->value() ==
@@ -3244,6 +3292,8 @@ static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format")
 static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/StorageServer/1/2"),
                                                     LiteralStringRef("FoundationDB/StorageServer/1/5"));
 static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
+static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
+static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
 
 // (Potentially) change with the durable version or when fetchKeys completes
 static const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
@@ -3320,12 +3370,16 @@ private:
 			ASSERT(m.type == MutationRef::SetValue && m.param1.startsWith(data->sk));
 			KeyRangeRef keys(startKey.removePrefix(data->sk), m.param1.removePrefix(data->sk));
 
-			// add changes in shard assignment to the mutation log
-			setAssignedStatus(data, keys, nowAssigned);
+			// ignore data movements for tss in quarantine
+			if (!data->isTSSInQuarantine()) {
+				// add changes in shard assignment to the mutation log
+				setAssignedStatus(data, keys, nowAssigned);
 
-			// The changes for version have already been received (and are being processed now).  We need
-			// to fetch the data for change.version-1 (changes from versions < change.version)
-			changeServerKeys(data, keys, nowAssigned, currentVersion - 1, CSK_UPDATE);
+				// The changes for version have already been received (and are being processed now).  We need to fetch
+				// the data for change.version-1 (changes from versions < change.version)
+				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, CSK_UPDATE);
+			}
+
 			processedStartKey = false;
 		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(data->sk)) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -3359,10 +3413,18 @@ private:
 			throw worker_removed();
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
 		           m.param1.substr(1).startsWith(serverTagPrefix)) {
-			bool matchesThisServer = decodeServerTagKey(m.param1.substr(1)) == data->thisServerID;
-			if ((m.type == MutationRef::SetValue && !matchesThisServer) ||
-			    (m.type == MutationRef::ClearRange && matchesThisServer))
+			UID serverTagKey = decodeServerTagKey(m.param1.substr(1));
+			bool matchesThisServer = serverTagKey == data->thisServerID;
+			bool matchesTssPair = data->isTss() ? serverTagKey == data->tssPairID.get() : false;
+			if ((m.type == MutationRef::SetValue && !data->isTss() && !matchesThisServer) ||
+			    (m.type == MutationRef::ClearRange &&
+			     ((!data->isTSSInQuarantine() && matchesThisServer) || (data->isTss() && matchesTssPair)))) {
 				throw worker_removed();
+			}
+			if (!data->isTss() && m.type == MutationRef::ClearRange && data->ssPairID.present() &&
+			    serverTagKey == data->ssPairID.get()) {
+				data->clearSSWithTssPair();
+			}
 		} else if (m.type == MutationRef::SetValue && m.param1 == rebootWhenDurablePrivateKey) {
 			data->rebootAfterDurableVersion = currentVersion;
 			TraceEvent("RebootWhenDurableSet", data->thisServerID)
@@ -3372,6 +3434,33 @@ private:
 			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
 			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 			data->addMutationToMutationLog(mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2));
+		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
+		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
+			if (!data->isTss()) {
+				UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.substr(1).removePrefix(tssMappingKeys.begin)));
+				ASSERT(ssId == data->thisServerID);
+				if (m.type == MutationRef::SetValue) {
+					UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
+					data->setSSWithTssPair(tssId);
+				} else {
+					data->clearSSWithTssPair();
+				}
+			}
+		} else if (m.param1.substr(1).startsWith(tssQuarantineKeys.begin) &&
+		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
+			if (data->isTss()) {
+				UID ssId = decodeTssQuarantineKey(m.param1.substr(1));
+				ASSERT(ssId == data->thisServerID);
+				if (m.type == MutationRef::SetValue) {
+					TEST(true); // Putting TSS in quarantine
+					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID);
+					data->startTssQuarantine();
+				} else {
+					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID);
+					// dipose of this TSS
+					throw worker_removed();
+				}
+			}
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -3429,6 +3518,21 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			wait(delayJittered(.005, TaskPriority::TLogPeekReply));
 		}
 
+		if (g_network->isSimulated() && data->isTss() && g_simulator.tssMode == ISimulator::TSSMode::EnabledAddDelay &&
+		    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now()) {
+			if (deterministicRandom()->random01() < 0.01) {
+				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID);
+				// small random chance to just completely get stuck here, each tss should eventually hit this in this
+				// mode
+				wait(Never());
+			} else {
+				// otherwise pause for part of a second
+				double delayTime = deterministicRandom()->random01();
+				TraceEvent(SevWarnAlways, "TSSInjectDelay", data->thisServerID).detail("Delay", delayTime);
+				wait(delay(delayTime));
+			}
+		}
+
 		while (data->byteSampleClearsTooLarge.get()) {
 			wait(data->byteSampleClearsTooLarge.onChange());
 		}
@@ -3441,8 +3545,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				break;
 			}
 		}
-		if (cursor->popped() > 0)
+		if (cursor->popped() > 0) {
 			throw worker_removed();
+		}
 
 		++data->counters.updateBatches;
 		data->lastTLogVersion = cursor->getMaxKnownVersion();
@@ -3493,7 +3598,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
-					//TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg.toString());
+					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg.toString());
 
 					if (firstMutation && msg.param1.startsWith(systemKeys.end))
 						hasPrivateData = true;
@@ -3601,7 +3706,23 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				Span span("SS:update"_loc, { spanContext });
 				span.addTag("key"_sr, msg.param1);
 
-				if (ver != invalidVersion) { // This change belongs to a version < minVersion
+				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
+				// quarantine.
+				if (g_network->isSimulated() && data->isTss() &&
+				    g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations &&
+				    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
+				    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
+				    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
+				    deterministicRandom()->random01() < 0.05) {
+					TraceEvent(SevWarnAlways, "TSSInjectDropMutation", data->thisServerID)
+					    .detail("Mutation", msg.toString())
+					    .detail("Version", cloneCursor2->version().toString());
+				} else if (data->isTSSInQuarantine() &&
+				           (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff)) {
+					TraceEvent("TSSQuarantineDropMutation", data->thisServerID)
+					    .suppressFor(10.0)
+					    .detail("Version", cloneCursor2->version().toString());
+				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
 					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);
 					if (ver == 1) {
 						TraceEvent("SSPeekMutation", data->thisServerID);
@@ -3846,6 +3967,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 void StorageServerDisk::makeNewStorageServerDurable() {
 	storage->set(persistFormat);
 	storage->set(KeyValueRef(persistID, BinaryWriter::toValue(data->thisServerID, Unversioned())));
+	if (data->tssPairID.present()) {
+		storage->set(KeyValueRef(persistTssPairID, BinaryWriter::toValue(data->tssPairID.get(), Unversioned())));
+	}
 	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
 	storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), LiteralStringRef("0")));
 	storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), LiteralStringRef("0")));
@@ -3957,6 +4081,11 @@ void StorageServerDisk::makeVersionDurable(Version version) {
 	// TraceEvent("MakeDurable", data->thisServerID)
 	//     .detail("FromVersion", prevStorageVersion)
 	//     .detail("ToVersion", version);
+}
+
+// Update data->storage to persist tss quarantine state
+void StorageServerDisk::makeTssQuarantineDurable() {
+	storage->set(KeyValueRef(persistTssQuarantine, LiteralStringRef("1")));
 }
 
 void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion protocol) {
@@ -4074,6 +4203,8 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data,
 ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* storage) {
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fID = storage->readValue(persistID);
+	state Future<Optional<Value>> ftssPairID = storage->readValue(persistTssPairID);
+	state Future<Optional<Value>> fTssQuarantine = storage->readValue(persistTssQuarantine);
 	state Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
 	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
 	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
@@ -4086,7 +4217,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	    restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
 	TraceEvent("ReadingDurableState", data->thisServerID);
-	wait(waitForAll(std::vector{ fFormat, fID, fVersion, fLogProtocol, fPrimaryLocality }));
+	wait(waitForAll(std::vector{ fFormat, fID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID);
@@ -4106,7 +4237,20 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		throw worker_recovery_failed();
 	}
 	data->thisServerID = BinaryReader::fromStringRef<UID>(fID.get().get(), Unversioned());
-	data->sk = serverKeysPrefixFor(data->thisServerID).withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
+	if (ftssPairID.get().present()) {
+		data->setTssPair(BinaryReader::fromStringRef<UID>(ftssPairID.get().get(), Unversioned()));
+	}
+
+	// It's a bit sketchy to rely on an untrusted storage engine to persist its quarantine state when the quarantine
+	// state means the storage engine already had a durability or correctness error, but it should get re-quarantined
+	// very quickly because of a mismatch if it starts trying to do things again
+	if (fTssQuarantine.get().present()) {
+		TEST(true); // TSS restarted while quarantined
+		data->tssInQuarantine = true;
+	}
+
+	data->sk = serverKeysPrefixFor((data->tssPairID.present()) ? data->tssPairID.get() : data->thisServerID)
+	               .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 
 	if (fLogProtocol.get().present())
 		data->logProtocol = BinaryReader::fromStringRef<ProtocolVersion>(fLogProtocol.get().get(), Unversioned());
@@ -4126,6 +4270,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		                     ? allKeys.end
 		                     : available[availableLoc + 1].key.removePrefix(persistShardAvailableKeys.begin));
 		ASSERT(!keys.empty());
+
 		bool nowAvailable = available[availableLoc].value != LiteralStringRef("0");
 		/*if(nowAvailable)
 		  TraceEvent("AvailableShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
@@ -4151,6 +4296,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		wait(yield());
 	}
 
+	// TODO: why is this seemingly random delay here?
 	wait(delay(0.0001));
 
 	{
@@ -4398,20 +4544,30 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 
 	wait(self->byteSampleRecovery);
 
-	Tag tag = self->tag;
 	self->actors.add(traceCounters("StorageMetrics",
 	                               self->thisServerID,
 	                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
 	                               &self->counters.cc,
 	                               self->thisServerID.toString() + "/StorageMetrics",
-	                               [tag, self = self](TraceEvent& te) {
-		                               te.detail("Tag", tag.toString());
+	                               [self = self](TraceEvent& te) {
+		                               te.detail("Tag", self->tag.toString());
 		                               StorageBytes sb = self->storage.getStorageBytes();
 		                               te.detail("KvstoreBytesUsed", sb.used);
 		                               te.detail("KvstoreBytesFree", sb.free);
 		                               te.detail("KvstoreBytesAvailable", sb.available);
 		                               te.detail("KvstoreBytesTotal", sb.total);
 		                               te.detail("KvstoreBytesTemp", sb.temp);
+		                               if (self->isTss()) {
+			                               te.detail("TSSPairID", self->tssPairID);
+			                               te.detail("TSSJointID",
+			                                         UID(self->thisServerID.first() ^ self->tssPairID.get().first(),
+			                                             self->thisServerID.second() ^ self->tssPairID.get().second()));
+		                               } else if (self->isSSWithTSSPair()) {
+			                               te.detail("SSPairID", self->ssPairID);
+			                               te.detail("TSSJointID",
+			                                         UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
+			                                             self->thisServerID.second() ^ self->ssPairID.get().second()));
+		                               }
 	                               }));
 
 	loop {
@@ -4515,6 +4671,7 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
 	loop {
 		GetKeyValuesRequest req = waitNext(getKeyValues);
+
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
 		// before doing real work
 		self->actors.add(self->readGuard(req, getKeyValuesQ));
@@ -4803,6 +4960,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	if (e.code() == error_code_please_reboot) {
 		// do nothing.
 	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
+		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be investigated?
 		persistentData->dispose();
 	} else {
 		persistentData->close();
@@ -4824,18 +4982,19 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 	// create a temp client connect to DB
 	Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST);
 
-	state Transaction tr(cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state int noCanRemoveCount = 0;
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state bool canRemove = wait(canRemoveStorageServer(&tr, id));
+			state bool canRemove = wait(canRemoveStorageServer(tr, id));
 			if (!canRemove) {
 				TEST(true); // it's possible that the caller had a transaction in flight that assigned keys to the
 				            // server. Wait for it to reverse its mistake.
 				wait(delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::UpdateStorage));
-				tr.reset();
+				tr->reset();
 				TraceEvent("RemoveStorageServerRetrying")
 				    .detail("Count", noCanRemoveCount++)
 				    .detail("ServerID", id)
@@ -4845,21 +5004,28 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 			}
 		} catch (Error& e) {
 			state Error err = e;
-			wait(tr.onError(e));
+			wait(tr->onError(e));
 			TraceEvent("RemoveStorageServerRetrying").error(err);
 		}
 	}
 }
 
+// for creating a new storage server
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
+                                 Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo>> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
+	if (ssi.isTss()) {
+		self.setTssPair(ssi.tssPairID.get());
+		ASSERT(self.isTss());
+	}
 
-	self.sk = serverKeysPrefixFor(self.thisServerID).withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
+	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
+	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
 
 	try {
@@ -4870,7 +5036,11 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(
 			    self.cx, ssi)); // Might throw recruitment_failed in case of simultaneous master failure
 			self.tag = verAndTag.second;
-			self.setInitialVersion(verAndTag.first - 1);
+			if (ssi.isTss()) {
+				self.setInitialVersion(tssSeedVersion);
+			} else {
+				self.setInitialVersion(verAndTag.first - 1);
+			}
 		} else {
 			self.tag = seedTag;
 		}
@@ -4880,12 +5050,14 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self.version.get())
-		    .detail("SeedTag", seedTag.toString());
+		    .detail("SeedTag", seedTag.toString())
+		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
 		InitializeStorageReply rep;
 		rep.interf = ssi;
 		rep.addedVersion = self.version.get();
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
+
 		wait(storageServerCore(&self, ssi));
 
 		throw internal_error();
@@ -4901,6 +5073,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 }
 
 ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface ssi) {
+	ASSERT(!ssi.isTss());
 	state Transaction tr(self->cx);
 
 	loop {
@@ -4915,6 +5088,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()))
 			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
+
 				try {
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -4933,6 +5107,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 						       tagLocalityListValue(rep.newTag.get().locality));
 					}
 
+					// this only should happen if SS moved datacenters
 					if (rep.newTag.present()) {
 						KeyRange conflictRange = singleKeyRange(serverTagConflictKeyFor(rep.newTag.get()));
 						tr.addReadConflictRange(conflictRange);
@@ -4988,6 +5163,51 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 	return Void();
 }
 
+ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterface ssi) {
+	// RYW for KeyBackedMap
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+
+	ASSERT(ssi.isTss());
+
+	loop {
+		try {
+			state Tag myTag;
+
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			Optional<Value> pairTagValue = wait(tr->get(serverTagKeyFor(self->tssPairID.get())));
+
+			if (!pairTagValue.present()) {
+				TEST(true); // Race where tss was down, pair was removed, tss starts back up
+				throw worker_removed();
+			}
+
+			myTag = decodeServerTagValue(pairTagValue.get());
+
+			tr->addReadConflictRange(singleKeyRange(serverListKeyFor(ssi.id())));
+			tr->set(serverListKeyFor(ssi.id()), serverListValue(ssi));
+
+			// add itself back to tss mapping
+			if (!self->isTSSInQuarantine()) {
+				tssMapDB.set(tr, self->tssPairID.get(), ssi.id());
+			}
+
+			wait(tr->commit());
+			self->tag = myTag;
+
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	return Void();
+}
+
+// for recovering an existing storage server
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Reference<AsyncVar<ServerDBInfo>> db,
@@ -4996,7 +5216,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<ClusterConnectionFile> connFile) {
 	state StorageServer self(persistentData, db, ssi);
 	self.folder = folder;
-	self.sk = serverKeysPrefixFor(self.thisServerID).withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
+
 	try {
 		state double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID);
@@ -5021,13 +5241,30 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		}
 		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
 
+		// if this is a tss storage file, use that as source of truth for this server being a tss instead of the
+		// presence of the tss pair key in the storage engine
+		if (ssi.isTss()) {
+			ASSERT(self.isTss());
+			ssi.tssPairID = self.tssPairID.get();
+		} else {
+			ASSERT(!self.isTss());
+		}
+
 		ASSERT(self.thisServerID == ssi.id());
+
+		self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
+		              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
+
 		TraceEvent("StorageServerReboot", self.thisServerID).detail("Version", self.version.get());
 
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		wait(replaceInterface(&self, ssi));
+		if (self.isTss()) {
+			wait(replaceTSSInterface(&self, ssi));
+		} else {
+			wait(replaceInterface(&self, ssi));
+		}
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 

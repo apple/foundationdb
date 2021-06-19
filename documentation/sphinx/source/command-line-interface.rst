@@ -64,9 +64,11 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
+
+The ``tss`` option, if present, changes the Testing Storage Server (TSS) configuration for a cluster. When used for the first time, both a count and a storage engine must be specified. For more details, see :ref:`testing-storage-server`.
 
 redundancy mode
 ^^^^^^^^^^^^^^^
@@ -106,6 +108,11 @@ For large clusters, you can manually set the allocated number of processes of a 
 Set the process using ``configure [grv_proxies|commit_proxies|resolvers|logs]=<N>``, where ``<N>`` is an integer greater than 0, or -1 to reset the value to its default.
 
 For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
+
+perpetual storage wiggle
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Set the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle.
 
 consistencycheck
 ----------------
@@ -496,3 +503,21 @@ Disables writing from ``fdbcli`` (the default). In this mode, attempting to set 
 ``writemode on``
 
 Enables writing from ``fdbcli``.
+
+tssq
+----
+
+Utility commands for handling quarantining Testing Storage Servers. For more information on this, see :ref:`testing-storage-server`.
+
+``tssq start <StorageUID>``
+
+Manually quarantines a TSS process, if it is not already quarantined.
+
+``tssq stop <StorageUID>``
+
+Removes a TSS process from quarantine, disposing of the TSS and allowing Data Distribution to recruit a new storage process on the worker.
+
+``tssq list``:
+
+Lists the storage UIDs of all TSS processes currently in quarantine.
+

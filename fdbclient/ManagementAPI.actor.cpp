@@ -60,6 +60,13 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		return out;
 	}
 
+	if (mode == "tss") {
+		// Set temporary marker in config map to mark that this is a tss configuration and not a normal storage/log
+		// configuration. A bit of a hack but reuses the parsing code nicely.
+		out[p + "istss"] = "1";
+		return out;
+	}
+
 	if (mode == "locked") {
 		// Setting this key is interpreted as an instruction to use the normal version-stamp-based mechanism for locking
 		// the database.
@@ -119,7 +126,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 
 		if ((key == "logs" || key == "commit_proxies" || key == "grv_proxies" || key == "resolvers" ||
 		     key == "remote_logs" || key == "log_routers" || key == "usable_regions" ||
-		     key == "repopulate_anti_quorum") &&
+		     key == "repopulate_anti_quorum" || key == "count") &&
 		    isInteger(value)) {
 			out[p + key] = value;
 		}
@@ -325,6 +332,35 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p + "log_replication_policy"] = policyWriter.toValue().toString();
+	}
+	if (outConf.count(p + "istss")) {
+		// redo config parameters to be tss config instead of normal config
+
+		// save param values from parsing as a normal config
+		bool isNew = outConf.count(p + "initialized");
+		Optional<std::string> count;
+		Optional<std::string> storageEngine;
+		if (outConf.count(p + "count")) {
+			count = Optional<std::string>(outConf[p + "count"]);
+		}
+		if (outConf.count(p + "storage_engine")) {
+			storageEngine = Optional<std::string>(outConf[p + "storage_engine"]);
+		}
+
+		// A new tss setup must have count + storage engine. An adjustment must have at least one.
+		if ((isNew && (!count.present() || !storageEngine.present())) ||
+		    (!isNew && !count.present() && !storageEngine.present())) {
+			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
+		}
+
+		// clear map and only reset tss parameters
+		outConf.clear();
+		if (count.present()) {
+			outConf[p + "tss_count"] = count.get();
+		}
+		if (storageEngine.present()) {
+			outConf[p + "tss_storage_engine"] = storageEngine.get();
+		}
 	}
 	return ConfigurationResult::SUCCESS;
 }

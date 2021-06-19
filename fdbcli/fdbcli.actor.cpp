@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Status.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -490,13 +491,17 @@ void initHelp() {
 	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will "
 	    "succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-	    "configure [new] "
+	    "configure [new|tss]"
 	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
-	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*"
+	    "count=<TSS_COUNT>",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
-	    "specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
+	    "specified.\n\ntss: when enabled, configures the testing storage server for the cluster instead."
+	    "When used with new to set up tss for the first time, it requires both a count and a storage engine."
+	    "To disable the testing storage server, run \"configure tss count=0\"\n\n"
+	    "Redundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
 	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
 	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
 	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
@@ -678,6 +683,12 @@ void initHelp() {
 	    CommandHelp("triggerddteaminfolog",
 	                "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
+	helpMap["tssq"] =
+	    CommandHelp("tssq start|stop <StorageUID>",
+	                "start/stop tss quarantine",
+	                "Toggles Quarantine mode for a Testing Storage Server. Quarantine will happen automatically if the "
+	                "TSS is detected to have incorrect data, but can also be initiated manually. You can also remove a "
+	                "TSS from quarantine once your investigation is finished, which will destroy the TSS process.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -1132,6 +1143,17 @@ void printStatus(StatusObjectReader statusObj,
 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
+
+				if (statusObjConfig.get("tss_count", intVal) && intVal > 0) {
+					int activeTss = 0;
+					if (statusObjCluster.has("active_tss_count")) {
+						statusObjCluster.get("active_tss_count", activeTss);
+					}
+					outputString += format("\n  TSS                    - %d/%d", activeTss, intVal);
+
+					if (statusObjConfig.get("tss_storage_engine", strVal))
+						outputString += format("\n  TSS Storage Engine     - %s", strVal.c_str());
+				}
 
 				outputString += "\n  Usable Regions         - ";
 				if (statusObjConfig.get("usable_regions", intVal)) {
@@ -1872,6 +1894,75 @@ ACTOR Future<Void> triggerDDTeamInfoLog(Database db) {
 			wait(tr.onError(e));
 		}
 	}
+}
+
+ACTOR Future<Void> tssQuarantineList(Database db) {
+	state ReadYourWritesTransaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			RangeResult result = wait(tr.getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY));
+			// shouldn't have many quarantined TSSes
+			ASSERT(!result.more);
+			printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");
+			for (auto& it : result) {
+				printf("  %s\n", decodeTssQuarantineKey(it.key).toString().c_str());
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<bool> tssQuarantine(Database db, bool enable, UID tssId) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			// Do some validation first to make sure the command is valid
+			Optional<Value> serverListValue = wait(tr->get(serverListKeyFor(tssId)));
+			if (!serverListValue.present()) {
+				printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
+				return false;
+			}
+			state StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+			if (!ssi.isTss()) {
+				printf("Cannot quarantine Non-TSS storage ID %s!\n", tssId.toString().c_str());
+				return false;
+			}
+
+			Optional<Value> currentQuarantineValue = wait(tr->get(tssQuarantineKeyFor(tssId)));
+			if (enable && currentQuarantineValue.present()) {
+				printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
+				return false;
+			} else if (!enable && !currentQuarantineValue.present()) {
+				printf("TSS %s is not in quarantine, cannot remove from quarantine!.\n", tssId.toString().c_str());
+				return false;
+			}
+
+			if (enable) {
+				tr->set(tssQuarantineKeyFor(tssId), LiteralStringRef(""));
+				// remove server from TSS mapping when quarantine is enabled
+				tssMapDB.erase(tr, ssi.tssPairID.get());
+			} else {
+				tr->clear(tssQuarantineKeyFor(tssId));
+			}
+
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	printf("Successfully %s TSS %s\n", enable ? "quarantined" : "removed", tssId.toString().c_str());
+	return true;
 }
 
 ACTOR Future<Void> timeWarning(double when, const char* msg) {
@@ -3393,6 +3484,31 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "tssq")) {
+					if (tokens.size() == 2) {
+						if (tokens[1] != LiteralStringRef("list")) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(tssQuarantineList(db));
+						}
+					}
+					if (tokens.size() == 3) {
+						if ((tokens[1] != LiteralStringRef("start") && tokens[1] != LiteralStringRef("stop")) ||
+						    (tokens[2].size() != 32) || !std::all_of(tokens[2].begin(), tokens[2].end(), &isxdigit)) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							bool enable = tokens[1] == LiteralStringRef("start");
+							UID tssId = UID::fromString(tokens[2].toString());
+							bool err = wait(tssQuarantine(db, enable, tssId));
+							if (err)
+								is_error = true;
+						}
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "configure")) {
 					bool err = wait(configure(db, tokens, db->getConnectionFile(), &linenoise, warn));
 					if (err)
@@ -3659,11 +3775,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for (auto it : address_interface) {
-							if (db->apiVersionAtLeast(700))
-								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
-								    .reboot.send(RebootRequest());
-							else
-								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
+							BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+							    .reboot.send(RebootRequest());
 						}
 						if (address_interface.size() == 0) {
 							fprintf(stderr,
@@ -3683,13 +3796,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if (!is_error) {
 							for (int i = 1; i < tokens.size(); i++) {
-								if (db->apiVersionAtLeast(700))
-									BinaryReader::fromStringRef<ClientWorkerInterface>(
-									    address_interface[tokens[i]].first, IncludeVersion())
-									    .reboot.send(RebootRequest());
-								else
-									tr->set(LiteralStringRef("\xff\xff/reboot_worker"),
-									        address_interface[tokens[i]].first);
+								BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[tokens[i]].first,
+								                                                   IncludeVersion())
+								    .reboot.send(RebootRequest());
 							}
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 						}
@@ -3746,13 +3855,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								tr->setOption(FDBTransactionOptions::TIMEOUT,
 								              StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
 								for (int i = 2; i < tokens.size(); i++) {
-									if (db->apiVersionAtLeast(700))
-										BinaryReader::fromStringRef<ClientWorkerInterface>(
-										    address_interface[tokens[i]].first, IncludeVersion())
-										    .reboot.send(RebootRequest(false, false, seconds));
-									else
-										tr->set(LiteralStringRef("\xff\xff/suspend_worker"),
-										        address_interface[tokens[i]].first);
+									BinaryReader::fromStringRef<ClientWorkerInterface>(
+									    address_interface[tokens[i]].first, IncludeVersion())
+									    .reboot.send(RebootRequest(false, false, seconds));
 								}
 								printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
 							}
@@ -4087,11 +4192,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for (auto it : address_interface) {
-							if (db->apiVersionAtLeast(700))
-								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
-								    .reboot.send(RebootRequest(false, true));
-							else
-								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
+							BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+							    .reboot.send(RebootRequest(false, true));
 						}
 						if (address_interface.size() == 0) {
 							fprintf(stderr,
@@ -4111,13 +4213,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if (!is_error) {
 							for (int i = 1; i < tokens.size(); i++) {
-								if (db->apiVersionAtLeast(700))
-									BinaryReader::fromStringRef<ClientWorkerInterface>(
-									    address_interface[tokens[i]].first, IncludeVersion())
-									    .reboot.send(RebootRequest(false, true));
-								else
-									tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"),
-									        address_interface[tokens[i]].first);
+								BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[tokens[i]].first,
+								                                                   IncludeVersion())
+								    .reboot.send(RebootRequest(false, true));
 							}
 							printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
 						}

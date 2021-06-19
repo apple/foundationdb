@@ -32,6 +32,7 @@
 #include "fdbserver/StorageMetrics.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/QuietDatabase.h"
+#include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -47,6 +48,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	// Whether or not perform consistency check between storage cache servers and storage servers
 	bool performCacheCheck;
+
+	// Whether or not to perform consistency check between storage servers and pair TSS
+	bool performTSSCheck;
 
 	// How long to wait for the database to go quiet before failing (if doing quiescent checks)
 	double quiescentWaitTimeout;
@@ -94,6 +98,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ConsistencyCheckWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		performQuiescentChecks = getOption(options, LiteralStringRef("performQuiescentChecks"), false);
 		performCacheCheck = getOption(options, LiteralStringRef("performCacheCheck"), false);
+		performTSSCheck = getOption(options, LiteralStringRef("performTSSCheck"), true);
 		quiescentWaitTimeout = getOption(options, LiteralStringRef("quiescentWaitTimeout"), 600.0);
 		distributed = getOption(options, LiteralStringRef("distributed"), true);
 		shardSampleFactor = std::max(getOption(options, LiteralStringRef("shardSampleFactor"), 1), 1);
@@ -205,11 +210,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		if (self->firstClient || self->distributed) {
 			try {
 				state DatabaseConfiguration configuration;
+				state std::map<UID, StorageServerInterface> tssMapping;
 
 				state Transaction tr(cx);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				loop {
 					try {
+						if (self->performTSSCheck) {
+							tssMapping.clear();
+							wait(readTSSMapping(&tr, &tssMapping));
+						}
 						RangeResult res = wait(tr.getRange(configKeys, 1000));
 						if (res.size() == 1000) {
 							TraceEvent("ConsistencyCheck_TooManyConfigOptions");
@@ -282,7 +292,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							throw;
 					}
 
-					wait(::success(self->checkForStorage(cx, configuration, self)));
+					wait(::success(self->checkForStorage(cx, configuration, tssMapping, self)));
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					// Check that each machine is operating as its desired class
@@ -313,7 +323,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						state Standalone<VectorRef<KeyValueRef>> keyLocations = keyLocationPromise.getFuture().get();
 
 						// Check that each shard has the same data on all storage servers that it resides on
-						wait(::success(self->checkDataConsistency(cx, keyLocations, configuration, self)));
+						wait(::success(self->checkDataConsistency(cx, keyLocations, configuration, tssMapping, self)));
 
 						// Cache consistency check
 						if (self->performCacheCheck)
@@ -1057,7 +1067,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					TraceEvent("ConsistencyCheck_FailedToFetchMetrics")
 					    .detail("Begin", printable(shard.begin))
 					    .detail("End", printable(shard.end))
-					    .detail("StorageServer", storageServers[i].id());
+					    .detail("StorageServer", storageServers[i].id())
+					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False")
+					    .error(reply.getError());
 					estimatedBytes.push_back(-1);
 				}
 
@@ -1074,7 +1086,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						    .detail("Begin", printable(shard.begin))
 						    .detail("End", printable(shard.end))
 						    .detail("StorageServer1", storageServers[firstValidStorageServer].id())
-						    .detail("StorageServer2", storageServers[i].id());
+						    .detail("StorageServer2", storageServers[i].id())
+						    .detail("IsTSS",
+						            storageServers[i].isTss() || storageServers[firstValidStorageServer].isTss()
+						                ? "True"
+						                : "False");
 					}
 				}
 			}
@@ -1114,6 +1130,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<bool> checkDataConsistency(Database cx,
 	                                        VectorRef<KeyValueRef> keyLocations,
 	                                        DatabaseConfiguration configuration,
+	                                        std::map<UID, StorageServerInterface> tssMapping,
 	                                        ConsistencyCheckWorkload* self) {
 		// Stores the total number of bytes on each storage server
 		// In a distributed test, this will be an estimated size
@@ -1236,6 +1253,19 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 			}
 
+			// add TSS to end of list, if configured and if not relocating
+			if (!isRelocating && self->performTSSCheck) {
+				int initialSize = storageServers.size();
+				for (int i = 0; i < initialSize; i++) {
+					auto tssPair = tssMapping.find(storageServers[i]);
+					if (tssPair != tssMapping.end()) {
+						TEST(true); // TSS checked in consistency check
+						storageServers.push_back(tssPair->second.id());
+						storageServerInterfaces.push_back(tssPair->second);
+					}
+				}
+			}
+
 			state vector<int64_t> estimatedBytes = wait(self->getStorageSizeEstimate(storageServerInterfaces, range));
 
 			// Gets permitted size range of shard
@@ -1323,7 +1353,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										// Be especially verbose if in simulation
 										if (g_network->isSimulated()) {
 											int invalidIndex = -1;
-											printf("\nSERVER %d (%s); shard = %s - %s:\n",
+											printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+											       storageServerInterfaces[j].isTss() ? "TSS " : "",
 											       j,
 											       storageServerInterfaces[j].address().toString().c_str(),
 											       printable(req.begin.getKey()).c_str(),
@@ -1341,7 +1372,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 											}
 
 											printf(
-											    "\nSERVER %d (%s); shard = %s - %s:\n",
+											    "\n%sSERVER %d (%s); shard = %s - %s:\n",
+											    storageServerInterfaces[firstValidServer].isTss() ? "TSS " : "",
 											    firstValidServer,
 											    storageServerInterfaces[firstValidServer].address().toString().c_str(),
 											    printable(req.begin.getKey()).c_str(),
@@ -1430,16 +1462,29 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										            printable(referenceUniqueKey))
 										    .detail("ValueMismatches", valueMismatches)
 										    .detail("ValueMismatchKey", printable(valueMismatchKey))
-										    .detail("MatchingKVPairs", matchingKVPairs);
+										    .detail("MatchingKVPairs", matchingKVPairs)
+										    .detail("IsTSS",
+										            storageServerInterfaces[j].isTss() ||
+										                    storageServerInterfaces[firstValidServer].isTss()
+										                ? "True"
+										                : "False");
 
-										self->testFailure("Data inconsistent", true);
-										return false;
+										if ((g_network->isSimulated() &&
+										     g_simulator.tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
+										    (!storageServerInterfaces[j].isTss() &&
+										     !storageServerInterfaces[firstValidServer].isTss())) {
+											self->testFailure("Data inconsistent", true);
+											return false;
+										}
 									}
 								}
 							}
 
 							// If the data is not available and we aren't relocating this shard
 							else if (!isRelocating) {
+								Error e =
+								    rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
+
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable")
 								    .suppressFor(1.0)
 								    .detail("StorageServer", storageServers[j])
@@ -1448,10 +1493,15 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail("Address", storageServerInterfaces[j].address())
 								    .detail("UID", storageServerInterfaces[j].id())
 								    .detail("GetKeyValuesToken",
-								            storageServerInterfaces[j].getKeyValues.getEndpoint().token);
+								            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
+								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False")
+								    .error(e);
 
 								// All shards should be available in quiscence
-								if (self->performQuiescentChecks) {
+								if (self->performQuiescentChecks &&
+								    ((g_network->isSimulated() &&
+								      g_simulator.tssMode != ISimulator::TSSMode::EnabledAddDelay) ||
+								     !storageServerInterfaces[j].isTss())) {
 									self->testFailure("Storage server unavailable");
 									return false;
 								}
@@ -1552,13 +1602,18 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							TraceEvent("ConsistencyCheck_IncorrectEstimate")
 							    .detail("EstimatedBytes", estimatedBytes[j])
 							    .detail("CorrectSampledBytes", sampledBytes)
-							    .detail("StorageServer", storageServers[j]);
-							self->testFailure("Storage servers had incorrect sampled estimate");
+							    .detail("StorageServer", storageServers[j])
+							    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
+
+							if (!storageServerInterfaces[j].isTss()) {
+								self->testFailure("Storage servers had incorrect sampled estimate");
+							}
 
 							hasValidEstimate = false;
 
 							break;
-						} else if (estimatedBytes[j] < 0) {
+						} else if (estimatedBytes[j] < 0 &&
+						           (g_network->isSimulated() || !storageServerInterfaces[j].isTss())) {
 							self->testFailure("Could not get storage metrics from server");
 							hasValidEstimate = false;
 							break;
@@ -1670,7 +1725,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (!keyValueStoreType.present()) {
 				TraceEvent("ConsistencyCheck_ServerUnavailable").detail("ServerID", storageServers[i].id());
 				self->testFailure("Storage server unavailable");
-			} else if (keyValueStoreType.get() != configuration.storageServerStoreType) {
+			} else if ((!storageServers[i].isTss() &&
+			            keyValueStoreType.get() != configuration.storageServerStoreType) ||
+			           (storageServers[i].isTss() &&
+			            keyValueStoreType.get() != configuration.testingStorageServerStoreType)) {
 				TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
 				    .detail("ServerID", storageServers[i].id())
 				    .detail("StoreType", keyValueStoreType.get().toString())
@@ -1698,10 +1756,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Returns false if any worker that should have a storage server does not have one
 	ACTOR Future<bool> checkForStorage(Database cx,
 	                                   DatabaseConfiguration configuration,
+	                                   std::map<UID, StorageServerInterface> tssMapping,
 	                                   ConsistencyCheckWorkload* self) {
 		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
-		std::set<Optional<Key>> missingStorage;
+		std::vector<Optional<Key>> missingStorage; // vector instead of a set to get the count
 
 		for (int i = 0; i < workers.size(); i++) {
 			NetworkAddress addr = workers[i].interf.stableAddress();
@@ -1720,21 +1779,48 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("Address", addr)
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
-					missingStorage.insert(workers[i].interf.locality.dcId());
+					missingStorage.push_back(workers[i].interf.locality.dcId());
 				}
 			}
 		}
 
+		int missingDc0 = configuration.regions.size() == 0
+		                     ? 0
+		                     : std::count(missingStorage.begin(), missingStorage.end(), configuration.regions[0].dcId);
+		int missingDc1 = configuration.regions.size() < 2
+		                     ? 0
+		                     : std::count(missingStorage.begin(), missingStorage.end(), configuration.regions[1].dcId);
+
 		if ((configuration.regions.size() == 0 && missingStorage.size()) ||
-		    (configuration.regions.size() == 1 && missingStorage.count(configuration.regions[0].dcId)) ||
-		    (configuration.regions.size() == 2 && configuration.usableRegions == 1 &&
-		     missingStorage.count(configuration.regions[0].dcId) &&
-		     missingStorage.count(configuration.regions[1].dcId)) ||
-		    (configuration.regions.size() == 2 && configuration.usableRegions > 1 &&
-		     (missingStorage.count(configuration.regions[0].dcId) ||
-		      missingStorage.count(configuration.regions[1].dcId)))) {
-			self->testFailure("No storage server on worker");
-			return false;
+		    (configuration.regions.size() == 1 && missingDc0) ||
+		    (configuration.regions.size() == 2 && configuration.usableRegions == 1 && missingDc0 && missingDc1) ||
+		    (configuration.regions.size() == 2 && configuration.usableRegions > 1 && (missingDc0 || missingDc1))) {
+
+			// TODO could improve this check by also ensuring DD is currently recruiting a TSS by using quietdb?
+			bool couldExpectMissingTss = (configuration.desiredTSSCount - tssMapping.size()) > 0;
+
+			int countMissing = missingStorage.size();
+			int acceptableTssMissing = 1;
+			if (configuration.regions.size() == 1) {
+				countMissing = missingDc0;
+			} else if (configuration.regions.size() == 2) {
+				if (configuration.usableRegions == 1) {
+					// all processes should be missing from 1, so take the number missing from the other
+					countMissing = std::min(missingDc0, missingDc1);
+				} else if (configuration.usableRegions == 2) {
+					countMissing = missingDc0 + missingDc1;
+					acceptableTssMissing = 2;
+				} else {
+					ASSERT(false); // in case fdb ever adds 3+ region support?
+				}
+			}
+
+			if (!couldExpectMissingTss || countMissing > acceptableTssMissing) {
+				self->testFailure("No storage server on worker");
+				return false;
+			} else {
+				TraceEvent(SevWarn, "ConsistencyCheck_TSSMissing");
+			}
 		}
 
 		return true;

@@ -682,6 +682,16 @@
              "ssd-rocksdb-experimental",
              "memory"
          ]},
+         "tss_count":1,
+         "tss_storage_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-experimental",
+             "ssd-rocksdb-experimental",
+             "memory"
+         ]},
          "coordinators_count":1,
          "excluded_servers":[
             {

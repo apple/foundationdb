@@ -89,13 +89,14 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 
 ACTOR Future<Void> removeStorageServer(Database cx,
                                        UID serverID,
+                                       Optional<UID> tssPairID, // if serverID is a tss, set to its ss pair id
                                        MoveKeysLock lock,
                                        const DDEnabledState* ddEnabledState);
 // Removes the given storage server permanently from the database.  It must already
 // have no shards assigned to it.  The storage server MUST NOT be added again after this
 // (though a new storage server with a new unique ID may be recruited from the same fdbserver).
 
-ACTOR Future<bool> canRemoveStorageServer(Transaction* tr, UID serverID);
+ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> tr, UID serverID);
 // Returns true if the given storage server has no keys assigned to it and may be safely removed
 // Obviously that could change later!
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx,

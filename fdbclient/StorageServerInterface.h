@@ -29,7 +29,9 @@
 #include "fdbrpc/LoadBalance.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
+#include "fdbrpc/TSSComparison.h"
 #include "fdbclient/TagThrottle.h"
+#include "flow/UnitTest.h"
 
 // Dead code, removed in the next protocol version
 struct VersionReply {
@@ -54,6 +56,7 @@ struct StorageServerInterface {
 
 	LocalityData locality;
 	UID uniqueID;
+	Optional<UID> tssPairID;
 
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
@@ -81,6 +84,7 @@ struct StorageServerInterface {
 	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
 	UID id() const { return uniqueID; }
+	bool isTss() const { return tssPairID.present(); }
 	std::string toString() const { return id().shortString(); }
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -89,7 +93,11 @@ struct StorageServerInterface {
 		// considered
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
-			serializer(ar, uniqueID, locality, getValue);
+			if (ar.protocolVersion().hasTSS()) {
+				serializer(ar, uniqueID, locality, getValue, tssPairID);
+			} else {
+				serializer(ar, uniqueID, locality, getValue);
+			}
 			if (Ar::isDeserializing) {
 				getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
 				getKeyValues = RequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
@@ -130,8 +138,9 @@ struct StorageServerInterface {
 			           waitFailure,
 			           getQueuingMetrics,
 			           getKeyValueStoreType);
-			if (ar.protocolVersion().hasWatches())
+			if (ar.protocolVersion().hasWatches()) {
 				serializer(ar, watchValue);
+			}
 		}
 	}
 	bool operator==(StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }

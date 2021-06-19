@@ -99,6 +99,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( TAG_ENCODE_KEY_SERVERS,                false ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
 	init( RANGESTREAM_FRAGMENT_SIZE,               1e6 );
 	init( RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT,     20 );
+	init( QUARANTINE_TSS_ON_MISMATCH,             true ); if( randomize && BUGGIFY ) QUARANTINE_TSS_ON_MISMATCH = false; // if true, a tss mismatch will put the offending tss in quarantine. If false, it will just be killed
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
