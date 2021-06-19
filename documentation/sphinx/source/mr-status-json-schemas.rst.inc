@@ -703,7 +703,8 @@
          "auto_logs":3,
          "backup_worker_enabled":1,
          "commit_proxies":5, // this field will be absent if a value has not been explicitly set
-         "proxies":6 // this field will be absent if a value has not been explicitly set
+         "proxies":6, // this field will be absent if a value has not been explicitly set
+         "perpetual_storage_wiggle": 0
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

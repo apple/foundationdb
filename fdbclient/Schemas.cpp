@@ -20,6 +20,7 @@
 
 #include "fdbclient/Schemas.h"
 
+// NOTE: also change mr-status-json-schemas.rst.inc
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
