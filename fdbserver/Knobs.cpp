@@ -722,7 +722,9 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );
 	init( REDWOOD_LAZY_CLEAR_MAX_PAGES,                          1e6 );
 	init( REDWOOD_REMAP_CLEANUP_WINDOW,                           50 );
-	init( REDWOOD_REMAP_CLEANUP_LAG,                             0.1 );
+	init( REDWOOD_REMAP_CLEANUP_MIN_PROGRESS,                    0.1 );
+	init( REDWOOD_REMAP_CLEANUP_START_DELAY,                      15 );
+	init( REMAP_GAIN_RATIO,                                     0.01 );
 	init( REDWOOD_LOGGING_INTERVAL,                              5.0 );
 
 	// Server request latency measurement

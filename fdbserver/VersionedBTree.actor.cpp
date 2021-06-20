@@ -1979,7 +1979,21 @@ public:
 			// Reset the remapQueue head reader for normal reads
 			self->remapQueue.resetHeadReader();
 
+			self->lastNumRemapEntries = self->remapQueue.numEntries;
 			self->remapCleanupFuture = remapCleanup(self);
+
+			/*
+			// Delay the remap clean by some time immediately post recovery to avoid overwhelming the system
+			double startDelay = SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_START_DELAY;
+			self->remapCleanupDelay = map(delay(startDelay), [=](Void) {
+				//TraceEvent(SevInfo, "RedwoodRemapCleanupStart").detail("Delay", startDelay).detail("Filename", self->filename);
+				return Void();
+			});
+			TraceEvent(SevInfo, "RedwoodRemapCleanupStart")
+			    .detail("Delay", startDelay)
+			    .detail("Filename", self->filename);
+			self->remapCleanupFuture = self->remapCleanupDelay.isReady() ? remapCleanup(self) : Void();
+	        */
 			TraceEvent(SevInfo, "RedwoodRecovered")
 			    .detail("FileName", self->filename.c_str())
 			    .detail("CommittedVersion", self->pHeader->committedVersion)
@@ -2045,6 +2059,7 @@ public:
 			// TODO: Double check this - need to do this as extentUsedList was pushed into
 			self->addLatestSnapshot();
 
+			self->lastNumRemapEntries = self->remapQueue.numEntries;
 			self->remapCleanupFuture = Void();
 			wait(self->commit());
 		}
@@ -2807,13 +2822,22 @@ public:
 		             ::toString(cutoff).c_str(),
 		             oldestRetainedVersion);
 
+		state int work = (1.0 + SERVER_KNOBS->REMAP_GAIN_RATIO) * ( self->remapQueue.numEntries - self->lastNumRemapEntries );
+		//debug_printf_always("DWALPager(%s) remapCleanup work %d numEntries %d\n", self->filename.c_str(), work, self->lastNumRemapEntries);
+
 		// Minimum version we must pop to before obeying stop command.
+		// This is based a minimum percentage of the version gap we want to close. i.e.
+		// from the beginning of the queue to the cutoff
+		//state Optional<RemappedPage> rp = wait(self->remapQueue.peek());
+		//    (cutoff.version - (rp.present() ? rp.get().version : 0)) *
+		//  (BUGGIFY ? deterministicRandom()->random01() : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_MIN_PROGRESS);
 		state Version minStopVersion =
-		    cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10)
-		                              : (self->remapCleanupWindow * SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG));
+		 cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10)
+						   : (self->remapCleanupWindow * (0.1)/*SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG*/));
 		self->remapDestinationsSimOnly.clear();
 
 		state int sinceYield = 0;
+		state int popped = 0;
 		loop {
 			state Optional<RemappedPage> p = wait(self->remapQueue.pop(cutoff));
 			debug_printf("DWALPager(%s) remapCleanup popped %s\n", self->filename.c_str(), ::toString(p).c_str());
@@ -2822,6 +2846,7 @@ public:
 			if (!p.present()) {
 				break;
 			}
+			popped++;
 
 			Future<Void> task = removeRemapEntry(self, p.get(), oldestRetainedVersion);
 			if (!task.isReady()) {
@@ -2830,7 +2855,9 @@ public:
 
 			// If the stop flag is set and we've reached the minimum stop version according the the allowed lag then
 			// stop.
-			if (self->remapCleanupStop && p.get().version >= minStopVersion) {
+			//if (self->remapCleanupStop && p.get().version >= minStopVersion) {
+			if (popped == work) {
+				//debug_printf_always("DWALPager(%s) remapCleanup work %d popped %d\n", self->filename.c_str(), work, popped);
 				break;
 			}
 
@@ -2844,6 +2871,7 @@ public:
 		debug_printf("DWALPager(%s) remapCleanup stopped (stop=%d)\n", self->filename.c_str(), self->remapCleanupStop);
 		signal.send(Void());
 		wait(tasks.getResult());
+		self->lastNumRemapEntries = self->remapQueue.numEntries;
 		return Void();
 	}
 
@@ -3172,7 +3200,9 @@ private:
 	SignalableActorCollection operations;
 	Future<Void> recoverFuture;
 	Future<Void> remapCleanupFuture;
+	Future<Void> remapCleanupDelay;
 	bool remapCleanupStop;
+	int64_t lastNumRemapEntries;
 
 	Reference<IAsyncFile> pageFile;
 
