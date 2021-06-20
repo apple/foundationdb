@@ -3300,8 +3300,7 @@ struct AccumulatedMutations {
 			lastChunkNumber = chunkNumber;
 			serializedMutations += kv.value.toString();
 		} else {
-			lastChunkNumber = -2;
-			serializedMutations.clear();
+			clear(false);
 		}
 		kvs.push_back(kv);
 	}
@@ -3348,6 +3347,18 @@ struct AccumulatedMutations {
 		return false;
 	}
 
+	// Free accumulated memory usage and set lastChunkNumber such that further chunks passed to addChunk
+	// will be ignored.
+	void clear(bool includeKVs = true) {
+		if (includeKVs) {
+			kvs.clear();
+			kvs.shrink_to_fit();
+		}
+		serializedMutations.clear();
+		serializedMutations.shrink_to_fit();
+		lastChunkNumber = -2;
+	}
+
 	std::vector<KeyValueRef> kvs;
 	std::string serializedMutations;
 	int lastChunkNumber;
@@ -3355,6 +3366,8 @@ struct AccumulatedMutations {
 
 // Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
 // and have data relevant to one of the KV ranges in ranges
+// Note that caller must keep data alive as the vector returns here contains KeyValueRefs which point to the same
+// memory.
 std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const std::vector<KeyRange>& ranges) {
 	std::unordered_map<Version, AccumulatedMutations> mutationBlocksByVersion;
 
@@ -3372,6 +3385,8 @@ std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, c
 		if (!m.isComplete() || m.matchesAnyRange(ranges)) {
 			output.insert(output.end(), m.kvs.begin(), m.kvs.end());
 		}
+		// Free memory in accumulator as output vector is built.
+		m.clear();
 	}
 
 	return output;
@@ -3430,10 +3445,28 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		state Key mutationLogPrefix = restore.mutationLogPrefix();
 		state Reference<IAsyncFile> inFile = wait(bc->readFile(logFile.fileName));
-		state Standalone<VectorRef<KeyValueRef>> dataOriginal = wait(decodeLogFileBlock(inFile, readOffset, readLen));
+
+		// Accumulate all KV pairs from all blocks covered by (inFile, readOffset, readLen) into dataOriginal
+		state Standalone<VectorRef<KeyValueRef>> dataOriginal;
+
+		state int64_t blockBegin;
+		state int64_t blockLen = 0;
+		state int64_t readEnd = readOffset + readLen;
+		for (blockBegin = readOffset; blockBegin < readEnd; blockBegin += blockLen) {
+			blockLen = std::min<int64_t>(readEnd - blockBegin, logFile.blockSize);
+
+			Standalone<VectorRef<KeyValueRef>> kvs = wait(decodeLogFileBlock(inFile, blockBegin, blockLen));
+
+			// Combine the arenas and copy the refs to dataOriginal instead of copying the KV bytes
+			dataOriginal.arena().dependsOn(kvs.arena());
+			for (auto& kv : kvs) {
+				dataOriginal.push_back(dataOriginal.arena(), kv);
+			}
+		}
 
 		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for this
-		// restore based on the restore range set.
+		// restore based on the restore range set.  Memory for all KV pairs is still held in dataOriginal so it must
+		// remain in scope.
 		state std::vector<KeyValueRef> dataFiltered = filterLogMutationKVPairs(dataOriginal, ranges);
 
 		state int start = 0;
@@ -3739,37 +3772,35 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			endVersion = f.version;
 			beginFile = f.fileName;
 
-			state int64_t j = beginBlock * f.blockSize;
+			int logBlocksPerTask =
+			    BUGGIFY ? deterministicRandom()->randomInt(1, 10) : CLIENT_KNOBS->BACKUP_LOG_BLOCKS_PER_TASK;
+			int readLen = 0;
+
 			// For each block of the file
-			for (; j < f.fileSize; j += f.blockSize) {
+			for (int64_t j = beginBlock * f.blockSize; j < f.fileSize; j += readLen) {
 				// Stop if we've reached the addtask limit
 				if (blocksDispatched == taskBatchSize)
 					break;
 
+				// The number of blocks to try to dispatch, based on file type
+				int blocksToTry = f.isRange ? 1 : logBlocksPerTask;
+				// Actual read len based on remaining file data size
+				readLen = std::min<int64_t>(f.blockSize * blocksToTry, f.fileSize - j);
+				// Actual blocks (rounded up to whole integer) readLen covers
+				int blocks = (readLen + f.blockSize - 1) / f.blockSize;
+
 				if (f.isRange) {
-					addTaskFutures.push_back(
-					    RestoreRangeTaskFunc::addTask(tr,
-					                                  taskBucket,
-					                                  task,
-					                                  f,
-					                                  j,
-					                                  std::min<int64_t>(f.blockSize, f.fileSize - j),
-					                                  TaskCompletionKey::joinWith(allPartsDone)));
+					addTaskFutures.push_back(RestoreRangeTaskFunc::addTask(
+					    tr, taskBucket, task, f, j, readLen, TaskCompletionKey::joinWith(allPartsDone)));
 				} else {
-					addTaskFutures.push_back(
-					    RestoreLogDataTaskFunc::addTask(tr,
-					                                    taskBucket,
-					                                    task,
-					                                    f,
-					                                    j,
-					                                    std::min<int64_t>(f.blockSize, f.fileSize - j),
-					                                    TaskCompletionKey::joinWith(allPartsDone)));
+					addTaskFutures.push_back(RestoreLogDataTaskFunc::addTask(
+					    tr, taskBucket, task, f, j, readLen, TaskCompletionKey::joinWith(allPartsDone)));
 				}
 
 				// Increment beginBlock for the file and total blocks dispatched for this task
-				++beginBlock;
-				++blocksDispatched;
-				--remainingInBatch;
+				beginBlock += blocks;
+				blocksDispatched += blocks;
+				remainingInBatch -= blocks;
 			}
 
 			// Stop if we've reached the addtask limit
