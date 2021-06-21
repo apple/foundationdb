@@ -1497,11 +1497,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False")
 								    .error(e);
 
-								// All shards should be available in quiscence
-								if (self->performQuiescentChecks &&
-								    ((g_network->isSimulated() &&
-								      g_simulator.tssMode != ISimulator::TSSMode::EnabledAddDelay) ||
-								     !storageServerInterfaces[j].isTss())) {
+								// All shards should be available in quiescence
+								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
 									self->testFailure("Storage server unavailable");
 									return false;
 								}
