@@ -24,13 +24,15 @@ Performance
 
 Reliability
 -----------
-
-
+* Improved worker recruitment logic to avoid unnecessary recoveries when processes are added or removed from a cluster. `(PR #4695) <https://github.com/apple/foundationdb/pull/4695>`_ `(PR #4631) <https://github.com/apple/foundationdb/pull/4631>`_ `(PR #4509) <https://github.com/apple/foundationdb/pull/4509>`_
+* Log class processes are prioritized above transaction class proceses for becoming tlogs. `(PR #4509) <https://github.com/apple/foundationdb/pull/4509>`_ 
 
 Fixes
 -----
-
-
+* Fixed a rare crash on the cluster controller when using multi-region configurations. `(PR #4547) <https://github.com/apple/foundationdb/pull/4547>`_ 
+* Using the ``exclude failed`` command could leave the data distributor in a state where it cannot complete relocations. `(PR #4495) <https://github.com/apple/foundationdb/pull/4495>`_ 
+* Fixed a rare crash that could happen on the sequencer during recovery. `(PR #4548) <https://github.com/apple/foundationdb/pull/4548>`_ 
+* When configured with ``usable_regions=2``, a cluster would not fail over to a region which contained only storage class processes. `(PR #4599) <https://github.com/apple/foundationdb/pull/4599>`_ 
 
 Status
 ------
