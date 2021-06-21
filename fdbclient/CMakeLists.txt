@@ -15,11 +15,19 @@ set(FDBCLIENT_SRCS
   BackupContainerLocalDirectory.h
   BackupContainerS3BlobStore.actor.cpp
   BackupContainerS3BlobStore.h
+  ClientKnobCollection.cpp
+  ClientKnobCollection.h
+  ClientKnobs.cpp
+  ClientKnobs.h
   ClientLogEvents.h
   ClientWorkerInterface.h
   ClusterInterface.h
   CommitProxyInterface.h
   CommitTransaction.h
+  ConfigKnobs.cpp
+  ConfigKnobs.h
+  ConfigTransactionInterface.cpp
+  ConfigTransactionInterface.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp
   DatabaseConfiguration.cpp
@@ -27,6 +35,7 @@ set(FDBCLIENT_SRCS
   DatabaseContext.h
   EventTypes.actor.h
   FDBOptions.h
+  FDBTypes.cpp
   FDBTypes.h
   FileBackupAgent.actor.cpp
   GlobalConfig.h
@@ -35,13 +44,18 @@ set(FDBCLIENT_SRCS
   GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
+  IConfigTransaction.cpp
+  IConfigTransaction.h
+  ISingleThreadTransaction.cpp
+  ISingleThreadTransaction.h
   JsonBuilder.cpp
   JsonBuilder.h
   KeyBackedTypes.h
   KeyRangeMap.actor.cpp
   KeyRangeMap.h
-  Knobs.cpp
   Knobs.h
+  IKnobCollection.cpp
+  IKnobCollection.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
   MonitorLeader.actor.cpp
@@ -55,6 +69,11 @@ set(FDBCLIENT_SRCS
   Notified.h
   ParallelStream.actor.cpp
   ParallelStream.actor.h
+  PaxosConfigTransaction.actor.cpp
+  PaxosConfigTransaction.h
+  SimpleConfigTransaction.actor.cpp
+  SpecialKeySpace.actor.cpp
+  SpecialKeySpace.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
   RestoreInterface.cpp
@@ -65,6 +84,11 @@ set(FDBCLIENT_SRCS
   S3BlobStore.actor.cpp
   Schemas.cpp
   Schemas.h
+  ServerKnobCollection.cpp
+  ServerKnobCollection.h
+  ServerKnobs.cpp
+  ServerKnobs.h
+  SimpleConfigTransaction.h
   SnapshotCache.h
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h
@@ -81,6 +105,8 @@ set(FDBCLIENT_SRCS
   TagThrottle.h
   TaskBucket.actor.cpp
   TaskBucket.h
+  TestKnobCollection.cpp
+  TestKnobCollection.h
   ThreadSafeTransaction.cpp
   ThreadSafeTransaction.h
   Tuple.cpp

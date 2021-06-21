@@ -503,7 +503,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					                       "",
 					                       "",
 					                       -1,
-					                       whitelistBinPaths));
+					                       whitelistBinPaths,
+					                       "",
+					                       {},
+					                       UseConfigDB::DISABLED));
 				}
 				if (runBackupAgents != AgentNone) {
 					futures.push_back(runBackup(connFile));
@@ -1125,6 +1128,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 struct SimulationConfig {
 	explicit SimulationConfig(const TestConfig& testConfig);
 	int extraDB;
+	bool generateFearless;
 
 	DatabaseConfiguration db;
 
@@ -1132,11 +1136,23 @@ struct SimulationConfig {
 
 	// Simulation layout
 	int datacenters;
+	int replication_type;
 	int machine_count; // Total, not per DC.
 	int processes_per_machine;
 	int coordinators;
 
 private:
+	void setRandomConfig();
+	void setSimpleConfig();
+	void setSpecificConfig(const TestConfig& testConfig);
+	void setDatacenters(const TestConfig& testConfig);
+	void setStorageEngine(const TestConfig& testConfig);
+	void setRegions(const TestConfig& testConfig);
+	void setReplicationType(const TestConfig& testConfig);
+	void setMachineCount(const TestConfig& testConfig);
+	void setCoordinators(const TestConfig& testConfig);
+	void setProcessesPerMachine(const TestConfig& testConfig);
+	void setTss(const TestConfig& testConfig);
 	void generateNormalConfig(const TestConfig& testConfig);
 };
 
@@ -1156,16 +1172,68 @@ void SimulationConfig::set_config(std::string config) {
 StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
-// Generates and sets an appropriate configuration for the database according to
-// the provided testConfig. Some attributes are randomly generated for more coverage
-// of different combinations
-void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
-	set_config("new");
-	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
-	// if we do not remove the surplus server and machine teams, the simulation test will report error.
-	// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
-	bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
-	bool generateFearless =
+
+// Set the randomly generated options of the config. Compiled here to easily observe and trace random options
+void SimulationConfig::setRandomConfig() {
+	if (deterministicRandom()->random01() < 0.25) {
+		db.desiredTLogCount = deterministicRandom()->randomInt(1, 7);
+	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.commitProxyCount = deterministicRandom()->randomInt(1, 7);
+	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.grvProxyCount = deterministicRandom()->randomInt(1, 4);
+	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.resolverCount = deterministicRandom()->randomInt(1, 7);
+	}
+	// TraceEvent("SimulatedConfigRandom")
+	// 	.detail("DesiredTLogCount", db.desiredTLogCount)
+	// 	.detail("CommitProxyCount", db.commitProxyCount)
+	// 	.detail("GRVProxyCount", db.grvProxyCount)
+	// 	.detail("ResolverCount", db.resolverCount);
+
+	if (deterministicRandom()->random01() < 0.5) {
+		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 0);
+		set_config("perpetual_storage_wiggle=0");
+	} else {
+		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 1);
+		set_config("perpetual_storage_wiggle=1");
+	}
+
+	if (deterministicRandom()->random01() < 0.5) {
+		set_config("backup_worker_enabled:=1");
+	}
+}
+
+// Overwrite DB with simple options, used when simpleConfig is true in the TestConfig
+void SimulationConfig::setSimpleConfig() {
+	db.desiredTLogCount = 1;
+	db.commitProxyCount = 1;
+	db.grvProxyCount = 1;
+	db.resolverCount = 1;
+}
+
+// Overwrite previous options with ones specified by TestConfig
+void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
+	if (testConfig.desiredTLogCount.present()) {
+		db.desiredTLogCount = testConfig.desiredTLogCount.get();
+	}
+	if (testConfig.commitProxyCount.present()) {
+		db.commitProxyCount = testConfig.commitProxyCount.get();
+	}
+	if (testConfig.grvProxyCount.present()) {
+		db.grvProxyCount = testConfig.grvProxyCount.get();
+	}
+	if (testConfig.resolverCount.present()) {
+		db.resolverCount = testConfig.resolverCount.get();
+	}
+}
+
+// Sets generateFearless and number of dataCenters based on testConfig details
+// The number of datacenters may be overwritten in setRegions
+void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
+	generateFearless =
 	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
 	if (testConfig.generateFearless.present()) {
 		// overwrite whatever decision we made before
@@ -1176,32 +1244,15 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	        ? 1
 	        : (generateFearless ? (testConfig.minimumReplication > 0 || deterministicRandom()->random01() < 0.5 ? 4 : 6)
 	                            : deterministicRandom()->randomInt(1, 4));
+
+	// Overwrite with specific option if present
 	if (testConfig.datacenters.present()) {
 		datacenters = testConfig.datacenters.get();
 	}
-	if (testConfig.desiredTLogCount.present()) {
-		db.desiredTLogCount = testConfig.desiredTLogCount.get();
-	} else if (deterministicRandom()->random01() < 0.25) {
-		db.desiredTLogCount = deterministicRandom()->randomInt(1, 7);
-	}
+}
 
-	if (testConfig.commitProxyCount.present()) {
-		db.commitProxyCount = testConfig.commitProxyCount.get();
-	} else if (deterministicRandom()->random01() < 0.25) {
-		db.commitProxyCount = deterministicRandom()->randomInt(1, 7);
-	}
-
-	if (testConfig.grvProxyCount.present()) {
-		db.grvProxyCount = testConfig.grvProxyCount.get();
-	} else if (deterministicRandom()->random01() < 0.25) {
-		db.grvProxyCount = deterministicRandom()->randomInt(1, 4);
-	}
-
-	if (testConfig.resolverCount.present()) {
-		db.resolverCount = testConfig.resolverCount.get();
-	} else if (deterministicRandom()->random01() < 0.25) {
-		db.resolverCount = deterministicRandom()->randomInt(1, 7);
-	}
+// Sets storage engine based on testConfig details
+void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
@@ -1238,38 +1289,15 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
+}
 
-	int tssCount = 0;
-	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
-		// 1 or 2 tss
-		tssCount = deterministicRandom()->randomInt(1, 3);
-	}
-
-	//	if (deterministicRandom()->random01() < 0.5) {
-	//		set_config("ssd");
-	//	} else {
-	//		set_config("memory");
-	//	}
-	//	set_config("memory");
-	//  set_config("memory-radixtree-beta");
-
-    if (deterministicRandom()->random01() < 0.5) {
-        set_config("perpetual_storage_wiggle=0");
-    } else {
-        set_config("perpetual_storage_wiggle=1");
-    }
-// 	set_config("perpetual_storage_wiggle=1");
-	if (testConfig.simpleConfig) {
-		db.desiredTLogCount = 1;
-		db.commitProxyCount = 1;
-		db.grvProxyCount = 1;
-		db.resolverCount = 1;
-	}
-	int replication_type = testConfig.simpleConfig
-	                           ? 1
-	                           : (std::max(testConfig.minimumReplication,
-	                                       datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
-	                                                       : std::min(deterministicRandom()->randomInt(0, 6), 3)));
+// Sets replication type and TLogSpillType and Version
+void SimulationConfig::setReplicationType(const TestConfig& testConfig) {
+	replication_type = testConfig.simpleConfig
+	                       ? 1
+	                       : (std::max(testConfig.minimumReplication,
+	                                   datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
+	                                                   : std::min(deterministicRandom()->randomInt(0, 6), 3)));
 	if (testConfig.config.present()) {
 		set_config(testConfig.config.get());
 	} else {
@@ -1330,211 +1358,213 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 			if (deterministicRandom()->random01() < 0.5)
 				set_config(format("log_spill:=%d", TLogSpillType::DEFAULT));
 		}
-
-		if (deterministicRandom()->random01() < 0.5) {
-			set_config("backup_worker_enabled:=1");
-		}
 	}
+}
 
-	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
-		// The kill region workload relies on the fact that all "0", "2", and "4" are all of the possible primary dcids.
-		StatusObject primaryObj;
-		StatusObject primaryDcObj;
-		primaryDcObj["id"] = "0";
-		primaryDcObj["priority"] = 2;
-		StatusArray primaryDcArr;
-		primaryDcArr.push_back(primaryDcObj);
+// Set the regions of the config, including the primary and remote options
+// This will also determine the replication types used for satellite and remote.
+void SimulationConfig::setRegions(const TestConfig& testConfig) {
+	// The kill region workload relies on the fact that all "0", "2", and "4" are all of the possible primary dcids.
+	StatusObject primaryObj;
+	StatusObject primaryDcObj;
+	primaryDcObj["id"] = "0";
+	primaryDcObj["priority"] = 2;
+	StatusArray primaryDcArr;
+	primaryDcArr.push_back(primaryDcObj);
 
-		StatusObject remoteObj;
-		StatusObject remoteDcObj;
-		remoteDcObj["id"] = "1";
-		remoteDcObj["priority"] = 1;
-		StatusArray remoteDcArr;
-		remoteDcArr.push_back(remoteDcObj);
+	StatusObject remoteObj;
+	StatusObject remoteDcObj;
+	remoteDcObj["id"] = "1";
+	remoteDcObj["priority"] = 1;
+	StatusArray remoteDcArr;
+	remoteDcArr.push_back(remoteDcObj);
 
-		bool needsRemote = generateFearless;
-		if (generateFearless) {
-			if (datacenters > 4) {
-				// FIXME: we cannot use one satellite replication with more than one satellite per region because
-				// canKillProcesses does not respect usable_dcs
-				int satellite_replication_type = deterministicRandom()->randomInt(0, 3);
-				switch (satellite_replication_type) {
-				case 0: {
-					TEST(true); // Simulated cluster using no satellite redundancy mode (>4 datacenters)
-					break;
-				}
-				case 1: {
-					TEST(true); // Simulated cluster using two satellite fast redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "two_satellite_fast";
-					remoteObj["satellite_redundancy_mode"] = "two_satellite_fast";
-					break;
-				}
-				case 2: {
-					TEST(true); // Simulated cluster using two satellite safe redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "two_satellite_safe";
-					remoteObj["satellite_redundancy_mode"] = "two_satellite_safe";
-					break;
-				}
-				default:
-					ASSERT(false); // Programmer forgot to adjust cases.
-				}
-			} else {
-				int satellite_replication_type = deterministicRandom()->randomInt(0, 5);
-				switch (satellite_replication_type) {
-				case 0: {
-					// FIXME: implement
-					TEST(true); // Simulated cluster using custom satellite redundancy mode
-					break;
-				}
-				case 1: {
-					TEST(true); // Simulated cluster using no satellite redundancy mode (<4 datacenters)
-					break;
-				}
-				case 2: {
-					TEST(true); // Simulated cluster using single satellite redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
-					remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
-					break;
-				}
-				case 3: {
-					TEST(true); // Simulated cluster using double satellite redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
-					remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
-					break;
-				}
-				case 4: {
-					TEST(true); // Simulated cluster using triple satellite redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "one_satellite_triple";
-					remoteObj["satellite_redundancy_mode"] = "one_satellite_triple";
-					break;
-				}
-				default:
-					ASSERT(false); // Programmer forgot to adjust cases.
-				}
-			}
-
-			if (deterministicRandom()->random01() < 0.25)
-				primaryObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-			if (deterministicRandom()->random01() < 0.25)
-				remoteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-
-			// We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log
-			// routers will not be able to keep up.
-			if (testConfig.minimumRegions <= 1 &&
-			    (deterministicRandom()->random01() < 0.25 ||
-			     SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND)) {
-				TEST(true); // Simulated cluster using one region
-				needsRemote = false;
-			} else {
-				TEST(true); // Simulated cluster using two regions
-				db.usableRegions = 2;
-			}
-
-			int remote_replication_type = deterministicRandom()->randomInt(0, datacenters > 4 ? 4 : 5);
-			switch (remote_replication_type) {
+	bool needsRemote = generateFearless;
+	if (generateFearless) {
+		if (datacenters > 4) {
+			// FIXME: we cannot use one satellite replication with more than one satellite per region because
+			// canKillProcesses does not respect usable_dcs
+			int satellite_replication_type = deterministicRandom()->randomInt(0, 3);
+			switch (satellite_replication_type) {
 			case 0: {
-				// FIXME: implement
-				TEST(true); // Simulated cluster using custom remote redundancy mode
+				TEST(true); // Simulated cluster using no satellite redundancy mode (>4 datacenters)
 				break;
 			}
 			case 1: {
-				TEST(true); // Simulated cluster using default remote redundancy mode
+				TEST(true); // Simulated cluster using two satellite fast redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "two_satellite_fast";
+				remoteObj["satellite_redundancy_mode"] = "two_satellite_fast";
 				break;
 			}
 			case 2: {
-				TEST(true); // Simulated cluster using single remote redundancy mode
-				set_config("remote_single");
-				break;
-			}
-			case 3: {
-				TEST(true); // Simulated cluster using double remote redundancy mode
-				set_config("remote_double");
-				break;
-			}
-			case 4: {
-				TEST(true); // Simulated cluster using triple remote redundancy mode
-				set_config("remote_triple");
+				TEST(true); // Simulated cluster using two satellite safe redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "two_satellite_safe";
+				remoteObj["satellite_redundancy_mode"] = "two_satellite_safe";
 				break;
 			}
 			default:
 				ASSERT(false); // Programmer forgot to adjust cases.
 			}
-
-			if (deterministicRandom()->random01() < 0.25)
-				db.desiredLogRouterCount = deterministicRandom()->randomInt(1, 7);
-			if (deterministicRandom()->random01() < 0.25)
-				db.remoteDesiredTLogCount = deterministicRandom()->randomInt(1, 7);
-
-			bool useNormalDCsAsSatellites =
-			    datacenters > 4 && testConfig.minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
-			StatusObject primarySatelliteObj;
-			primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
-			primarySatelliteObj["priority"] = 1;
-			primarySatelliteObj["satellite"] = 1;
-			if (deterministicRandom()->random01() < 0.25)
-				primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-			primaryDcArr.push_back(primarySatelliteObj);
-
-			StatusObject remoteSatelliteObj;
-			remoteSatelliteObj["id"] = useNormalDCsAsSatellites ? "0" : "3";
-			remoteSatelliteObj["priority"] = 1;
-			remoteSatelliteObj["satellite"] = 1;
-			if (deterministicRandom()->random01() < 0.25)
-				remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-			remoteDcArr.push_back(remoteSatelliteObj);
-
-			if (datacenters > 4) {
-				StatusObject primarySatelliteObjB;
-				primarySatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "4";
-				primarySatelliteObjB["priority"] = 1;
-				primarySatelliteObjB["satellite"] = 1;
-				if (deterministicRandom()->random01() < 0.25)
-					primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-				primaryDcArr.push_back(primarySatelliteObjB);
-
-				StatusObject remoteSatelliteObjB;
-				remoteSatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "5";
-				remoteSatelliteObjB["priority"] = 1;
-				remoteSatelliteObjB["satellite"] = 1;
-				if (deterministicRandom()->random01() < 0.25)
-					remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-				remoteDcArr.push_back(remoteSatelliteObjB);
-			}
-			if (useNormalDCsAsSatellites) {
-				datacenters = 3;
-			}
-		}
-
-		primaryObj["datacenters"] = primaryDcArr;
-		remoteObj["datacenters"] = remoteDcArr;
-
-		StatusArray regionArr;
-		regionArr.push_back(primaryObj);
-		if (needsRemote || deterministicRandom()->random01() < 0.5) {
-			regionArr.push_back(remoteObj);
-		}
-
-		if (needsRemote) {
-			g_simulator.originalRegions = "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr),
-			                                                                     json_spirit::Output_options::none);
-
-			StatusArray disablePrimary = regionArr;
-			disablePrimary[0].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
-			g_simulator.disablePrimary = "regions=" + json_spirit::write_string(json_spirit::mValue(disablePrimary),
-			                                                                    json_spirit::Output_options::none);
-
-			StatusArray disableRemote = regionArr;
-			disableRemote[1].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
-			g_simulator.disableRemote = "regions=" + json_spirit::write_string(json_spirit::mValue(disableRemote),
-			                                                                   json_spirit::Output_options::none);
 		} else {
-			// In order to generate a starting configuration with the remote disabled, do not apply the region
-			// configuration to the DatabaseConfiguration until after creating the starting conf string.
-			set_config("regions=" +
-			           json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
+			int satellite_replication_type = deterministicRandom()->randomInt(0, 5);
+			switch (satellite_replication_type) {
+			case 0: {
+				// FIXME: implement
+				TEST(true); // Simulated cluster using custom satellite redundancy mode
+				break;
+			}
+			case 1: {
+				TEST(true); // Simulated cluster using no satellite redundancy mode (<4 datacenters)
+				break;
+			}
+			case 2: {
+				TEST(true); // Simulated cluster using single satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
+				break;
+			}
+			case 3: {
+				TEST(true); // Simulated cluster using double satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
+				break;
+			}
+			case 4: {
+				TEST(true); // Simulated cluster using triple satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_triple";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_triple";
+				break;
+			}
+			default:
+				ASSERT(false); // Programmer forgot to adjust cases.
+			}
+		}
+
+		if (deterministicRandom()->random01() < 0.25)
+			primaryObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+		if (deterministicRandom()->random01() < 0.25)
+			remoteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+
+		// We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log
+		// routers will not be able to keep up.
+		if (testConfig.minimumRegions <= 1 &&
+		    (deterministicRandom()->random01() < 0.25 ||
+		     SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND)) {
+			TEST(true); // Simulated cluster using one region
+			needsRemote = false;
+		} else {
+			TEST(true); // Simulated cluster using two regions
+			db.usableRegions = 2;
+		}
+
+		int remote_replication_type = deterministicRandom()->randomInt(0, datacenters > 4 ? 4 : 5);
+		switch (remote_replication_type) {
+		case 0: {
+			// FIXME: implement
+			TEST(true); // Simulated cluster using custom remote redundancy mode
+			break;
+		}
+		case 1: {
+			TEST(true); // Simulated cluster using default remote redundancy mode
+			break;
+		}
+		case 2: {
+			TEST(true); // Simulated cluster using single remote redundancy mode
+			set_config("remote_single");
+			break;
+		}
+		case 3: {
+			TEST(true); // Simulated cluster using double remote redundancy mode
+			set_config("remote_double");
+			break;
+		}
+		case 4: {
+			TEST(true); // Simulated cluster using triple remote redundancy mode
+			set_config("remote_triple");
+			break;
+		}
+		default:
+			ASSERT(false); // Programmer forgot to adjust cases.
+		}
+
+		if (deterministicRandom()->random01() < 0.25)
+			db.desiredLogRouterCount = deterministicRandom()->randomInt(1, 7);
+		if (deterministicRandom()->random01() < 0.25)
+			db.remoteDesiredTLogCount = deterministicRandom()->randomInt(1, 7);
+
+		bool useNormalDCsAsSatellites =
+		    datacenters > 4 && testConfig.minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
+		StatusObject primarySatelliteObj;
+		primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
+		primarySatelliteObj["priority"] = 1;
+		primarySatelliteObj["satellite"] = 1;
+		if (deterministicRandom()->random01() < 0.25)
+			primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+		primaryDcArr.push_back(primarySatelliteObj);
+
+		StatusObject remoteSatelliteObj;
+		remoteSatelliteObj["id"] = useNormalDCsAsSatellites ? "0" : "3";
+		remoteSatelliteObj["priority"] = 1;
+		remoteSatelliteObj["satellite"] = 1;
+		if (deterministicRandom()->random01() < 0.25)
+			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+		remoteDcArr.push_back(remoteSatelliteObj);
+
+		if (datacenters > 4) {
+			StatusObject primarySatelliteObjB;
+			primarySatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "4";
+			primarySatelliteObjB["priority"] = 1;
+			primarySatelliteObjB["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25)
+				primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			primaryDcArr.push_back(primarySatelliteObjB);
+
+			StatusObject remoteSatelliteObjB;
+			remoteSatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "5";
+			remoteSatelliteObjB["priority"] = 1;
+			remoteSatelliteObjB["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25)
+				remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			remoteDcArr.push_back(remoteSatelliteObjB);
+		}
+		if (useNormalDCsAsSatellites) {
+			datacenters = 3;
 		}
 	}
 
+	primaryObj["datacenters"] = primaryDcArr;
+	remoteObj["datacenters"] = remoteDcArr;
+
+	StatusArray regionArr;
+	regionArr.push_back(primaryObj);
+	if (needsRemote || deterministicRandom()->random01() < 0.5) {
+		regionArr.push_back(remoteObj);
+	}
+
+	if (needsRemote) {
+		g_simulator.originalRegions =
+		    "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
+
+		StatusArray disablePrimary = regionArr;
+		disablePrimary[0].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
+		g_simulator.disablePrimary = "regions=" + json_spirit::write_string(json_spirit::mValue(disablePrimary),
+		                                                                    json_spirit::Output_options::none);
+
+		StatusArray disableRemote = regionArr;
+		disableRemote[1].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
+		g_simulator.disableRemote = "regions=" + json_spirit::write_string(json_spirit::mValue(disableRemote),
+		                                                                   json_spirit::Output_options::none);
+	} else {
+		// In order to generate a starting configuration with the remote disabled, do not apply the region
+		// configuration to the DatabaseConfiguration until after creating the starting conf string.
+		set_config("regions=" +
+		           json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
+	}
+}
+
+// Sets the machine count based on the testConfig. May be overwritten later
+// if the end result is not a viable config.
+void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 	if (testConfig.machineCount.present()) {
 		machine_count = testConfig.machineCount.get();
 	} else if (generateFearless && testConfig.minimumReplication > 1) {
@@ -1551,6 +1581,10 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		                         ((db.minDatacentersRequired() > 0) ? datacenters : 1) *
 		                             std::max(3, db.minZonesRequiredPerDatacenter()));
 		machine_count = deterministicRandom()->randomInt(machine_count, std::max(machine_count + 1, extraDB ? 6 : 10));
+		// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
+		// if we do not remove the surplus server and machine teams, the simulation test will report error.
+		// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
+		bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
 		if (generateMachineTeamTestConfig) {
 			// When DESIRED_TEAMS_PER_SERVER is set to 1, the desired machine team number is 5
 			// while the max possible machine team number is 10.
@@ -1559,7 +1593,11 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 			machine_count = std::max(machine_count, deterministicRandom()->randomInt(5, extraDB ? 6 : 10));
 		}
 	}
+}
 
+// Sets the coordinator count based on the testConfig. May be overwritten later
+// if the end result is not a viable config.
+void SimulationConfig::setCoordinators(const TestConfig& testConfig) {
 	if (testConfig.coordinators.present()) {
 		coordinators = testConfig.coordinators.get();
 	} else {
@@ -1569,20 +1607,26 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		                   ? deterministicRandom()->randomInt(1, std::max(machine_count, 2))
 		                   : 1;
 	}
+}
 
-	if (testConfig.minimumReplication > 1 && datacenters == 3) {
-		// low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for
-		// logs to recover.
-		machine_count = std::max(machine_count, 6);
-		coordinators = 3;
-	}
-
+// Sets the processes per machine based on the testConfig.
+void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 	if (testConfig.processesPerMachine.present()) {
 		processes_per_machine = testConfig.processesPerMachine.get();
 	} else if (generateFearless) {
 		processes_per_machine = 1;
 	} else {
 		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28) / machine_count + 2);
+	}
+}
+
+// Sets the TSS configuration based on the testConfig.
+// Also configures the cluster behaviour through setting some flags on the simulator.
+void SimulationConfig::setTss(const TestConfig& testConfig) {
+	int tssCount = 0;
+	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
+		// 1 or 2 tss
+		tssCount = deterministicRandom()->randomInt(1, 3);
 	}
 
 	// reduce tss to half of extra non-seed servers that can be recruited in usable regions.
@@ -1606,6 +1650,43 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		}
 		printf("enabling tss for simulation in mode %d: %s\n", g_simulator.tssMode, confStr.c_str());
 	}
+}
+
+// Generates and sets an appropriate configuration for the database according to
+// the provided testConfig. Some attributes are randomly generated for more coverage
+// of different combinations
+void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
+	set_config("new");
+	// Some of these options will overwrite one another so the ordering is important.
+	// This is a bit inefficient but separates the different types of option setting paths for better readability.
+	setDatacenters(testConfig);
+
+	// These 3 sets will only change the settings with trivial logic and low coupling with
+	// other portions of the configuration. The parameters that are more involved and use
+	// complex logic will be found in their respective "set----" methods following after.
+	setRandomConfig();
+	if (testConfig.simpleConfig) {
+		setSimpleConfig();
+	}
+	setSpecificConfig(testConfig);
+
+	setStorageEngine(testConfig);
+	setReplicationType(testConfig);
+	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
+		setRegions(testConfig);
+	}
+	setMachineCount(testConfig);
+	setCoordinators(testConfig);
+
+	if (testConfig.minimumReplication > 1 && datacenters == 3) {
+		// low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for
+		// logs to recover.
+		machine_count = std::max(machine_count, 6);
+		coordinators = 3;
+	}
+
+	setProcessesPerMachine(testConfig);
+	setTss(testConfig);
 }
 
 // Configures the system according to the given specifications in order to run

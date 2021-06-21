@@ -219,15 +219,15 @@ public:
 	Error deferredError;
 	bool lockAware;
 
-	bool isError() { return deferredError.code() != invalid_error_code; }
+	bool isError() const { return deferredError.code() != invalid_error_code; }
 
-	void checkDeferredError() {
+	void checkDeferredError() const {
 		if (isError()) {
 			throw deferredError;
 		}
 	}
 
-	int apiVersionAtLeast(int minVersion) { return apiVersion < 0 || apiVersion >= minVersion; }
+	int apiVersionAtLeast(int minVersion) const { return apiVersion < 0 || apiVersion >= minVersion; }
 
 	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
 	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
@@ -414,6 +414,7 @@ public:
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
 	Smoother smoothMidShardSize;
+	bool useConfigDatabase{ false };
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 

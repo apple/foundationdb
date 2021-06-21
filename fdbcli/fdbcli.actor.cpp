@@ -28,6 +28,7 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ClusterInterface.h"
@@ -3060,23 +3061,25 @@ struct CLIOptions {
 			return;
 		}
 
-		for (const auto& [knob, value] : knobs) {
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
-				if (!globalFlowKnobs->setKnob(knob, value) && !globalClientKnobs->setKnob(knob, value)) {
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knob.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knob));
-				}
+				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+				g_knobs.setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", value.c_str(), knob.c_str());
+					fprintf(stderr,
+					        "WARNING: Invalid value '%s' for knob option '%s'\n",
+					        knobValueString.c_str(),
+					        knobName.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knob))
-					    .detail("Value", printable(value));
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
 				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knob.c_str(), e.what());
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
-					    .detail("Knob", printable(knob))
-					    .detail("Value", printable(value))
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString))
 					    .error(e);
 					exit_code = FDB_EXIT_ERROR;
 				}
@@ -3084,8 +3087,7 @@ struct CLIOptions {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		globalFlowKnobs->initialize(true);
-		globalClientKnobs->initialize(true);
+		g_knobs.initialize(Randomize::NO, IsSimulated::NO);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -4856,6 +4858,8 @@ int main(int argc, char** argv) {
 	setMemoryQuota(memLimit);
 
 	registerCrashHandler();
+
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
 
 #ifdef __unixish__
 	struct sigaction act;
