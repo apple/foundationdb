@@ -30,9 +30,9 @@ Reliability
 Fixes
 -----
 * Fixed a rare crash on the cluster controller when using multi-region configurations. `(PR #4547) <https://github.com/apple/foundationdb/pull/4547>`_ 
-* Using the `exclude failed` command could leave the data distributor in a state where it cannot complete relocations. `(PR #4495) <https://github.com/apple/foundationdb/pull/4495>`_ 
+* Using the ``exclude failed`` command could leave the data distributor in a state where it cannot complete relocations. `(PR #4495) <https://github.com/apple/foundationdb/pull/4495>`_ 
 * Fixed a rare crash that could happen on the sequencer during recovery. `(PR #4548) <https://github.com/apple/foundationdb/pull/4548>`_ 
-* When configured with `usable_regions=2`, a cluster would not fail over to a region which contained only storage class processes. `(PR #4599) <https://github.com/apple/foundationdb/pull/4599>`_ 
+* When configured with ``usable_regions=2``, a cluster would not fail over to a region which contained only storage class processes. `(PR #4599) <https://github.com/apple/foundationdb/pull/4599>`_ 
 
 Status
 ------
