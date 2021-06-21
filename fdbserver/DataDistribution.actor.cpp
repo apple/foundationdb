@@ -5672,6 +5672,16 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	}
 }
 
+ACTOR Future<Void> updateInitialDDTeamMaps(Database cx, Reference<InitialDataDistribution> initData) {
+	// TODO: Can be done concurrently.
+	state std::set<std::vector<UID>> primaryTeams = initData->primaryTeams;
+	state std::set<vector<UID>>::iterator it;
+	for (it = primaryTeams.begin(); it != primaryTeams.end(); ++it) {
+		UID teamId = wait(maybeUpdateTeamMaps(cx, *it));
+	}
+	return Void();
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -5760,6 +5770,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 				    ddEnabledState));
 				initData = initData_;
+				wait(updateInitialDDTeamMaps(cx, initData));
 				if (initData->shards.size() > 1) {
 					TraceEvent("DDInitGotInitialDD", self->ddId)
 					    .detail("B", initData->shards.end()[-2].key)

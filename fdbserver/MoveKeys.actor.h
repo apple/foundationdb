@@ -106,5 +106,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 // Directly removes serverID from serverKeys and keyServers system keyspace.
 // Performed when a storage server is marked as permanently failed.
 
+ACTOR Future<UID> maybeUpdateTeamMaps(Database cx, vector<UID> team);
+
 #include "flow/unactorcompiler.h"
 #endif

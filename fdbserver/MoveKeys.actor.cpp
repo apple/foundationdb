@@ -27,6 +27,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/serialize.h"
 
 using std::max;
 using std::min;
@@ -1384,11 +1385,21 @@ ACTOR Future<UID> maybeUpdateTeamMaps(Database cx, vector<UID> team) {
 				Optional<Value> existingTeamsInServer = wait(tr.get(teamIdKey));
 				std::set<UID> newTeamIdsInServer(team.begin(), team.end());
 				if (existingTeamsInServer.present()) {
-					for (const auto& id : decodeStorageTeams(existingTeamsInServer.get())) {
+					BinaryReader br(existingTeamsInServer.get(), Unversioned());
+					int size;
+					br >> size;
+					for (int i = 0; i < size; ++i) {
+						UID id;
+						br >> id;
 						newTeamIdsInServer.insert(id);
 					}
 				}
-				tr.set(teamIdKey, BinaryWriter::toValue(newTeamIdsInServer, Unversioned()));
+				BinaryWriter wr(Unversioned());
+				wr << newTeamIdsInServer.size();
+				for (auto id : newTeamIdsInServer) {
+					wr << id;
+				}
+				tr.set(teamIdKey, wr.toValue());
 			}
 
 			wait(tr.commit());
