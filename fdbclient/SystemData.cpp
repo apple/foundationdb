@@ -351,14 +351,6 @@ const Value encodeStorageTeams(const std::vector<UID>& value) {
 	return wr.toValue();
 }
 
-const KeyRef shardToTeamIdKeyPrefix = LiteralStringRef("\xff/storageShardToTeam/");
-const Key shardToTeamIdKey(const KeyRange& keys) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(shardToTeamIdKeyPrefix);
-	wr << keys;
-	return wr.toValue();
-}
-
 const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
 
 const Key cacheKeysKey(uint16_t idx, const KeyRef& key) {

@@ -112,9 +112,6 @@ const Key storageServerToTeamIdKey(UID serverId);
 extern const KeyRef storageServerListToTeamIdKeyPrefix;
 const Key storageServerListToTeamIdKey(std::vector<UID> servers);
 
-extern const KeyRef shardToTeamIdKeyPrefix;
-const Key shardToTeamIdKey(const KeyRange& keys);
-
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
 extern const KeyRangeRef writeConflictRangeKeysRange;
