@@ -70,6 +70,8 @@ The ``new`` option, if present, initializes a new database with the given config
 
 The ``tss`` option, if present, changes the Testing Storage Server (TSS) configuration for a cluster. When used for the first time, both a count and a storage engine must be specified. For more details, see :ref:`testing-storage-server`.
 
+The ``perpetual_storag_wiggle`` option, if present, switch on/off perpetual storage wiggle. The value speed will be the number of processes that the Data Distributor should wiggle at a time. Currently FDB only support up to 1. So any value different than 0 or 1 will return an error.
+
 redundancy mode
 ^^^^^^^^^^^^^^^
 
