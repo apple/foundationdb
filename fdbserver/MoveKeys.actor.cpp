@@ -1411,29 +1411,6 @@ ACTOR Future<UID> maybeUpdateTeamMaps(Database cx, vector<UID> team) {
 	return teamId;
 }
 
-ACTOR Future<Void> updateShardToTeamIdMap(Database cx, UID teamId, KeyRange keys) {
-	loop {
-		try {
-			state Transaction tr = Transaction(cx);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			auto key = shardToTeamIdKey(keys);
-			Optional<Value> teamId = wait(tr.get(key));
-			if (!teamId.present()) {
-				tr.set(shardToTeamIdKey(keys), BinaryWriter::toValue(teamId, Unversioned()));
-			}
-
-			tr.set(shardToTeamIdKey(keys), BinaryWriter::toValue(teamId, Unversioned()));
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
-}
-
 ACTOR Future<Void> moveKeys(Database cx,
                             KeyRange keys,
                             vector<UID> destinationTeam,
@@ -1472,8 +1449,6 @@ ACTOR Future<Void> moveKeys(Database cx,
 	                    relocationIntervalId,
 	                    tssMapping,
 	                    ddEnabledState));
-
-	// wait(updateShardToTeamIdMap(cx, teamId, keys));
 
 	// This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
 	completionSignaller.cancel();
