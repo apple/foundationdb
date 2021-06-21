@@ -2840,8 +2840,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 				this->wiggle_addresses.push_back(addr);
 				this->excludedServers.set(addr, DDTeamCollection::Status::WIGGLING);
-				moveFutures.push_back(
-				    waitForAllDataRemoved(this->cx, info->lastKnownInterface.id(), info->addedVersion, this));
+				moveFutures.push_back(info->onRemoved);
 			}
 			if (!moveFutures.empty()) {
 				this->restartRecruiting.trigger();
@@ -3982,6 +3981,7 @@ ACTOR Future<std::pair<Future<Void>, Value>> watchPerpetualStoragePIDChange(DDTe
 
 // periodically check whether the cluster is healthy if we continue perpetual wiggle
 ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, int* extraTeamCount) {
+	state int pausePenalty = 1;
 	loop {
 		Promise<int> countp;
 		self->getUnhealthyRelocationCount.send(countp);
@@ -3994,9 +3994,9 @@ ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, 
 		    self->bestTeamStuck) {
 			// if we pause wiggle not because the reason a, increase extraTeamCount. This helps avoid oscillation
 			// between pause and non-pause status.
-			if (count < SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD && !self->pauseWiggle->get()) {
-				*extraTeamCount = std::min(*extraTeamCount + 1,
-				                           SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (int)self->server_info.size());
+			if ((self->healthyTeamCount <= *extraTeamCount || self->bestTeamStuck) && !self->pauseWiggle->get()) {
+				*extraTeamCount = std::min(*extraTeamCount + pausePenalty, (int)self->teams.size());
+				pausePenalty = std::min(pausePenalty * 2, (int)self->teams.size());
 			}
 			self->pauseWiggle->set(true);
 		} else {
@@ -4031,6 +4031,8 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				self->includeStorageServersForWiggle();
 				TraceEvent("PerpetualStorageWigglePause", self->distributorId)
 				    .detail("ProcessId", pid)
+				    .detail("ExtraHealthyTeamCount", extraTeamCount)
+				    .detail("HealthyTeamCount", self->healthyTeamCount)
 				    .detail("StorageCount", movingCount);
 			} else {
 				TEST(true); // start wiggling
@@ -4039,6 +4041,8 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				moveFinishFuture = waitForAll(fv);
 				TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
 				    .detail("ProcessId", pid)
+				    .detail("ExtraHealthyTeamCount", extraTeamCount)
+				    .detail("HealthyTeamCount", self->healthyTeamCount)
 				    .detail("StorageCount", movingCount);
 			}
 		}
