@@ -23,17 +23,19 @@
 #include <cmath>
 #include <cinttypes>
 
-std::unique_ptr<FlowKnobs> globalFlowKnobs = std::make_unique<FlowKnobs>();
-FlowKnobs const* FLOW_KNOBS = globalFlowKnobs.get();
+FlowKnobs::FlowKnobs(Randomize randomize, IsSimulated isSimulated) {
+	initialize(randomize, isSimulated);
+}
+
+FlowKnobs bootstrapGlobalFlowKnobs(Randomize::NO, IsSimulated::NO);
+FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 
 #define init(knob, value) initKnob(knob, value, #knob)
 
-FlowKnobs::FlowKnobs() {
-	initialize();
-}
-
 // clang-format off
-void FlowKnobs::initialize(bool randomize, bool isSimulated) {
+void FlowKnobs::initialize(Randomize _randomize, IsSimulated _isSimulated) {
+	bool const randomize = _randomize == Randomize::YES;
+	bool const isSimulated = _isSimulated == IsSimulated::YES;
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
@@ -254,60 +256,88 @@ static std::string toLower(std::string const& name) {
 	return lower_name;
 }
 
-bool Knobs::setKnob(std::string const& knob, std::string const& value) {
-	explicitlySetKnobs.insert(toLower(knob));
+template <class T>
+static T parseIntegral(std::string const& value) {
+	T v;
+	int n = 0;
+	if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
+		if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
+			throw invalid_option_value();
+	} else {
+		if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
+			throw invalid_option_value();
+	}
+	return v;
+}
+
+ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const& value) const {
 	if (double_knobs.count(knob)) {
 		double v;
 		int n = 0;
 		if (sscanf(value.c_str(), "%lf%n", &v, &n) != 1 || n != value.size())
 			throw invalid_option_value();
-		*double_knobs[knob] = v;
-		return true;
-	}
-	if (bool_knobs.count(knob)) {
+		return v;
+	} else if (bool_knobs.count(knob)) {
 		if (toLower(value) == "true") {
-			*bool_knobs[knob] = true;
+			return true;
 		} else if (toLower(value) == "false") {
-			*bool_knobs[knob] = false;
+			return false;
 		} else {
-			int64_t v;
-			int n = 0;
-			if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
-				if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
-					throw invalid_option_value();
-			} else {
-				if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
-					throw invalid_option_value();
-			}
-			*bool_knobs[knob] = v;
+			return parseIntegral<bool>(value);
 		}
-		return true;
+	} else if (int64_knobs.count(knob)) {
+		return parseIntegral<int64_t>(value);
+	} else if (int_knobs.count(knob)) {
+		return parseIntegral<int>(value);
+	} else if (string_knobs.count(knob)) {
+		return value;
 	}
-	if (int64_knobs.count(knob) || int_knobs.count(knob)) {
-		int64_t v;
-		int n = 0;
-		if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
-			if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
-				throw invalid_option_value();
-		} else {
-			if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
-				throw invalid_option_value();
-		}
-		if (int64_knobs.count(knob))
-			*int64_knobs[knob] = v;
-		else {
-			if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max())
-				throw invalid_option_value();
-			*int_knobs[knob] = v;
-		}
-		return true;
+	return NoKnobFound{};
+}
+
+bool Knobs::setKnob(std::string const& knob, int value) {
+	if (!int_knobs.count(knob)) {
+		return false;
 	}
-	if (string_knobs.count(knob)) {
-		*string_knobs[knob] = value;
-		return true;
+	*int_knobs[knob] = value;
+	explicitlySetKnobs.insert(toLower(knob));
+	return true;
+}
+
+bool Knobs::setKnob(std::string const& knob, int64_t value) {
+	if (!int64_knobs.count(knob)) {
+		return false;
 	}
-	explicitlySetKnobs.erase(toLower(knob)); // don't store knobs that don't exist
-	return false;
+	*int64_knobs[knob] = value;
+	explicitlySetKnobs.insert(toLower(knob));
+	return true;
+}
+
+bool Knobs::setKnob(std::string const& knob, bool value) {
+	if (!bool_knobs.count(knob)) {
+		return false;
+	}
+	*bool_knobs[knob] = value;
+	explicitlySetKnobs.insert(toLower(knob));
+	return true;
+}
+
+bool Knobs::setKnob(std::string const& knob, double value) {
+	if (!double_knobs.count(knob)) {
+		return false;
+	}
+	*double_knobs[knob] = value;
+	explicitlySetKnobs.insert(toLower(knob));
+	return true;
+}
+
+bool Knobs::setKnob(std::string const& knob, std::string const& value) {
+	if (!string_knobs.count(knob)) {
+		return false;
+	}
+	*string_knobs[knob] = value;
+	explicitlySetKnobs.insert(toLower(knob));
+	return true;
 }
 
 void Knobs::initKnob(double& knob, double value, std::string const& name) {

@@ -503,7 +503,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					                       "",
 					                       "",
 					                       -1,
-					                       whitelistBinPaths));
+					                       whitelistBinPaths,
+					                       "",
+					                       {},
+					                       UseConfigDB::DISABLED));
 				}
 				if (runBackupAgents != AgentNone) {
 					futures.push_back(runBackup(connFile));

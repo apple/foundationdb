@@ -1935,14 +1935,60 @@ Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
 	return res;
 }
 
-template <class T, class Res>
-Future<Res> operator>>=(Future<T> lhs, std::function<Future<Res>(T const&)> rhs) {
-	return runAfter(lhs, rhs);
+template <class T, class Fun>
+auto operator>>=(Future<T> lhs, Fun&& rhs) -> Future<decltype(rhs(std::declval<T>()))> {
+	return runAfter(lhs, std::forward<Fun>(rhs));
 }
 
 template <class T, class U>
 Future<U> operator>>(Future<T> const& lhs, Future<U> const& rhs) {
 	return runAfter(lhs, rhs);
+}
+
+/*
+ * IDependentAsyncVar is similar to AsyncVar, but it decouples the input and output, so the translation unit
+ * responsible for handling the output does not need to have knowledge of how the output is generated
+ */
+template <class Output>
+class IDependentAsyncVar : public ReferenceCounted<IDependentAsyncVar<Output>> {
+public:
+	virtual ~IDependentAsyncVar() = default;
+	virtual Output const& get() const = 0;
+	virtual Future<Void> onChange() const = 0;
+	template <class Input, class F>
+	static Reference<IDependentAsyncVar> create(Reference<AsyncVar<Input>> const& input, F const& f);
+	static Reference<IDependentAsyncVar> create(Reference<AsyncVar<Output>> const& output);
+};
+
+template <class Input, class Output, class F>
+class DependentAsyncVar final : public IDependentAsyncVar<Output> {
+	Reference<AsyncVar<Output>> output;
+	Future<Void> monitorActor;
+	ACTOR static Future<Void> monitor(Reference<AsyncVar<Input>> input, Reference<AsyncVar<Output>> output, F f) {
+		loop {
+			wait(input->onChange());
+			output->set(f(input->get()));
+		}
+	}
+
+public:
+	DependentAsyncVar(Reference<AsyncVar<Input>> const& input, F const& f)
+	  : output(makeReference<AsyncVar<Output>>(f(input->get()))), monitorActor(monitor(input, output, f)) {}
+	Output const& get() const override { return output->get(); }
+	Future<Void> onChange() const override { return output->onChange(); }
+};
+
+template <class Output>
+template <class Input, class F>
+Reference<IDependentAsyncVar<Output>> IDependentAsyncVar<Output>::create(Reference<AsyncVar<Input>> const& input,
+                                                                         F const& f) {
+	return makeReference<DependentAsyncVar<Input, Output, F>>(input, f);
+}
+
+template <class Output>
+Reference<IDependentAsyncVar<Output>> IDependentAsyncVar<Output>::create(Reference<AsyncVar<Output>> const& input) {
+	auto identity = [](const auto& x) { return x; };
+	return makeReference<DependentAsyncVar<Output, Output, decltype(identity)>>(input, identity);
 }
 
 // A weak reference type to wrap a future Reference<T> object.

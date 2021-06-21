@@ -156,7 +156,7 @@ struct ClusterControllerFullInterface {
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterControllerFullInterface const& r) const { return id() != r.id(); }
 
-	bool hasMessage() {
+	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
@@ -828,13 +828,17 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         std::string metricsConnFile,
                         std::string metricsPrefix,
                         int64_t memoryProfilingThreshold,
-                        std::string whitelistBinPaths);
+                        std::string whitelistBinPaths,
+                        std::string configPath,
+                        std::map<std::string, std::string> manualKnobOverrides,
+                        UseConfigDB useConfigDB);
 
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
-                                     LocalityData locality);
+                                     LocalityData locality,
+                                     UseConfigDB useConfigDB);
 
 // These servers are started by workerServer
 class IKeyValueStore;

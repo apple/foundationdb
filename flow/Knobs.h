@@ -28,15 +28,23 @@
 #include <set>
 #include <string>
 #include <stdint.h>
+#include <variant>
+#include <optional>
+
+// NOTE: Directly using KnobValueRef as the return type for Knobs::parseKnobValue would result
+// in a cyclic dependency, so we use this intermediate ParsedKnobValue type
+struct NoKnobFound {};
+using ParsedKnobValue = std::variant<NoKnobFound, int, double, int64_t, bool, std::string>;
+
+// To be used as effectively boolean parameters with added type safety
+enum class IsSimulated { NO, YES };
+enum class Randomize { NO, YES };
 
 class Knobs {
-public:
-	bool setKnob(std::string const& name,
-	             std::string const& value); // Returns true if the knob name is known, false if it is unknown
-	void trace() const;
-
 protected:
 	Knobs() = default;
+	Knobs(Knobs const&) = delete;
+	Knobs& operator=(Knobs const&) = delete;
 	void initKnob(double& knob, double value, std::string const& name);
 	void initKnob(int64_t& knob, int64_t value, std::string const& name);
 	void initKnob(int& knob, int value, std::string const& name);
@@ -49,9 +57,28 @@ protected:
 	std::map<std::string, std::string*> string_knobs;
 	std::map<std::string, bool*> bool_knobs;
 	std::set<std::string> explicitlySetKnobs;
+
+public:
+	bool setKnob(std::string const& name, int value);
+	bool setKnob(std::string const& name, bool value);
+	bool setKnob(std::string const& name, int64_t value);
+	bool setKnob(std::string const& name, double value);
+	bool setKnob(std::string const& name, std::string const& value);
+	ParsedKnobValue parseKnobValue(std::string const& name, std::string const& value) const;
+	void trace() const;
 };
 
-class FlowKnobs : public Knobs {
+template <class T>
+class KnobsImpl : public Knobs {
+public:
+	template <class... Args>
+	void reset(Args&&... args) {
+		explicitlySetKnobs.clear();
+		static_cast<T*>(this)->initialize(std::forward<Args>(args)...);
+	}
+};
+
+class FlowKnobs : public KnobsImpl<FlowKnobs> {
 public:
 	int AUTOMATIC_TRACE_DUMP;
 	double PREVENT_FAST_SPIN_DELAY;
@@ -257,12 +284,12 @@ public:
 	bool HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS;
 	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
 	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
-
-	FlowKnobs();
-	void initialize(bool randomize = false, bool isSimulated = false);
+	FlowKnobs(Randomize, IsSimulated);
+	void initialize(Randomize, IsSimulated);
 };
 
-extern std::unique_ptr<FlowKnobs> globalFlowKnobs;
+// Flow knobs are needed before the knob collections are available, so a global FlowKnobs object is used to bootstrap
+extern FlowKnobs bootstrapGlobalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
 
 #endif

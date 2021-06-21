@@ -51,7 +51,7 @@ constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
-const int WLTOKEN_COUNTS = 12; // number of wellKnownEndpoints
+static constexpr int WLTOKEN_COUNTS = 20; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:
@@ -158,7 +158,7 @@ const Endpoint& EndpointMap::insert(NetworkAddressList localAddresses,
 NetworkMessageReceiver* EndpointMap::get(Endpoint::Token const& token) {
 	uint32_t index = token.second();
 	if (index < wellKnownEndpointCount && data[index].receiver == nullptr) {
-		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded").detail("Token", token);
+		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded").detail("Token", token).detail("Index", index).backtrace();
 	}
 	if (index < data.size() && data[index].token().first() == token.first() &&
 	    ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second())

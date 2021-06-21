@@ -1,5 +1,5 @@
 /*
- * Knobs.cpp
+ * ServerKnobs.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,17 @@
  * limitations under the License.
  */
 
-#include "fdbserver/Knobs.h"
-#include "fdbrpc/Locality.h"
-#include <cmath>
-
-std::unique_ptr<ServerKnobs> globalServerKnobs = std::make_unique<ServerKnobs>();
-ServerKnobs const* SERVER_KNOBS = globalServerKnobs.get();
+#include "fdbclient/ServerKnobs.h"
 
 #define init(knob, value) initKnob(knob, value, #knob)
 
-ServerKnobs::ServerKnobs() {
-	initialize();
+ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
+	initialize(randomize, clientKnobs, isSimulated);
 }
 
-void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSimulated) {
+void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsSimulated _isSimulated) {
+	bool const randomize = _randomize == Randomize::YES;
+	bool const isSimulated = _isSimulated == IsSimulated::YES;
 	// clang-format off
 	// Versions
 	init( VERSIONS_PER_SECOND,                                   1e6 );

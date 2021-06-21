@@ -26,6 +26,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/IClientApi.h"
+#include "fdbclient/ISingleThreadTransaction.h"
 
 // An implementation of IDatabase that serializes operations onto the network thread and interacts with the lower-level
 // client APIs exposed by NativeAPI and ReadYourWrites.
@@ -58,6 +59,7 @@ public:
 
 private:
 	friend class ThreadSafeTransaction;
+	bool isConfigDB { false };
 	DatabaseContext* db;
 
 public: // Internal use only
@@ -67,10 +69,10 @@ public: // Internal use only
 };
 
 // An implementation of ITransaction that serializes operations onto the network thread and interacts with the
-// lower-level client APIs exposed by NativeAPI and ReadYourWrites.
+// lower-level client APIs exposed by ISingleThreadTransaction
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction(DatabaseContext* cx);
+	explicit ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type);
 	~ThreadSafeTransaction() override;
 
 	// Note: used while refactoring fdbcli, need to be removed later
@@ -145,7 +147,7 @@ public:
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::delref(); }
 
 private:
-	ReadYourWritesTransaction* tr;
+	ISingleThreadTransaction* tr;
 };
 
 // An implementation of IClientApi that serializes operations onto the network thread and interacts with the lower-level

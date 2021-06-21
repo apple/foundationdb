@@ -37,10 +37,10 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
@@ -1547,6 +1547,10 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			validateOptionValue(value, false);
 			transactionTracingEnabled--;
 			break;
+		case FDBDatabaseOptions::USE_CONFIG_DATABASE:
+			validateOptionValue(value, false);
+			useConfigDatabase = true;
+			break;
 		default:
 			break;
 		}
@@ -1835,14 +1839,12 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 
 		std::string knobName = optionValue.substr(0, eq);
-		std::string knobValue = optionValue.substr(eq + 1);
-		if (globalFlowKnobs->setKnob(knobName, knobValue)) {
-			// update dependent knobs
-			globalFlowKnobs->initialize();
-		} else if (globalClientKnobs->setKnob(knobName, knobValue)) {
-			// update dependent knobs
-			globalClientKnobs->initialize();
-		} else {
+		std::string knobValueString = optionValue.substr(eq + 1);
+
+		try {
+			auto knobValue = IKnobCollection::parseKnobValue(knobName, knobValueString, IKnobCollection::Type::CLIENT);
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
 			fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
 		}
@@ -5106,7 +5108,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	return readVersion;
 }
 
-Optional<Version> Transaction::getCachedReadVersion() {
+Optional<Version> Transaction::getCachedReadVersion() const {
 	if (readVersion.isValid() && readVersion.isReady() && !readVersion.isError()) {
 		return readVersion.get();
 	} else {
@@ -5671,7 +5673,7 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::splitStorageMetrics(KeyRange 
 	return ::splitStorageMetrics(cx, keys, limit, estimated);
 }
 
-void Transaction::checkDeferredError() {
+void Transaction::checkDeferredError() const {
 	cx->checkDeferredError();
 }
 

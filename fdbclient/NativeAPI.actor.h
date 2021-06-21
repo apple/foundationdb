@@ -246,7 +246,7 @@ public:
 	void setVersion(Version v);
 	Future<Version> getReadVersion() { return getReadVersion(0); }
 	Future<Version> getRawReadVersion();
-	Optional<Version> getCachedReadVersion();
+	Optional<Version> getCachedReadVersion() const;
 
 	[[nodiscard]] Future<Optional<Value>> get(const Key& key, bool snapshot = false);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
@@ -320,7 +320,9 @@ public:
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
-	Version getCommittedVersion() { return committedVersion; } // May be called only after commit() returns success
+	Version getCommittedVersion() const {
+		return committedVersion;
+	} // May be called only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>>
 	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
@@ -352,7 +354,7 @@ public:
 
 	int apiVersionAtLeast(int minVersion) const;
 
-	void checkDeferredError();
+	void checkDeferredError() const;
 
 	Database getDatabase() const { return cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
