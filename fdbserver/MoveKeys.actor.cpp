@@ -1350,6 +1350,10 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 	return Void();
 }
 
+// Create three maps:
+// (1) List of Storage Servers (Team) -> TeamID
+// (2) TeamID -> List of Storage Servers (Team)
+// (3) Storag Server -> List of TeamsIDs
 ACTOR Future<UID> maybeUpdateTeamMaps(Database cx, vector<UID> team) {
 	state UID teamId = UID();
 	state Transaction tr(cx);
