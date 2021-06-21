@@ -4059,9 +4059,9 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				wait(delayJittered(5.0, TaskPriority::DataDistributionLow));
 			}
 			when(wait(moveFinishFuture)) {
-				TEST(true); // finish wiggling this process
 				ASSERT(self->wigglingPid.present());
 				StringRef pid = self->wigglingPid.get();
+				TEST(pid != LiteralStringRef("")); // finish wiggling this process
 
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
