@@ -16,8 +16,8 @@ Features
 * Tag-based throttling now also takes the write path into account. `(PR #3512) <https://github.com/apple/foundationdb/pull/3512>`_
 * Added the ability to ratekeeper to throttle certain types of tags based on write hot spots in addition to read hot spots. `(PR #3571) <https://github.com/apple/foundationdb/pull/3571>`_
 * Users now have the option to make ratekeeper recommend which transaction tags should be throttled, but not actually throttle them using fdbcli . `(PR #3669) <https://github.com/apple/foundationdb/pull/3669>`_
-* Added a new `--build_flags option` to binaries to print build information. `(PR #3769) <https://github.com/apple/foundationdb/pull/3769>`_
-* Added `--incremental` option to backup and restore that allows specification of only recording mutation log files and not range files. Incremental restore also allows restoring to a non-empty destination database. `(PR #3676) <https://github.com/apple/foundationdb/pull/3676>`_
+* Added a new ``--build_flags option`` to binaries to print build information. `(PR #3769) <https://github.com/apple/foundationdb/pull/3769>`_
+* Added ``--incremental`` option to backup and restore that allows specification of only recording mutation log files and not range files. Incremental restore also allows restoring to a non-empty destination database. `(PR #3676) <https://github.com/apple/foundationdb/pull/3676>`_
 * Added request tracing framework. `(PR #3329) <https://github.com/apple/foundationdb/pull/3329>`_ `(PR #3700) <https://github.com/apple/foundationdb/pull/3700>`_ `(PR #4048) <https://github.com/apple/foundationdb/pull/4048>`_ `(PR #4125) <https://github.com/apple/foundationdb/pull/4125>`_ `(PR #4204) <https://github.com/apple/foundationdb/pull/4204>`_
 * Added the `(Global Configuration Framework) <https://github.com/apple/foundationdb/wiki/Global-Configuration-Framework>`_, an eventually consistent configuration mechanism to efficiently make runtime changes to all clients and servers. `(PR #4330) <https://github.com/apple/foundationdb/pull/4330>`_
 * Added the feature to monitor and manage an fdb cluster via read/write specific special keys through transactions. `(PR #3455) <https://github.com/apple/foundationdb/pull/3455>`_ `(PR #3945) <https://github.com/apple/foundationdb/pull/3945>`_ `(PR #4255) <https://github.com/apple/foundationdb/pull/4255>`_ `(PR #4354) <https://github.com/apple/foundationdb/pull/4354>`_ `(PR #4582) <https://github.com/apple/foundationdb/pull/4582>`_
@@ -54,7 +54,7 @@ Fixes
 * Fixed a rare crash on the cluster controller when using multi-region configurations. `(PR #4547) <https://github.com/apple/foundationdb/pull/4547>`_ 
 * Fixed a memory corruption bug in the data distributor. `(PR #4535) <https://github.com/apple/foundationdb/pull/4535>`_
 * Fixed a rare crash that could happen on the sequencer during recovery. `(PR #4548) <https://github.com/apple/foundationdb/pull/4548>`_ 
-* Added a new pre-backup action when creating a backup. Backups can now either verify the range data is being saved to is empty before the backup begins (current behavior) or clear the range where data is being saved to. Fixes a `restore_destination_not_empty` failure after a backup retry due to `commit_unknown_failure`. `(PR #4595) <https://github.com/apple/foundationdb/pull/4595>`_
+* Added a new pre-backup action when creating a backup. Backups can now either verify the range data is being saved to is empty before the backup begins (current behavior) or clear the range where data is being saved to. Fixes a ``restore_destination_not_empty`` failure after a backup retry due to ``commit_unknown_failure``. `(PR #4595) <https://github.com/apple/foundationdb/pull/4595>`_
 * When configured with ``usable_regions=2``, a cluster would not fail over to a region which contained only storage class processes. `(PR #4599) <https://github.com/apple/foundationdb/pull/4599>`_ 
 
 Status
