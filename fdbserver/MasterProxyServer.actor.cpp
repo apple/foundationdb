@@ -88,7 +88,9 @@ struct ProxyStats {
 	Counter mutations;
 	Counter conflictRanges;
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
+	Counter updatesFromRatekeeper, leaseTimeouts;
 	Version lastCommitVersionAssigned;
+	int systemGRVQueueSize, defaultGRVQueueSize, batchGRVQueueSize;
 	double transactionRateAllowed, batchTransactionRateAllowed;
 	double transactionLimit, batchTransactionLimit;
 	// how much of the GRV requests queue was processed in one attempt to hand out read version.
@@ -171,7 +173,8 @@ struct ProxyStats {
 	    txnRejectedForQueuedTooLong("TxnRejectedForQueuedTooLong", cc), commitBatchOut("CommitBatchOut", cc),
 	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
-	    keyServerLocationErrors("KeyServerLocationErrors", cc), lastCommitVersionAssigned(0),
+	    keyServerLocationErrors("KeyServerLocationErrors", cc), updatesFromRatekeeper("UpdatesFromRatekeeper", cc),
+	    leaseTimeouts("LeaseTimeouts", cc), lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -198,7 +201,8 @@ struct ProxyStats {
 	                           id,
 	                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    transactionRateAllowed(0), batchTransactionRateAllowed(0), transactionLimit(0), batchTransactionLimit(0),
+	    systemGRVQueueSize(0), defaultGRVQueueSize(0), batchGRVQueueSize(0), transactionRateAllowed(0),
+	    batchTransactionRateAllowed(0), transactionLimit(0), batchTransactionLimit(0),
 	    percentageOfDefaultGRVQueueProcessed(0), percentageOfBatchGRVQueueProcessed(0) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
@@ -208,6 +212,9 @@ struct ProxyStats {
 		});
 		specialCounter(cc, "MaxCompute", [this]() { return this->getAndResetMaxCompute(); });
 		specialCounter(cc, "MinCompute", [this]() { return this->getAndResetMinCompute(); });
+		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
+		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });
+		specialCounter(cc, "BatchGRVQueueSize", [this]() { return this->batchGRVQueueSize; });
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemAndDefaultTxnRateAllowed", [this]() { return this->transactionRateAllowed; });
 		specialCounter(cc, "BatchTransactionRateAllowed", [this]() { return this->batchTransactionRateAllowed; });
@@ -306,6 +313,7 @@ struct TransactionRateInfo {
 	}
 };
 
+// Get transaction rate info from RateKeeper.
 ACTOR Future<Void> getRate(UID myID,
                            Reference<AsyncVar<ServerDBInfo>> db,
                            int64_t* inTransactionCount,
@@ -361,6 +369,7 @@ ACTOR Future<Void> getRate(UID myID,
 
 			stats->transactionRateAllowed = rep.transactionRate;
 			stats->batchTransactionRateAllowed = rep.batchTransactionRate;
+			++stats->updatesFromRatekeeper;
 			// TraceEvent("MasterProxyTxRate", myID)
 			//     .detail("RKID", db->get().ratekeeper.get().id())
 			//     .detail("RateAllowed", rep.transactionRate)
@@ -385,6 +394,7 @@ ACTOR Future<Void> getRate(UID myID,
 		when(wait(leaseTimeout)) {
 			transactionRateInfo->disable();
 			batchTransactionRateInfo->disable();
+			++stats->leaseTimeouts;
 			TraceEvent(SevWarn, "MasterProxyRateLeaseExpired", myID).suppressFor(5.0);
 			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
 			leaseTimeout = Never();
@@ -441,14 +451,17 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 				} else if (req.priority == TransactionPriority::DEFAULT) {
 					if (!batchQueue->empty()) {
 						dropRequestFromQueue(batchQueue, stats);
+						--stats->batchGRVQueueSize;
 					} else {
 						canBeQueued = false;
 					}
 				} else {
 					if (!batchQueue->empty()) {
 						dropRequestFromQueue(batchQueue, stats);
+						--stats->batchGRVQueueSize;
 					} else if (!defaultQueue->empty()) {
 						dropRequestFromQueue(defaultQueue, stats);
+						--stats->defaultGRVQueueSize;
 					} else {
 						canBeQueued = false;
 					}
@@ -478,11 +491,13 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 					++stats->txnRequestIn;
 					stats->txnStartIn += req.transactionCount;
 					stats->txnSystemPriorityStartIn += req.transactionCount;
+					++stats->systemGRVQueueSize;
 					systemQueue->push_back(req);
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
 					++stats->txnRequestIn;
 					stats->txnStartIn += req.transactionCount;
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
+					++stats->defaultGRVQueueSize;
 					defaultQueue->push_back(req);
 				} else {
 					// Return error for batch_priority GRV requests
@@ -494,6 +509,7 @@ ACTOR Future<Void> queueTransactionStartRequests(Reference<AsyncVar<ServerDBInfo
 						++stats->txnRequestIn;
 						stats->txnStartIn += req.transactionCount;
 						stats->txnBatchPriorityStartIn += req.transactionCount;
+						++stats->batchGRVQueueSize;
 						batchQueue->push_back(req);
 					}
 				}
@@ -1977,12 +1993,15 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy,
 			double currentTime = g_network->timer();
 			if (req.priority >= TransactionPriority::IMMEDIATE) {
 				systemTransactionsStarted[req.flags & 1] += tc;
+				--stats->systemGRVQueueSize;
 			} else if (req.priority >= TransactionPriority::DEFAULT) {
 				defaultPriTransactionsStarted[req.flags & 1] += tc;
 				stats->defaultTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
+				--stats->defaultGRVQueueSize;
 			} else {
 				batchPriTransactionsStarted[req.flags & 1] += tc;
 				stats->batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
+				--stats->batchGRVQueueSize;
 			}
 
 			start[req.flags & 1].push_back(std::move(req));
