@@ -3,6 +3,7 @@ runSetup=false
 
     testName=ConfigureDatabase
     testDuration=300.0
+    allowDescriptorChange=false
 
     testName=RandomClogging
     testDuration=300.0

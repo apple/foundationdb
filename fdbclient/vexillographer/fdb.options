@@ -195,6 +195,8 @@ description is not currently required but encouraged.
     <Option name="transaction_bypass_unreadable" code="700"
             description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
             defaultFor="1100"/>
+    <Option name="use_config_database" code="800"
+            description="Use configuration database." />
   </Scope>
   
   <Scope name="TransactionOption">

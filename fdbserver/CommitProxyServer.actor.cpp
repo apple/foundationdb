@@ -1289,8 +1289,9 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 
 	const Optional<UID>& debugID = self->debugID;
 
-	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
+	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
+	}
 
 	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
 	//     .detail("PrevVersion", self->prevVersion)

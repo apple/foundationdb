@@ -73,3 +73,11 @@ Optional<bool> UnitTestParameters::getBool(const std::string& name) const {
 	}
 	return {};
 }
+
+std::string UnitTestParameters::getDataDir() const {
+	return dataDir.get();
+}
+
+void UnitTestParameters::setDataDir(std::string const& dataDir) {
+	this->dataDir = dataDir;
+}

@@ -69,7 +69,7 @@ Future<Void> IFailureMonitor::onFailedFor(Endpoint const& endpoint, double susta
 	return waitForContinuousFailure(this, endpoint, sustainedFailureDuration, slope);
 }
 
-SimpleFailureMonitor::SimpleFailureMonitor() : endpointKnownFailed() {
+SimpleFailureMonitor::SimpleFailureMonitor() {
 	// Mark ourselves as available in FailureMonitor
 	const auto& localAddresses = FlowTransport::transport().getLocalAddresses();
 	addressStatus[localAddresses.address] = FailureStatus(false);
@@ -126,13 +126,20 @@ void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 	    .suppressFor(1.0)
 	    .detail("Address", endpoint.getPrimaryAddress())
 	    .detail("Token", endpoint.token);
-	failedEndpoints.insert(endpoint);
+	if (endpoint.getPrimaryAddress().isPublic()) {
+		if (failedEndpoints.size() > 100000) {
+			TraceEvent(SevWarnAlways, "TooManyFailedEndpoints").suppressFor(1.0);
+			failedEndpoints.clear();
+		}
+		failedEndpoints.insert(endpoint);
+	}
 	endpointKnownFailed.trigger(endpoint);
 }
 
 void SimpleFailureMonitor::notifyDisconnect(NetworkAddress const& address) {
 	//TraceEvent("NotifyDisconnect").detail("Address", address);
 	endpointKnownFailed.triggerRange(Endpoint({ address }, UID()), Endpoint({ address }, UID(-1, -1)));
+	disconnectTriggers.trigger(address);
 }
 
 Future<Void> SimpleFailureMonitor::onDisconnectOrFailure(Endpoint const& endpoint) {
@@ -147,6 +154,10 @@ Future<Void> SimpleFailureMonitor::onDisconnectOrFailure(Endpoint const& endpoin
 	//   address has changed state (and since it was previously not failed, it must now be failed), or
 	//   notifyDisconnect() has been called.
 	return endpointKnownFailed.onChange(endpoint);
+}
+
+Future<Void> SimpleFailureMonitor::onDisconnect(NetworkAddress const& address) {
+	return disconnectTriggers.onChange(address);
 }
 
 Future<Void> SimpleFailureMonitor::onStateChanged(Endpoint const& endpoint) {
