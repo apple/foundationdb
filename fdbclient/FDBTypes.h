@@ -26,7 +26,6 @@
 #include <string>
 #include <vector>
 
-#include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/flow.h"
 #include "flow/String.h"

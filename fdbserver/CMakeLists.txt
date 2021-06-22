@@ -70,7 +70,6 @@ set(FDBSERVER_SRCS
   OldTLogServer_6_2.actor.cpp
   OnDemandStore.actor.cpp
   OnDemandStore.h
-  Orderer.actor.h
   PaxosConfigConsumer.actor.cpp
   PaxosConfigConsumer.h
   PaxosConfigDatabaseNode.actor.cpp

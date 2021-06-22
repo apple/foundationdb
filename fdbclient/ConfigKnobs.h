@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBCLIENT_CONFIGKNOBS_H
+#define FDBCLIENT_CONFIGKNOBS_H
+
 #pragma once
 
 #include <string>
@@ -204,3 +207,5 @@ enum class UseConfigDB {
 	SIMPLE,
 	PAXOS,
 };
+
+#endif // FDBCLIENT_CONFIGKNOBS_H
