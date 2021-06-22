@@ -12,7 +12,7 @@ This document covers the concept and usage of perpetual storage wiggle.
 
 Summary
 ============
-Perpetual storage wiggle is a feature that lets the data distributor is forced to constantly build new storage teams when the cluster is healthy. On a high-level note, the process is like this:
+Perpetual storage wiggle is a feature that forces the data distributor to constantly build new storage teams when the cluster is healthy. On a high-level note, the process is like this:
 
 Order storage servers by process id. For each storage server n:
 
@@ -22,7 +22,7 @@ b. Wait until all data has been moved off the storage server.
 
 c. Include storage n
 
-Goto a.
+Goto a to wiggle the next storage process with different process id.
 
 With a perpetual wiggle, storage migrations will be much less impactful. The wiggler will detect the healthy status based on healthy teams, available disk space and the number of unhealthy relocations. It will pause the wiggle until the cluster is healthy again.
 
