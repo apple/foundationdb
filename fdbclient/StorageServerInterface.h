@@ -76,6 +76,7 @@ struct StorageServerInterface {
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
+	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -116,6 +117,8 @@ struct StorageServerInterface {
 				    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
 				getRangeSplitPoints =
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
+				getKeyValuesStream =
+				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -157,6 +160,7 @@ struct StorageServerInterface {
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
+		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -287,6 +291,45 @@ struct GetKeyValuesRequest : TimedRequest {
 	ReplyPromise<GetKeyValuesReply> reply;
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+	}
+};
+
+struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 1783066;
+	Arena arena;
+	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	Version version; // useful when latestVersion was requested
+	bool more;
+	bool cached = false;
+
+	GetKeyValuesStreamReply() : version(invalidVersion), more(false), cached(false) {}
+	GetKeyValuesStreamReply(GetKeyValuesReply r)
+	  : arena(r.arena), data(r.data), version(r.version), more(r.more), cached(r.cached) {}
+
+	int expectedSize() const { return sizeof(GetKeyValuesStreamReply) + data.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, data, version, more, cached, arena);
+	}
+};
+
+struct GetKeyValuesStreamRequest {
+	constexpr static FileIdentifier file_identifier = 6795746;
+	SpanID spanContext;
+	Arena arena;
+	KeySelectorRef begin, end;
+	Version version; // or latestVersion
+	int limit, limitBytes;
+	bool isFetchKeys;
+	Optional<TagSet> tags;
+	Optional<UID> debugID;
+	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
+
+	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
