@@ -308,6 +308,7 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncV
 			    .detail("SS", servers[i].id());
 			throw attribute_not_found();
 		}
+
 		messages.push_back(timeoutError(itr->second.eventLogRequest.getReply(
 		                                    EventLogRequest(StringRef(servers[i].id().toString() + "/StorageMetrics"))),
 		                                1.0));
@@ -516,7 +517,15 @@ ACTOR Future<bool> getStorageServersRecruiting(Database cx, WorkerInterface dist
 		                      1.0));
 
 		TraceEvent("StorageServersRecruiting").detail("Message", recruitingMessage.toString());
-		return recruitingMessage.getValue("State") == "Recruiting";
+
+		if (recruitingMessage.getValue("State") == "Recruiting") {
+			std::string tssValue;
+			// if we're tss recruiting, that's fine because that can block indefinitely if only 1 free storage process
+			if (!recruitingMessage.tryGetValue("IsTSS", tssValue) || tssValue == "False") {
+				return true;
+			}
+		}
+		return false;
 	} catch (Error& e) {
 		TraceEvent("QuietDatabaseFailure", distributorWorker.id())
 		    .detail("Reason", "Failed to extract StorageServersRecruiting")

@@ -624,7 +624,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> managementApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		// All management api related tests
-		Database cx = cx_->clone();
+		state Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
 		// test ordered option keys
 		{
@@ -1423,6 +1423,40 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					wait(tx->onError(e));
+				}
+			}
+		}
+		// make sure when we change dd related special keys, we grab the two system keys,
+		// i.e. moveKeysLockOwnerKey and moveKeysLockWriteKey
+		{
+			state Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
+			state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
+			loop {
+				try {
+					Version readVersion = wait(tr1->getReadVersion());
+					tr2->setVersion(readVersion);
+					tr1->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tr2->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+					tr1->set(LiteralStringRef("mode").withPrefix(ddPrefix), LiteralStringRef("1"));
+					wait(tr1->commit());
+					// randomly read the moveKeysLockOwnerKey/moveKeysLockWriteKey
+					// both of them should be grabbed when changing dd mode
+					wait(success(
+					    tr2->get(deterministicRandom()->coinflip() ? moveKeysLockOwnerKey : moveKeysLockWriteKey)));
+					// tr2 shoulde never succeed, just write to a key to make it not a read-only transaction
+					tr2->set(LiteralStringRef("unused_key"), LiteralStringRef(""));
+					wait(tr2->commit());
+					ASSERT(false); // commit should always fail due to conflict
+				} catch (Error& e) {
+					if (e.code() != error_code_not_committed) {
+						// when buggify is enabled, it's possible we get other retriable errors
+						wait(tr2->onError(e));
+						tr1->reset();
+					} else {
+						// loop until we get conflict error
+						break;
+					}
 				}
 			}
 		}

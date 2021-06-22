@@ -28,6 +28,7 @@
 
 struct NetworkTestInterface {
 	RequestStream<struct NetworkTestRequest> test;
+	RequestStream<struct NetworkTestStreamingRequest> testStream;
 	NetworkTestInterface() {}
 	NetworkTestInterface(NetworkAddress remote);
 	NetworkTestInterface(INetwork* local);
@@ -54,6 +55,29 @@ struct NetworkTestRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, replySize, reply);
+	}
+};
+
+struct NetworkTestStreamingReply : ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 3726830;
+
+	int index = 0;
+	NetworkTestStreamingReply() = default;
+	explicit NetworkTestStreamingReply(int index) : index(index) {}
+	size_t expectedSize() const { return 4e6; /*sizeof(*this);*/ }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, index);
+	}
+};
+
+struct NetworkTestStreamingRequest {
+	constexpr static FileIdentifier file_identifier = 2794452;
+	ReplyPromiseStream<struct NetworkTestStreamingReply> reply;
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

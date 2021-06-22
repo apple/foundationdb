@@ -38,6 +38,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -45,6 +46,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/ParallelStream.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -121,6 +123,52 @@ NetworkOptions::NetworkOptions()
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
+void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi) {
+	auto result = tssMapping.find(ssi.id());
+	// Update tss endpoint mapping if ss isn't in mapping, or the interface it mapped to changed
+	if (result == tssMapping.end() ||
+	    result->second.getValue.getEndpoint().token.first() != tssi.getValue.getEndpoint().token.first()) {
+		Reference<TSSMetrics> metrics;
+		if (result == tssMapping.end()) {
+			// new TSS pairing
+			metrics = makeReference<TSSMetrics>();
+			tssMetrics[tssi.id()] = metrics;
+			tssMapping[ssi.id()] = tssi;
+		} else {
+			if (result->second.id() == tssi.id()) {
+				metrics = tssMetrics[tssi.id()];
+			} else {
+				TEST(true); // SS now maps to new TSS! This will probably never happen in practice
+				tssMetrics.erase(result->second.id());
+				metrics = makeReference<TSSMetrics>();
+				tssMetrics[tssi.id()] = metrics;
+			}
+			result->second = tssi;
+		}
+
+		queueModel.updateTssEndpoint(ssi.getValue.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getValue.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKey.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKey.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKeyValues.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.watchValue.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.watchValue.getEndpoint(), metrics));
+	}
+}
+
+void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
+	auto result = tssMapping.find(ssi.id());
+	if (result != tssMapping.end()) {
+		tssMetrics.erase(ssi.id());
+		tssMapping.erase(result);
+		queueModel.removeTssEndpoint(ssi.getValue.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKey.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKeyValues.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.watchValue.getEndpoint().token.first());
+	}
+}
+
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
@@ -133,6 +181,7 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load
 				//       balance to take an AsyncVar<Reference<Interface>> so that it is notified when the interface
 				//       changes.
+
 				it->second->interf = ssi;
 			} else {
 				it->second->notifyContextDestroyed();
@@ -285,6 +334,13 @@ void delref(DatabaseContext* ptr) {
 	ptr->delref();
 }
 
+void traceTSSErrors(const char* name, UID tssId, const std::unordered_map<int, uint64_t>& errorsByCode) {
+	TraceEvent ev(name, tssId);
+	for (auto& it : errorsByCode) {
+		ev.detail("E" + std::to_string(it.first), it.second);
+	}
+}
+
 ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 	state double lastLogged = 0;
 	loop {
@@ -326,6 +382,62 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
+
+		for (const auto& it : cx->tssMetrics) {
+			// TODO could skip this tss if request counter is zero? would potentially complicate elapsed calculation
+			// though
+			if (it.second->mismatches.getIntervalDelta()) {
+				cx->tssMismatchStream.send(it.first);
+			}
+
+			// do error histograms as separate event
+			if (it.second->ssErrorsByCode.size()) {
+				traceTSSErrors("TSS_SSErrors", it.first, it.second->ssErrorsByCode);
+			}
+
+			if (it.second->tssErrorsByCode.size()) {
+				traceTSSErrors("TSS_TSSErrors", it.first, it.second->tssErrorsByCode);
+			}
+
+			TraceEvent tssEv("TSSClientMetrics", cx->dbId);
+			tssEv.detail("TSSID", it.first)
+			    .detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Internal", cx->internal);
+
+			it.second->cc.logToTraceEvent(tssEv);
+
+			tssEv.detail("MeanSSGetValueLatency", it.second->SSgetValueLatency.mean())
+			    .detail("MedianSSGetValueLatency", it.second->SSgetValueLatency.median())
+			    .detail("SSGetValueLatency90", it.second->SSgetValueLatency.percentile(0.90))
+			    .detail("SSGetValueLatency99", it.second->SSgetValueLatency.percentile(0.99));
+
+			tssEv.detail("MeanTSSGetValueLatency", it.second->TSSgetValueLatency.mean())
+			    .detail("MedianTSSGetValueLatency", it.second->TSSgetValueLatency.median())
+			    .detail("TSSGetValueLatency90", it.second->TSSgetValueLatency.percentile(0.90))
+			    .detail("TSSGetValueLatency99", it.second->TSSgetValueLatency.percentile(0.99));
+
+			tssEv.detail("MeanSSGetKeyLatency", it.second->SSgetKeyLatency.mean())
+			    .detail("MedianSSGetKeyLatency", it.second->SSgetKeyLatency.median())
+			    .detail("SSGetKeyLatency90", it.second->SSgetKeyLatency.percentile(0.90))
+			    .detail("SSGetKeyLatency99", it.second->SSgetKeyLatency.percentile(0.99));
+
+			tssEv.detail("MeanTSSGetKeyLatency", it.second->TSSgetKeyLatency.mean())
+			    .detail("MedianTSSGetKeyLatency", it.second->TSSgetKeyLatency.median())
+			    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
+			    .detail("TSSGetKeyLatency99", it.second->TSSgetKeyLatency.percentile(0.99));
+
+			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyLatency.mean())
+			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyLatency.median())
+			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyLatency.percentile(0.90))
+			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyLatency.percentile(0.99));
+
+			tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
+			    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
+			    .detail("TSSGetKeyValuesLatency90", it.second->TSSgetKeyValuesLatency.percentile(0.90))
+			    .detail("TSSGetKeyValuesLatency99", it.second->TSSgetKeyValuesLatency.percentile(0.99));
+
+			it.second->clear();
+		}
 
 		lastLogged = now();
 	}
@@ -711,6 +823,63 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	}
 }
 
+ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
+	state Reference<ReadYourWritesTransaction> tr;
+	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	loop {
+		state UID tssID = waitNext(cx->tssMismatchStream.getFuture());
+		// find ss pair id so we can remove it from the mapping
+		state UID tssPairID;
+		bool found = false;
+		for (const auto& it : cx->tssMapping) {
+			if (it.second.id() == tssID) {
+				tssPairID = it.first;
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			state bool quarantine = CLIENT_KNOBS->QUARANTINE_TSS_ON_MISMATCH;
+			TraceEvent(SevWarnAlways, quarantine ? "TSS_QuarantineMismatch" : "TSS_KillMismatch")
+			    .detail("TSSID", tssID.toString());
+			TEST(quarantine); // Quarantining TSS because it got mismatch
+			TEST(!quarantine); // Killing TSS because it got mismatch
+
+			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(cx)));
+			state int tries = 0;
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+					if (quarantine) {
+						tr->set(tssQuarantineKeyFor(tssID), LiteralStringRef(""));
+					} else {
+						tr->clear(serverTagKeyFor(tssID));
+					}
+					tssMapDB.erase(tr, tssPairID);
+
+					wait(tr->commit());
+
+					break;
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
+				tries++;
+				if (tries > 10) {
+					// Give up, it'll get another mismatch or a human will investigate eventually
+					TraceEvent("TSS_MismatchGaveUp").detail("TSSID", tssID.toString());
+					break;
+				}
+			}
+			// clear out txn so that the extra DatabaseContext ref gets decref'd and we can free cx
+			tr = makeReference<ReadYourWritesTransaction>();
+		} else {
+			TEST(true); // Not handling TSS with mismatch because it's already gone
+		}
+	}
+}
+
 ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed) {
 	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
 		if (detailed) {
@@ -922,7 +1091,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
-    transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc),
+    transactionGetRangeRequests("GetRangeRequests", cc),
+    transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
     transactionCommittedMutations("CommittedMutations", cc),
@@ -958,6 +1128,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
+	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 
@@ -1049,14 +1220,16 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<ClientProfilingImpl>(
 		        KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
-				.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<MaintenanceImpl>(
 		        KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<DataDistributionImpl>(
 		        KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
@@ -1153,7 +1326,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
-    transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc),
+    transactionGetRangeRequests("GetRangeRequests", cc),
+    transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
     transactionCommittedMutations("CommittedMutations", cc),
@@ -1197,6 +1371,8 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 DatabaseContext::~DatabaseContext() {
 	cacheListMonitor.cancel();
 	monitorProxiesInfoChange.cancel();
+	monitorTssInfoChange.cancel();
+	tssMismatchHandler.cancel();
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
@@ -2015,6 +2191,29 @@ ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInt
 	return serverInterfaces;
 }
 
+void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
+	// Since a ss -> tss mapping is included in resultsTssMapping iff that SS is in results and has a tss pair,
+	// all SS in results that do not have a mapping present must not have a tss pair.
+	std::unordered_map<UID, const StorageServerInterface*> ssiById;
+	for (const auto& [_, shard] : reply.results) {
+		for (auto& ssi : shard) {
+			ssiById[ssi.id()] = &ssi;
+		}
+	}
+
+	for (const auto& mapping : reply.resultsTssMapping) {
+		auto ssi = ssiById.find(mapping.first);
+		ASSERT(ssi != ssiById.end());
+		cx->addTssMapping(*ssi->second, mapping.second);
+		ssiById.erase(mapping.first);
+	}
+
+	// if SS didn't have a mapping above, it's still in the ssiById map, so remove its tss mapping
+	for (const auto& it : ssiById) {
+		cx->removeTssMapping(*it.second);
+	}
+}
+
 // If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key).
 // Otherwise returns the shard containing key
 ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Database cx,
@@ -2047,6 +2246,7 @@ ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Da
 				ASSERT(rep.results.size() == 1);
 
 				auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
+				updateTssMappings(cx, rep);
 				return std::make_pair(KeyRange(rep.results[0].first, rep.arena), locationInfo);
 			}
 		}
@@ -2110,6 +2310,7 @@ ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocatio
 					                     cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
 					wait(yield());
 				}
+				updateTssMappings(cx, rep);
 
 				return results;
 			}
@@ -2345,6 +2546,11 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 				    "NativeAPI.getKey.Before"); //.detail("StartKey",
 				                                // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++cx->transactionPhysicalReads;
+
+			GetKeyRequest req(
+			    span.context, k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), getKeyID);
+			req.arena.dependsOn(k.arena());
+
 			state GetKeyReply reply;
 			try {
 				choose {
@@ -2353,11 +2559,7 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 					         wait(loadBalance(cx.getPtr(),
 					                          ssi.second,
 					                          &StorageServerInterface::getKey,
-					                          GetKeyRequest(span.context,
-					                                        k,
-					                                        version.get(),
-					                                        cx->sampleReadTags() ? tags : Optional<TagSet>(),
-					                                        getKeyID),
+					                          req,
 					                          TaskPriority::DefaultPromiseEndpoint,
 					                          false,
 					                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
@@ -2718,6 +2920,9 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
 			req.end = firstGreaterOrEqual(range.end);
 			req.spanContext = span.context;
 
+			// keep shard's arena around in case of async tss comparison
+			req.arena.dependsOn(locations[shard].first.arena());
+
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
@@ -3034,6 +3239,9 @@ ACTOR Future<RangeResult> getRange(Database cx,
 			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
+			// In case of async tss comparison, also make req arena depend on begin, end, and/or shard's arena depending
+			// on which  is used
+			bool dependOnShard = false;
 			if (reverse && (begin - 1).isDefinitelyLess(shard.begin) &&
 			    (!begin.isFirstGreaterOrEqual() ||
 			     begin.getKey() != shard.begin)) { // In this case we would be setting modifiedSelectors to true, but
@@ -3041,14 +3249,23 @@ ACTOR Future<RangeResult> getRange(Database cx,
 
 				req.begin = firstGreaterOrEqual(shard.begin);
 				modifiedSelectors = true;
-			} else
+				req.arena.dependsOn(shard.arena());
+				dependOnShard = true;
+			} else {
 				req.begin = begin;
+				req.arena.dependsOn(begin.arena());
+			}
 
 			if (!reverse && end.isDefinitelyGreater(shard.end)) {
 				req.end = firstGreaterOrEqual(shard.end);
 				modifiedSelectors = true;
-			} else
+				if (!dependOnShard) {
+					req.arena.dependsOn(shard.arena());
+				}
+			} else {
 				req.end = end;
+				req.arena.dependsOn(end.arena());
+			}
 
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
@@ -3133,10 +3350,17 @@ ACTOR Future<RangeResult> getRange(Database cx,
 					output.readThroughEnd = readThroughEnd;
 
 					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows)) {
+						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
+						// happens in simulation so it's fine
+						RangeResult copy;
+						int newSize =
+						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());
+						for (int i = 0; i < newSize; i++) {
+							copy.push_back_deep(copy.arena(), output[i]);
+						}
+						output = copy;
 						output.more = true;
-						output.resize(
-						    output.arena(),
-						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size()));
+
 						getRangeFinished(cx,
 						                 trLogInfo,
 						                 startTime,
@@ -3252,6 +3476,324 @@ ACTOR Future<RangeResult> getRange(Database cx,
 
 		throw;
 	}
+}
+
+// Streams all of the KV pairs in a target key range into a ParallelStream fragment
+ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment* results,
+                                          Database cx,
+                                          Reference<TransactionLogInfo> trLogInfo,
+                                          Version version,
+                                          KeyRange keys,
+                                          GetRangeLimits limits,
+                                          bool snapshot,
+                                          bool reverse,
+                                          TransactionInfo info,
+                                          TagSet tags,
+                                          SpanID spanContext) {
+	loop {
+		state vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+		    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValuesStream, info));
+		ASSERT(locations.size());
+		state int shard = 0;
+		loop {
+			const KeyRange& range = locations[shard].first;
+
+			state GetKeyValuesStreamRequest req;
+			req.version = version;
+			req.begin = firstGreaterOrEqual(range.begin);
+			req.end = firstGreaterOrEqual(range.end);
+			req.spanContext = spanContext;
+			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+			req.limitBytes = std::numeric_limits<int>::max();
+
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+
+			// FIXME: buggify byte limits on internal functions that use them, instead of globally
+			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
+			req.debugID = info.debugID;
+
+			try {
+				if (info.debugID.present()) {
+					g_traceBatch.addEvent(
+					    "TransactionDebug", info.debugID.get().first(), "NativeAPI.RangeStream.Before");
+				}
+				++cx->transactionPhysicalReads;
+				state GetKeyValuesStreamReply rep;
+
+				if (locations[shard].second->size() == 0) {
+					wait(cx->connectionFileChanged());
+					results->sendError(transaction_too_old());
+					return Void();
+				}
+
+				state int useIdx = -1;
+
+				loop {
+					// FIXME: create a load balance function for this code so future users of reply streams do not have
+					// to duplicate this code
+					int count = 0;
+					for (int i = 0; i < locations[shard].second->size(); i++) {
+						if (!IFailureMonitor::failureMonitor()
+						         .getState(locations[shard]
+						                       .second->get(i, &StorageServerInterface::getKeyValuesStream)
+						                       .getEndpoint())
+						         .failed) {
+							if (deterministicRandom()->random01() <= 1.0 / ++count) {
+								useIdx = i;
+							}
+						}
+					}
+
+					if (useIdx >= 0) {
+						break;
+					}
+
+					vector<Future<Void>> ok(locations[shard].second->size());
+					for (int i = 0; i < ok.size(); i++) {
+						ok[i] = IFailureMonitor::failureMonitor().onStateEqual(
+						    locations[shard].second->get(i, &StorageServerInterface::getKeyValuesStream).getEndpoint(),
+						    FailureStatus(false));
+					}
+
+					// Making this SevWarn means a lot of clutter
+					if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
+					    deterministicRandom()->random01() < 0.01) {
+						TraceEvent("AllAlternativesFailed")
+						    .detail("Alternatives", locations[shard].second->description());
+					}
+
+					wait(allAlternativesFailedDelay(quorum(ok, 1)));
+				}
+
+				state ReplyPromiseStream<GetKeyValuesStreamReply> replyStream =
+				    locations[shard]
+				        .second->get(useIdx, &StorageServerInterface::getKeyValuesStream)
+				        .getReplyStream(req);
+				state bool breakAgain = false;
+				loop {
+					wait(results->onEmpty());
+					try {
+						choose {
+							when(wait(cx->connectionFileChanged())) {
+								results->sendError(transaction_too_old());
+								return Void();
+							}
+
+							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) { rep = _rep; }
+						}
+						++cx->transactionPhysicalReadsCompleted;
+					} catch (Error& e) {
+						++cx->transactionPhysicalReadsCompleted;
+						if (e.code() == error_code_broken_promise) {
+							throw connection_failed();
+						}
+						if (e.code() != error_code_end_of_stream) {
+							throw;
+						}
+						rep = GetKeyValuesStreamReply();
+					}
+					if (info.debugID.present())
+						g_traceBatch.addEvent(
+						    "TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
+					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
+
+					int64_t bytes = 0;
+					for (const KeyValueRef& kv : output) {
+						bytes += kv.key.size() + kv.value.size();
+					}
+
+					cx->transactionBytesRead += bytes;
+					cx->transactionKeysRead += output.size();
+
+					// If the reply says there is more but we know that we finished the shard, then fix rep.more
+					if (reverse && output.more && rep.data.size() > 0 &&
+					    output[output.size() - 1].key == locations[shard].first.begin) {
+						output.more = false;
+					}
+
+					if (output.more) {
+						if (!rep.data.size()) {
+							TraceEvent(SevError, "GetRangeStreamError")
+							    .detail("Reason", "More data indicated but no rows present")
+							    .detail("LimitBytes", limits.bytes)
+							    .detail("LimitRows", limits.rows)
+							    .detail("OutputSize", output.size())
+							    .detail("OutputBytes", output.expectedSize())
+							    .detail("BlockSize", rep.data.size())
+							    .detail("BlockBytes", rep.data.expectedSize());
+							ASSERT(false);
+						}
+						TEST(true); // GetKeyValuesStreamReply.more in getRangeStream
+						// Make next request to the same shard with a beginning key just after the last key returned
+						if (reverse)
+							locations[shard].first =
+							    KeyRangeRef(locations[shard].first.begin, output[output.size() - 1].key);
+						else
+							locations[shard].first =
+							    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].first.end);
+					}
+
+					if (locations[shard].first.empty()) {
+						output.more = false;
+					}
+
+					if (!output.more) {
+						const KeyRange& range = locations[shard].first;
+						if (shard == locations.size() - 1) {
+							KeyRef begin = reverse ? keys.begin : range.end;
+							KeyRef end = reverse ? range.begin : keys.end;
+
+							if (begin >= end) {
+								if (range.begin == allKeys.begin) {
+									output.readToBegin = true;
+								}
+								if (range.end == allKeys.end) {
+									output.readThroughEnd = true;
+								}
+								output.arena().dependsOn(keys.arena());
+								output.readThrough = reverse ? keys.begin : keys.end;
+								results->send(std::move(output));
+								results->finish();
+								return Void();
+							}
+							keys = KeyRangeRef(begin, end);
+							breakAgain = true;
+						} else {
+							++shard;
+						}
+						output.arena().dependsOn(range.arena());
+						output.readThrough = reverse ? range.begin : range.end;
+						results->send(std::move(output));
+						break;
+					}
+
+					ASSERT(output.size());
+					if (keys.begin == allKeys.begin && !reverse) {
+						output.readToBegin = true;
+					}
+					if (keys.end == allKeys.end && reverse) {
+						output.readThroughEnd = true;
+					}
+					results->send(std::move(output));
+				}
+				if (breakAgain) {
+					break;
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+				    e.code() == error_code_connection_failed) {
+					const KeyRangeRef& range = locations[shard].first;
+
+					if (reverse)
+						keys = KeyRangeRef(keys.begin, range.end);
+					else
+						keys = KeyRangeRef(range.begin, keys.end);
+
+					cx->invalidateCache(keys);
+					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
+					break;
+				} else {
+					results->sendError(e);
+					return Void();
+				}
+			}
+		}
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, KeyRange keys, int64_t chunkSize);
+
+static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
+	return KeyRange(KeyRangeRef(std::max(lhs.begin, rhs.begin), std::min(lhs.end, rhs.end)));
+}
+
+// Divides the requested key range into 1MB fragments, create range streams for each fragment, and merges the results so
+// the client get them in order
+ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
+                                  Database cx,
+                                  Reference<TransactionLogInfo> trLogInfo,
+                                  Future<Version> fVersion,
+                                  KeySelector begin,
+                                  KeySelector end,
+                                  GetRangeLimits limits,
+                                  Promise<std::pair<Key, Key>> conflictRange,
+                                  bool snapshot,
+                                  bool reverse,
+                                  TransactionInfo info,
+                                  TagSet tags) {
+
+	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
+
+	// FIXME: better handling to disable row limits
+	ASSERT(!limits.hasRowLimit());
+	state Span span("NAPI:getRangeStream"_loc, info.spanID);
+
+	state Version version = wait(fVersion);
+	cx->validateVersion(version);
+
+	Future<Key> fb = resolveKey(cx, begin, version, info, tags);
+	state Future<Key> fe = resolveKey(cx, end, version, info, tags);
+
+	state Key b = wait(fb);
+	state Key e = wait(fe);
+
+	if (!snapshot) {
+		// FIXME: this conflict range is too large, and should be updated continously as results are returned
+		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(), begin.arena())),
+		                                  std::max(e, Key(end.getKey(), end.arena()))));
+	}
+
+	if (b >= e) {
+		wait(results.finish());
+		return Void();
+	}
+
+	// if e is allKeys.end, we have read through the end of the database
+	// if b is allKeys.begin, we have either read through the beginning of the database,
+	// or allKeys.begin exists in the database and will be part of the conflict range anyways
+
+	state std::vector<Future<Void>> outstandingRequests;
+	while (b < e) {
+		state pair<KeyRange, Reference<LocationInfo>> ssi =
+		    wait(getKeyLocation(cx, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, info, reverse));
+		state KeyRange shardIntersection = intersect(ssi.first, KeyRangeRef(b, e));
+		state Standalone<VectorRef<KeyRef>> splitPoints =
+		    wait(getRangeSplitPoints(cx, shardIntersection, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
+		state std::vector<KeyRange> toSend;
+		// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
+
+		if (!splitPoints.empty()) {
+			toSend.push_back(KeyRange(KeyRangeRef(shardIntersection.begin, splitPoints.front()), splitPoints.arena()));
+			for (int i = 0; i < splitPoints.size() - 1; ++i) {
+				toSend.push_back(KeyRange(KeyRangeRef(splitPoints[i], splitPoints[i + 1]), splitPoints.arena()));
+			}
+			toSend.push_back(KeyRange(KeyRangeRef(splitPoints.back(), shardIntersection.end), splitPoints.arena()));
+		} else {
+			toSend.push_back(KeyRange(KeyRangeRef(shardIntersection.begin, shardIntersection.end)));
+		}
+
+		state int idx = 0;
+		state int useIdx = 0;
+		for (; idx < toSend.size(); ++idx) {
+			useIdx = reverse ? toSend.size() - idx - 1 : idx;
+			if (toSend[useIdx].empty()) {
+				continue;
+			}
+			ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
+			outstandingRequests.push_back(getRangeStreamFragment(
+			    fragment, cx, trLogInfo, version, toSend[useIdx], limits, snapshot, reverse, info, tags, span.context));
+		}
+		if (reverse) {
+			e = shardIntersection.begin;
+		} else {
+			b = shardIntersection.end;
+		}
+	}
+	wait(waitForAll(outstandingRequests) && results.finish());
+	return Void();
 }
 
 Future<RangeResult> getRange(Database const& cx,
@@ -3607,6 +4149,67 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           bool snapshot,
                                           bool reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
+}
+
+// A method for streaming data from the storage server that is more efficient than getRange when reading large amounts
+// of data
+Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
+                                         const KeySelector& begin,
+                                         const KeySelector& end,
+                                         GetRangeLimits limits,
+                                         bool snapshot,
+                                         bool reverse) {
+	++cx->transactionLogicalReads;
+	++cx->transactionGetRangeStreamRequests;
+
+	// FIXME: limits are not implemented yet, and this code has not be tested with reverse=true
+	ASSERT(!limits.hasByteLimit() && !limits.hasRowLimit() && !reverse);
+
+	KeySelector b = begin;
+	if (b.orEqual) {
+		TEST(true); // Native stream begin orEqual==true
+		b.removeOrEqual(b.arena());
+	}
+
+	KeySelector e = end;
+	if (e.orEqual) {
+		TEST(true); // Native stream end orEqual==true
+		e.removeOrEqual(e.arena());
+	}
+
+	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
+		TEST(true); // Native stream range inverted
+		results.sendError(end_of_stream());
+		return Void();
+	}
+
+	Promise<std::pair<Key, Key>> conflictRange;
+	if (!snapshot) {
+		extraConflictRanges.push_back(conflictRange.getFuture());
+	}
+
+	return forwardErrors(::getRangeStream(results,
+	                                      cx,
+	                                      trLogInfo,
+	                                      getReadVersion(),
+	                                      b,
+	                                      e,
+	                                      limits,
+	                                      conflictRange,
+	                                      snapshot,
+	                                      reverse,
+	                                      info,
+	                                      options.readTags),
+	                     results);
+}
+
+Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
+                                         const KeySelector& begin,
+                                         const KeySelector& end,
+                                         int limit,
+                                         bool snapshot,
+                                         bool reverse) {
+	return getRangeStream(results, begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
 void Transaction::addReadConflictRange(KeyRangeRef const& keys) {
@@ -5328,7 +5931,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, Key
 		state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
-		                              100,
+		                              CLIENT_KNOBS->TOO_MANY,
 		                              false,
 		                              &StorageServerInterface::getRangeSplitPoints,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));

@@ -103,6 +103,8 @@ set(FDBSERVER_SRCS
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
+  TSSMappingUtil.actor.h
+  TSSMappingUtil.actor.cpp
   VersionedBTree.actor.cpp
   VFSAsync.h
   VFSAsync.cpp
@@ -157,6 +159,7 @@ set(FDBSERVER_SRCS
   workloads/FileSystem.actor.cpp
   workloads/Fuzz.cpp
   workloads/FuzzApiCorrectness.actor.cpp
+  workloads/GetRangeStream.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
   workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
