@@ -1632,13 +1632,22 @@ public:
 		                                               id_used,
 		                                               preferredSharing,
 		                                               first_resolver);
+		auto version_indexers = getWorkersForRoleInDatacenter(dcId,
+		                                                      ProcessClass::VersionIndexer,
+		                                                      req.configuration.getDesiredVersionIndexers(),
+		                                                      req.configuration,
+		                                                      id_used,
+		                                                      preferredSharing,
+		                                                      first_grv_proxy);
 		for (int i = 0; i < commit_proxies.size(); i++)
 			result.commitProxies.push_back(commit_proxies[i].interf);
 		for (int i = 0; i < grv_proxies.size(); i++)
 			result.grvProxies.push_back(grv_proxies[i].interf);
 		for (int i = 0; i < resolvers.size(); i++)
 			result.resolvers.push_back(resolvers[i].interf);
-
+		for (int i = 0; i < version_indexers.size(); ++i) {
+			result.versionIndexers.push_back(version_indexers[i].interf);
+		}
 		if (req.maxOldLogRouters > 0) {
 			if (tlogs.size() == 1) {
 				result.oldLogRouters.push_back(tlogs[0].interf);
@@ -1682,7 +1691,11 @@ public:
 		     RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS,
 		                 req.configuration.getDesiredResolvers(),
 		                 ProcessClass::Resolver)
-		         .betterCount(RoleFitness(resolvers, ProcessClass::Resolver, id_used)))) {
+		         .betterCount(RoleFitness(resolvers, ProcessClass::Resolver, id_used)) ||
+		     RoleFitness(SERVER_KNOBS->EXPECTED_VERSION_INDEXER_FITNESS,
+		                 req.configuration.getDesiredVersionIndexers(),
+		                 ProcessClass::VersionIndexer)
+		         .betterCount(RoleFitness(version_indexers, ProcessClass::VersionIndexer, id_used)))) {
 			return operation_failed();
 		}
 
@@ -1812,7 +1825,7 @@ public:
 
 			auto datacenters = getDatacenters(req.configuration);
 
-			std::tuple<RoleFitness, RoleFitness, RoleFitness> bestFitness;
+			std::tuple<RoleFitness, RoleFitness, RoleFitness, RoleFitness> bestFitness;
 			int numEquivalent = 1;
 			Optional<Key> bestDC;
 
@@ -1874,10 +1887,18 @@ public:
 					                                               used,
 					                                               preferredSharing,
 					                                               first_resolver);
+					auto version_indexers = getWorkersForRoleInDatacenter(dcId,
+					                                                      ProcessClass::VersionIndexer,
+					                                                      req.configuration.getDesiredVersionIndexers(),
+					                                                      req.configuration,
+					                                                      used,
+					                                                      preferredSharing,
+					                                                      first_resolver);
 
 					auto fitness = std::make_tuple(RoleFitness(commit_proxies, ProcessClass::CommitProxy, used),
 					                               RoleFitness(grv_proxies, ProcessClass::GrvProxy, used),
-					                               RoleFitness(resolvers, ProcessClass::Resolver, used));
+					                               RoleFitness(resolvers, ProcessClass::Resolver, used),
+					                               RoleFitness(version_indexers, ProcessClass::VersionIndexer, used));
 
 					if (dcId == clusterControllerDcId) {
 						bestFitness = fitness;
@@ -1938,7 +1959,9 @@ public:
 			    .detail("DesiredGrvProxies", req.configuration.getDesiredGrvProxies())
 			    .detail("ActualGrvProxies", result.grvProxies.size())
 			    .detail("DesiredResolvers", req.configuration.getDesiredResolvers())
-			    .detail("ActualResolvers", result.resolvers.size());
+			    .detail("ActualResolvers", result.resolvers.size())
+			    .detail("DesiredVersionIndexers", req.configuration.getDesiredVersionIndexers())
+			    .detail("ActualVersionIndexers", result.versionIndexers.size());
 
 			if (!goodRecruitmentTime.isReady() &&
 			    (RoleFitness(
@@ -1955,7 +1978,11 @@ public:
 			     RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS,
 			                 req.configuration.getDesiredResolvers(),
 			                 ProcessClass::Resolver)
-			         .betterCount(std::get<2>(bestFitness)))) {
+			         .betterCount(std::get<2>(bestFitness)) ||
+			     RoleFitness(SERVER_KNOBS->EXPECTED_VERSION_INDEXER_FITNESS,
+			                 req.configuration.getDesiredVersionIndexers(),
+			                 ProcessClass::VersionIndexer)
+			         .betterCount(std::get<3>(bestFitness)))) {
 				throw operation_failed();
 			}
 
@@ -3426,6 +3453,11 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (dbInfo.resolvers != req.resolvers) {
 		isChanged = true;
 		dbInfo.resolvers = req.resolvers;
+	}
+
+	if (dbInfo.versionIndexers != req.versionIndexers) {
+		isChanged = true;
+		dbInfo.versionIndexers = req.versionIndexers;
 	}
 
 	if (dbInfo.recoveryCount != req.recoveryCount) {

@@ -131,6 +131,23 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		default:
 			return ProcessClass::WorstFit;
 		}
+	case ProcessClass::VersionIndexer:
+		switch (_class) {
+		case ProcessClass::VersionIndexerClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::TransactionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
 	case ProcessClass::LogRouter:
 		switch (_class) {
 		case ProcessClass::LogRouterClass:
@@ -177,6 +194,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::MasterClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::VersionIndexerClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;

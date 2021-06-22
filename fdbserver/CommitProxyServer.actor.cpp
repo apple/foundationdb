@@ -484,6 +484,8 @@ struct CommitBatchContext {
 
 	void setupTraceBatch();
 
+	std::set<Tag> writtenTags;
+
 private:
 	void evaluateBatchSize();
 };
@@ -946,8 +948,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				    .detail("To", tags)
 				    .detail("Mutation", m);
 				self->toCommit.addTags(tags);
+				self->writtenTags.insert(tags.begin(), tags.end());
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
+					self->writtenTags.insert(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
 			} else if (m.type == MutationRef::ClearRange) {
@@ -963,7 +967,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					    .detail("Mutation", m);
 
 					ranges.begin().value().populateTags();
-					self->toCommit.addTags(ranges.begin().value().tags);
+					const auto& tags = ranges.begin().value().tags;
+					self->toCommit.addTags(tags);
+					self->writtenTags.insert(tags.begin(), tags.end());
 
 					// check whether clear is sampled
 					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
@@ -1001,10 +1007,12 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					    .detail("Mutation", m);
 
 					self->toCommit.addTags(allSources);
+					self->writtenTags.insert(allSources.begin(), allSources.end());
 				}
 
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
+					self->writtenTags.insert(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
 			} else {
@@ -1054,6 +1062,31 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	}
 
 	return Void();
+}
+
+// Send the version and the set of tags we are writing to to the version indexers. This can be made asynchronous in the
+// future, but for now it isn't in order to simplify the implementation.
+Future<Void> informVersionIndexers(CommitBatchContext* self) {
+	VersionIndexerCommitRequest req;
+	req.version = self->commitVersion;
+	req.previousVersion = self->prevVersion;
+	req.committedVersion = self->pProxyCommitData->committedVersion.get();
+	req.tags.reserve(self->writtenTags.size());
+	req.tags.insert(req.tags.end(), self->writtenTags.begin(), self->writtenTags.end());
+	std::vector<Future<Void>> resp;
+	const auto& versionIndexers = self->pProxyCommitData->db->get().versionIndexers;
+	resp.reserve(versionIndexers.size());
+	for (const auto& vi : versionIndexers) {
+		resp.emplace_back(vi.commit.getReply(req));
+	}
+	return waitForAll(resp);
+}
+
+// A helper function. We need to wait on logging and on the version indexers to acknowledge the write. However, we are
+// only interested in the result from the tlogs.
+ACTOR Future<Version> loggingComplete(Future<Version> logging, Future<Void> versionIndexersInformed) {
+	wait(versionIndexersInformed && success(logging));
+	return logging.get();
 }
 
 ACTOR Future<Void> postResolution(CommitBatchContext* self) {
@@ -1178,13 +1211,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
-	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
-	                                                          self->commitVersion,
-	                                                          pProxyCommitData->committedVersion.get(),
-	                                                          pProxyCommitData->minKnownCommittedVersion,
-	                                                          self->toCommit,
-	                                                          span.context,
-	                                                          self->debugID);
+	self->loggingComplete =
+	    loggingComplete(pProxyCommitData->logSystem->push(self->prevVersion,
+	                                                      self->commitVersion,
+	                                                      pProxyCommitData->committedVersion.get(),
+	                                                      pProxyCommitData->minKnownCommittedVersion,
+	                                                      self->toCommit,
+	                                                      span.context,
+	                                                      self->debugID),
+	                    informVersionIndexers(self));
 
 	if (!self->forceRecovery) {
 		ASSERT(pProxyCommitData->latestLocalCommitBatchLogging.get() == self->localBatchNumber - 1);

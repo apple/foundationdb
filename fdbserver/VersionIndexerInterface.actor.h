@@ -26,10 +26,14 @@
 struct VersionIndexerInterface {
 	constexpr static FileIdentifier file_identifier = 6865162;
 
-	UID id = deterministicRandom()->randomUniqueID();
+	UID uniqueID = deterministicRandom()->randomUniqueID();
+	UID id() const { return uniqueID; }
 	RequestStream<ReplyPromise<Void>> waitFailure;
-	RequestStream<struct CommitRequest> commit;
+	RequestStream<struct VersionIndexerCommitRequest> commit;
 	RequestStream<struct VersionIndexerPeekRequest> peek;
+
+	bool operator==(const VersionIndexerInterface& other) const { return id() == other.id(); }
+	bool operator!=(const VersionIndexerInterface& other) const { return id() != other.id(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -37,7 +41,7 @@ struct VersionIndexerInterface {
 	}
 };
 
-struct CommitRequest {
+struct VersionIndexerCommitRequest {
 	constexpr static FileIdentifier file_identifier = 7036778;
 
 	Version version, previousVersion, committedVersion;

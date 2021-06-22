@@ -217,6 +217,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<GrvProxyInterface> provisionalGrvProxies;
 	std::vector<ResolverInterface> resolvers;
+	std::vector<VersionIndexerInterface> versionIndexers;
 
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
@@ -344,7 +345,21 @@ ACTOR Future<Void> newResolvers(Reference<MasterData> self, RecruitFromConfigura
 
 	vector<ResolverInterface> newRecruits = wait(getAll(initializationReplies));
 	self->resolvers = newRecruits;
+	return Void();
+}
 
+ACTOR Future<Void> newVersionIndexers(Reference<MasterData> self, RecruitFromConfigurationReply recr) {
+	std::vector<Future<VersionIndexerInterface>> initializationReplies;
+	for (int i = 0; i < recr.versionIndexers.size(); ++i) {
+		InitializeVersionIndexerRequest req;
+		TraceEvent("VersionIndexerReplies", self->dbgid).detail("WorkerID", recr.versionIndexers[i].id());
+		initializationReplies.push_back(
+		    transformErrors(throwErrorOr(recr.versionIndexers[i].versionIndexer.getReplyUnlessFailedFor(
+		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+		                    master_recovery_failed()));
+	}
+	std::vector<VersionIndexerInterface> newRecruits = wait(getAll(initializationReplies));
+	self->versionIndexers = newRecruits;
 	return Void();
 }
 
@@ -512,6 +527,16 @@ Future<Void> waitResolverFailure(vector<ResolverInterface> const& resolvers) {
 	return tagError<Void>(quorum(failed, 1), master_resolver_failed());
 }
 
+Future<Void> waitVersionIndexerFailure(std::vector<VersionIndexerInterface> const& versionIndexers) {
+	std::vector<Future<Void>> failed;
+	failed.reserve(versionIndexers.size());
+	for (auto const& versionIndexer : versionIndexers) {
+		failed.push_back(waitFailureClient(versionIndexer.waitFailure));
+	}
+	ASSERT(failed.size() >= 1);
+	return tagError<Void>(quorum(failed, 1), master_version_indexer_failed());
+}
+
 ACTOR Future<Void> updateLogsValue(Reference<MasterData> self, Database cx) {
 	state Transaction tr(cx);
 	loop {
@@ -557,6 +582,7 @@ Future<Void> sendMasterRegistration(MasterData* self,
                                     vector<CommitProxyInterface> commitProxies,
                                     vector<GrvProxyInterface> grvProxies,
                                     vector<ResolverInterface> resolvers,
+                                    vector<VersionIndexerInterface> versionIndexers,
                                     DBRecoveryCount recoveryCount,
                                     vector<UID> priorCommittedLogServers) {
 	RegisterMasterRequest masterReq;
@@ -566,6 +592,7 @@ Future<Void> sendMasterRegistration(MasterData* self,
 	masterReq.commitProxies = commitProxies;
 	masterReq.grvProxies = grvProxies;
 	masterReq.resolvers = resolvers;
+	masterReq.versionIndexers = versionIndexers;
 	masterReq.recoveryCount = recoveryCount;
 	if (self->hasConfiguration)
 		masterReq.configuration = self->configuration;
@@ -599,6 +626,7 @@ ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILog
 			                            self->provisionalCommitProxies,
 			                            self->provisionalGrvProxies,
 			                            self->resolvers,
+			                            self->versionIndexers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
 		} else {
@@ -608,6 +636,7 @@ ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILog
 			                            self->commitProxies,
 			                            self->grvProxies,
 			                            self->resolvers,
+			                            self->versionIndexers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            vector<UID>()));
 		}
@@ -773,7 +802,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	wait(newSeedServers(self, recruits, seedServers));
 	state vector<Standalone<CommitTransactionRef>> confChanges;
 	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
-	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
+	     newVersionIndexers(self, recruits) && newTLogServers(self, recruits, oldLogSystem, &confChanges));
 	return confChanges;
 }
 
@@ -1885,6 +1914,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
 	self->addActor.send(waitResolverFailure(self->resolvers));
+	self->addActor.send(waitVersionIndexerFailure(self->versionIndexers));
 	self->addActor.send(waitCommitProxyFailure(self->commitProxies));
 	self->addActor.send(waitGrvProxyFailure(self->grvProxies));
 	self->addActor.send(provideVersions(self));

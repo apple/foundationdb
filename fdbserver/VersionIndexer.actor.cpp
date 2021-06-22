@@ -20,10 +20,21 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Notified.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/VersionIndexerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
+
+struct VersionIndexerStats {
+	CounterCollection cc;
+	Counter reqIn, peeks;
+	Version lastCommittedVersion, windowBegin, windowEnd;
+
+	Future<Void> logger;
+
+	VersionIndexerStats(UID id);
+};
 
 struct VersionIndexerState {
 	struct VersionEntry {
@@ -31,9 +42,12 @@ struct VersionIndexerState {
 		std::vector<Tag> tags;
 		bool operator<(VersionEntry const& other) const { return version < other.version; }
 	};
+	UID id;
 	NotifiedVersion version;
 	Version committedVersion = invalidVersion, previousVersion = invalidVersion;
 	std::deque<VersionEntry> versionWindow;
+	VersionIndexerStats stats;
+	explicit VersionIndexerState(UID id) : id(id), stats(id) {}
 	void truncate(Version to) {
 		while (versionWindow.front().version > to) {
 			previousVersion = versionWindow.front().version;
@@ -42,7 +56,13 @@ struct VersionIndexerState {
 	}
 };
 
+VersionIndexerStats::VersionIndexerStats(UID id)
+  : cc("VersionIndexerStats", id.toString()), reqIn("Requests", cc), peeks("PeekRequests", cc) {
+	logger = traceCounters("VersionIndexerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc);
+}
+
 ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequest req) {
+	++self->stats.peeks;
 	wait(self->version.whenAtLeast(req.lastKnownVersion + 1));
 	VersionIndexerState::VersionEntry searchEntry;
 	searchEntry.version = req.lastKnownVersion;
@@ -68,8 +88,11 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 	return Void();
 }
 
-ACTOR Future<Void> addVersion(VersionIndexerState* self, CommitRequest req) {
+ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitRequest req) {
 	self->committedVersion = std::max(self->committedVersion, req.committedVersion);
+	req.reply.send(Void());
+	++self->stats.reqIn;
+	self->stats.lastCommittedVersion = std::max(self->stats.lastCommittedVersion, req.committedVersion);
 	wait(self->version.whenAtLeast(req.previousVersion));
 	if (self->version.get() < req.version) {
 		ASSERT(self->version.get() == req.previousVersion);
@@ -79,6 +102,7 @@ ACTOR Future<Void> addVersion(VersionIndexerState* self, CommitRequest req) {
 		std::sort(entry.tags.begin(), entry.tags.end());
 		self->versionWindow.emplace_back(std::move(entry));
 		self->version.set(req.version);
+		self->stats.windowEnd = req.version;
 	}
 	return Void();
 }
@@ -88,16 +112,21 @@ ACTOR Future<Void> windowTruncator(VersionIndexerState* self) {
 	loop {
 		wait(self->version.whenAtLeast(self->versionWindow.front().version +
 		                               4 * SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS));
-		self->truncate(self->version.get() - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS);
+		auto truncateTo = self->version.get() - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+		self->truncate(truncateTo);
+		self->stats.windowBegin = truncateTo;
 	}
 }
 
 ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface) {
-	state VersionIndexerState self;
+	state VersionIndexerState self(interface.id());
 	state ActorCollection actors(false);
+	actors.add(windowTruncator(&self));
 	loop {
 		choose {
-			when(CommitRequest req = waitNext(interface.commit.getFuture())) {}
+			when(VersionIndexerCommitRequest req = waitNext(interface.commit.getFuture())) {
+				actors.add(addVersion(&self, req));
+			}
 			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
 		}
 	}

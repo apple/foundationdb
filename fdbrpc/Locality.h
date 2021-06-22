@@ -46,6 +46,7 @@ struct ProcessClass {
 		StorageCacheClass,
 		BackupClass,
 		GrvProxyClass,
+		VersionIndexerClass,
 		InvalidClass = -1
 	};
 
@@ -71,6 +72,7 @@ struct ProcessClass {
 		Ratekeeper,
 		StorageCache,
 		Backup,
+		VersionIndexer,
 		NoRole
 	};
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
@@ -105,6 +107,7 @@ public:
 		else if (s=="ratekeeper") _class = RatekeeperClass;
 		else if (s=="storage_cache") _class = StorageCacheClass;
 		else if (s=="backup") _class = BackupClass;
+		else if (s=="version_indexer") _class = VersionIndexerClass;
 		else _class = InvalidClass;
 	}
 
@@ -132,6 +135,7 @@ public:
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
 		else if (classStr=="backup") _class = BackupClass;
+		else if (classStr=="version_indexer") _class = VersionIndexerClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -169,6 +173,7 @@ public:
 			case RatekeeperClass: return "ratekeeper";
 			case StorageCacheClass: return "storage_cache";
 			case BackupClass: return "backup";
+			case VersionIndexerClass: return "version_indexer";
 			default: return "invalid";
 		}
 	}

@@ -91,6 +91,7 @@ struct WorkerInterface {
 		coordinationPing.getEndpoint(TaskPriority::Worker);
 		updateServerDBInfo.getEndpoint(TaskPriority::Worker);
 		eventLogRequest.getEndpoint(TaskPriority::Worker);
+		versionIndexer.getEndpoint(TaskPriority::Worker);
 	}
 
 	template <class Ar>
@@ -118,7 +119,8 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
-		           updateServerDBInfo);
+		           updateServerDBInfo,
+		           versionIndexer);
 	}
 };
 
@@ -217,6 +219,7 @@ struct RegisterMasterRequest {
 	std::vector<CommitProxyInterface> commitProxies;
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<ResolverInterface> resolvers;
+	std::vector<VersionIndexerInterface> versionIndexers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
 	Optional<DatabaseConfiguration> configuration;
@@ -246,7 +249,8 @@ struct RegisterMasterRequest {
 		           priorCommittedLogServers,
 		           recoveryState,
 		           recoveryStalled,
-		           reply);
+		           reply,
+		           versionIndexers);
 	}
 };
 
@@ -258,6 +262,7 @@ struct RecruitFromConfigurationReply {
 	std::vector<WorkerInterface> commitProxies;
 	std::vector<WorkerInterface> grvProxies;
 	std::vector<WorkerInterface> resolvers;
+	std::vector<WorkerInterface> versionIndexers;
 	std::vector<WorkerInterface> storageServers;
 	std::vector<WorkerInterface> oldLogRouters; // During recovery, log routers for older generations will be recruited.
 	Optional<Key> dcId; // dcId is where master is recruited. It prefers to be in configuration.primaryDcId, but
@@ -279,7 +284,8 @@ struct RecruitFromConfigurationReply {
 		           oldLogRouters,
 		           dcId,
 		           satelliteFallback,
-		           backupWorkers);
+		           backupWorkers,
+		           versionIndexers);
 	}
 };
 
@@ -519,7 +525,7 @@ struct InitializeBackupRequest {
 
 struct InitializeVersionIndexerRequest {
 	constexpr static FileIdentifier file_identifier = 6194990;
-	UID reqId;
+	UID reqId = deterministicRandom()->randomUniqueID();
 	ReplyPromise<VersionIndexerInterface> reply;
 
 	template <class Ar>
@@ -951,6 +957,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Reference<AsyncVar<bool>> degraded,
                         Reference<AsyncVar<UID>> activeSharedTLog);
 }
+
+ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface);
 
 typedef decltype(&tLog) TLogFn;
 
