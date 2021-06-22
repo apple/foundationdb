@@ -38,6 +38,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
@@ -3703,27 +3704,26 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		for (auto k = knobs.begin(); k != knobs.end(); ++k) {
+		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
-				if (!globalFlowKnobs->setKnob(k->first, k->second) &&
-				    !globalClientKnobs->setKnob(k->first, k->second)) {
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
-				}
+				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+				g_knobs.setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
 					fprintf(stderr,
 					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        k->second.c_str(),
-					        k->first.c_str());
+					        knobValueString.c_str(),
+					        knobName.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(k->first))
-					    .detail("Value", printable(k->second));
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
 				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
-					    .detail("Knob", printable(k->first))
-					    .detail("Value", printable(k->second))
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString))
 					    .error(e);
 					throw;
 				}
@@ -3731,8 +3731,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		globalFlowKnobs->initialize(true);
-		globalClientKnobs->initialize(true);
+		g_knobs.initialize(Randomize::NO, IsSimulated::NO);
 
 		if (trace) {
 			if (!traceLogGroup.empty())

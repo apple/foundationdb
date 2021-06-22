@@ -114,8 +114,15 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
 
-//    "\xff/tss/[[serverId]]" := "[[tssId]]"
+// "\xff/tss/[[serverId]]" := "[[tssId]]"
 extern const KeyRangeRef tssMappingKeys;
+
+// "\xff/tssQ/[[serverId]]" := ""
+// For quarantining a misbehaving TSS.
+extern const KeyRangeRef tssQuarantineKeys;
+
+const Key tssQuarantineKeyFor(UID serverID);
+UID decodeTssQuarantineKey(KeyRef const&);
 
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
@@ -469,6 +476,12 @@ extern const ValueRef writeRecoveryKeyTrue;
 //	Written by master server during recovery if recovering from a snapshot.
 //	Allows incremental restore to read and set starting version for consistency.
 extern const KeyRef snapshotEndVersionKey;
+
+// Configuration database special keys
+extern const KeyRef configTransactionDescriptionKey;
+extern const KeyRange globalConfigKnobKeys;
+extern const KeyRangeRef configKnobKeys;
+extern const KeyRangeRef configClassKeys;
 
 #pragma clang diagnostic pop
 

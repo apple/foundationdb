@@ -1482,7 +1482,7 @@ void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
 }
 #endif
 
-SystemStatistics getSystemStatistics(std::string dataFolder,
+SystemStatistics getSystemStatistics(std::string const& dataFolder,
                                      const IPAddress* ip,
                                      SystemStatisticsState** statState,
                                      bool logDetails) {
@@ -2640,7 +2640,7 @@ Future<vector<std::string>> listDirectoriesAsync(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, true);
 }
 
-void findFilesRecursively(std::string path, std::vector<std::string>& out) {
+void findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
 	// Add files to output, prefixing path
 	std::vector<std::string> files = platform::listFiles(path);
 	for (auto const& f : files)

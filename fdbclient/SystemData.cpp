@@ -348,6 +348,22 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 
 const KeyRangeRef tssMappingKeys(LiteralStringRef("\xff/tss/"), LiteralStringRef("\xff/tss0"));
 
+const KeyRangeRef tssQuarantineKeys(LiteralStringRef("\xff/tssQ/"), LiteralStringRef("\xff/tssQ0"));
+
+const Key tssQuarantineKeyFor(UID serverID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(tssQuarantineKeys.begin);
+	wr << serverID;
+	return wr.toValue();
+}
+
+UID decodeTssQuarantineKey(KeyRef const& key) {
+	UID serverID;
+	BinaryReader rd(key.removePrefix(tssQuarantineKeys.begin), Unversioned());
+	rd >> serverID;
+	return serverID;
+}
+
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
 
 const KeyRef serverTagPrefix = serverTagKeys.begin;
@@ -987,6 +1003,11 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTON
 const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
+
+const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
+const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
+const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
+const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

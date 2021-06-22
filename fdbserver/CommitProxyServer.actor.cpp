@@ -1440,9 +1440,9 @@ void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
 	if (!included.count(ssId)) {
 		auto mappingItr = commitData->tssMapping.find(ssId);
 		if (mappingItr != commitData->tssMapping.end()) {
-			included.insert(ssId);
 			reply.resultsTssMapping.push_back(*mappingItr);
 		}
+		included.insert(ssId);
 	}
 }
 

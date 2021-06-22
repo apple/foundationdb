@@ -150,7 +150,7 @@ public:
 	const IPAddressStore& toV6() const { return std::get<IPAddressStore>(addr); }
 
 	std::string toString() const;
-	static Optional<IPAddress> parse(std::string str);
+	static Optional<IPAddress> parse(std::string const& str);
 
 	bool operator==(const IPAddress& addr) const;
 	bool operator!=(const IPAddress& addr) const;
@@ -304,6 +304,10 @@ struct NetworkAddressList {
 			return address.toString();
 		}
 		return address.toString() + ", " + secondaryAddress.get().toString();
+	}
+
+	bool contains(const NetworkAddress& r) const {
+		return address == r || (secondaryAddress.present() && secondaryAddress.get() == r);
 	}
 
 	template <class Ar>

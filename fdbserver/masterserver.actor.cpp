@@ -267,7 +267,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), neverCreated(false),
 	    lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), databaseLocked(false),
 	    minKnownCommittedVersion(invalidVersion), recoveryTransactionVersion(invalidVersion), lastCommitTime(0),
-	    registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(0), memoryLimit(2e9),
+	    registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9),
 	    addActor(addActor), hasConfiguration(false), recruitmentStalled(makeReference<AsyncVar<bool>>(false)),
 	    cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
@@ -294,7 +294,9 @@ ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfi
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
-		TraceEvent("CommitProxyReplies", self->dbgid).detail("WorkerID", recr.commitProxies[i].id());
+		TraceEvent("CommitProxyReplies", self->dbgid)
+			.detail("WorkerID", recr.commitProxies[i].id())
+			.detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -953,6 +955,10 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 		wait(yield());
 	}
 	wait(waitForAll(txnReplies));
+	TraceEvent("RecoveryInternal", self->dbgid)
+		.detail("StatusCode", RecoveryStatus::recovery_transaction)
+		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+		.detail("Step", "SentTxnStateStoreToCommitProxies");
 
 	vector<Future<ResolveTransactionBatchReply>> replies;
 	for (auto& r : self->resolvers) {
@@ -965,6 +971,10 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 	}
 
 	wait(waitForAll(replies));
+	TraceEvent("RecoveryInternal", self->dbgid)
+		.detail("StatusCode", RecoveryStatus::recovery_transaction)
+		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+		.detail("Step", "InitializedAllResolvers");
 	return Void();
 }
 
