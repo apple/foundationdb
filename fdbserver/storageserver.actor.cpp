@@ -364,6 +364,15 @@ public:
 		                                      Histogram::Unit::bytes_per_second)) {}
 	} fetchKeysHistograms;
 
+	Reference<Histogram> tlogCursorReadsLatencyHistogram;
+	Reference<Histogram> ssVersionLockLatencyHistogram;
+	Reference<Histogram> eagerReadsLatencyHistogram;
+	Reference<Histogram> fetchKeysPTreeUpdatesLatencyHistogram;
+	Reference<Histogram> tLogMsgsPTreeUpdatesLatencyHistogram;
+	Reference<Histogram> storageUpdatesDurableLatencyHistogram;
+	Reference<Histogram> storageCommitLatencyHistogram;
+	Reference<Histogram> ssDurableVersionUpdateLatencyHistogram;
+
 	// watch map operations
 	Reference<ServerWatchMetadata> getWatchMetadata(KeyRef key) const;
 	KeyRef setWatchMetadata(Reference<ServerWatchMetadata> metadata);
@@ -780,7 +789,31 @@ public:
 	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()), tssInQuarantine(false),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
 	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
-	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0) {
+	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
+	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
+	                                                            Histogram::Unit::microseconds)),
+	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                          SS_VERSION_LOCK_LATENCY_HISTOGRAM,
+	                                                          Histogram::Unit::microseconds)),
+	    eagerReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                       EAGER_READS_LATENCY_HISTOGRAM,
+	                                                       Histogram::Unit::microseconds)),
+	    fetchKeysPTreeUpdatesLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                                  FETCH_KEYS_PTREE_UPDATES_LATENCY_HISTOGRAM,
+	                                                                  Histogram::Unit::microseconds)),
+	    tLogMsgsPTreeUpdatesLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                                 TLOG_MSGS_PTREE_UPDATES_LATENCY_HISTOGRAM,
+	                                                                 Histogram::Unit::microseconds)),
+	    storageUpdatesDurableLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                                  STORAGE_UPDATES_DURABLE_LATENCY_HISTOGRAM,
+	                                                                  Histogram::Unit::microseconds)),
+	    storageCommitLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                          STORAGE_COMMIT_LATENCY_HISTOGRAM,
+	                                                          Histogram::Unit::microseconds)),
+	    ssDurableVersionUpdateLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                                   SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM,
+	                                                                   Histogram::Unit::microseconds)) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -3407,12 +3440,14 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
 
+		state double beforeTLogCursorReads = now();
 		loop {
 			wait(cursor->getMore());
 			if (!cursor->isExhausted()) {
 				break;
 			}
 		}
+		data->tlogCursorReadsLatencyHistogram->sampleSeconds(now() - beforeTLogCursorReads);
 		if (cursor->popped() > 0) {
 			throw worker_removed();
 		}
@@ -3432,6 +3467,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
 			    .detail("Duration", now() - start)
 			    .detail("Version", data->version.get());
+		data->ssVersionLockLatencyHistogram->sampleSeconds(now() - start);
 
 		start = now();
 		state UpdateEagerReadInfo eager;
@@ -3502,6 +3538,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			// selectively
 			eager = UpdateEagerReadInfo();
 		}
+		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
 
 		if (now() - start > 0.1)
 			TraceEvent("SSSlowTakeLock2", data->thisServerID)
@@ -3521,6 +3558,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		state bool injectedChanges = false;
 		state int changeNum = 0;
 		state int mutationBytes = 0;
+		state double beforeFetchKeysUpdates = now();
 		for (; changeNum < fii.changes.size(); changeNum++) {
 			state int mutationNum = 0;
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
@@ -3534,10 +3572,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				}
 			}
 		}
+		data->fetchKeysPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeFetchKeysUpdates);
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
 		state SpanID spanContext = SpanID();
+		state double beforeTLogMsgsUpdates = now();
 		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
@@ -3630,6 +3670,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .detail("Version", cloneCursor2->version().toString());
 			}
 		}
+		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
 
 		if (ver != invalidVersion) {
 			data->lastVersionWithData = ver;
@@ -3750,6 +3791,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
 
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
+		state double beforeStorageUpdates = now();
 		loop {
 			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
@@ -3767,8 +3809,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		// Set the new durable version as part of the outstanding change set, before commit
 		if (startOldestVersion != newOldestVersion)
 			data->storage.makeVersionDurable(newOldestVersion);
+		data->storageUpdatesDurableLatencyHistogram->sampleSeconds(now() - beforeStorageUpdates);
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
+		state double beforeStorageCommit = now();
 		state Future<Void> durable = data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
@@ -3777,6 +3821,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
+		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
@@ -3801,6 +3846,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
 		// effective and are applied after we change the durable version. Also ensure that we have to lock while calling
 		// changeDurableVersion, because otherwise the latest version of mutableData might be partially loaded.
+		state double beforeSSDurableVersionUpdate = now();
 		wait(data->durableVersionLock.take());
 		data->popVersion(data->durableVersion.get() + 1);
 
@@ -3813,6 +3859,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		data->durableVersionLock.release();
+		data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
 
 		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 
