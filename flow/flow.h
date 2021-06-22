@@ -23,7 +23,7 @@
 #pragma once
 
 #pragma warning(disable : 4244 4267) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int
-                                     // conversions like this suppresses)
+// conversions like this suppresses)
 #pragma warning(disable : 4345)
 #pragma warning(error : 4239)
 
@@ -581,88 +581,6 @@ public:
 };
 
 template <class T>
-struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
-	int promises; // one for each promise (and one for an active actor if this is an actor)
-	int futures; // one for each future and one more if there are any callbacks
-
-	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
-	std::queue<T, Deque<T>> queue;
-	Error error;
-
-	NotifiedQueue(int futures, int promises) : futures(futures), promises(promises) { SingleCallback<T>::next = this; }
-
-	bool isReady() const { return !queue.empty() || error.isValid(); }
-	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
-	uint32_t size() const { return queue.size(); }
-
-	T pop() {
-		if (queue.empty()) {
-			if (error.isValid())
-				throw error;
-			throw internal_error();
-		}
-		auto copy = std::move(queue.front());
-		queue.pop();
-		return copy;
-	}
-
-	template <class U>
-	void send(U&& value) {
-		if (error.isValid())
-			return;
-
-		if (SingleCallback<T>::next != this) {
-			SingleCallback<T>::next->fire(std::forward<U>(value));
-		} else {
-			queue.emplace(std::forward<U>(value));
-		}
-	}
-
-	void sendError(Error err) {
-		if (error.isValid())
-			return;
-
-		this->error = err;
-		if (SingleCallback<T>::next != this)
-			SingleCallback<T>::next->error(err);
-	}
-
-	void addPromiseRef() { promises++; }
-	void addFutureRef() { futures++; }
-
-	void delPromiseRef() {
-		if (!--promises) {
-			if (futures) {
-				sendError(broken_promise());
-			} else
-				destroy();
-		}
-	}
-	void delFutureRef() {
-		if (!--futures) {
-			if (promises)
-				cancel();
-			else
-				destroy();
-		}
-	}
-
-	int getFutureReferenceCount() const { return futures; }
-	int getPromiseReferenceCount() const { return promises; }
-
-	virtual void destroy() { delete this; }
-	virtual void cancel() {}
-
-	void addCallbackAndDelFutureRef(SingleCallback<T>* cb) {
-		ASSERT(SingleCallback<T>::next == this);
-		cb->insert(this);
-	}
-	void unwait() override { delFutureRef(); }
-	void fire(T const&) override { ASSERT(false); }
-	void fire(T&&) override { ASSERT(false); }
-};
-
-template <class T>
 class Promise;
 
 template <class T>
@@ -839,6 +757,113 @@ private:
 };
 
 template <class T>
+struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
+	int promises; // one for each promise (and one for an active actor if this is an actor)
+	int futures; // one for each future and one more if there are any callbacks
+
+	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
+	std::queue<T, Deque<T>> queue;
+	Promise<Void> onEmpty;
+	Error error;
+
+	NotifiedQueue(int futures, int promises) : futures(futures), promises(promises), onEmpty(nullptr) {
+		SingleCallback<T>::next = this;
+	}
+
+	bool isReady() const { return !queue.empty() || error.isValid(); }
+	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
+	uint32_t size() const { return queue.size(); }
+
+	virtual T pop() {
+		if (queue.empty()) {
+			if (error.isValid())
+				throw error;
+			throw internal_error();
+		}
+		auto copy = std::move(queue.front());
+		queue.pop();
+		if (onEmpty.isValid() && queue.empty()) {
+			Promise<Void> hold = onEmpty;
+			onEmpty = Promise<Void>(nullptr);
+			hold.send(Void());
+		}
+		return copy;
+	}
+
+	template <class U>
+	void send(U&& value) {
+		if (error.isValid())
+			return;
+
+		if (SingleCallback<T>::next != this) {
+			SingleCallback<T>::next->fire(std::forward<U>(value));
+		} else {
+			queue.emplace(std::forward<U>(value));
+		}
+	}
+
+	void sendError(Error err) {
+		if (error.isValid())
+			return;
+
+		this->error = err;
+		if (shouldFireImmediately()) {
+			SingleCallback<T>::next->error(err);
+		}
+	}
+
+	void addPromiseRef() { promises++; }
+	void addFutureRef() { futures++; }
+
+	void delPromiseRef() {
+		if (!--promises) {
+			if (futures) {
+				sendError(broken_promise());
+			} else
+				destroy();
+		}
+	}
+	void delFutureRef() {
+		if (!--futures) {
+			if (promises)
+				cancel();
+			else
+				destroy();
+		}
+	}
+
+	int getFutureReferenceCount() const { return futures; }
+	int getPromiseReferenceCount() const { return promises; }
+
+	virtual void destroy() { delete this; }
+	virtual void cancel() {}
+
+	void addCallbackAndDelFutureRef(SingleCallback<T>* cb) {
+		ASSERT(SingleCallback<T>::next == this);
+		cb->insert(this);
+	}
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
+	virtual void fire(T&&) override { ASSERT(false); }
+
+protected:
+	T popImpl() {
+		if (queue.empty()) {
+			if (error.isValid())
+				throw error;
+			throw internal_error();
+		}
+		auto copy = std::move(queue.front());
+		queue.pop();
+		return copy;
+	}
+
+	bool hasError() { return error.isValid(); }
+
+	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
+};
+
+template <class T>
 class FutureStream {
 public:
 	bool isValid() const { return queue != 0; }
@@ -890,6 +915,11 @@ private:
 
 template <class Request>
 decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r) {
+	return r.reply;
+}
+
+template <class Request>
+auto const& getReplyPromiseStream(Request const& r) {
 	return r.reply;
 }
 
@@ -981,9 +1011,38 @@ public:
 	bool operator==(const PromiseStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
 
+	Future<Void> onEmpty() {
+		if (isEmpty()) {
+			return Void();
+		}
+		if (!queue->onEmpty.isValid()) {
+			queue->onEmpty = Promise<Void>();
+		}
+		return queue->onEmpty.getFuture();
+	}
+
 private:
 	NotifiedQueue<T>* queue;
 };
+
+// Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
+#ifdef __GNUG__
+#define REPLYSTREAM_TYPE(RequestType) decltype(getReplyPromiseStream(std::declval<RequestType>()).getFuture().pop())
+#else
+template <class T>
+struct ReplyStreamType {
+	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
+	//   breaks IntelliSense in VS2010; this is a workaround.
+	typedef decltype(std::declval<T>().reply.getFuture().pop()) Type;
+};
+template <class T>
+class ReplyPromiseStream;
+template <class T>
+struct ReplyStreamType<ReplyPromiseStream<T>> {
+	typedef T Type;
+};
+#define REPLYSTREAM_TYPE(RequestType) typename ReplyStreamType<RequestType>::Type
+#endif
 
 // extern int actorCount;
 

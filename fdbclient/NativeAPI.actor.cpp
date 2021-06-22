@@ -46,6 +46,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/ParallelStream.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -1090,7 +1091,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
-    transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc),
+    transactionGetRangeRequests("GetRangeRequests", cc),
+    transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
     transactionCommittedMutations("CommittedMutations", cc),
@@ -1324,7 +1326,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
-    transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc),
+    transactionGetRangeRequests("GetRangeRequests", cc),
+    transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
     transactionCommittedMutations("CommittedMutations", cc),
@@ -3475,6 +3478,324 @@ ACTOR Future<RangeResult> getRange(Database cx,
 	}
 }
 
+// Streams all of the KV pairs in a target key range into a ParallelStream fragment
+ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment* results,
+                                          Database cx,
+                                          Reference<TransactionLogInfo> trLogInfo,
+                                          Version version,
+                                          KeyRange keys,
+                                          GetRangeLimits limits,
+                                          bool snapshot,
+                                          bool reverse,
+                                          TransactionInfo info,
+                                          TagSet tags,
+                                          SpanID spanContext) {
+	loop {
+		state vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+		    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValuesStream, info));
+		ASSERT(locations.size());
+		state int shard = 0;
+		loop {
+			const KeyRange& range = locations[shard].first;
+
+			state GetKeyValuesStreamRequest req;
+			req.version = version;
+			req.begin = firstGreaterOrEqual(range.begin);
+			req.end = firstGreaterOrEqual(range.end);
+			req.spanContext = spanContext;
+			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+			req.limitBytes = std::numeric_limits<int>::max();
+
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+
+			// FIXME: buggify byte limits on internal functions that use them, instead of globally
+			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
+			req.debugID = info.debugID;
+
+			try {
+				if (info.debugID.present()) {
+					g_traceBatch.addEvent(
+					    "TransactionDebug", info.debugID.get().first(), "NativeAPI.RangeStream.Before");
+				}
+				++cx->transactionPhysicalReads;
+				state GetKeyValuesStreamReply rep;
+
+				if (locations[shard].second->size() == 0) {
+					wait(cx->connectionFileChanged());
+					results->sendError(transaction_too_old());
+					return Void();
+				}
+
+				state int useIdx = -1;
+
+				loop {
+					// FIXME: create a load balance function for this code so future users of reply streams do not have
+					// to duplicate this code
+					int count = 0;
+					for (int i = 0; i < locations[shard].second->size(); i++) {
+						if (!IFailureMonitor::failureMonitor()
+						         .getState(locations[shard]
+						                       .second->get(i, &StorageServerInterface::getKeyValuesStream)
+						                       .getEndpoint())
+						         .failed) {
+							if (deterministicRandom()->random01() <= 1.0 / ++count) {
+								useIdx = i;
+							}
+						}
+					}
+
+					if (useIdx >= 0) {
+						break;
+					}
+
+					vector<Future<Void>> ok(locations[shard].second->size());
+					for (int i = 0; i < ok.size(); i++) {
+						ok[i] = IFailureMonitor::failureMonitor().onStateEqual(
+						    locations[shard].second->get(i, &StorageServerInterface::getKeyValuesStream).getEndpoint(),
+						    FailureStatus(false));
+					}
+
+					// Making this SevWarn means a lot of clutter
+					if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
+					    deterministicRandom()->random01() < 0.01) {
+						TraceEvent("AllAlternativesFailed")
+						    .detail("Alternatives", locations[shard].second->description());
+					}
+
+					wait(allAlternativesFailedDelay(quorum(ok, 1)));
+				}
+
+				state ReplyPromiseStream<GetKeyValuesStreamReply> replyStream =
+				    locations[shard]
+				        .second->get(useIdx, &StorageServerInterface::getKeyValuesStream)
+				        .getReplyStream(req);
+				state bool breakAgain = false;
+				loop {
+					wait(results->onEmpty());
+					try {
+						choose {
+							when(wait(cx->connectionFileChanged())) {
+								results->sendError(transaction_too_old());
+								return Void();
+							}
+
+							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) { rep = _rep; }
+						}
+						++cx->transactionPhysicalReadsCompleted;
+					} catch (Error& e) {
+						++cx->transactionPhysicalReadsCompleted;
+						if (e.code() == error_code_broken_promise) {
+							throw connection_failed();
+						}
+						if (e.code() != error_code_end_of_stream) {
+							throw;
+						}
+						rep = GetKeyValuesStreamReply();
+					}
+					if (info.debugID.present())
+						g_traceBatch.addEvent(
+						    "TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
+					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
+
+					int64_t bytes = 0;
+					for (const KeyValueRef& kv : output) {
+						bytes += kv.key.size() + kv.value.size();
+					}
+
+					cx->transactionBytesRead += bytes;
+					cx->transactionKeysRead += output.size();
+
+					// If the reply says there is more but we know that we finished the shard, then fix rep.more
+					if (reverse && output.more && rep.data.size() > 0 &&
+					    output[output.size() - 1].key == locations[shard].first.begin) {
+						output.more = false;
+					}
+
+					if (output.more) {
+						if (!rep.data.size()) {
+							TraceEvent(SevError, "GetRangeStreamError")
+							    .detail("Reason", "More data indicated but no rows present")
+							    .detail("LimitBytes", limits.bytes)
+							    .detail("LimitRows", limits.rows)
+							    .detail("OutputSize", output.size())
+							    .detail("OutputBytes", output.expectedSize())
+							    .detail("BlockSize", rep.data.size())
+							    .detail("BlockBytes", rep.data.expectedSize());
+							ASSERT(false);
+						}
+						TEST(true); // GetKeyValuesStreamReply.more in getRangeStream
+						// Make next request to the same shard with a beginning key just after the last key returned
+						if (reverse)
+							locations[shard].first =
+							    KeyRangeRef(locations[shard].first.begin, output[output.size() - 1].key);
+						else
+							locations[shard].first =
+							    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].first.end);
+					}
+
+					if (locations[shard].first.empty()) {
+						output.more = false;
+					}
+
+					if (!output.more) {
+						const KeyRange& range = locations[shard].first;
+						if (shard == locations.size() - 1) {
+							KeyRef begin = reverse ? keys.begin : range.end;
+							KeyRef end = reverse ? range.begin : keys.end;
+
+							if (begin >= end) {
+								if (range.begin == allKeys.begin) {
+									output.readToBegin = true;
+								}
+								if (range.end == allKeys.end) {
+									output.readThroughEnd = true;
+								}
+								output.arena().dependsOn(keys.arena());
+								output.readThrough = reverse ? keys.begin : keys.end;
+								results->send(std::move(output));
+								results->finish();
+								return Void();
+							}
+							keys = KeyRangeRef(begin, end);
+							breakAgain = true;
+						} else {
+							++shard;
+						}
+						output.arena().dependsOn(range.arena());
+						output.readThrough = reverse ? range.begin : range.end;
+						results->send(std::move(output));
+						break;
+					}
+
+					ASSERT(output.size());
+					if (keys.begin == allKeys.begin && !reverse) {
+						output.readToBegin = true;
+					}
+					if (keys.end == allKeys.end && reverse) {
+						output.readThroughEnd = true;
+					}
+					results->send(std::move(output));
+				}
+				if (breakAgain) {
+					break;
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+				    e.code() == error_code_connection_failed) {
+					const KeyRangeRef& range = locations[shard].first;
+
+					if (reverse)
+						keys = KeyRangeRef(keys.begin, range.end);
+					else
+						keys = KeyRangeRef(range.begin, keys.end);
+
+					cx->invalidateCache(keys);
+					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
+					break;
+				} else {
+					results->sendError(e);
+					return Void();
+				}
+			}
+		}
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, KeyRange keys, int64_t chunkSize);
+
+static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
+	return KeyRange(KeyRangeRef(std::max(lhs.begin, rhs.begin), std::min(lhs.end, rhs.end)));
+}
+
+// Divides the requested key range into 1MB fragments, create range streams for each fragment, and merges the results so
+// the client get them in order
+ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
+                                  Database cx,
+                                  Reference<TransactionLogInfo> trLogInfo,
+                                  Future<Version> fVersion,
+                                  KeySelector begin,
+                                  KeySelector end,
+                                  GetRangeLimits limits,
+                                  Promise<std::pair<Key, Key>> conflictRange,
+                                  bool snapshot,
+                                  bool reverse,
+                                  TransactionInfo info,
+                                  TagSet tags) {
+
+	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
+
+	// FIXME: better handling to disable row limits
+	ASSERT(!limits.hasRowLimit());
+	state Span span("NAPI:getRangeStream"_loc, info.spanID);
+
+	state Version version = wait(fVersion);
+	cx->validateVersion(version);
+
+	Future<Key> fb = resolveKey(cx, begin, version, info, tags);
+	state Future<Key> fe = resolveKey(cx, end, version, info, tags);
+
+	state Key b = wait(fb);
+	state Key e = wait(fe);
+
+	if (!snapshot) {
+		// FIXME: this conflict range is too large, and should be updated continously as results are returned
+		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(), begin.arena())),
+		                                  std::max(e, Key(end.getKey(), end.arena()))));
+	}
+
+	if (b >= e) {
+		wait(results.finish());
+		return Void();
+	}
+
+	// if e is allKeys.end, we have read through the end of the database
+	// if b is allKeys.begin, we have either read through the beginning of the database,
+	// or allKeys.begin exists in the database and will be part of the conflict range anyways
+
+	state std::vector<Future<Void>> outstandingRequests;
+	while (b < e) {
+		state pair<KeyRange, Reference<LocationInfo>> ssi =
+		    wait(getKeyLocation(cx, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, info, reverse));
+		state KeyRange shardIntersection = intersect(ssi.first, KeyRangeRef(b, e));
+		state Standalone<VectorRef<KeyRef>> splitPoints =
+		    wait(getRangeSplitPoints(cx, shardIntersection, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
+		state std::vector<KeyRange> toSend;
+		// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
+
+		if (!splitPoints.empty()) {
+			toSend.push_back(KeyRange(KeyRangeRef(shardIntersection.begin, splitPoints.front()), splitPoints.arena()));
+			for (int i = 0; i < splitPoints.size() - 1; ++i) {
+				toSend.push_back(KeyRange(KeyRangeRef(splitPoints[i], splitPoints[i + 1]), splitPoints.arena()));
+			}
+			toSend.push_back(KeyRange(KeyRangeRef(splitPoints.back(), shardIntersection.end), splitPoints.arena()));
+		} else {
+			toSend.push_back(KeyRange(KeyRangeRef(shardIntersection.begin, shardIntersection.end)));
+		}
+
+		state int idx = 0;
+		state int useIdx = 0;
+		for (; idx < toSend.size(); ++idx) {
+			useIdx = reverse ? toSend.size() - idx - 1 : idx;
+			if (toSend[useIdx].empty()) {
+				continue;
+			}
+			ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
+			outstandingRequests.push_back(getRangeStreamFragment(
+			    fragment, cx, trLogInfo, version, toSend[useIdx], limits, snapshot, reverse, info, tags, span.context));
+		}
+		if (reverse) {
+			e = shardIntersection.begin;
+		} else {
+			b = shardIntersection.end;
+		}
+	}
+	wait(waitForAll(outstandingRequests) && results.finish());
+	return Void();
+}
+
 Future<RangeResult> getRange(Database const& cx,
                              Future<Version> const& fVersion,
                              KeySelector const& begin,
@@ -3828,6 +4149,67 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           bool snapshot,
                                           bool reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
+}
+
+// A method for streaming data from the storage server that is more efficient than getRange when reading large amounts
+// of data
+Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
+                                         const KeySelector& begin,
+                                         const KeySelector& end,
+                                         GetRangeLimits limits,
+                                         bool snapshot,
+                                         bool reverse) {
+	++cx->transactionLogicalReads;
+	++cx->transactionGetRangeStreamRequests;
+
+	// FIXME: limits are not implemented yet, and this code has not be tested with reverse=true
+	ASSERT(!limits.hasByteLimit() && !limits.hasRowLimit() && !reverse);
+
+	KeySelector b = begin;
+	if (b.orEqual) {
+		TEST(true); // Native stream begin orEqual==true
+		b.removeOrEqual(b.arena());
+	}
+
+	KeySelector e = end;
+	if (e.orEqual) {
+		TEST(true); // Native stream end orEqual==true
+		e.removeOrEqual(e.arena());
+	}
+
+	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
+		TEST(true); // Native stream range inverted
+		results.sendError(end_of_stream());
+		return Void();
+	}
+
+	Promise<std::pair<Key, Key>> conflictRange;
+	if (!snapshot) {
+		extraConflictRanges.push_back(conflictRange.getFuture());
+	}
+
+	return forwardErrors(::getRangeStream(results,
+	                                      cx,
+	                                      trLogInfo,
+	                                      getReadVersion(),
+	                                      b,
+	                                      e,
+	                                      limits,
+	                                      conflictRange,
+	                                      snapshot,
+	                                      reverse,
+	                                      info,
+	                                      options.readTags),
+	                     results);
+}
+
+Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
+                                         const KeySelector& begin,
+                                         const KeySelector& end,
+                                         int limit,
+                                         bool snapshot,
+                                         bool reverse) {
+	return getRangeStream(results, begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
 void Transaction::addReadConflictRange(KeyRangeRef const& keys) {
@@ -5549,7 +5931,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, Key
 		state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
-		                              100,
+		                              CLIENT_KNOBS->TOO_MANY,
 		                              false,
 		                              &StorageServerInterface::getRangeSplitPoints,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));

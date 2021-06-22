@@ -42,6 +42,8 @@
 
 using std::vector;
 
+ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
+
 struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	QueueModel* model;
 	bool released;
@@ -527,43 +529,17 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				                                                       FailureStatus(false));
 			}
 
+			Future<Void> okFuture = quorum(ok, 1);
+
 			if (!alternatives->alwaysFresh()) {
-				if (now() - g_network->networkInfo.newestAlternativesFailure >
-				    FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
-					g_network->networkInfo.oldestAlternativesFailure = now();
-				}
-
-				double delay = FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY;
-				if (now() - g_network->networkInfo.lastAlternativesFailureSkipDelay >
-				    FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
-					g_network->networkInfo.lastAlternativesFailureSkipDelay = now();
-				} else {
-					double elapsed = now() - g_network->networkInfo.oldestAlternativesFailure;
-					delay = std::max(delay,
-					                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO,
-					                          FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
-					delay = std::max(delay,
-					                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,
-					                          FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
-				}
-
 				// Making this SevWarn means a lot of clutter
 				if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
 				    deterministicRandom()->random01() < 0.01) {
-					TraceEvent("AllAlternativesFailed")
-					    .detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
-					    .detail("Alternatives", alternatives->description())
-					    .detail("Delay", delay);
+					TraceEvent("AllAlternativesFailed").detail("Alternatives", alternatives->description());
 				}
-
-				g_network->networkInfo.newestAlternativesFailure = now();
-
-				choose {
-					when(wait(quorum(ok, 1))) {}
-					when(wait(::delayJittered(delay))) { throw all_alternatives_failed(); }
-				}
+				wait(allAlternativesFailedDelay(okFuture));
 			} else {
-				wait(quorum(ok, 1));
+				wait(okFuture);
 			}
 
 			numAttempts = 0; // now that we've got a server back, reset the backoff

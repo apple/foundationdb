@@ -709,7 +709,6 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
 	}
 };
-using RangeResult = Standalone<RangeResultRef>;
 
 template <>
 struct Traceable<RangeResultRef> : std::true_type {
