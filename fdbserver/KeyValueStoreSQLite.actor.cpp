@@ -1440,6 +1440,8 @@ void SQLiteDB::open(bool writable) {
 			TraceEvent("CreatedDBFile").detail("Filename", apath);
 		}
 	}
+
+	// If the walFile has an io_error and the dbFile has a file_not_found, return the more serious error code
 	if (walFile.isError() && walFile.getError().code() != error_code_file_not_found)
 		throw walFile.getError();
 	if (dbFile.isError())
