@@ -576,42 +576,38 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	}
 
 	~LogData() {
-		try {
-			endRole(Role::TRANSACTION_LOG, logId, "Error", true);
+		endRole(Role::TRANSACTION_LOG, logId, "Error", true);
 
-			if (!terminated.isReady()) {
-				tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
-				TraceEvent("TLogBytesWhenRemoved", logId)
-				    .detail("SharedBytesInput", tLogData->bytesInput)
-				    .detail("SharedBytesDurable", tLogData->bytesDurable)
-				    .detail("LocalBytesInput", bytesInput.getValue())
-				    .detail("LocalBytesDurable", bytesDurable.getValue());
+		if (!terminated.isReady()) {
+			tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
+			TraceEvent("TLogBytesWhenRemoved", logId)
+			    .detail("SharedBytesInput", tLogData->bytesInput)
+			    .detail("SharedBytesDurable", tLogData->bytesDurable)
+			    .detail("LocalBytesInput", bytesInput.getValue())
+			    .detail("LocalBytesDurable", bytesDurable.getValue());
 
-				ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
+			ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
 
-				Key logIdKey = BinaryWriter::toValue(logId, Unversioned());
-				tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
-				tLogData->persistentData->clear(
-				    singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)));
-				tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)));
-				tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)));
-				tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)));
-				tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
-				Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
-				tLogData->persistentData->clear(KeyRangeRef(msgKey, strinc(msgKey)));
-				Key poppedKey = logIdKey.withPrefix(persistTagPoppedKeys.begin);
-				tLogData->persistentData->clear(KeyRangeRef(poppedKey, strinc(poppedKey)));
-			}
+			Key logIdKey = BinaryWriter::toValue(logId, Unversioned());
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
+			tLogData->persistentData->clear(
+			    singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
+			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
+			tLogData->persistentData->clear(KeyRangeRef(msgKey, strinc(msgKey)));
+			Key poppedKey = logIdKey.withPrefix(persistTagPoppedKeys.begin);
+			tLogData->persistentData->clear(KeyRangeRef(poppedKey, strinc(poppedKey)));
+		}
 
-			for (auto it = peekTracker.begin(); it != peekTracker.end(); ++it) {
-				for (auto seq : it->second.sequence_version) {
-					if (!seq.second.isSet()) {
-						seq.second.sendError(operation_obsolete());
-					}
+		for (auto it = peekTracker.begin(); it != peekTracker.end(); ++it) {
+			for (auto seq : it->second.sequence_version) {
+				if (!seq.second.isSet()) {
+					seq.second.sendError(operation_obsolete());
 				}
 			}
-		} catch (Error& e) {
-			tLogData->sharedActors.send(Future<Void>(e));
 		}
 	}
 

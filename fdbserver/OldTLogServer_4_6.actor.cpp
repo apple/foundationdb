@@ -481,28 +481,24 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	}
 
 	~LogData() {
-		try {
-			tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
-			TraceEvent("TLogBytesWhenRemoved", tli.id())
-			    .detail("SharedBytesInput", tLogData->bytesInput)
-			    .detail("SharedBytesDurable", tLogData->bytesDurable)
-			    .detail("LocalBytesInput", bytesInput.getValue())
-			    .detail("LocalBytesDurable", bytesDurable.getValue());
+		tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
+		TraceEvent("TLogBytesWhenRemoved", tli.id())
+		    .detail("SharedBytesInput", tLogData->bytesInput)
+		    .detail("SharedBytesDurable", tLogData->bytesDurable)
+		    .detail("LocalBytesInput", bytesInput.getValue())
+		    .detail("LocalBytesDurable", bytesDurable.getValue());
 
-			ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
-			endRole(Role::TRANSACTION_LOG, tli.id(), "Error", true);
+		ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
+		endRole(Role::TRANSACTION_LOG, tli.id(), "Error", true);
 
-			if (!tLogData->terminated) {
-				Key logIdKey = BinaryWriter::toValue(logId, Unversioned());
-				tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
-				tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
-				Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
-				tLogData->persistentData->clear(KeyRangeRef(msgKey, strinc(msgKey)));
-				Key poppedKey = logIdKey.withPrefix(persistTagPoppedKeys.begin);
-				tLogData->persistentData->clear(KeyRangeRef(poppedKey, strinc(poppedKey)));
-			}
-		} catch (Error& e) {
-			tLogData->sharedActors.send(Future<Void>(e));
+		if (!tLogData->terminated) {
+			Key logIdKey = BinaryWriter::toValue(logId, Unversioned());
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
+			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
+			tLogData->persistentData->clear(KeyRangeRef(msgKey, strinc(msgKey)));
+			Key poppedKey = logIdKey.withPrefix(persistTagPoppedKeys.begin);
+			tLogData->persistentData->clear(KeyRangeRef(poppedKey, strinc(poppedKey)));
 		}
 	}
 
