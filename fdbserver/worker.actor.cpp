@@ -202,7 +202,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				wait(onClosed);
 			}
 			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
-				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY + FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING));
+				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
 			}
 			if (storeError.isReady())
 				throw storeError.get().getError();
