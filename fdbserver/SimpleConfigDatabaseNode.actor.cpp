@@ -293,7 +293,7 @@ class SimpleConfigDatabaseNodeImpl {
 		for (const auto& kv : snapshot) {
 			auto configKey =
 			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(kvKeys.begin), IncludeVersion());
-			if (configKey.configClass.castTo<Key>() == req.configClass) {
+			if (configKey.configClass.template castTo<Key>() == req.configClass) {
 				knobSet.insert(configKey.knobName);
 			}
 		}
@@ -301,7 +301,7 @@ class SimpleConfigDatabaseNodeImpl {
 		state Standalone<VectorRef<VersionedConfigMutationRef>> mutations =
 		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
 		for (const auto& versionedMutation : mutations) {
-			if (versionedMutation.mutation.getConfigClass().castTo<Key>() == req.configClass) {
+			if (versionedMutation.mutation.getConfigClass().template castTo<Key>() == req.configClass) {
 				if (versionedMutation.mutation.isSet()) {
 					knobSet.insert(versionedMutation.mutation.getKnobName());
 				} else {
