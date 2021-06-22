@@ -503,7 +503,7 @@ public:
 		}
 	}
 
-	void addRole(std::string role) {
+	void addRole(std::string const& role) {
 		MutexHolder holder(mutex);
 
 		RoleInfo& r = mutateRoleInfo();
@@ -511,7 +511,7 @@ public:
 		r.refreshRolesString();
 	}
 
-	void removeRole(std::string role) {
+	void removeRole(std::string const& role) {
 		MutexHolder holder(mutex);
 
 		RoleInfo& r = mutateRoleInfo();
@@ -557,13 +557,13 @@ NetworkAddress getAddressIndex() {
 }
 
 // This does not check for simulation, and as such is not safe for external callers
-void clearPrefix_internal(std::map<std::string, TraceEventFields>& data, std::string prefix) {
+void clearPrefix_internal(std::map<std::string, TraceEventFields>& data, std::string const& prefix) {
 	auto first = data.lower_bound(prefix);
 	auto last = data.lower_bound(strinc(prefix).toString());
 	data.erase(first, last);
 }
 
-void LatestEventCache::clear(std::string prefix) {
+void LatestEventCache::clear(std::string const& prefix) {
 	clearPrefix_internal(latest[getAddressIndex()], prefix);
 }
 
@@ -575,7 +575,7 @@ void LatestEventCache::set(std::string tag, const TraceEventFields& contents) {
 	latest[getAddressIndex()][tag] = contents;
 }
 
-TraceEventFields LatestEventCache::get(std::string tag) {
+TraceEventFields LatestEventCache::get(std::string const& tag) {
 	return latest[getAddressIndex()][tag];
 }
 
@@ -757,11 +757,11 @@ bool traceFileIsOpen() {
 	return g_traceLog.isOpen();
 }
 
-void addTraceRole(std::string role) {
+void addTraceRole(std::string const& role) {
 	g_traceLog.addRole(role);
 }
 
-void removeTraceRole(std::string role) {
+void removeTraceRole(std::string const& role) {
 	g_traceLog.removeRole(role);
 }
 

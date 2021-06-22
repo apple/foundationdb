@@ -3,8 +3,17 @@ Release Notes
 #############
 
 
+6.3.15
+======
+* Added several counters to the ``MasterMetrics`` trace event to count the number of requests of each type received. `(PR #4829) <https://github.com/apple/foundationdb/pull/4829>`_
+* Added ``RecoveryCount`` to trace events when a transaction log begins. `(PR #4944) <https://github.com/apple/foundationdb/pull/4944>`_
+* Added metrics to compare the bandwidth used by data distributions and updates. `(PR #4907) <https://github.com/apple/foundationdb/pull/4907>`_
+* Batch transactions could be throttled with an error when the latency between ratekeeper and some proxies was high. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
+* Fix accounting issue that could cause higher priority GRV requests to be rejected after many batch priority requests have been rejected on a proxy. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
+
 6.3.14
 ======
+* Fixed fdbbackup start command that automatically configures database with backup workers to only do so when using partitioned logs. `(PR #4863) <https://github.com/apple/foundationdb/pull/4863>`_
 * Added ``cluster.bounce_impact`` section to status to report if there will be any extra effects when bouncing the cluster, and if so, the reason for those effects. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
 * Added ``fetched_versions`` to the storage metrics section of status to report how fast a storage server is catching up in versions. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
 * Added ``fetches_from_logs`` to the storage metrics section of status to report how frequently a storage server fetches updates from transaction logs. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_

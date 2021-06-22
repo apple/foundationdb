@@ -119,7 +119,7 @@ void setFastAllocatorThreadInitFunction(ThreadInitFunction f) {
 std::atomic<int64_t> g_hugeArenaMemory(0);
 
 double hugeArenaLastLogged = 0;
-std::map<std::string, std::pair<int, int>> hugeArenaTraces;
+std::map<std::string, std::pair<int, int64_t>> hugeArenaTraces;
 
 void hugeArenaSample(int size) {
 	if (TraceEvent::isNetworkThread()) {
@@ -564,7 +564,7 @@ void FastAllocator<Size>::releaseThreadMagazines() {
 		if (thr.freelist || thr.alternate) {
 			if (thr.freelist) {
 				ASSERT(thr.count > 0 && thr.count <= magazine_size);
-				globalData()->partial_magazines.push_back(std::make_pair(thr.count, thr.freelist));
+				globalData()->partial_magazines.emplace_back(thr.count, thr.freelist);
 				globalData()->partialMagazineUnallocatedMemory += thr.count * Size;
 			}
 			if (thr.alternate) {

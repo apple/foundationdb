@@ -39,7 +39,7 @@ class HistogramRegistry {
 public:
 	void registerHistogram(Histogram* h);
 	void unregisterHistogram(Histogram* h);
-	Histogram* lookupHistogram(std::string name);
+	Histogram* lookupHistogram(std::string const& name);
 	void logReport();
 
 private:
@@ -63,7 +63,7 @@ public:
 private:
 	static const std::unordered_map<Unit, std::string> UnitToStringMapper;
 
-	Histogram(std::string group, std::string op, Unit unit, HistogramRegistry& registry)
+	Histogram(std::string const& group, std::string const& op, Unit unit, HistogramRegistry& registry)
 	  : group(group), op(op), unit(unit), registry(registry), ReferenceCounted<Histogram>() {
 
 		ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
@@ -71,7 +71,7 @@ private:
 		clear();
 	}
 
-	static std::string generateName(std::string group, std::string op) { return group + ":" + op; }
+	static std::string generateName(std::string const& group, std::string const& op) { return group + ":" + op; }
 
 public:
 	~Histogram() { registry.unregisterHistogram(this); }
@@ -125,7 +125,7 @@ public:
 	}
 	void writeToLog();
 
-	std::string name() { return generateName(this->group, this->op); }
+	std::string name() const { return generateName(this->group, this->op); }
 
 	std::string const group;
 	std::string const op;

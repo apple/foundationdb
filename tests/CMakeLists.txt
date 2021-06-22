@@ -87,7 +87,10 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES SlowTask.txt IGNORE)
   add_fdb_test(TEST_FILES SpecificUnitTest.txt IGNORE)
   add_fdb_test(TEST_FILES StorageMetricsSampleTests.txt IGNORE)
+  add_fdb_test(TEST_FILES WorkerTests.txt IGNORE)
+  add_fdb_test(TEST_FILES StorageServerInterface.txt)
   add_fdb_test(TEST_FILES StreamingWrite.txt IGNORE)
+  add_fdb_test(TEST_FILES SystemData.txt)
   add_fdb_test(TEST_FILES ThreadSafety.txt IGNORE)
   add_fdb_test(TEST_FILES TraceEventMetrics.txt IGNORE)
   add_fdb_test(TEST_FILES PopulateTPCC.txt IGNORE)
@@ -153,6 +156,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/Watches.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
+  add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
@@ -186,17 +190,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_5.0.0/StorefrontTestRestart-1.txt
                restarting/from_5.0.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.29/SnapTestAttrition-1.txt
-               restarting/from_6.2.29/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_6.2.33/SnapTestAttrition-1.txt
+               restarting/from_6.2.33/SnapTestAttrition-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.29/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.29/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.33/SnapTestSimpleRestart-1.txt
+               restarting/from_6.2.33/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.29/SnapTestRestart-1.txt
-               restarting/from_6.2.29/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_6.2.33/SnapTestRestart-1.txt
+               restarting/from_6.2.33/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.29/SnapCycleRestart-1.txt
-               restarting/from_6.2.29/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.33/SnapCycleRestart-1.txt
+               restarting/from_6.2.33/SnapCycleRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
                restarting/from_5.1.7/DrUpgradeRestart-2.txt)

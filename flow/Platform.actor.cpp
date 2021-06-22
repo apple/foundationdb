@@ -1482,7 +1482,7 @@ void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
 }
 #endif
 
-SystemStatistics getSystemStatistics(std::string dataFolder,
+SystemStatistics getSystemStatistics(std::string const& dataFolder,
                                      const IPAddress* ip,
                                      SystemStatisticsState** statState,
                                      bool logDetails) {
@@ -2640,7 +2640,7 @@ Future<vector<std::string>> listDirectoriesAsync(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, true);
 }
 
-void findFilesRecursively(std::string path, std::vector<std::string>& out) {
+void findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
 	// Add files to output, prefixing path
 	std::vector<std::string> files = platform::listFiles(path);
 	for (auto const& f : files)
@@ -2998,7 +2998,7 @@ void outOfMemory() {
 		else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
 			s = s.substr(LiteralStringRef("struct ").size());
 #endif
-		typeNames.push_back(std::make_pair(s, i->first));
+		typeNames.emplace_back(s, i->first);
 	}
 	std::sort(typeNames.begin(), typeNames.end());
 	for (int i = 0; i < typeNames.size(); i++) {

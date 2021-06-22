@@ -530,7 +530,7 @@
                "hz":0.0,
                "counter":0,
                "roughness":0.0
-            }, 
+            },
              "low_priority_reads":{ // measures number of incoming low priority read requests
                "hz":0.0,
                "counter":0,
@@ -682,6 +682,16 @@
              "ssd-rocksdb-experimental",
              "memory"
          ]},
+         "tss_count":1,
+         "tss_storage_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-experimental",
+             "ssd-rocksdb-experimental",
+             "memory"
+         ]},
          "coordinators_count":1,
          "excluded_servers":[
             {
@@ -692,7 +702,9 @@
          "auto_resolvers":1,
          "auto_logs":3,
          "backup_worker_enabled":1,
-         "commit_proxies":5 // this field will be absent if a value has not been explicitly set
+         "commit_proxies":5, // this field will be absent if a value has not been explicitly set
+         "proxies":6, // this field will be absent if a value has not been explicitly set
+         "perpetual_storage_wiggle": 0
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

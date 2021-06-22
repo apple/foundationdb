@@ -35,8 +35,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
@@ -52,6 +52,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/NetworkTest.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "fdbserver/Status.h"
@@ -91,7 +92,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -174,6 +175,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
+	{ OPT_CONFIG_PATH,           "--config_path",               SO_REQ_SEP },
+	{ OPT_USE_TEST_CONFIG_DB,    "--use_test_config_db",        SO_NONE },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -954,7 +957,7 @@ struct CLIOptions {
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = nullptr;
-	uint64_t memLimit =
+	int64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 	uint64_t storageMemLimit = 1LL << 30;
@@ -965,6 +968,7 @@ struct CLIOptions {
 	bool useNet2 = true;
 	bool useThreadPool = false;
 	std::vector<std::pair<std::string, std::string>> knobs;
+	std::map<std::string, std::string> manualKnobOverrides;
 	LocalityData localities;
 	int minTesterCount = 1;
 	bool testOnServers = false;
@@ -975,6 +979,9 @@ struct CLIOptions {
 	uint64_t rsssize = -1;
 	std::vector<std::string> blobCredentials; // used for fast restore workers & backup workers
 	const char* blobCredsFromENV = nullptr;
+
+	std::string configPath;
+	UseConfigDB useConfigDB{ UseConfigDB::DISABLED };
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1050,7 +1057,8 @@ private:
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				syn = syn.substr(7);
-				knobs.push_back(std::make_pair(syn, args.OptionArg()));
+				knobs.emplace_back(syn, args.OptionArg());
+				manualKnobOverrides[syn] = args.OptionArg();
 				break;
 			}
 			case OPT_UNITTESTPARAM: {
@@ -1359,10 +1367,10 @@ private:
 				}
 				// SOMEDAY: ideally we'd have some better way to express that a knob should be elevated to formal
 				// parameter
-				knobs.push_back(std::make_pair(
+				knobs.emplace_back(
 				    "page_cache_4k",
-				    format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the
-				                                             // next smaller multiple of 4K.
+				    format("%ld", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to the
+				                                            // next smaller multiple of 4K.
 				break;
 			case OPT_BUGGIFY:
 				if (!strcmp(args.OptionArg(), "on"))
@@ -1428,6 +1436,12 @@ private:
 						}
 					} while (t.size() != 0);
 				}
+				break;
+			case OPT_CONFIG_PATH:
+				configPath = args.OptionArg();
+				break;
+			case OPT_USE_TEST_CONFIG_DB:
+				useConfigDB = UseConfigDB::SIMPLE;
 				break;
 
 #ifndef TLS_DISABLED
@@ -1626,46 +1640,44 @@ int main(int argc, char* argv[]) {
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
-		if (!globalServerKnobs->setKnob("log_directory", opts.logFolder))
-			ASSERT(false);
+		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,
+		                                         Randomize::YES,
+		                                         role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("log_directory", KnobValue::create(opts.logFolder));
 		if (role != ServerRole::Simulation) {
-			if (!globalServerKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))
-				ASSERT(false);
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("commit_batches_mem_bytes_hard_limit",
+			                                                          KnobValue::create(int64_t{ opts.memLimit }));
 		}
-		for (auto k = opts.knobs.begin(); k != opts.knobs.end(); ++k) {
+
+		for (const auto& [knobName, knobValueString] : opts.knobs) {
 			try {
-				if (!globalFlowKnobs->setKnob(k->first, k->second) &&
-				    !globalClientKnobs->setKnob(k->first, k->second) &&
-				    !globalServerKnobs->setKnob(k->first, k->second)) {
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
-				}
+				auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+				g_knobs.setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
 					fprintf(stderr,
 					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        k->second.c_str(),
-					        k->first.c_str());
+					        knobName.c_str(),
+					        knobValueString.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(k->first))
-					    .detail("Value", printable(k->second));
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
 				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
-					    .detail("Knob", printable(k->first))
-					    .detail("Value", printable(k->second))
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString))
 					    .error(e);
 					throw;
 				}
 			}
 		}
-		if (!globalServerKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit)))
-			ASSERT(false);
-
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("server_mem_limit",
+		                                                          KnobValue::create(int64_t{ opts.memLimit }));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		globalFlowKnobs->initialize(true, role == ServerRole::Simulation);
-		globalClientKnobs->initialize(true);
-		globalServerKnobs->initialize(true, globalClientKnobs.get(), role == ServerRole::Simulation);
+		IKnobCollection::getMutableGlobalKnobCollection().initialize(
+		    Randomize::YES, role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
@@ -1785,21 +1797,6 @@ int main(int argc, char* argv[]) {
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
 		    .trackLatest("ProgramStart");
-
-		// Test for TraceEvent length limits
-		/*std::string foo(4096, 'x');
-		TraceEvent("TooLongDetail").detail("Contents", foo);
-
-		TraceEvent("TooLongEvent")
-		    .detail("Contents1", foo)
-		    .detail("Contents2", foo)
-		    .detail("Contents3", foo)
-		    .detail("Contents4", foo)
-		    .detail("Contents5", foo)
-		    .detail("Contents6", foo)
-		    .detail("Contents7", foo)
-		    .detail("Contents8", foo)
-		    .detail("ExtraTest", 1776);*/
 
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
@@ -1980,7 +1977,10 @@ int main(int argc, char* argv[]) {
 				                      opts.metricsConnFile,
 				                      opts.metricsPrefix,
 				                      opts.rsssize,
-				                      opts.whitelistBinPaths));
+				                      opts.whitelistBinPaths,
+				                      opts.configPath,
+				                      opts.manualKnobOverrides,
+				                      opts.useConfigDB));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
@@ -2143,7 +2143,7 @@ int main(int argc, char* argv[]) {
 					s = s.substr(LiteralStringRef("struct ").size());
 #endif
 
-				typeNames.push_back(std::make_pair(s, i->first));
+				typeNames.emplace_back(s, i->first);
 			}
 			std::sort(typeNames.begin(), typeNames.end());
 			for (int i = 0; i < typeNames.size(); i++) {

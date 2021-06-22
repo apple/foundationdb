@@ -45,6 +45,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "flow/Deque.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -536,7 +537,10 @@ public:
 
 	std::string getFilename() const override { return actualFilename; }
 
-	~SimpleFile() override { _close(h); }
+	~SimpleFile() override {
+		_close(h);
+		--openCount;
+	}
 
 private:
 	int h;
@@ -835,6 +839,7 @@ private:
 
 #define g_sim2 ((Sim2&)g_simulator)
 
+// A simulated version of the network which allows the database to be deterministically simulated.
 class Sim2 final : public ISimulator, public INetworkConnections {
 public:
 	// Implement INetwork interface
@@ -842,9 +847,9 @@ public:
 	// machines and time
 	double now() const override { return time; }
 
-	// timer() can be up to 0.1 seconds ahead of now()
+	// timer() can be up to 0.1 seconds ahead of actualTime
 	double timer() override {
-		timerTime += deterministicRandom()->random01() * (time + 0.1 - timerTime) / 2.0;
+		timerTime += deterministicRandom()->random01() * (actualTime + 0.1 - timerTime) / 2.0;
 		return timerTime;
 	}
 
@@ -854,19 +859,30 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess);
 	}
+
+	// The duration of simulated delays can be artifically increased. Tasks which end at similar times can be reordered.
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine) {
 		ASSERT(seconds >= -0.0001);
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		if (!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() &&
-		    FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
+		bool ordered = (seconds <= 0.0001) && (currentProcess->rebooting || machine != currentProcess ||
+		                                       currentProcess->shutdownSignal.isSet());
+		if (!ordered && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
 		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
 		}
 
 		mutex.enter();
-		tasks.push(Task(time + seconds, taskID, taskCount++, machine, f));
+		if (ordered) {
+			orderedTasks.emplace_back(actualTime, taskID, taskCount++, machine, f);
+		} else {
+			tasks.push(Task(std::max(actualTime, time + seconds),
+			                taskID,
+			                (deterministicRandom()->randomUInt64() << 32) | taskCount++,
+			                machine,
+			                f));
+		}
 		mutex.leave();
 
 		return f;
@@ -1015,8 +1031,8 @@ public:
 
 		// Get the size of all files we've created on the server and subtract them from the free space
 		for (auto file = proc->machine->openFiles.begin(); file != proc->machine->openFiles.end(); ++file) {
-			if (file->second.isReady()) {
-				totalFileSize += ((AsyncFileNonDurable*)file->second.get().getPtr())->approximateSize;
+			if (file->second.get().isReady()) {
+				totalFileSize += ((AsyncFileNonDurable*)file->second.get().get().getPtr())->approximateSize;
 			}
 			numFiles++;
 		}
@@ -1091,6 +1107,9 @@ public:
 		}
 	}
 
+	// The simulated run loop is implemented to behave similar to the Net2 run loop. It batches together multiple tasks
+	// that are all at the same time, reorders them by priority, and executes them without considering any new tasks
+	// which have been issued since the start of the batch.
 	ACTOR static Future<Void> runLoop(Sim2* self) {
 		state ISimulator::ProcessInfo* callingMachine = self->currentProcess;
 		while (!self->isStopped) {
@@ -1103,13 +1122,40 @@ public:
 			}
 			// if (!randLog/* && now() >= 32.0*/)
 			//	randLog = fopen("randLog.txt", "wt");
-			Task t = std::move(self->tasks.top()); // Unfortunately still a copy under gcc where .top() returns const&
-			self->currentTaskID = t.taskID;
-			self->tasks.pop();
-			self->mutex.leave();
 
-			self->execTask(t);
-			self->yielded = false;
+			self->instantTasks.clear();
+			self->instantTasks.push_back(
+			    std::move(self->tasks.top())); // Unfortunately still a copy under gcc where .top() returns const&
+			self->time = self->tasks.top().time;
+			double batchTime = deterministicRandom()->random01() * FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING;
+			self->tasks.pop();
+			while (self->tasks.top().time - self->time < batchTime) {
+				self->instantTasks.push_back(std::move(self->tasks.top()));
+				self->tasks.pop();
+			}
+			std::sort(self->instantTasks.begin(), self->instantTasks.end(), [](const Task& a, const Task& b) {
+				if (a.taskID != b.taskID) {
+					return a.taskID > b.taskID;
+				}
+				return a.stable < b.stable;
+			});
+			self->mutex.leave();
+			for (auto& t : self->instantTasks) {
+				while (self->orderedTasks.size() && !self->isStopped) {
+					self->mutex.enter();
+					Task o = std::move(self->orderedTasks.front());
+					self->orderedTasks.pop_front();
+					self->time = o.time;
+					self->mutex.leave();
+					self->execTask(o);
+					self->yielded = false;
+				}
+				if (self->isStopped) {
+					break;
+				}
+				self->execTask(t);
+				self->yielded = false;
+			}
 		}
 		self->currentProcess = callingMachine;
 		self->net2->stop();
@@ -1983,7 +2029,8 @@ public:
 	}
 
 	Sim2()
-	  : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
+	  : time(0.0), actualTime(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0),
+	    currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",
@@ -2045,8 +2092,9 @@ public:
 			t.action.send(Never());
 		} else {
 			mutex.enter();
-			this->time = t.time;
-			this->timerTime = std::max(this->timerTime, this->time);
+			this->currentTaskID = t.taskID;
+			this->actualTime = std::max(this->actualTime, t.time);
+			this->timerTime = std::max(this->timerTime, this->actualTime);
 			mutex.leave();
 
 			this->currentProcess = t.machine;
@@ -2060,8 +2108,9 @@ public:
 
 			if (randLog)
 				fprintf(randLog,
-				        "T %f %d %s %" PRId64 "\n",
+				        "T %f %f %d %s %" PRId64 "\n",
 				        this->time,
+				        this->actualTime,
 				        int(deterministicRandom()->peek() % 10000),
 				        t.machine ? t.machine->name : "none",
 				        t.stable);
@@ -2075,7 +2124,7 @@ public:
 
 		mutex.enter();
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-		tasks.push(Task(time, taskID, taskCount++, getCurrentProcess(), std::move(signal)));
+		orderedTasks.emplace_back(actualTime, taskID, taskCount++, getCurrentProcess(), std::move(signal));
 		mutex.leave();
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
@@ -2092,8 +2141,10 @@ public:
 
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
-	double time;
-	double timerTime;
+	double time; // The time as returned by now()
+	double actualTime; // A more accurate account of the simulated time which is updated within a batch of tasks
+	double timerTime; // To simulate that timer() can increase without ever returning to the run loop, and timer() can
+	                  // increase up to .1 larger than actualTime when called multiple times in a row
 	TaskPriority currentTaskID;
 
 	// taskCount is guarded by ISimulator::mutex
@@ -2105,6 +2156,8 @@ public:
 
 	// tasks is guarded by ISimulator::mutex
 	std::priority_queue<Task, std::vector<Task>> tasks;
+	std::vector<Task> instantTasks;
+	Deque<Task> orderedTasks;
 
 	std::vector<std::function<void()>> stopCallbacks;
 
@@ -2440,7 +2493,7 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			actualFilename = filename + ".part";
 			auto partFile = machineCache.find(actualFilename);
 			if (partFile != machineCache.end()) {
-				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second);
+				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second.get());
 				if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 					f = map(f, [=](Reference<IAsyncFile> r) {
 						return Reference<IAsyncFile>(new AsyncFileWriteChecker(r));
@@ -2448,19 +2501,26 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 				return f;
 			}
 		}
-		if (machineCache.find(actualFilename) == machineCache.end()) {
+
+		Future<Reference<IAsyncFile>> f;
+		auto itr = machineCache.find(actualFilename);
+		if (itr == machineCache.end()) {
 			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
 			// This way, they can both keep up with the time to start the next operation
 			auto diskParameters =
 			    makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
-			machineCache[actualFilename] =
-			    AsyncFileNonDurable::open(filename,
+			f = AsyncFileNonDurable::open(filename,
 			                              actualFilename,
 			                              SimpleFile::open(filename, flags, mode, diskParameters, false),
 			                              diskParameters,
 			                              (flags & IAsyncFile::OPEN_NO_AIO) == 0);
+
+			machineCache[actualFilename] = UnsafeWeakFutureReference<IAsyncFile>(f);
+		} else {
+			f = itr->second.get();
 		}
-		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(machineCache[actualFilename]);
+
+		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 		return f;

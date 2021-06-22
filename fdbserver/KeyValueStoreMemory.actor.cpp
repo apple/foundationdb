@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DeltaTree.h"
@@ -401,7 +402,7 @@ private:
 			if (o->op == OpSet) {
 				if (sequential) {
 					KeyValueMapPair pair(o->p1, o->p2);
-					dataSets.push_back(std::make_pair(pair, pair.arena.getSize() + data.getElementBytes()));
+					dataSets.emplace_back(pair, pair.arena.getSize() + data.getElementBytes());
 				} else {
 					data.insert(o->p1, o->p2);
 				}

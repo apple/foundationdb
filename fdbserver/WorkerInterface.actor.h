@@ -158,7 +158,7 @@ struct ClusterControllerFullInterface {
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterControllerFullInterface const& r) const { return id() != r.id(); }
 
-	bool hasMessage() {
+	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
@@ -627,11 +627,13 @@ struct InitializeStorageRequest {
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
+	Optional<std::pair<UID, Version>>
+	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion);
 	}
 };
 
@@ -783,6 +785,7 @@ struct DiskStoreRequest {
 struct Role {
 	static const Role WORKER;
 	static const Role STORAGE_SERVER;
+	static const Role TESTING_STORAGE_SERVER;
 	static const Role TRANSACTION_LOG;
 	static const Role SHARED_TRANSACTION_LOG;
 	static const Role COMMIT_PROXY;
@@ -839,13 +842,17 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         std::string metricsConnFile,
                         std::string metricsPrefix,
                         int64_t memoryProfilingThreshold,
-                        std::string whitelistBinPaths);
+                        std::string whitelistBinPaths,
+                        std::string configPath,
+                        std::map<std::string, std::string> manualKnobOverrides,
+                        UseConfigDB useConfigDB);
 
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
-                                     LocalityData locality);
+                                     LocalityData locality,
+                                     UseConfigDB useConfigDB);
 
 // These servers are started by workerServer
 class IKeyValueStore;
@@ -854,6 +861,7 @@ class IDiskQueue;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
+                                 Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo>> db,
                                  std::string folder);
