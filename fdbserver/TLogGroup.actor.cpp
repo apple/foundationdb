@@ -22,18 +22,23 @@
 #include <iterator>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
@@ -99,6 +104,12 @@ LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::uno
 	return localityMap;
 }
 
+UID TLogGroupCollection::addStorageTeam(ptxn::StorageTeamID teamId) {
+	auto group = deterministicRandom()->randomChoice(recruitedGroups);
+	group->assignStorageTeam(teamId);
+	return group->id();
+}
+
 void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq) {
 	CommitTransactionRef& tr = recoveryCommitReq->transaction;
 	const auto& serversPrefix = LiteralStringRef("/servers");
@@ -127,6 +138,87 @@ void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store) {
 	}
 }
 
+void TLogGroupCollection::monitorStorageTeams(Database cx) {
+	storageTeamMonitorF = storageTeamMonitor(this, cx);
+}
+
+ACTOR Future<std::map<ptxn::StorageTeamID, std::vector<UID>>> fetchStorageTeams(Database cx) {
+	state Transaction tr(cx);
+	state std::map<ptxn::StorageTeamID, vector<UID>> teams;
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			GetRangeLimits limits;
+			RangeResult results = wait(tr.getRange(storageTeamIdKeyRange, limits));
+			ASSERT(!results.more);
+
+			for (auto team : results) {
+				const UID teamId = storageTeamIdKeyDecode(team.key);
+				const std::vector<UID> servers = decodeStorageTeams(team.value);
+				teams[teamId] = servers;
+			}
+
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "TLogGroupFetchTeamError");
+			wait(tr.onError(e));
+		}
+	}
+
+	return teams;
+}
+
+ACTOR Future<Void> TLogGroupCollection::storageTeamMonitor(TLogGroupCollection* self, Database cx) {
+	loop {
+		try {
+			state std::map<UID, std::vector<UID>> teams = wait(fetchStorageTeams(cx));
+			state std::map<UID, std::vector<UID>>::iterator it;
+			for (it = teams.begin(); it != teams.end(); ++it) {
+				state ptxn::StorageTeamID teamId = it->first;
+
+				if (self->storageTeams.find(teamId) == self->storageTeams.end()) {
+					continue;
+				}
+
+				self->storageTeams[teamId] = it->second;
+
+				// Assign team to a group.
+				// TODO: Monitoring teams. Removing when gone.
+				state UID groupId = self->addStorageTeam(teamId);
+
+				// Storage the assignment to \xff keyspace
+				state Transaction tr(cx);
+				loop {
+					try {
+						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+						tr.set(storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(groupId, Unversioned()));
+						wait(tr.commit());
+					} catch (Error& e) {
+						TraceEvent(SevWarn, "TLogGroupMonitorAddStorageError")
+						    .detail("TeamId", teamId)
+						    .detail("GroupId", groupId);
+						wait(tr.onError(e));
+					}
+				}
+			}
+
+			wait(delay(1.0));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "TLogGroupMonitorError");
+		}
+	}
+}
+
 void TLogGroup::addServer(const TLogWorkerDataRef& workerData) {
 	serverMap.emplace(workerData->id, workerData);
 }
@@ -141,6 +233,10 @@ std::vector<TLogWorkerDataRef> TLogGroup::servers() const {
 
 int TLogGroup::size() const {
 	return serverMap.size();
+}
+
+void TLogGroup::assignStorageTeam(const UID& teamId) {
+	storageTeamSet.insert(teamId);
 }
 
 Standalone<StringRef> TLogGroup::toValue() const {

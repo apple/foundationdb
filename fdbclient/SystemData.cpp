@@ -303,6 +303,7 @@ bool serverHasKey(ValueRef storedValue) {
 }
 
 const KeyRef storageTeamIdKeyPrefix = LiteralStringRef("\xff/storageTeams/");
+const KeyRangeRef storageTeamIdKeyRange(LiteralStringRef("\xff/storageTeams/"), LiteralStringRef("\xff/storageTeams0"));
 
 const Key storageTeamIdKey(ptxn::StorageTeamID teamId) {
 	BinaryWriter wr(Unversioned());
@@ -348,6 +349,14 @@ const Value encodeStorageTeams(const std::vector<UID>& value) {
 	for (auto& v : value) {
 		wr << v;
 	}
+	return wr.toValue();
+}
+
+extern const KeyRef storageTeamIdToTLogGroupPrefix = LiteralStringRef("\xff/storageTeamIdToTLogGroup/");
+const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(storageTeamIdToTLogGroupPrefix);
+	wr << teamId;
 	return wr.toValue();
 }
 

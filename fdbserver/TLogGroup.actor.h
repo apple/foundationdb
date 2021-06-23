@@ -1,5 +1,5 @@
 /*
- * TLogGroup.h
+ * TLogGroup.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -85,10 +85,18 @@ public:
 	// by master.
 	void loadState(const Standalone<RangeResultRef>& store);
 
+	// Start monitoring storage teams by reading \xff keyspace.
+	// TODO: Get notifications from DD.
+	void monitorStorageTeams(Database cx);
+	ACTOR Future<Void> storageTeamMonitor(TLogGroupCollection* self, Database cx);
+
 private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers
 	// given in 'ignoreServers'.
 	LocalityMap<TLogWorkerData> buildLocalityMap(const std::unordered_set<UID>& ignoreServers);
+
+	// Find and assign a TLogGroup to given storage team. Returns the group to which team is assigned.
+	UID addStorageTeam(ptxn::StorageTeamID teamId);
 
 	// ReplicationPolicy defined for this collection. The members of group must satisfy
 	// this replication policy, or else will not be part of a group.
@@ -106,6 +114,15 @@ private:
 	// A map from UID or workers to their corresponding TLogWorkerData objects.
 	// This map contains both recruited and unrecruited workers.
 	std::unordered_map<UID, TLogWorkerDataRef> recruitMap;
+
+	// Map from storage TeamID to list of list of storage servers in that team.
+	std::map<ptxn::StorageTeamID, vector<UID>> storageTeams;
+
+	// Mao from storage TeamID to the TLogGroup managing that team.
+	std::map<ptxn::StorageTeamID, UID> storageTeamToTLogGroupMap;
+
+	// Holds the future returned by `storageTeamMonitor` actor. Set by calling `monitorStorageTeams()`.
+	Future<Void> storageTeamMonitorF;
 };
 
 // Represents a single TLogGroup which consists of TLog workers.
@@ -125,6 +142,13 @@ public:
 	// Returns the number of servers recruited in this group, including failed ones.
 	int size() const;
 
+	// Return set of storage team ids managed by this group.
+	const std::unordered_set<UID>& storageTeams();
+
+	// Helpers to assign and remove a team from group by its ID.
+	void assignStorageTeam(const UID& teamId);
+	void removeStorageTeam(const UID& teamId);
+
 	Standalone<StringRef> toValue() const;
 
 	static TLogGroupRef fromValue(UID groupId,
@@ -141,6 +165,9 @@ private:
 	// Map from worker UID to TLogWorkerData
 	// TODO: Can be an unordered_set.
 	std::unordered_map<UID, TLogWorkerDataRef> serverMap;
+
+	// List of storage teams IDs mananaged by this group.
+	std::unordered_set<ptxn::StorageTeamID> storageTeamSet;
 };
 
 // Represents an individual TLogWorker in this collection. A TLogGroup is a set of TLogWorkerData.
