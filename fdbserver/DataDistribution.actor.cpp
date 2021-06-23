@@ -3936,14 +3936,17 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
                                                   FutureStream<Void> finishStorageWiggleSignal,
                                                   DDTeamCollection* teamCollection) {
+	state int lastFinishTime = now();
 	loop {
 		choose {
 			when(wait(stopSignal->onChange())) {}
 			when(waitNext(finishStorageWiggleSignal)) {
-				// there must not have other teams to place wiggled data
-				while (teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
-				       teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize) {
-					wait(delayJittered(SERVER_KNOBS->CHECK_TEAM_DELAY));
+				state bool takeRest = true; // delay to avoid delete and update ServerList too frequently
+				while (takeRest) {
+					wait(delayJittered(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
+					// there must not have other teams to place wiggled data
+					takeRest = teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
+						   teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
 				}
 				wait(updateNextWigglingStoragePID(teamCollection));
 			}
