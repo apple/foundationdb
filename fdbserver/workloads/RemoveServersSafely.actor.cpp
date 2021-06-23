@@ -755,33 +755,16 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::unordered_map<std::string, int> killableLocalitiesCount;
 		auto processes = getServers();
 		for (const auto& processInfo : processes) {
-			if (processInfo->locality.dcId().present())
-				allLocalitiesCount[ExcludeLocalityKeyDcIdPrefix.toString() +
-				                   processInfo->locality.dcId().get().toString()]++;
-			if (processInfo->locality.zoneId().present())
-				allLocalitiesCount[ExcludeLocalityKeyZoneIdPrefix.toString() +
-				                   processInfo->locality.zoneId().get().toString()]++;
-			if (processInfo->locality.machineId().present())
-				allLocalitiesCount[ExcludeLocalityKeyMachineIdPrefix.toString() +
-				                   processInfo->locality.machineId().get().toString()]++;
-			if (processInfo->locality.processId().present())
-				allLocalitiesCount[ExcludeLocalityKeyProcessIdPrefix.toString() +
-				                   processInfo->locality.processId().get().toString()]++;
+			std::map<std::string, std::string> localityData = processInfo->locality.getAllData();
+			for (const auto& l : localityData) {
+				allLocalitiesCount[ExcludeLocalityPrefix.toString() + l.first + ":" + l.second]++;
+			}
 
 			AddressExclusion pAddr(processInfo->address.ip, processInfo->address.port);
 			if (std::find(addresses.begin(), addresses.end(), pAddr) != addresses.end()) {
-				if (processInfo->locality.dcId().present())
-					killableLocalitiesCount[ExcludeLocalityKeyDcIdPrefix.toString() +
-					                        processInfo->locality.dcId().get().toString()]++;
-				if (processInfo->locality.zoneId().present())
-					killableLocalitiesCount[ExcludeLocalityKeyZoneIdPrefix.toString() +
-					                        processInfo->locality.zoneId().get().toString()]++;
-				if (processInfo->locality.machineId().present())
-					killableLocalitiesCount[ExcludeLocalityKeyMachineIdPrefix.toString() +
-					                        processInfo->locality.machineId().get().toString()]++;
-				if (processInfo->locality.processId().present())
-					killableLocalitiesCount[ExcludeLocalityKeyProcessIdPrefix.toString() +
-					                        processInfo->locality.processId().get().toString()]++;
+				for (const auto& l : localityData) {
+					killableLocalitiesCount[ExcludeLocalityPrefix.toString() + l.first + ":" + l.second]++;
+				}
 			}
 		}
 
@@ -806,8 +789,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
 		for (auto process : processes) {
-			process->locality.set(LocalityData::keyProcessId,
-			                      workers[addressToIndexMap[process->address]].locality.processId());
+			if (addressToIndexMap.find(process->address) != addressToIndexMap.end()) {
+				if (workers[addressToIndexMap[process->address]].locality.processId().present()) {
+					process->locality.set(LocalityData::keyProcessId,
+					                      workers[addressToIndexMap[process->address]].locality.processId());
+				}
+			}
 		}
 
 		return Void();

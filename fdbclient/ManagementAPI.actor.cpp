@@ -1950,18 +1950,10 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
 // The prefix could be dcid, processid, machineid, processid.
 std::pair<std::string, std::string> decodeLocality(const std::string& locality) {
 	StringRef localityRef(locality.c_str());
-	if (localityRef.startsWith(ExcludeLocalityKeyDcIdPrefix)) {
-		return std::make_pair(LocalityData::keyDcId.toString(),
-		                      localityRef.removePrefix(ExcludeLocalityKeyDcIdPrefix).toString());
-	} else if (localityRef.startsWith(ExcludeLocalityKeyMachineIdPrefix)) {
-		return std::make_pair(LocalityData::keyMachineId.toString(),
-		                      localityRef.removePrefix(ExcludeLocalityKeyMachineIdPrefix).toString());
-	} else if (localityRef.startsWith(ExcludeLocalityKeyProcessIdPrefix)) {
-		return std::make_pair(LocalityData::keyProcessId.toString(),
-		                      localityRef.removePrefix(ExcludeLocalityKeyProcessIdPrefix).toString());
-	} else if (localityRef.startsWith(ExcludeLocalityKeyZoneIdPrefix)) {
-		return std::make_pair(LocalityData::keyZoneId.toString(),
-		                      localityRef.removePrefix(ExcludeLocalityKeyZoneIdPrefix).toString());
+	std::string localityKeyValue = localityRef.removePrefix(ExcludeLocalityPrefix).toString();
+	int split = localityKeyValue.find(':');
+	if (split != std::string::npos) {
+		return std::make_pair(localityKeyValue.substr(0, split), localityKeyValue.substr(split + 1));
 	}
 
 	return std::make_pair("", "");
@@ -1975,17 +1967,8 @@ std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>
 
 	std::set<AddressExclusion> localityAddresses;
 	for (int i = 0; i < workers.size(); i++) {
-		if (localityKeyValue.first == LocalityData::keyDcId && workers[i].locality.dcId().present() &&
-		    localityKeyValue.second == workers[i].locality.dcId().get()) {
-			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
-		} else if (localityKeyValue.first == LocalityData::keyMachineId && workers[i].locality.machineId().present() &&
-		           localityKeyValue.second == workers[i].locality.machineId().get()) {
-			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
-		} else if (localityKeyValue.first == LocalityData::keyProcessId && workers[i].locality.processId().present() &&
-		           localityKeyValue.second == workers[i].locality.processId().get()) {
-			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
-		} else if (localityKeyValue.first == LocalityData::keyZoneId && workers[i].locality.zoneId().present() &&
-		           localityKeyValue.second == workers[i].locality.zoneId().get()) {
+		if (workers[i].locality.isPresent(localityKeyValue.first) &&
+		    workers[i].locality.get(localityKeyValue.first) == localityKeyValue.second) {
 			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
 		}
 	}

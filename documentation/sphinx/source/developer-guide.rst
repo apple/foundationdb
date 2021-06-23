@@ -964,8 +964,8 @@ that process, and wait for necessary data to be moved away.
 #. ``\xff\xff/management/options/failed_locality/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/failed_locality/<locality>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
 
 An exclusion is syntactically either an ip address (e.g. ``127.0.0.1``), or
-an ip address and port (e.g. ``127.0.0.1:4500``) or locality (e.g ``dcid:primary-satellite`` or
-``zoneid:primary-satellite-log-2`` or ``machineid:primary-stateless-1`` or ``processid:223be2da244ca0182375364e4d122c30``). 
+an ip address and port (e.g. ``127.0.0.1:4500``) or locality (e.g ``locality_dcid:primary-satellite`` or
+``locality_zoneid:primary-satellite-log-2`` or ``locality_machineid:primary-stateless-1`` or ``locality_processid:223be2da244ca0182375364e4d122c30``).
 If no port is specified, then all processes on that host match the exclusion.
 For locality, all processes that match the given locality are excluded.
 

@@ -541,11 +541,12 @@ void initHelp() {
 	    "10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in "
 	    "the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
 	helpMap["exclude"] = CommandHelp(
-	    "exclude [FORCE] [failed] [no_wait] [<ADDRESS...>] [dcid:<excludedcid>] [zoneid:<excludezoneid>] "
-	    "[machineid:<excludemachineid>] [processid:<excludeprocessid>]",
+	    "exclude [FORCE] [failed] [no_wait] [<ADDRESS...>] [locality_dcid:<excludedcid>] "
+	    "[locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] "
+	    "[locality_processid:<excludeprocessid>] or any locality data",
 	    "exclude servers from the database either with IP address match or locality match",
 	    "If no addresses or locaities are specified, lists the set of excluded addresses and localities."
-	    "\n\nFor each IP address or IP:port pair in <ADDRESS...> or locality (which include dcid, zoneid, "
+	    "\n\nFor each IP address or IP:port pair in <ADDRESS...> or any LocalityData attributes (like dcid, zoneid, "
 	    "machineid, processid), adds the address/locality to the set of excluded servers and localities then waits "
 	    "until all database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
 	    "command returns \nimmediately without checking if the exclusions have completed successfully.\n"
@@ -553,11 +554,11 @@ void initHelp() {
 	    "If 'failed' is set, the transaction log queue is dropped pre-emptively before waiting\n"
 	    "for data movement to finish and the server cannot be included again.");
 	helpMap["include"] = CommandHelp(
-	    "include all|[<ADDRESS...>] [dcid:<excludedcid>] [zoneid:<excludezoneid>] "
-	    "[machineid:<excludemachineid>] [processid:<excludeprocessid>]",
+	    "include all|[<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] "
+	    "[locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality data",
 	    "permit previously-excluded servers and localities to rejoin the database",
 	    "If `all' is specified, the excluded servers and localities list is cleared.\n\nFor each IP address or IP:port "
-	    "pair in <ADDRESS...> or locality (which include dcid, zoneid, machineid, processid), removes any "
+	    "pair in <ADDRESS...> or any LocalityData (like dcid, zoneid, machineid, processid), removes any "
 	    "matching exclusions from the excluded servers and localities list. "
 	    "(A specified IP will match all IP:* exclusion entries)");
 	helpMap["setclass"] =
@@ -2433,9 +2434,8 @@ ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 			all = true;
 		} else if (*t == LiteralStringRef("failed")) {
 			failed = true;
-		} else if (t->startsWith(ExcludeLocalityKeyDcIdPrefix) || t->startsWith(ExcludeLocalityKeyMachineIdPrefix) ||
-		           t->startsWith(ExcludeLocalityKeyProcessIdPrefix) || t->startsWith(ExcludeLocalityKeyZoneIdPrefix)) {
-			// if the token starts with any locality prefix.
+		} else if (t->startsWith(ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
+			// if the token starts with 'locality_' prefix.
 			localities.push_back(t->toString());
 		} else {
 			auto a = AddressExclusion::parse(*t);
@@ -2514,10 +2514,7 @@ ACTOR Future<bool> exclude(Database db,
 				waitForAllExcluded = false;
 			} else if (*t == LiteralStringRef("failed")) {
 				markFailed = true;
-			} else if (t->startsWith(ExcludeLocalityKeyDcIdPrefix) ||
-			           t->startsWith(ExcludeLocalityKeyMachineIdPrefix) ||
-			           t->startsWith(ExcludeLocalityKeyProcessIdPrefix) ||
-			           t->startsWith(ExcludeLocalityKeyZoneIdPrefix)) {
+			} else if (t->startsWith(ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
 				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, t->toString());
 				if (localityAddresses.empty()) {
 					noMatchLocalities.push_back(t->toString());
