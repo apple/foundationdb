@@ -59,7 +59,7 @@ HistogramRegistry& GetHistogramRegistry();
  */
 class Histogram final : public ReferenceCounted<Histogram> {
 public:
-	enum class Unit { microseconds, bytes, bytes_per_second };
+	enum class Unit { microseconds, bytes, bytes_per_second, percentage };
 
 private:
 	static const std::unordered_map<Unit, std::string> UnitToStringMapper;
@@ -120,6 +120,17 @@ public:
 		} else {
 			sample((uint32_t)(delta * 1000000)); // convert to microseconds and truncate to integer
 		}
+	}
+	// This histogram buckets samples into linear interval of size 4 percent.
+	inline void samplePercentage(double pct) {
+		ASSERT(unit==Histogram::Unit::percentage);
+		ASSERT(pct>=0.0);
+		if (pct >= 1.28){
+			pct = 1.24;
+		}
+		size_t idx = (pct*100) / 4; 
+		ASSERT(idx < 32);
+		buckets[idx]++;
 	}
 
 	void clear() {

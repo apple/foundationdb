@@ -1297,10 +1297,10 @@ struct RedwoodMetrics {
 		int levelCounter = 0;
 		for (auto& level : levels) {
 			level = {
-				.buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::bytes),
-				.modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::bytes),
-				.buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::bytes),
-				.modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::bytes),
+				.buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
+				.modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
+				.buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
+				.modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
 				.buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::bytes),
 				.modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::bytes)
 			};
@@ -4967,8 +4967,8 @@ private:
 			metrics.buildStoredPct += p.kvFraction();
 			metrics.buildItemCount += p.count;
 
-			metrics.buildFillPctSketch->sample(p.usedFraction());
-			metrics.buildStoredPctSketch->sample(p.kvFraction());
+			metrics.buildFillPctSketch->samplePercentage(p.usedFraction());
+			metrics.buildStoredPctSketch->samplePercentage(p.kvFraction());
 			metrics.buildItemCountSketch->sample(p.count);
 
 			// Create chunked pages
@@ -5292,8 +5292,8 @@ private:
 			metrics.modifyStoredPct += (double)btPage->kvBytes / capacity;
 			metrics.modifyItemCount += btPage->tree()->numItems;
 
-			metrics.modifyFillPctSketch->sample((double)btPage->size() / capacity);
-			metrics.modifyStoredPctSketch->sample((double)btPage->kvBytes / capacity);
+			metrics.modifyFillPctSketch->samplePercentage((double)btPage->size() / capacity);
+			metrics.modifyStoredPctSketch->samplePercentage((double)btPage->kvBytes / capacity);
 			metrics.modifyItemCountSketch->sample(btPage->tree()->numItems);
 
 			g_redwoodMetrics.kvSizeWritten->sample(btPage->kvBytes);

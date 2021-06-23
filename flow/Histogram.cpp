@@ -99,7 +99,8 @@ void HistogramRegistry::logReport() {
 const std::unordered_map<Histogram::Unit, std::string> Histogram::UnitToStringMapper = {
 	{ Histogram::Unit::microseconds, "microseconds" },
 	{ Histogram::Unit::bytes, "bytes" },
-	{ Histogram::Unit::bytes_per_second, "bytes_per_second" }
+	{ Histogram::Unit::bytes_per_second, "bytes_per_second" },
+	{ Histogram::Unit::percentage, "percentage" },
 };
 
 void Histogram::writeToLog() {
@@ -129,6 +130,9 @@ void Histogram::writeToLog() {
 			case Unit::bytes:
 			case Unit::bytes_per_second:
 				e.detail(format("LessThan%u", value), buckets[i]);
+				break;
+			case Unit::percentage:
+				e.detail(format("LessThan%f", (i+1)*0.04), buckets[i]);
 				break;
 			default:
 				ASSERT(false);
