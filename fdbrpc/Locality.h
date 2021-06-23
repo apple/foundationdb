@@ -24,10 +24,8 @@
 
 #include "flow/flow.h"
 
-inline const StringRef ExcludeLocalityKeyDcIdPrefix = LiteralStringRef("dcid:");
-inline const StringRef ExcludeLocalityKeyMachineIdPrefix = LiteralStringRef("machineid:");
-inline const StringRef ExcludeLocalityKeyProcessIdPrefix = LiteralStringRef("processid:");
-inline const StringRef ExcludeLocalityKeyZoneIdPrefix = LiteralStringRef("zoneid:");
+inline const StringRef ExcludeLocalityKeyMachineIdPrefix = LiteralStringRef("locality_machineid:");
+inline const StringRef ExcludeLocalityPrefix = LiteralStringRef("locality_");
 
 struct ProcessClass {
 	constexpr static FileIdentifier file_identifier = 6697257;
@@ -311,6 +309,16 @@ public:
 				}
 			}
 		}
+	}
+
+	std::map<std::string, std::string> getAllData() const {
+		std::map<std::string, std::string> data;
+		for (const auto& d : _data) {
+			if (d.second.present()) {
+				data[d.first.toString()] = d.second.get().toString();
+			}
+		}
+		return data;
 	}
 
 	static const UID UNSET_ID;

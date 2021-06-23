@@ -634,71 +634,33 @@ std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 
 // checks if the locality is excluded or not by checking if the key is present.
 bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) const {
-	return (locality.dcId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() +
-	                                                                  locality.dcId().get().toString()))
-	                                        .present()
-	                                  : false) ||
-	       (locality.dcId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() +
-	                                                                locality.dcId().get().toString()))
-	                                        .present()
-	                                  : false) ||
-	       (locality.machineId().present()
-	            ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() +
-	                                            locality.machineId().get().toString()))
-	                  .present()
-	            : false) ||
-	       (locality.machineId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() +
-	                                                                     locality.machineId().get().toString()))
-	                                             .present()
-	                                       : false) ||
-	       (locality.processId().present()
-	            ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyProcessIdPrefix.toString() +
-	                                            locality.processId().get().toString()))
-	                  .present()
-	            : false) ||
-	       (locality.processId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyProcessIdPrefix.toString() +
-	                                                                     locality.processId().get().toString()))
-	                                             .present()
-	                                       : false) ||
-	       (locality.zoneId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() +
-	                                                                    locality.zoneId().get().toString()))
-	                                          .present()
-	                                    : false) ||
-	       (locality.zoneId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() +
-	                                                                  locality.zoneId().get().toString()))
-	                                          .present()
-	                                    : false);
+	std::map<std::string, std::string> localityData = locality.getAllData();
+	for (const auto& l : localityData) {
+		if (get(StringRef(encodeExcludedLocalityKey(ExcludeLocalityPrefix.toString() + l.first + ":" + l.second)))
+		        .present() ||
+		    get(StringRef(encodeFailedLocalityKey(ExcludeLocalityPrefix.toString() + l.first + ":" + l.second)))
+		        .present()) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 // checks if this machineid of given locality is excluded.
 // A machine can be excluded either as part of dcid exclustion or zoneid exclusion
 // or this explicit machineid exclusion.
 bool DatabaseConfiguration::isMachineExcluded(const LocalityData& locality) const {
-	return (locality.dcId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() +
-	                                                                  locality.dcId().get().toString()))
-	                                        .present()
-	                                  : false) ||
-	       (locality.dcId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() +
-	                                                                locality.dcId().get().toString()))
-	                                        .present()
-	                                  : false) ||
-	       (locality.machineId().present()
-	            ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() +
-	                                            locality.machineId().get().toString()))
-	                  .present()
-	            : false) ||
-	       (locality.machineId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() +
-	                                                                     locality.machineId().get().toString()))
-	                                             .present()
-	                                       : false) ||
-	       (locality.zoneId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() +
-	                                                                    locality.zoneId().get().toString()))
-	                                          .present()
-	                                    : false) ||
-	       (locality.zoneId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() +
-	                                                                  locality.zoneId().get().toString()))
-	                                          .present()
-	                                    : false);
+	if (locality.machineId().present()) {
+		return get(encodeExcludedLocalityKey("ExcludeLocalityKeyMachineIdPrefix.toString()" +
+		                                     locality.machineId().get().toString()))
+		           .present() ||
+		       get(encodeFailedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() +
+		                                   locality.machineId().get().toString()))
+		           .present();
+	}
+
+	return false;
 }
 
 // Gets the list of already excluded localities (with failed option)

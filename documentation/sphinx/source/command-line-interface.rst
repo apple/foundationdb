@@ -139,9 +139,9 @@ For more information on setting the cluster description, see :ref:`configuration
 exclude
 -------
 
-The ``exclude`` command excludes servers from the database or marks them as failed. Its syntax is ``exclude [failed] [<ADDRESS...>] [dcid:<excludedcid>] [zoneid:<excludezoneid>] [machineid:<excludemachineid>] [processid:<excludeprocessid>]``. If no addresses are specified, the command provides the set of excluded and failed servers and localities.
+The ``exclude`` command excludes servers from the database or marks them as failed. Its syntax is ``exclude [failed] [<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality``. If no addresses are specified, the command provides the set of excluded and failed servers and localities.
 
-For each IP address or IP:port pair in ``<ADDRESS...>`` or locality (which include dcid, zoneid, machineid, processid), the command adds the address/locality to the set of excluded servers and localities. It then waits until all database state has been safely moved off the specified servers.
+For each IP address or IP:port pair in ``<ADDRESS...>`` or locality (which include anything set on LocalityData like dcid, zoneid, machineid, processid), the command adds the address/locality to the set of excluded servers and localities. It then waits until all database state has been safely moved off the specified servers.
 
 If the ``failed`` keyword is specified, the address is marked as failed and added to the set of failed servers. It will not wait for the database state to move off the specified servers.
 
@@ -246,7 +246,7 @@ The following options are available for use with the ``option`` command:
 include
 -------
 
-The ``include`` command permits previously excluded or failed servers/localities to rejoin the database. Its syntax is ``include [failed] all|[<ADDRESS...>] [dcid:<excludedcid>] [zoneid:<excludezoneid>] [machineid:<excludemachineid>] [processid:<excludeprocessid>]``.
+The ``include`` command permits previously excluded or failed servers/localities to rejoin the database. Its syntax is ``include [failed] all|[<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality``.
 
 The ``failed`` keyword is required if the servers were previously marked as failed rather than excluded.
 
