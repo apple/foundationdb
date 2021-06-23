@@ -112,7 +112,7 @@ For recommendations on appropriate values for process types in large clusters, s
 perpetual storage wiggle
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Set the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle.
+Set the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle. For more details, see :ref:`perpetual-storage-wiggle`.
 
 consistencycheck
 ----------------
