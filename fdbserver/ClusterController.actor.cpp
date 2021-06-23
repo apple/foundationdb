@@ -1691,6 +1691,66 @@ public:
 		return idUsed;
 	}
 
+    // Updates work health signals in `workerHealth` based on `req`.
+    void updateWorkerHealth(const UpdateWorkerHealthRequest& req) {
+        std::string degradedPeersString;
+        for (int i = 0; i < req.degradedPeers.size(); ++i) {
+            degradedPeersString += i == 0 ? "" : " " + req.degradedPeers[i].toString();
+        }
+        TraceEvent("ClusterControllerUpdateWorkerHealth")
+            .detail("WorkerAddress", req.address)
+            .detail("DegradedPeers", degradedPeersString);
+
+        // `req.degradedPeers` contains the latest peer performance view from the worker. Clear the worker if the
+        // requested worker doesn't see any degraded peers.
+        if (req.degradedPeers.empty()) {
+            workerHealth.erase(req.address);
+            return;
+        }
+
+        double currentTime = now();
+
+        // Current `workerHealth` doesn't have any information about the incoming worker. Add the worker into
+        // `workerHealth`.
+        if (workerHealth.find(req.address) == workerHealth.end()) {
+            workerHealth[req.address] = {};
+            for (const auto& degradedPeer : req.degradedPeers) {
+                workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
+            }
+
+            return;
+        }
+
+        // The incoming worker already exists in `workerHealth`.
+
+        auto& health = workerHealth[req.address];
+
+        // First, remove any degraded peers recorded in the `workerHealth`, but aren't in the incoming request. These
+        // machines network performance should have recovered.
+        std::unordered_set<NetworkAddress> recoveredPeers;
+        for (const auto& [peer, times] : health.degradedPeers) {
+            recoveredPeers.insert(peer);
+        }
+        for (const auto& peer : req.degradedPeers) {
+            if (recoveredPeers.find(peer) != recoveredPeers.end()) {
+                recoveredPeers.erase(peer);
+            }  
+        }
+        for (const auto& peer : recoveredPeers) {
+            health.degradedPeers.erase(peer);
+        }
+
+        // Update the worker's degradedPeers.
+        for (const auto& peer : req.degradedPeers) {
+            auto it = health.degradedPeers.find(peer);
+            if (it == health.degradedPeers.end()) {
+                health.degradedPeers[peer] = { currentTime, currentTime };
+                continue;
+            }
+            it->second.lastRefreshTime = currentTime;
+        }
+    }
+
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
 	    id_class; // contains the mapping from process id to process class from the database
@@ -1728,6 +1788,18 @@ public:
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
+
+    // Stores the health information from a particular worker's perspective.
+    struct WorkerHealth {
+        struct DegradedTimes {
+            double startTime = 0;
+            double lastRefreshTime = 0;
+        };
+        std::unordered_map<NetworkAddress, DegradedTimes> degradedPeers;
+
+        // TODO(zhewu): Include disk and CPU signals.
+    };
+	std::unordered_map<NetworkAddress, WorkerHealth> workerHealth;
 
 	CounterCollection clusterControllerMetrics;
 
@@ -3587,6 +3659,11 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			++self.registerMasterRequests;
 			clusterRegisterMaster(&self, req);
 		}
+		when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
+			if (SERVER_KNOBS->CLUSTER_CONTROLLER_ENABLE_WORKER_HEALTH_MONITOR) {
+				self.updateWorkerHealth(req);
+			}
+		}
 		when(GetServerDBInfoRequest req = waitNext(interf.getServerDBInfo.getFuture())) {
 			self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
 		}
@@ -3679,3 +3756,67 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> connFile,
 		hasConnected = true;
 	}
 }
+
+namespace {
+
+// Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth` based on
+// `UpdateWorkerHealth` request correctly.
+TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
+    // Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+    state ClusterControllerData data(ClusterControllerFullInterface(),
+                                     LocalityData(),
+                                     ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+    state NetworkAddress workerAddress(IPAddress(0x01010101), 1);
+    state NetworkAddress badPeer1(IPAddress(0x02020202), 1);
+    state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
+    state NetworkAddress badPeer3(IPAddress(0x04040404), 1);
+
+    // Create a `UpdateWorkerHealthRequest` with two bad peers, and they should appear in the `workerAddress`'s
+    // degradedPeers.
+    {
+        UpdateWorkerHealthRequest req;
+        req.address = workerAddress;
+        req.degradedPeers.push_back(badPeer1);
+        req.degradedPeers.push_back(badPeer2);
+        data.updateWorkerHealth(req);
+        ASSERT(data.workerHealth.find(workerAddress) != data.workerHealth.end());
+        auto& health = data.workerHealth[workerAddress];
+        ASSERT_EQ(health.degradedPeers.size(), 2);
+        ASSERT(health.degradedPeers.find(badPeer1) != health.degradedPeers.end());
+        ASSERT_EQ(health.degradedPeers[badPeer1].startTime, health.degradedPeers[badPeer1].lastRefreshTime);
+        ASSERT(health.degradedPeers.find(badPeer2) != health.degradedPeers.end());
+    }
+
+    // Create a `UpdateWorkerHealthRequest` with two bad peers, one from the previous test and a new one.
+    // The one from the previous test should have lastRefreshTime updated.
+    // The other one from the previous test not included in this test should be removed.
+    {
+        // Make the time to move so that now() guarantees to return a larger value than before.
+        wait(delay(0.001));
+        UpdateWorkerHealthRequest req;
+        req.address = workerAddress;
+        req.degradedPeers.push_back(badPeer1);
+        req.degradedPeers.push_back(badPeer3);
+        data.updateWorkerHealth(req);
+        ASSERT(data.workerHealth.find(workerAddress) != data.workerHealth.end());
+        auto& health = data.workerHealth[workerAddress];
+        ASSERT_EQ(health.degradedPeers.size(), 2);
+        ASSERT(health.degradedPeers.find(badPeer1) != health.degradedPeers.end());
+        ASSERT_LT(health.degradedPeers[badPeer1].startTime, health.degradedPeers[badPeer1].lastRefreshTime);
+        ASSERT(health.degradedPeers.find(badPeer2) == health.degradedPeers.end());
+        ASSERT(health.degradedPeers.find(badPeer3) != health.degradedPeers.end());
+    }
+
+    // Create a `UpdateWorkerHealthRequest` with empty `degradedPeers`, which should remove the worker from
+    // `workerHealth`.
+    {
+        UpdateWorkerHealthRequest req;
+        req.address = workerAddress;
+        data.updateWorkerHealth(req);
+        ASSERT(data.workerHealth.find(workerAddress) == data.workerHealth.end());
+    }
+
+    return Void();
+}
+
+} // namespace

@@ -387,6 +387,7 @@ public:
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
 	double CLIENT_REGISTER_INTERVAL;
+        bool CLUSTER_CONTROLLER_ENABLE_WORKER_HEALTH_MONITOR;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)

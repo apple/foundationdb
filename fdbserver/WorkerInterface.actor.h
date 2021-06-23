@@ -144,6 +144,7 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct RegisterWorkerRequest> registerWorker;
 	RequestStream<struct GetWorkersRequest> getWorkers;
 	RequestStream<struct RegisterMasterRequest> registerMaster;
+	RequestStream<struct UpdateWorkerHealthRequest> updateWorkerHealth;
 	RequestStream<struct GetServerDBInfoRequest>
 	    getServerDBInfo; // only used by testers; the cluster controller will send the serverDBInfo to workers
 
@@ -155,7 +156,8 @@ struct ClusterControllerFullInterface {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
-		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady();
+		       registerMaster.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
+		       getServerDBInfo.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -166,6 +168,7 @@ struct ClusterControllerFullInterface {
 		registerWorker.getEndpoint(TaskPriority::ClusterControllerWorker);
 		getWorkers.getEndpoint(TaskPriority::ClusterController);
 		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
+		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
 		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
 	}
 
@@ -182,6 +185,7 @@ struct ClusterControllerFullInterface {
 		           registerWorker,
 		           getWorkers,
 		           registerMaster,
+				   updateWorkerHealth,
 		           getServerDBInfo);
 	}
 };
@@ -413,6 +417,20 @@ struct GetWorkersRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, flags, reply);
+	}
+};
+
+struct UpdateWorkerHealthRequest {
+	constexpr static FileIdentifier file_identifier = 5789927;
+	NetworkAddress address;
+	std::vector<NetworkAddress> degradedPeers;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, address, degradedPeers);
 	}
 };
 
