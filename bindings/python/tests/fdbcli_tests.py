@@ -6,6 +6,7 @@ import logging
 import functools
 import json
 import time
+import random
 
 def enable_logging(level=logging.ERROR):
     """Enable logging in the function with the specified logging level
@@ -93,32 +94,40 @@ def maintenance(logger):
     output3 = run_fdbcli_command('maintenance')
     assert output3 == no_maintenance_output
 
-@enable_logging()
+@enable_logging(logging.DEBUG)
 def setclass(logger):
     output1 = run_fdbcli_command('setclass')
     class_type_line_1 = output1.split('\n')[-1]
     logger.debug(class_type_line_1)
     # check process' network address
     assert '127.0.0.1' in class_type_line_1
+    network_address = ':'.join(class_type_line_1.split(':')[:2])
+    logger.debug("Network address: {}".format(network_address))
     # check class type
     assert 'unset' in class_type_line_1
     # check class source
     assert 'command_line' in class_type_line_1
-    # set class to a random value
-    random_class_type = 'storage'
-    run_fdbcli_command('setclass', '127.0.0.1', random_class_type)
+    # set class to a random valid type
+    class_types = ['storage', 'storage', 'transaction', 'resolution', 
+                    'commit_proxy', 'grv_proxy', 'master', 'stateless', 'log', 
+                    'router', 'cluster_controller', 'fast_restore', 'data_distributor',
+	                'coordinator', 'ratekeeper', 'storage_cache', 'backup', 
+                    'default']
+    random_class_type = random.choice(class_types)
+    logger.debug("Change to type: {}".format(random_class_type))
+    run_fdbcli_command('setclass', network_address, random_class_type)
     # check the set successful
     output2 = run_fdbcli_command('setclass')
     class_type_line_2 = output2.split('\n')[-1]
     logger.debug(class_type_line_2)
     # check process' network address
-    assert '127.0.0.1' in class_type_line_2
+    assert network_address in class_type_line_2
     # check class type changed to the specified value
     assert random_class_type in class_type_line_2
     # check class source
     assert 'set_class' in class_type_line_2
     # set back to default
-    run_fdbcli_command('setclass', '127.0.0.1', 'default')
+    run_fdbcli_command('setclass', network_address, 'default')
     # everything should be back to the same as before
     output3 = run_fdbcli_command('setclass')
     class_type_line_3 = output3.split('\n')[-1]
