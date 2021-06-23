@@ -684,6 +684,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 		    addressesInDbAndPrimaryDc(interf.addresses(), dbInfo) && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
+			UpdateWorkerHealthRequest req;
 			for (const auto& [address, peer] : allPeers) {
 				if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
 					// Ignore peers that don't have enough samples.
@@ -721,8 +722,13 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 					    .detail("Count", peer->pingLatencies.getPopulationSize())
 					    .detail("TimeoutCount", peer->timeoutCount);
 
-					// TODO(zhewu): Keep track of degraded peers and send them to cluster controller.
+					req.degradedPeers.push_back(address);
 				}
+			}
+
+			if (!req.degradedPeers.empty()) {
+				req.address = FlowTransport::transport().getLocalAddress();
+				ccInterface->get().get().updateWorkerHealth.send(req);
 			}
 		}
 		choose {
