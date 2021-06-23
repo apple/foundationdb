@@ -946,12 +946,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if (found && teamList[j]->isHealthy()) {
+							printf("Avoided move of !wantsNewServers req\n");
 							bestOption = teamList[j];
 							req.reply.send(std::make_pair(bestOption, foundSrc));
 							return Void();
 						}
 					}
 				}
+				printf("Couldn't avoid move of !wantsNewServers req\n");
 			}
 
 			if (req.wantsTrueBest) {

@@ -41,6 +41,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/SequentialWriteTracking.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/VersionedMap.h"
@@ -145,6 +146,7 @@ public:
 	struct StorageServer* readWrite;
 	KeyRange keys;
 	uint64_t changeCounter;
+	SequentialWriteTracker seqWriteTracker;
 
 	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
 	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
@@ -902,6 +904,39 @@ public:
 			if (!i->value()->isReadable())
 				return false;
 		return true;
+	}
+
+	SequentialWriteState seqWriteState(KeyRangeRef const& keys) {
+		// might cross multiple shards.
+		// Only sequential decreasing if the first tracker is decreasing
+		// Only sequential increasing if the last tracker is increasing
+		// TODO could improve
+		auto sh = shards.intersectingRanges(keys);
+		bool seenFirst;
+		SequentialWriteState firstState;
+		SequentialWriteState lastState;
+		int count = 0;
+		/*printf("Checking SS Seq Write State for [%s - %s)\n",
+		       keys.begin.printable().c_str(),
+		       keys.end.printable().c_str());*/
+		for (auto i = sh.begin(); i != sh.end(); ++i) {
+			SequentialWriteState st = i->value()->seqWriteTracker.getWriteState();
+			// printf("    %s\n", getSequentialWriteStateName(st));
+			if (!seenFirst) {
+				seenFirst = false;
+				firstState = st;
+			}
+			lastState = st;
+			count++;
+		}
+		if (count == 1) {
+			return firstState;
+		}
+		// if the endpoint was increasing or decreasing, leave it up to the DD-side determiniation
+		if (count > 1 && (firstState == S4SequentialDecreasing || lastState == S4SequentialIncreasing)) {
+			return S4Unknown;
+		}
+		return S4NonSequential;
 	}
 
 	void checkChangeCounter(uint64_t oldShardChangeCounter, KeyRef const& key) {
@@ -2110,13 +2145,13 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
-		//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
+		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
 		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
 			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
-			//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
-			//shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -2193,10 +2228,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				}
 
 				/*for( int i = 0; i < r.data.size(); i++ ) {
-					StorageMetrics m;
-					m.bytesPerKSecond = r.data[i].expectedSize();
-					m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
-					data->metrics.notify(r.data[i].key, m);
+				    StorageMetrics m;
+				    m.bytesPerKSecond = r.data[i].expectedSize();
+				    m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an
+				int data->metrics.notify(r.data[i].key, m);
 				}*/
 
 				// For performance concerns, the cost of a range read is billed to the start key and end key of the
@@ -3199,6 +3234,14 @@ void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
 		    .detail("Version", version)
 		    .detail("Mutation", mutation.toString());
 		ASSERT(false); // Mutation delivered to notAssigned shard!
+	}
+
+	// TODO could also handle clear range by checking both bounds against increasing/decreasing
+	if (mutation.type == MutationRef::SetValue) {
+		seqWriteTracker.trackKey(mutation.param1);
+		// TODO REMOVE, just for testing
+		SequentialWriteState st = seqWriteTracker.getWriteState();
+		TEST(st == S4SequentialIncreasing || st == S4SequentialDecreasing); // sequential SS writes!
 	}
 }
 
@@ -4441,6 +4484,44 @@ Future<bool> StorageServerDisk::restoreDurableState() {
 	return ::restoreDurableState(data, storage);
 }
 
+// use the information from both DD request and SS state to determine what the actual sequential write state is
+// The overall idea is, unless one of the specific knobs are set, DD has the higher level picture, so go with DD unless
+// it doesn't have enough info or it contradicts the SS state
+// (dd, ss) -> result
+// (non-seq, *) -> non-seq
+
+SequentialWriteState computeSequentialWriteState(SequentialWriteState ddState, SequentialWriteState ssState) {
+	if (SERVER_KNOBS->SEQ_WRITE_DISABLED) {
+		return S4NonSequential;
+	} else if (SERVER_KNOBS->SEQ_WRITE_DDONLY) {
+		return ddState;
+	} else if (SERVER_KNOBS->SEQ_WRITE_SSONLY) {
+		return ssState;
+	}
+	if (ddState == S4NonSequential) {
+		return S4NonSequential;
+	}
+
+	// TODO: a potential optimization here is that if both DD and SS agree on the same sequential value, skew split even
+	// more since we're more confident that it's a split Could be "high confidence" vs "low confidence" sequential or
+	// something
+
+	// if DD state is sequential, use DD state as long as SS state doesn't contradict it to handle semi-sequential
+	// writes
+	if (ddState == S4SequentialDecreasing && (ssState != S4SequentialIncreasing)) {
+		return S4SequentialDecreasing;
+	}
+	if (ddState == S4SequentialIncreasing && (ssState != S4SequentialDecreasing)) {
+		return S4SequentialIncreasing;
+	}
+	// if dd doesn't know but SS is sure it's sequential, use SS state
+	if (ddState == S4Unknown && (ssState == S4SequentialDecreasing || ssState == S4SequentialIncreasing)) {
+		return ssState;
+	}
+
+	return (ddState == S4Unknown && ssState == S4Unknown) ? S4Unknown : S4NonSequential;
+}
+
 // Determines whether a key-value pair should be included in a byte sample
 // Also returns size information about the sample
 ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue) {
@@ -4704,7 +4785,18 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 					TEST(true); // splitMetrics immediate wrong_shard_server()
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
-					self->metrics.splitMetrics(req);
+					// copy to make it writable since actor compiler makes req const
+					SplitMetricsRequest req2 = req;
+					SequentialWriteState ddState = static_cast<SequentialWriteState>(req2.seqWriteState);
+					SequentialWriteState ssState = self->seqWriteState(req2.keys);
+					SequentialWriteState combined = computeSequentialWriteState(ddState, ssState);
+					req2.seqWriteState = combined;
+					// TODO REMOVE?
+					TraceEvent("SeqWriteStateCalc")
+					    .detail("DD", getSequentialWriteStateName(ddState))
+					    .detail("SS", getSequentialWriteStateName(ssState))
+					    .detail("Result", getSequentialWriteStateName(combined));
+					self->metrics.splitMetrics(req2);
 				}
 			}
 			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {

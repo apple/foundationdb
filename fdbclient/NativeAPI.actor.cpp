@@ -6224,7 +6224,8 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
-                                                                StorageMetrics estimated) {
+                                                                StorageMetrics estimated,
+                                                                SequentialWriteState seqWriteState) {
 	state Span span("NAPI:SplitStorageMetrics"_loc);
 	loop {
 		state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
@@ -6249,7 +6250,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 				state int i = 0;
 				for (; i < locations.size(); i++) {
-					SplitMetricsRequest req(locations[i].first, limit, used, estimated, i == locations.size() - 1);
+					SplitMetricsRequest req(
+					    locations[i].first, limit, used, estimated, i == 0, i == locations.size() - 1, seqWriteState);
 					SplitMetricsReply res = wait(loadBalance(locations[i].second->locations(),
 					                                         &StorageServerInterface::splitMetrics,
 					                                         req,
@@ -6266,11 +6268,19 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 						results.arena().dependsOn(res.splits.arena());
 					}
 					used = res.used;
+					seqWriteState = static_cast<SequentialWriteState>(res.seqWriteState);
 
 					//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
 				}
 
-				if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT)) {
+				// if we are splitting sequential increasing, the last shard is desired to be smaller than the others,
+				// so don't truncate it if it has a split before (results is currently [begin, split])
+				if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) &&
+				    (seqWriteState != S4SequentialIncreasing || results.size() < 2)) {
+					/*printf("Truncating last shard split @ %s due to unfair split limit (%lld < %.1f bytes)\n",
+					       results.back().printable().c_str(),
+					       used.bytes,
+					       limit.bytes * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT);*/
 					results.resize(results.arena(), results.size() - 1);
 				}
 
@@ -6290,8 +6300,9 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 Future<Standalone<VectorRef<KeyRef>>> Transaction::splitStorageMetrics(KeyRange const& keys,
                                                                        StorageMetrics const& limit,
-                                                                       StorageMetrics const& estimated) {
-	return ::splitStorageMetrics(cx, keys, limit, estimated);
+                                                                       StorageMetrics const& estimated,
+                                                                       SequentialWriteState seqWriteState) {
+	return ::splitStorageMetrics(cx, keys, limit, estimated, seqWriteState);
 }
 
 void Transaction::checkDeferredError() const {

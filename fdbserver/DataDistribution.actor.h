@@ -239,6 +239,7 @@ struct ShardTrackedData {
 	Future<Void> trackShard;
 	Future<Void> trackBytes;
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+	Reference<ShardSplitLineage> splitLineage;
 };
 
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,

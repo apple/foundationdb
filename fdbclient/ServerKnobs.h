@@ -692,6 +692,17 @@ public:
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
+	// Sequential Write Logic
+	// TODO remove all of these except feature toggle after testing
+	// if all of SEQ_WRITE* are false, it will use a combination of DD and SS's information to determine shard splits
+	bool SEQ_WRITE_DISABLED; // disable sequential write tracking and splitting
+	bool SEQ_WRITE_DDONLY; // Only use the data distributor's sequential write tracking to determine shard splits
+	bool SEQ_WRITE_SSONLY; // Only use the storage server's sequential write tracking to determine shard splits
+	bool STORAGE_METRICS_OLD; // use old storage metrics split calculation
+	bool DD_USE_FIXED_SIZE_SHARD; // hack to always use the same size shard split
+	int64_t DD_FIXED_SHARD_SIZE;
+	bool DD_ALWAYS_SPLIT_SEQ_INC;
+
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };

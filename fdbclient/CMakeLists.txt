@@ -90,6 +90,8 @@ set(FDBCLIENT_SRCS
   ServerKnobCollection.h
   ServerKnobs.cpp
   ServerKnobs.h
+  SequentialWriteTracking.cpp
+  SequentialWriteTracking.h
   SimpleConfigTransaction.h
   SnapshotCache.h
   SpecialKeySpace.actor.cpp

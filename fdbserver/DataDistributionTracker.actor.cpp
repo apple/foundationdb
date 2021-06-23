@@ -24,6 +24,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
@@ -137,6 +138,7 @@ struct DataDistributionTracker {
 
 void restartShardTrackers(DataDistributionTracker* self,
                           KeyRangeRef keys,
+                          Reference<ShardSplitLineage> splitLineage,
                           Optional<ShardMetrics> startingMetrics = Optional<ShardMetrics>());
 
 // Gets the permitted size and IO bounds for a shard. A shard that starts at allKeys.begin
@@ -176,6 +178,10 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 }
 
 int64_t getMaxShardSize(double dbSizeEstimate) {
+	// TODO REMOVE
+	if (SERVER_KNOBS->DD_USE_FIXED_SIZE_SHARD) {
+		return SERVER_KNOBS->DD_FIXED_SHARD_SIZE;
+	}
 	return std::min((SERVER_KNOBS->MIN_SHARD_BYTES + (int64_t)std::sqrt(std::max<double>(dbSizeEstimate, 0)) *
 	                                                     SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES) *
 	                    SERVER_KNOBS->SHARD_BYTES_RATIO,
@@ -372,11 +378,13 @@ inBytes->get().get() + rate * 10.0 );
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getSplitKeys(DataDistributionTracker* self,
                                                          KeyRange splitRange,
                                                          StorageMetrics splitMetrics,
-                                                         StorageMetrics estimated) {
+                                                         StorageMetrics estimated,
+                                                         SequentialWriteState seqWriteState) {
 	loop {
 		state Transaction tr(self->cx);
 		try {
-			Standalone<VectorRef<KeyRef>> keys = wait(tr.splitStorageMetrics(splitRange, splitMetrics, estimated));
+			Standalone<VectorRef<KeyRef>> keys =
+			    wait(tr.splitStorageMetrics(splitRange, splitMetrics, estimated, seqWriteState));
 			return keys;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -469,12 +477,23 @@ private:
 ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
                                  KeyRange keys,
                                  Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
-                                 ShardSizeBounds shardBounds) {
+                                 ShardSizeBounds shardBounds,
+                                 Reference<ShardSplitLineage> splitLineage) {
 	state StorageMetrics metrics = shardSize->get().get().metrics;
 	state BandwidthStatus bandwidthStatus = getBandwidthStatus(metrics);
+	state SequentialWriteState seqWriteState =
+	    (!SERVER_KNOBS->SEQ_WRITE_DISABLED && !SERVER_KNOBS->SEQ_WRITE_SSONLY && !SERVER_KNOBS->STORAGE_METRICS_OLD)
+	        ? splitLineage->getSplitState(3)
+	        : S4NonSequential;
+
+	// TODO REMOVE!!!!!
+	if (SERVER_KNOBS->DD_ALWAYS_SPLIT_SEQ_INC) {
+		seqWriteState = S4SequentialIncreasing;
+	}
 
 	// Split
 	TEST(true); // shard to be split
+	// printf("Shard splitter starting for [%s - %s)\n", keys.begin.printable().c_str(), keys.end.printable().c_str());
 
 	StorageMetrics splitMetrics;
 	splitMetrics.bytes = shardBounds.max.bytes / 2;
@@ -483,11 +502,18 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	splitMetrics.iosPerKSecond = splitMetrics.infinity;
 	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
 
-	state Standalone<VectorRef<KeyRef>> splitKeys = wait(getSplitKeys(self, keys, splitMetrics, metrics));
+	TEST(seqWriteState == S4SequentialIncreasing ||
+	     seqWriteState == S4SequentialDecreasing); // sequential split lineage!
+	state Standalone<VectorRef<KeyRef>> splitKeys =
+	    wait(getSplitKeys(self, keys, splitMetrics, metrics, seqWriteState));
 	// fprintf(stderr, "split keys:\n");
 	// for( int i = 0; i < splitKeys.size(); i++ ) {
 	//	fprintf(stderr, "   %s\n", printable(splitKeys[i]).c_str());
 	//}
+	/*printf("split keys:\n");
+	for (auto& it : splitKeys) {
+	    printf("  %s\n", it.printable().c_str());
+	}*/
 	int numShards = splitKeys.size() - 1;
 
 	if (deterministicRandom()->random01() < 0.01) {
@@ -501,28 +527,92 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
 		                                                       : "Low")
 		    .detail("BytesPerKSec", metrics.bytesPerKSecond)
-		    .detail("NumShards", numShards);
+		    .detail("NumShards", numShards)
+		    .detail("SequentialSplit",
+		            (seqWriteState == S4SequentialIncreasing || seqWriteState == S4SequentialDecreasing) ? "Y" : "N");
 	}
 
 	if (numShards > 1) {
+		// TODO make check depth of 3 a knob?
+		ASSERT(splitLineage.isValid());
+		std::vector<Reference<ShardSplitLineage>> childSplitLineage = splitShardLineage(splitLineage, numShards, 3);
+
 		int skipRange = deterministicRandom()->randomInt(0, numShards);
+
+		// TODO REMOVE!! just need for testing to count shard splits easily
+		TraceEvent("RelocateShardSplitting", self->distributorId)
+		    .detail("Begin", keys.begin)
+		    .detail("End", keys.end)
+		    .detail("MaxBytes", shardBounds.max.bytes)
+		    .detail("MetricsBytes", metrics.bytes)
+		    .detail("Bandwidth",
+		            bandwidthStatus == BandwidthStatusHigh     ? "High"
+		            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
+		                                                       : "Low")
+		    .detail("BytesPerKSec", metrics.bytesPerKSecond)
+		    .detail("NumShards", numShards)
+		    .detail("SequentialSplit",
+		            (seqWriteState == S4SequentialIncreasing || seqWriteState == S4SequentialDecreasing) ? "Y" : "N");
+
 		// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 		// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
 		for (int i = 0; i < skipRange; i++)
-			restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
-		restartShardTrackers(self, KeyRangeRef(splitKeys[skipRange], splitKeys[skipRange + 1]));
+			restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]), childSplitLineage[i]);
+		restartShardTrackers(
+		    self, KeyRangeRef(splitKeys[skipRange], splitKeys[skipRange + 1]), childSplitLineage[skipRange]);
 		for (int i = numShards - 1; i > skipRange; i--)
-			restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
+			restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]), childSplitLineage[i]);
+
+		int movePriority = SERVER_KNOBS->PRIORITY_SPLIT_SHARD;
+		int seqHotIndex = -1;
+		if ((seqWriteState == S4SequentialIncreasing || seqWriteState == S4SequentialDecreasing)) {
+
+			// If sequential writes, only move the sequential end of the range.
+			// This is to move the write hotspotting around between storage servers, and because it moves the minimal
+			// amount of data since the sequential shard is smaller.
+
+			TEST(numShards == 2); // 2 shards in sequential split
+			TEST(numShards > 2); // > 2 shards in sequential split
+
+			// Since sequential cold shards are moved with the priority SEQ_COLD, wantsNewServers will not be set in the
+			// relocateData, and they shouldn't be moved off of the original server.
+			movePriority = SERVER_KNOBS->PRIORITY_SPLIT_SHARD_SEQ_COLD;
+
+			// The whole idea of sequential writes is that the sequential end split is hot, and the other splits are
+			// cold. So, just don't move the cold splits, and move the hot split with the same probability it would get
+			// moved if it wasn't sequential (skipRange != moveRange), we can save on data movement
+
+			seqHotIndex = (seqWriteState == S4SequentialIncreasing) ? numShards - 1 : 0;
+			KeyRangeRef seqRange(splitKeys[seqHotIndex], splitKeys[seqHotIndex + 1]);
+			// TODO REMOVE!!
+			if (seqHotIndex != skipRange) {
+				printf("Relocating seq shard after split [%s - %s)\n",
+				       seqRange.begin.printable().c_str(),
+				       seqRange.end.printable().c_str());
+			} else {
+				printf("Skipping relocation of seq shard after split [%s - %s)\n",
+				       seqRange.begin.printable().c_str(),
+				       seqRange.end.printable().c_str());
+			}
+		}
 
 		for (int i = 0; i < skipRange; i++) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD));
+			self->output.send(
+			    RelocateShard(r, i == seqHotIndex ? SERVER_KNOBS->PRIORITY_SPLIT_SHARD_SEQ_HOT : movePriority));
+			printf("Relocating shard after split [%s - %s)\n",
+			       splitKeys[i].printable().c_str(),
+			       splitKeys[i + 1].printable().c_str());
 		}
 		for (int i = numShards - 1; i > skipRange; i--) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD));
+			self->output.send(
+			    RelocateShard(r, i == seqHotIndex ? SERVER_KNOBS->PRIORITY_SPLIT_SHARD_SEQ_HOT : movePriority));
+			printf("Relocating shard after split [%s - %s)\n",
+			       splitKeys[i].printable().c_str(),
+			       splitKeys[i + 1].printable().c_str());
 		}
 
 		self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
@@ -616,8 +706,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		shardsMerged++;
 
 		auto shardBounds = getShardSizeBounds(merged, maxShardSize);
-		// If we just recently get the current shard's metrics (i.e., less than DD_LOW_BANDWIDTH_DELAY ago), it means
-		// the shard's metric may not be stable yet. So we cannot continue merging in this direction.
+		// If we just recently get the current shard's metrics (i.e., less than DD_LOW_BANDWIDTH_DELAY ago), it
+		// means the shard's metric may not be stable yet. So we cannot continue merging in this direction.
 		if (endingStats.bytes >= shardBounds.min.bytes || getBandwidthStatus(endingStats) != BandwidthStatusLow ||
 		    now() - lastLowBandwidthStartTime < SERVER_KNOBS->DD_LOW_BANDWIDTH_DELAY ||
 		    shardsMerged >= SERVER_KNOBS->DD_MERGE_LIMIT) {
@@ -651,9 +741,11 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	// NewKeys: New key range after shards are merged;
 	// EndingSize: The new merged shard size in bytes;
 	// BatchedMerges: The number of shards merged. Each shard is defined in self->shards;
-	// LastLowBandwidthStartTime: When does a shard's bandwidth status becomes BandwidthStatusLow. If a shard's status
+	// LastLowBandwidthStartTime: When does a shard's bandwidth status becomes BandwidthStatusLow. If a shard's
+	// status
 	//   becomes BandwidthStatusLow less than DD_LOW_BANDWIDTH_DELAY ago, the merging logic will stop at the shard;
-	// ShardCount: The number of non-splittable shards that are merged. Each shard is defined in self->shards may have
+	// ShardCount: The number of non-splittable shards that are merged. Each shard is defined in self->shards may
+	// have
 	//   more than 1 shards.
 	TraceEvent("RelocateShardMergeMetrics", self->distributorId)
 	    .detail("OldKeys", keys)
@@ -666,7 +758,10 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	if (mergeRange.begin < systemKeys.begin) {
 		self->systemSizeEstimate -= systemBytes;
 	}
-	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
+	restartShardTrackers(self,
+	                     mergeRange,
+	                     makeReference<ShardSplitLineage>(),
+	                     ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
 	self->output.send(RelocateShard(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD));
 
@@ -677,7 +772,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
                                   KeyRange keys,
                                   Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
-                                  Reference<HasBeenTrueFor> wantsToMerge) {
+                                  Reference<HasBeenTrueFor> wantsToMerge,
+                                  Reference<ShardSplitLineage> splitLineage) {
 	Future<Void> onChange = shardSize->onChange() || yieldedFuture(self->maxShardSize->onChange());
 
 	// There are the bounds inside of which we are happy with the shard size.
@@ -722,7 +818,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 		onChange = onChange || shardMerger(self, keys, shardSize);
 	}
 	if (shouldSplit) {
-		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds);
+		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, splitLineage);
 	}
 
 	wait(onChange);
@@ -731,7 +827,8 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 
 ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
                                 KeyRange keys,
-                                Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
+                                Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
+                                Reference<ShardSplitLineage> splitLineage) {
 	wait(yieldedFuture(self()->readyToStart.getFuture()));
 
 	if (!shardSize->get().present())
@@ -757,10 +854,10 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 	try {
 		loop {
 			// Use the current known size to check for (and start) splits and merges.
-			wait(shardEvaluator(self(), keys, shardSize, wantsToMerge));
+			wait(shardEvaluator(self(), keys, shardSize, wantsToMerge, splitLineage));
 
-			// We could have a lot of actors being released from the previous wait at the same time. Immediately calling
-			// delay(0) mitigates the resulting SlowTask
+			// We could have a lot of actors being released from the previous wait at the same time. Immediately
+			// calling delay(0) mitigates the resulting SlowTask
 			wait(delay(0, TaskPriority::DataDistribution));
 		}
 	} catch (Error& e) {
@@ -771,9 +868,18 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 	}
 }
 
-void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optional<ShardMetrics> startingMetrics) {
+void restartShardTrackers(DataDistributionTracker* self,
+                          KeyRangeRef keys,
+                          Reference<ShardSplitLineage> splitLineage,
+                          Optional<ShardMetrics> startingMetrics) {
+	/*printf("restarting shard trackers for range [%s - %s)\n",
+	       keys.begin.printable().c_str(),
+	       keys.end.printable().c_str());*/
 	auto ranges = self->shards.getAffectedRangesAfterInsertion(keys, ShardTrackedData());
 	for (int i = 0; i < ranges.size(); i++) {
+		/*printf("restarting shard tracker  [%s - %s)\n",
+		       ranges[i].begin.printable().c_str(),
+		       ranges[i].end.printable().c_str());*/
 		if (!ranges[i].value.trackShard.isValid() && ranges[i].begin != keys.begin) {
 			// When starting, key space will be full of "dummy" default contructed entries.
 			// This should happen when called from trackInitialShards()
@@ -795,10 +901,26 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 			shardMetrics->set(startingMetrics);
 		}
 
+		Reference<ShardSplitLineage> newSplitLineage = makeReference<ShardSplitLineage>();
+		if (keys.begin == ranges[i].begin && keys.end == ranges[i].end) {
+			/*printf("Setting split lineage for range [%s - %s)\n",
+			       ranges[i].begin.printable().c_str(),
+			       ranges[i].end.printable().c_str());*/
+			newSplitLineage = splitLineage;
+		} /* else if (splitLineage->parent.isValid() && ranges[i].value.splitLineage.isValid() &&
+		            splitLineage->parent.getPtr() != ranges[i].value.splitLineage.getPtr()) {
+		     // if the old one for this part of the range isn't the parent of this splitLineage, this is a merge, so
+		 mark
+		     // old ranges as merged
+		     ranges[i].value.splitLineage->merged();
+		 }*/
+
 		ShardTrackedData data;
 		data.stats = shardMetrics;
-		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
+		data.trackShard =
+		    shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics, newSplitLineage);
 		data.trackBytes = trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
+		data.splitLineage = newSplitLineage;
 		self->shards.insert(ranges[i], data);
 	}
 }
@@ -812,7 +934,12 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 
 	state int s;
 	for (s = 0; s < initData->shards.size() - 1; s++) {
-		restartShardTrackers(self, KeyRangeRef(initData->shards[s].key, initData->shards[s + 1].key));
+		printf("restarting shard trackers for initial shard [%s - %s)\n",
+		       initData->shards[s].key.printable().c_str(),
+		       initData->shards[s + 1].key.printable().c_str());
+		restartShardTrackers(self,
+		                     KeyRangeRef(initData->shards[s].key, initData->shards[s + 1].key),
+		                     makeReference<ShardSplitLineage>());
 		wait(yield(TaskPriority::DataDistribution));
 	}
 
@@ -934,6 +1061,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
 	try {
+		// TODO: could read shard lineage from previous shard map instead of starting fresh
 		wait(trackInitialShards(&self, initData));
 		initData = Reference<InitialDataDistribution>();
 

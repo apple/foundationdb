@@ -142,6 +142,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_TEAM_FAILED,                                  805 );
 	init( PRIORITY_TEAM_0_LEFT,                                  809 );
 	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
+	init( PRIORITY_SPLIT_SHARD_SEQ_HOT,      PRIORITY_SPLIT_SHARD+5 );
+	init( PRIORITY_SPLIT_SHARD_SEQ_COLD,     PRIORITY_SPLIT_SHARD-5 );
+
 
 	// Data distribution
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
@@ -741,6 +744,15 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
+
+	// Sequential Write Tracking
+	init( SEQ_WRITE_DISABLED,                                  false );
+	init( SEQ_WRITE_DDONLY,                                    false );
+	init( SEQ_WRITE_SSONLY,                                    false );
+	init( STORAGE_METRICS_OLD,                                 false );
+	init( DD_USE_FIXED_SIZE_SHARD,                             false );
+	init( DD_FIXED_SHARD_SIZE,                              10000000 );
+	init( DD_ALWAYS_SPLIT_SEQ_INC,                             false );
 
 	// clang-format on
 
