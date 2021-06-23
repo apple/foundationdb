@@ -60,5 +60,5 @@ ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<Str
 }
 
 // hidden commands, no help text for now
-CommandFactory dataDistributionFactory("snapshot");
+CommandFactory snapshotFactory("snapshot");
 } // namespace fdb_cli
