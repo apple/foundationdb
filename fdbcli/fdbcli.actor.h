@@ -57,9 +57,13 @@ struct CommandFactory {
 };
 
 // Special keys used by fdbcli commands
-
+// advanceversion
+extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
+// maintenance
+extern const KeyRangeRef maintenanceSpecialKeyRange;
+extern const KeyRef ignoreSSFailureSpecialKey;
 
 // help functions (Copied from fdbcli.actor.cpp)
 
@@ -69,8 +73,16 @@ bool tokencmp(StringRef token, const char* command);
 void printUsage(StringRef command);
 
 // All fdbcli commands (alphabetically)
+// advanceversion command
+ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens);
+// force_recovery_with_data_loss command
+ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// maintenance command
+ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// snapshot command
+ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 

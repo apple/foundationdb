@@ -1,4 +1,3 @@
-
 /*
  * CommitProxyInterface.h
  *

@@ -482,6 +482,12 @@ extern const ValueRef writeRecoveryKeyTrue;
 //	Allows incremental restore to read and set starting version for consistency.
 extern const KeyRef snapshotEndVersionKey;
 
+// Configuration database special keys
+extern const KeyRef configTransactionDescriptionKey;
+extern const KeyRange globalConfigKnobKeys;
+extern const KeyRangeRef configKnobKeys;
+extern const KeyRangeRef configClassKeys;
+
 #pragma clang diagnostic pop
 
 #endif

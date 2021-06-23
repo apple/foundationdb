@@ -49,7 +49,7 @@
 
 struct IssuesListImpl {
 	IssuesListImpl() {}
-	void addIssue(std::string issue) {
+	void addIssue(std::string const& issue) {
 		MutexHolder h(mutex);
 		issues.insert(issue);
 	}
@@ -61,7 +61,7 @@ struct IssuesListImpl {
 		}
 	}
 
-	void resolveIssue(std::string issue) {
+	void resolveIssue(std::string const& issue) {
 		MutexHolder h(mutex);
 		issues.erase(issue);
 	}
@@ -73,23 +73,23 @@ private:
 
 IssuesList::IssuesList() : impl(std::make_unique<IssuesListImpl>()) {}
 IssuesList::~IssuesList() = default;
-void IssuesList::addIssue(std::string issue) {
+void IssuesList::addIssue(std::string const& issue) {
 	impl->addIssue(issue);
 }
 void IssuesList::retrieveIssues(std::set<std::string>& out) const {
 	impl->retrieveIssues(out);
 }
-void IssuesList::resolveIssue(std::string issue) {
+void IssuesList::resolveIssue(std::string const& issue) {
 	impl->resolveIssue(issue);
 }
 
-FileTraceLogWriter::FileTraceLogWriter(std::string directory,
-                                       std::string processName,
-                                       std::string basename,
-                                       std::string extension,
+FileTraceLogWriter::FileTraceLogWriter(std::string const& directory,
+                                       std::string const& processName,
+                                       std::string const& basename,
+                                       std::string const& extension,
                                        uint64_t maxLogsSize,
-                                       std::function<void()> onError,
-                                       Reference<ITraceLogIssuesReporter> issues)
+                                       std::function<void()> const& onError,
+                                       Reference<ITraceLogIssuesReporter> const& issues)
   : directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize),
     traceFileFD(-1), index(0), onError(onError), issues(issues) {}
 

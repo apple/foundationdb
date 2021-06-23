@@ -51,7 +51,7 @@ constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
-const int WLTOKEN_COUNTS = 12; // number of wellKnownEndpoints
+static constexpr int WLTOKEN_COUNTS = 20; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:
@@ -159,7 +159,7 @@ const Endpoint& EndpointMap::insert(NetworkAddressList localAddresses,
 NetworkMessageReceiver* EndpointMap::get(Endpoint::Token const& token) {
 	uint32_t index = token.second();
 	if (index < wellKnownEndpointCount && data[index].receiver == nullptr) {
-		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded").detail("Token", token);
+		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded").detail("Token", token).detail("Index", index).backtrace();
 	}
 	if (index < data.size() && data[index].token().first() == token.first() &&
 	    ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second())
@@ -200,8 +200,9 @@ struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 
 	void receive(ArenaObjectReader& reader) override {
 		// Remote machine tells us it doesn't have endpoint e
-		Endpoint e;
-		reader.deserialize(e);
+		UID token;
+		reader.deserialize(token);
+		Endpoint e = FlowTransport::transport().loadedEndpoint(token);
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
 	}
 };
@@ -311,6 +312,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				    .detail("Count", peer->pingLatencies.getPopulationSize())
 				    .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived)
 				    .detail("BytesSent", peer->bytesSent - peer->lastLoggedBytesSent)
+				    .detail("TimeoutCount", peer->timeoutCount)
 				    .detail("ConnectOutgoingCount", peer->connectOutgoingCount)
 				    .detail("ConnectIncomingCount", peer->connectIncomingCount)
 				    .detail("ConnectFailedCount", peer->connectFailedCount)
@@ -327,6 +329,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				peer->connectLatencies.clear();
 				peer->lastLoggedBytesReceived = peer->bytesReceived;
 				peer->lastLoggedBytesSent = peer->bytesSent;
+				peer->timeoutCount = 0;
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
 			} else if (it == self->orderedAddresses.begin()) {
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
@@ -478,6 +481,7 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 		loop {
 			choose {
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					peer->timeoutCount++;
 					if (startingBytes == peer->bytesReceived) {
 						if (peer->destination.isPublic()) {
 							peer->pingLatencies.addSample(now() - startTime);
@@ -622,7 +626,6 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				            IFailureMonitor::failureMonitor().getState(self->destination).isAvailable() ? "OK"
 				                                                                                        : "FAILED");
 				++self->connectOutgoingCount;
-
 				try {
 					choose {
 						when(Reference<IConnection> _conn =
@@ -797,7 +800,7 @@ Peer::Peer(TransportData* transport, NetworkAddress const& destination)
     reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
     incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
     pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
-    bytesSent(0), lastLoggedBytesSent(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
+    bytesSent(0), lastLoggedBytesSent(0), timeoutCount(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
     connectFailedCount(0), connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1),
     protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())) {
 	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
@@ -955,13 +958,13 @@ ACTOR static void deliver(TransportData* self,
 		if (destination.token.first() != -1) {
 			if (self->isLocalAddress(destination.getPrimaryAddress())) {
 				sendLocal(self,
-				          SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)),
+				          SerializeSource<UID>(destination.token),
 				          Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
 			} else {
 				Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 				sendPacket(self,
 				           peer,
-				           SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)),
+				           SerializeSource<UID>(destination.token),
 				           Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND),
 				           false);
 			}
@@ -1436,6 +1439,10 @@ NetworkAddress FlowTransport::getLocalAddress() const {
 	return self->localAddresses.address;
 }
 
+const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAllPeers() const {
+	return self->peers;
+}
+
 std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompatiblePeers() {
 	for (auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
 		if (self->multiVersionConnections.count(it->second.first)) {
@@ -1470,7 +1477,7 @@ Endpoint FlowTransport::loadedEndpoint(const UID& token) {
 }
 
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
-	if (!isStream || !endpoint.getPrimaryAddress().isValid())
+	if (!isStream || !endpoint.getPrimaryAddress().isValid() || !endpoint.getPrimaryAddress().isPublic())
 		return;
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
@@ -1482,7 +1489,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 }
 
 void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
-	if (!isStream || !endpoint.getPrimaryAddress().isValid())
+	if (!isStream || !endpoint.getPrimaryAddress().isValid() || !endpoint.getPrimaryAddress().isPublic())
 		return;
 	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
 	if (peer) {
