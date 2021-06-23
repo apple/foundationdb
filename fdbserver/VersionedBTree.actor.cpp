@@ -1289,6 +1289,7 @@ int nextPowerOf2(uint32_t x) {
 
 struct RedwoodMetrics {
 	static constexpr int btreeLevels = 5;
+	static constexpr int maxRecordCount = 315;
 
 	RedwoodMetrics() { clear(); }
 
@@ -1301,8 +1302,8 @@ struct RedwoodMetrics {
 				.modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
 				.buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
 				.modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
-				.buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::bytes),
-				.modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::bytes)
+				.buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount),
+				.modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount)
 			};
 			++levelCounter;
 		}
@@ -4969,7 +4970,8 @@ private:
 
 			metrics.buildFillPctSketch->samplePercentage(p.usedFraction());
 			metrics.buildStoredPctSketch->samplePercentage(p.kvFraction());
-			metrics.buildItemCountSketch->sample(p.count);
+			//std::cout<<"build item count: "<<p.count<<std::endl;
+			metrics.buildItemCountSketch->sampleRecordCounter(p.count);
 
 			// Create chunked pages
 			// TODO: Avoid copying page bytes, but this is not trivial due to how pager checksums are currently handled.
@@ -5294,7 +5296,8 @@ private:
 
 			metrics.modifyFillPctSketch->samplePercentage((double)btPage->size() / capacity);
 			metrics.modifyStoredPctSketch->samplePercentage((double)btPage->kvBytes / capacity);
-			metrics.modifyItemCountSketch->sample(btPage->tree()->numItems);
+			//std::cout<<"modify item count: "<<btPage->tree()->numItems<<std::endl;
+			metrics.modifyItemCountSketch->sampleRecordCounter(btPage->tree()->numItems);
 
 			g_redwoodMetrics.kvSizeWritten->sample(btPage->kvBytes);
 
@@ -9734,7 +9737,7 @@ TEST_CASE("!/redwood/performance/randomRangeScans") {
 
 TEST_CASE(":/redwood/performance/histogramThroughput") {
 	std::default_random_engine generator;
-	std::uniform_int_distribution<int> distribution(0,pow(2,32));
+	std::uniform_int_distribution<uint32_t> distribution(0,UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
 	state vector<uint32_t> uniform;
 	for(int i=0; i<inputSize; i++){
@@ -9759,7 +9762,7 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 }
 TEST_CASE(":/redwood/performance/continuousSmapleThroughput") {
 	std::default_random_engine generator;
-	std::uniform_int_distribution<int> distribution(0,pow(2,32));
+	std::uniform_int_distribution<uint32_t> distribution(0,UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
 	state vector<uint32_t> uniform;
 	for(int i=0; i<inputSize; i++){

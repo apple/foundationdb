@@ -101,6 +101,7 @@ const std::unordered_map<Histogram::Unit, std::string> Histogram::UnitToStringMa
 	{ Histogram::Unit::bytes, "bytes" },
 	{ Histogram::Unit::bytes_per_second, "bytes_per_second" },
 	{ Histogram::Unit::percentage, "percentage" },
+	{ Histogram::Unit::record_counter, "record_counter" },
 };
 
 void Histogram::writeToLog() {
