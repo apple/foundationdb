@@ -29,7 +29,7 @@ With a perpetual wiggle, storage migrations will be much less impactful. The wig
 Configuration
 =============
 
-You can configure TSS via the FDB :ref:`command line interface <command-line-interface>`.
+You can configure the Perpetual Storage Wiggle via the FDB :ref:`command line interface <command-line-interface>`.
 
 Example commands
 ----------------
