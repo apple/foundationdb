@@ -120,6 +120,14 @@ public:
 		vo.read(*this);
 	}
 
+	template <class T, class VersionOptions>
+	static T fromStringRef(StringRef sr, VersionOptions vo) {
+		T t;
+		ObjectReader reader(sr.begin(), vo);
+		reader.deserialize(t);
+		return t;
+	}
+
 	const uint8_t* data() { return _data; }
 
 	Arena& arena() { return _arena; }

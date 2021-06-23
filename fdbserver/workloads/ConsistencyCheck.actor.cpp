@@ -1498,7 +1498,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .error(e);
 
 								// All shards should be available in quiscence
-								if (self->performQuiescentChecks) {
+								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
 									self->testFailure("Storage server unavailable");
 									return false;
 								}

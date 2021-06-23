@@ -64,7 +64,7 @@ public:
 
 	NetworkAddress getStableAddress() const { return addresses.getTLSAddress(); }
 
-	Endpoint getAdjustedEndpoint(uint32_t index) {
+	Endpoint getAdjustedEndpoint(uint32_t index) const {
 		uint32_t newIndex = token.second();
 		newIndex += index;
 		return Endpoint(
