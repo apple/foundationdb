@@ -34,8 +34,8 @@
 // ParallelStream is used to fetch data from multiple streams in parallel and then merge them back into a single stream
 // in order.
 template <class T>
-class ParallelStream : public ReferenceCounted<ParallelStream<T>> {
-	BoundedFlowLock semaphore;
+class ParallelStream {
+	Reference<BoundedFlowLock> semaphore;
 	struct FragmentConstructorTag {
 		explicit FragmentConstructorTag() = default;
 	};
@@ -43,14 +43,14 @@ class ParallelStream : public ReferenceCounted<ParallelStream<T>> {
 public:
 	// A Fragment is a single stream that will get results to be merged back into the main output stream
 	class Fragment : public ReferenceCounted<Fragment> {
-		Reference<ParallelStream<T>> parallelStream;
+		Reference<BoundedFlowLock> semaphore;
 		PromiseStream<T> stream;
 		BoundedFlowLock::Releaser releaser;
 		friend class ParallelStream;
 
 	public:
-		Fragment(Reference<ParallelStream<T>> parallelStream, int64_t permitNumber, FragmentConstructorTag)
-		  : parallelStream(parallelStream), releaser(&parallelStream->semaphore, permitNumber) {}
+		Fragment(Reference<BoundedFlowLock> semaphore, int64_t permitNumber, FragmentConstructorTag)
+		  : semaphore(semaphore), releaser(semaphore.getPtr(), permitNumber) {}
 		template <class U>
 		void send(U&& value) {
 			stream.send(std::forward<U>(value));
@@ -105,19 +105,20 @@ public:
 		}
 	}
 
-	ParallelStream(PromiseStream<T> results, size_t bufferLimit) : results(results), semaphore(1, bufferLimit) {
+	ParallelStream(PromiseStream<T> results, size_t bufferLimit) : results(results) {
+		semaphore = makeReference<BoundedFlowLock>(1, bufferLimit);
 		flusher = flushToClient(this);
 	}
 
 	// Creates a fragment to get merged into the main output stream
-	ACTOR static Future<Fragment*> createFragmentImpl(Reference<ParallelStream<T>> self) {
-		int64_t permitNumber = wait(self->semaphore.take());
-		auto fragment = makeReference<Fragment>(self, permitNumber, FragmentConstructorTag());
+	ACTOR static Future<Fragment*> createFragmentImpl(ParallelStream<T>* self) {
+		int64_t permitNumber = wait(self->semaphore->take());
+		auto fragment = makeReference<Fragment>(self->semaphore, permitNumber, FragmentConstructorTag());
 		self->fragments.send(fragment);
 		return fragment.getPtr();
 	}
 
-	Future<Fragment*> createFragment() { return createFragmentImpl(Reference<ParallelStream<T>>::addRef(this)); }
+	Future<Fragment*> createFragment() { return createFragmentImpl(this); }
 
 	Future<Void> finish() {
 		fragments.sendError(end_of_stream());
