@@ -27,6 +27,7 @@
 #include <string>
 #include <map>
 #include <unordered_map>
+#include <iostream>
 
 #ifdef _WIN32
 #include <intrin.h>
@@ -66,7 +67,10 @@ private:
 	Histogram(std::string const& group, std::string const& op, Unit unit, HistogramRegistry& registry)
 	  : group(group), op(op), unit(unit), registry(registry), ReferenceCounted<Histogram>() {
 
-		ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
+		for(const auto & [ key, value ] : UnitToStringMapper){
+			std::cout<<value<<std::endl;
+		}
+		//ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
 
 		clear();
 	}

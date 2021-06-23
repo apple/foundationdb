@@ -40,6 +40,9 @@ typedef uint32_t PhysicalPageID;
 typedef uint32_t QueueID;
 #define invalidQueueID std::numeric_limits<QueueID>::max()
 
+// Reasons for page levle events.
+enum class pagerEventReasons{ pointRead, rangeRead, rangePrefetch, commit, lazyClear, metaData};
+
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
 public:
@@ -128,7 +131,7 @@ public:
 
 class IPagerSnapshot {
 public:
-	virtual Future<Reference<const ArenaPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool nohit) = 0;
+	virtual Future<Reference<const ArenaPage>> getPhysicalPage(pagerEventReasons r, LogicalPageID pageID, bool cacheable, bool nohit) = 0;
 	virtual bool tryEvictPage(LogicalPageID id) = 0;
 	virtual Version getVersion() const = 0;
 
@@ -188,8 +191,8 @@ public:
 	// Cacheable indicates that the page should be added to the page cache (if applicable?) as a result of this read.
 	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
 	// considered likely to be needed soon.
-	virtual Future<Reference<ArenaPage>> readPage(LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
-	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
+	virtual Future<Reference<ArenaPage>> readPage(pagerEventReasons r, LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
+	virtual Future<Reference<ArenaPage>> readExtent(pagerEventReasons r, LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 
 	// Temporary methods for testing
