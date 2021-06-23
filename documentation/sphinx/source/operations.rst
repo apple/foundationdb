@@ -28,6 +28,8 @@ Ready to operate an externally accessible FoundationDB cluster? You'll find what
 
 * :doc:`tss` gives an overview of the Testing Storage Server feature of FoundationDB, which allows you to safely run an untrusted storage engine in a production cluster.
 
+* :doc:`perpetual-storage-wiggle` gives an overview of Perpetual Storage Wiggle feature about how to use it.
+
 .. toctree::
  :maxdepth: 2
  :titlesonly:
@@ -44,3 +46,4 @@ Ready to operate an externally accessible FoundationDB cluster? You'll find what
  platforms
  transaction-tagging
  tss
+ perpetual-storage-wiggle

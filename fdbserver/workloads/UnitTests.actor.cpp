@@ -28,6 +28,7 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
+void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 
 struct UnitTestWorkload : TestWorkload {
@@ -61,6 +62,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
+		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 	}
 
