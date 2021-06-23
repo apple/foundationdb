@@ -115,6 +115,7 @@ void Histogram::writeToLog() {
 	}
 
 	TraceEvent e(SevInfo, "Histogram");
+	ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
 	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper.at(unit));
 
 	for (uint32_t i = 0; i < 32; i++) {
