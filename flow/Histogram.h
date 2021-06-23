@@ -59,13 +59,13 @@ HistogramRegistry& GetHistogramRegistry();
  */
 class Histogram final : public ReferenceCounted<Histogram> {
 public:
-	enum class Unit { microseconds, bytes, bytes_per_second, percentage };
+	enum class Unit { microseconds, bytes, bytes_per_second, percentage, record_counter };
 
 private:
 	static const std::unordered_map<Unit, std::string> UnitToStringMapper;
 
-	Histogram(std::string const& group, std::string const& op, Unit unit, HistogramRegistry& registry)
-	  : group(group), op(op), unit(unit), registry(registry), ReferenceCounted<Histogram>() {
+	Histogram(std::string const& group, std::string const& op, Unit unit, HistogramRegistry& registry, uint32_t lower, uint32_t upper)
+	  : group(group), op(op), unit(unit), registry(registry), lowerBound(lower), upperBound(upper), ReferenceCounted<Histogram>() {
 
 		for(const auto & [ key, value ] : UnitToStringMapper){
 			std::cout<<value<<std::endl;
@@ -80,14 +80,14 @@ private:
 public:
 	~Histogram() { registry.unregisterHistogram(this); }
 
-	static Reference<Histogram> getHistogram(StringRef group, StringRef op, Unit unit) {
+	static Reference<Histogram> getHistogram(StringRef group, StringRef op, Unit unit, uint32_t lower = 0, uint32_t upper = UINT32_MAX) {
 		std::string group_str = group.toString();
 		std::string op_str = op.toString();
 		std::string name = generateName(group_str, op_str);
 		HistogramRegistry& registry = GetHistogramRegistry();
 		Histogram* h = registry.lookupHistogram(name);
 		if (!h) {
-			h = new Histogram(group_str, op_str, unit, registry);
+			h = new Histogram(group_str, op_str, unit, registry, lower, upper);
 			registry.registerHistogram(h);
 			return Reference<Histogram>(h);
 		} else {
@@ -121,7 +121,7 @@ public:
 			sample((uint32_t)(delta * 1000000)); // convert to microseconds and truncate to integer
 		}
 	}
-	// This histogram buckets samples into linear interval of size 4 percent.
+	// Histogram buckets samples into linear interval of size 4 percent.
 	inline void samplePercentage(double pct) {
 		ASSERT(unit==Histogram::Unit::percentage);
 		ASSERT(pct>=0.0);
@@ -129,6 +129,18 @@ public:
 			pct = 1.24;
 		}
 		size_t idx = (pct*100) / 4; 
+		ASSERT(idx < 32);
+		buckets[idx]++;
+	}
+
+	// Histogram buckets samples into one of the same sized buckets 
+	// This is used when the distance b/t upperBound and lowerBound are relativly small
+	inline void sampleRecordCounter(uint32_t sample) {
+		ASSERT(unit==Histogram::Unit::record_counter);
+		if(sample == upperBound){
+			sample = upperBound - 1;
+		}
+		size_t idx = sample * 32 / (upperBound - lowerBound);
 		ASSERT(idx < 32);
 		buckets[idx]++;
 	}
@@ -147,6 +159,8 @@ public:
 	Unit const unit;
 	HistogramRegistry& registry;
 	uint32_t buckets[32];
+	uint32_t lowerBound;
+	uint32_t upperBound;
 };
 
 #endif // FLOW_HISTOGRAM_H
