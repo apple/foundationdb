@@ -660,7 +660,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	Promise<UID> removeFailedServer;
 
-	Reference<AsyncVar<Optional<struct ServerDBInfo>>> dbInfo;
+	Optional<Reference<AsyncVar<struct ServerDBInfo>>> dbInfo;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -700,7 +700,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> processingUnhealthy,
 	                 PromiseStream<GetMetricsRequest> getShardMetrics,
 	                 Promise<UID> removeFailedServer,
-					 Reference<AsyncVar<struct ServerDBInfo>> const& dbInfo)
+					 Optional<Reference<AsyncVar<struct ServerDBInfo>>> const& dbInfo)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false),
 	    teamBuilder(Void()), badTeamRemover(Void()), checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()),
@@ -1324,7 +1324,23 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		addTeam(newTeamServers, isInitialTeam);
 	}
 
-	ACTOR Future<Void> addTeam(const vector<Reference<TCServerInfo>>& newTeamServers,
+	ACTOR static Future<Void> notifySSTeamChange(Optional<Reference<AsyncVar<struct ServerDBInfo>>> dbInfo)
+	{
+		if (dbInfo.present()) {
+			state Future<ErrorOr<Void>> proxyReply = dbInfo.get()->get().client.commitProxies[0].ssTeamChange.tryGetReply(SSTeamChangeRequest());
+			try {
+				wait(throwErrorOr(proxyReply));
+			} catch (Error& e) {
+				// TBD: Do we need to add a TraceEvent here?
+				// TBD: Do we need to notify another proxy in this case?
+				throw e;
+			}
+		}
+
+		return Void();
+	}
+
+	void addTeam(const vector<Reference<TCServerInfo>>& newTeamServers,
 	             bool isInitialTeam,
 	             bool redundantTeam = false) {
 		auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
@@ -1337,22 +1353,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
 		if (badTeam) {
 			badTeams.push_back(teamInfo);
-			return Void();
 		}
 
 		// For a good team, we add it to teams and create machine team for it when necessary
 		teams.push_back(teamInfo);
 		for (int i = 0; i < newTeamServers.size(); ++i) {
 			newTeamServers[i]->teams.push_back(teamInfo);
-		}
-
-		if (dbInfo->get().present()) {
-			state Future<ErrorOr<Void>> proxyReply = dbInfo->get().get().client.commitProxies[0].ssTeamChange.tryGetReply(SSTeamChangeRequest());
-			try {
-				wait(throwErrorOr(proxyReply));
-			} catch (Error& e) {
-				throw e;
-			}
 		}
 
 		// Find or create machine team for the server team
@@ -1388,7 +1394,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			traceTeamCollectionInfo();
 		}
 
-		return Void();
+		// Send a notification (about the SS team change) to one of the proxies.
+		Future<Void> notified = notifySSTeamChange(dbInfo);
 	}
 
 	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
@@ -2496,6 +2503,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// Update server team information for consistency check in simulation
 			traceTeamCollectionInfo();
 		}
+
+		// Send a notification (about the SS team change) to one of the proxies.
+		Future<Void> notified = notifySSTeamChange(dbInfo);
+
 		return found;
 	}
 
@@ -5717,7 +5728,8 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                           true,
 	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           PromiseStream<GetMetricsRequest>(),
-	                                                           Promise<UID>()));
+	                                                           Promise<UID>(),
+															   Optional<Reference<AsyncVar<struct ServerDBInfo>>>()));
 
 	for (int id = 1; id <= processCount; ++id) {
 		UID uid(id, 0);
@@ -5759,7 +5771,8 @@ std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
 	                                                           true,
 	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           PromiseStream<GetMetricsRequest>(),
-	                                                           Promise<UID>()));
+	                                                           Promise<UID>(),
+															   Optional<Reference<AsyncVar<struct ServerDBInfo>>>()));
 
 	for (int id = 1; id <= processCount; id++) {
 		UID uid(id, 0);

@@ -1784,9 +1784,9 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 	return Void();
 }
 
-ACTOR Future<Void> proxyApplySSTeamChange(SSTeamChangeRequest ssTeamChangeReq) {
+void proxyApplySSTeamChange(SSTeamChangeRequest ssTeamChangeReq) {
+	// TODO: Need to update the SS team info on the proxy.
 	ssTeamChangeReq.reply.send(Void());
-	return Void();
 }
 
 ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
@@ -2042,7 +2042,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			wait(yield());
 		}
 		when(SSTeamChangeRequest ssTeamChangeReq = waitNext(proxy.ssTeamChange.getFuture())) {
-			addActor.send(proxyApplySSTeamChange(ssTeamChangeReq));
+			proxyApplySSTeamChange(ssTeamChangeReq);
 		}
 	}
 }

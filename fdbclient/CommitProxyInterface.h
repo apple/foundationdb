@@ -86,8 +86,7 @@ struct CommitProxyInterface {
 			exclusionSafetyCheckReq =
 			    RequestStream<struct ExclusionSafetyCheckRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
-			ssTeamChange =
-				RequestStream<struct SSTeamChangeRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
+			ssTeamChange = RequestStream<struct SSTeamChangeRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 		}
 	}
 
@@ -514,11 +513,11 @@ struct ExclusionSafetyCheckRequest {
 };
 
 struct SSTeamChangeRequest {
-	constexpr static FileIdentifier file_identifier = 13852702; // TODO: how to choose this value?
-	// TODO: Add info about SS team changes
+	constexpr static FileIdentifier file_identifier = 13852702; // TODO: Need to choose an appropriate value here
+	// TODO: Need to add info about the SS team change that triggered this request.
 	ReplyPromise<Void> reply;
 
-	explicit SSTeamChangeRequest() {}
+	SSTeamChangeRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
