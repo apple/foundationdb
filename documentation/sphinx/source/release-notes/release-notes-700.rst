@@ -9,6 +9,7 @@ Release Notes
 
 Features
 --------
+* First release of the Redwood Storage Engine, a BTree storage engine with higher throughput and lower write amplification than SQLite. See :ref:`Redwood Storage Engine Documentation <redwood-storage-engine>` for details.
 * Replaced committed version broadcast through proxy with centralizing live committed versions into master. `(PR #3307) <https://github.com/apple/foundationdb/pull/3307>`_
 * Added a new API in all bindings that can be used to get a list of split points that will split the given range into (roughly) equally sized chunks. `(PR #3394) <https://github.com/apple/foundationdb/pull/3394>`_
 * Introduced a new role called GRV proxy specialized for serving GRV requests to decrease GRV tail latency since we prioritize commit paths over GRV in the current proxy. The original proxy is renamed to Commit proxy. `(PR #3549) <https://github.com/apple/foundationdb/pull/3549>`_ `(PR #3772) <https://github.com/apple/foundationdb/pull/3772>`_
@@ -38,6 +39,7 @@ Performance
 * The Coro library has been replaced with boost::coroutine2. `(PR #4242) <https://github.com/apple/foundationdb/pull/4242>`_
 * Reduce CPU overhead of load balancing on client processes. `(PR #4561) <https://github.com/apple/foundationdb/pull/4561>`_
 * Used the restored key range to filter out files for faster restore. `(PR #4568) <https://github.com/apple/foundationdb/pull/4568>`_
+* Transaction log files will be truncated by default if they are under 2GB in size. `(PR #4656) <https://github.com/apple/foundationdb/pull/4656>`_
 * Reduced the number of connections required by the multi-version client when loading external clients. When connecting to 7.0 clusters, only one connection with version 6.2 or larger will be used. With older clusters, at most two connections with version 6.2 or larger will be used. Clients older than version 6.2 will continue to create an additional connection each. `(PR #4667) <https://github.com/apple/foundationdb/pull/4667>`_
 
 Reliability
@@ -56,6 +58,7 @@ Fixes
 * Fixed a rare crash that could happen on the sequencer during recovery. `(PR #4548) <https://github.com/apple/foundationdb/pull/4548>`_ 
 * Added a new pre-backup action when creating a backup. Backups can now either verify the range data is being saved to is empty before the backup begins (current behavior) or clear the range where data is being saved to. Fixes a ``restore_destination_not_empty`` failure after a backup retry due to ``commit_unknown_failure``. `(PR #4595) <https://github.com/apple/foundationdb/pull/4595>`_
 * When configured with ``usable_regions=2``, a cluster would not fail over to a region which contained only storage class processes. `(PR #4599) <https://github.com/apple/foundationdb/pull/4599>`_ 
+* If a restore is done using a prefix to remove and specific key ranges to restore, the key range boundaries must begin with the prefix to remove. `(PR #4684) <https://github.com/apple/foundationdb/pull/4684>`_
 
 Status
 ------
