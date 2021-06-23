@@ -304,15 +304,15 @@ bool serverHasKey(ValueRef storedValue) {
 
 const KeyRef storageTeamIdKeyPrefix = LiteralStringRef("\xff/storageTeams/");
 
-const Key storageTeamIdKey(UID teamId) {
+const Key storageTeamIdKey(ptxn::StorageTeamID teamId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(storageTeamIdKeyPrefix);
 	wr << teamId;
 	return wr.toValue();
 }
 
-UID storageTeamIdKeyDecode(const KeyRef& key) {
-	UID teamId;
+ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key) {
+	ptxn::StorageTeamID teamId;
 	BinaryReader rd(key.removePrefix(storageTeamIdKeyPrefix), Unversioned());
 	rd >> teamId;
 	return teamId;

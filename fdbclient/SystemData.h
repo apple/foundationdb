@@ -97,8 +97,8 @@ bool serverHasKey(ValueRef storedValue);
 
 // Creates a map from teamId to list of storage servers in that team.
 extern const KeyRef storageTeamIdKeyPrefix;
-const Key storageTeamIdKey(UID teamId);
-UID storageTeamIdKeyDecode(const KeyRef& key);
+const Key storageTeamIdKey(ptxn::StorageTeamID teamId);
+ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key);
 std::vector<UID> decodeStorageTeams(const ValueRef& value);
 const Value encodeStorageTeams(const std::vector<UID>& value);
 

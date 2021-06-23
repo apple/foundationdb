@@ -1351,12 +1351,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 	return Void();
 }
 
-// Create three maps:
-// (1) List of Storage Servers (Team) -> TeamID
-// (2) TeamID -> List of Storage Servers (Team)
-// (3) Storag Server -> List of TeamsIDs
-ACTOR Future<UID> maybeUpdateTeamMaps(Database cx, vector<UID> team) {
-	state UID teamId = UID();
+ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, vector<UID> team) {
+	state ptxn::StorageTeamID teamId = UID();
 	state Transaction tr(cx);
 
 	std::sort(team.begin(), team.end());
@@ -1369,7 +1365,7 @@ ACTOR Future<UID> maybeUpdateTeamMaps(Database cx, vector<UID> team) {
 
 			Optional<Value> _teamId = wait(tr.get(teamListKey));
 			if (_teamId.present()) {
-				teamId = BinaryReader::fromStringRef<UID>(_teamId.get(), Unversioned());
+				teamId = BinaryReader::fromStringRef<ptxn::StorageTeamID>(_teamId.get(), Unversioned());
 				break;
 			}
 
@@ -1383,13 +1379,13 @@ ACTOR Future<UID> maybeUpdateTeamMaps(Database cx, vector<UID> team) {
 				state Key teamIdKey =
 				    storageServerToTeamIdKey(t).withSuffix(BinaryWriter::toValue(teamId, Unversioned()));
 				Optional<Value> existingTeamsInServer = wait(tr.get(teamIdKey));
-				std::set<UID> newTeamIdsInServer(team.begin(), team.end());
+				std::set<ptxn::StorageTeamID> newTeamIdsInServer(team.begin(), team.end());
 				if (existingTeamsInServer.present()) {
 					BinaryReader br(existingTeamsInServer.get(), Unversioned());
 					int size;
 					br >> size;
 					for (int i = 0; i < size; ++i) {
-						UID id;
+						ptxn::StorageTeamID id;
 						br >> id;
 						newTeamIdsInServer.insert(id);
 					}
@@ -1410,7 +1406,7 @@ ACTOR Future<UID> maybeUpdateTeamMaps(Database cx, vector<UID> team) {
 				throw;
 			}
 
-			TraceEvent(SevError, "MoveKeysUpdateTeamMapError")
+			TraceEvent(SevWarn, "MoveKeysUpdateTeamMapError")
 			    .detail("TeamId", teamId)
 			    .detail("TeamServers", describe(team))
 			    .detail("ErrorName", e.name())
