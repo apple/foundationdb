@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/IRandom.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -26,6 +27,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/serialize.h"
 
 using std::max;
 using std::min;
@@ -409,7 +411,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 
 					// printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(),
 					// keys.end.toString().c_str(), old.size(), servers.size()); for(int i=0; i<old.size(); i++)
-					// 	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
+					//	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
 
 					// Check that enough servers for each shard are in the correct state
 					state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
@@ -1349,6 +1351,73 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 	return Void();
 }
 
+ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, vector<UID> team) {
+	state ptxn::StorageTeamID teamId = UID();
+	state Transaction tr(cx);
+
+	std::sort(team.begin(), team.end());
+	state Key teamListKey = storageServerListToTeamIdKey(team);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			Optional<Value> _teamId = wait(tr.get(teamListKey));
+			if (_teamId.present()) {
+				teamId = BinaryReader::fromStringRef<ptxn::StorageTeamID>(_teamId.get(), Unversioned());
+				break;
+			}
+
+			// New team, update maps.
+			teamId = deterministicRandom()->randomUniqueID();
+			tr.set(storageTeamIdKey(teamId), encodeStorageTeams(team)); // TeamId -> Vec<StorageServers>
+			tr.set(teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
+
+			// Store StorageServer -> Vector<TeamId>
+			for (const auto& t : team) {
+				state Key teamIdKey =
+				    storageServerToTeamIdKey(t).withSuffix(BinaryWriter::toValue(teamId, Unversioned()));
+				Optional<Value> existingTeamsInServer = wait(tr.get(teamIdKey));
+				std::set<ptxn::StorageTeamID> newTeamIdsInServer(team.begin(), team.end());
+				if (existingTeamsInServer.present()) {
+					BinaryReader br(existingTeamsInServer.get(), Unversioned());
+					int size;
+					br >> size;
+					for (int i = 0; i < size; ++i) {
+						ptxn::StorageTeamID id;
+						br >> id;
+						newTeamIdsInServer.insert(id);
+					}
+				}
+				BinaryWriter wr(Unversioned());
+				wr << newTeamIdsInServer.size();
+				for (auto id : newTeamIdsInServer) {
+					wr << id;
+				}
+				tr.set(teamIdKey, wr.toValue());
+			}
+
+			wait(tr.commit());
+			TraceEvent("StorageTeamCreated").detail("TeamId", teamId).detail("StorageServers", describe(team));
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
+			TraceEvent(SevWarn, "MoveKeysUpdateTeamMapError")
+			    .detail("TeamId", teamId)
+			    .detail("TeamServers", describe(team))
+			    .detail("ErrorName", e.name())
+			    .error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	return teamId;
+}
+
 ACTOR Future<Void> moveKeys(Database cx,
                             KeyRange keys,
                             vector<UID> destinationTeam,
@@ -1365,6 +1434,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 
 	state std::map<UID, StorageServerInterface> tssMapping;
 
+	state UID teamId = wait(maybeUpdateTeamMaps(cx, destinationTeam));
 	wait(startMoveKeys(cx,
 	                   keys,
 	                   destinationTeam,
@@ -1439,8 +1509,8 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 
 	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
 	                                                    : keyServersValue(RangeResult(), serverSrcUID);
-	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
-	// to a specific
+	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a
+	// change to a specific
 	//   key (keyServersKeyServersKey)
 	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 

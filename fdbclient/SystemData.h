@@ -95,6 +95,23 @@ const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 
+// Creates a map from teamId to list of storage servers in that team.
+extern const KeyRef storageTeamIdKeyPrefix;
+const Key storageTeamIdKey(ptxn::StorageTeamID teamId);
+ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key);
+std::vector<UID> decodeStorageTeams(const ValueRef& value);
+const Value encodeStorageTeams(const std::vector<UID>& value);
+
+// Create a map from storage server ID to list of teams associated with that
+// team.
+extern const KeyRef storageServerToTeamIdKeyPrefix;
+const Key storageServerToTeamIdKey(UID serverId);
+
+// Create a map from list of storage servers to teamId. The list of server ID in
+// key is stored in sorted order.
+extern const KeyRef storageServerListToTeamIdKeyPrefix;
+const Key storageServerListToTeamIdKey(std::vector<UID> servers);
+
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
 extern const KeyRangeRef writeConflictRangeKeysRange;

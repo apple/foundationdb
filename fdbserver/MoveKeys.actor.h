@@ -106,5 +106,12 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 // Directly removes serverID from serverKeys and keyServers system keyspace.
 // Performed when a storage server is marked as permanently failed.
 
+ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> team);
+// Gives a unique ID for each storage team and creates three maps for storage teams. `team` is list
+// of strage servers in the storage team:
+// (1) List of Storage Servers (Team) -> TeamID
+// (2) TeamID -> List of Storage Servers (Team)
+// (3) Storage Server -> List of TeamsIDs
+
 #include "flow/unactorcompiler.h"
 #endif

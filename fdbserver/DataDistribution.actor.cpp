@@ -626,7 +626,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::map<Key, std::vector<Reference<TCServerInfo>>> pid2server_info; // some process may serve as multiple storage servers
 	std::vector<AddressExclusion> wiggle_addresses; // collection of wiggling servers' address
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
-	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a read-only concatenation of 2 data structures? 
+	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a read-only concatenation of 2 data structures?
 	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
 	AsyncVar<bool> disableFailingLaggingServers;
 	Optional<Key> wigglingPid; // Process id of current wiggling storage server;
@@ -1057,8 +1057,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 			// if (!bestOption.present()) {
-			// 	TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
-			// 	self->traceAllInfo(true);
+			//	TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
+			//	self->traceAllInfo(true);
 			// }
 
 			req.reply.send(std::make_pair(bestOption, foundSrc));
@@ -2302,8 +2302,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Debug purpose
 		// if (healthyMachineTeamCount > desiredMachineTeams || machineTeams.size() > maxMachineTeams) {
-		// 	// When the number of machine teams is over the limit, print out the current team info.
-		// 	traceAllInfo(true);
+		//	// When the number of machine teams is over the limit, print out the current team info.
+		//	traceAllInfo(true);
 		// }
 	}
 
@@ -3139,37 +3139,37 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
 			//     .detail("Primary", self->primary);
 			// for (i = 0; i < internedLocalityRecordKeyNameStrings.size(); i++) {
-			// 	TraceEvent("LocalityRecordKeyIndexName", self->distributorId)
-			// 	    .detail("KeyIndex", i)
-			// 	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
-			// 	    .detail("Primary", self->primary);
-			// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-			// 		wait(yield());
-			// 	}
+			//	TraceEvent("LocalityRecordKeyIndexName", self->distributorId)
+			//	    .detail("KeyIndex", i)
+			//	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
+			//	    .detail("Primary", self->primary);
+			//	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+			//		wait(yield());
+			//	}
 			// }
 
 			// TraceEvent("MachineLocalityMap", self->distributorId)
 			//     .detail("Size", machineLocalityMapEntryArraySize)
 			//     .detail("Primary", self->primary);
 			// for (i = 0; i < serverIDs.size(); i++) {
-			// 	const auto& serverID = serverIDs[i];
-			// 	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
-			// 	if (record.isValid()) {
-			// 		TraceEvent("MachineLocalityMap", self->distributorId)
-			// 		    .detail("LocalityIndex", i)
-			// 		    .detail("UID", serverID->toString())
-			// 		    .detail("LocalityRecord", record->toString())
-			// 		    .detail("Primary", self->primary);
-			// 	} else {
-			// 		TraceEvent("MachineLocalityMap", self->distributorId)
-			// 		    .detail("LocalityIndex", i)
-			// 		    .detail("UID", serverID->toString())
-			// 		    .detail("LocalityRecord", "[NotFound]")
-			// 		    .detail("Primary", self->primary);
-			// 	}
-			// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-			// 		wait(yield());
-			// 	}
+			//	const auto& serverID = serverIDs[i];
+			//	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
+			//	if (record.isValid()) {
+			//		TraceEvent("MachineLocalityMap", self->distributorId)
+			//		    .detail("LocalityIndex", i)
+			//		    .detail("UID", serverID->toString())
+			//		    .detail("LocalityRecord", record->toString())
+			//		    .detail("Primary", self->primary);
+			//	} else {
+			//		TraceEvent("MachineLocalityMap", self->distributorId)
+			//		    .detail("LocalityIndex", i)
+			//		    .detail("UID", serverID->toString())
+			//		    .detail("LocalityRecord", "[NotFound]")
+			//		    .detail("Primary", self->primary);
+			//	}
+			//	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+			//		wait(yield());
+			//	}
 			// }
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -5722,6 +5722,16 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	}
 }
 
+ACTOR Future<Void> updateInitialDDTeamMaps(Database cx, Reference<InitialDataDistribution> initData) {
+	// TODO: Can be done concurrently.
+	state std::set<std::vector<UID>> primaryTeams = initData->primaryTeams;
+	state std::set<vector<UID>>::iterator it;
+	for (it = primaryTeams.begin(); it != primaryTeams.end(); ++it) {
+		ptxn::StorageTeamID teamId = wait(maybeUpdateTeamMaps(cx, *it));
+	}
+	return Void();
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -5810,6 +5820,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 				    ddEnabledState));
 				initData = initData_;
+				wait(updateInitialDDTeamMaps(cx, initData));
 				if (initData->shards.size() > 1) {
 					TraceEvent("DDInitGotInitialDD", self->ddId)
 					    .detail("B", initData->shards.end()[-2].key)
