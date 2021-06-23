@@ -27,7 +27,6 @@
 ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type type) {
 	if (type == Type::RYW) {
 		auto tr = new ReadYourWritesTransaction;
-		tr->preinitializeOnForeignThread();
 		return tr;
 	} else if (type == Type::SIMPLE_CONFIG) {
 		auto tr = new SimpleConfigTransaction;
@@ -43,12 +42,15 @@ ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type
 void ISingleThreadTransaction::create(ISingleThreadTransaction* tr, Type type, Database db) {
 	switch (type) {
 	case Type::RYW:
+		dynamic_cast<ReadYourWritesTransaction*>(tr)->~ReadYourWritesTransaction();
 		new (tr) ReadYourWritesTransaction(db);
 		break;
 	case Type::SIMPLE_CONFIG:
+		dynamic_cast<SimpleConfigTransaction*>(tr)->~SimpleConfigTransaction();
 		new (tr) SimpleConfigTransaction(db);
 		break;
 	case Type::PAXOS_CONFIG:
+		dynamic_cast<PaxosConfigTransaction*>(tr)->~PaxosConfigTransaction();
 		new (tr) PaxosConfigTransaction(db);
 		break;
 	default:

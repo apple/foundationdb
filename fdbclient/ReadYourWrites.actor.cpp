@@ -1729,10 +1729,6 @@ void ReadYourWritesTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {
 	}
 }
 
-void ReadYourWritesTransaction::preinitializeOnForeignThread() {
-	tr.preinitializeOnForeignThread();
-}
-
 void ReadYourWritesTransaction::setTransactionID(uint64_t id) {
 	tr.setTransactionID(id);
 }

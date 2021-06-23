@@ -241,8 +241,6 @@ public:
 	explicit Transaction(Database const& cx);
 	~Transaction();
 
-	void preinitializeOnForeignThread() { committedVersion = invalidVersion; }
-
 	void setVersion(Version v);
 	Future<Version> getReadVersion() { return getReadVersion(0); }
 	Future<Version> getRawReadVersion();
@@ -418,7 +416,7 @@ private:
 	Database cx;
 
 	double backoff;
-	Version committedVersion;
+	Version committedVersion{ invalidVersion };
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
 	Promise<Optional<Value>> metadataVersion;
