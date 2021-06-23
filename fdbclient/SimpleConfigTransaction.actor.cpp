@@ -297,3 +297,5 @@ SimpleConfigTransaction::SimpleConfigTransaction(ConfigTransactionInterface cons
   : _impl(std::make_unique<SimpleConfigTransactionImpl>(cti)) {}
 
 SimpleConfigTransaction::~SimpleConfigTransaction() = default;
+
+SimpleConfigTransaction::SimpleConfigTransaction() = default;

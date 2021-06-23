@@ -26,15 +26,14 @@
 
 ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type type) {
 	if (type == Type::RYW) {
-		auto tr =
-		    (ReadYourWritesTransaction*)(ReadYourWritesTransaction::operator new(sizeof(ReadYourWritesTransaction)));
+		auto tr = new ReadYourWritesTransaction;
 		tr->preinitializeOnForeignThread();
 		return tr;
 	} else if (type == Type::SIMPLE_CONFIG) {
-		auto tr = (SimpleConfigTransaction*)(SimpleConfigTransaction::operator new(sizeof(SimpleConfigTransaction)));
+		auto tr = new SimpleConfigTransaction;
 		return tr;
 	} else if (type == Type::PAXOS_CONFIG) {
-		auto tr = (PaxosConfigTransaction*)(PaxosConfigTransaction::operator new(sizeof(PaxosConfigTransaction)));
+		auto tr = new PaxosConfigTransaction;
 		return tr;
 	}
 	ASSERT(false);

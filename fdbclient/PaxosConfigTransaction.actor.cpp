@@ -128,3 +128,5 @@ PaxosConfigTransaction::PaxosConfigTransaction(Database const& cx) {
 }
 
 PaxosConfigTransaction::~PaxosConfigTransaction() = default;
+
+PaxosConfigTransaction::PaxosConfigTransaction() = default;
