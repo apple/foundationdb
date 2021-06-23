@@ -3727,7 +3727,8 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
                                   TransactionInfo info,
                                   TagSet tags) {
 
-	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
+	state Reference<ParallelStream<RangeResult>> results =
+	    makeReference<ParallelStream<RangeResult>>(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
@@ -3749,7 +3750,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
 	}
 
 	if (b >= e) {
-		wait(results.finish());
+		wait(results->finish());
 		return Void();
 	}
 
@@ -3784,7 +3785,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
 			if (toSend[useIdx].empty()) {
 				continue;
 			}
-			ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
+			ParallelStream<RangeResult>::Fragment* fragment = wait(results->createFragment());
 			outstandingRequests.push_back(getRangeStreamFragment(
 			    fragment, cx, trLogInfo, version, toSend[useIdx], limits, snapshot, reverse, info, tags, span.context));
 		}
@@ -3794,7 +3795,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
 			b = shardIntersection.end;
 		}
 	}
-	wait(waitForAll(outstandingRequests) && results.finish());
+	wait(waitForAll(outstandingRequests) && results->finish());
 	return Void();
 }
 

@@ -61,7 +61,8 @@ TEST_CASE("/fdbclient/ParallelStream") {
 	state PromiseStream<ParallelStreamTest::TestValue> results;
 	state size_t bufferLimit = deterministicRandom()->randomInt(0, 21);
 	state size_t numProducers = deterministicRandom()->randomInt(1, 1001);
-	state ParallelStream<ParallelStreamTest::TestValue> parallelStream(results, bufferLimit);
+	state Reference<ParallelStream<ParallelStreamTest::TestValue>> parallelStream =
+	    makeReference<ParallelStream<ParallelStreamTest::TestValue>>(results, bufferLimit);
 	state Future<Void> consumer = ParallelStreamTest::consume(results.getFuture(), numProducers);
 	state std::vector<Future<Void>> producers;
 	TraceEvent("StartingParallelStreamTest")
@@ -69,10 +70,10 @@ TEST_CASE("/fdbclient/ParallelStream") {
 	    .detail("NumProducers", numProducers);
 	state int i = 0;
 	for (; i < numProducers; ++i) {
-		ParallelStream<ParallelStreamTest::TestValue>::Fragment* fragment = wait(parallelStream.createFragment());
+		ParallelStream<ParallelStreamTest::TestValue>::Fragment* fragment = wait(parallelStream->createFragment());
 		producers.push_back(ParallelStreamTest::produce(fragment, ParallelStreamTest::TestValue(i)));
 	}
-	wait(parallelStream.finish());
+	wait(parallelStream->finish());
 	wait(consumer);
 	return Void();
 }
