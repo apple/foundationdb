@@ -9752,8 +9752,9 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		for(size_t i=0; i<uniform.size(); i++){
 			h->sample(uniform[i]);
 		}
-		GetHistogramRegistry().logReport();
 		auto t_end = std::chrono::high_resolution_clock::now();
+		h->drawHistogram();
+		GetHistogramRegistry().logReport();
 		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end-t_start).count();
 		std::cout<<"Time in millisecond: "<<elapsed_time_ms <<std::endl;
 	}
@@ -9764,10 +9765,11 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		    Histogram::getHistogram(LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentage);
 		ASSERT(uniform.size() == inputSize);
 		for(size_t i=0; i<uniform.size(); i++){
-			h->sample((double)uniform[i]/UINT32_MAX);
+			h->samplePercentage((double)uniform[i]/UINT32_MAX);
 		}
-		GetHistogramRegistry().logReport();
 		auto t_end = std::chrono::high_resolution_clock::now();
+		h->drawHistogram();
+		GetHistogramRegistry().logReport();
 		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end-t_start).count();
 		std::cout<<"Time in millisecond: "<<elapsed_time_ms <<std::endl;
 	}

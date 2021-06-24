@@ -28,6 +28,7 @@
 #include <map>
 #include <unordered_map>
 #include <iostream>
+#include <iomanip>
 
 #ifdef _WIN32
 #include <intrin.h>
@@ -156,6 +157,8 @@ public:
 	void writeToLog();
 
 	std::string name() const { return generateName(this->group, this->op); }
+
+	void drawHistogram();
 
 	std::string const group;
 	std::string const op;
