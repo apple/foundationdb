@@ -319,10 +319,6 @@ ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key) {
 	return teamId;
 }
 
-std::vector<UID> decodeStorageTeams(const ValueRef& value) {
-	return BinaryReader::fromStringRef<std::vector<UID>>(value, Unversioned());
-}
-
 const KeyRef storageServerToTeamIdKeyPrefix = LiteralStringRef("\xff/storageServerToTeam/");
 const Key storageServerToTeamIdKey(UID serverId) {
 	BinaryWriter wr(Unversioned());
@@ -344,12 +340,11 @@ const Key storageServerListToTeamIdKey(std::vector<UID> servers) {
 }
 
 const Value encodeStorageTeams(const std::vector<UID>& value) {
-	BinaryWriter wr(Unversioned());
-	wr << value.size();
-	for (auto& v : value) {
-		wr << v;
-	}
-	return wr.toValue();
+	return BinaryWriter::toValue(value, IncludeVersion());
+}
+
+std::vector<UID> decodeStorageTeams(const ValueRef& value) {
+	return BinaryReader::fromStringRef<std::vector<UID>>(value, IncludeVersion());
 }
 
 extern const KeyRef storageTeamIdToTLogGroupPrefix = LiteralStringRef("\xff/storageTeamIdToTLogGroup/");
