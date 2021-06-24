@@ -147,6 +147,7 @@ Future<Void> tssComparison(Req req,
 				        ? SevWarnAlways
 				        : SevError,
 				    TSS_mismatchTraceName(req));
+				mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
 				if (FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_VERIFY_SS && ssTeam->size() > 1) {
