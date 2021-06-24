@@ -347,12 +347,20 @@ std::vector<UID> decodeStorageTeams(const ValueRef& value) {
 	return BinaryReader::fromStringRef<std::vector<UID>>(value, IncludeVersion());
 }
 
-extern const KeyRef storageTeamIdToTLogGroupPrefix = LiteralStringRef("\xff/storageTeamIdToTLogGroup/");
+const KeyRef storageTeamIdToTLogGroupPrefix = LiteralStringRef("\xff/storageTeamIdToTLogGroup/");
+const KeyRangeRef storageTeamIdToTLogGroupRange(LiteralStringRef("\xff/storageTeamIdToTLogGroup/"),
+                                                LiteralStringRef("\xff/storageTeamIdToTLogGroup0"));
 const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(storageTeamIdToTLogGroupPrefix);
 	wr << teamId;
 	return wr.toValue();
+}
+const ptxn::StorageTeamID decodeStorageTeamIdToTLogGroupKey(const KeyRef& k) {
+	BinaryReader br(k.removePrefix(storageTeamIdToTLogGroupPrefix), Unversioned());
+	ptxn::StorageTeamID teamId;
+	br >> teamId;
+	return teamId;
 }
 
 const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");

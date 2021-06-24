@@ -67,6 +67,10 @@ public:
 	// Returns the size of each TLogGroup.
 	int groupSize() const;
 
+	// Return the group with given 'id'. Returns an null reference if the group
+	// with given ID doesn't exists.
+	TLogGroupRef getGroup(UID groupId) const;
+
 	// Returns the number of TLogGroups we want to keep in collection. May be not be
 	// equal to number of groups currently recruited/active.
 	int targetGroupSize() const;
@@ -77,6 +81,12 @@ public:
 	// Build a collection of groups and recruit workers into each group as per the ReplicationPolicy
 	// and group size set in the parent class.
 	void recruitEverything();
+
+	// Find a TLogGroup for assigning a storage team.
+	TLogGroupRef selectFreeGroup();
+
+	// Assigns a storage team to given group
+	bool assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group);
 
 	// Add mutations to store state to given txnStoreState transaction request 'recoveryCommitReq'.
 	void storeState(CommitTransactionRequest* recoveryCommitReq);
@@ -94,9 +104,6 @@ private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers
 	// given in 'ignoreServers'.
 	LocalityMap<TLogWorkerData> buildLocalityMap(const std::unordered_set<UID>& ignoreServers);
-
-	// Find and assign a TLogGroup to given storage team. Returns the group to which team is assigned.
-	UID addStorageTeam(ptxn::StorageTeamID teamId);
 
 	// ReplicationPolicy defined for this collection. The members of group must satisfy
 	// this replication policy, or else will not be part of a group.
@@ -118,8 +125,8 @@ private:
 	// Map from storage TeamID to list of list of storage servers in that team.
 	std::map<ptxn::StorageTeamID, vector<UID>> storageTeams;
 
-	// Mao from storage TeamID to the TLogGroup managing that team.
-	std::map<ptxn::StorageTeamID, UID> storageTeamToTLogGroupMap;
+	// Map from storage TeamID to the TLogGroup managing that team.
+	std::map<ptxn::StorageTeamID, TLogGroupRef> storageTeamToTLogGroupMap;
 
 	// Holds the future returned by `storageTeamMonitor` actor. Set by calling `monitorStorageTeams()`.
 	Future<Void> storageTeamMonitorF;

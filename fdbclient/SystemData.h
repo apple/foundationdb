@@ -105,6 +105,8 @@ const Value encodeStorageTeams(const std::vector<UID>& value);
 
 // Map from storage teamId to TLogGroup
 extern const KeyRef storageTeamIdToTLogGroupPrefix;
+extern const KeyRangeRef storageTeamIdToTLogGroupRange;
+const ptxn::StorageTeamID decodeStorageTeamIdToTLogGroupKey(const KeyRef& k);
 const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId);
 
 // Create a map from storage server ID to list of teams associated with that

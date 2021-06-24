@@ -60,6 +60,16 @@ int TLogGroupCollection::targetGroupSize() const {
 	return targetNumGroups;
 }
 
+TLogGroupRef TLogGroupCollection::getGroup(UID groupId) const {
+	// TODO: Change the vector of groups to a map for faster lookup.
+	for (auto& g : recruitedGroups) {
+		if (g->id() == groupId) {
+			return g;
+		}
+	}
+	return Reference<TLogGroup>();
+}
+
 void TLogGroupCollection::addWorkers(const std::vector<WorkerInterface>& logWorkers) {
 	for (const auto& worker : logWorkers) {
 		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
@@ -104,10 +114,15 @@ LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::uno
 	return localityMap;
 }
 
-UID TLogGroupCollection::addStorageTeam(ptxn::StorageTeamID teamId) {
-	auto group = deterministicRandom()->randomChoice(recruitedGroups);
+TLogGroupRef TLogGroupCollection::selectFreeGroup() {
+	return deterministicRandom()->randomChoice(recruitedGroups);
+}
+
+bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group) {
+	ASSERT(storageTeamToTLogGroupMap.find(teamId) != storageTeamToTLogGroupMap.end());
+	storageTeamToTLogGroupMap[teamId] = group;
 	group->assignStorageTeam(teamId);
-	return group->id();
+	return true;
 }
 
 void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq) {
@@ -174,7 +189,35 @@ ACTOR Future<std::map<ptxn::StorageTeamID, std::vector<UID>>> fetchStorageTeams(
 	return teams;
 }
 
+ACTOR Future<Void> restoreStorageTeamToGroupAssignment(TLogGroupCollection* self, Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			RangeResult results = wait(tr.getRange(storageTeamIdToTLogGroupRange, GetRangeLimits()));
+			for (auto& r : results) {
+				auto teamId = decodeStorageTeamIdToTLogGroupKey(r.key);
+				auto group = self->getGroup(decodeTLogGroupKey(r.value));
+				ASSERT(group.isValid());
+				self->assignStorageTeam(teamId, group);
+			}
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> TLogGroupCollection::storageTeamMonitor(TLogGroupCollection* self, Database cx) {
+	// TODO: Monitoring teams. Removing when gone.
+	// TODO: Clean this up. The way assignments and team info is managed..
+	wait(restoreStorageTeamToGroupAssignment(self, cx));
+
 	loop {
 		try {
 			state std::map<UID, std::vector<UID>> teams = wait(fetchStorageTeams(cx));
@@ -186,24 +229,30 @@ ACTOR Future<Void> TLogGroupCollection::storageTeamMonitor(TLogGroupCollection* 
 					continue;
 				}
 
-				self->storageTeams[teamId] = it->second;
-
-				// Assign team to a group.
-				// TODO: Monitoring teams. Removing when gone.
-				state UID groupId = self->addStorageTeam(teamId);
-
-				// Storage the assignment to \xff keyspace
+				// Save assignment state to \xff keyspace
+				state TLogGroupRef group = self->selectFreeGroup();
 				state Transaction tr(cx);
+
 				loop {
 					try {
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						tr.set(storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(groupId, Unversioned()));
+						tr.set(storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(group->id(), Unversioned()));
 						wait(tr.commit());
+						if (self->storageTeamToTLogGroupMap.find(teamId) == self->storageTeamToTLogGroupMap.end()) {
+							// Check if this is already assigned. Possible when we recovered.
+							self->assignStorageTeam(teamId, group);
+						}
+
+						self->storageTeams[teamId] = it->second;
 					} catch (Error& e) {
+						if (e.code() == error_code_actor_cancelled) {
+							throw;
+						}
+
 						TraceEvent(SevWarn, "TLogGroupMonitorAddStorageError")
 						    .detail("TeamId", teamId)
-						    .detail("GroupId", groupId);
+						    .detail("GroupId", group->id());
 						wait(tr.onError(e));
 					}
 				}
