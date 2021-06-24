@@ -133,6 +133,63 @@ void Histogram::writeToLog() {
 	}
 }
 
+void Histogram::drawHistogram(){
+
+	const char* verticalLine = "├\0";
+	const char* origin = "└\0";
+	const char* emptyCell = "------\0";
+	const char* halfCell = "---▄▄▄\0";
+	const char* fullCell = "---███\0";
+	const char* xFull = "---▀▀▀\0";
+	const char* xEmpty = "------\0";
+	const char* lineEnd = "--- \0";
+	const unsigned int width = std::strlen(emptyCell);
+
+	int max_lines = 23;
+	uint32_t total = 0;
+	double maxPct = 0;
+
+    for (int i = 0; i < 32; i++){
+		total += buckets[i];
+	}
+	for (int i = 0; i < 32; i++){
+		maxPct = std::max(maxPct, (100.0*buckets[i])/total);
+	}
+
+	double intervalSize = (maxPct<(max_lines - 3)) ? 1 : maxPct / (max_lines - 3);
+	unsigned int lines = (maxPct < (max_lines - 3)) ? (unsigned int)maxPct : (max_lines - 3);
+
+	std::cout<<"Total Inputs: "<<total<<std::fixed<<"\n";
+	std::cout<<"Percent"<<"\n";
+	for (int l = 0; l < lines; l++){
+		double currHeight = (lines - l) * intervalSize;
+		double halfFullHeight = currHeight - intervalSize / 4;
+		std::cout << std::setw( 6 ) << std::setprecision( 2 ) << currHeight << " " << verticalLine;
+		for (int i =0; i<32; i++){
+			double pct = (100.0 * buckets[i]) / total;
+			if(pct > currHeight) std::cout << fullCell;
+			else if (pct > halfFullHeight) std::cout << halfCell;
+			else std::cout << emptyCell;
+		}
+		std::cout << lineEnd << "\n";
+	}
+
+	std::cout<<"  0.00 "<<origin;
+	for (int i =0; i<32; i++){
+		double pct = (100.0 * buckets[i]) / total;
+		if (pct > intervalSize/4) std::cout << xFull;
+		else std::cout << xEmpty;
+	}
+	std::cout << lineEnd << "\n";
+
+	std::cout << std::string(9, ' ');
+	for (int i = 0; i<32; i++){
+		std::cout<<std::left<<std::setw(width)<<"  B"+std::to_string(i);
+	}
+	std::cout << "\n";
+
+}
+
 #pragma endregion // Histogram
 
 TEST_CASE("/flow/histogram/smoke_test") {
