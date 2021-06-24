@@ -1294,7 +1294,9 @@ struct RedwoodMetrics {
 	RedwoodMetrics() { clear(); }
 
 	void clear() {
+		std::cout<<"in clear"<<std::endl;
 		memset(this, 0, sizeof(RedwoodMetrics));
+		std::cout<<"after set memory"<<std::endl;
 		int levelCounter = 0;
 		for (auto& level : levels) {
 			level = {
@@ -4970,7 +4972,6 @@ private:
 
 			metrics.buildFillPctSketch->samplePercentage(p.usedFraction());
 			metrics.buildStoredPctSketch->samplePercentage(p.kvFraction());
-			//std::cout<<"build item count: "<<p.count<<std::endl;
 			metrics.buildItemCountSketch->sampleRecordCounter(p.count);
 
 			// Create chunked pages
@@ -5296,7 +5297,6 @@ private:
 
 			metrics.modifyFillPctSketch->samplePercentage((double)btPage->size() / capacity);
 			metrics.modifyStoredPctSketch->samplePercentage((double)btPage->kvBytes / capacity);
-			//std::cout<<"modify item count: "<<btPage->tree()->numItems<<std::endl;
 			metrics.modifyItemCountSketch->sampleRecordCounter(btPage->tree()->numItems);
 
 			g_redwoodMetrics.kvSizeWritten->sample(btPage->kvBytes);
@@ -6831,7 +6831,6 @@ public:
 			Value v;
 			v.arena().dependsOn(cur.back().page->getArena());
 			v.contents() = cur.get().value.get();
-			//std::cout<<"kvBytes for readValue impl: "<<cur.get().kvBytes()<<std::endl;
 			g_redwoodMetrics.kvSizeReadByGet->sample(cur.get().kvBytes());
 			return v;
 		}
@@ -9743,11 +9742,12 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 	for(int i=0; i<inputSize; i++){
 		uniform.push_back(distribution(generator));
 	}
+	std::cout<<"size of input: "<<uniform.size()<<std::endl;
 	{
+		std::cout<<"Histogram Unit bytes"<<std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
 		Reference<Histogram> h =
 		    Histogram::getHistogram(LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
-		std::cout<<"histogramTest is okay"<<std::endl;
 		ASSERT(uniform.size() == inputSize);
 		for(size_t i=0; i<uniform.size(); i++){
 			h->sample(uniform[i]);
@@ -9755,7 +9755,20 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		GetHistogramRegistry().logReport();
 		auto t_end = std::chrono::high_resolution_clock::now();
 		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end-t_start).count();
-		std::cout<<"size of input: "<<uniform.size()<<std::endl;
+		std::cout<<"Time in millisecond: "<<elapsed_time_ms <<std::endl;
+	}
+	{
+		std::cout<<"Histogram Unit percentage: "<<std::endl;
+		auto t_start = std::chrono::high_resolution_clock::now();
+		Reference<Histogram> h =
+		    Histogram::getHistogram(LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentage);
+		ASSERT(uniform.size() == inputSize);
+		for(size_t i=0; i<uniform.size(); i++){
+			h->sample((double)uniform[i]/UINT32_MAX);
+		}
+		GetHistogramRegistry().logReport();
+		auto t_end = std::chrono::high_resolution_clock::now();
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end-t_start).count();
 		std::cout<<"Time in millisecond: "<<elapsed_time_ms <<std::endl;
 	}
 	return Void();
