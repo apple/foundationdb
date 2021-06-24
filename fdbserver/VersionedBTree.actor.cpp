@@ -1298,12 +1298,12 @@ struct RedwoodMetrics {
 		int levelCounter = 0;
 		for (auto& level : levels) {
 			level = {
-				.buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
-				.modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
-				.buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
-				.modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
-				.buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount),
-				.modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount)
+				Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
+				Histogram::getHistogram(LiteralStringRef("modifyFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
+				Histogram::getHistogram(LiteralStringRef("buildStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
+				Histogram::getHistogram(LiteralStringRef("modifyStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage),
+				Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount),
+				Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount)
 			};
 			++levelCounter;
 		}
@@ -1355,6 +1355,25 @@ struct RedwoodMetrics {
 		Reference<Histogram> modifyStoredPctSketch;
 		Reference<Histogram> buildItemCountSketch;
 		Reference<Histogram> modifyItemCountSketch;
+
+		Level(	Reference<Histogram> a, 
+				Reference<Histogram> b,
+				Reference<Histogram> c,
+				Reference<Histogram> d,
+				Reference<Histogram> e,
+				Reference<Histogram> f
+			) : 
+			pageRead(0), pageReadExt(0), pageBuild(0), pageBuildExt(0), pageCommitStart(0), pageModify(0), pageModifyExt(0), 
+			lazyClearRequeue(0), lazyClearRequeueExt(0), lazyClearFree(0), lazyClearFreeExt(0), forceUpdate(0), detachChild(0), 
+			buildStoredPct(0), buildFillPct(0), buildItemCount(0), modifyStoredPct(0), modifyFillPct(0), modifyItemCount(0),
+			buildFillPctSketch(a), modifyFillPctSketch(b), buildStoredPctSketch(c), modifyStoredPctSketch(d), buildItemCountSketch(e), modifyItemCountSketch(f)
+			{} 
+		Level() : 
+			pageRead(0), pageReadExt(0), pageBuild(0), pageBuildExt(0), pageCommitStart(0), pageModify(0), pageModifyExt(0), 
+			lazyClearRequeue(0), lazyClearRequeueExt(0), lazyClearFree(0), lazyClearFreeExt(0), forceUpdate(0), detachChild(0), 
+			buildStoredPct(0), buildFillPct(0), buildItemCount(0), modifyStoredPct(0), modifyFillPct(0), modifyItemCount(0),
+			buildFillPctSketch(), modifyFillPctSketch(), buildStoredPctSketch(), modifyStoredPctSketch(), buildItemCountSketch(), modifyItemCountSketch()
+			{}
 	};
 
 	Level levels[btreeLevels];
