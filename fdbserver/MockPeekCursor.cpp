@@ -18,10 +18,21 @@
  * limitations under the License.
  */
 
+#include <ostream>
 #include "MockPeekCursor.h"
 
 const static bool LOG_METHOD_CALLS = false;
-const static bool LOG_MESSAGES = true;
+const static bool LOG_MESSAGES = false;
+
+std::ostream& operator<<(std::ostream& os, const MockPeekCursor::VersionedMessage& versionedMessage) {
+	os << "VersionedMessage [version: " << versionedMessage.version << " sub: " << versionedMessage.sub
+	   << " message: " << StringRef(versionedMessage.message).toHexString() << " tags: ";
+	for (auto tag : versionedMessage.tags) {
+		os << tag.toString() << " ";
+	}
+	os << "]";
+	return os;
+}
 
 static void logMethodName(std::string methodName) {
 	if (LOG_METHOD_CALLS) {

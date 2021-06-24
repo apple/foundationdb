@@ -703,6 +703,8 @@ struct KeyValueStoreType {
 	// Only add new ones just before END.
 	// SS storeType is END before the storageServerInterface is initialized.
 	enum StoreType { SSD_BTREE_V1, MEMORY, SSD_BTREE_V2, SSD_REDWOOD_V1, MEMORY_RADIXTREE, SSD_ROCKSDB_V1, END };
+	constexpr static const StoreType ALL[] = { SSD_BTREE_V1,   MEMORY,           SSD_BTREE_V2,
+		                                       SSD_REDWOOD_V1, MEMORY_RADIXTREE, SSD_ROCKSDB_V1 };
 
 	KeyValueStoreType() : type(END) {}
 	KeyValueStoreType(StoreType type) : type(type) {
@@ -734,6 +736,16 @@ struct KeyValueStoreType {
 		default:
 			return "unknown";
 		}
+	}
+
+	static KeyValueStoreType fromString(const std::string& typeStr) {
+		for (StoreType t : ALL) {
+			auto kvst = KeyValueStoreType(t);
+			if (kvst.toString() == typeStr) {
+				return kvst;
+			}
+		}
+		return KeyValueStoreType(END);
 	}
 
 private:

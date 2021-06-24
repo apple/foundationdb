@@ -39,6 +39,7 @@ MockLogSystem::MockLogSystem(const MockLogSystem& that) : cursor(that.cursor) {
 }
 
 MockLogSystem& MockLogSystem::operator=(const MockLogSystem& that) {
+	logMethodName(__func__);
 	cursor = that.cursor;
 	return *this;
 }

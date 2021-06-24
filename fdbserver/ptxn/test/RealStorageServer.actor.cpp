@@ -68,6 +68,19 @@ struct ServerTestDriver {
 };
 
 struct StorageServerTestDriver : ServerTestDriver {
+	struct Options {
+		const int nMutationsPerMore;
+		const Optional<int> maxMutations;
+		const int advanceVersionsPerMutation;
+		const KeyValueStoreType storeType;
+
+		explicit Options(const UnitTestParameters& params)
+		  : nMutationsPerMore(params.getInt("nMutationsPerMore").get()),
+		    maxMutations(params.getInt("maxMutations").castTo<int>()),
+		    advanceVersionsPerMutation(params.getInt("advanceVersionsPerMutation").get()),
+		    storeType(KeyValueStoreType::fromString(params.get("keyValueStoreType").orDefault("ssd-2"))) {}
+	} options;
+
 	Reference<MockPeekCursor> mockPeekCursor;
 
 	// Default tag.
@@ -76,7 +89,7 @@ struct StorageServerTestDriver : ServerTestDriver {
 	StorageServerInterface ssi;
 	ActorCollection actors = ActorCollection(false);
 
-	StorageServerTestDriver() : ServerTestDriver() { initEndpoints(); }
+	StorageServerTestDriver(const UnitTestParameters& params) : ServerTestDriver(), options(params) { initEndpoints(); }
 
 	void initEndpoints() {
 		UID uid = nondeterministicRandom()->randomUniqueID();
@@ -90,9 +103,7 @@ struct StorageServerTestDriver : ServerTestDriver {
 
 		StorageServerInterface& ssi = self->ssi;
 
-		// TODO: Make this parameterizable. We'll eventually want to test this against more than the one storage server
-		// implementation.
-		KeyValueStoreType storeType = KeyValueStoreType::SSD_BTREE_V2;
+		auto storeType = self->options.storeType;
 		state std::string folder = ".";
 		std::string fileName = joinPath(folder, "storage-" + ssi.id().toString() + "." + storeType.toString());
 		std::cout << "new Storage Server file name: " << fileName << std::endl;
@@ -145,7 +156,7 @@ struct StorageServerTestDriver : ServerTestDriver {
 		GetValueReply getValueReply = wait(getValueRequest.reply.getFuture());
 		const Value& value = getValueReply.value.get();
 		std::cout << "Get value: " << value.toString() << ", expected " << expectedValue.toString() << std::endl;
-		ASSERT(value.compare(expectedValue) == 0);
+		ASSERT(value == expectedValue);
 
 		wait(switchBack(self));
 		return Void();
@@ -154,39 +165,30 @@ struct StorageServerTestDriver : ServerTestDriver {
 } // namespace ptxn
 
 TEST_CASE("fdbserver/ptxn/test/storageserver") {
-	state ptxn::StorageServerTestDriver driver;
-
-	// TODO: Manage all props in the driver and set default values when the PR is finalized.
-	int nMutationsPerMore = params.getInt("nMutationsPerMore").get();
-	Optional<int> maxMutations = params.getInt("maxMutations").castTo<int>();
-	state int advanceVersionsPerMutation = params.getInt("advanceVersionsPerMutation").get();
+	state ptxn::StorageServerTestDriver driver(params);
 
 	Arena arena;
-	VectorRef<Tag> tags;
-	tags.push_back(arena, driver.tag);
-	auto supplier = VersionedMessageSupplier(0, tags, advanceVersionsPerMutation);
-	driver.mockPeekCursor = makeReference<MockPeekCursor>(nMutationsPerMore, maxMutations, supplier, arena);
+	Standalone<VectorRef<Tag>> tags;
+	tags.push_back(tags.arena(), driver.tag);
+	auto supplier = MockPeekCursor::VersionedMessageSupplier(0, tags, driver.options.advanceVersionsPerMutation);
+	driver.mockPeekCursor =
+	    makeReference<MockPeekCursor>(driver.options.nMutationsPerMore, driver.options.maxMutations, supplier, arena);
 
 	int verifyId = params.getInt("verifyId").get();
 	state Future<Void> verify = ptxn::StorageServerTestDriver::verifyGetValueFromId(
 	    &driver,
 	    verifyId,
 	    // Other versions after commitVersion should work too.
-	    VersionedMessageSupplier::commitVersion(verifyId, advanceVersionsPerMutation));
+	    MockPeekCursor::VersionedMessageSupplier::commitVersion(verifyId, driver.options.advanceVersionsPerMutation));
 
-	loop choose{
+	loop choose {
 		when(wait(ptxn::StorageServerTestDriver::runStorageServer(&driver))) {
-		    std::cout << "Storage serves exited unexpectedly" << std::endl;
-	        ASSERT(false);
-        }
-        when(wait(verify)) {
-	        break;
-        }
-        when(wait(driver.actors.getResult())) {}
-    };
+			std::cout << "Storage serves exited unexpectedly" << std::endl;
+			ASSERT(false);
+		}
+		when(wait(verify)) { break; }
+		when(wait(driver.actors.getResult())) {}
+	}
 
-    // TODO: Visualize trace log to see how the version in memory and the version in storage advanced. Problem 1: No
-    // trace log sometimes. Problem 2: How to not run as simulation?
-
-    return Void();
+	return Void();
 }
