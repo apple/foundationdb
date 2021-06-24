@@ -102,7 +102,7 @@ level ``global_config/`` key space.
 Clearing data
 ^^^^^^^^^^^^^
 
-Data can be removed from global configuration using standand transaction
+Data can be removed from global configuration using standard transaction
 semantics. Submit a clear or clear range to the appropriate global
 configuration keys in the special key space to clear data.
 
