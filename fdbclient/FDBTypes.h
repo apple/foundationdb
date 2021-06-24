@@ -703,8 +703,6 @@ struct KeyValueStoreType {
 	// Only add new ones just before END.
 	// SS storeType is END before the storageServerInterface is initialized.
 	enum StoreType { SSD_BTREE_V1, MEMORY, SSD_BTREE_V2, SSD_REDWOOD_V1, MEMORY_RADIXTREE, SSD_ROCKSDB_V1, END };
-	constexpr static const StoreType ALL[] = { SSD_BTREE_V1,   MEMORY,           SSD_BTREE_V2,
-		                                       SSD_REDWOOD_V1, MEMORY_RADIXTREE, SSD_ROCKSDB_V1 };
 
 	KeyValueStoreType() : type(END) {}
 	KeyValueStoreType(StoreType type) : type(type) {
@@ -739,13 +737,16 @@ struct KeyValueStoreType {
 	}
 
 	static KeyValueStoreType fromString(const std::string& typeStr) {
-		for (StoreType t : ALL) {
-			auto kvst = KeyValueStoreType(t);
-			if (kvst.toString() == typeStr) {
-				return kvst;
-			}
-		}
-		return KeyValueStoreType(END);
+		static const std::unordered_map<std::string, StoreType> STR_TO_TYPE = {
+			{ "ssd-1", SSD_BTREE_V1 },
+			{ "ssd-2", SSD_BTREE_V2 },
+			{ "ssd-redwood-experimental", SSD_REDWOOD_V1 },
+			{ "ssd-rocksdb-experimental", SSD_ROCKSDB_V1 },
+			{ "memory", MEMORY },
+			{ "memory-radixtree-beta", MEMORY_RADIXTREE }
+		};
+		auto it = STR_TO_TYPE.find(typeStr);
+		return KeyValueStoreType(it == STR_TO_TYPE.end() ? END : it->second);
 	}
 
 private:
