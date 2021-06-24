@@ -1294,9 +1294,7 @@ struct RedwoodMetrics {
 	RedwoodMetrics() { clear(); }
 
 	void clear() {
-		std::cout<<"in clear"<<std::endl;
-		memset(this, 0, sizeof(RedwoodMetrics));
-		std::cout<<"after set memory"<<std::endl;
+		//memset(this, 0, sizeof(RedwoodMetrics));
 		int levelCounter = 0;
 		for (auto& level : levels) {
 			level = {
@@ -1309,6 +1307,10 @@ struct RedwoodMetrics {
 			};
 			++levelCounter;
 		}
+		opSet = 0, opSetKeyBytes = 0, opSetValueBytes = 0, opClear = 0, opClearKey = 0, opCommit = 0, opGet = 0, opGetRange = 0; 
+		pagerDiskWrite = 0, pagerDiskRead = 0, pagerRemapFree = 0, pagerRemapCopy = 0, pagerRemapSkip = 0; 
+		pagerCacheHit = 0, pagerCacheMiss = 0, pagerProbeHit = 0, pagerProbeMiss = 0, pagerEvictUnhit = 0, pagerEvictFail = 0; 
+		btreeLeafPreload = 0, btreeLeafPreloadExt = 0;
 
 		const events eventsVector[] = {events::pagerCacheLookup, events::pagerCacheHit, events::pagerCacheMiss, events::pagerWrite};
 		const pagerEventReasons reasonsVector[] = {pagerEventReasons::pointRead, pagerEventReasons::rangeRead, pagerEventReasons::rangePrefetch, pagerEventReasons::commit, pagerEventReasons::lazyClear, pagerEventReasons::metaData};
@@ -1379,6 +1381,8 @@ struct RedwoodMetrics {
 	unsigned int btreeLeafPreload;
 	unsigned int btreeLeafPreloadExt;
 
+	double startTime;
+
 	unsigned int eventsReasons[4][6];
 
 	Reference<Histogram> kvSizeWritten;
@@ -1406,8 +1410,6 @@ struct RedwoodMetrics {
 		// All page reads are either a cache hit, probe hit, or a disk read
 		return pagerDiskWrite + pagerDiskRead + pagerCacheHit + pagerProbeHit;
 	}
-
-	double startTime;
 
 	Level& level(unsigned int level) {
 		static Level outOfBound;
