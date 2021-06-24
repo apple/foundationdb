@@ -96,14 +96,6 @@ void HistogramRegistry::logReport() {
 
 #pragma region Histogram
 
-const std::unordered_map<Histogram::Unit, std::string> Histogram::UnitToStringMapper = {
-	{ Histogram::Unit::microseconds, "microseconds" },
-	{ Histogram::Unit::bytes, "bytes" },
-	{ Histogram::Unit::bytes_per_second, "bytes_per_second" },
-	{ Histogram::Unit::percentage, "percentage" },
-	{ Histogram::Unit::record_counter, "record_counter" },
-};
-
 void Histogram::writeToLog() {
 	bool active = false;
 	for (uint32_t i = 0; i < 32; i++) {
@@ -117,7 +109,6 @@ void Histogram::writeToLog() {
 	}
 
 	TraceEvent e(SevInfo, "Histogram");
-	ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
 	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper.at(unit));
 
 	for (uint32_t i = 0; i < 32; i++) {

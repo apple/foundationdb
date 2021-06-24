@@ -62,15 +62,18 @@ public:
 	enum class Unit { microseconds, bytes, bytes_per_second, percentage, record_counter };
 
 private:
-	static const std::unordered_map<Unit, std::string> UnitToStringMapper;
+	//static const std::unordered_map<Unit, std::string> UnitToStringMapper;
+	const std::unordered_map<Unit, std::string> UnitToStringMapper;
 
 	Histogram(std::string const& group, std::string const& op, Unit unit, HistogramRegistry& registry, uint32_t lower, uint32_t upper)
-	  : group(group), op(op), unit(unit), registry(registry), lowerBound(lower), upperBound(upper), ReferenceCounted<Histogram>() {
+	  : UnitToStringMapper (
+		  { { Histogram::Unit::microseconds, "microseconds" },{ Histogram::Unit::bytes, "bytes" },
+			{ Histogram::Unit::bytes_per_second, "bytes_per_second" },
+			{ Histogram::Unit::percentage, "percentage" },
+			{ Histogram::Unit::record_counter, "record_counter" },
+		}), group(group), op(op), unit(unit), registry(registry), lowerBound(lower), upperBound(upper), ReferenceCounted<Histogram>() {
 
-		for(const auto & [ key, value ] : UnitToStringMapper){
-			std::cout<<value<<std::endl;
-		}
-		//ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
+		ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
 
 		clear();
 	}
