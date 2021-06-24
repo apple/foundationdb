@@ -3946,7 +3946,7 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 					wait(delayJittered(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
 					// there must not have other teams to place wiggled data
 					takeRest = teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
-						   teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
+					           teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
 				}
 				wait(updateNextWigglingStoragePID(teamCollection));
 			}
@@ -3983,7 +3983,9 @@ ACTOR Future<std::pair<Future<Void>, Value>> watchPerpetualStoragePIDChange(DDTe
 }
 
 // periodically check whether the cluster is healthy if we continue perpetual wiggle
-ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, int* extraTeamCount) {
+ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self,
+                                                        int* extraTeamCount,
+                                                        const DDEnabledState* ddEnabledState) {
 	state int pausePenalty = 1;
 	loop {
 		Promise<int> countp;
@@ -3993,8 +3995,9 @@ ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, 
 		// a. DDQueue is busy with unhealthy relocation request
 		// b. healthy teams are not enough
 		// c. the overall disk space is not enough
+		// d. DD is disabled
 		if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD || self->healthyTeamCount <= *extraTeamCount ||
-		    self->bestTeamStuck) {
+		    self->bestTeamStuck || !ddEnabledState->isDDEnabled()) {
 			// if we pause wiggle not because the reason a, increase extraTeamCount. This helps avoid oscillation
 			// between pause and non-pause status.
 			if ((self->healthyTeamCount <= *extraTeamCount || self->bestTeamStuck) && !self->pauseWiggle->get()) {
@@ -4019,7 +4022,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 	state Future<Void> watchFuture = Never();
 	state Future<Void> moveFinishFuture = Never();
 	state int extraTeamCount = 0;
-	state Future<Void> ddQueueCheck = clusterHealthCheckForPerpetualWiggle(self, &extraTeamCount);
+	state Future<Void> ddQueueCheck = clusterHealthCheckForPerpetualWiggle(self, &extraTeamCount, ddEnabledState);
 	state int movingCount = 0;
 	state std::pair<Future<Void>, Value> res = wait(watchPerpetualStoragePIDChange(self));
 	ASSERT(!self->wigglingPid.present()); // only single process wiggle is allowed
