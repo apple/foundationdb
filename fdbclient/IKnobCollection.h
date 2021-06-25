@@ -39,6 +39,8 @@ class IKnobCollection {
 	static std::unique_ptr<IKnobCollection> globalKnobCollection;
 
 public:
+	virtual ~IKnobCollection() = default;
+
 	enum class Type {
 		CLIENT,
 		SERVER,

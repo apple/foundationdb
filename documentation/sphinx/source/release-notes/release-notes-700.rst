@@ -11,7 +11,7 @@ Features
 --------
 * Added a new API in all bindings that can be used to get a list of split points that will split the given range into (roughly) equally sized chunks. `(PR #3394) <https://github.com/apple/foundationdb/pull/3394>`_
 * Added support for writing backup files directly to Azure blob storage. This is not yet performance tested on large-scale clusters. `(PR #3961) <https://github.com/apple/foundationdb/pull/3961>`_
-* Added the Testing Storage Server (TSS), which allows FoundationDB to run an "untrusted" storage engine with identical workload to the current storage engine, with zero impact on durability or correctness, and minimal impact on performance. `(PR #4556) <https://github.com/apple/foundationdb/pull/4556>`_ `(PR #4892) <https://github.com/apple/foundationdb/pull/4892>`_ `(PR #4895) <https://github.com/apple/foundationdb/pull/4895>`_ `(PR #4934) <https://github.com/apple/foundationdb/pull/4934>`_ `(PR #4949) <https://github.com/apple/foundationdb/pull/4949>`_ `(PR #4965) <https://github.com/apple/foundationdb/pull/4965>`_ 
+* Added the Testing Storage Server (TSS), which allows FoundationDB to run an "untrusted" storage engine with identical workload to the current storage engine, with zero impact on durability or correctness, and minimal impact on performance. `(Documentation) <https://github.com/apple/foundationdb/blob/master/documentation/sphinx/source/tss.rst>`_ `(PR #4556) <https://github.com/apple/foundationdb/pull/4556>`_
 
 Performance
 -----------

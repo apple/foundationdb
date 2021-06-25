@@ -234,6 +234,27 @@ command                    string   The fdbcli command corresponding to this ope
 message                    string   Help text explaining the reason this operation failed
 ========================== ======== ===============
 
+Global configuration module
+---------------------------
+
+The global configuration module provides an interface to read and write values
+to :doc:`global-configuration`. In general, clients should not read and write
+the global configuration special key space keys directly, but should instead
+use the global configuration functions.
+
+#. ``\xff\xff/global_config/<key> := <value>`` Read/write. Reading keys in the range will return a tuple decoded string representation of the value for the given key. Writing a value will update all processes in the cluster with the new key-value pair. Values must be written using the :ref:`api-python-tuple-layer`.
+
+Tracing module
+--------------
+
+The tracing module provides read and write access to a transactions' tracing
+data. Every transaction contains a unique identifier which follows the
+transaction through the system. By providing access to set this identifier,
+clients can connect FoundationDB transactions to outside events.
+
+#. ``\xff\xff/tracing/transaction_id := <transaction_id>`` Read/write. A 64-bit integer transaction ID which follows the transaction as it moves through FoundationDB. All transactions are assigned a random transaction ID on creation, and this key can be read to surface the randomly generated ID. Alternatively, set this key to provide a custom identifier. When setting this key, provide a string in the form of a 64-bit integer, which will be automatically converted to the appropriate type.
+#. ``\xff\xff/tracing/token := <tracing_enabled>`` Read/write. Set to true/false to enable or disable tracing for the transaction, respectively. If read, returns a 64-bit integer set to 0 if tracing has been disabled, or a random 64-bit integer otherwise (this integers value has no meaning to the client other than to determine whether the transaction will be traced).
+
 .. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
 .. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS
 .. [#special_key_space_enable_writes] Enabling this option enables other transaction options, such as ``ACCESS_SYSTEM_KEYS``. This may change in the future.

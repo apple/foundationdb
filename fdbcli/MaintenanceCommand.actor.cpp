@@ -87,8 +87,9 @@ ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, dou
 			ASSERT(res.size() <= 1);
 			if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 				if (printWarning) {
-					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
-					       "server failures. Use 'datadistribution on' to reenable data distribution.\n");
+					fprintf(stderr,
+					        "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
+					        "server failures. Use 'datadistribution on' to reenable data distribution.\n");
 				}
 				return false;
 			}
@@ -116,8 +117,9 @@ ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db, bool printWarning, 
 			ASSERT(res.size() <= 1);
 			if (!clearSSFailureZoneString && res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 				if (printWarning) {
-					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
-					       "server failures. Use 'datadistribution on' to reenable data distribution.\n");
+					fprintf(stderr,
+					        "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
+					        "server failures. Use 'datadistribution on' to reenable data distribution.\n");
 				}
 				return false;
 			}
