@@ -20,7 +20,7 @@ Features
 * Added a new ``--build_flags option`` to binaries to print build information. `(PR #3769) <https://github.com/apple/foundationdb/pull/3769>`_
 * Added ``--incremental`` option to backup and restore that allows specification of only recording mutation log files and not range files. Incremental restore also allows restoring to a non-empty destination database. `(PR #3676) <https://github.com/apple/foundationdb/pull/3676>`_
 * Added a tracing framework to track request latency throughout the system. See :ref:`Documentation <request-tracing>` for details. `(PR #3329) <https://github.com/apple/foundationdb/pull/3329>`_
-* Added the `(Global Configuration Framework) <https://github.com/apple/foundationdb/wiki/Global-Configuration-Framework>`_, an eventually consistent configuration mechanism to efficiently make runtime changes to all clients and servers. `(PR #4330) <https://github.com/apple/foundationdb/pull/4330>`_
+* Added the :ref:`(Global Configuration Framework) <global-configuration>`, an eventually consistent configuration mechanism to efficiently make runtime changes to all clients and servers. `(PR #4330) <https://github.com/apple/foundationdb/pull/4330>`_
 * Added the ability to monitor and manage an fdb cluster via read/write specific special keys through transactions. See :ref:`Documentation <special-keys>` for details. `(PR #3455) <https://github.com/apple/foundationdb/pull/3455>`_
 * Added TLS support to fdbdecode for decoding mutation log files stored in blobs. `(PR #4611) <https://github.com/apple/foundationdb/pull/4611>`_
 * Added ``initial_snapshot_interval`` to fdbbackup that can specify the duration of the first inconsistent snapshot written to the backup. `(PR #4620) <https://github.com/apple/foundationdb/pull/4620>`_
