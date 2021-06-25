@@ -970,6 +970,7 @@ struct LogPushData : NonCopyable {
 				}
 			}
 		}
+		written = std::vector<bool>(messagesWriter.size(), false);
 	}
 
 	void addTxsTag() {
@@ -1087,13 +1088,30 @@ struct LogPushData : NonCopyable {
 		next_message_tags.clear();
 	}
 
-	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
+	Standalone<StringRef> getMessages(int loc) {
+		// Update written here because this is called less frequently.
+		Standalone<StringRef> value = messagesWriter[loc].toValue();
+		if (!written[loc]) {
+			BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
+			Standalone<StringRef> v = w.toValue();
+			if (value.size() > v.size()) {
+				written[loc] = true;
+			}
+		}
+		return value;
+	}
+
+	float getEmptyLocationRatio() const {
+		auto count = std::count(written.begin(), written.end(), false);
+		return 1.0 * count / written.size();
+	}
 
 private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;
 	std::vector<BinaryWriter> messagesWriter;
+	std::vector<bool> written; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
 	// Stores message locations that have had span information written to them
 	// for the current transaction. Adding transaction info will reset this
