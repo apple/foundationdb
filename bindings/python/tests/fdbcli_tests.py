@@ -94,7 +94,7 @@ def maintenance(logger):
     output3 = run_fdbcli_command('maintenance')
     assert output3 == no_maintenance_output
 
-@enable_logging(logging.DEBUG)
+@enable_logging()
 def setclass(logger):
     output1 = run_fdbcli_command('setclass')
     class_type_line_1 = output1.split('\n')[-1]
@@ -111,8 +111,8 @@ def setclass(logger):
     class_types = ['storage', 'storage', 'transaction', 'resolution', 
                     'commit_proxy', 'grv_proxy', 'master', 'stateless', 'log', 
                     'router', 'cluster_controller', 'fast_restore', 'data_distributor',
-	                'coordinator', 'ratekeeper', 'storage_cache', 'backup', 
-                    'default']
+	                'coordinator', 'ratekeeper', 'storage_cache', 'backup'
+                ]
     random_class_type = random.choice(class_types)
     logger.debug("Change to type: {}".format(random_class_type))
     run_fdbcli_command('setclass', network_address, random_class_type)
@@ -191,15 +191,35 @@ def suspend(logger):
     logger.debug("Address: {}".format(address))
     db_available = get_value_from_status_json(False, 'client', 'database_status', 'available')
     assert db_available
+    # use pgrep to get the pid of the fdb process
+    pinfos = subprocess.check_output(['pgrep', '-a', 'fdbserver']).decode().strip().split('\n')
+    port = address.split(':')[1]
+    logger.debug("Port: {}".format(port))
+    # use the port number to find the exact fdb process we are connecting to
+    pinfo = list(filter(lambda x: port in x, pinfos))
+    assert len(pinfo) == 1
+    pid = pinfo[0].split(' ')[0]
+    logger.debug("Pid: {}".format(pid))
     process = subprocess.Popen(command_template[:-1], stdin = subprocess.PIPE, stdout = subprocess.PIPE)
-    # suspend the process for 3 seconds
-    output2, err = process.communicate(input='suspend; suspend 3 {}\n'.format(address).encode())
+    # suspend the process for enough long time
+    output2, err = process.communicate(input='suspend; suspend 3600 {}\n'.format(address).encode())
     # the cluster should be unavailable after the only process being suspended
-    db_available2 = get_value_from_status_json(False, 'client', 'database_status', 'available')
-    assert not db_available2
-    while not get_value_from_status_json(False, 'client', 'database_status', 'available'):
-        logger.debug("Sleep for 1 second")
+    assert not get_value_from_status_json(False, 'client', 'database_status', 'available')
+    # check the process pid still exists
+    pids = subprocess.check_output(['pidof', 'fdbserver']).decode().strip()
+    logger.debug("PIDs: {}".format(pids))
+    assert pid in pids
+    # kill the process by pid
+    kill_output = subprocess.check_output(['kill', pid]).decode().strip()
+    logger.debug("Kill result: {}".format(kill_output))
+    # The process should come back after a few time
+    duration = 0 # seconds we already wait
+    while not get_value_from_status_json(False, 'client', 'database_status', 'available') and duration < 60:
+        logger.debug("Sleep for 1 second to wait cluster recovery")
         time.sleep(1)
+        duration += 1
+    # at most after 60 seconds, the cluster should be available
+    assert get_value_from_status_json(False, 'client', 'database_status', 'available')
 
 def get_value_from_status_json(retry, *args):
     while True:
