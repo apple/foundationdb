@@ -566,7 +566,8 @@ void initHelp() {
 	                "change the class of a process",
 	                "If no address and class are specified, lists the classes of all servers.\n\nSetting the class to "
 	                "`default' resets the process class to the class specified on the command line. The available "
-	                "classes are `unset', `storage', `transaction', `resolution', `proxy', `master', `test', `unset', "
+	                "classes are `unset', `storage', `transaction', `resolution', `commit_proxy', `grv_proxy', "
+	                "`master', `test', "
 	                "`stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', "
 	                "`coordinator', `ratekeeper', `storage_cache', `backup', and `default'.");
 	helpMap["status"] =
@@ -3604,9 +3605,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						state std::string passPhrase = deterministicRandom()->randomAlphaNumeric(10);
 						warn.cancel(); // don't warn while waiting on user input
 						printf("Unlocking the database is a potentially dangerous operation.\n");
-						Optional<std::string> input = wait(linenoise.read(
-						    format("Repeat the following passphrase if you would like to proceed (%s) : ",
-						           passPhrase.c_str())));
+						printf("%s\n", passPhrase.c_str());
+						fflush(stdout);
+						Optional<std::string> input =
+						    wait(linenoise.read(format("Repeat the above passphrase if you would like to proceed:")));
 						warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db);
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
