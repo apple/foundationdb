@@ -16,7 +16,7 @@ Features
 * Added support for writing backup files directly to Azure blob storage. This is not yet performance tested on large-scale clusters. `(PR #3961) <https://github.com/apple/foundationdb/pull/3961>`_
 * Tag-based throttling now also takes the write path into account. `(PR #3512) <https://github.com/apple/foundationdb/pull/3512>`_
 * Added the ability to ratekeeper to throttle certain types of tags based on write hot spots in addition to read hot spots. `(PR #3571) <https://github.com/apple/foundationdb/pull/3571>`_
-* Users now have the option to make ratekeeper recommend which transaction tags should be throttled, but not actually throttle them using fdbcli . `(PR #3669) <https://github.com/apple/foundationdb/pull/3669>`_
+* Users now have the option to make ratekeeper recommend which transaction tags should be throttled, but not actually throttle them using fdbcli. `(PR #3669) <https://github.com/apple/foundationdb/pull/3669>`_
 * Added a new ``--build_flags option`` to binaries to print build information. `(PR #3769) <https://github.com/apple/foundationdb/pull/3769>`_
 * Added ``--incremental`` option to backup and restore that allows specification of only recording mutation log files and not range files. Incremental restore also allows restoring to a non-empty destination database. `(PR #3676) <https://github.com/apple/foundationdb/pull/3676>`_
 * Added request tracing framework. `(PR #3329) <https://github.com/apple/foundationdb/pull/3329>`_ `(PR #3700) <https://github.com/apple/foundationdb/pull/3700>`_ `(PR #4048) <https://github.com/apple/foundationdb/pull/4048>`_ `(PR #4125) <https://github.com/apple/foundationdb/pull/4125>`_ `(PR #4204) <https://github.com/apple/foundationdb/pull/4204>`_
