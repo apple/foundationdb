@@ -289,20 +289,21 @@ public:
 	                        Key url,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges,
 	                        bool waitForComplete = true,
-	                        Version targetVersion = -1,
+	                        Version targetVersion = ::invalidVersion,
 	                        bool verbose = true,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
 	                        bool lockDB = true,
 	                        bool onlyAppyMutationLogs = false,
 	                        bool inconsistentSnapshotOnly = false,
-	                        Version beginVersion = -1);
+	                        Version beginVersion = ::invalidVersion,
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
 	                        bool waitForComplete = true,
-	                        Version targetVersion = -1,
+	                        Version targetVersion = ::invalidVersion,
 	                        bool verbose = true,
 	                        KeyRange range = normalKeys,
 	                        Key addPrefix = Key(),
@@ -310,7 +311,8 @@ public:
 	                        bool lockDB = true,
 	                        bool onlyAppyMutationLogs = false,
 	                        bool inconsistentSnapshotOnly = false,
-	                        Version beginVersion = -1) {
+	                        Version beginVersion = ::invalidVersion,
+	                        Optional<std::string> const& encryptionKeyFileName = {}) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
 		return restore(cx,
@@ -326,7 +328,8 @@ public:
 		               lockDB,
 		               onlyAppyMutationLogs,
 		               inconsistentSnapshotOnly,
-		               beginVersion);
+		               beginVersion,
+		               encryptionKeyFileName);
 	}
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,

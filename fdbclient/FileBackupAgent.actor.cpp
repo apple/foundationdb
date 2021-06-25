@@ -5312,6 +5312,7 @@ public:
 	                                     bool onlyAppyMutationLogs,
 	                                     bool inconsistentSnapshotOnly,
 	                                     Version beginVersion,
+	                                     Optional<std::string> encryptionKeyFileName,
 	                                     UID randomUid) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
 		if (ranges.empty()) {
@@ -5525,6 +5526,7 @@ public:
 			                           false,
 			                           false,
 			                           invalidVersion,
+			                           {},
 			                           randomUid));
 			return ver;
 		}
@@ -5586,7 +5588,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          bool lockDB,
                                          bool onlyAppyMutationLogs,
                                          bool inconsistentSnapshotOnly,
-                                         Version beginVersion) {
+                                         Version beginVersion,
+                                         Optional<std::string> const& encryptionKeyFileName) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -5602,6 +5605,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    onlyAppyMutationLogs,
 	                                    inconsistentSnapshotOnly,
 	                                    beginVersion,
+	                                    encryptionKeyFileName,
 	                                    deterministicRandom()->randomUniqueID());
 }
 
