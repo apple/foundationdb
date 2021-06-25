@@ -1342,22 +1342,26 @@ struct RedwoodMetrics {
 		Reference<Histogram> buildItemCountSketch;
 		Reference<Histogram> modifyItemCountSketch;
 
-		Level() { levelClear(); }
+		Level() {
+			levelClear(); 
+		}
 
 		void levelClear(unsigned int levelCounter = 0){
 			metric = {};
-			metric.eventReasons.clear();
+			
 			buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-			buildFillPctSketch->clear();
 			modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-			modifyFillPctSketch->clear();
 			buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-			buildStoredPctSketch->clear();
 			modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-			modifyStoredPctSketch->clear();
 			buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
-			buildItemCountSketch->clear();
 			modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
+
+			metric.eventReasons.clear();
+			buildFillPctSketch->clear();
+			modifyFillPctSketch->clear();
+			buildStoredPctSketch->clear();
+			modifyStoredPctSketch->clear();
+			buildItemCountSketch->clear();
 			modifyItemCountSketch->clear();
 		}
 	};
@@ -1387,7 +1391,12 @@ struct RedwoodMetrics {
 		eventReasonsArray eventReasons;
 	};
 
-	RedwoodMetrics() { clear(); }
+	RedwoodMetrics() { 
+		kvSizeWritten = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes);
+		kvSizeReadByGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet "), Histogram::Unit::bytes);
+		kvSizeReadByRangeGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByRangeGet"), Histogram::Unit::bytes);
+		clear(); 
+	}
 
 	void clear() {
 		unsigned int levelCounter = 1;
@@ -1397,12 +1406,11 @@ struct RedwoodMetrics {
 		}
 		metric = {};
 		metric.eventReasons.clear();
-		kvSizeWritten = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes);
+
 		kvSizeWritten->clear();
-		kvSizeReadByGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet "), Histogram::Unit::bytes);
 		kvSizeReadByGet->clear();
-		kvSizeReadByRangeGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByRangeGet"), Histogram::Unit::bytes);
 		kvSizeReadByRangeGet->clear();
+
 		startTime = g_network ? now() : 0;
 	}
 
@@ -1638,8 +1646,13 @@ public:
 			return &i->second.item;
 		}
 		++g_redwoodMetrics.metric.pagerProbeMiss;
-		(l == 0) ? g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r) 
-				 : g_redwoodMetrics.levels[l-1].metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+		if (l == 0 ){
+			g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+		}
+		else{
+			auto& metrics = g_redwoodMetrics.level(l);
+			metrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+		}
 		return nullptr;
 	}
 
@@ -1686,8 +1699,8 @@ public:
 					g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
 				}
 				else{
-					g_redwoodMetrics.levels[l-1].metric.eventReasons.addEventReason(events::pagerCacheHit, r);
-					g_redwoodMetrics.levels[l-1].metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+					g_redwoodMetrics.level(l).metric.eventReasons.addEventReason(events::pagerCacheHit, r);
+					g_redwoodMetrics.level(l).metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
 				}
 
 				// Move the entry to the back of the eviction order
@@ -1703,8 +1716,8 @@ public:
 					g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
 				}
 				else{
-					g_redwoodMetrics.levels[l-1].metric.eventReasons.addEventReason(events::pagerCacheMiss, r);
-					g_redwoodMetrics.levels[l-1].metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+					g_redwoodMetrics.level(l).metric.eventReasons.addEventReason(events::pagerCacheMiss, r);
+					g_redwoodMetrics.level(l).metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
 				}
 			}
 			// Finish initializing entry
@@ -2314,7 +2327,9 @@ public:
 		             page->begin());
 
 		++g_redwoodMetrics.metric.pagerDiskWrite;
-		if (l == 0){ g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerWrite, r);}
+		if (l == 0){ 
+			g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerWrite, r);
+		}
 		else{
 			auto& metrics = g_redwoodMetrics.level(l);
 			metrics.metric.eventReasons.addEventReason(events::pagerWrite, r);
