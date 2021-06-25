@@ -340,11 +340,12 @@ const Key storageServerListToTeamIdKey(std::vector<UID> servers) {
 }
 
 const Value encodeStorageTeams(const std::vector<UID>& value) {
-	return BinaryWriter::toValue(value, IncludeVersion(ProtocolVersion::withPartitionTransaction());
+	return BinaryWriter::toValue(value, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 }
 
 std::vector<UID> decodeStorageTeams(const ValueRef& value) {
-	return BinaryReader::fromStringRef<std::vector<UID>>(value, IncludeVersion());
+	return BinaryReader::fromStringRef<std::vector<UID>>(value,
+	                                                     IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 }
 
 const KeyRef storageTeamIdToTLogGroupPrefix = LiteralStringRef("\xff/storageTeamIdToTLogGroup/");
