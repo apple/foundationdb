@@ -352,6 +352,7 @@ ACTOR Future<Void> newVersionIndexers(Reference<MasterData> self, RecruitFromCon
 	std::vector<Future<VersionIndexerInterface>> initializationReplies;
 	for (int i = 0; i < recr.versionIndexers.size(); ++i) {
 		InitializeVersionIndexerRequest req;
+		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		TraceEvent("VersionIndexerReplies", self->dbgid).detail("WorkerID", recr.versionIndexers[i].id());
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.versionIndexers[i].versionIndexer.getReplyUnlessFailedFor(
@@ -746,6 +747,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 		    .detail("RequiredCommitProxies", 1)
 		    .detail("RequiredGrvProxies", 1)
 		    .detail("RequiredResolvers", 1)
+		    .detail("RequiredVersionIndexers", 1)
 		    .trackLatest("MasterRecoveryState");
 
 	// FIXME: we only need log routers for the same locality as the master
@@ -788,6 +790,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .detail("GrvProxies", recruits.grvProxies.size())
 	    .detail("TLogs", recruits.tLogs.size())
 	    .detail("Resolvers", recruits.resolvers.size())
+	    .detail("VersionIndexers", recruits.versionIndexers.size())
 	    .detail("SatelliteTLogs", recruits.satelliteTLogs.size())
 	    .detail("OldLogRouters", recruits.oldLogRouters.size())
 	    .detail("StorageServers", recruits.storageServers.size())
@@ -1425,6 +1428,7 @@ static std::set<int> const& normalMasterErrors() {
 		s.insert(error_code_commit_proxy_failed);
 		s.insert(error_code_grv_proxy_failed);
 		s.insert(error_code_master_resolver_failed);
+		s.insert(error_code_master_version_indexer_failed);
 		s.insert(error_code_master_backup_worker_failed);
 		s.insert(error_code_recruitment_failed);
 		s.insert(error_code_no_more_servers);
@@ -1813,6 +1817,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	ASSERT(self->grvProxies.size() >= 1);
 	ASSERT(self->resolvers.size() <= self->configuration.getDesiredResolvers());
 	ASSERT(self->resolvers.size() >= 1);
+	ASSERT(self->versionIndexers.size() <= self->configuration.getDesiredVersionIndexers());
+	ASSERT(self->versionIndexers.size() >= 1);
 
 	self->recoveryState = RecoveryState::RECOVERY_TRANSACTION;
 	TraceEvent("MasterRecoveryState", self->dbgid)
@@ -2073,11 +2079,14 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 			self->addActor.getFuture().pop();
 		}
 
+		// clang-format off
 		TEST(err.code() == error_code_master_tlog_failed); // Master: terminated due to tLog failure
 		TEST(err.code() == error_code_commit_proxy_failed); // Master: terminated due to commit proxy failure
 		TEST(err.code() == error_code_grv_proxy_failed); // Master: terminated due to GRV proxy failure
 		TEST(err.code() == error_code_master_resolver_failed); // Master: terminated due to resolver failure
 		TEST(err.code() == error_code_master_backup_worker_failed); // Master: terminated due to backup worker failure
+		TEST(err.code() == error_code_master_version_indexer_failed); // Master: terminated due to version indexer failure
+		// clang-format on
 
 		if (normalMasterErrors().count(err.code())) {
 			TraceEvent("MasterTerminated", mi.id()).error(err);

@@ -526,11 +526,12 @@ struct InitializeBackupRequest {
 struct InitializeVersionIndexerRequest {
 	constexpr static FileIdentifier file_identifier = 6194990;
 	UID reqId = deterministicRandom()->randomUniqueID();
+	uint64_t recoveryCount;
 	ReplyPromise<VersionIndexerInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, reply);
+		serializer(ar, reqId, recoveryCount, reply);
 	}
 };
 
@@ -958,7 +959,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Reference<AsyncVar<UID>> activeSharedTLog);
 }
 
-ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface);
+ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface,
+                                  InitializeVersionIndexerRequest req,
+                                  Reference<AsyncVar<ServerDBInfo>> db);
 
 typedef decltype(&tLog) TLogFn;
 

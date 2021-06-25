@@ -21,14 +21,16 @@
 #include "fdbclient/Notified.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/VersionIndexerInterface.actor.h"
+#include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/VersionIndexerInterface.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 struct VersionIndexerStats {
 	CounterCollection cc;
-	Counter reqIn, peeks;
+	Counter commits, peeks;
 	Version lastCommittedVersion, windowBegin, windowEnd;
 
 	Future<Void> logger;
@@ -57,7 +59,7 @@ struct VersionIndexerState {
 };
 
 VersionIndexerStats::VersionIndexerStats(UID id)
-  : cc("VersionIndexerStats", id.toString()), reqIn("Requests", cc), peeks("PeekRequests", cc) {
+  : cc("VersionIndexerStats", id.toString()), commits("Commits", cc), peeks("PeekRequests", cc) {
 	logger = traceCounters("VersionIndexerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc);
 }
 
@@ -91,7 +93,7 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitRequest req) {
 	self->committedVersion = std::max(self->committedVersion, req.committedVersion);
 	req.reply.send(Void());
-	++self->stats.reqIn;
+	++self->stats.commits;
 	self->stats.lastCommittedVersion = std::max(self->stats.lastCommittedVersion, req.committedVersion);
 	wait(self->version.whenAtLeast(req.previousVersion));
 	if (self->version.get() < req.version) {
@@ -118,16 +120,48 @@ ACTOR Future<Void> windowTruncator(VersionIndexerState* self) {
 	}
 }
 
-ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface) {
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
+                                uint64_t recoveryCount,
+                                VersionIndexerInterface myInterface) {
+	loop {
+		if (db->get().recoveryCount >= recoveryCount &&
+		    !std::count(db->get().versionIndexers.begin(), db->get().versionIndexers.end(), myInterface)) {
+			TraceEvent("VersionIndexerRemoved", myInterface.id())
+			    .detail("RecoveryCount", db->get().recoveryCount)
+			    .detail("LastRecoveryCount", recoveryCount)
+			    .detail("FirstInterface",
+			            db->get().versionIndexers.size() > 0 ? db->get().versionIndexers[0].id() : UID())
+			    .detail("NumVersionIndexers", db->get().versionIndexers.size());
+			throw worker_removed();
+		}
+		wait(db->onChange());
+	}
+}
+
+ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface,
+                                  InitializeVersionIndexerRequest req,
+                                  Reference<AsyncVar<ServerDBInfo>> db) {
 	state VersionIndexerState self(interface.id());
 	state ActorCollection actors(false);
+	state Future<Void> removed = checkRemoved(db, req.recoveryCount, interface);
+	actors.add(waitFailureServer(interface.waitFailure.getFuture()));
 	actors.add(windowTruncator(&self));
-	loop {
-		choose {
-			when(VersionIndexerCommitRequest req = waitNext(interface.commit.getFuture())) {
-				actors.add(addVersion(&self, req));
+	try {
+		loop {
+			choose {
+				when(VersionIndexerCommitRequest req = waitNext(interface.commit.getFuture())) {
+					TraceEvent("VersionIndexerCommitRequest");
+					actors.add(addVersion(&self, req));
+				}
+				when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
+				when(wait(removed)) {}
 			}
-			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
 		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
+			TraceEvent("VersionIndexerTerminated", interface.id()).error(e, true);
+			return Void();
+		}
+		throw;
 	}
 }

@@ -89,7 +89,8 @@ struct ServerDBInfo {
 		           priorCommittedLogServers,
 		           latencyBandConfig,
 		           infoGeneration,
-		           configBroadcaster);
+		           configBroadcaster,
+		           versionIndexers);
 	}
 };
 

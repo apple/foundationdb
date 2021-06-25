@@ -1595,9 +1595,10 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			}
 			when(InitializeVersionIndexerRequest req = waitNext(interf.versionIndexer.getFuture())) {
 				VersionIndexerInterface recruited;
+				recruited.locality = locality;
 				startRole(Role::VERSION_INDEXER, recruited.id(), interf.id());
 				DUMPTOKEN(recruited.waitFailure);
-				errorForwarders.add(versionIndexer(recruited));
+				errorForwarders.add(versionIndexer(recruited, req, dbInfo));
 				TraceEvent("VersionIndexer_InitRequest", req.reqId).detail("VersionIndexerId", recruited.id());
 				req.reply.send(recruited);
 			}

@@ -17,16 +17,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_VERSION_INDEXER_INTERFACE_ACTOR_G_H)
 #define FDBSERVER_VERSION_INDEXER_INTERFACE_ACTOR_G_H
 #include "fdbserver/VersionIndexerInterface.actor.g.h"
 #elif !defined(FDBSERVER_VERSION_INDEXER_INTERFACE_ACTOR_H)
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
 
 struct VersionIndexerInterface {
 	constexpr static FileIdentifier file_identifier = 6865162;
 
 	UID uniqueID = deterministicRandom()->randomUniqueID();
+	LocalityData locality;
 	UID id() const { return uniqueID; }
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct VersionIndexerCommitRequest> commit;
@@ -37,7 +40,7 @@ struct VersionIndexerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, waitFailure, commit, peek);
+		serializer(ar, uniqueID, locality, waitFailure, commit, peek);
 	}
 };
 
