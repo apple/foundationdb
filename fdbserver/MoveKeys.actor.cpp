@@ -1035,8 +1035,8 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 			state vector<Future<Optional<Value>>> localityExclusions;
 			std::map<std::string, std::string> localityData = server.locality.getAllData();
 			for (const auto& l : localityData) {
-				localityExclusions.push_back(tr->get(
-				    StringRef(encodeExcludedLocalityKey(ExcludeLocalityPrefix.toString() + l.first + ":" + l.second))));
+				localityExclusions.push_back(tr->get(StringRef(encodeExcludedLocalityKey(
+				    LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second))));
 			}
 
 			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);

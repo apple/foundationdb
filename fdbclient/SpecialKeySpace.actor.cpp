@@ -2176,7 +2176,8 @@ bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
 		    .detail("Key", iter->begin().toString());
 		if (entry.first && entry.second.present()) {
 			Key locality = iter->begin().removePrefix(range.begin);
-			if (locality.startsWith(ExcludeLocalityPrefix) && locality.toString().find(':') != std::string::npos) {
+			if (locality.startsWith(LocalityData::ExcludeLocalityPrefix) &&
+			    locality.toString().find(':') != std::string::npos) {
 				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality.toString());
 				if (!localityAddresses.empty()) {
 					std::copy(localityAddresses.begin(), localityAddresses.end(), back_inserter(addresses));
