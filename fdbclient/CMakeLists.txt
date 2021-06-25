@@ -22,6 +22,7 @@ set(FDBCLIENT_SRCS
   ClientLogEvents.h
   ClientWorkerInterface.h
   ClusterInterface.h
+  CommitProxyInterface.h
   CommitTransaction.h
   ConfigKnobs.cpp
   ConfigKnobs.h
@@ -57,7 +58,6 @@ set(FDBCLIENT_SRCS
   IKnobCollection.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
-  CommitProxyInterface.h
   MonitorLeader.actor.cpp
   MonitorLeader.h
   MultiVersionAssignmentVars.h
@@ -67,6 +67,8 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
+  ParallelStream.actor.cpp
+  ParallelStream.actor.h
   PaxosConfigTransaction.actor.cpp
   PaxosConfigTransaction.h
   SimpleConfigTransaction.actor.cpp
@@ -88,6 +90,8 @@ set(FDBCLIENT_SRCS
   ServerKnobs.h
   SimpleConfigTransaction.h
   SnapshotCache.h
+  SpecialKeySpace.actor.cpp
+  SpecialKeySpace.actor.h
   Status.h
   StatusClient.actor.cpp
   StatusClient.h

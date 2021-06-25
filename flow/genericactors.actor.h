@@ -1305,6 +1305,17 @@ private:
 	Promise<Void> lastPromise;
 };
 
+ACTOR template <class T, class V>
+Future<T> forwardErrors(Future<T> f, PromiseStream<V> output) {
+	try {
+		T val = wait(f);
+		return val;
+	} catch (Error& e) {
+		output.sendError(e);
+		throw;
+	}
+}
+
 struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	// FlowLock implements a nonblocking critical section: there can be only a limited number of clients executing code
 	// between wait(take()) and release(). Not thread safe. take() returns only when the number of holders of the lock

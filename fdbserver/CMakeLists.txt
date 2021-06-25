@@ -70,7 +70,6 @@ set(FDBSERVER_SRCS
   OldTLogServer_6_2.actor.cpp
   OnDemandStore.actor.cpp
   OnDemandStore.h
-  Orderer.actor.h
   PaxosConfigConsumer.actor.cpp
   PaxosConfigConsumer.h
   PaxosConfigDatabaseNode.actor.cpp
@@ -179,6 +178,7 @@ set(FDBSERVER_SRCS
   workloads/FileSystem.actor.cpp
   workloads/Fuzz.cpp
   workloads/FuzzApiCorrectness.actor.cpp
+  workloads/GetRangeStream.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
   workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
