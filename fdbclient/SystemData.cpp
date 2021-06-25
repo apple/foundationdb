@@ -340,7 +340,7 @@ const Key storageServerListToTeamIdKey(std::vector<UID> servers) {
 }
 
 const Value encodeStorageTeams(const std::vector<UID>& value) {
-	return BinaryWriter::toValue(value, IncludeVersion());
+	return BinaryWriter::toValue(value, IncludeVersion(ProtocolVersion::withPartitionTransaction());
 }
 
 std::vector<UID> decodeStorageTeams(const ValueRef& value) {
