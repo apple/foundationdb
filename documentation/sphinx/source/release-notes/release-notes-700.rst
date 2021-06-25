@@ -52,7 +52,7 @@ Reliability
 Fixes
 -----
 * List files asynchronously so many backup files on a slow disk won't cause the backup agent to lose its lease. `(PR #3094) <https://github.com/apple/foundationdb/pull/3094>`_
-* Unknown endpoint has been tracked in a wrong way and therefore showed up too frequently in our statistics. `(PR #4473) <https://github.com/apple/foundationdb/pull/4473>`_
+* Unknown endpoint has been tracked incorrectly and therefore showed up too frequently in our statistics. `(PR #4473) <https://github.com/apple/foundationdb/pull/4473>`_
 * Using the ``exclude failed`` command could leave the data distributor in a state where it cannot complete relocations. `(PR #4495) <https://github.com/apple/foundationdb/pull/4495>`_ 
 * Fixed a rare crash on the cluster controller when using multi-region configurations. `(PR #4547) <https://github.com/apple/foundationdb/pull/4547>`_ 
 * Fixed a memory corruption bug in the data distributor. `(PR #4535) <https://github.com/apple/foundationdb/pull/4535>`_
