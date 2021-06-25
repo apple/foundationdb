@@ -1950,7 +1950,7 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
 // The prefix could be dcid, processid, machineid, processid.
 std::pair<std::string, std::string> decodeLocality(const std::string& locality) {
 	StringRef localityRef(locality.c_str());
-	std::string localityKeyValue = localityRef.removePrefix(ExcludeLocalityPrefix).toString();
+	std::string localityKeyValue = localityRef.removePrefix(LocalityData::ExcludeLocalityPrefix).toString();
 	int split = localityKeyValue.find(':');
 	if (split != std::string::npos) {
 		return std::make_pair(localityKeyValue.substr(0, split), localityKeyValue.substr(split + 1));

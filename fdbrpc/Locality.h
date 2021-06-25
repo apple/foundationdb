@@ -24,9 +24,6 @@
 
 #include "flow/flow.h"
 
-inline const StringRef ExcludeLocalityKeyMachineIdPrefix = LiteralStringRef("locality_machineid:");
-inline const StringRef ExcludeLocalityPrefix = LiteralStringRef("locality_");
-
 struct ProcessClass {
 	constexpr static FileIdentifier file_identifier = 6697257;
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
@@ -322,6 +319,8 @@ public:
 	}
 
 	static const UID UNSET_ID;
+	static const StringRef ExcludeLocalityKeyMachineIdPrefix;
+	static const StringRef ExcludeLocalityPrefix;
 };
 
 static std::string describe(std::vector<LocalityData> const& items, StringRef const key, int max_items = -1) {

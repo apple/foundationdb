@@ -2434,7 +2434,7 @@ ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 			all = true;
 		} else if (*t == LiteralStringRef("failed")) {
 			failed = true;
-		} else if (t->startsWith(ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
+		} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
 			// if the token starts with 'locality_' prefix.
 			localities.push_back(t->toString());
 		} else {
@@ -2514,7 +2514,8 @@ ACTOR Future<bool> exclude(Database db,
 				waitForAllExcluded = false;
 			} else if (*t == LiteralStringRef("failed")) {
 				markFailed = true;
-			} else if (t->startsWith(ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
+			} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) &&
+			           t->toString().find(':') != std::string::npos) {
 				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, t->toString());
 				if (localityAddresses.empty()) {
 					noMatchLocalities.push_back(t->toString());

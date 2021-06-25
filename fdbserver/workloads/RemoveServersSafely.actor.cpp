@@ -757,13 +757,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (const auto& processInfo : processes) {
 			std::map<std::string, std::string> localityData = processInfo->locality.getAllData();
 			for (const auto& l : localityData) {
-				allLocalitiesCount[ExcludeLocalityPrefix.toString() + l.first + ":" + l.second]++;
+				allLocalitiesCount[LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second]++;
 			}
 
 			AddressExclusion pAddr(processInfo->address.ip, processInfo->address.port);
 			if (std::find(addresses.begin(), addresses.end(), pAddr) != addresses.end()) {
 				for (const auto& l : localityData) {
-					killableLocalitiesCount[ExcludeLocalityPrefix.toString() + l.first + ":" + l.second]++;
+					killableLocalitiesCount[LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
+					                        l.second]++;
 				}
 			}
 		}

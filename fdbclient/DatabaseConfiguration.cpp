@@ -636,9 +636,11 @@ std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) const {
 	std::map<std::string, std::string> localityData = locality.getAllData();
 	for (const auto& l : localityData) {
-		if (get(StringRef(encodeExcludedLocalityKey(ExcludeLocalityPrefix.toString() + l.first + ":" + l.second)))
+		if (get(StringRef(encodeExcludedLocalityKey(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
+		                                            l.second)))
 		        .present() ||
-		    get(StringRef(encodeFailedLocalityKey(ExcludeLocalityPrefix.toString() + l.first + ":" + l.second)))
+		    get(StringRef(
+		            encodeFailedLocalityKey(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second)))
 		        .present()) {
 			return true;
 		}
@@ -648,14 +650,12 @@ bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) con
 }
 
 // checks if this machineid of given locality is excluded.
-// A machine can be excluded either as part of dcid exclustion or zoneid exclusion
-// or this explicit machineid exclusion.
 bool DatabaseConfiguration::isMachineExcluded(const LocalityData& locality) const {
 	if (locality.machineId().present()) {
-		return get(encodeExcludedLocalityKey("ExcludeLocalityKeyMachineIdPrefix.toString()" +
+		return get(encodeExcludedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
 		                                     locality.machineId().get().toString()))
 		           .present() ||
-		       get(encodeFailedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() +
+		       get(encodeFailedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
 		                                   locality.machineId().get().toString()))
 		           .present();
 	}
