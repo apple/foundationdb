@@ -133,7 +133,9 @@ void Histogram::writeToLog() {
 	}
 }
 
-void Histogram::drawHistogram(){
+std::string Histogram::drawHistogram(){
+
+	std::stringstream result;
 
 	const char* verticalLine = "├\0";
 	const char* origin = "└\0";
@@ -159,35 +161,35 @@ void Histogram::drawHistogram(){
 	double intervalSize = (maxPct<(max_lines - 3)) ? 1 : maxPct / (max_lines - 3);
 	unsigned int lines = (maxPct < (max_lines - 3)) ? (unsigned int)maxPct : (max_lines - 3);
 
-	std::cout<<"Total Inputs: "<<total<<std::fixed<<"\n";
-	std::cout<<"Percent"<<"\n";
+	result<<"Total Inputs: "<<total<<std::fixed<<"\n";
+	result<<"Percent"<<"\n";
 	for (int l = 0; l < lines; l++){
 		double currHeight = (lines - l) * intervalSize;
 		double halfFullHeight = currHeight - intervalSize / 4;
-		std::cout << std::setw( 6 ) << std::setprecision( 2 ) << currHeight << " " << verticalLine;
+		result<<std::setw(6)<<std::setprecision(2)<<currHeight<<" "<< verticalLine;
 		for (int i =0; i<32; i++){
 			double pct = (100.0 * buckets[i]) / total;
-			if(pct > currHeight) std::cout << fullCell;
-			else if (pct > halfFullHeight) std::cout << halfCell;
-			else std::cout << emptyCell;
+			if(pct > currHeight) result<<fullCell;
+			else if (pct > halfFullHeight) result<<halfCell;
+			else result<<emptyCell;
 		}
-		std::cout << lineEnd << "\n";
+		result<<lineEnd<<"\n";
 	}
 
-	std::cout<<"  0.00 "<<origin;
+	result<<"  0.00 "<<origin;
 	for (int i =0; i<32; i++){
 		double pct = (100.0 * buckets[i]) / total;
-		if (pct > intervalSize/4) std::cout << xFull;
-		else std::cout << xEmpty;
+		if (pct > intervalSize/4) result<<xFull;
+		else result<<xEmpty;
 	}
-	std::cout << lineEnd << "\n";
+	result<<lineEnd<<"\n";
 
-	std::cout << std::string(9, ' ');
+	result<<std::string(9, ' ');
 	for (int i = 0; i<32; i++){
-		std::cout<<std::left<<std::setw(width)<<"  B"+std::to_string(i);
+		result<<std::left<<std::setw(width)<<"  B"+std::to_string(i);
 	}
-	std::cout << "\n";
-
+	result<<"\n";
+	return result.str();
 }
 
 #pragma endregion // Histogram

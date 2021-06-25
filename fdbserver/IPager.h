@@ -40,8 +40,10 @@ typedef uint32_t PhysicalPageID;
 typedef uint32_t QueueID;
 #define invalidQueueID std::numeric_limits<QueueID>::max()
 
+// Pager Events
+enum class events{ pagerCacheLookup = 0, pagerCacheHit, pagerCacheMiss, pagerWrite, MAXEVENTS};
 // Reasons for page levle events.
-enum class pagerEventReasons{ pointRead, rangeRead, rangePrefetch, commit, lazyClear, metaData};
+enum class pagerEventReasons{ pointRead, rangeRead, rangePrefetch, commit, lazyClear, metaData, MAXEVENTREASONS};
 
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
@@ -131,7 +133,7 @@ public:
 
 class IPagerSnapshot {
 public:
-	virtual Future<Reference<const ArenaPage>> getPhysicalPage(pagerEventReasons r, LogicalPageID pageID, bool cacheable, bool nohit) = 0;
+	virtual Future<Reference<const ArenaPage>> getPhysicalPage(pagerEventReasons r, unsigned int l, LogicalPageID pageID, bool cacheable, bool nohit) = 0;
 	virtual bool tryEvictPage(LogicalPageID id) = 0;
 	virtual Version getVersion() const = 0;
 
@@ -167,13 +169,13 @@ public:
 	// Replace the contents of a page with new data across *all* versions.
 	// Existing holders of a page reference for pageID, read from any version,
 	// may see the effects of this write.
-	virtual void updatePage(LogicalPageID pageID, Reference<ArenaPage> data) = 0;
+	virtual void updatePage(pagerEventReasons r, unsigned int l, LogicalPageID pageID, Reference<ArenaPage> data) = 0;
 
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
 	// instead and return the new page ID to the caller.  Otherwise the original pageID argument will be returned.
 	// If a new page ID is returned, the old page ID will be freed as of version v
-	virtual Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<ArenaPage> data, Version v) = 0;
+	virtual Future<LogicalPageID> atomicUpdatePage(unsigned int l, LogicalPageID pageID, Reference<ArenaPage> data, Version v) = 0;
 
 	// Free pageID to be used again after the commit that moves oldestVersion past v
 	virtual void freePage(LogicalPageID pageID, Version v) = 0;
@@ -191,8 +193,8 @@ public:
 	// Cacheable indicates that the page should be added to the page cache (if applicable?) as a result of this read.
 	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
 	// considered likely to be needed soon.
-	virtual Future<Reference<ArenaPage>> readPage(pagerEventReasons r, LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
-	virtual Future<Reference<ArenaPage>> readExtent(pagerEventReasons r, LogicalPageID pageID) = 0;
+	virtual Future<Reference<ArenaPage>> readPage(pagerEventReasons r, unsigned int l, LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
+	virtual Future<Reference<ArenaPage>> readExtent(pagerEventReasons r, unsigned int l, LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 
 	// Temporary methods for testing

@@ -144,7 +144,7 @@ public:
 		if(sample == upperBound){
 			sample = upperBound - 1;
 		}
-		size_t idx = sample * 32 / (upperBound - lowerBound);
+		size_t idx = ( (sample - lowerBound) * 32.0 ) / (upperBound - lowerBound);
 		ASSERT(idx < 32);
 		buckets[idx]++;
 	}
@@ -158,7 +158,7 @@ public:
 
 	std::string name() const { return generateName(this->group, this->op); }
 
-	void drawHistogram();
+	std::string drawHistogram();
 
 	std::string const group;
 	std::string const op;
