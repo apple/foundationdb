@@ -5057,7 +5057,7 @@ private:
 			// LogicalPageIDs in previousID and try to update them atomically.
 			if (pagesToBuild.size() == 1 && previousID.size() == pages.size()) {
 				for (k = 0; k < pages.size(); ++k) {
-					LogicalPageID id = wait(self->m_pager->atomicUpdatePage(previousID[k], currLevel , pages[k], v));
+					LogicalPageID id = wait(self->m_pager->atomicUpdatePage(currLevel, previousID[k], pages[k], v));
 					childPageID.push_back(records.arena(), id);
 				}
 			} else {
@@ -5245,7 +5245,7 @@ private:
 		if (oldID.size() == 1) {
 			BTreePage* btPage = (BTreePage*)page->begin();
 			int currLevel = btPage->height;
-			LogicalPageID id = wait(self->m_pager->atomicUpdatePage(oldID.front(), currLevel, page, writeVersion));
+			LogicalPageID id = wait(self->m_pager->atomicUpdatePage(currLevel, oldID.front(), page, writeVersion));
 			newID.front() = id;
 		} else {
 			state std::vector<Reference<ArenaPage>> pages;
@@ -5266,7 +5266,7 @@ private:
 			for (; i < pages.size(); ++i) {
 				BTreePage* btPage = (BTreePage*)page->begin();
 				int currLevel = btPage->height;
-				LogicalPageID id = wait(self->m_pager->atomicUpdatePage(oldID[i], currLevel, pages[i], writeVersion));
+				LogicalPageID id = wait(self->m_pager->atomicUpdatePage(currLevel, oldID[i], pages[i], writeVersion));
 				newID[i] = id;
 			}
 		}
