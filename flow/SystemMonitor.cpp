@@ -61,7 +61,7 @@ SystemStatistics getSystemStatistics() {
 	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
 	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
 
-SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics) {
+SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsState* statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	SystemStatistics currentStats = getSystemStatistics(
 	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState->systemState, true);
@@ -285,7 +285,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* sta
 				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
 					s = s.substr(LiteralStringRef("struct ").size());
 #endif
-				typeNames.push_back(std::make_pair(s, i->first));
+				typeNames.emplace_back(s, i->first);
 			}
 			std::sort(typeNames.begin(), typeNames.end());
 			for (int i = 0; i < typeNames.size(); i++) {

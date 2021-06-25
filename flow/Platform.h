@@ -232,7 +232,7 @@ struct SystemStatisticsState;
 
 struct IPAddress;
 
-SystemStatistics getSystemStatistics(std::string dataFolder,
+SystemStatistics getSystemStatistics(std::string const& dataFolder,
                                      const IPAddress* ip,
                                      SystemStatisticsState** statState,
                                      bool logDetails);
@@ -369,7 +369,7 @@ std::vector<std::string> listFiles(std::string const& directory, std::string con
 // returns directory names relative to directory
 std::vector<std::string> listDirectories(std::string const& directory);
 
-void findFilesRecursively(std::string path, std::vector<std::string>& out);
+void findFilesRecursively(std::string const& path, std::vector<std::string>& out);
 
 // Tag the given file as "temporary", i.e. not really needing commits to disk
 void makeTemporary(const char* filename);
@@ -580,10 +580,16 @@ inline static int64_t flowInterlockedAnd64(int64_t* p, int64_t a) {
 #define bigEndian16(value) uint16_t(_byteswap_ushort(value))
 #define bigEndian32(value) uint32_t(_byteswap_ulong(value))
 #define bigEndian64(value) uint64_t(_byteswap_uint64(value))
+#define fromBigEndian16(value) uint16_t(_byteswap_ushort(value))
+#define fromBigEndian32(value) uint32_t(_byteswap_ulong(value))
+#define fromBigEndian64(value) uint64_t(_byteswap_uint64(value))
 #elif __GNUG__
 #define bigEndian16(value) uint16_t((value >> 8) | (value << 8))
 #define bigEndian32(value) uint32_t(__builtin_bswap32(value))
 #define bigEndian64(value) uint64_t(__builtin_bswap64(value))
+#define fromBigEndian16(value) uint16_t((value >> 8) | (value << 8))
+#define fromBigEndian32(value) uint32_t(__builtin_bswap32(value))
+#define fromBigEndian64(value) uint64_t(__builtin_bswap64(value))
 #else
 #error Missing byte swap methods
 #endif
@@ -791,17 +797,17 @@ inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) 
 #include <inttypes.h>
 static inline uint32_t hwCrc32cU8(unsigned int crc, unsigned char v) {
 	uint32_t ret;
-	asm volatile("crc32cb %w[r], %w[c], %w[v]" : [ r ] "=r"(ret) : [ c ] "r"(crc), [ v ] "r"(v));
+	asm volatile("crc32cb %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
 	return ret;
 }
 static inline uint32_t hwCrc32cU32(unsigned int crc, unsigned int v) {
 	uint32_t ret;
-	asm volatile("crc32cw %w[r], %w[c], %w[v]" : [ r ] "=r"(ret) : [ c ] "r"(crc), [ v ] "r"(v));
+	asm volatile("crc32cw %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
 	return ret;
 }
 static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
 	uint64_t ret;
-	asm volatile("crc32cx %w[r], %w[c], %x[v]" : [ r ] "=r"(ret) : [ c ] "r"(crc), [ v ] "r"(v));
+	asm volatile("crc32cx %w[r], %w[c], %x[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
 	return ret;
 }
 #else

@@ -26,27 +26,6 @@
 #include <stdarg.h>
 #include <cinttypes>
 
-thread_local Reference<ActorLineage> currentLineage;
-WriteOnlyVariable<ActorLineage, unsigned> currentLineageThreadSafe;
-
-LineagePropertiesBase::~LineagePropertiesBase() {}
-
-ActorLineage::ActorLineage() : properties(), parent(currentLineage) {}
-
-ActorLineage::~ActorLineage() {
-	for (auto ptr : properties) {
-		delete ptr.second;
-	}
-}
-
-using namespace std::literals;
-
-const std::string_view StackLineage::name = "StackLineage"sv;
-
-std::vector<StringRef> getActorStackTrace() {
-	return currentLineage->stack(&StackLineage::actorName);
-}
-
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
 void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
@@ -114,7 +93,7 @@ std::string UID::shortString() const {
 
 void detectFailureAfter(int const& address, double const& delay);
 
-Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit) {
+Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit) {
 	char* endptr;
 
 	uint64_t ret = strtoull(toparse.c_str(), &endptr, 10);
@@ -165,7 +144,7 @@ Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_un
 // m - minutes
 // h - hours
 // d - days
-Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit) {
+Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit) {
 	char* endptr;
 	uint64_t ret = strtoull(str.c_str(), &endptr, 10);
 
@@ -305,7 +284,7 @@ std::vector<double> P_BUGGIFIED_SECTION_FIRES{ .25, .25 };
 
 double P_EXPENSIVE_VALIDATION = .05;
 
-int getSBVar(std::string file, int line, BuggifyType type) {
+int getSBVar(std::string const& file, int line, BuggifyType type) {
 	if (!buggifyActivated[int(type)])
 		return 0;
 

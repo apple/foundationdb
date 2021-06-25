@@ -22,6 +22,7 @@
 #include <fstream>
 #include <ostream>
 #include <sstream>
+#include <toml.hpp>
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
@@ -37,8 +38,9 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
+#include "flow/TypeTraits.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
 #undef min
@@ -46,9 +48,283 @@
 extern "C" int g_expect_full_pointermap;
 extern const char* getSourceVersion();
 
+using namespace std::literals;
+
 const int MACHINE_REBOOT_TIME = 10;
 
 bool destructed = false;
+
+// Configuration details specified in workload test files that change the simulation
+// environment details
+class TestConfig {
+	class ConfigBuilder {
+		using value_type = toml::basic_value<toml::discard_comments>;
+		using base_variant = std::variant<int, bool, std::string, std::vector<int>>;
+		using types =
+		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
+		std::unordered_map<std::string_view, types> confMap;
+
+		struct visitor {
+			const value_type& value;
+			visitor(const value_type& v) : value(v) {}
+			void operator()(int* val) const { *val = value.as_integer(); }
+			void operator()(Optional<int>* val) const { *val = value.as_integer(); }
+			void operator()(bool* val) const { *val = value.as_boolean(); }
+			void operator()(Optional<bool>* val) const { *val = value.as_boolean(); }
+			void operator()(std::string* val) const { *val = value.as_string(); }
+			void operator()(Optional<std::string>* val) const { *val = value.as_string(); }
+			void operator()(std::vector<int>* val) const {
+				auto arr = value.as_array();
+				for (const auto& i : arr) {
+					val->emplace_back(i.as_integer());
+				}
+			}
+			void operator()(Optional<std::vector<int>>* val) const {
+				std::vector<int> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+		};
+
+		struct trace_visitor {
+			std::string key;
+			TraceEvent& evt;
+			trace_visitor(std::string const& key, TraceEvent& e) : key("Key" + key), evt(e) {}
+			void operator()(int* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(Optional<int>* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(bool* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(Optional<bool>* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(std::string* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(Optional<std::string>* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(std::vector<int>* val) const {
+				if (val->empty()) {
+					evt.detail(key.c_str(), "[]");
+					return;
+				}
+				std::stringstream value;
+				value << "[" << val->at(0);
+				for (int i = 1; i < val->size(); ++i) {
+					value << "," << val->at(i);
+				}
+				value << "]";
+				evt.detail(key.c_str(), value.str());
+			}
+			void operator()(Optional<std::vector<int>>* val) const {
+				std::vector<int> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+		};
+
+	public:
+		~ConfigBuilder() {
+			TraceEvent evt("SimulatorConfigFromToml");
+			for (const auto& p : confMap) {
+				std::visit(trace_visitor(std::string(p.first), evt), p.second);
+			}
+		}
+
+		template <class V>
+		ConfigBuilder& add(std::string_view key, V value) {
+			confMap.emplace(key, value);
+			return *this;
+		}
+
+		void set(std::string_view key, const value_type& value) {
+			auto iter = confMap.find(key);
+			if (iter == confMap.end()) {
+				std::cerr << "Unknown configuration attribute " << key << std::endl;
+				TraceEvent("UnknownConfigurationAttribute").detail("Name", std::string(key));
+				throw unknown_error();
+			}
+			std::visit(visitor(value), iter->second);
+		}
+	};
+
+	bool isIniFile(const char* fileName) {
+		std::string name = fileName;
+		auto pos = name.find_last_of('.');
+		ASSERT(pos != std::string::npos && pos + 1 < name.size());
+		auto extension = name.substr(pos + 1);
+		return extension == "txt"sv;
+	}
+
+	void loadIniFile(const char* testFile) {
+		std::ifstream ifs;
+		ifs.open(testFile, std::ifstream::in);
+		if (!ifs.good())
+			return;
+
+		std::string cline;
+
+		while (ifs.good()) {
+			getline(ifs, cline);
+			std::string line = removeWhitespace(std::string(cline));
+			if (!line.size() || line.find(';') == 0)
+				continue;
+
+			size_t found = line.find('=');
+			if (found == std::string::npos)
+				// hmmm, not good
+				continue;
+			std::string attrib = removeWhitespace(line.substr(0, found));
+			std::string value = removeWhitespace(line.substr(found + 1));
+
+			if (attrib == "extraDB") {
+				sscanf(value.c_str(), "%d", &extraDB);
+			}
+
+			if (attrib == "minimumReplication") {
+				sscanf(value.c_str(), "%d", &minimumReplication);
+			}
+
+			if (attrib == "minimumRegions") {
+				sscanf(value.c_str(), "%d", &minimumRegions);
+			}
+
+			if (attrib == "configureLocked") {
+				sscanf(value.c_str(), "%d", &configureLocked);
+			}
+
+			if (attrib == "startIncompatibleProcess") {
+				startIncompatibleProcess = strcmp(value.c_str(), "true") == 0;
+			}
+
+			if (attrib == "logAntiQuorum") {
+				sscanf(value.c_str(), "%d", &logAntiQuorum);
+			}
+
+			if (attrib == "storageEngineExcludeTypes") {
+				std::stringstream ss(value);
+				for (int i; ss >> i;) {
+					storageEngineExcludeTypes.push_back(i);
+					if (ss.peek() == ',') {
+						ss.ignore();
+					}
+				}
+			}
+			if (attrib == "maxTLogVersion") {
+				sscanf(value.c_str(), "%d", &maxTLogVersion);
+			}
+			if (attrib == "disableTss") {
+				sscanf(value.c_str(), "%d", &disableTss);
+			}
+			if (attrib == "restartInfoLocation") {
+				isFirstTestInRestart = true;
+			}
+		}
+
+		ifs.close();
+	}
+
+public:
+	int extraDB = 0;
+	int minimumReplication = 0;
+	int minimumRegions = 0;
+	bool configureLocked = false;
+	bool startIncompatibleProcess = false;
+	int logAntiQuorum = -1;
+	bool isFirstTestInRestart = false;
+	// 7.0 cannot be downgraded to 6.3 after enabling TSS, so disable TSS for 6.3 downgrade tests
+	bool disableTss = false;
+	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
+	//	0 = "ssd"
+	//	1 = "memory"
+	//	2 = "memory-radixtree-beta"
+	//	3 = "ssd-redwood-experimental"
+	// Requires a comma-separated list of numbers WITHOUT whitespaces
+	std::vector<int> storageEngineExcludeTypes;
+	// Set the maximum TLog version that can be selected for a test
+	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
+	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
+	// Set true to simplify simulation configs for easier debugging
+	bool simpleConfig = false;
+	Optional<bool> generateFearless, buggify;
+	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
+	    stderrSeverity, machineCount, processesPerMachine, coordinators;
+	Optional<std::string> config;
+
+	bool tomlKeyPresent(const toml::value& data, std::string key) {
+		if (data.is_table()) {
+			for (const auto& [k, v] : data.as_table()) {
+				if (k == key || tomlKeyPresent(v, key)) {
+					return true;
+				}
+			}
+		} else if (data.is_array()) {
+			for (const auto& v : data.as_array()) {
+				if (tomlKeyPresent(v, key)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	void readFromConfig(const char* testFile) {
+		if (isIniFile(testFile)) {
+			loadIniFile(testFile);
+			return;
+		}
+		ConfigBuilder builder;
+		builder.add("extraDB", &extraDB)
+		    .add("minimumReplication", &minimumReplication)
+		    .add("minimumRegions", &minimumRegions)
+		    .add("configureLocked", &configureLocked)
+		    .add("startIncompatibleProcess", &startIncompatibleProcess)
+		    .add("logAntiQuorum", &logAntiQuorum)
+		    .add("storageEngineExcludeTypes", &storageEngineExcludeTypes)
+		    .add("maxTLogVersion", &maxTLogVersion)
+		    .add("disableTss", &disableTss)
+		    .add("simpleConfig", &simpleConfig)
+		    .add("generateFearless", &generateFearless)
+		    .add("datacenters", &datacenters)
+		    .add("desiredTLogCount", &desiredTLogCount)
+		    .add("commitProxyCount", &commitProxyCount)
+		    .add("grvProxyCount", &grvProxyCount)
+		    .add("resolverCount", &resolverCount)
+		    .add("storageEngineType", &storageEngineType)
+		    .add("config", &config)
+		    .add("buggify", &buggify)
+		    .add("StderrSeverity", &stderrSeverity)
+		    .add("machineCount", &machineCount)
+		    .add("processesPerMachine", &processesPerMachine)
+		    .add("coordinators", &coordinators);
+		try {
+			auto file = toml::parse(testFile);
+			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
+				auto conf = toml::find(file, "configuration").as_table();
+				for (const auto& [key, value] : conf) {
+					if (key == "ClientInfoLogging") {
+						setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
+					} else if (key == "restartInfoLocation") {
+						isFirstTestInRestart = true;
+					} else {
+						builder.set(key, value);
+					}
+				}
+				if (stderrSeverity.present()) {
+					TraceEvent("StderrSeverity").detail("NewSeverity", stderrSeverity.get());
+				}
+			}
+			// look for restartInfoLocation to mark isFirstTestInRestart
+			if (!isFirstTestInRestart) {
+				isFirstTestInRestart = tomlKeyPresent(file, "restartInfoLocation");
+			}
+		} catch (std::exception& e) {
+			std::cerr << e.what() << std::endl;
+			TraceEvent("TOMLParseError").detail("Error", printable(e.what()));
+			throw unknown_error();
+		}
+		// Verify that we can use the passed config
+		if (simpleConfig) {
+			if (minimumRegions > 1) {
+				TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
+				flushAndExit(0);
+			}
+		}
+	}
+};
 
 template <class T>
 T simulate(const T& in) {
@@ -227,7 +503,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					                       "",
 					                       "",
 					                       -1,
-					                       whitelistBinPaths));
+					                       whitelistBinPaths,
+					                       "",
+					                       {},
+					                       UseConfigDB::DISABLED));
 				}
 				if (runBackupAgents != AgentNone) {
 					futures.push_back(runBackup(connFile));
@@ -507,8 +786,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				// Copy the file pointers to a vector because the map may be modified while we are killing files
 				std::vector<AsyncFileNonDurable*> files;
 				for (auto fileItr = machineCache.begin(); fileItr != machineCache.end(); ++fileItr) {
-					ASSERT(fileItr->second.isReady());
-					files.push_back((AsyncFileNonDurable*)fileItr->second.get().getPtr());
+					ASSERT(fileItr->second.get().isReady());
+					files.push_back((AsyncFileNonDurable*)fileItr->second.get().get().getPtr());
 				}
 
 				std::vector<Future<Void>> killFutures;
@@ -524,7 +803,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			for (auto it : machineCache) {
 				filenames.insert(it.first);
 				closingStr += it.first + ", ";
-				ASSERT(it.second.isReady() && !it.second.isError());
+				ASSERT(it.second.get().canGet());
 			}
 
 			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingFiles) {
@@ -849,6 +1128,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 struct SimulationConfig {
 	explicit SimulationConfig(const TestConfig& testConfig);
 	int extraDB;
+	bool generateFearless;
 
 	DatabaseConfiguration db;
 
@@ -856,11 +1136,23 @@ struct SimulationConfig {
 
 	// Simulation layout
 	int datacenters;
+	int replication_type;
 	int machine_count; // Total, not per DC.
 	int processes_per_machine;
 	int coordinators;
 
 private:
+	void setRandomConfig();
+	void setSimpleConfig();
+	void setSpecificConfig(const TestConfig& testConfig);
+	void setDatacenters(const TestConfig& testConfig);
+	void setStorageEngine(const TestConfig& testConfig);
+	void setRegions(const TestConfig& testConfig);
+	void setReplicationType(const TestConfig& testConfig);
+	void setMachineCount(const TestConfig& testConfig);
+	void setCoordinators(const TestConfig& testConfig);
+	void setProcessesPerMachine(const TestConfig& testConfig);
+	void setTss(const TestConfig& testConfig);
 	void generateNormalConfig(const TestConfig& testConfig);
 };
 
@@ -880,36 +1172,99 @@ void SimulationConfig::set_config(std::string config) {
 StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
-// Generates and sets an appropriate configuration for the database according to
-// the provided testConfig. Some attributes are randomly generated for more coverage
-// of different combinations
-void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
-	set_config("new");
-	const bool simple = false; // Set true to simplify simulation configs for easier debugging
-	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
-	// if we do not remove the surplus server and machine teams, the simulation test will report error.
-	// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
-	bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
-	bool generateFearless = simple ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
-	datacenters = simple ? 1
-	                     : (generateFearless
-	                            ? (testConfig.minimumReplication > 0 || deterministicRandom()->random01() < 0.5 ? 4 : 6)
-	                            : deterministicRandom()->randomInt(1, 4));
-	if (deterministicRandom()->random01() < 0.25)
+
+// Set the randomly generated options of the config. Compiled here to easily observe and trace random options
+void SimulationConfig::setRandomConfig() {
+	if (deterministicRandom()->random01() < 0.25) {
 		db.desiredTLogCount = deterministicRandom()->randomInt(1, 7);
-	if (deterministicRandom()->random01() < 0.25)
-		db.commitProxyCount = deterministicRandom()->randomInt(1, 7);
-	if (deterministicRandom()->random01() < 0.25)
-		db.grvProxyCount = deterministicRandom()->randomInt(1, 4);
-	if (deterministicRandom()->random01() < 0.25)
-		db.resolverCount = deterministicRandom()->randomInt(1, 7);
-	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
-	// Continuously re-pick the storage engine type if it's the one we want to exclude
-	while (std::find(testConfig.storageEngineExcludeTypes.begin(),
-	                 testConfig.storageEngineExcludeTypes.end(),
-	                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
-		storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.commitProxyCount = deterministicRandom()->randomInt(1, 7);
+	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.grvProxyCount = deterministicRandom()->randomInt(1, 4);
+	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.resolverCount = deterministicRandom()->randomInt(1, 7);
+	}
+	// TraceEvent("SimulatedConfigRandom")
+	// 	.detail("DesiredTLogCount", db.desiredTLogCount)
+	// 	.detail("CommitProxyCount", db.commitProxyCount)
+	// 	.detail("GRVProxyCount", db.grvProxyCount)
+	// 	.detail("ResolverCount", db.resolverCount);
+
+	if (deterministicRandom()->random01() < 0.5) {
+		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 0);
+		set_config("perpetual_storage_wiggle=0");
+	} else {
+		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 1);
+		set_config("perpetual_storage_wiggle=1");
+	}
+
+	if (deterministicRandom()->random01() < 0.5) {
+		set_config("backup_worker_enabled:=1");
+	}
+}
+
+// Overwrite DB with simple options, used when simpleConfig is true in the TestConfig
+void SimulationConfig::setSimpleConfig() {
+	db.desiredTLogCount = 1;
+	db.commitProxyCount = 1;
+	db.grvProxyCount = 1;
+	db.resolverCount = 1;
+}
+
+// Overwrite previous options with ones specified by TestConfig
+void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
+	if (testConfig.desiredTLogCount.present()) {
+		db.desiredTLogCount = testConfig.desiredTLogCount.get();
+	}
+	if (testConfig.commitProxyCount.present()) {
+		db.commitProxyCount = testConfig.commitProxyCount.get();
+	}
+	if (testConfig.grvProxyCount.present()) {
+		db.grvProxyCount = testConfig.grvProxyCount.get();
+	}
+	if (testConfig.resolverCount.present()) {
+		db.resolverCount = testConfig.resolverCount.get();
+	}
+}
+
+// Sets generateFearless and number of dataCenters based on testConfig details
+// The number of datacenters may be overwritten in setRegions
+void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
+	generateFearless =
+	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
+	if (testConfig.generateFearless.present()) {
+		// overwrite whatever decision we made before
+		generateFearless = testConfig.generateFearless.get();
+	}
+	datacenters =
+	    testConfig.simpleConfig
+	        ? 1
+	        : (generateFearless ? (testConfig.minimumReplication > 0 || deterministicRandom()->random01() < 0.5 ? 4 : 6)
+	                            : deterministicRandom()->randomInt(1, 4));
+
+	// Overwrite with specific option if present
+	if (testConfig.datacenters.present()) {
+		datacenters = testConfig.datacenters.get();
+	}
+}
+
+// Sets storage engine based on testConfig details
+void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
+	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	if (testConfig.storageEngineType.present()) {
+		storage_engine_type = testConfig.storageEngineType.get();
+	} else {
+		// Continuously re-pick the storage engine type if it's the one we want to exclude
+		while (std::find(testConfig.storageEngineExcludeTypes.begin(),
+		                 testConfig.storageEngineExcludeTypes.end(),
+		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
+			storage_engine_type = deterministicRandom()->randomInt(0, 4);
+		}
+	}
+
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
@@ -934,284 +1289,285 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
-	//	if (deterministicRandom()->random01() < 0.5) {
-	//		set_config("ssd");
-	//	} else {
-	//		set_config("memory");
-	//	}
-	//	set_config("memory");
-	//  set_config("memory-radixtree-beta");
-	if (simple) {
-		db.desiredTLogCount = 1;
-		db.commitProxyCount = 1;
-		db.grvProxyCount = 1;
-		db.resolverCount = 1;
-	}
-	int replication_type = simple ? 1
-	                              : (std::max(testConfig.minimumReplication,
-	                                          datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
-	                                                          : std::min(deterministicRandom()->randomInt(0, 6), 3)));
-	switch (replication_type) {
-	case 0: {
-		TEST(true); // Simulated cluster using custom redundancy mode
-		int storage_servers = deterministicRandom()->randomInt(1, generateFearless ? 4 : 5);
-		// FIXME: log replicas must be more than storage replicas because otherwise better master exists will not
-		// recognize it needs to change dcs
-		int replication_factor = deterministicRandom()->randomInt(storage_servers, generateFearless ? 4 : 5);
-		int anti_quorum = deterministicRandom()->randomInt(
-		    0,
-		    (replication_factor / 2) + 1); // The anti quorum cannot be more than half of the replication factor, or the
-		                                   // log system will continue to accept commits when a recovery is impossible
-		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
-		set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
-		                  "replica_datacenters:=1 min_replica_datacenters:=1",
-		                  storage_servers,
-		                  replication_factor,
-		                  anti_quorum));
-		break;
-	}
-	case 1: {
-		TEST(true); // Simulated cluster running in single redundancy mode
-		set_config("single");
-		break;
-	}
-	case 2: {
-		TEST(true); // Simulated cluster running in double redundancy mode
-		set_config("double");
-		break;
-	}
-	case 3: {
-		if (datacenters <= 2 || generateFearless) {
-			TEST(true); // Simulated cluster running in triple redundancy mode
-			set_config("triple");
-		} else if (datacenters == 3) {
-			TEST(true); // Simulated cluster running in 3 data-hall mode
-			set_config("three_data_hall");
-		} else {
-			ASSERT(false);
-		}
-		break;
-	}
-	default:
-		ASSERT(false); // Programmer forgot to adjust cases.
-	}
+}
 
-	if (deterministicRandom()->random01() < 0.5) {
-		int logSpill = deterministicRandom()->randomInt(TLogSpillType::VALUE, TLogSpillType::END);
-		set_config(format("log_spill:=%d", logSpill));
-		int logVersion = deterministicRandom()->randomInt(TLogVersion::MIN_RECRUITABLE, testConfig.maxTLogVersion + 1);
-		set_config(format("log_version:=%d", logVersion));
+// Sets replication type and TLogSpillType and Version
+void SimulationConfig::setReplicationType(const TestConfig& testConfig) {
+	replication_type = testConfig.simpleConfig
+	                       ? 1
+	                       : (std::max(testConfig.minimumReplication,
+	                                   datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
+	                                                   : std::min(deterministicRandom()->randomInt(0, 6), 3)));
+	if (testConfig.config.present()) {
+		set_config(testConfig.config.get());
 	} else {
-		if (deterministicRandom()->random01() < 0.7)
-			set_config(format("log_version:=%d", testConfig.maxTLogVersion));
-		if (deterministicRandom()->random01() < 0.5)
-			set_config(format("log_spill:=%d", TLogSpillType::DEFAULT));
-	}
-
-	if (deterministicRandom()->random01() < 0.5) {
-		set_config("backup_worker_enabled:=1");
-	}
-
-	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
-		// The kill region workload relies on the fact that all "0", "2", and "4" are all of the possible primary dcids.
-		StatusObject primaryObj;
-		StatusObject primaryDcObj;
-		primaryDcObj["id"] = "0";
-		primaryDcObj["priority"] = 2;
-		StatusArray primaryDcArr;
-		primaryDcArr.push_back(primaryDcObj);
-
-		StatusObject remoteObj;
-		StatusObject remoteDcObj;
-		remoteDcObj["id"] = "1";
-		remoteDcObj["priority"] = 1;
-		StatusArray remoteDcArr;
-		remoteDcArr.push_back(remoteDcObj);
-
-		bool needsRemote = generateFearless;
-		if (generateFearless) {
-			if (datacenters > 4) {
-				// FIXME: we cannot use one satellite replication with more than one satellite per region because
-				// canKillProcesses does not respect usable_dcs
-				int satellite_replication_type = deterministicRandom()->randomInt(0, 3);
-				switch (satellite_replication_type) {
-				case 0: {
-					TEST(true); // Simulated cluster using no satellite redundancy mode (>4 datacenters)
-					break;
-				}
-				case 1: {
-					TEST(true); // Simulated cluster using two satellite fast redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "two_satellite_fast";
-					remoteObj["satellite_redundancy_mode"] = "two_satellite_fast";
-					break;
-				}
-				case 2: {
-					TEST(true); // Simulated cluster using two satellite safe redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "two_satellite_safe";
-					remoteObj["satellite_redundancy_mode"] = "two_satellite_safe";
-					break;
-				}
-				default:
-					ASSERT(false); // Programmer forgot to adjust cases.
-				}
+		switch (replication_type) {
+		case 0: {
+			TEST(true); // Simulated cluster using custom redundancy mode
+			int storage_servers = deterministicRandom()->randomInt(1, generateFearless ? 4 : 5);
+			// FIXME: log replicas must be more than storage replicas because otherwise better master exists will not
+			// recognize it needs to change dcs
+			int replication_factor = deterministicRandom()->randomInt(storage_servers, generateFearless ? 4 : 5);
+			int anti_quorum = deterministicRandom()->randomInt(
+			    0,
+			    (replication_factor / 2) +
+			        1); // The anti quorum cannot be more than half of the replication factor, or the
+			            // log system will continue to accept commits when a recovery is impossible
+			// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
+			set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
+			                  "replica_datacenters:=1 min_replica_datacenters:=1",
+			                  storage_servers,
+			                  replication_factor,
+			                  anti_quorum));
+			break;
+		}
+		case 1: {
+			TEST(true); // Simulated cluster running in single redundancy mode
+			set_config("single");
+			break;
+		}
+		case 2: {
+			TEST(true); // Simulated cluster running in double redundancy mode
+			set_config("double");
+			break;
+		}
+		case 3: {
+			if (datacenters <= 2 || generateFearless) {
+				TEST(true); // Simulated cluster running in triple redundancy mode
+				set_config("triple");
+			} else if (datacenters == 3) {
+				TEST(true); // Simulated cluster running in 3 data-hall mode
+				set_config("three_data_hall");
 			} else {
-				int satellite_replication_type = deterministicRandom()->randomInt(0, 5);
-				switch (satellite_replication_type) {
-				case 0: {
-					// FIXME: implement
-					TEST(true); // Simulated cluster using custom satellite redundancy mode
-					break;
-				}
-				case 1: {
-					TEST(true); // Simulated cluster using no satellite redundancy mode (<4 datacenters)
-					break;
-				}
-				case 2: {
-					TEST(true); // Simulated cluster using single satellite redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
-					remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
-					break;
-				}
-				case 3: {
-					TEST(true); // Simulated cluster using double satellite redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
-					remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
-					break;
-				}
-				case 4: {
-					TEST(true); // Simulated cluster using triple satellite redundancy mode
-					primaryObj["satellite_redundancy_mode"] = "one_satellite_triple";
-					remoteObj["satellite_redundancy_mode"] = "one_satellite_triple";
-					break;
-				}
-				default:
-					ASSERT(false); // Programmer forgot to adjust cases.
-				}
+				ASSERT(false);
 			}
+			break;
+		}
+		default:
+			ASSERT(false); // Programmer forgot to adjust cases.
+		}
+		if (deterministicRandom()->random01() < 0.5) {
+			int logSpill = deterministicRandom()->randomInt(TLogSpillType::VALUE, TLogSpillType::END);
+			set_config(format("log_spill:=%d", logSpill));
+			int logVersion =
+			    deterministicRandom()->randomInt(TLogVersion::MIN_RECRUITABLE, testConfig.maxTLogVersion + 1);
+			set_config(format("log_version:=%d", logVersion));
+		} else {
+			if (deterministicRandom()->random01() < 0.7)
+				set_config(format("log_version:=%d", testConfig.maxTLogVersion));
+			if (deterministicRandom()->random01() < 0.5)
+				set_config(format("log_spill:=%d", TLogSpillType::DEFAULT));
+		}
+	}
+}
 
-			if (deterministicRandom()->random01() < 0.25)
-				primaryObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-			if (deterministicRandom()->random01() < 0.25)
-				remoteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+// Set the regions of the config, including the primary and remote options
+// This will also determine the replication types used for satellite and remote.
+void SimulationConfig::setRegions(const TestConfig& testConfig) {
+	// The kill region workload relies on the fact that all "0", "2", and "4" are all of the possible primary dcids.
+	StatusObject primaryObj;
+	StatusObject primaryDcObj;
+	primaryDcObj["id"] = "0";
+	primaryDcObj["priority"] = 2;
+	StatusArray primaryDcArr;
+	primaryDcArr.push_back(primaryDcObj);
 
-			// We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log
-			// routers will not be able to keep up.
-			if (testConfig.minimumRegions <= 1 &&
-			    (deterministicRandom()->random01() < 0.25 ||
-			     SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND)) {
-				TEST(true); // Simulated cluster using one region
-				needsRemote = false;
-			} else {
-				TEST(true); // Simulated cluster using two regions
-				db.usableRegions = 2;
-			}
+	StatusObject remoteObj;
+	StatusObject remoteDcObj;
+	remoteDcObj["id"] = "1";
+	remoteDcObj["priority"] = 1;
+	StatusArray remoteDcArr;
+	remoteDcArr.push_back(remoteDcObj);
 
-			int remote_replication_type = deterministicRandom()->randomInt(0, datacenters > 4 ? 4 : 5);
-			switch (remote_replication_type) {
+	bool needsRemote = generateFearless;
+	if (generateFearless) {
+		if (datacenters > 4) {
+			// FIXME: we cannot use one satellite replication with more than one satellite per region because
+			// canKillProcesses does not respect usable_dcs
+			int satellite_replication_type = deterministicRandom()->randomInt(0, 3);
+			switch (satellite_replication_type) {
 			case 0: {
-				// FIXME: implement
-				TEST(true); // Simulated cluster using custom remote redundancy mode
+				TEST(true); // Simulated cluster using no satellite redundancy mode (>4 datacenters)
 				break;
 			}
 			case 1: {
-				TEST(true); // Simulated cluster using default remote redundancy mode
+				TEST(true); // Simulated cluster using two satellite fast redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "two_satellite_fast";
+				remoteObj["satellite_redundancy_mode"] = "two_satellite_fast";
 				break;
 			}
 			case 2: {
-				TEST(true); // Simulated cluster using single remote redundancy mode
-				set_config("remote_single");
-				break;
-			}
-			case 3: {
-				TEST(true); // Simulated cluster using double remote redundancy mode
-				set_config("remote_double");
-				break;
-			}
-			case 4: {
-				TEST(true); // Simulated cluster using triple remote redundancy mode
-				set_config("remote_triple");
+				TEST(true); // Simulated cluster using two satellite safe redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "two_satellite_safe";
+				remoteObj["satellite_redundancy_mode"] = "two_satellite_safe";
 				break;
 			}
 			default:
 				ASSERT(false); // Programmer forgot to adjust cases.
 			}
-
-			if (deterministicRandom()->random01() < 0.25)
-				db.desiredLogRouterCount = deterministicRandom()->randomInt(1, 7);
-			if (deterministicRandom()->random01() < 0.25)
-				db.remoteDesiredTLogCount = deterministicRandom()->randomInt(1, 7);
-
-			bool useNormalDCsAsSatellites =
-			    datacenters > 4 && testConfig.minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
-			StatusObject primarySatelliteObj;
-			primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
-			primarySatelliteObj["priority"] = 1;
-			primarySatelliteObj["satellite"] = 1;
-			if (deterministicRandom()->random01() < 0.25)
-				primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-			primaryDcArr.push_back(primarySatelliteObj);
-
-			StatusObject remoteSatelliteObj;
-			remoteSatelliteObj["id"] = useNormalDCsAsSatellites ? "0" : "3";
-			remoteSatelliteObj["priority"] = 1;
-			remoteSatelliteObj["satellite"] = 1;
-			if (deterministicRandom()->random01() < 0.25)
-				remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-			remoteDcArr.push_back(remoteSatelliteObj);
-
-			if (datacenters > 4) {
-				StatusObject primarySatelliteObjB;
-				primarySatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "4";
-				primarySatelliteObjB["priority"] = 1;
-				primarySatelliteObjB["satellite"] = 1;
-				if (deterministicRandom()->random01() < 0.25)
-					primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-				primaryDcArr.push_back(primarySatelliteObjB);
-
-				StatusObject remoteSatelliteObjB;
-				remoteSatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "5";
-				remoteSatelliteObjB["priority"] = 1;
-				remoteSatelliteObjB["satellite"] = 1;
-				if (deterministicRandom()->random01() < 0.25)
-					remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
-				remoteDcArr.push_back(remoteSatelliteObjB);
-			}
-			if (useNormalDCsAsSatellites) {
-				datacenters = 3;
-			}
-		}
-
-		primaryObj["datacenters"] = primaryDcArr;
-		remoteObj["datacenters"] = remoteDcArr;
-
-		StatusArray regionArr;
-		regionArr.push_back(primaryObj);
-		if (needsRemote || deterministicRandom()->random01() < 0.5) {
-			regionArr.push_back(remoteObj);
-		}
-
-		if (needsRemote) {
-			g_simulator.originalRegions = "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr),
-			                                                                     json_spirit::Output_options::none);
-
-			StatusArray disablePrimary = regionArr;
-			disablePrimary[0].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
-			g_simulator.disablePrimary = "regions=" + json_spirit::write_string(json_spirit::mValue(disablePrimary),
-			                                                                    json_spirit::Output_options::none);
-
-			StatusArray disableRemote = regionArr;
-			disableRemote[1].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
-			g_simulator.disableRemote = "regions=" + json_spirit::write_string(json_spirit::mValue(disableRemote),
-			                                                                   json_spirit::Output_options::none);
 		} else {
-			// In order to generate a starting configuration with the remote disabled, do not apply the region
-			// configuration to the DatabaseConfiguration until after creating the starting conf string.
-			set_config("regions=" +
-			           json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
+			int satellite_replication_type = deterministicRandom()->randomInt(0, 5);
+			switch (satellite_replication_type) {
+			case 0: {
+				// FIXME: implement
+				TEST(true); // Simulated cluster using custom satellite redundancy mode
+				break;
+			}
+			case 1: {
+				TEST(true); // Simulated cluster using no satellite redundancy mode (<4 datacenters)
+				break;
+			}
+			case 2: {
+				TEST(true); // Simulated cluster using single satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
+				break;
+			}
+			case 3: {
+				TEST(true); // Simulated cluster using double satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
+				break;
+			}
+			case 4: {
+				TEST(true); // Simulated cluster using triple satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_triple";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_triple";
+				break;
+			}
+			default:
+				ASSERT(false); // Programmer forgot to adjust cases.
+			}
+		}
+
+		if (deterministicRandom()->random01() < 0.25)
+			primaryObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+		if (deterministicRandom()->random01() < 0.25)
+			remoteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+
+		// We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log
+		// routers will not be able to keep up.
+		if (testConfig.minimumRegions <= 1 &&
+		    (deterministicRandom()->random01() < 0.25 ||
+		     SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND)) {
+			TEST(true); // Simulated cluster using one region
+			needsRemote = false;
+		} else {
+			TEST(true); // Simulated cluster using two regions
+			db.usableRegions = 2;
+		}
+
+		int remote_replication_type = deterministicRandom()->randomInt(0, datacenters > 4 ? 4 : 5);
+		switch (remote_replication_type) {
+		case 0: {
+			// FIXME: implement
+			TEST(true); // Simulated cluster using custom remote redundancy mode
+			break;
+		}
+		case 1: {
+			TEST(true); // Simulated cluster using default remote redundancy mode
+			break;
+		}
+		case 2: {
+			TEST(true); // Simulated cluster using single remote redundancy mode
+			set_config("remote_single");
+			break;
+		}
+		case 3: {
+			TEST(true); // Simulated cluster using double remote redundancy mode
+			set_config("remote_double");
+			break;
+		}
+		case 4: {
+			TEST(true); // Simulated cluster using triple remote redundancy mode
+			set_config("remote_triple");
+			break;
+		}
+		default:
+			ASSERT(false); // Programmer forgot to adjust cases.
+		}
+
+		if (deterministicRandom()->random01() < 0.25)
+			db.desiredLogRouterCount = deterministicRandom()->randomInt(1, 7);
+		if (deterministicRandom()->random01() < 0.25)
+			db.remoteDesiredTLogCount = deterministicRandom()->randomInt(1, 7);
+
+		bool useNormalDCsAsSatellites =
+		    datacenters > 4 && testConfig.minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
+		StatusObject primarySatelliteObj;
+		primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
+		primarySatelliteObj["priority"] = 1;
+		primarySatelliteObj["satellite"] = 1;
+		if (deterministicRandom()->random01() < 0.25)
+			primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+		primaryDcArr.push_back(primarySatelliteObj);
+
+		StatusObject remoteSatelliteObj;
+		remoteSatelliteObj["id"] = useNormalDCsAsSatellites ? "0" : "3";
+		remoteSatelliteObj["priority"] = 1;
+		remoteSatelliteObj["satellite"] = 1;
+		if (deterministicRandom()->random01() < 0.25)
+			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+		remoteDcArr.push_back(remoteSatelliteObj);
+
+		if (datacenters > 4) {
+			StatusObject primarySatelliteObjB;
+			primarySatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "4";
+			primarySatelliteObjB["priority"] = 1;
+			primarySatelliteObjB["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25)
+				primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			primaryDcArr.push_back(primarySatelliteObjB);
+
+			StatusObject remoteSatelliteObjB;
+			remoteSatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "5";
+			remoteSatelliteObjB["priority"] = 1;
+			remoteSatelliteObjB["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25)
+				remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			remoteDcArr.push_back(remoteSatelliteObjB);
+		}
+		if (useNormalDCsAsSatellites) {
+			datacenters = 3;
 		}
 	}
 
-	if (generateFearless && testConfig.minimumReplication > 1) {
+	primaryObj["datacenters"] = primaryDcArr;
+	remoteObj["datacenters"] = remoteDcArr;
+
+	StatusArray regionArr;
+	regionArr.push_back(primaryObj);
+	if (needsRemote || deterministicRandom()->random01() < 0.5) {
+		regionArr.push_back(remoteObj);
+	}
+
+	if (needsRemote) {
+		g_simulator.originalRegions =
+		    "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
+
+		StatusArray disablePrimary = regionArr;
+		disablePrimary[0].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
+		g_simulator.disablePrimary = "regions=" + json_spirit::write_string(json_spirit::mValue(disablePrimary),
+		                                                                    json_spirit::Output_options::none);
+
+		StatusArray disableRemote = regionArr;
+		disableRemote[1].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
+		g_simulator.disableRemote = "regions=" + json_spirit::write_string(json_spirit::mValue(disableRemote),
+		                                                                   json_spirit::Output_options::none);
+	} else {
+		// In order to generate a starting configuration with the remote disabled, do not apply the region
+		// configuration to the DatabaseConfiguration until after creating the starting conf string.
+		set_config("regions=" +
+		           json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
+	}
+}
+
+// Sets the machine count based on the testConfig. May be overwritten later
+// if the end result is not a viable config.
+void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
+	if (testConfig.machineCount.present()) {
+		machine_count = testConfig.machineCount.get();
+	} else if (generateFearless && testConfig.minimumReplication > 1) {
 		// low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that
 		// is down during failures).
 		machine_count = 16;
@@ -1225,6 +1581,10 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		                         ((db.minDatacentersRequired() > 0) ? datacenters : 1) *
 		                             std::max(3, db.minZonesRequiredPerDatacenter()));
 		machine_count = deterministicRandom()->randomInt(machine_count, std::max(machine_count + 1, extraDB ? 6 : 10));
+		// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
+		// if we do not remove the surplus server and machine teams, the simulation test will report error.
+		// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
+		bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
 		if (generateMachineTeamTestConfig) {
 			// When DESIRED_TEAMS_PER_SERVER is set to 1, the desired machine team number is 5
 			// while the max possible machine team number is 10.
@@ -1233,12 +1593,90 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 			machine_count = std::max(machine_count, deterministicRandom()->randomInt(5, extraDB ? 6 : 10));
 		}
 	}
+}
 
-	// because we protect a majority of coordinators from being killed, it is better to run with low numbers of
-	// coordinators to prevent too many processes from being protected
-	coordinators = (testConfig.minimumRegions <= 1 && BUGGIFY)
-	                   ? deterministicRandom()->randomInt(1, std::max(machine_count, 2))
-	                   : 1;
+// Sets the coordinator count based on the testConfig. May be overwritten later
+// if the end result is not a viable config.
+void SimulationConfig::setCoordinators(const TestConfig& testConfig) {
+	if (testConfig.coordinators.present()) {
+		coordinators = testConfig.coordinators.get();
+	} else {
+		// because we protect a majority of coordinators from being killed, it is better to run with low numbers of
+		// coordinators to prevent too many processes from being protected
+		coordinators = (testConfig.minimumRegions <= 1 && BUGGIFY)
+		                   ? deterministicRandom()->randomInt(1, std::max(machine_count, 2))
+		                   : 1;
+	}
+}
+
+// Sets the processes per machine based on the testConfig.
+void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
+	if (testConfig.processesPerMachine.present()) {
+		processes_per_machine = testConfig.processesPerMachine.get();
+	} else if (generateFearless) {
+		processes_per_machine = 1;
+	} else {
+		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28) / machine_count + 2);
+	}
+}
+
+// Sets the TSS configuration based on the testConfig.
+// Also configures the cluster behaviour through setting some flags on the simulator.
+void SimulationConfig::setTss(const TestConfig& testConfig) {
+	int tssCount = 0;
+	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
+		// 1 or 2 tss
+		tssCount = deterministicRandom()->randomInt(1, 3);
+	}
+
+	// reduce tss to half of extra non-seed servers that can be recruited in usable regions.
+	tssCount =
+	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
+
+	if (!testConfig.config.present() && tssCount > 0) {
+		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
+		set_config(confStr);
+		double tssRandom = deterministicRandom()->random01();
+		if (tssRandom > 0.5) {
+			// normal tss mode
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledNormal;
+		} else if (tssRandom < 0.25 && !testConfig.isFirstTestInRestart) {
+			// fault injection - don't enable in first test in restart because second test won't know it intentionally
+			// lost data
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledDropMutations;
+		} else {
+			// delay injection
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledAddDelay;
+		}
+		printf("enabling tss for simulation in mode %d: %s\n", g_simulator.tssMode, confStr.c_str());
+	}
+}
+
+// Generates and sets an appropriate configuration for the database according to
+// the provided testConfig. Some attributes are randomly generated for more coverage
+// of different combinations
+void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
+	set_config("new");
+	// Some of these options will overwrite one another so the ordering is important.
+	// This is a bit inefficient but separates the different types of option setting paths for better readability.
+	setDatacenters(testConfig);
+
+	// These 3 sets will only change the settings with trivial logic and low coupling with
+	// other portions of the configuration. The parameters that are more involved and use
+	// complex logic will be found in their respective "set----" methods following after.
+	setRandomConfig();
+	if (testConfig.simpleConfig) {
+		setSimpleConfig();
+	}
+	setSpecificConfig(testConfig);
+
+	setStorageEngine(testConfig);
+	setReplicationType(testConfig);
+	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
+		setRegions(testConfig);
+	}
+	setMachineCount(testConfig);
+	setCoordinators(testConfig);
 
 	if (testConfig.minimumReplication > 1 && datacenters == 3) {
 		// low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for
@@ -1247,11 +1685,8 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		coordinators = 3;
 	}
 
-	if (generateFearless) {
-		processes_per_machine = 1;
-	} else {
-		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28) / machine_count + 2);
-	}
+	setProcessesPerMachine(testConfig);
+	setTss(testConfig);
 }
 
 // Configures the system according to the given specifications in order to run
@@ -1275,6 +1710,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		startingConfigString += " locked";
 	}
 	for (auto kv : startingConfigJSON) {
+		if ("tss_storage_engine" == kv.first) {
+			continue;
+		}
 		startingConfigString += " ";
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
@@ -1287,6 +1725,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		} else {
 			ASSERT(false);
 		}
+	}
+
+	// handle tss_storage_engine separately because the passthrough needs the enum ordinal, but it's serialized to json
+	// as the string name
+	if (simconfig.db.desiredTSSCount > 0) {
+		startingConfigString += format(" tss_storage_engine:=%d", simconfig.db.testingStorageServerStoreType);
 	}
 
 	if (g_simulator.originalRegions != "") {
@@ -1363,6 +1807,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	TEST(!useIPv6); // Use IPv4
 
 	vector<NetworkAddress> coordinatorAddresses;
+	vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
 	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
 		int nonPrimaryDcs = dataCenters / 2;
@@ -1372,6 +1817,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 				auto ip = makeIPAddressForSim(useIPv6, { 2, dc, 1, m });
 				coordinatorAddresses.push_back(
 				    NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
+				auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
+				extraCoordinatorAddresses.push_back(
+				    NetworkAddress(extraIp, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
 				TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
 			}
 		}
@@ -1400,6 +1848,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 					auto ip = makeIPAddressForSim(useIPv6, { 2, dc, 1, m });
 					coordinatorAddresses.push_back(
 					    NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
+					auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
+					extraCoordinatorAddresses.push_back(
+					    NetworkAddress(extraIp, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
 					TraceEvent("SelectedCoordinator")
 					    .detail("Address", coordinatorAddresses.back())
 					    .detail("M", m)
@@ -1417,6 +1868,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		}
 	}
 
+	ASSERT(coordinatorAddresses.size() > 0);
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
 	for (int i = 0; i < (coordinatorAddresses.size() / 2) + 1; i++) {
 		TraceEvent("ProtectCoordinator")
@@ -1436,11 +1888,13 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
 	if (testConfig.extraDB == 1) {
 		// The DR database can be either a new database or itself
-		g_simulator.extraDB = new ClusterConnectionString(
-		    coordinatorAddresses, BUGGIFY ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0"));
+		g_simulator.extraDB =
+		    BUGGIFY ? new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"))
+		            : new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
 	} else if (testConfig.extraDB == 2) {
 		// The DR database is a new database
-		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
+		g_simulator.extraDB =
+		    new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
 	} else if (testConfig.extraDB == 3) {
 		// The DR database is the same database
 		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
@@ -1626,68 +2080,10 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	    .detail("StartingConfiguration", pStartingConfiguration->toString());
 }
 
+using namespace std::literals;
+
 // Populates the TestConfig fields according to what is found in the test file.
-void checkTestConf(const char* testFile, TestConfig* testConfig) {
-	std::ifstream ifs;
-	ifs.open(testFile, std::ifstream::in);
-	if (!ifs.good())
-		return;
-
-	std::string cline;
-
-	while (ifs.good()) {
-		getline(ifs, cline);
-		std::string line = removeWhitespace(std::string(cline));
-		if (!line.size() || line.find(';') == 0)
-			continue;
-
-		size_t found = line.find('=');
-		if (found == std::string::npos)
-			// hmmm, not good
-			continue;
-		std::string attrib = removeWhitespace(line.substr(0, found));
-		std::string value = removeWhitespace(line.substr(found + 1));
-
-		if (attrib == "extraDB") {
-			sscanf(value.c_str(), "%d", &testConfig->extraDB);
-		}
-
-		if (attrib == "minimumReplication") {
-			sscanf(value.c_str(), "%d", &testConfig->minimumReplication);
-		}
-
-		if (attrib == "minimumRegions") {
-			sscanf(value.c_str(), "%d", &testConfig->minimumRegions);
-		}
-
-		if (attrib == "configureLocked") {
-			sscanf(value.c_str(), "%d", &testConfig->configureLocked);
-		}
-
-		if (attrib == "startIncompatibleProcess") {
-			testConfig->startIncompatibleProcess = strcmp(value.c_str(), "true") == 0;
-		}
-
-		if (attrib == "logAntiQuorum") {
-			sscanf(value.c_str(), "%d", &testConfig->logAntiQuorum);
-		}
-
-		if (attrib == "storageEngineExcludeTypes") {
-			std::stringstream ss(value);
-			for (int i; ss >> i;) {
-				testConfig->storageEngineExcludeTypes.push_back(i);
-				if (ss.peek() == ',') {
-					ss.ignore();
-				}
-			}
-		}
-		if (attrib == "maxTLogVersion") {
-			sscanf(value.c_str(), "%d", &testConfig->maxTLogVersion);
-		}
-	}
-
-	ifs.close();
-}
+void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
 ACTOR void setupAndRun(std::string dataFolder,
                        const char* testFile,
@@ -1699,7 +2095,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
 	state TestConfig testConfig;
-	checkTestConf(testFile, &testConfig);
+	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
 

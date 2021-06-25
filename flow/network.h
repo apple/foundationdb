@@ -35,7 +35,6 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/WriteOnlySet.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -151,7 +150,7 @@ public:
 	const IPAddressStore& toV6() const { return std::get<IPAddressStore>(addr); }
 
 	std::string toString() const;
-	static Optional<IPAddress> parse(std::string str);
+	static Optional<IPAddress> parse(std::string const& str);
 
 	bool operator==(const IPAddress& addr) const;
 	bool operator!=(const IPAddress& addr) const;
@@ -305,6 +304,10 @@ struct NetworkAddressList {
 			return address.toString();
 		}
 		return address.toString() + ", " + secondaryAddress.get().toString();
+	}
+
+	bool contains(const NetworkAddress& r) const {
+		return address == r || (secondaryAddress.present() && secondaryAddress.get() == r);
 	}
 
 	template <class Ar>
@@ -559,9 +562,6 @@ public:
 	// If the network has not been run and this function has not been previously called, returns true. Otherwise,
 	// returns false.
 	virtual bool checkRunnable() = 0;
-
-	// Returns the shared memory data structure used to store actor lineages.
-	virtual ActorLineageSet& getActorLineageSet() = 0;
 
 	virtual ProtocolVersion protocolVersion() = 0;
 

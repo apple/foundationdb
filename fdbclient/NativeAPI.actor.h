@@ -246,41 +246,80 @@ public:
 	void setVersion(Version v);
 	Future<Version> getReadVersion() { return getReadVersion(0); }
 	Future<Version> getRawReadVersion();
-	Optional<Version> getCachedReadVersion();
+	Optional<Version> getCachedReadVersion() const;
 
 	[[nodiscard]] Future<Optional<Value>> get(const Key& key, bool snapshot = false);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
 	[[nodiscard]] Future<Key> getKey(const KeySelector& key, bool snapshot = false);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
-	                                                          const KeySelector& end,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false);
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
-	                                                          const KeySelector& end,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false);
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) {
+	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
+	                                           const KeySelector& end,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false);
+	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
+	                                           const KeySelector& end,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false);
+	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limit,
 		                snapshot,
 		                reverse);
 	}
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) {
+	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limits,
 		                snapshot,
 		                reverse);
+	}
+
+	// A method for streaming data from the storage server that is more efficient than getRange when reading large
+	// amounts of data
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
+	                                          const KeySelector& begin,
+	                                          const KeySelector& end,
+	                                          int limit,
+	                                          bool snapshot = false,
+	                                          bool reverse = false);
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
+	                                          const KeySelector& begin,
+	                                          const KeySelector& end,
+	                                          GetRangeLimits limits,
+	                                          bool snapshot = false,
+	                                          bool reverse = false);
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
+	                                          const KeyRange& keys,
+	                                          int limit,
+	                                          bool snapshot = false,
+	                                          bool reverse = false) {
+		return getRangeStream(results,
+		                      KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
+		                      KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                      limit,
+		                      snapshot,
+		                      reverse);
+	}
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
+	                                          const KeyRange& keys,
+	                                          GetRangeLimits limits,
+	                                          bool snapshot = false,
+	                                          bool reverse = false) {
+		return getRangeStream(results,
+		                      KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
+		                      KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                      limits,
+		                      snapshot,
+		                      reverse);
 	}
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
@@ -320,7 +359,9 @@ public:
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
-	Version getCommittedVersion() { return committedVersion; } // May be called only after commit() returns success
+	Version getCommittedVersion() const {
+		return committedVersion;
+	} // May be called only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>>
 	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
@@ -352,7 +393,7 @@ public:
 
 	int apiVersionAtLeast(int minVersion) const;
 
-	void checkDeferredError();
+	void checkDeferredError() const;
 
 	Database getDatabase() const { return cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
@@ -407,5 +448,10 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;
 }
+
+// Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
+// will be 1. Otherwise, the value will be 0.
+ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, bool lock_aware = false);
+
 #include "flow/unactorcompiler.h"
 #endif

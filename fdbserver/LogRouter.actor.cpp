@@ -175,22 +175,22 @@ struct LogRouterData {
 		specialCounter(cc, "WaitForVersionMS", [this]() {
 			double val = this->waitForVersionTime;
 			this->waitForVersionTime = 0;
-			return 1000 * val;
+			return int64_t(1000 * val);
 		});
 		specialCounter(cc, "WaitForVersionMaxMS", [this]() {
 			double val = this->maxWaitForVersionTime;
 			this->maxWaitForVersionTime = 0;
-			return 1000 * val;
+			return int64_t(1000 * val);
 		});
 		specialCounter(cc, "GetMoreMS", [this]() {
 			double val = this->getMoreTime;
 			this->getMoreTime = 0;
-			return 1000 * val;
+			return int64_t(1000 * val);
 		});
 		specialCounter(cc, "GetMoreMaxMS", [this]() {
 			double val = this->maxGetMoreTime;
 			this->maxGetMoreTime = 0;
-			return 1000 * val;
+			return int64_t(1000 * val);
 		});
 		specialCounter(cc, "Generation", [this]() { return this->generation; });
 		logger = traceCounters("LogRouterMetrics",

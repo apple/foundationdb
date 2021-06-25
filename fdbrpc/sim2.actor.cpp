@@ -31,7 +31,6 @@
 #include "flow/IThreadPool.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
-#include "flow/WriteOnlySet.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
@@ -982,10 +981,6 @@ public:
 
 	bool checkRunnable() override { return net2->checkRunnable(); }
 
-	ActorLineageSet& getActorLineageSet() override {
-		return actorLineageSet;
-	}
-
 	void stop() override { isStopped = true; }
 	void addStopCallback(std::function<void()> fn) override { stopCallbacks.emplace_back(std::move(fn)); }
 	bool isSimulated() const override { return true; }
@@ -1026,8 +1021,8 @@ public:
 
 		// Get the size of all files we've created on the server and subtract them from the free space
 		for (auto file = proc->machine->openFiles.begin(); file != proc->machine->openFiles.end(); ++file) {
-			if (file->second.isReady()) {
-				totalFileSize += ((AsyncFileNonDurable*)file->second.get().getPtr())->approximateSize;
+			if (file->second.get().isReady()) {
+				totalFileSize += ((AsyncFileNonDurable*)file->second.get().get().getPtr())->approximateSize;
 			}
 			numFiles++;
 		}
@@ -1944,7 +1939,10 @@ public:
 		TraceEvent("ClogInterface")
 		    .detail("IP", ip.toString())
 		    .detail("Delay", seconds)
-		    .detail("Queue", mode == ClogSend ? "Send" : mode == ClogReceive ? "Receive" : "All");
+		    .detail("Queue",
+		            mode == ClogSend      ? "Send"
+		            : mode == ClogReceive ? "Receive"
+		                                  : "All");
 
 		if (mode == ClogSend || mode == ClogAll)
 			g_clogging.clogSendFor(ip, seconds);
@@ -2125,8 +2123,6 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
-
-	ActorLineageSet actorLineageSet;
 };
 
 class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
@@ -2418,9 +2414,9 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 	                       GENERIC_READ | ((flags & IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
 	                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 	                       nullptr,
-	                       (flags & IAsyncFile::OPEN_EXCLUSIVE)
-	                           ? CREATE_NEW
-	                           : (flags & IAsyncFile::OPEN_CREATE) ? OPEN_ALWAYS : OPEN_EXISTING,
+	                       (flags & IAsyncFile::OPEN_EXCLUSIVE) ? CREATE_NEW
+	                       : (flags & IAsyncFile::OPEN_CREATE)  ? OPEN_ALWAYS
+	                                                            : OPEN_EXISTING,
 	                       FILE_ATTRIBUTE_NORMAL,
 	                       nullptr);
 	int h = -1;
@@ -2450,7 +2446,7 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			actualFilename = filename + ".part";
 			auto partFile = machineCache.find(actualFilename);
 			if (partFile != machineCache.end()) {
-				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second);
+				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second.get());
 				if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 					f = map(f, [=](Reference<IAsyncFile> r) {
 						return Reference<IAsyncFile>(new AsyncFileWriteChecker(r));
@@ -2458,19 +2454,26 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 				return f;
 			}
 		}
-		if (machineCache.find(actualFilename) == machineCache.end()) {
+
+		Future<Reference<IAsyncFile>> f;
+		auto itr = machineCache.find(actualFilename);
+		if (itr == machineCache.end()) {
 			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
 			// This way, they can both keep up with the time to start the next operation
 			auto diskParameters =
 			    makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
-			machineCache[actualFilename] =
-			    AsyncFileNonDurable::open(filename,
+			f = AsyncFileNonDurable::open(filename,
 			                              actualFilename,
 			                              SimpleFile::open(filename, flags, mode, diskParameters, false),
 			                              diskParameters,
 			                              (flags & IAsyncFile::OPEN_NO_AIO) == 0);
+
+			machineCache[actualFilename] = UnsafeWeakFutureReference<IAsyncFile>(f);
+		} else {
+			f = itr->second.get();
 		}
-		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(machineCache[actualFilename]);
+
+		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
@@ -2508,10 +2511,6 @@ Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 		fileWrites[filename] = now();
 	}
 	return fileWrites[filename];
-}
-
-ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
-	return actorLineageSet;
 }
 
 void Sim2FileSystem::newFileSystem() {

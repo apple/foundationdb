@@ -28,7 +28,6 @@
 
 #include "flow/Arena.h"
 #include "flow/flow.h"
-#include "fdbclient/Knobs.h"
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
@@ -468,11 +467,12 @@ struct Traceable<KeyValueRef> : std::true_type {
 	}
 };
 
-typedef Standalone<KeyRef> Key;
-typedef Standalone<ValueRef> Value;
-typedef Standalone<KeyRangeRef> KeyRange;
-typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector;
+using Key = Standalone<KeyRef>;
+using Value = Standalone<ValueRef>;
+using KeyRange = Standalone<KeyRangeRef>;
+using KeyValue = Standalone<KeyValueRef>;
+using KeySelector = Standalone<struct KeySelectorRef>;
+using RangeResult = Standalone<struct RangeResultRef>;
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
@@ -482,7 +482,9 @@ inline Key keyAfter(const KeyRef& key) {
 
 	Standalone<StringRef> r;
 	uint8_t* s = new (r.arena()) uint8_t[key.size() + 1];
-	memcpy(s, key.begin(), key.size());
+	if (key.size() > 0) {
+		memcpy(s, key.begin(), key.size());
+	}
 	s[key.size()] = 0;
 	((StringRef&)r) = StringRef(s, key.size() + 1);
 	return r;
@@ -511,28 +513,12 @@ inline KeyRange prefixRange(KeyRef prefix) {
 	range.contents() = KeyRangeRef(start, end);
 	return range;
 }
-inline KeyRef keyBetween(const KeyRangeRef& keys) {
-	// Returns (one of) the shortest key(s) either contained in keys or equal to keys.end,
-	// assuming its length is no more than CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT. If the length of
-	// the shortest key exceeds that limit, then the end key is returned.
-	// The returned reference is valid as long as keys is valid.
 
-	int pos = 0; // will be the position of the first difference between keys.begin and keys.end
-	int minSize = std::min(keys.begin.size(), keys.end.size());
-	for (; pos < minSize && pos < CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT; pos++) {
-		if (keys.begin[pos] != keys.end[pos]) {
-			return keys.end.substr(0, pos + 1);
-		}
-	}
-
-	// If one more character keeps us in the limit, and the latter key is simply
-	// longer, then we only need one more byte of the end string.
-	if (pos < CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT && keys.begin.size() < keys.end.size()) {
-		return keys.end.substr(0, pos + 1);
-	}
-
-	return keys.end;
-}
+// Returns (one of) the shortest key(s) either contained in keys or equal to keys.end,
+// assuming its length is no more than CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT. If the length of
+// the shortest key exceeds that limit, then the end key is returned.
+// The returned reference is valid as long as keys is valid.
+KeyRef keyBetween(const KeyRangeRef& keys);
 
 struct KeySelectorRef {
 private:
@@ -557,32 +543,9 @@ public:
 
 	KeyRef getKey() const { return key; }
 
-	void setKey(KeyRef const& key) {
-		// There are no keys in the database with size greater than KEY_SIZE_LIMIT, so if this key selector has a key
-		// which is large, then we can translate it to an equivalent key selector with a smaller key
-		if (key.size() > (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-		                                                           : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-			this->key = key.substr(0,
-			                       (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-			                                                                 : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-			                           1);
-		else
-			this->key = key;
-	}
+	void setKey(KeyRef const& key);
 
-	std::string toString() const {
-		if (offset > 0) {
-			if (orEqual)
-				return format("%d+firstGreaterThan(%s)", offset - 1, printable(key).c_str());
-			else
-				return format("%d+firstGreaterOrEqual(%s)", offset - 1, printable(key).c_str());
-		} else {
-			if (orEqual)
-				return format("%d+lastLessOrEqual(%s)", offset, printable(key).c_str());
-			else
-				return format("%d+lastLessThan(%s)", offset, printable(key).c_str());
-		}
-	}
+	std::string toString() const;
 
 	bool isBackward() const {
 		return !orEqual && offset <= 0;

@@ -51,8 +51,8 @@ struct ITraceLogFormatter {
 
 struct ITraceLogIssuesReporter {
 	virtual ~ITraceLogIssuesReporter();
-	virtual void addIssue(std::string issue) = 0;
-	virtual void resolveIssue(std::string issue) = 0;
+	virtual void addIssue(std::string const& issue) = 0;
+	virtual void resolveIssue(std::string const& issue) = 0;
 
 	virtual void retrieveIssues(std::set<std::string>& out) const = 0;
 

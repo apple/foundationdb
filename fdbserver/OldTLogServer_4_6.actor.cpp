@@ -838,7 +838,7 @@ void commitMessages(Reference<LogData> self,
 			TEST(true); // Splitting commit messages across multiple blocks
 			messages1 = StringRef(block.end(), bytes);
 			block.append(block.arena(), messages.begin(), bytes);
-			self->messageBlocks.push_back(std::make_pair(version, block));
+			self->messageBlocks.emplace_back(version, block);
 			addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 			messages = messages.substr(bytes);
 		}
@@ -851,7 +851,7 @@ void commitMessages(Reference<LogData> self,
 	// Copy messages into block
 	ASSERT(messages.size() <= block.capacity() - block.size());
 	block.append(block.arena(), messages.begin(), messages.size());
-	self->messageBlocks.push_back(std::make_pair(version, block));
+	self->messageBlocks.emplace_back(version, block);
 	addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	messages = StringRef(block.end() - messages.size(), messages.size());
 
@@ -869,7 +869,7 @@ void commitMessages(Reference<LogData> self,
 				int offs = tag->messageOffsets[m];
 				uint8_t const* p =
 				    offs < messages1.size() ? messages1.begin() + offs : messages.begin() + offs - messages1.size();
-				tsm->value.version_messages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)p)));
+				tsm->value.version_messages.emplace_back(version, LengthPrefixedStringRef((uint32_t*)p));
 				if (tsm->value.version_messages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 					TraceEvent(SevWarnAlways, "LargeMessage")
 					    .detail("Size", tsm->value.version_messages.back().second.expectedSize());
@@ -1063,7 +1063,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 
 		peekMessagesFromMemory(logData, req, messages2, endVersion);
 
-		Standalone<RangeResultRef> kvs = wait(self->persistentData->readRange(
+		RangeResult kvs = wait(self->persistentData->readRange(
 		    KeyRangeRef(persistTagMessagesKey(logData->logId, oldTag, req.begin),
 		                persistTagMessagesKey(logData->logId, oldTag, logData->persistentDataDurableVersion + 1)),
 		    SERVER_KNOBS->DESIRED_TOTAL_BYTES,
@@ -1391,8 +1391,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 
 	IKeyValueStore* storage = self->persistentData;
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
-	state Future<Standalone<RangeResultRef>> fVers = storage->readRange(persistCurrentVersionKeys);
-	state Future<Standalone<RangeResultRef>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
+	state Future<RangeResult> fVers = storage->readRange(persistCurrentVersionKeys);
+	state Future<RangeResult> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
 
 	// FIXME: metadata in queue?
 
@@ -1407,8 +1407,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 	}
 
 	if (!fFormat.get().present()) {
-		Standalone<RangeResultRef> v =
-		    wait(self->persistentData->readRange(KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1));
+		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1));
 		if (!v.size()) {
 			TEST(true); // The DB is completely empty, so it was never initialized.  Delete it.
 			throw worker_removed();
@@ -1469,8 +1468,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 		loop {
 			if (logData->removed.isReady())
 				break;
-			Standalone<RangeResultRef> data =
-			    wait(self->persistentData->readRange(tagKeys, BUGGIFY ? 3 : 1 << 30, 1 << 20));
+			RangeResult data = wait(self->persistentData->readRange(tagKeys, BUGGIFY ? 3 : 1 << 30, 1 << 20));
 			if (!data.size())
 				break;
 			((KeyRangeRef&)tagKeys) = KeyRangeRef(keyAfter(data.back().key, tagKeys.arena()), tagKeys.end);

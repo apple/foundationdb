@@ -152,12 +152,14 @@ public:
 		databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
 		runConsistencyCheck = g_network->isSimulated();
 		runConsistencyCheckOnCache = false;
+		runConsistencyCheckOnTSS = true;
 		waitForQuiescenceBegin = true;
 		waitForQuiescenceEnd = true;
 		simCheckRelocationDuration = false;
 		simConnectionFailuresDisableDuration = 0;
 		simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		restorePerpetualWiggleSetting = true;
 	}
 	TestSpec(StringRef title,
 	         bool dump,
@@ -167,9 +169,9 @@ public:
 	         double databasePingDelay = -1.0)
 	  : title(title), dumpAfterTest(dump), clearAfterTest(clear), startDelay(startDelay), useDB(useDB), timeout(600),
 	    databasePingDelay(databasePingDelay), runConsistencyCheck(g_network->isSimulated()),
-	    runConsistencyCheckOnCache(false), waitForQuiescenceBegin(true), waitForQuiescenceEnd(true),
-	    simCheckRelocationDuration(false), simConnectionFailuresDisableDuration(0),
-	    simBackupAgents(ISimulator::BackupAgentType::NoBackupAgents),
+	    runConsistencyCheckOnCache(false), runConsistencyCheckOnTSS(false), waitForQuiescenceBegin(true),
+	    waitForQuiescenceEnd(true), restorePerpetualWiggleSetting(true), simCheckRelocationDuration(false),
+	    simConnectionFailuresDisableDuration(0), simBackupAgents(ISimulator::BackupAgentType::NoBackupAgents),
 	    simDrAgents(ISimulator::BackupAgentType::NoBackupAgents) {
 		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		if (databasePingDelay < 0)
@@ -187,8 +189,14 @@ public:
 	double databasePingDelay;
 	bool runConsistencyCheck;
 	bool runConsistencyCheckOnCache;
+	bool runConsistencyCheckOnTSS;
 	bool waitForQuiescenceBegin;
 	bool waitForQuiescenceEnd;
+	bool restorePerpetualWiggleSetting; // whether set perpetual_storage_wiggle as the value after run
+	                                      // QuietDatabase. QuietDatabase always disables perpetual storage wiggle on
+	                                      // purpose. If waitForQuiescenceBegin == true and we want to keep perpetual
+	                                      // storage wiggle the same setting as before during testing, this value should
+	                                      // be set true.
 
 	bool simCheckRelocationDuration; // If set to true, then long duration relocations generate SevWarnAlways messages.
 	                                 // Once any workload sets this to true, it will be true for the duration of the

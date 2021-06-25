@@ -26,6 +26,17 @@
 #include "fdbrpc/Smoother.h"
 #include "flow/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "fdbrpc/TSSComparison.h" // For TSS Metrics
+#include "fdbrpc/FlowTransport.h" // For Endpoint
+
+struct TSSEndpointData {
+	UID tssId;
+	Endpoint endpoint;
+	Reference<TSSMetrics> metrics;
+
+	TSSEndpointData(UID tssId, Endpoint endpoint, Reference<TSSMetrics> metrics)
+	  : tssId(tssId), endpoint(endpoint), metrics(metrics) {}
+};
 
 // The data structure used for the client-side load balancing algorithm to
 // decide which storage server to read data from. Conceptually, it tracks the
@@ -59,6 +70,10 @@ struct QueueData {
 	// hasn't returned a valid result, increase above `futureVersionBackoff`
 	// to increase the future backoff amount.
 	double increaseBackoffTime;
+
+	// a bit of a hack to store this here, but it's the only centralized place for per-endpoint tracking
+	Optional<TSSEndpointData> tssData;
+
 	QueueData()
 	  : latency(0.001), penalty(1.0), smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT), failedUntil(0),
 	    futureVersionBackoff(FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF), increaseBackoffTime(0) {}
@@ -89,13 +104,29 @@ public:
 	double secondBudget;
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> laggingRequests; // requests for which a different recipient already answered
+	PromiseStream<Future<Void>> addTSSActor;
+	Future<Void> tssComparisons; // requests for which a different recipient already answered
 	int laggingRequestCount;
+	int laggingTSSCompareCount;
+
+        // Updates this endpoint data to duplicate requests to the specified TSS endpoint
+	void updateTssEndpoint(uint64_t endpointId, const TSSEndpointData& endpointData);
+
+        // Removes the TSS mapping from this endpoint to stop duplicating requests to a TSS endpoint
+	void removeTssEndpoint(uint64_t endpointId);
+
+        // Retrieves the data for this endpoint's pair TSS endpoint, if present
+	Optional<TSSEndpointData> getTssData(uint64_t endpointId);
 
 	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0) {
 		laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
+		tssComparisons = actorCollection(addTSSActor.getFuture(), &laggingTSSCompareCount);
 	}
 
-	~QueueModel() { laggingRequests.cancel(); }
+	~QueueModel() {
+		laggingRequests.cancel();
+		tssComparisons.cancel();
+	}
 
 private:
 	std::unordered_map<uint64_t, QueueData> data;

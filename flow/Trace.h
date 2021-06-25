@@ -483,7 +483,7 @@ private:
 	std::string trackingKey;
 	TraceEventFields fields;
 	Severity severity;
-	ErrorKind errorKind;
+	ErrorKind errorKind{ ErrorKind::Unset };
 	const char* type;
 	UID id;
 	Error err;
@@ -519,11 +519,11 @@ struct TraceInterval {
 struct LatestEventCache {
 public:
 	void set(std::string tag, const TraceEventFields& fields);
-	TraceEventFields get(std::string tag);
+	TraceEventFields get(std::string const& tag);
 	std::vector<TraceEventFields> getAll();
 	std::vector<TraceEventFields> getAllUnsafe();
 
-	void clear(std::string prefix);
+	void clear(std::string const& prefix);
 	void clear();
 
 	// Latest error tracking only tracks errors when called from the main thread. Other errors are silently ignored.
@@ -577,8 +577,8 @@ bool selectTraceClockSource(std::string source);
 // Returns true iff source is recognized.
 bool validateTraceClockSource(std::string source);
 
-void addTraceRole(std::string role);
-void removeTraceRole(std::string role);
+void addTraceRole(std::string const& role);
+void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 template <class T>

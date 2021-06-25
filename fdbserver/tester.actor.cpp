@@ -39,6 +39,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -869,6 +870,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
                                     std::vector<TesterInterface> testers,
                                     bool doQuiescentCheck,
                                     bool doCacheCheck,
+                                    bool doTSSCheck,
                                     double quiescentWaitTimeout,
                                     double softTimeLimit,
                                     double databasePingDelay,
@@ -885,11 +887,16 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	Standalone<VectorRef<KeyValueRef>> options;
 	StringRef performQuiescent = LiteralStringRef("false");
 	StringRef performCacheCheck = LiteralStringRef("false");
+	StringRef performTSSCheck = LiteralStringRef("false");
 	if (doQuiescentCheck) {
 		performQuiescent = LiteralStringRef("true");
+		spec.restorePerpetualWiggleSetting = false;
 	}
 	if (doCacheCheck) {
 		performCacheCheck = LiteralStringRef("true");
+	}
+	if (doTSSCheck) {
+		performTSSCheck = LiteralStringRef("true");
 	}
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
@@ -898,6 +905,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), performQuiescent));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performCacheCheck"), performCacheCheck));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performTSSCheck"), performTSSCheck));
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("quiescentWaitTimeout"),
 	                                   ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
@@ -973,6 +981,7 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   testers,
 				                                   quiescent,
 				                                   spec.runConsistencyCheckOnCache,
+				                                   spec.runConsistencyCheckOnTSS,
 				                                   10000.0,
 				                                   18000,
 				                                   spec.databasePingDelay,
@@ -1039,7 +1048,9 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{ "storageEngineExcludeTypes",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeTypes", ""); } },
 	{ "maxTLogVersion",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } }
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } },
+	{ "disableTss",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1107,6 +1118,11 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      spec->runConsistencyCheckOnCache = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnCache", spec->runConsistencyCheckOnCache);
+	  } },
+	{ "runConsistencyCheckOnTSS",
+	  [](const std::string& value, TestSpec* spec) {
+	      spec->runConsistencyCheckOnTSS = (value == "true");
+	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnTSS", spec->runConsistencyCheckOnTSS);
 	  } },
 	{ "waitForQuiescence",
 	  [](const std::string& value, TestSpec* spec) {
@@ -1249,20 +1265,6 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 
 	const toml::value& conf = toml::parse(fileName);
 
-	// Handle all global settings
-	for (const auto& [k, v] : conf.as_table()) {
-		if (k == "test") {
-			continue;
-		}
-		if (testSpecGlobalKeys.find(k) != testSpecGlobalKeys.end()) {
-			testSpecGlobalKeys[k](toml_to_string(v));
-		} else {
-			TraceEvent(SevError, "TestSpecUnrecognizedGlobalParam")
-			    .detail("Attrib", k)
-			    .detail("Value", toml_to_string(v));
-		}
-	}
-
 	// Then parse each test
 	const toml::array& tests = toml::find(conf, "test").as_array();
 	for (const toml::value& test : tests) {
@@ -1384,6 +1386,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state bool useDB = false;
 	state bool waitForQuiescenceBegin = false;
 	state bool waitForQuiescenceEnd = false;
+	state bool restorePerpetualWiggleSetting = false;
+	state bool perpetualWiggleEnabled = false;
 	state double startDelay = 0.0;
 	state double databasePingDelay = 1e9;
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
@@ -1398,6 +1402,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			waitForQuiescenceBegin = true;
 		if (iter->waitForQuiescenceEnd)
 			waitForQuiescenceEnd = true;
+		if (iter->restorePerpetualWiggleSetting)
+			restorePerpetualWiggleSetting = true;
 		startDelay = std::max(startDelay, iter->startDelay);
 		databasePingDelay = std::min(databasePingDelay, iter->databasePingDelay);
 		if (iter->simBackupAgents != ISimulator::BackupAgentType::NoBackupAgents)
@@ -1436,6 +1442,15 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
 		}
+		if (restorePerpetualWiggleSetting) {
+			std::string_view confView(reinterpret_cast<const char*>(startingConfiguration.begin()),
+			                          startingConfiguration.size());
+			const std::string setting = "perpetual_storage_wiggle:=";
+			auto pos = confView.find(setting);
+			if (pos != confView.npos && confView.at(pos + setting.size()) == '1') {
+				perpetualWiggleEnabled = true;
+			}
+		}
 	}
 
 	if (useDB && waitForQuiescenceBegin) {
@@ -1450,6 +1465,10 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		} catch (Error& e) {
 			TraceEvent("QuietDatabaseStartExternalError").error(e);
 			throw;
+		}
+
+		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
+			wait(setPerpetualStorageWiggle(cx, true, true));
 		}
 	}
 

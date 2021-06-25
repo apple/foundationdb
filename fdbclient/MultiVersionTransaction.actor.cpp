@@ -89,19 +89,19 @@ ThreadFuture<Key> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeySelectorRef& begin,
-                                                                 const KeySelectorRef& end,
-                                                                 int limit,
-                                                                 bool snapshot,
-                                                                 bool reverse) {
+ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
+                                                  const KeySelectorRef& end,
+                                                  int limit,
+                                                  bool snapshot,
+                                                  bool reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeySelectorRef& begin,
-                                                                 const KeySelectorRef& end,
-                                                                 GetRangeLimits limits,
-                                                                 bool snapshot,
-                                                                 bool reverse) {
+ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
+                                                  const KeySelectorRef& end,
+                                                  GetRangeLimits limits,
+                                                  bool snapshot,
+                                                  bool reverse) {
 	FdbCApi::FDBFuture* f = api->transactionGetRange(tr,
 	                                                 begin.getKey().begin(),
 	                                                 begin.getKey().size(),
@@ -117,7 +117,7 @@ ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeySelect
 	                                                 0,
 	                                                 snapshot,
 	                                                 reverse);
-	return toThreadFuture<Standalone<RangeResultRef>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBKeyValue* kvs;
 		int count;
 		FdbCApi::fdb_bool_t more;
@@ -125,23 +125,19 @@ ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeySelect
 		ASSERT(!error);
 
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Standalone<RangeResultRef>(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more),
-		                                  Arena());
+		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeyRangeRef& keys,
-                                                                 int limit,
-                                                                 bool snapshot,
-                                                                 bool reverse) {
+ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys, int limit, bool snapshot, bool reverse) {
 	return getRange(
 	    firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeyRangeRef& keys,
-                                                                 GetRangeLimits limits,
-                                                                 bool snapshot,
-                                                                 bool reverse) {
+ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
+                                                  GetRangeLimits limits,
+                                                  bool snapshot,
+                                                  bool reverse) {
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
@@ -599,7 +595,7 @@ Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 
 void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {
 	MutexHolder holder(lock);
-	threadCompletionHooks.push_back(std::make_pair(hook, hookParameter));
+	threadCompletionHooks.emplace_back(hook, hookParameter);
 }
 
 // MultiVersionTransaction
@@ -685,45 +681,45 @@ ThreadFuture<Key> MultiVersionTransaction::getKey(const KeySelectorRef& key, boo
 	return abortableFuture(f, tr.onChange);
 }
 
-ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
-                                                                           const KeySelectorRef& end,
-                                                                           int limit,
-                                                                           bool snapshot,
-                                                                           bool reverse) {
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
+                                                            const KeySelectorRef& end,
+                                                            int limit,
+                                                            bool snapshot,
+                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(begin, end, limit, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	                        : ThreadFuture<RangeResult>(Never());
 	return abortableFuture(f, tr.onChange);
 }
 
-ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
-                                                                           const KeySelectorRef& end,
-                                                                           GetRangeLimits limits,
-                                                                           bool snapshot,
-                                                                           bool reverse) {
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
+                                                            const KeySelectorRef& end,
+                                                            GetRangeLimits limits,
+                                                            bool snapshot,
+                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(begin, end, limits, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	                        : ThreadFuture<RangeResult>(Never());
 	return abortableFuture(f, tr.onChange);
 }
 
-ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
-                                                                           int limit,
-                                                                           bool snapshot,
-                                                                           bool reverse) {
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
+                                                            int limit,
+                                                            bool snapshot,
+                                                            bool reverse) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getRange(keys, limit, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	auto f =
+	    tr.transaction ? tr.transaction->getRange(keys, limit, snapshot, reverse) : ThreadFuture<RangeResult>(Never());
 	return abortableFuture(f, tr.onChange);
 }
 
-ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
-                                                                           GetRangeLimits limits,
-                                                                           bool snapshot,
-                                                                           bool reverse) {
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
+                                                            GetRangeLimits limits,
+                                                            bool snapshot,
+                                                            bool reverse) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	auto f =
+	    tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse) : ThreadFuture<RangeResult>(Never());
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -951,7 +947,7 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 		                                             value.castTo<Standalone<StringRef>>());
 	}
 
-	dbState->options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
+	dbState->options.emplace_back(option, value.castTo<Standalone<StringRef>>());
 
 	if (dbState->db) {
 		dbState->db->setOption(option, value);
@@ -1563,7 +1559,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 				runOnExternalClientsAllThreads(
 				    [option, value](Reference<ClientInfo> client) { client->api->setNetworkOption(option, value); });
 			} else {
-				options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
+				options.emplace_back(option, value.castTo<Standalone<StringRef>>());
 			}
 		}
 	}

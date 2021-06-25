@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DeltaTree.h"
@@ -228,15 +229,13 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
-	                                             int rowLimit = 1 << 30,
-	                                             int byteLimit = 1 << 30) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
 			return waitAndReadRange(this, keys, rowLimit, byteLimit);
 
-		Standalone<RangeResultRef> result;
+		RangeResult result;
 		if (rowLimit == 0) {
 			return result;
 		}
@@ -403,7 +402,7 @@ private:
 			if (o->op == OpSet) {
 				if (sequential) {
 					KeyValueMapPair pair(o->p1, o->p2);
-					dataSets.push_back(std::make_pair(pair, pair.arena.getSize() + data.getElementBytes()));
+					dataSets.emplace_back(pair, pair.arena.getSize() + data.getElementBytes());
 				} else {
 					data.insert(o->p1, o->p2);
 				}
@@ -835,10 +834,10 @@ private:
 		wait(self->recovering);
 		return self->readValuePrefix(key, maxLength).get();
 	}
-	ACTOR static Future<Standalone<RangeResultRef>> waitAndReadRange(KeyValueStoreMemory* self,
-	                                                                 KeyRange keys,
-	                                                                 int rowLimit,
-	                                                                 int byteLimit) {
+	ACTOR static Future<RangeResult> waitAndReadRange(KeyValueStoreMemory* self,
+	                                                  KeyRange keys,
+	                                                  int rowLimit,
+	                                                  int byteLimit) {
 		wait(self->recovering);
 		return self->readRange(keys, rowLimit, byteLimit).get();
 	}

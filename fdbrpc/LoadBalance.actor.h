@@ -36,9 +36,13 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
+#include "fdbrpc/simulator.h" // for checking tss simulation mode
+#include "fdbrpc/TSSComparison.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using std::vector;
+
+ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
 
 struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	QueueModel* model;
@@ -75,6 +79,97 @@ struct LoadBalancedReply {
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply);
 Optional<LoadBalancedReply> getLoadBalancedReply(const void*);
 
+ACTOR template <class Req, class Resp>
+Future<Void> tssComparison(Req req,
+                           Future<ErrorOr<Resp>> fSource,
+                           Future<ErrorOr<Resp>> fTss,
+                           TSSEndpointData tssData) {
+	state double startTime = now();
+	state Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT);
+	state int finished = 0;
+	state double srcEndTime;
+	state double tssEndTime;
+
+	loop {
+		choose {
+			when(state ErrorOr<Resp> src = wait(fSource)) {
+				srcEndTime = now();
+				fSource = Never();
+				finished++;
+				if (finished == 2) {
+					break;
+				}
+			}
+			when(state Optional<ErrorOr<Resp>> tss = wait(fTssWithTimeout)) {
+				tssEndTime = now();
+				fTssWithTimeout = Never();
+				finished++;
+				if (finished == 2) {
+					break;
+				}
+			}
+		}
+	}
+
+	// we want to record ss/tss errors to metrics
+	int srcErrorCode = error_code_success;
+	int tssErrorCode = error_code_success;
+
+	++tssData.metrics->requests;
+
+	if (src.isError()) {
+		srcErrorCode = src.getError().code();
+		tssData.metrics->ssError(srcErrorCode);
+	}
+	if (!tss.present()) {
+		++tssData.metrics->tssTimeouts;
+	} else if (tss.get().isError()) {
+		tssErrorCode = tss.get().getError().code();
+		tssData.metrics->tssError(tssErrorCode);
+	}
+	if (!src.isError() && tss.present() && !tss.get().isError()) {
+		Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
+		Optional<LoadBalancedReply> tssLB = getLoadBalancedReply(&tss.get().get());
+		ASSERT(srcLB.present() ==
+		       tssLB.present()); // getLoadBalancedReply returned different responses for same templated type
+
+		// if Resp is a LoadBalancedReply, only compare if both replies are non-error
+		if (!srcLB.present() || (!srcLB.get().error.present() && !tssLB.get().error.present())) {
+			// only record latency difference if both requests actually succeeded, so that we're comparing apples to
+			// apples
+			tssData.metrics->recordLatency(req, srcEndTime - startTime, tssEndTime - startTime);
+
+			// expect mismatches in drop mutations mode.
+			Severity traceSeverity =
+			    (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+			        ? SevWarnAlways
+			        : SevError;
+
+			if (!TSS_doCompare(req, src.get(), tss.get().get(), traceSeverity, tssData.tssId)) {
+				TEST(true); // TSS Mismatch
+				++tssData.metrics->mismatches;
+			}
+		} else if (tssLB.present() && tssLB.get().error.present()) {
+			tssErrorCode = tssLB.get().error.get().code();
+			tssData.metrics->tssError(tssErrorCode);
+		} else if (srcLB.present() && srcLB.get().error.present()) {
+			srcErrorCode = srcLB.get().error.get().code();
+			tssData.metrics->ssError(srcErrorCode);
+		}
+	}
+
+	if (srcErrorCode != error_code_success && tssErrorCode != error_code_success && srcErrorCode != tssErrorCode) {
+		// if ss and tss both got different errors, record them
+		TraceEvent("TSSErrorMismatch")
+		    .suppressFor(1.0)
+		    .detail("TSSID", tssData.tssId)
+		    .detail("SSError", srcErrorCode)
+		    .detail("TSSError", tssErrorCode);
+	}
+
+	return Void();
+}
+
 // Stores state for a request made by the load balancer
 template <class Request>
 struct RequestData : NonCopyable {
@@ -91,11 +186,30 @@ struct RequestData : NonCopyable {
 	// This is true once setupRequest is called, even though at that point the response is Never().
 	bool isValid() { return response.isValid(); }
 
+	static void maybeDuplicateTSSRequest(RequestStream<Request> const* stream,
+	                                     Request& request,
+	                                     QueueModel* model,
+	                                     Future<Reply> ssResponse) {
+		if (model) {
+			// Send parallel request to TSS pair, if it exists
+			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
+
+			if (tssData.present()) {
+				TEST(true); // duplicating request to TSS
+				resetReply(request);
+				// FIXME: optimize to avoid creating new netNotifiedQueue for each message
+				RequestStream<Request> tssRequestStream(tssData.get().endpoint);
+				Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(request);
+				model->addActor.send(tssComparison(request, ssResponse, fTssResult, tssData.get()));
+			}
+		}
+	}
+
 	// Initializes the request state and starts it, possibly after a backoff delay
 	void startRequest(double backoff,
 	                  bool triedAllOptions,
 	                  RequestStream<Request> const* stream,
-	                  Request const& request,
+	                  Request& request,
 	                  QueueModel* model) {
 		modelHolder = Reference<ModelHolder>();
 		requestStarted = false;
@@ -105,12 +219,15 @@ struct RequestData : NonCopyable {
 			    delay(backoff), [this, stream, &request, model](Void _) {
 				    requestStarted = true;
 				    modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
-				    return stream->tryGetReply(request);
+				    Future<Reply> resp = stream->tryGetReply(request);
+				    maybeDuplicateTSSRequest(stream, request, model, resp);
+				    return resp;
 			    });
 		} else {
 			requestStarted = true;
 			modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
 			response = stream->tryGetReply(request);
+			maybeDuplicateTSSRequest(stream, request, model, response);
 		}
 
 		requestProcessed = false;
@@ -412,43 +529,17 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				                                                       FailureStatus(false));
 			}
 
+			Future<Void> okFuture = quorum(ok, 1);
+
 			if (!alternatives->alwaysFresh()) {
-				if (now() - g_network->networkInfo.newestAlternativesFailure >
-				    FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
-					g_network->networkInfo.oldestAlternativesFailure = now();
-				}
-
-				double delay = FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY;
-				if (now() - g_network->networkInfo.lastAlternativesFailureSkipDelay >
-				    FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
-					g_network->networkInfo.lastAlternativesFailureSkipDelay = now();
-				} else {
-					double elapsed = now() - g_network->networkInfo.oldestAlternativesFailure;
-					delay = std::max(delay,
-					                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO,
-					                          FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
-					delay = std::max(delay,
-					                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,
-					                          FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
-				}
-
 				// Making this SevWarn means a lot of clutter
 				if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
 				    deterministicRandom()->random01() < 0.01) {
-					TraceEvent("AllAlternativesFailed")
-					    .detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
-					    .detail("Alternatives", alternatives->description())
-					    .detail("Delay", delay);
+					TraceEvent("AllAlternativesFailed").detail("Alternatives", alternatives->description());
 				}
-
-				g_network->networkInfo.newestAlternativesFailure = now();
-
-				choose {
-					when(wait(quorum(ok, 1))) {}
-					when(wait(::delayJittered(delay))) { throw all_alternatives_failed(); }
-				}
+				wait(allAlternativesFailedDelay(okFuture));
 			} else {
-				wait(quorum(ok, 1));
+				wait(okFuture);
 			}
 
 			numAttempts = 0; // now that we've got a server back, reset the backoff

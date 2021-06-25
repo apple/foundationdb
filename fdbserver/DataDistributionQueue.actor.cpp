@@ -595,12 +595,11 @@ struct DDQueueData {
 			servers.clear();
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
-				state Standalone<RangeResultRef> UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				Standalone<RangeResultRef> keyServersEntries =
-				    wait(tr.getRange(lastLessOrEqual(keyServersKey(input.keys.begin)),
-				                     firstGreaterOrEqual(keyServersKey(input.keys.end)),
-				                     SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
+				RangeResult keyServersEntries = wait(tr.getRange(lastLessOrEqual(keyServersKey(input.keys.begin)),
+				                                                 firstGreaterOrEqual(keyServersKey(input.keys.end)),
+				                                                 SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
 
 				if (keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for (int shard = 0; shard < keyServersEntries.size(); shard++) {
@@ -629,7 +628,7 @@ struct DDQueueData {
 				// When a shard is inflight and DD crashes, some destination servers may have already got the data.
 				// The new DD will treat the destination servers as source servers. So the size can be large.
 				else {
-					Standalone<RangeResultRef> serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+					RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 					for (auto s = serverList.begin(); s != serverList.end(); ++s)
@@ -994,7 +993,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				allHealthy = true;
 				anyWithSource = false;
 				bestTeams.clear();
-				// Get team from teamCollections in diffrent DCs and find the best one
+				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
 					double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 					if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
@@ -1033,7 +1032,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 						anyWithSource = true;
 					}
 
-					bestTeams.push_back(std::make_pair(bestTeam.first.get(), bestTeam.second));
+					bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 					tciIndex++;
 				}
 				if (foundTeams && anyHealthy) {
@@ -1551,6 +1550,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
+                                         PromiseStream<Promise<int>> getUnhealthyRelocationCount,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
@@ -1662,6 +1662,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
 					    .detail("PriorityRebalanceOverutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
+					    .detail("PriorityStorageWiggle",
+					            self.priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
 					    .detail("PriorityTeamHealthy", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
 					    .detail("PriorityTeamContainsUndesiredServer",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])
@@ -1680,6 +1682,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount.getFuture())) {
+					r.send(self.unhealthyRelocations);
+				}
 			}
 		}
 	} catch (Error& e) {

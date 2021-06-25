@@ -20,6 +20,7 @@
 
 #include "fdbclient/Schemas.h"
 
+// NOTE: also change mr-status-json-schemas.rst.inc
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
@@ -140,6 +141,16 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "roughness":0.0
                   },
                   "mutations":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "fetched_versions":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "fetches_from_logs":{
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0
@@ -421,6 +432,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "seconds" : 1.0,
          "versions" : 1000000
       },
+      "active_tss_count":0,
       "degraded_processes":0,
       "database_available":true,
       "database_lock_state": {
@@ -648,6 +660,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "data_distribution_disabled_for_rebalance":true,
       "data_distribution_disabled":true,
       "active_primary_dc":"pv",
+      "bounce_impact":{
+         "can_clean_bounce":true,
+         "reason":""
+      },
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
@@ -715,6 +731,19 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "memory-2",
              "memory-radixtree-beta"
          ]},
+         "tss_count":1,
+         "tss_storage_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-experimental",
+             "ssd-rocksdb-experimental",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta"
+         ]},
          "coordinators_count":1,
          "excluded_servers":[
             {
@@ -727,7 +756,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "auto_logs":3,
          "commit_proxies":5,
          "grv_proxies":1,
-         "backup_worker_enabled":1
+         "proxies":6,
+         "backup_worker_enabled":1,
+         "perpetual_storage_wiggle":0
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
@@ -787,7 +818,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                 }
             }
          ],
-         "least_operating_space_bytes_storage_server":0
+         "least_operating_space_bytes_storage_server":0,
+         "max_machine_failures_without_losing_data":0
       },
       "machines":{
          "$map":{

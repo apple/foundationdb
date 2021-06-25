@@ -1,4 +1,5 @@
-configureLocked = 1
+[configuration]
+configureLocked = true
 
 [[test]]
 testTitle = 'ConfigureLocked'

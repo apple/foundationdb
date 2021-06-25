@@ -243,8 +243,7 @@ public:
 		state Reference<Task> task(new Task());
 		task->key = taskUID;
 
-		state Standalone<RangeResultRef> values =
-		    wait(tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY));
+		state RangeResult values = wait(tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY));
 		Version version = wait(tr->getReadVersion());
 		task->timeoutVersion =
 		    version + (uint64_t)(taskBucket->timeout *
@@ -602,19 +601,19 @@ public:
 		taskBucket->setOptions(tr);
 
 		// Check all available priorities for keys
-		state std::vector<Future<Standalone<RangeResultRef>>> resultFutures;
+		state std::vector<Future<RangeResult>> resultFutures;
 		for (int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then the taskbucket is not empty so return false
 		state int i;
 		for (i = 0; i < resultFutures.size(); ++i) {
-			Standalone<RangeResultRef> results = wait(resultFutures[i]);
+			RangeResult results = wait(resultFutures[i]);
 			if (results.size() > 0)
 				return false;
 		}
 
-		Standalone<RangeResultRef> values = wait(tr->getRange(taskBucket->timeouts.range(), 1));
+		RangeResult values = wait(tr->getRange(taskBucket->timeouts.range(), 1));
 		if (values.size() > 0)
 			return false;
 
@@ -625,14 +624,14 @@ public:
 		taskBucket->setOptions(tr);
 
 		// Check all available priorities for emptiness
-		state std::vector<Future<Standalone<RangeResultRef>>> resultFutures;
+		state std::vector<Future<RangeResult>> resultFutures;
 		for (int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then return true as the level is 'busy'
 		state int i;
 		for (i = 0; i < resultFutures.size(); ++i) {
-			Standalone<RangeResultRef> results = wait(resultFutures[i]);
+			RangeResult results = wait(resultFutures[i]);
 			if (results.size() > 0)
 				return true;
 		}
@@ -650,7 +649,7 @@ public:
 		t.append(task->timeoutVersion);
 		t.append(task->key);
 
-		Standalone<RangeResultRef> values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
+		RangeResult values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
 		if (values.size() > 0)
 			return false;
 
@@ -742,7 +741,7 @@ public:
 		state KeyRange range(
 		    KeyRangeRef(taskBucket->timeouts.get(0).range().begin, taskBucket->timeouts.get(end).range().end));
 
-		Standalone<RangeResultRef> values = wait(tr->getRange(range, CLIENT_KNOBS->TASKBUCKET_MAX_TASK_KEYS));
+		RangeResult values = wait(tr->getRange(range, CLIENT_KNOBS->TASKBUCKET_MAX_TASK_KEYS));
 
 		// Keys will be tuples of (taskUID, param) -> paramValue
 		// Unfortunately we need to know the priority parameter for a taskUID before we can know which available-tasks
@@ -793,7 +792,7 @@ public:
 	ACTOR static Future<Void> debugPrintRange(Reference<ReadYourWritesTransaction> tr, Subspace subspace, Key msg) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		Standalone<RangeResultRef> values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
+		RangeResult values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
 		TraceEvent("TaskBucketDebugPrintRange")
 		    .detail("Key", subspace.key())
 		    .detail("Count", values.size())
@@ -851,7 +850,7 @@ public:
 		} else {
 			TEST(true); // Extended a task without updating parameters
 			// Otherwise, read and transplant the params from the old to new timeout spaces
-			Standalone<RangeResultRef> params = wait(tr->getRange(oldTimeoutSpace.range(), CLIENT_KNOBS->TOO_MANY));
+			RangeResult params = wait(tr->getRange(oldTimeoutSpace.range(), CLIENT_KNOBS->TOO_MANY));
 			for (auto& kv : params) {
 				Tuple paramKey = oldTimeoutSpace.unpack(kv.key);
 				tr->set(newTimeoutSpace.pack(paramKey), kv.value);
@@ -1114,7 +1113,7 @@ public:
 	ACTOR static Future<bool> isSet(Reference<ReadYourWritesTransaction> tr, Reference<TaskFuture> taskFuture) {
 		taskFuture->futureBucket->setOptions(tr);
 
-		Standalone<RangeResultRef> values = wait(tr->getRange(taskFuture->blocks.range(), 1));
+		RangeResult values = wait(tr->getRange(taskFuture->blocks.range(), 1));
 		if (values.size() > 0)
 			return false;
 
@@ -1177,7 +1176,7 @@ public:
 	                                            Reference<TaskFuture> taskFuture) {
 		taskFuture->futureBucket->setOptions(tr);
 
-		Standalone<RangeResultRef> values = wait(tr->getRange(taskFuture->callbacks.range(), CLIENT_KNOBS->TOO_MANY));
+		RangeResult values = wait(tr->getRange(taskFuture->callbacks.range(), CLIENT_KNOBS->TOO_MANY));
 		tr->clear(taskFuture->callbacks.range());
 
 		std::vector<Future<Void>> actions;

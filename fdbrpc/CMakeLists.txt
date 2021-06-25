@@ -14,6 +14,7 @@ set(FDBRPC_SRCS
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
   IAsyncFile.actor.cpp
+  LoadBalance.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
   Net2FileSystem.cpp
@@ -29,7 +30,8 @@ set(FDBRPC_SRCS
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h
-  TraceFileIO.cpp)
+  TraceFileIO.cpp
+  TSSComparison.h)
 
 if(WITH_TLS AND NOT WIN32)
   set(FDBRPC_SRCS

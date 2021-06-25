@@ -187,7 +187,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				for (restoreIndex = 0; restoreIndex < self->skippedRestoreRanges.size(); restoreIndex++) {
 					state KeyRangeRef range = self->skippedRestoreRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
-					Standalone<RangeResultRef> res = wait(tr.getRange(range, GetRangeLimits::ROW_LIMIT_UNLIMITED));
+					RangeResult res = wait(tr.getRange(range, GetRangeLimits::ROW_LIMIT_UNLIMITED));
 					if (!res.empty()) {
 						TraceEvent(SevError, "BARW_UnexpectedRangePresent").detail("Range", printable(range));
 						return false;
@@ -400,7 +400,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state int rowCount = 0;
 		loop {
 			try {
-				Standalone<RangeResultRef> existingRows = wait(tr.getRange(normalKeys, 1));
+				RangeResult existingRows = wait(tr.getRange(normalKeys, 1));
 				rowCount = existingRows.size();
 				break;
 			} catch (Error& e) {
@@ -756,7 +756,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						printf("BackupCorrectnessLeftOverLogTasks: %ld\n", (long)taskCount);
 					}
 
-					Standalone<RangeResultRef> agentValues =
+					RangeResult agentValues =
 					    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
 					// Error if the system keyspace for the backup tag is not empty
@@ -791,10 +791,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						printf("No left over backup version key\n");
 					}
 
-					Standalone<RangeResultRef> versions = wait(tr->getRange(
+					RangeResult versions = wait(tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
 					if (!self->shareLogRange || !versions.size()) {
-						Standalone<RangeResultRef> logValues = wait(
+						RangeResult logValues = wait(
 						    tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 						// Error if the log/mutation keyspace for the backup tag  is not empty

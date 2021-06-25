@@ -27,9 +27,7 @@
 #define FDBCLIENT_GLOBALCONFIG_ACTOR_H
 
 #include <any>
-#include <functional>
 #include <map>
-#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -51,9 +49,6 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
 
-extern const KeyRef samplingFrequency;
-extern const KeyRef samplingWindow;
-
 // Structure used to hold the values stored by global configuration. The arena
 // is used as memory to store both the key and the value (the value is only
 // stored in the arena if it is an object; primitives are just copied).
@@ -67,22 +62,33 @@ struct ConfigValue : ReferenceCounted<ConfigValue> {
 
 class GlobalConfig : NonCopyable {
 public:
-	// Creates a GlobalConfig singleton, accessed by calling GlobalConfig().
-	// This function should only be called once by each process (however, it is
-	// idempotent and calling it multiple times will have no effect).
-	static void create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo);
+	// Creates a GlobalConfig singleton, accessed by calling
+	// GlobalConfig::globalConfig(). This function requires a database object
+	// to allow global configuration to run transactions on the database, and
+	// an AsyncVar object to watch for changes on. The ClientDBInfo pointer
+	// should point to a ClientDBInfo object which will contain the updated
+	// global configuration history when the given AsyncVar changes. This
+	// function should be called whenever the database object changes, in order
+	// to allow global configuration to run transactions on the latest
+	// database.
+	template <class T>
+	static void create(Database& cx, Reference<AsyncVar<T>> db, const ClientDBInfo* dbInfo) {
+		if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
+			auto config = new GlobalConfig{ cx };
+			g_network->setGlobal(INetwork::enGlobalConfig, config);
+			config->_updater = updater(config, dbInfo);
+			// Bind changes in `db` to the `dbInfoChanged` AsyncTrigger.
+			forward(db, std::addressof(config->dbInfoChanged));
+		} else {
+			GlobalConfig* config = reinterpret_cast<GlobalConfig*>(g_network->global(INetwork::enGlobalConfig));
+			config->cx = cx;
+		}
+	}
 
 	// Returns a reference to the global GlobalConfig object. Clients should
 	// call this function whenever they need to read a value out of the global
 	// configuration.
 	static GlobalConfig& globalConfig();
-
-	// Updates the ClientDBInfo object used by global configuration to read new
-	// data. For server processes, this value needs to be set by the cluster
-	// controller, but global config is initialized before the cluster
-	// controller is, so this function provides a mechanism to update the
-	// object after initialization.
-	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
@@ -137,7 +143,7 @@ public:
 	void trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn);
 
 private:
-	GlobalConfig();
+	GlobalConfig(Database& cx);
 
 	// The functions below only affect the local copy of the global
 	// configuration keyspace! To insert or remove values across all nodes you
@@ -156,10 +162,10 @@ private:
 
 	ACTOR static Future<Void> migrate(GlobalConfig* self);
 	ACTOR static Future<Void> refresh(GlobalConfig* self);
-	ACTOR static Future<Void> updater(GlobalConfig* self);
+	ACTOR static Future<Void> updater(GlobalConfig* self, const ClientDBInfo* dbInfo);
 
 	Database cx;
-	Reference<AsyncVar<ClientDBInfo>> dbInfo;
+	AsyncTrigger dbInfoChanged;
 	Future<Void> _updater;
 	Promise<Void> initialized;
 	AsyncTrigger configChanged;

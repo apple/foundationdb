@@ -31,6 +31,7 @@ void forceLinkMemcpyPerfTests();
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void forceLinkStreamCipherTests();
 #endif
+void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 
 struct UnitTestWorkload : TestWorkload {
@@ -49,6 +50,7 @@ struct UnitTestWorkload : TestWorkload {
 		enabled = !clientId; // only do this on the "first" client
 		testPattern = getOption(options, LiteralStringRef("testsMatching"), Value()).toString();
 		testRunLimit = getOption(options, LiteralStringRef("maxTestCases"), -1);
+		testParams.setDataDir(getOption(options, LiteralStringRef("dataDir"), "simfdb/unittests/"_sr).toString());
 
 		// Consume all remaining options as testParams which the unit test can access
 		for (auto& kv : options) {
@@ -66,11 +68,15 @@ struct UnitTestWorkload : TestWorkload {
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		forceLinkStreamCipherTests();
 #endif
+		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 	}
 
 	std::string description() const override { return "UnitTests"; }
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> setup(Database const& cx) override {
+		platform::eraseDirectoryRecursive(testParams.getDataDir());
+		return Void();
+	}
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
 			return runUnitTests(this);
@@ -108,12 +114,14 @@ struct UnitTestWorkload : TestWorkload {
 			state double start_now = now();
 			state double start_timer = timer();
 
+			platform::createDirectory(self->testParams.getDataDir());
 			try {
 				wait(test->func(self->testParams));
 			} catch (Error& e) {
 				++self->testsFailed;
 				result = e;
 			}
+			platform::eraseDirectoryRecursive(self->testParams.getDataDir());
 			++self->testsExecuted;
 			double wallTime = timer() - start_timer;
 			double simTime = now() - start_now;
