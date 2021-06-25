@@ -253,7 +253,8 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 }
 
 // Get an IBackupContainer based on a container URL string
-Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url) {
+Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url,
+                                                            Optional<std::string> const& encryptionKeyFileName) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
 	Reference<IBackupContainer>& r = m_cache[url];
@@ -263,7 +264,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 	try {
 		StringRef u(url);
 		if (u.startsWith(LiteralStringRef("file://"))) {
-			r = Reference<IBackupContainer>(new BackupContainerLocalDirectory(url));
+			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
 		} else if (u.startsWith(LiteralStringRef("blobstore://"))) {
 			std::string resource;
 

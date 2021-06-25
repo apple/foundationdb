@@ -241,11 +241,12 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	generateRandomData(&writeBuffer.front(), bytes);
 	state std::vector<unsigned char> readBuffer(bytes, 0);
 	ASSERT(g_network->isSimulated());
-	StreamCipher::Key::initializeRandomKey();
+	StreamCipher::Key::initializeRandomTestKey();
 	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
 	            IAsyncFile::OPEN_NO_AIO;
-	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(params.getDataDir(), flags, 0600));
+	state Reference<IAsyncFile> file =
+	    wait(IAsyncFileSystem::filesystem()->open(joinPath(params.getDataDir(), "test-encrypted-file"), flags, 0600));
 	state int bytesWritten = 0;
 	while (bytesWritten < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesWritten);

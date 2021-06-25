@@ -44,16 +44,33 @@ void StreamCipher::cleanup() noexcept {
 	}
 }
 
-void StreamCipher::Key::initializeRandomKey() {
+void StreamCipher::Key::initializeKey(std::array<unsigned char, 16>&& arr) {
+	ASSERT(!globalKey);
+	globalKey = std::make_unique<Key>(ConstructorTag{});
+	globalKey->arr = std::move(arr);
+	memset(arr.data(), 0, arr.size());
+}
+
+void StreamCipher::Key::initializeRandomTestKey() {
 	ASSERT(g_network->isSimulated());
 	if (globalKey) return;
 	globalKey = std::make_unique<Key>(ConstructorTag{});
-	generateRandomData(globalKey.get()->arr.data(), globalKey.get()->arr.size());
+	generateRandomData(globalKey->arr.data(), globalKey->arr.size());
 }
 
 const StreamCipher::Key& StreamCipher::Key::getKey() {
 	ASSERT(globalKey);
 	return *globalKey;
+}
+
+StreamCipher::Key::Key(Key&& rhs) : arr(std::move(rhs.arr)) {
+	memset(arr.data(), 0, arr.size());
+}
+
+StreamCipher::Key& StreamCipher::Key::operator=(Key&& rhs) {
+	arr = std::move(rhs.arr);
+	memset(arr.data(), 0, arr.size());
+	return *this;
 }
 
 StreamCipher::Key::~Key() {
@@ -111,7 +128,7 @@ void forceLinkStreamCipherTests() {}
 // Tests both encryption and decryption of random data
 // using the StreamCipher class
 TEST_CASE("flow/StreamCipher") {
-	StreamCipher::Key::initializeRandomKey();
+	StreamCipher::Key::initializeRandomTestKey();
 	const auto& key = StreamCipher::Key::getKey();
 
 	StreamCipher::IV iv;

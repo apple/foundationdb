@@ -23,6 +23,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.actor.h"
 #include "flow/Platform.h"
+#include "flow/StreamCipher.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -131,7 +132,29 @@ std::string BackupContainerLocalDirectory::getURLFormat() {
 	return "file://</path/to/base/dir/>";
 }
 
-BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url) {
+ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
+	state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
+	int64_t fileSize = wait(keyFile->size());
+	// TODO: Use new error code and avoid hard-coding expected size
+	if (fileSize != 16) {
+		throw internal_error();
+	}
+	state std::array<uint8_t, 16> key;
+	wait(success(keyFile->read(key.data(), key.size(), 0)));
+	StreamCipher::Key::initializeKey(std::move(key));
+	return Void();
+}
+
+bool BackupContainerLocalDirectory::usesEncryption() const {
+	return encryptionSetupFuture.isValid();
+}
+
+BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url,
+                                                             const Optional<std::string>& encryptionKeyFileName) {
+	if (encryptionKeyFileName.present()) {
+		encryptionSetupFuture = readEncryptionKey(encryptionKeyFileName.get());
+	}
+
 	std::string path;
 	if (url.find("file://") != 0) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
@@ -207,6 +230,9 @@ Future<bool> BackupContainerLocalDirectory::exists() {
 
 Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
+	if (usesEncryption()) {
+		flags |= IAsyncFile::OPEN_ENCRYPTED;
+	}
 	// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
 	// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
 	// but only if the source directory is writeable which shouldn't be required for a restore.
@@ -260,6 +286,9 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_READWRITE;
+	if (usesEncryption()) {
+		flags |= IAsyncFile::OPEN_ENCRYPTED;
+	}
 	std::string fullPath = joinPath(m_path, path);
 	platform::createDirectory(parentDirectory(fullPath));
 	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";

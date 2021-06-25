@@ -362,20 +362,22 @@ public:
 	                          Key outContainer,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
-	                          std::string tagName,
+	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          bool stopWhenDone = true,
 	                          bool partitionedLog = false,
-	                          bool incrementalBackupOnly = false);
+	                          bool incrementalBackupOnly = false,
+	                          Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
-	                          std::string tagName,
+	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          bool stopWhenDone = true,
 	                          bool partitionedLog = false,
-	                          bool incrementalBackupOnly = false) {
+	                          bool incrementalBackupOnly = false,
+	                          Optional<std::string> const& encryptionKeyFileName = {}) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -385,7 +387,8 @@ public:
 			                    backupRanges,
 			                    stopWhenDone,
 			                    partitionedLog,
-			                    incrementalBackupOnly);
+			                    incrementalBackupOnly,
+			                    encryptionKeyFileName);
 		});
 	}
 

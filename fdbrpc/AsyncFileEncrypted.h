@@ -18,8 +18,7 @@
  * limitations under the License.
  */
 
-#ifndef __FDBRPC_ASYNC_FILE_ENCRYPTED_H__
-#define __FDBRPC_ASYNC_FILE_ENCRYPTED_H__
+#pragma once
 
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/FastRef.h"
@@ -75,5 +74,3 @@ public:
 	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 	int64_t debugFD() const override;
 };
-
-#endif

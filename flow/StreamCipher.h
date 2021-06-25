@@ -18,8 +18,7 @@
  * limitations under the License.
  */
 
-#ifndef __FLOW_STREAM_CIPHER_H__
-#define __FLOW_STREAM_CIPHER_H__
+#pragma once
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -48,9 +47,12 @@ public:
 
 	public:
 		Key(ConstructorTag) {}
+		Key(Key&&);
+		Key& operator=(Key&&);
 		~Key();
 		unsigned char const* data() const { return arr.data(); }
-		static void initializeRandomKey();
+		static void initializeKey(decltype(arr)&&);
+		static void initializeRandomTestKey();
 		static const Key& getKey();
 		static void cleanup() noexcept;
 	};
@@ -75,5 +77,3 @@ public:
 	StringRef decrypt(unsigned char const* ciphertext, int len, Arena&);
 	StringRef finish(Arena&);
 };
-
-#endif
