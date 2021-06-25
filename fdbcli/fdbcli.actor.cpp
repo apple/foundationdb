@@ -566,7 +566,7 @@ void initHelp() {
 	                "If no address and class are specified, lists the classes of all servers.\n\nSetting the class to "
 	                "`default' resets the process class to the class specified on the command line. The available "
 	                "classes are `unset', `storage', `transaction', `resolution', `commit_proxy', `grv_proxy', "
-	                "`master', `test', `unset', "
+	                "`master', `test', "
 	                "`stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', "
 	                "`coordinator', `ratekeeper', `storage_cache', `backup', and `default'.");
 	helpMap["status"] =
