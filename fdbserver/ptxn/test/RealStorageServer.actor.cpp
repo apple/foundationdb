@@ -68,6 +68,19 @@ struct ServerTestDriver {
 };
 
 struct StorageServerTestDriver : ServerTestDriver {
+	struct Options {
+		const int nMutationsPerMore;
+		const Optional<int> maxMutations;
+		const int advanceVersionsPerMutation;
+		const KeyValueStoreType storeType;
+
+		explicit Options(const UnitTestParameters& params)
+		  : nMutationsPerMore(params.getInt("nMutationsPerMore").get()),
+		    maxMutations(params.getInt("maxMutations").castTo<int>()),
+		    advanceVersionsPerMutation(params.getInt("advanceVersionsPerMutation").get()),
+		    storeType(KeyValueStoreType::fromString(params.get("keyValueStoreType").orDefault("ssd-2"))) {}
+	} options;
+
 	Reference<MockPeekCursor> mockPeekCursor;
 
 	// Default tag.
@@ -76,7 +89,7 @@ struct StorageServerTestDriver : ServerTestDriver {
 	StorageServerInterface ssi;
 	ActorCollection actors = ActorCollection(false);
 
-	StorageServerTestDriver() : ServerTestDriver() { initEndpoints(); }
+	StorageServerTestDriver(const UnitTestParameters& params) : ServerTestDriver(), options(params) { initEndpoints(); }
 
 	void initEndpoints() {
 		UID uid = nondeterministicRandom()->randomUniqueID();
@@ -90,9 +103,7 @@ struct StorageServerTestDriver : ServerTestDriver {
 
 		StorageServerInterface& ssi = self->ssi;
 
-		// TODO: Make this parameterizable. We'll eventually want to test this against more than the one storage server
-		// implementation.
-		KeyValueStoreType storeType = KeyValueStoreType::SSD_BTREE_V2;
+		auto storeType = self->options.storeType;
 		state std::string folder = ".";
 		std::string fileName = joinPath(folder, "storage-" + ssi.id().toString() + "." + storeType.toString());
 		std::cout << "new Storage Server file name: " << fileName << std::endl;
@@ -120,10 +131,17 @@ struct StorageServerTestDriver : ServerTestDriver {
 		return Void();
 	}
 
+	ACTOR static Future<Void> verifyGetValueFromId(StorageServerTestDriver* self, int id, Version version) {
+		auto idStr = std::to_string(id);
+		wait(verifyGetValue(
+		    self, Standalone<StringRef>("Key-" + idStr), version, Standalone<StringRef>("Value-" + idStr)));
+		return Void();
+	}
+
 	ACTOR static Future<Void> verifyGetValue(StorageServerTestDriver* self,
-	                                         KeyRef key,
+	                                         Key key,
 	                                         Version version,
-	                                         ValueRef expectedValue) {
+	                                         Value expectedValue) {
 		wait(switchToServerProcess(self));
 
 		GetValueRequest getValueRequest = GetValueRequest(UID(), // spanContext
@@ -131,11 +149,13 @@ struct StorageServerTestDriver : ServerTestDriver {
 		                                                  version,
 		                                                  Optional<TagSet>(), // tags
 		                                                  Optional<UID>()); // debugID
+		std::cout << "Sending getValue request for key " << key.toString() << std::endl;
+
 		self->ssi.getValue.send(getValueRequest);
 
 		GetValueReply getValueReply = wait(getValueRequest.reply.getFuture());
 		const Value& value = getValueReply.value.get();
-		std::cout << "Get value: " << value.toString() << std::endl;
+		std::cout << "Get value: " << value.toString() << ", expected " << expectedValue.toString() << std::endl;
 		ASSERT(value == expectedValue);
 
 		wait(switchBack(self));
@@ -145,28 +165,30 @@ struct StorageServerTestDriver : ServerTestDriver {
 } // namespace ptxn
 
 TEST_CASE("fdbserver/ptxn/test/storageserver") {
+	state ptxn::StorageServerTestDriver driver(params);
 
-	state ptxn::StorageServerTestDriver driver;
-
-	// Set the mock cursor with some input.
 	Arena arena;
-	MutationRef mutation(arena, MutationRef::SetValue, "Hello"_sr, "World"_sr);
-	std::string message = BinaryWriter::toValue(mutation, AssumeVersion(currentProtocolVersion)).toString();
-	std::vector<Tag> tags = { driver.tag };
-	state std::vector<MockPeekCursor::OneVersionMessages> allVersionMessages = { MockPeekCursor::OneVersionMessages(
-		8, // version
-		{ MockPeekCursor::MessageAndTags(message, tags) }) };
-	driver.mockPeekCursor = makeReference<MockPeekCursor>(allVersionMessages, arena);
+	Standalone<VectorRef<Tag>> tags;
+	tags.push_back(tags.arena(), driver.tag);
+	auto supplier = MockPeekCursor::VersionedMessageSupplier(0, tags, driver.options.advanceVersionsPerMutation);
+	driver.mockPeekCursor =
+	    makeReference<MockPeekCursor>(driver.options.nMutationsPerMore, driver.options.maxMutations, supplier, arena);
 
-	loop choose{ when(wait(ptxn::StorageServerTestDriver::runStorageServer(&driver))){
-		std::cout << "Storage serves exited unexpectedly" << std::endl;
-	ASSERT(false);
-        }
-        when(wait(ptxn::StorageServerTestDriver::verifyGetValue(&driver, "Hello"_sr, 8, "World"_sr))) {
-	        break;
-        }
-        when(wait(driver.actors.getResult())) {}
-    };
+	int verifyId = params.getInt("verifyId").get();
+	state Future<Void> verify = ptxn::StorageServerTestDriver::verifyGetValueFromId(
+	    &driver,
+	    verifyId,
+	    // Other versions after commitVersion should work too.
+	    MockPeekCursor::VersionedMessageSupplier::commitVersion(verifyId, driver.options.advanceVersionsPerMutation));
 
-    return Void();
+	loop choose {
+		when(wait(ptxn::StorageServerTestDriver::runStorageServer(&driver))) {
+			std::cout << "Storage serves exited unexpectedly" << std::endl;
+			ASSERT(false);
+		}
+		when(wait(verify)) { break; }
+		when(wait(driver.actors.getResult())) {}
+	}
+
+	return Void();
 }
