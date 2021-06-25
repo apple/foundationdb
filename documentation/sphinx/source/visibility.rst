@@ -1,4 +1,4 @@
-:orphan:
+.. _visibility:
 
 ####################
 Visibility Documents
