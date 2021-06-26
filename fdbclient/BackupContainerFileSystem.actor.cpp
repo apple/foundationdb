@@ -1454,6 +1454,9 @@ void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& en
 		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
 	}
 }
+Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const &filename) {
+	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
+}
 
 namespace backup_test {
 
