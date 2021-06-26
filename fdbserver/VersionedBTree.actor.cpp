@@ -1500,17 +1500,6 @@ struct RedwoodMetrics {
 					*s += format("%-15s %-8u %8" PRId64 "/s  ", m.first, m.second, int64_t(m.second / elapsed));
 				}
 			}
-			const events eventsVector[] = {events::pagerCacheLookup, events::pagerCacheHit, events::pagerCacheMiss, events::pagerWrite};
-			const vector<const pagerEventReasons> reasonsVector = {pagerEventReasons::pointRead, pagerEventReasons::rangeRead, pagerEventReasons::rangePrefetch, pagerEventReasons::commit, pagerEventReasons::lazyClear, pagerEventReasons::metaData};
-			for(events e : eventsVector){
-				std::cout<<"\n"+getName(e)+": {";
-				for(auto r = reasonsVector.begin() ; r != reasonsVector.end(); ++r){
-					std::string temp = ""+getName(*r)+": "+std::to_string(metric.eventReasons.getEventReason(e,*r));
-					temp += (std::next(r) != reasonsVector.end() ? ", " : "}");
-					std::cout<<temp;
-				}
-		}
-
 		}
 		
 		for (int i = 0; i < btreeLevels; ++i) {
@@ -9824,9 +9813,13 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		}
 		auto t_end = std::chrono::high_resolution_clock::now();
 		std::cout<<h->drawHistogram();
-		GetHistogramRegistry().logReport();
 		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end-t_start).count();
 		std::cout<<"Time in millisecond: "<<elapsed_time_ms <<std::endl;
+
+		Reference<Histogram> hCopy =
+		    Histogram::getHistogram(LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+		std::cout<<hCopy->drawHistogram();
+		GetHistogramRegistry().logReport();
 	}
 	{
 		std::cout<<"Histogram Unit percentage: "<<std::endl;
