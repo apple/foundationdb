@@ -23,7 +23,6 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.actor.h"
 #include "flow/Platform.h"
-#include "flow/StreamCipher.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -132,25 +131,9 @@ std::string BackupContainerLocalDirectory::getURLFormat() {
 	return "file://</path/to/base/dir/>";
 }
 
-ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
-	state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
-	state std::array<uint8_t, 16> key;
-	int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
-	// TODO: Throw new error (fail gracefully)
-	ASSERT_EQ(bytesRead, key.size());
-	StreamCipher::Key::initializeKey(std::move(key));
-	return Void();
-}
-
-bool BackupContainerLocalDirectory::usesEncryption() const {
-	return encryptionSetupFuture.isValid();
-}
-
 BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url,
                                                              const Optional<std::string>& encryptionKeyFileName) {
-	if (encryptionKeyFileName.present()) {
-		encryptionSetupFuture = readEncryptionKey(encryptionKeyFileName.get());
-	}
+	setEncryptionKey(encryptionKeyFileName);
 
 	std::string path;
 	if (url.find("file://") != 0) {
@@ -214,10 +197,9 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 
 Future<Void> BackupContainerLocalDirectory::create() {
 	if (usesEncryption()) {
-		return encryptionSetupFuture;
+		return encryptionSetupComplete();
 	}
-	// TODO: Update this comment:
-	// Nothing should be done here because create() can be called by any process working with the container URL,
+	// No directory should be created here because create() can be called by any process working with the container URL,
 	// such as fdbbackup. Since "local directory" containers are by definition local to the machine they are
 	// accessed from, the container's creation (in this case the creation of a directory) must be ensured prior to
 	// every file creation, which is done in openFile(). Creating the directory here will result in unnecessary

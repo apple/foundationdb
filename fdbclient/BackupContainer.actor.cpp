@@ -58,6 +58,7 @@ ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalon
 	wait(file->append(s.begin(), s.size()));
 	return Void();
 }
+
 } // namespace IBackupFile_impl
 
 Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
@@ -278,7 +279,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			for (auto c : resource)
 				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
 					throw backup_invalid_url();
-			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams);
+			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
@@ -286,7 +287,8 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			auto address = NetworkAddress::parse(u.eat("/"_sr).toString());
 			auto containerName = u.eat("/"_sr).toString();
 			auto accountName = u.eat("/"_sr).toString();
-			r = makeReference<BackupContainerAzureBlobStore>(address, containerName, accountName);
+			r = makeReference<BackupContainerAzureBlobStore>(
+			    address, containerName, accountName, encryptionKeyFileName);
 		}
 #endif
 		else {
@@ -334,7 +336,7 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 			}
 
 			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
-			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams);
+			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams, {});
 
 			std::vector<std::string> results = wait(BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket()));
 			return results;

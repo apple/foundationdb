@@ -54,8 +54,6 @@ public:
 
 private:
 	std::string m_path;
-	Future<Void> encryptionSetupFuture;
-	bool usesEncryption() const;
 };
 
 #endif

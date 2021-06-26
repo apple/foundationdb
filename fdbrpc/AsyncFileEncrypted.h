@@ -60,6 +60,7 @@ class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileE
 	Future<Void> initialize();
 
 public:
+	// TODO: Remove boolean parameter here:
 	AsyncFileEncrypted(Reference<IAsyncFile>, bool canWrite);
 	void addref() override;
 	void delref() override;

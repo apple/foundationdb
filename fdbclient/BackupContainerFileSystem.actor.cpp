@@ -23,6 +23,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/JsonBuilder.h"
+#include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 
 #include <algorithm>
@@ -1126,6 +1127,16 @@ public:
 		return false;
 	}
 
+	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
+		state Reference<IAsyncFile> keyFile =
+		    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
+		state std::array<uint8_t, 16> key;
+		int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
+		// TODO: Throw new error (fail gracefully)
+		ASSERT_EQ(bytesRead, key.size());
+		StreamCipher::Key::initializeKey(std::move(key));
+		return Void();
+	}
 }; // class BackupContainerFileSystemImpl
 
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeLogFile(Version beginVersion,
@@ -1431,6 +1442,17 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::unreliable
 }
 BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() {
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
+}
+bool BackupContainerFileSystem::usesEncryption() const {
+	return encryptionSetupFuture.isValid();
+}
+Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
+	return encryptionSetupFuture;
+}
+void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
+	if (encryptionKeyFileName.present()) {
+		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
+	}
 }
 
 namespace backup_test {

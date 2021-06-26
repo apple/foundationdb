@@ -186,6 +186,14 @@ private:
 	Future<std::vector<RangeFile>> old_listRangeFiles(Version beginVersion, Version endVersion);
 
 	friend class BackupContainerFileSystemImpl;
+
+protected:
+	bool usesEncryption() const;
+	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
+	Future<Void> encryptionSetupComplete() const;
+
+private:
+	Future<Void> encryptionSetupFuture;
 };
 
 #endif
