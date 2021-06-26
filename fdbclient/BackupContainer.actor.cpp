@@ -263,9 +263,9 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 	try {
 		StringRef u(url);
-		if (u.startsWith(LiteralStringRef("file://"))) {
+		if (u.startsWith("file://"_sr)) {
 			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
-		} else if (u.startsWith(LiteralStringRef("blobstore://"))) {
+		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
@@ -278,15 +278,15 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			for (auto c : resource)
 				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
 					throw backup_invalid_url();
-			r = Reference<IBackupContainer>(new BackupContainerS3BlobStore(bstore, resource, backupParams));
+			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams);
 		}
 #ifdef BUILD_AZURE_BACKUP
-		else if (u.startsWith(LiteralStringRef("azure://"))) {
-			u.eat(LiteralStringRef("azure://"));
-			auto address = NetworkAddress::parse(u.eat(LiteralStringRef("/")).toString());
-			auto containerName = u.eat(LiteralStringRef("/")).toString();
-			auto accountName = u.eat(LiteralStringRef("/")).toString();
-			r = Reference<IBackupContainer>(new BackupContainerAzureBlobStore(address, containerName, accountName));
+		else if (u.startsWith("azure://"_sr)) {
+			u.eat("azure://"_sr);
+			auto address = NetworkAddress::parse(u.eat("/"_sr).toString());
+			auto containerName = u.eat("/"_sr).toString();
+			auto accountName = u.eat("/"_sr).toString();
+			r = makeReference<BackupContainerAzureBlobStore>(address, containerName, accountName);
 		}
 #endif
 		else {
@@ -316,10 +316,10 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) {
 	try {
 		StringRef u(baseURL);
-		if (u.startsWith(LiteralStringRef("file://"))) {
+		if (u.startsWith("file://"_sr)) {
 			std::vector<std::string> results = wait(BackupContainerLocalDirectory::listURLs(baseURL));
 			return results;
-		} else if (u.startsWith(LiteralStringRef("blobstore://"))) {
+		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 
 			S3BlobStoreEndpoint::ParametersT backupParams;
@@ -341,7 +341,7 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 		}
 		// TODO: Enable this when Azure backups are ready
 		/*
-		else if (u.startsWith(LiteralStringRef("azure://"))) {
+		else if (u.startsWith("azure://"_sr)) {
 		    std::vector<std::string> results = wait(BackupContainerAzureBlobStore::listURLs(baseURL));
 		    return results;
 		}
