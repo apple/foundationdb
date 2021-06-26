@@ -102,7 +102,7 @@ public:
 			if (self->offsetInBlock == FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE) {
 				wait(self->writeLastBlockToFile());
 				self->offsetInBlock = 0;
-				ASSERT(self->currentBlock < std::numeric_limits<uint16_t>::max());
+				ASSERT_LT(self->currentBlock, std::numeric_limits<uint16_t>::max());
 				++self->currentBlock;
 				self->encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipher::Key::getKey(),
 				                                                           self->getIV(self->currentBlock));
@@ -205,7 +205,7 @@ Future<Void> AsyncFileEncrypted::writeLastBlockToFile() {
 }
 
 size_t AsyncFileEncrypted::RandomCache::evict() {
-	ASSERT(vec.size() == maxSize);
+	ASSERT_EQ(vec.size(), maxSize);
 	auto index = deterministicRandom()->randomInt(0, maxSize);
 	hashMap.erase(vec[index]);
 	return index;
@@ -263,7 +263,7 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	while (bytesRead < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesRead);
 		int bytesReadInChunk = wait(file->read(&readBuffer[bytesRead], chunkSize, bytesRead));
-		ASSERT(bytesReadInChunk == chunkSize);
+		ASSERT_EQ(bytesReadInChunk, chunkSize);
 		bytesRead += bytesReadInChunk;
 	}
 	ASSERT(writeBuffer == readBuffer);

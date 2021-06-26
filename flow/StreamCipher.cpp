@@ -44,7 +44,7 @@ void StreamCipher::cleanup() noexcept {
 	}
 }
 
-void StreamCipher::Key::initializeKey(std::array<unsigned char, 16>&& arr) {
+void StreamCipher::Key::initializeKey(RawKeyType&& arr) {
 	ASSERT(!globalKey);
 	globalKey = std::make_unique<Key>(ConstructorTag{});
 	globalKey->arr = std::move(arr);
@@ -180,7 +180,7 @@ TEST_CASE("flow/StreamCipher") {
 		}
 		const auto decrypted = decryptor.finish(arena);
 		std::copy(decrypted.begin(), decrypted.end(), &decryptedtext[decryptedOffset]);
-		ASSERT(decryptedOffset + decrypted.size() == plaintext.size());
+		ASSERT_EQ(decryptedOffset + decrypted.size(), plaintext.size());
 		decryptedtext.resize(decryptedOffset + decrypted.size());
 	}
 

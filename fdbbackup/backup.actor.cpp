@@ -2490,9 +2490,8 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 ACTOR Future<Void> dumpBackupData(const char* name,
                                   std::string destinationContainer,
                                   Version beginVersion,
-                                  Version endVersion,
-                                  Optional<std::string> encryptionKeyFile) {
-	state Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, encryptionKeyFile);
+                                  Version endVersion) {
+	state Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 
 	if (beginVersion < 0 || endVersion < 0) {
 		BackupDescription desc = wait(c->describeBackup());
@@ -3994,7 +3993,7 @@ int main(int argc, char* argv[]) {
 
 			case BackupType::DUMP:
 				initTraceFile();
-				f = stopAfter(dumpBackupData(argv[0], destinationContainer, dumpBegin, dumpEnd, encryptionKeyFile));
+				f = stopAfter(dumpBackupData(argv[0], destinationContainer, dumpBegin, dumpEnd));
 				break;
 
 			case BackupType::UNDEFINED:

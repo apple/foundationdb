@@ -291,13 +291,13 @@ public:
 
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
 		for (int i = 0; i < logs.size(); i++) {
-			ASSERT(logs[i].tagId >= 0);
-			ASSERT(logs[i].tagId < logs[i].totalTags);
+			ASSERT_GE(logs[i].tagId, 0);
+			ASSERT_LT(logs[i].tagId, logs[i].totalTags);
 			auto& indices = tagIndices[logs[i].tagId];
 			// filter out if indices.back() is subset of files[i] or vice versa
 			if (!indices.empty()) {
 				if (logs[indices.back()].isSubset(logs[i])) {
-					ASSERT(logs[indices.back()].fileSize <= logs[i].fileSize);
+					ASSERT_LE(logs[indices.back()].fileSize, logs[i].fileSize);
 					indices.back() = i;
 				} else if (!logs[i].isSubset(logs[indices.back()])) {
 					indices.push_back(i);
@@ -865,7 +865,7 @@ public:
 		int i = 0;
 		for (int j = 1; j < logs.size(); j++) {
 			if (logs[j].isSubset(logs[i])) {
-				ASSERT(logs[j].fileSize <= logs[i].fileSize);
+				ASSERT_LE(logs[j].fileSize, logs[i].fileSize);
 				continue;
 			}
 
@@ -1033,10 +1033,10 @@ public:
 	}
 
 	static std::string versionFolderString(Version v, int smallestBucket) {
-		ASSERT(smallestBucket < 14);
+		ASSERT_LT(smallestBucket, 14);
 		// Get a 0-padded fixed size representation of v
 		std::string vFixedPrecision = format("%019lld", v);
-		ASSERT(vFixedPrecision.size() == 19);
+		ASSERT_EQ(vFixedPrecision.size(), 19);
 		// Truncate smallestBucket from the fixed length representation
 		vFixedPrecision.resize(vFixedPrecision.size() - smallestBucket);
 
@@ -1127,12 +1127,37 @@ public:
 		return false;
 	}
 
+	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
+		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
+		    filename,
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
+		    0600));
+		StreamCipher::Key::RawKeyType testKey;
+		generateRandomData(testKey.data(), testKey.size());
+		keyFile->write(testKey.data(), testKey.size(), 0);
+		wait(keyFile->sync());
+		return Void();
+	}
+
 	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
-		state Reference<IAsyncFile> keyFile =
-		    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
-		state std::array<uint8_t, 16> key;
+		state Reference<IAsyncFile> keyFile;
+		try {
+			Reference<IAsyncFile> _keyFile =
+			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
+			    .detail("FileName", encryptionKeyFileName)
+			    .error(e);
+			throw e;
+		}
+		state StreamCipher::Key::RawKeyType key;
 		int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
-		// TODO: Throw new error (fail gracefully)
+		if (bytesRead != key.size()) {
+			TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")
+			    .detail("ExpectedSize", key.size())
+			    .detail("ActualSize", bytesRead);
+			throw invalid_encryption_key_file();
+		}
 		ASSERT_EQ(bytesRead, key.size());
 		StreamCipher::Key::initializeKey(std::move(key));
 		return Void();
@@ -1496,7 +1521,7 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 		state Standalone<VectorRef<uint8_t>> buf;
 		buf.resize(buf.arena(), fileSize);
 		int b = wait(inputFile->read(buf.begin(), buf.size(), 0));
-		ASSERT(b == buf.size());
+		ASSERT_EQ(b, buf.size());
 		ASSERT(buf == content);
 	}
 	return Void();
@@ -1510,7 +1535,7 @@ Version nextVersion(Version v) {
 
 // Write a snapshot file with only begin & end key
 ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key begin, Key end, uint32_t blockSize) {
-	ASSERT(blockSize > 3 * sizeof(uint32_t) + begin.size() + end.size());
+	ASSERT_GT(blockSize, 3 * sizeof(uint32_t) + begin.size() + end.size());
 
 	uint32_t fileVersion = BACKUP_AGENT_SNAPSHOT_FILE_VERSION;
 	// write Header
@@ -1531,23 +1556,11 @@ ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key
 	return Void();
 }
 
-ACTOR Future<Void> createTestEncryptionKeyFile(std::string filename) {
-	state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
-	    filename,
-	    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
-	    0600));
-	std::array<uint8_t, 16> testKey;
-	generateRandomData(testKey.data(), testKey.size());
-	keyFile->write(testKey.data(), testKey.size(), 0);
-	wait(keyFile->sync());
-	return Void();
-}
-
 ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> encryptionKeyFileName) {
 	state FlowLock lock(100e6);
 
 	if (encryptionKeyFileName.present()) {
-		wait(createTestEncryptionKeyFile(encryptionKeyFileName.get()));
+		wait(BackupContainerFileSystem::createTestEncryptionKeyFile(encryptionKeyFileName.get()));
 	}
 
 	printf("BackupContainerTest URL %s\n", url.c_str());
@@ -1638,9 +1651,9 @@ ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> en
 	wait(waitForAll(writes));
 
 	state BackupFileList listing = wait(c->dumpFileList());
-	ASSERT(listing.ranges.size() == nRangeFiles);
-	ASSERT(listing.logs.size() == logs.size());
-	ASSERT(listing.snapshots.size() == snapshots.size());
+	ASSERT_EQ(listing.ranges.size(), nRangeFiles);
+	ASSERT_EQ(listing.logs.size(), logs.size());
+	ASSERT_EQ(listing.snapshots.size(), snapshots.size());
 
 	state BackupDescription desc = wait(c->describeBackup());
 	printf("\n%s\n", desc.toString().c_str());
@@ -1670,8 +1683,8 @@ ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> en
 
 		// If there is an error, it must be backup_cannot_expire and we have to be on the last snapshot
 		if (f.isError()) {
-			ASSERT(f.getError().code() == error_code_backup_cannot_expire);
-			ASSERT(i == listing.snapshots.size() - 1);
+			ASSERT_EQ(f.getError().code(), error_code_backup_cannot_expire);
+			ASSERT_EQ(i, listing.snapshots.size() - 1);
 			wait(c->expireData(expireVersion, true));
 		}
 
@@ -1687,9 +1700,9 @@ ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> en
 	ASSERT(d.isError() && d.getError().code() == error_code_backup_does_not_exist);
 
 	BackupFileList empty = wait(c->dumpFileList());
-	ASSERT(empty.ranges.size() == 0);
-	ASSERT(empty.logs.size() == 0);
-	ASSERT(empty.snapshots.size() == 0);
+	ASSERT_EQ(empty.ranges.size(), 0);
+	ASSERT_EQ(empty.logs.size(), 0);
+	ASSERT_EQ(empty.snapshots.size(), 0);
 
 	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
 

@@ -46,12 +46,13 @@ public:
 		struct ConstructorTag {};
 
 	public:
+		using RawKeyType = decltype(arr);
 		Key(ConstructorTag) {}
 		Key(Key&&);
 		Key& operator=(Key&&);
 		~Key();
 		unsigned char const* data() const { return arr.data(); }
-		static void initializeKey(decltype(arr)&&);
+		static void initializeKey(RawKeyType&&);
 		static void initializeRandomTestKey();
 		static const Key& getKey();
 		static void cleanup() noexcept;
