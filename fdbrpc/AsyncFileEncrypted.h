@@ -57,6 +57,7 @@ class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileE
 	uint16_t currentBlock{ 0 };
 	int offsetInBlock{ 0 };
 	std::vector<unsigned char> writeBuffer;
+	Future<Void> initialize();
 
 public:
 	AsyncFileEncrypted(Reference<IAsyncFile>, bool canWrite);

@@ -1466,7 +1466,7 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 
 	state Reference<IAsyncFile> inputFile = wait(c->readFile(f->getFileName()));
 	int64_t fileSize = wait(inputFile->size());
-	ASSERT(size == fileSize);
+	ASSERT_EQ(size, fileSize);
 	if (size > 0) {
 		state Standalone<VectorRef<uint8_t>> buf;
 		buf.resize(buf.arena(), fileSize);
@@ -1506,12 +1506,28 @@ ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key
 	return Void();
 }
 
-ACTOR static Future<Void> testBackupContainer(std::string url) {
+ACTOR Future<Void> createTestEncryptionKeyFile(std::string filename) {
+	state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
+	    filename,
+	    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
+	    0600));
+	std::array<uint8_t, 16> testKey;
+	generateRandomData(testKey.data(), testKey.size());
+	keyFile->write(testKey.data(), testKey.size(), 0);
+	wait(keyFile->sync());
+	return Void();
+}
+
+ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> encryptionKeyFileName) {
 	state FlowLock lock(100e6);
+
+	if (encryptionKeyFileName.present()) {
+		wait(createTestEncryptionKeyFile(encryptionKeyFileName.get()));
+	}
 
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
-	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, encryptionKeyFileName);
 
 	// Make sure container doesn't exist, then create it.
 	try {
@@ -1655,22 +1671,25 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 	return Void();
 }
 
-TEST_CASE("/backup/containers/localdir") {
-	if (g_network->isSimulated())
-		wait(testBackupContainer(format("file://simfdb/backups/%llx", timer_int())));
-	else
-		wait(testBackupContainer(format("file:///private/tmp/fdb_backups/%llx", timer_int())));
+TEST_CASE("/backup/containers/localdir/unencrypted") {
+	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}));
 	return Void();
-};
+}
+
+TEST_CASE("/backup/containers/localdir/encrypted") {
+	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                         format("%s/test_encryption_key", params.getDataDir().c_str())));
+	return Void();
+}
 
 TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
-		wait(testBackupContainer(url));
+		wait(testBackupContainer(url, {}));
 	}
 	return Void();
-};
+}
 
 TEST_CASE("/backup/containers_list") {
 	if (!g_network->isSimulated()) {
@@ -1683,7 +1702,7 @@ TEST_CASE("/backup/containers_list") {
 		}
 	}
 	return Void();
-};
+}
 
 TEST_CASE("/backup/time") {
 	// test formatTime()

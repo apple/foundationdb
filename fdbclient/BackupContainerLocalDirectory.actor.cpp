@@ -134,13 +134,10 @@ std::string BackupContainerLocalDirectory::getURLFormat() {
 
 ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
 	state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
-	int64_t fileSize = wait(keyFile->size());
-	// TODO: Use new error code and avoid hard-coding expected size
-	if (fileSize != 16) {
-		throw internal_error();
-	}
 	state std::array<uint8_t, 16> key;
-	wait(success(keyFile->read(key.data(), key.size(), 0)));
+	int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
+	// TODO: Throw new error (fail gracefully)
+	ASSERT_EQ(bytesRead, key.size());
 	StreamCipher::Key::initializeKey(std::move(key));
 	return Void();
 }
@@ -216,6 +213,10 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 }
 
 Future<Void> BackupContainerLocalDirectory::create() {
+	if (usesEncryption()) {
+		return encryptionSetupFuture;
+	}
+	// TODO: Update this comment:
 	// Nothing should be done here because create() can be called by any process working with the container URL,
 	// such as fdbbackup. Since "local directory" containers are by definition local to the machine they are
 	// accessed from, the container's creation (in this case the creation of a directory) must be ensured prior to
@@ -284,8 +285,8 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 }
 
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
-	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
-	            IAsyncFile::OPEN_READWRITE;
+	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
+	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 	if (usesEncryption()) {
 		flags |= IAsyncFile::OPEN_ENCRYPTED;
 	}

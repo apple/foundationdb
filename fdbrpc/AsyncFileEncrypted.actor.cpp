@@ -30,7 +30,10 @@ public:
 	// the filename.
 	static auto getFirstBlockIV(const std::string& filename) {
 		StreamCipher::IV iv;
-		auto hash = XXH3_128bits(filename.c_str(), filename.size());
+		auto salt = basename(filename);
+		auto pos = salt.find('.');
+		salt = salt.substr(0, pos);
+		auto hash = XXH3_128bits(salt.c_str(), salt.size());
 		auto high = reinterpret_cast<unsigned char*>(&hash.high64);
 		auto low = reinterpret_cast<unsigned char*>(&hash.low64);
 		std::copy(high, high + 8, &iv[0]);
@@ -67,7 +70,6 @@ public:
 				self->readBuffers.insert(block, _plaintext);
 				plaintext = _plaintext;
 			}
-			ASSERT(plaintext.size() == FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE);
 			auto start = (block == firstBlock) ? plaintext.begin() + (offset % FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)
 			                                   : plaintext.begin();
 			auto end = (block == lastBlock)
@@ -86,7 +88,7 @@ public:
 	ACTOR static Future<Void> write(AsyncFileEncrypted* self, void const* data, int length, int64_t offset) {
 		ASSERT(self->canWrite);
 		// All writes must append to the end of the file:
-		ASSERT(offset == self->currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + self->offsetInBlock);
+		ASSERT_EQ(offset, self->currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + self->offsetInBlock);
 		state unsigned char const* input = reinterpret_cast<unsigned char const*>(data);
 		while (length > 0) {
 			const auto chunkSize = std::min(length, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE - self->offsetInBlock);
@@ -156,11 +158,13 @@ Future<Void> AsyncFileEncrypted::zeroRange(int64_t offset, int64_t length) {
 }
 
 Future<Void> AsyncFileEncrypted::truncate(int64_t size) {
-	ASSERT(false); // TODO: Not yet implemented
+	// FIXME: Not yet implemented
+	ASSERT(canWrite);
 	return Void();
 }
 
 Future<Void> AsyncFileEncrypted::sync() {
+	ASSERT(canWrite);
 	return AsyncFileEncryptedImpl::sync(this);
 }
 
@@ -169,7 +173,7 @@ Future<Void> AsyncFileEncrypted::flush() {
 }
 
 Future<int64_t> AsyncFileEncrypted::size() const {
-	return currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + offsetInBlock;
+	return file->size();
 }
 
 std::string AsyncFileEncrypted::getFilename() const {

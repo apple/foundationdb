@@ -697,9 +697,9 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
-	{ OPT_ENCRYPTION_KEY_FILE, "--encryption_key_file", SO_REQ_SEP },
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent_snapshot_only", SO_NONE },
+	{ OPT_ENCRYPTION_KEY_FILE, "--encryption_key_file", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
