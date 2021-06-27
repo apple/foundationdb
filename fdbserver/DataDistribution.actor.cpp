@@ -678,6 +678,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	AsyncTrigger printDetailedTeamsInfo;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
+	bool shuttingDown;
 	Promise<UID> removeFailedServer;
 
 	void resetLocalitySet() {
@@ -732,13 +733,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), isTssRecruiting(false),
 	    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
 	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
-	    getShardMetrics(getShardMetrics), removeFailedServer(removeFailedServer) {
+	    getShardMetrics(getShardMetrics), shuttingDown(false), removeFailedServer(removeFailedServer) {
 		if (!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest("DDTrackerStarting");
 		}
 	}
 
 	~DDTeamCollection() {
+		shuttingDown = true;
 		TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
 
 		// Cancel the teamBuilder to avoid creating new teams after teams are cancelled.
@@ -1346,6 +1348,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void addTeam(const vector<Reference<TCServerInfo>>& newTeamServers,
 	             bool isInitialTeam,
 	             bool redundantTeam = false) {
+		if (shuttingDown) {
+			throw movekeys_conflict();
+		}
 		auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
 
 		// Move satisfiesPolicy to the end for performance benefit
