@@ -41,7 +41,7 @@ static void bench_encrypt(benchmark::State& state) {
 	auto bytes = state.range(0);
 	auto chunks = state.range(1);
 	auto chunkSize = bytes / chunks;
-	StreamCipher::Key::initializeRandomKey();
+	StreamCipher::Key::initializeRandomTestKey();
 	const auto& key = StreamCipher::Key::getKey();
 	auto iv = getRandomIV();
 	auto data = getKey(bytes);
@@ -57,7 +57,7 @@ static void bench_decrypt(benchmark::State& state) {
 	auto bytes = state.range(0);
 	auto chunks = state.range(1);
 	auto chunkSize = bytes / chunks;
-	StreamCipher::Key::initializeRandomKey();
+	StreamCipher::Key::initializeRandomTestKey();
 	const auto& key = StreamCipher::Key::getKey();
 	auto iv = getRandomIV();
 	auto data = getKey(bytes);
