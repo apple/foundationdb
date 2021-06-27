@@ -45,7 +45,9 @@ void StreamCipher::cleanup() noexcept {
 }
 
 void StreamCipher::Key::initializeKey(RawKeyType&& arr) {
-	ASSERT(!globalKey);
+	if (globalKey) {
+		ASSERT(globalKey->arr == arr);
+	}
 	globalKey = std::make_unique<Key>(ConstructorTag{});
 	globalKey->arr = std::move(arr);
 	memset(arr.data(), 0, arr.size());

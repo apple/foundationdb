@@ -1141,16 +1141,17 @@ public:
 
 	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
 		state Reference<IAsyncFile> keyFile;
+		state StreamCipher::Key::RawKeyType key;
 		try {
 			Reference<IAsyncFile> _keyFile =
 			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
+			keyFile = _keyFile;
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
 			    .detail("FileName", encryptionKeyFileName)
 			    .error(e);
 			throw e;
 		}
-		state StreamCipher::Key::RawKeyType key;
 		int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
 		if (bytesRead != key.size()) {
 			TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")

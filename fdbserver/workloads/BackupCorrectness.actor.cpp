@@ -172,6 +172,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "BARW_Param").detail("DifferentialBackup", differentialBackup);
 		TraceEvent(SevInfo, "BARW_Param").detail("StopDifferentialAfter", stopDifferentialAfter);
 		TraceEvent(SevInfo, "BARW_Param").detail("AgentRequest", agentRequest);
+		TraceEvent(SevInfo, "BARW_Param").detail("Encrypted", encryptionKeyFileName.present());
 
 		return _start(cx, this);
 	}
