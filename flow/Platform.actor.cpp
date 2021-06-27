@@ -3419,10 +3419,13 @@ void crashHandler(int sig) {
 	bool error = (sig != SIGUSR2);
 
 	fflush(stdout);
-	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
-	    .detail("Signal", sig)
-	    .detail("Name", strsignal(sig))
-	    .detail("Trace", backtrace);
+	{
+		TraceEvent te(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated");
+		te.detail("Signal", sig).detail("Name", strsignal(sig)).detail("Trace", backtrace);
+		if (error) {
+			te.setErrorKind(ErrorKind::BugDetected);
+		}
+	}
 	flushTraceFileVoid();
 
 	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
