@@ -1094,6 +1094,8 @@ struct LogPushData : NonCopyable {
 		return messagesWriter[loc].toValue();
 	}
 
+	// Records if a tlog (specified by "loc") will receive an empty version batch message.
+	// "value" is the message returned by getMessages() call.
 	void recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
 		if (!isEmptyMessage[loc]) {
 			BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
@@ -1104,6 +1106,8 @@ struct LogPushData : NonCopyable {
 		}
 	}
 
+	// Returns the ratio of empty messages in this version batch.
+	// MUST be called after getMessages() and recordEmptyMessage().
 	float getEmptyMessageRatio() const {
 		auto count = std::count(isEmptyMessage.begin(), isEmptyMessage.end(), false);
 		ASSERT_WE_THINK(isEmptyMessage.size() > 0);
