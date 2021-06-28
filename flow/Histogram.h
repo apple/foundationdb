@@ -68,11 +68,13 @@ private:
 
 	Histogram(std::string const& group, std::string const& op, Unit unit, HistogramRegistry& registry, uint32_t lower, uint32_t upper)
 	  : UnitToStringMapper (
-		  { { Histogram::Unit::microseconds, "microseconds" },{ Histogram::Unit::bytes, "bytes" },
+		  { { Histogram::Unit::microseconds, "microseconds" },
+		  	{ Histogram::Unit::bytes, "bytes" },
 			{ Histogram::Unit::bytes_per_second, "bytes_per_second" },
 			{ Histogram::Unit::percentage, "percentage" },
 			{ Histogram::Unit::record_counter, "record_counter" },
-		}), group(group), op(op), unit(unit), registry(registry), lowerBound(lower), upperBound(upper), ReferenceCounted<Histogram>() {
+		}),
+		group(group), op(op), unit(unit), registry(registry), lowerBound(lower), upperBound(upper), ReferenceCounted<Histogram>() {
 
 		ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
 
