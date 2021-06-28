@@ -15,7 +15,7 @@
  There is no way to take snapshot. There is no way to record KV Ranges for the complete key space at a given version. For
  a keyspace a-z, its not possible to record KV range (a-z, v0), if keyspace a-z is not small enough. Instead, we can record
  KV ranges {(a-b, v0), (c-d, v1), (e-f, v2) ... (y-z, v10)}. With mutation log recorded all along, we can still use
- the simple backup-restore scheme described above on sub keyspaces seperately. Assuming we did record mutation log from
+ the simple backup-restore scheme described above on sub keyspaces separately. Assuming we did record mutation log from
  v0 to vn, that allows us to restore
 
 * Keyspace a-b to any version between v0 and vn
@@ -23,7 +23,7 @@
 * Keyspace y-z to any version between v10 and vn
 
 But, we are not interested in restoring sub keyspaces, we want to restore a-z. Well, we can restore a-z, to any
-version between v10 and vn by restoring individual sub spaces seperately.
+version between v10 and vn by restoring individual sub spaces separately.
 
 #### Key Value Ranges
 
