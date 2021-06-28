@@ -78,6 +78,8 @@ private:
 
 		ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
 
+		ASSERT(upperBound >= lowerBound);
+
 		clear();
 	}
 

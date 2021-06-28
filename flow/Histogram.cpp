@@ -126,6 +126,9 @@ void Histogram::writeToLog() {
 			case Unit::percentage:
 				e.detail(format("LessThan%f", (i+1)*0.04), buckets[i]);
 				break;
+			case Unit::record_counter:
+				e.detail(format("LessThan%f", (i+1)*((upperBound-lowerBound)/31.0)), buckets[i]);
+				break;
 			default:
 				ASSERT(false);
 			}

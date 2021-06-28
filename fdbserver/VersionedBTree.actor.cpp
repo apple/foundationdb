@@ -1308,6 +1308,23 @@ struct RedwoodMetrics {
 		const unsigned int& getEventReason(events e, pagerEventReasons r){
 			return eventReasons[(size_t)e][(size_t)r];
 		}
+
+		std::string report(int currLevel){
+			std::string result = "Level "+std::to_string(currLevel)+":\n";
+
+			std::map<events, std::string> allEvents = {{events::pagerCacheLookup, "pagerCacheLookup"}, {events::pagerCacheHit, "pagerCacheHit"}, {events::pagerCacheMiss, "pagerCacheMiss"}, {events::pagerWrite, "pagerWrite"}};
+			std::map<pagerEventReasons, std::string> allReasons = {{pagerEventReasons::pointRead, "pointRead"}, {pagerEventReasons::rangeRead, "rangeRead"}, {pagerEventReasons::rangePrefetch, "rangePrefetch"}, {pagerEventReasons::commit, "commit"}, {pagerEventReasons::lazyClear, "lazyClear"}, {pagerEventReasons::metaData, "metaData"}};
+			
+			for(auto e = allEvents.begin(); e != allEvents.end(); e++){
+				result += e->second + "\n";
+				for(auto r = allReasons.begin(); r != allReasons.end(); r++){
+					result += r->second + ": " + std::to_string(eventReasons[(size_t)e->first][(size_t)r->first]) +", ";
+				}
+				result +="\n";
+			}
+			return result;
+		}
+
 	};
 
 	// Page levle events 
@@ -1422,18 +1439,6 @@ struct RedwoodMetrics {
 	Reference<Histogram> kvSizeReadByRangeGet;
 	double startTime;
 
-	std::string getName(events e){
-		std::map<events, std::string> names = {{events::pagerCacheLookup, "pagerCacheLookup"}, {events::pagerCacheHit, "pagerCacheHit"}, {events::pagerCacheMiss, "pagerCacheMiss"}, {events::pagerWrite, "pagerWrite"}};
-		ASSERT(names.find(e) != names.end());
-		return names[e];
-	}
-
-	std::string getName(pagerEventReasons r){
-		std::map<pagerEventReasons, std::string> names = {{pagerEventReasons::pointRead, "pointRead"}, {pagerEventReasons::rangeRead, "rangeRead"}, {pagerEventReasons::rangePrefetch, "rangePrefetch"}, {pagerEventReasons::commit, "commit"}, {pagerEventReasons::lazyClear, "lazyClear"}, {pagerEventReasons::metaData, "metaData"}};
-		ASSERT(names.find(r) != names.end());
-		return names[r];
-	}
-
 	// Return number of pages read or written, from cache or disk
 	unsigned int pageOps() const {
 		// All page reads are either a cache hit, probe hit, or a disk read
@@ -1482,6 +1487,8 @@ struct RedwoodMetrics {
 			                                               { "PagerRemapFree", metric.pagerRemapFree },
 			                                               { "PagerRemapCopy", metric.pagerRemapCopy },
 			                                               { "PagerRemapSkip", metric.pagerRemapSkip } };
+		GetHistogramRegistry().logReport();
+
 		double elapsed = now() - startTime;
 
 		if (e != nullptr) {
@@ -1494,6 +1501,8 @@ struct RedwoodMetrics {
 		}
 
 		if (s != nullptr) {
+			*s += "\n";
+			*s += metric.eventReasons.report(0);
 			for (auto& m : metrics) {
 				if (*m.first == '\0') {
 					*s += "\n";
@@ -1502,9 +1511,15 @@ struct RedwoodMetrics {
 				}
 			}
 		}
-		
+
 		for (int i = 0; i < btreeLevels; ++i) {
 			auto& level = levels[i];
+
+			if (s != nullptr){
+				*s += '\n';
+				*s += level.metric.eventReasons.report(i+1);
+			}
+
 			std::pair<const char*, unsigned int> metrics[] = {
 				{ "PageBuild", level.metric.pageBuild },
 				{ "PageBuildExt", level.metric.pageBuildExt },
