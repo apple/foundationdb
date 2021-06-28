@@ -1348,13 +1348,14 @@ struct RedwoodMetrics {
 
 		void levelClear(unsigned int levelCounter = 0){
 			metric = {};
-			
-			buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-			modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-			buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-			modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-			buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
-			modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
+			if(!buildFillPctSketch.isValid() || buildFillPctSketch->name() != ("buildFillPct:" + std::to_string(levelCounter))){
+				buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
+				modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
+				buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
+				modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
+				buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
+				modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
+			}
 
 			metric.eventReasons.clear();
 			buildFillPctSketch->clear();
@@ -1400,7 +1401,7 @@ struct RedwoodMetrics {
 
 	void clear() {
 		unsigned int levelCounter = 1;
-		for (auto& level : levels) {
+		for (RedwoodMetrics::Level& level : levels) {
 			level.levelClear(levelCounter);
 			++levelCounter;
 		}
