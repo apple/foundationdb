@@ -6422,7 +6422,7 @@ public:
 		bool isValid() const { return valid; }
 
 		int getHeight(){ 
-			if(!path.empty()) return path.back().btPage()->height; 
+			if(!path.empty() && path.back().btPage() != nullptr) return path.back().btPage()->height; 
 			return 0;
 		}
 		std::string toString() const {
