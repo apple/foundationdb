@@ -2479,7 +2479,9 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {
-				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, flags & IAsyncFile::OPEN_READWRITE));
+				auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
+				                                               : AsyncFileEncrypted::Mode::READ_ONLY;
+				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
 			});
 #endif
 		return f;

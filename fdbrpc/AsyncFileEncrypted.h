@@ -32,10 +32,14 @@
  * Append-only file encrypted using AES-128-GCM.
  * */
 class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileEncrypted> {
+public:
+	enum class Mode { APPEND_ONLY, READ_ONLY };
+
+private:
 	Reference<IAsyncFile> file;
 	StreamCipher::IV firstBlockIV;
 	StreamCipher::IV getIV(uint16_t block) const;
-	bool canWrite;
+	Mode mode;
 	Future<Void> writeLastBlockToFile();
 	friend class AsyncFileEncryptedImpl;
 
@@ -60,7 +64,7 @@ class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileE
 	Future<Void> initialize();
 
 public:
-	AsyncFileEncrypted(Reference<IAsyncFile>, bool canWrite);
+	AsyncFileEncrypted(Reference<IAsyncFile>, Mode);
 	void addref() override;
 	void delref() override;
 	Future<int> read(void* data, int length, int64_t offset) override;

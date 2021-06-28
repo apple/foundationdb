@@ -59,6 +59,7 @@ public:
 		state uint16_t block;
 		state unsigned char* output = reinterpret_cast<unsigned char*>(data);
 		state int bytesRead = 0;
+		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
 		for (block = firstBlock; block <= lastBlock; ++block) {
 			state StringRef plaintext;
 
@@ -86,7 +87,7 @@ public:
 	}
 
 	ACTOR static Future<Void> write(AsyncFileEncrypted* self, void const* data, int length, int64_t offset) {
-		ASSERT(self->canWrite);
+		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		// All writes must append to the end of the file:
 		ASSERT_EQ(offset, self->currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + self->offsetInBlock);
 		state unsigned char const* input = reinterpret_cast<unsigned char const*>(data);
@@ -112,13 +113,14 @@ public:
 	}
 
 	ACTOR static Future<Void> sync(AsyncFileEncrypted* self) {
-		ASSERT(self->canWrite);
+		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		wait(self->writeLastBlockToFile());
 		wait(self->file->sync());
 		return Void();
 	}
 
 	ACTOR static Future<Void> zeroRange(AsyncFileEncrypted* self, int64_t offset, int64_t length) {
+		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		// TODO: Could optimize this
 		Arena arena;
 		auto zeroes = new (arena) unsigned char[length];
@@ -128,10 +130,10 @@ public:
 	}
 };
 
-AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, bool canWrite)
-  : file(file), canWrite(canWrite), currentBlock(0), readBuffers(FLOW_KNOBS->MAX_DECRYPTED_BLOCKS) {
+AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode)
+  : file(file), mode(mode), currentBlock(0), readBuffers(FLOW_KNOBS->MAX_DECRYPTED_BLOCKS) {
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
-	if (canWrite) {
+	if (mode == Mode::APPEND_ONLY) {
 		encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipher::Key::getKey(), getIV(currentBlock));
 		writeBuffer = std::vector<unsigned char>(FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, 0);
 	}
@@ -158,21 +160,22 @@ Future<Void> AsyncFileEncrypted::zeroRange(int64_t offset, int64_t length) {
 }
 
 Future<Void> AsyncFileEncrypted::truncate(int64_t size) {
-	// FIXME: Not yet implemented
-	ASSERT(canWrite);
-	return Void();
+	ASSERT(mode == Mode::APPEND_ONLY);
+	return file->truncate(size);
 }
 
 Future<Void> AsyncFileEncrypted::sync() {
-	ASSERT(canWrite);
+	ASSERT(mode == Mode::APPEND_ONLY);
 	return AsyncFileEncryptedImpl::sync(this);
 }
 
 Future<Void> AsyncFileEncrypted::flush() {
+	ASSERT(mode == Mode::APPEND_ONLY);
 	return Void();
 }
 
 Future<int64_t> AsyncFileEncrypted::size() const {
+	ASSERT(mode == Mode::READ_ONLY);
 	return file->size();
 }
 
@@ -190,7 +193,7 @@ void AsyncFileEncrypted::releaseZeroCopy(void* data, int length, int64_t offset)
 }
 
 int64_t AsyncFileEncrypted::debugFD() const {
-	return 0;
+	return file->debugFD();
 }
 
 StreamCipher::IV AsyncFileEncrypted::getIV(uint16_t block) const {
