@@ -29,6 +29,8 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/MutationTracking.h"
+#include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/IndexedSet.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -970,7 +972,7 @@ struct LogPushData : NonCopyable {
 				}
 			}
 		}
-		written = std::vector<bool>(messagesWriter.size(), false);
+		isEmptyMessage = std::vector<bool>(messagesWriter.size(), false);
 	}
 
 	void addTxsTag() {
@@ -1089,21 +1091,23 @@ struct LogPushData : NonCopyable {
 	}
 
 	Standalone<StringRef> getMessages(int loc) {
-		// Update written here because this is called less frequently.
-		Standalone<StringRef> value = messagesWriter[loc].toValue();
-		if (!written[loc]) {
+		return messagesWriter[loc].toValue();
+	}
+
+	void recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
+		if (!isEmptyMessage[loc]) {
 			BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
 			Standalone<StringRef> v = w.toValue();
 			if (value.size() > v.size()) {
-				written[loc] = true;
+				isEmptyMessage[loc] = true;
 			}
 		}
-		return value;
 	}
 
-	float getEmptyLocationRatio() const {
-		auto count = std::count(written.begin(), written.end(), false);
-		return 1.0 * count / written.size();
+	float getEmptyMessageRatio() const {
+		auto count = std::count(isEmptyMessage.begin(), isEmptyMessage.end(), false);
+		ASSERT_WE_THINK(isEmptyMessage.size() > 0);
+		return 1.0 * count / isEmptyMessage.size();
 	}
 
 private:
@@ -1111,7 +1115,7 @@ private:
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;
 	std::vector<BinaryWriter> messagesWriter;
-	std::vector<bool> written; // if messagesWriter has written anything
+	std::vector<bool> isEmptyMessage; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
 	// Stores message locations that have had span information written to them
 	// for the current transaction. Adding transaction info will reset this

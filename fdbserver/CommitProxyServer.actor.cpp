@@ -1186,7 +1186,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	                                                          span.context,
 	                                                          self->debugID);
 
-	float ratio = self->toCommit.getEmptyLocationRatio();
+	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
 
 	if (!self->forceRecovery) {
