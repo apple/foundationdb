@@ -1126,4 +1126,27 @@ inline const char* transactionPriorityToString(TransactionPriority priority, boo
 	throw internal_error();
 }
 
+struct VersionVector {
+	std::map<Tag, Version> versions;
+
+	VersionVector() {}
+
+	void setVersion(const Tag& tag, Version version) {
+		versions[tag] = version;
+	}
+
+	bool hasVersion(const Tag& tag) const {
+		return versions.find(tag) != versions.end();
+	}
+
+	Version getVersion(const Tag& tag) const {
+		return versions.at(tag);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, versions);
+	}
+};
+
 #endif
