@@ -145,7 +145,7 @@ public:
 		ASSERT(unit==Histogram::Unit::record_counter);
 
 		size_t idx = ( (sample - lowerBound) * 31.0 ) / (upperBound - lowerBound);
-		//ASSERT(idx < 32);
+		ASSERT(idx < 32);
 
 		buckets[idx]++;
 	}
