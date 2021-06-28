@@ -634,7 +634,7 @@ const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoP
 const KeyRangeRef excludedServersKeys(LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0"));
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;
 const KeyRef excludedServersVersionKey = LiteralStringRef("\xff/conf/excluded");
-const AddressExclusion decodeExcludedServersKey(KeyRef const& key) {
+AddressExclusion decodeExcludedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(excludedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
@@ -648,10 +648,22 @@ std::string encodeExcludedServersKey(AddressExclusion const& addr) {
 	return excludedServersPrefix.toString() + addr.toString();
 }
 
+const KeyRangeRef excludedLocalityKeys(LiteralStringRef("\xff/conf/excluded_locality/"),
+                                       LiteralStringRef("\xff/conf/excluded_locality0"));
+const KeyRef excludedLocalityPrefix = excludedLocalityKeys.begin;
+const KeyRef excludedLocalityVersionKey = LiteralStringRef("\xff/conf/excluded_locality");
+std::string decodeExcludedLocalityKey(KeyRef const& key) {
+	ASSERT(key.startsWith(excludedLocalityPrefix));
+	return key.removePrefix(excludedLocalityPrefix).toString();
+}
+std::string encodeExcludedLocalityKey(std::string const& locality) {
+	return excludedLocalityPrefix.toString() + locality;
+}
+
 const KeyRangeRef failedServersKeys(LiteralStringRef("\xff/conf/failed/"), LiteralStringRef("\xff/conf/failed0"));
 const KeyRef failedServersPrefix = failedServersKeys.begin;
 const KeyRef failedServersVersionKey = LiteralStringRef("\xff/conf/failed");
-const AddressExclusion decodeFailedServersKey(KeyRef const& key) {
+AddressExclusion decodeFailedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(failedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
@@ -663,6 +675,18 @@ const AddressExclusion decodeFailedServersKey(KeyRef const& key) {
 std::string encodeFailedServersKey(AddressExclusion const& addr) {
 	// FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
 	return failedServersPrefix.toString() + addr.toString();
+}
+
+const KeyRangeRef failedLocalityKeys(LiteralStringRef("\xff/conf/failed_locality/"),
+                                     LiteralStringRef("\xff/conf/failed_locality0"));
+const KeyRef failedLocalityPrefix = failedLocalityKeys.begin;
+const KeyRef failedLocalityVersionKey = LiteralStringRef("\xff/conf/failed_locality");
+std::string decodeFailedLocalityKey(KeyRef const& key) {
+	ASSERT(key.startsWith(failedLocalityPrefix));
+	return key.removePrefix(failedLocalityPrefix).toString();
+}
+std::string encodeFailedLocalityKey(std::string const& locality) {
+	return failedLocalityPrefix.toString() + locality;
 }
 
 // const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
