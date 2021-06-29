@@ -3410,6 +3410,8 @@ void platformInit() {
 #endif
 }
 
+// The crashHandler function is registered to handle signals before the process terminates.
+// Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
 #ifdef __linux__
 	// Pretty much all of this handler is risking undefined behavior and hangs,
@@ -3419,10 +3421,13 @@ void crashHandler(int sig) {
 	bool error = (sig != SIGUSR2);
 
 	fflush(stdout);
-	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
-	    .detail("Signal", sig)
-	    .detail("Name", strsignal(sig))
-	    .detail("Trace", backtrace);
+	{
+		TraceEvent te(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated");
+		te.detail("Signal", sig).detail("Name", strsignal(sig)).detail("Trace", backtrace);
+		if (error) {
+			te.setErrorKind(ErrorKind::BugDetected);
+		}
+	}
 	flushTraceFileVoid();
 
 	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);

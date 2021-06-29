@@ -38,6 +38,10 @@ The latest changes are detailed in :ref:`release-notes`. The documentation has t
 
 * :doc:`administration` contains documentation on administering FoundationDB.
 
+* :doc:`redwood` contains documentation on Redwood Storage Engine.
+
+* :doc:`visibility` contains documentation related to Visibility into FoundationDB.
+
 .. toctree::
    :maxdepth: 1
    :titlesonly:
@@ -51,4 +55,6 @@ The latest changes are detailed in :ref:`release-notes`. The documentation has t
    api-reference
    tutorials
    administration
+   redwood
+   visibility
    earlier-release-notes
