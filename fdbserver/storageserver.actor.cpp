@@ -323,6 +323,11 @@ public:
 	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
+struct VersionStreamMessage {
+	Version previous, version;
+	bool expectData;
+};
+
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -647,7 +652,7 @@ public:
 
 	Promise<Void> otherError;
 	Promise<Void> coreStarted;
-	PromiseStream<std::pair<Version, bool>> versionStream;
+	PromiseStream<VersionStreamMessage> versionStream;
 	bool shuttingDown;
 
 	bool behind;
@@ -3598,6 +3603,7 @@ ACTOR Future<Void> tssDelayForever() {
 	}
 }
 
+// Fetches mutations from the tlog system and adds them to the ptree
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
@@ -4953,6 +4959,9 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 	state std::vector<Reference<ReferencedInterface<VersionIndexerInterface>>> interfaces;
 	state Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>> multi;
+	state VersionIndexerPeekReply reply;
+	state int i = 0;
+	state Version prevVersion;
 	for (auto& i : self->db->get().versionIndexers) {
 		interfaces.emplace_back(new ReferencedInterface<VersionIndexerInterface>(i));
 	}
@@ -4962,10 +4971,17 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 		VersionIndexerPeekRequest request;
 		request.lastKnownVersion = self->version.get();
 		request.tag = self->tag;
-		VersionIndexerPeekReply reply =
+		VersionIndexerPeekReply _reply =
 		    wait(brokenPromiseToNever(loadBalance(multi, &VersionIndexerInterface::peek, request)));
-		for (auto& p : reply.versions) {
-			self->versionStream.send(p);
+		reply = _reply;
+		prevVersion = reply.previousVersion;
+		wait(self->version.whenAtLeast(prevVersion));
+		for (; i < reply.versions.size(); ++i) {
+			if (self->version.get() == prevVersion && !reply.versions[i].second) {
+				self->version.set(reply.versions[i].first);
+			} else if (self->version.get() < reply.versions[i].first) {
+				wait(self->version.whenAtLeast(reply.versions[i].first));
+			}
 		}
 	}
 }

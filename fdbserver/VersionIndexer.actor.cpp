@@ -30,13 +30,24 @@
 
 template <>
 void TSSMetrics::recordLatency(const VersionIndexerPeekRequest& req, double ssLatency, double tssLatency) {}
+
 template <>
-bool TSS_doCompare(const VersionIndexerPeekRequest& req,
-                   const VersionIndexerPeekReply& src,
-                   const VersionIndexerPeekReply& tss,
-                   Severity traceSeverity,
-                   UID tssId) {
+bool TSS_doCompare(VersionIndexerPeekReply const&, VersionIndexerPeekReply const&) {
 	return true;
+}
+
+template <>
+char const* TSS_mismatchTraceName(VersionIndexerPeekRequest const&) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent&,
+                       VersionIndexerPeekRequest const&,
+                       VersionIndexerPeekReply const&,
+                       VersionIndexerPeekReply const&) {
+	ASSERT(false);
 }
 
 struct VersionIndexerStats {

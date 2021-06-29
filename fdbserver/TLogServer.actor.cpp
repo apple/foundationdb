@@ -516,6 +516,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	std::vector<std::vector<Reference<TagData>>> tag_data; // tag.locality | tag.id
 	int unpoppedRecoveredTags;
+	std::map<Tag, Promise<Void>> waitingTags;
 
 	Reference<TagData> getTagData(Tag tag) {
 		int idx = tag.toTagDataIndex();
@@ -1451,6 +1452,12 @@ void commitMessages(TLogData* self,
 				} else {
 					txsBytes += tagData->versionMessages.back().second.expectedSize();
 				}
+				auto iter = logData->waitingTags.find(tag);
+				if (iter != logData->waitingTags.end()) {
+					auto promise = iter->second;
+					logData->waitingTags.erase(iter);
+					promise.send(Void());
+				}
 
 				// The factor of VERSION_MESSAGES_OVERHEAD is intended to be an overestimate of the actual memory used
 				// to store this data in a std::deque. In practice, this number is probably something like 528/512
@@ -1505,6 +1512,14 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 	}
 	return tagData->versionMessages;
 };
+
+Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest const& req) {
+	auto tagData = self->getTagData(req.tag);
+	if (tagData.isValid()) {
+		return Void();
+	}
+	return self->waitingTags[req.tag].getFuture();
+}
 
 void peekMessagesFromMemory(Reference<LogData> self,
                             TLogPeekRequest const& req,
@@ -1835,6 +1850,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		if (req.onlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
+			wait(waitForMessagesForTag(logData, req));
 			peekMessagesFromMemory(logData, req, messages, endVersion);
 		}
 
