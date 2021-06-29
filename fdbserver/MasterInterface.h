@@ -26,6 +26,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/VersionVector.h"
 #include "fdbserver/TLogInterface.h"
 
 typedef uint64_t DBRecoveryCount;
@@ -43,6 +44,7 @@ struct MasterInterface {
 	RequestStream<struct GetRawCommittedVersionRequest> getLiveCommittedVersion;
 	// Report a proxy's committed version.
 	RequestStream<struct ReportRawCommittedVersionRequest> reportLiveCommittedVersion;
+	RequestStream<struct GetTlogPrevCommitVersionRequest> getTlogPrevCommitVersion;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 	NetworkAddressList addresses() const { return changeCoordinators.getEndpoint().addresses; }
@@ -66,6 +68,8 @@ struct MasterInterface {
 			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(5));
 			reportLiveCommittedVersion = RequestStream<struct ReportRawCommittedVersionRequest>(
 			    waitFailure.getEndpoint().getAdjustedEndpoint(6));
+			getTlogPrevCommitVersion =
+			    RequestStream<struct GetTlogPrevCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(7));
 		}
 	}
 
@@ -78,6 +82,7 @@ struct MasterInterface {
 		streams.push_back(notifyBackupWorkerDone.getReceiver());
 		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetLiveCommittedVersion));
 		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ReportLiveCommittedVersion));
+		streams.push_back(getTlogPrevCommitVersion.getReceiver(TaskPriority::GetTlogPrevCommitVersion));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -184,26 +189,49 @@ struct GetCommitVersionRequest {
 	}
 };
 
+struct GetTlogPrevCommitVersionReply {
+	constexpr static FileIdentifier file_identifier = 16683183;
+	std::unordered_map<uint16_t, Version> tpcvMap;
+	GetTlogPrevCommitVersionReply() {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tpcvMap);
+	}
+};
+
+struct GetTlogPrevCommitVersionRequest {
+	constexpr static FileIdentifier file_identifier = 16683184;
+	std::set<uint16_t> locSet;
+	ReplyPromise<GetTlogPrevCommitVersionReply> reply;
+	GetTlogPrevCommitVersionRequest() {}
+	GetTlogPrevCommitVersionRequest(std::set<uint16_t>& locSet) : locSet(locSet) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, locSet, reply);
+	}
+};
+
 struct ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
-
+	Optional<std::set<Tag>> tagSet;
 	ReplyPromise<Void> reply;
 
 	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
 	ReportRawCommittedVersionRequest(Version version,
 	                                 bool locked,
 	                                 Optional<Value> metadataVersion,
-	                                 Version minKnownCommittedVersion)
+	                                 Version minKnownCommittedVersion,
+	                                 Optional<std::set<Tag>> tagSet = Optional<std::set<Tag>>())
 	  : version(version), locked(locked), metadataVersion(metadataVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion), tagSet(tagSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, reply);
+		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, tagSet, reply);
 	}
 };
 
