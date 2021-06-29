@@ -250,6 +250,8 @@ use the global configuration functions.
 
 #. ``\xff\xff/global_config/<key> := <value>`` Read/write. Reading keys in the range will return a tuple decoded string representation of the value for the given key. Writing a value will update all processes in the cluster with the new key-value pair. Values must be written using the :ref:`api-python-tuple-layer`.
 
+.. _special-key-space-tracing-module:
+
 Tracing module
 --------------
 
