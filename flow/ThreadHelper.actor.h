@@ -638,7 +638,7 @@ ThreadFuture<decltype(std::declval<F>()().getValue())> onMainThread(F f) {
 	Promise<Void> signal;
 	auto returnValue = new ThreadSingleAssignmentVar<decltype(std::declval<F>()().getValue())>();
 	returnValue->addref(); // For the ThreadFuture we return
-	                       // TODO: Is this cancellation logic actually needed?
+	// TODO: Is this cancellation logic actually needed?
 	Future<Void> cancelFuture = internal_thread_helper::doOnMainThread<decltype(std::declval<F>()().getValue()), F>(
 	    signal.getFuture(), f, returnValue);
 	returnValue->setCancel(std::move(cancelFuture));
