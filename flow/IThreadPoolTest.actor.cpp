@@ -27,7 +27,7 @@ struct ThreadNameReceiver : IThreadPoolReceiver {
 		int err = pthread_getname_np(t, name, arrayLen);
 		if (err != 0) {
 			std::cout << "Get name failed with error code: " << err << std::endl;
-			a.name.sendError(unknown_error());
+			a.name.sendError(platform_error());
 			return;
 		}
 		std::string s = name;
