@@ -31,6 +31,7 @@ struct VersionIndexerInterface {
 	UID uniqueID = deterministicRandom()->randomUniqueID();
 	LocalityData locality;
 	UID id() const { return uniqueID; }
+	std::string toString() const { return id().shortString(); }
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct VersionIndexerCommitRequest> commit;
 	RequestStream<struct VersionIndexerPeekRequest> peek;

@@ -28,6 +28,17 @@
 #include "fdbserver/VersionIndexerInterface.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+template <>
+void TSSMetrics::recordLatency(const VersionIndexerPeekRequest& req, double ssLatency, double tssLatency) {}
+template <>
+bool TSS_doCompare(const VersionIndexerPeekRequest& req,
+                   const VersionIndexerPeekReply& src,
+                   const VersionIndexerPeekReply& tss,
+                   Severity traceSeverity,
+                   UID tssId) {
+	return true;
+}
+
 struct VersionIndexerStats {
 	CounterCollection cc;
 	Counter commits, peeks;

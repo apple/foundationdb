@@ -647,6 +647,7 @@ public:
 
 	Promise<Void> otherError;
 	Promise<Void> coreStarted;
+	PromiseStream<std::pair<Version, bool>> versionStream;
 	bool shuttingDown;
 
 	bool behind;
@@ -4948,6 +4949,39 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	}
 }
 
+ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
+	state std::vector<Reference<ReferencedInterface<VersionIndexerInterface>>> interfaces;
+	state Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>> multi;
+	for (auto& i : self->db->get().versionIndexers) {
+		interfaces.emplace_back(new ReferencedInterface<VersionIndexerInterface>(i));
+	}
+	multi = Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>>(
+	    new MultiInterface<ReferencedInterface<VersionIndexerInterface>>(interfaces));
+	loop {
+		VersionIndexerPeekRequest request;
+		request.lastKnownVersion = self->version.get();
+		request.tag = self->tag;
+		VersionIndexerPeekReply reply =
+		    wait(brokenPromiseToNever(loadBalance(multi, &VersionIndexerInterface::peek, request)));
+		for (auto& p : reply.versions) {
+			self->versionStream.send(p);
+		}
+	}
+}
+
+ACTOR Future<Void> versionIndexerPeeker(StorageServer* self) {
+	loop {
+		Future<Void> impl = Never();
+		if (self->db.isValid() && !self->db->get().versionIndexers.empty()) {
+			impl = versionIndexerPeekerImpl(self);
+		}
+		choose {
+			when(wait(impl)) { ASSERT(false); }
+			when(wait(self->db->onChange())) {}
+		}
+	}
+}
+
 ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived =
@@ -4970,6 +5004,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
+	self->actors.add(versionIndexerPeeker(self));
 
 	self->transactionTagCounter.startNewInterval(self->thisServerID);
 	self->actors.add(recurring([&]() { self->transactionTagCounter.startNewInterval(self->thisServerID); },

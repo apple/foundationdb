@@ -1079,7 +1079,7 @@ Future<Void> informVersionIndexers(CommitBatchContext* self) {
 	for (const auto& vi : versionIndexers) {
 		resp.emplace_back(vi.commit.getReply(req));
 	}
-	return wait(waitForAll(resp));
+	return waitForAll(resp);
 }
 
 // A helper function. We need to wait on logging and on the version indexers to acknowledge the write. However, we are
