@@ -35,7 +35,7 @@ struct VersionVector {
 
 
 	VersionVector() : maxVersion(invalidVersion) {}
-	VersionVector(Version maxVer) : maxVersion(maxVer) {}
+	VersionVector(Version version) : maxVersion(version) {}
 
 	void setVersion(const Tag& tag, Version version) {
         ASSERT(tag != invalidTag);
@@ -63,7 +63,7 @@ struct VersionVector {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, versions);
+		serializer(ar, versions, maxVersion);
 	}
 };
 
