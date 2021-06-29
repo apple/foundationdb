@@ -55,7 +55,7 @@ void doOnMainThreadVoid(Future<Void> signal, F f, Error* err) {
 // There is no way to wait for the functor run to finish. For cases where you need a result back or simply need
 // to know when the functor has finished running, use `onMainThread`.
 //
-// WARNING: Successive invocations of `onMainThreadVoid` with different task priorities may run out of order.
+// WARNING: Successive invocations of `onMainThreadVoid` with different task priorities may not run in the order they were called.
 //
 // WARNING: The error returned in `err` can only be read on the FDB network thread because there is no way to
 // order the write to `err` with actions on other threads.
