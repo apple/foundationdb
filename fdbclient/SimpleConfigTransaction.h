@@ -40,12 +40,11 @@ class SimpleConfigTransaction final : public IConfigTransaction, public FastAllo
 	SimpleConfigTransactionImpl const& impl() const { return *_impl; }
 	SimpleConfigTransactionImpl& impl() { return *_impl; }
 
-	SimpleConfigTransaction();
-	friend class ISingleThreadTransaction;
-
 public:
 	SimpleConfigTransaction(ConfigTransactionInterface const&);
 	SimpleConfigTransaction(Database const&);
+	SimpleConfigTransaction();
+	void setDatabase(Database const&) override;
 	~SimpleConfigTransaction();
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;

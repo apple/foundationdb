@@ -508,7 +508,7 @@ void DLApi::selectApiVersion(int apiVersion) {
 
 	init();
 	throwIfError(api->selectApiVersion(apiVersion, headerVersion));
-	throwIfError(api->setNetworkOption(FDB_NET_OPTION_EXTERNAL_CLIENT, nullptr, 0));
+	throwIfError(api->setNetworkOption(static_cast<FDBNetworkOption>(FDBNetworkOptions::EXTERNAL_CLIENT), nullptr, 0));
 }
 
 const char* DLApi::getClientVersion() {

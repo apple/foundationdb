@@ -32,12 +32,10 @@ class PaxosConfigTransaction final : public IConfigTransaction, public FastAlloc
 	PaxosConfigTransactionImpl const& impl() const { return *_impl; }
 	PaxosConfigTransactionImpl& impl() { return *_impl; }
 
-	PaxosConfigTransaction();
-	friend class ISingleThreadTransaction;
-
 public:
-	PaxosConfigTransaction(Database const&);
+	PaxosConfigTransaction();
 	~PaxosConfigTransaction();
+	void setDatabase(Database const&) override;
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 

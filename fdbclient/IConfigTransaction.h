@@ -40,8 +40,6 @@ public:
 	virtual ~IConfigTransaction() = default;
 
 	static Reference<IConfigTransaction> createTestSimple(ConfigTransactionInterface const&);
-	static Reference<IConfigTransaction> createSimple(Database const&);
-	static Reference<IConfigTransaction> createPaxos(Database const&);
 
 	// Not implemented:
 	void setVersion(Version) override { throw client_invalid_operation(); }

@@ -38,22 +38,3 @@ ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type
 	ASSERT(false);
 	return nullptr;
 }
-
-void ISingleThreadTransaction::create(ISingleThreadTransaction* tr, Type type, Database db) {
-	switch (type) {
-	case Type::RYW:
-		dynamic_cast<ReadYourWritesTransaction*>(tr)->~ReadYourWritesTransaction();
-		new (tr) ReadYourWritesTransaction(db);
-		break;
-	case Type::SIMPLE_CONFIG:
-		dynamic_cast<SimpleConfigTransaction*>(tr)->~SimpleConfigTransaction();
-		new (tr) SimpleConfigTransaction(db);
-		break;
-	case Type::PAXOS_CONFIG:
-		dynamic_cast<PaxosConfigTransaction*>(tr)->~PaxosConfigTransaction();
-		new (tr) PaxosConfigTransaction(db);
-		break;
-	default:
-		ASSERT(false);
-	}
-}

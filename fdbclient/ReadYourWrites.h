@@ -68,6 +68,7 @@ public:
 	explicit ReadYourWritesTransaction(Database const& cx);
 	~ReadYourWritesTransaction();
 
+	void setDatabase(Database const&) override;
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
