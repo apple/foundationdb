@@ -26,6 +26,8 @@ const StringRef LocalityData::keyZoneId = LiteralStringRef("zoneid");
 const StringRef LocalityData::keyDcId = LiteralStringRef("dcid");
 const StringRef LocalityData::keyMachineId = LiteralStringRef("machineid");
 const StringRef LocalityData::keyDataHallId = LiteralStringRef("data_hall");
+const StringRef LocalityData::ExcludeLocalityKeyMachineIdPrefix = LiteralStringRef("locality_machineid:");
+const StringRef LocalityData::ExcludeLocalityPrefix = LiteralStringRef("locality_");
 
 ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const {
 	switch (role) {

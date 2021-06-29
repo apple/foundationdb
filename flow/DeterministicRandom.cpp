@@ -20,6 +20,8 @@
 
 #include "flow/DeterministicRandom.h"
 
+#include <cstring>
+
 uint64_t DeterministicRandom::gen64() {
 	uint64_t curr = next;
 	next = (uint64_t(random()) << 32) ^ random();
