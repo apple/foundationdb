@@ -195,6 +195,7 @@ ACTOR Future<Void> restoreStorageTeamToGroupAssignment(TLogGroupCollection* self
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			RangeResult results = wait(tr.getRange(storageTeamIdToTLogGroupRange, GetRangeLimits()));
 			for (auto& r : results) {
 				auto teamId = decodeStorageTeamIdToTLogGroupKey(r.key);
@@ -237,6 +238,7 @@ ACTOR Future<Void> TLogGroupCollection::storageTeamMonitor(TLogGroupCollection* 
 					try {
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr.set(storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(group->id(), Unversioned()));
 						wait(tr.commit());
 						if (self->storageTeamToTLogGroupMap.find(teamId) == self->storageTeamToTLogGroupMap.end()) {
