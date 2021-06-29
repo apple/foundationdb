@@ -46,6 +46,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
+#include "fdbclient/VersionVector.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

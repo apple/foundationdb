@@ -126,6 +126,18 @@ struct Traceable<Tag> : std::true_type {
 	static std::string toString(const Tag& value) { return value.toString(); }
 };
 
+namespace std {
+template <>
+struct hash<Tag> {
+	std::size_t operator() (const Tag& tag) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, std::hash<int8_t>{}(tag.locality));
+		boost::hash_combine(seed, std::hash<uint16_t>{}(tag.id));
+		return seed;
+	}
+};
+} // namespace std
+
 static const Tag invalidTag{ tagLocalitySpecial, 0 };
 static const Tag txsTag{ tagLocalitySpecial, 1 };
 static const Tag cacheTag{ tagLocalitySpecial, 2 };
@@ -1125,28 +1137,5 @@ inline const char* transactionPriorityToString(TransactionPriority priority, boo
 	ASSERT(false);
 	throw internal_error();
 }
-
-struct VersionVector {
-	std::map<Tag, Version> versions;
-
-	VersionVector() {}
-
-	void setVersion(const Tag& tag, Version version) {
-		versions[tag] = version;
-	}
-
-	bool hasVersion(const Tag& tag) const {
-		return versions.find(tag) != versions.end();
-	}
-
-	Version getVersion(const Tag& tag) const {
-		return versions.at(tag);
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, versions);
-	}
-};
 
 #endif
