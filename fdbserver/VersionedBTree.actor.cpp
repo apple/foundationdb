@@ -1310,19 +1310,24 @@ struct RedwoodMetrics {
 		}
 
 		std::string report(int currLevel){
-			std::string result = "Level "+std::to_string(currLevel)+":\n";
-
+			std::string result = "";
 			std::map<events, std::string> allEvents = {{events::pagerCacheLookup, "pagerCacheLookup"}, {events::pagerCacheHit, "pagerCacheHit"}, {events::pagerCacheMiss, "pagerCacheMiss"}, {events::pagerWrite, "pagerWrite"}};
 			std::map<pagerEventReasons, std::string> allReasons = {{pagerEventReasons::pointRead, "pointRead"}, {pagerEventReasons::rangeRead, "rangeRead"}, {pagerEventReasons::rangePrefetch, "rangePrefetch"}, {pagerEventReasons::commit, "commit"}, {pagerEventReasons::lazyClear, "lazyClear"}, {pagerEventReasons::metaData, "metaData"}};
 			
 			for(auto e = allEvents.begin(); e != allEvents.end(); e++){
-				result += e->second + "\n";
+				result += e->second + "\n\t";
 				for(auto r = allReasons.begin(); r != allReasons.end(); r++){
-					result += r->second + ": " + std::to_string(eventReasons[(size_t)e->first][(size_t)r->first]) +", ";
+					std::string num = std::to_string(eventReasons[(size_t)e->first][(size_t)r->first]);
+					result += r->second; 
+					result.append(16 - r->second.length(), ' ');
+					result.append(8 - num.length(), ' ');
+					result += num;
+					result.append(13, ' ');
 				}
 				result +="\n";
 			}
 			return result;
+			
 		}
 
 	};
@@ -1501,8 +1506,6 @@ struct RedwoodMetrics {
 		}
 
 		if (s != nullptr) {
-			*s += "\n";
-			*s += metric.eventReasons.report(0);
 			for (auto& m : metrics) {
 				if (*m.first == '\0') {
 					*s += "\n";
@@ -1510,15 +1513,12 @@ struct RedwoodMetrics {
 					*s += format("%-15s %-8u %8" PRId64 "/s  ", m.first, m.second, int64_t(m.second / elapsed));
 				}
 			}
+			*s += "\n";
+			*s += metric.eventReasons.report(0);
 		}
 
 		for (int i = 0; i < btreeLevels; ++i) {
 			auto& level = levels[i];
-
-			if (s != nullptr){
-				*s += '\n';
-				*s += level.metric.eventReasons.report(i+1);
-			}
 
 			std::pair<const char*, unsigned int> metrics[] = {
 				{ "PageBuild", level.metric.pageBuild },
@@ -1574,6 +1574,8 @@ struct RedwoodMetrics {
 						*s += format("%-15s %8u %8u/s  ", name, m.second, rate ? int(m.second / elapsed) : 0);
 					}
 				}
+				*s += '\n';
+				*s += level.metric.eventReasons.report(i+1);
 			}
 		}
 	}
@@ -5209,12 +5211,12 @@ private:
 		                                     ((BTreePage*)page->begin())->tree());
 	}
 
-	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef id) {
+	static void preLoadPage(IPagerSnapshot* snapshot, unsigned int l, BTreePageIDRef id) {
 		g_redwoodMetrics.metric.btreeLeafPreload += 1;
 		g_redwoodMetrics.metric.btreeLeafPreloadExt += (id.size() - 1);
 
 		for (auto pageID : id) {
-			snapshot->getPhysicalPage(pagerEventReasons::rangePrefetch, 1, pageID, true, true); // prefetch btree leaf node
+			snapshot->getPhysicalPage(pagerEventReasons::rangePrefetch, l, pageID, true, true); // prefetch btree leaf node
 		}
 	}
 
@@ -6555,7 +6557,7 @@ public:
 							// If there is a page link, preload it.
 							if (c.get().value.present()) {
 								BTreePageIDRef childPage = c.get().getChildPage();
-								preLoadPage(self->pager.getPtr(), childPage);
+								preLoadPage(self->pager.getPtr(), self->getHeight()+1, childPage);
 								prefetchBytes -= self->btree->m_blockSize * childPage.size();
 							}
 						}
