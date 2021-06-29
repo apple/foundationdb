@@ -145,11 +145,11 @@ public:
 	// This is used when the distance b/t upperBound and lowerBound are relativly small
 	inline void sampleRecordCounter(uint32_t sample) {
 		ASSERT(unit==Histogram::Unit::record_counter);
-
+		if(sample > upperBound){ 
+			sample = upperBound;
+		}
 		size_t idx = ( (sample - lowerBound) * 31.0 ) / (upperBound - lowerBound);
-		if(idx >= 32){ idx = 31;}
 		ASSERT(idx < 32);
-
 		buckets[idx]++;
 	}
 
