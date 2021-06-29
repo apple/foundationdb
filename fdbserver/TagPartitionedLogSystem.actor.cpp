@@ -563,6 +563,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				vector<Future<Void>> tLogCommitResults;
 				for (int loc = 0; loc < it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
+					data.recordEmptyMessage(location, msg);
 					allReplies.push_back(recordPushMetrics(
 					    it->connectionResetTrackers[loc],
 					    it->logServers[loc]->get().interf().address(),
