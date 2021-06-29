@@ -998,6 +998,22 @@ struct LogPushData : NonCopyable {
 		writtenLocations.clear();
 	}
 
+	// copy next_message_tags into given set
+	void saveTags(std::set<Tag>& tagSet) {
+		tagSet.insert(next_message_tags.begin(), next_message_tags.end());
+		return;
+	}
+
+	// store tlogs as represented by index
+	// also store in tag set all replicas
+	void saveLocations(std::set<uint16_t>& locSet, std::set<Tag>& tagSet) {
+		locSet.insert(msg_locations.begin(), msg_locations.end());
+		for (auto loc: msg_locations) {
+			tagSet.insert(Tag(0, loc));  // TODO POST DEMO support DC other than primary
+		}
+		return;
+	}
+
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations) {
 		if (!usePreviousLocations) {
 			prev_tags.clear();

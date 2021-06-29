@@ -37,6 +37,7 @@ public:
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
 	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+	bool ENABLE_VERSION_VECTOR;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
 
