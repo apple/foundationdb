@@ -3410,6 +3410,8 @@ void platformInit() {
 #endif
 }
 
+// The crashHandler function is registered to handle signals before the process terminates.
+// Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
 #ifdef __linux__
 	// Pretty much all of this handler is risking undefined behavior and hangs,
