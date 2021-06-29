@@ -107,6 +107,9 @@ struct ProxyStats {
 	LatencyBands commitLatencyBands;
 	LatencyBands grvLatencyBands;
 
+	// Ratio of tlogs receiving empty commit messages.
+	LatencySample commitBatchingEmptyMessageRatio;
+
 	LatencySample commitBatchingWindowSize;
 
 	Future<Void> logger;
@@ -187,6 +190,10 @@ struct ProxyStats {
 	                          id,
 	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    commitBatchingEmptyMessageRatio("CommitBatchingEmptyMessageRatio",
+	                                    id,
+	                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -1565,6 +1572,9 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	self->lastStartCommit = commitStartTime;
 	Future<Version> loggingComplete = self->logSystem->push(
 	    prevVersion, commitVersion, self->committedVersion.get(), self->minKnownCommittedVersion, toCommit, debugID);
+
+	float ratio = toCommit.getEmptyMessageRatio();
+	self->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
 
 	if (!forceRecovery) {
 		ASSERT(self->latestLocalCommitBatchLogging.get() == localBatchNumber - 1);
