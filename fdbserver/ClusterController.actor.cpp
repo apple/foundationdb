@@ -290,6 +290,7 @@ public:
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
 			if (workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    fitness != ProcessClass::NeverAssign &&
 			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
 				fitness_workers[fitness].push_back(it.second.details);
@@ -482,7 +483,8 @@ public:
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
 			        exclusionWorkerIds.end() ||
 			    !workerAvailable(worker_info, checkStable) ||
-			    conf.isExcludedServer(worker_details.interf.addresses()) || fitness == ProcessClass::NeverAssign ||
+			    conf.isExcludedServer(worker_details.interf.addresses()) ||
+			    isExcludedDegradedServer(worker_details.interf.addresses()) || fitness == ProcessClass::NeverAssign ||
 			    (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) ||
 			    (!allowDegraded && worker_details.degraded)) {
 				continue;
@@ -690,7 +692,8 @@ public:
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
 			        exclusionWorkerIds.end() ||
 			    !workerAvailable(worker_info, checkStable) ||
-			    conf.isExcludedServer(worker_details.interf.addresses()) || fitness == ProcessClass::NeverAssign ||
+			    conf.isExcludedServer(worker_details.interf.addresses()) ||
+			    isExcludedDegradedServer(worker_details.interf.addresses()) || fitness == ProcessClass::NeverAssign ||
 			    (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0)) {
 				continue;
 			}
@@ -799,7 +802,8 @@ public:
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
 			        exclusionWorkerIds.end() ||
 			    !workerAvailable(worker_info, checkStable) ||
-			    conf.isExcludedServer(worker_details.interf.addresses()) || fitness == ProcessClass::NeverAssign ||
+			    conf.isExcludedServer(worker_details.interf.addresses()) ||
+			    isExcludedDegradedServer(worker_details.interf.addresses()) || fitness == ProcessClass::NeverAssign ||
 			    (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0)) {
 				continue;
 			}
@@ -1208,7 +1212,8 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
-			if (conf.isExcludedServer(it.second.details.interf.addresses())) {
+			if (conf.isExcludedServer(it.second.details.interf.addresses()) ||
+			    isExcludedDegradedServer(it.second.details.interf.addresses())) {
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
 			}
 			if (workerAvailable(it.second, checkStable) && fitness < unacceptableFitness &&
@@ -1255,6 +1260,7 @@ public:
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
 			if (workerAvailable(it.second, checkStable) &&
 			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
 			    (!minWorker.present() ||
 			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
@@ -1389,7 +1395,9 @@ public:
 	                                                         bool checkStable = false) {
 		std::set<Optional<Standalone<StringRef>>> result;
 		for (auto& it : id_worker)
-			if (workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.addresses()))
+			if (workerAvailable(it.second, checkStable) &&
+			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !isExcludedDegradedServer(it.second.details.interf.addresses()))
 				result.insert(it.second.details.interf.locality.dcId());
 		return result;
 	}
@@ -2673,6 +2681,162 @@ public:
         }
     }
 
+	// Checks that if any worker or their degraded peers have recovered. If so, remove them from `workerHealth`.
+	void updateRecoveredWorkers() {
+		double currentTime = now();
+		for (auto& [workerAddress, health] : workerHealth) {
+			for (auto it = health.degradedPeers.begin(); it != health.degradedPeers.end();) {
+				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL) {
+					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("peer", it->first);
+					health.degradedPeers.erase(it++);
+				} else {
+					++it;
+				}
+			}
+		}
+
+		for (auto it = workerHealth.begin(); it != workerHealth.end();) {
+			if (it->second.degradedPeers.empty()) {
+				TraceEvent("WorkerAllPeerHealthRecovered").detail("worker", it->first);
+				workerHealth.erase(it++);
+			} else {
+				++it;
+			}
+		}
+	}
+
+	// Returns a list of servers who are experiencing degraded links. These are candidates to perform exclusion. Note
+	// that only one endpoint of a bad link will be included in this list.
+	std::unordered_set<NetworkAddress> getServersWithDegradedLink() {
+		updateRecoveredWorkers();
+
+		// Build a map keyed by measured degraded peer. This map gives the info that who complains a particular server.
+		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> degradedLinkDst2Src;
+		double currentTime = now();
+		for (const auto& [server, health] : workerHealth) {
+			for (const auto& [degradedPeer, times] : health.degradedPeers) {
+				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
+					// This degraded link is not long enough to be considered as degraded.
+					continue;
+				}
+				degradedLinkDst2Src[degradedPeer].insert(server);
+			}
+		}
+
+		// Sort degraded peers based on the number of workers complaining about it.
+		std::vector<std::pair<int, NetworkAddress>> count2DegradedPeer;
+		for (const auto& [degradedPeer, complainers] : degradedLinkDst2Src) {
+			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
+		}
+		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), std::greater<>());
+
+		// Go through all reported degraded peers by decreasing order of the number of complainers. For a particular
+		// degraded peer, if a complainer has already be considered as degraded, we skip the current examine degraded
+		// peer since there has been one endpoint on the link between degradedPeer and complainer considered as
+		// degraded. This is to address the issue that both endpoints on a bad link may be considered as degraded
+		// server.
+		//
+		// For example, if server A is already considered as a degraded server, and A complains B, we won't add B as
+		// degraded since A is already considered as degraded.
+		std::unordered_set<NetworkAddress> currentDegradedServers;
+		for (const auto& [complainerCount, badServer] : count2DegradedPeer) {
+			for (const auto& complainer : degradedLinkDst2Src[badServer]) {
+				if (currentDegradedServers.find(complainer) == currentDegradedServers.end()) {
+					currentDegradedServers.insert(badServer);
+					break;
+				}
+			}
+		}
+
+		// For degraded server that are complained by more than SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE, we
+		// don't know if it is a hot server, or the network is bad. We remove from the returned degraded server list.
+		std::unordered_set<NetworkAddress> currentDegradedServersWithinLimit;
+		for (const auto& badServer : currentDegradedServers) {
+			if (degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
+				currentDegradedServersWithinLimit.insert(badServer);
+			}
+		}
+		return currentDegradedServersWithinLimit;
+	}
+
+	// Returns true when the cluster controller should trigger a recovery due to degraded servers are used in the
+	// transaction system in the primary data center.
+	bool shouldTriggerRecoveryDueToDegradedServers() {
+		if (degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+			return false;
+		}
+
+		const ServerDBInfo dbi = db.serverInfo->get();
+		if (dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			return false;
+		}
+
+		// Do not trigger recovery if the cluster controller is excluded, since the master will change
+		// anyways once the cluster controller is moved
+		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			return false;
+		}
+
+		if (db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority &&
+		    db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated &&
+		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
+			checkRegions(db.config.regions);
+		}
+
+		for (const auto& excludedServer : degradedServers) {
+			if (dbi.master.addresses().contains(excludedServer)) {
+				return true;
+			}
+
+			for (auto& logSet : dbi.logSystemConfig.tLogs) {
+				if (!logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+					continue;
+				}
+				for (const auto& tlog : logSet.tLogs) {
+					if (tlog.present() && tlog.interf().addresses().contains(excludedServer)) {
+						return true;
+					}
+				}
+			}
+
+			for (auto& proxy : dbi.client.grvProxies) {
+				if (proxy.addresses().contains(excludedServer)) {
+					return true;
+				}
+			}
+
+			for (auto& proxy : dbi.client.commitProxies) {
+				if (proxy.addresses().contains(excludedServer)) {
+					return true;
+				}
+			}
+
+			for (auto& resolver : dbi.resolvers) {
+				if (resolver.addresses().contains(excludedServer)) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	int recentRecoveryCountDueToHealth() {
+		while (!recentHealthTriggeredRecoveryTime.empty() &&
+		       now() - recentHealthTriggeredRecoveryTime.front() > SERVER_KNOBS->CC_TRACKING_HEALTH_RECOVERY_INTERVAL) {
+			recentHealthTriggeredRecoveryTime.pop();
+		}
+		return recentHealthTriggeredRecoveryTime.size();
+	}
+
+	bool isExcludedDegradedServer(const NetworkAddressList& a) {
+		for (const auto& server : excludedDegradedServers) {
+			if (a.contains(server))
+				return true;
+		}
+		return false;
+	}
+
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
 	    id_class; // contains the mapping from process id to process class from the database
@@ -2722,6 +2886,12 @@ public:
         // TODO(zhewu): Include disk and CPU signals.
     };
 	std::unordered_map<NetworkAddress, WorkerHealth> workerHealth;
+	std::unordered_set<NetworkAddress>
+	    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this list
+	                     // are not excluded unless they are added to `excludedDegradedServers`.
+	std::unordered_set<NetworkAddress>
+	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
+	std::queue<double> recentHealthTriggeredRecoveryTime;
 
 	CounterCollection clusterControllerMetrics;
 
@@ -4388,6 +4558,58 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	}
 }
 
+// The actor that periodically monitors the health of tracked workers.
+ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
+	loop {
+		try {
+			while (!self->goodRecruitmentTime.isReady()) {
+				wait(self->goodRecruitmentTime);
+			}
+
+			self->degradedServers = self->getServersWithDegradedLink();
+
+			// Compare `self->degradedServers` with `self->excludedDegradedServers` and remove those that have
+			// recovered.
+			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
+				if (self->degradedServers.find(*it) == self->degradedServers.end()) {
+					self->excludedDegradedServers.erase(it++);
+				} else {
+					++it;
+				}
+			}
+
+			if (!self->degradedServers.empty()) {
+				std::string degradedServerString;
+				for (const auto& server : self->degradedServers) {
+					degradedServerString += server.toString() + " ";
+				}
+				TraceEvent("ClusterControllerHealthMonitor").detail("DegradedServers", degradedServerString);
+
+				// Check if the cluster controller should trigger a recovery to exclude any degraded servers from the
+				// transaction system.
+				if (self->shouldTriggerRecoveryDueToDegradedServers()) {
+					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
+						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
+							self->recentHealthTriggeredRecoveryTime.push(now());
+							self->excludedDegradedServers = self->degradedServers;
+							TraceEvent("DegradedServerDetectedAndTriggerRecovery")
+							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
+							self->db.forceMasterFailure.trigger();
+						}
+					} else {
+						self->excludedDegradedServers.clear();
+						TraceEvent("DegradedServerDetectedAndSuggestRecovery");
+					}
+				}
+			}
+
+			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "ClusterControllerHealthMonitorError").error(e);
+		}
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
@@ -4419,6 +4641,10 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	                                 self.id.toString() + "/ClusterControllerMetrics"));
 	self.addActor.send(traceRole(Role::CLUSTER_CONTROLLER, interf.id()));
 	// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
+
+	if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
+		self.addActor.send(workerHealthMonitor(&self));
+	}
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {
@@ -4491,7 +4717,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			clusterRegisterMaster(&self, req);
 		}
 		when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
-			if (SERVER_KNOBS->CLUSTER_CONTROLLER_ENABLE_WORKER_HEALTH_MONITOR) {
+			if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 				self.updateWorkerHealth(req);
 			}
 		}
@@ -4648,6 +4874,266 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
     }
 
     return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	NetworkAddress worker1(IPAddress(0x01010101), 1);
+	NetworkAddress worker2(IPAddress(0x11111111), 1);
+	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
+	NetworkAddress badPeer2(IPAddress(0x03030303), 1);
+
+	// Create following test scenario:
+	// 	 worker1 -> badPeer1 active
+	// 	 worker1 -> badPeer2 recovered
+	// 	 worker2 -> badPeer2 recovered
+	data.workerHealth[worker1].degradedPeers[badPeer1] = {
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1, now()
+	};
+	data.workerHealth[worker1].degradedPeers[badPeer2] = {
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1,
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1
+	};
+	data.workerHealth[worker2].degradedPeers[badPeer2] = {
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1,
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1
+	};
+	data.updateRecoveredWorkers();
+
+	ASSERT_EQ(data.workerHealth.size(), 1);
+	ASSERT(data.workerHealth.find(worker1) != data.workerHealth.end());
+	ASSERT(data.workerHealth[worker1].degradedPeers.find(badPeer1) != data.workerHealth[worker1].degradedPeers.end());
+	ASSERT(data.workerHealth[worker1].degradedPeers.find(badPeer2) == data.workerHealth[worker1].degradedPeers.end());
+	ASSERT(data.workerHealth.find(worker2) == data.workerHealth.end());
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	NetworkAddress worker(IPAddress(0x01010101), 1);
+	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
+	NetworkAddress badPeer2(IPAddress(0x03030303), 1);
+	NetworkAddress badPeer3(IPAddress(0x04040404), 1);
+	NetworkAddress badPeer4(IPAddress(0x05050505), 1);
+
+	// Test that a reported degraded link should stay for sometime before being considered as a degraded link by cluster
+	// controller.
+	{
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now(), now() };
+		ASSERT(data.getServersWithDegradedLink().empty());
+		data.workerHealth.clear();
+	}
+
+	// Test that when there is only one reported degraded link, getServersWithDegradedLink can return correct degraded
+	// server.
+	{
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		auto degradedServers = data.getServersWithDegradedLink();
+		ASSERT(degradedServers.size() == 1);
+		ASSERT(degradedServers.find(badPeer1) != degradedServers.end());
+		data.workerHealth.clear();
+	}
+
+	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded server.
+	{
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer1].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		auto degradedServers = data.getServersWithDegradedLink();
+		ASSERT(degradedServers.size() == 1);
+		ASSERT(degradedServers.find(worker) != degradedServers.end() ||
+		       degradedServers.find(badPeer1) != degradedServers.end());
+		data.workerHealth.clear();
+	}
+
+	// Test that if B complains A and C complains A, A is selected as degraded server instead of B or C.
+	{
+		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer1].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[worker].degradedPeers[badPeer2] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer2].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		auto degradedServers = data.getServersWithDegradedLink();
+		ASSERT(degradedServers.size() == 1);
+		ASSERT(degradedServers.find(worker) != degradedServers.end());
+		data.workerHealth.clear();
+	}
+
+	// Test that if the number of complainers exceeds the threshold, no degraded server is returned.
+	{
+		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
+		data.workerHealth[badPeer1].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer2].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer3].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer4].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		ASSERT(data.getServersWithDegradedLink().empty());
+		data.workerHealth.clear();
+	}
+
+	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server is returned.
+	{
+		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer1].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[worker].degradedPeers[badPeer2] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer2].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[worker].degradedPeers[badPeer3] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer3].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[worker].degradedPeers[badPeer4] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer4].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		ASSERT(data.getServersWithDegradedLink().empty());
+		data.workerHealth.clear();
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/recentRecoveryCountDueToHealth") {
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+
+	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 0);
+
+	data.recentHealthTriggeredRecoveryTime.push(now() - SERVER_KNOBS->CC_TRACKING_HEALTH_RECOVERY_INTERVAL - 1);
+	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 0);
+
+	data.recentHealthTriggeredRecoveryTime.push(now() - SERVER_KNOBS->CC_TRACKING_HEALTH_RECOVERY_INTERVAL + 1);
+	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 1);
+
+	data.recentHealthTriggeredRecoveryTime.push(now());
+	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 2);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServers") {
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	NetworkAddress master(IPAddress(0x01010101), 1);
+	NetworkAddress tlog(IPAddress(0x02020202), 1);
+	NetworkAddress satelliteTlog(IPAddress(0x03030303), 1);
+	NetworkAddress remoteTlog(IPAddress(0x04040404), 1);
+	NetworkAddress logRouter(IPAddress(0x05050505), 1);
+	NetworkAddress backup(IPAddress(0x06060606), 1);
+	NetworkAddress proxy(IPAddress(0x07070707), 1);
+	NetworkAddress resolver(IPAddress(0x08080808), 1);
+
+	// Create a ServerDBInfo using above addresses.
+	ServerDBInfo testDbInfo;
+	testDbInfo.master.changeCoordinators =
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, UID(1, 2)));
+
+	TLogInterface localTLogInterf;
+	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, UID(1, 2)));
+	TLogInterface localLogRouterInterf;
+	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, UID(1, 2)));
+	BackupInterface backupInterf;
+	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, UID(1, 2)));
+	TLogSet localTLogSet;
+	localTLogSet.isLocal = true;
+	localTLogSet.tLogs.push_back(OptionalInterface(localTLogInterf));
+	localTLogSet.logRouters.push_back(OptionalInterface(localLogRouterInterf));
+	localTLogSet.backupWorkers.push_back(OptionalInterface(backupInterf));
+	testDbInfo.logSystemConfig.tLogs.push_back(localTLogSet);
+
+	TLogInterface sateTLogInterf;
+	sateTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTlog }, UID(1, 2)));
+	TLogSet sateTLogSet;
+	sateTLogSet.isLocal = true;
+	sateTLogSet.locality = tagLocalitySatellite;
+	sateTLogSet.tLogs.push_back(OptionalInterface(sateTLogInterf));
+	testDbInfo.logSystemConfig.tLogs.push_back(sateTLogSet);
+
+	TLogInterface remoteTLogInterf;
+	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, UID(1, 2)));
+	TLogSet remoteTLogSet;
+	remoteTLogSet.isLocal = false;
+	remoteTLogSet.tLogs.push_back(OptionalInterface(remoteTLogInterf));
+	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
+
+	GrvProxyInterface proxyInterf;
+	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, UID(1, 2)));
+	testDbInfo.client.grvProxies.push_back(proxyInterf);
+
+	ResolverInterface resolverInterf;
+	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, UID(1, 2)));
+	testDbInfo.resolvers.push_back(resolverInterf);
+
+	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+
+	// No recovery when no degraded servers.
+	data.db.serverInfo->set(testDbInfo);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+
+	// Trigger recovery when master is degraded.
+	data.degradedServers.insert(master);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// Trigger recovery when primary TLog is degraded.
+	data.degradedServers.insert(tlog);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// No recovery when satellite Tlog is degraded.
+	data.degradedServers.insert(satelliteTlog);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// No recovery when remote tlog is degraded.
+	data.degradedServers.insert(remoteTlog);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// No recovery when log router is degraded.
+	data.degradedServers.insert(logRouter);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// No recovery when backup worker is degraded.
+	data.degradedServers.insert(backup);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// Trigger recovery when proxy is degraded.
+	data.degradedServers.insert(proxy);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// Trigger recovery when resolver is degraded.
+	data.degradedServers.insert(resolver);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+
+	return Void();
 }
 
 } // namespace
