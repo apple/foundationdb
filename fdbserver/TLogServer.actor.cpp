@@ -2399,6 +2399,9 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				logData->logSystem->set(Reference<ILogSystem>());
 			}
 		}
+		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
+
+		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
 			logData->addActor.send(tLogPeekMessages(self, req, logData));
 		}
@@ -3100,6 +3103,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	recruited.initEndpoints();
 
 	DUMPTOKEN(recruited.peekMessages);
+	DUMPTOKEN(recruited.peekStreamMessages);
 	DUMPTOKEN(recruited.popMessages);
 	DUMPTOKEN(recruited.commit);
 	DUMPTOKEN(recruited.lock);

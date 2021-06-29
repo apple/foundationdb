@@ -38,6 +38,7 @@ struct TLogInterface {
 	UID sharedTLogID;
 
 	RequestStream<struct TLogPeekRequest> peekMessages;
+	RequestStream<struct TLogPeekStreamRequest> peekStreamMessages; // request establish a peek stream with the TLog server
 	RequestStream<struct TLogPopRequest> popMessages;
 
 	RequestStream<struct TLogCommitRequest> commit;
@@ -70,6 +71,7 @@ struct TLogInterface {
 	void initEndpoints() {
 		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
 		streams.push_back(peekMessages.getReceiver(TaskPriority::TLogPeek));
+		streams.push_back(peekStreamMessages.getReceiver(TaskPriority::ReadSocket));
 		streams.push_back(popMessages.getReceiver(TaskPriority::TLogPop));
 		streams.push_back(commit.getReceiver(TaskPriority::TLogCommit));
 		streams.push_back(lock.getReceiver());
@@ -106,6 +108,7 @@ struct TLogInterface {
 			enablePopRequest =
 			    RequestStream<struct TLogEnablePopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(9));
 			snapRequest = RequestStream<struct TLogSnapRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(10));
+			peekStreamMessages = RequestStream<struct TLogPeekStreamRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(11));
 		}
 	}
 };
@@ -206,6 +209,45 @@ struct TLogPeekRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, arena, begin, tag, returnIfBlocked, onlySpilled, sequence, reply);
+	}
+};
+
+struct TLogPeekStreamReply: public ReplyPromiseStreamReply {
+    constexpr static FileIdentifier file_identifier = 10072848;
+	Arena arena;
+	StringRef messages;
+	Version end;
+	Optional<Version> popped;
+	Version maxKnownVersion;
+	Version minKnownCommittedVersion;
+	Optional<Version> begin;
+
+	int expectedSize() const {
+		return messages.expectedSize() + sizeof(TLogPeekStreamReply);
+	}
+
+    template <class Ar>
+    void serialize(Ar& ar) {
+        serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, arena, messages, end, popped, maxKnownVersion,
+		           minKnownCommittedVersion, begin);
+    }
+};
+
+struct TLogPeekStreamRequest {
+	constexpr static FileIdentifier file_identifier = 10072821;
+	Arena arena;
+	Version begin;
+	Tag tag;
+	int limit, limitBytes;
+	ReplyPromiseStream<TLogPeekStreamReply> reply;
+
+	TLogPeekStreamRequest() {}
+	TLogPeekStreamRequest(Version version, Tag tag, int limit, int limitBytes)
+	  : begin(version), tag(tag), limit(limit), limitBytes(limitBytes) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, arena, begin, tag, limit, limitBytes, reply);
 	}
 };
 
