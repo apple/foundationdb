@@ -28,6 +28,7 @@ set(FLOW_SRCS
   Histogram.h
   IDispatched.h
   IRandom.h
+  IThreadPoolTest.actor.cpp
   IThreadPool.cpp
   IThreadPool.h
   ITrace.h
