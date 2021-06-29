@@ -384,10 +384,11 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->bytesPerCommit.clear();
 
 		for (const auto& it : cx->tssMetrics) {
-			// TODO could skip this tss if request counter is zero? would potentially complicate elapsed calculation
-			// though
+			// TODO could skip this whole thing if tss if request counter is zero?
+			// That would potentially complicate elapsed calculation though
 			if (it.second->mismatches.getIntervalDelta()) {
-				cx->tssMismatchStream.send(it.first);
+				cx->tssMismatchStream.send(
+				    std::pair<UID, std::vector<DetailedTSSMismatch>>(it.first, it.second->detailedMismatches));
 			}
 
 			// do error histograms as separate event
@@ -826,13 +827,15 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	state Reference<ReadYourWritesTransaction> tr;
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	state KeyBackedMap<Tuple, std::string> tssMismatchDB = KeyBackedMap<Tuple, std::string>(tssMismatchKeys.begin);
 	loop {
-		state UID tssID = waitNext(cx->tssMismatchStream.getFuture());
+		// <tssid, list of detailed mismatch data>
+		state std::pair<UID, std::vector<DetailedTSSMismatch>> data = waitNext(cx->tssMismatchStream.getFuture());
 		// find ss pair id so we can remove it from the mapping
 		state UID tssPairID;
 		bool found = false;
 		for (const auto& it : cx->tssMapping) {
-			if (it.second.id() == tssID) {
+			if (it.second.id() == data.first) {
 				tssPairID = it.first;
 				found = true;
 				break;
@@ -841,7 +844,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 		if (found) {
 			state bool quarantine = CLIENT_KNOBS->QUARANTINE_TSS_ON_MISMATCH;
 			TraceEvent(SevWarnAlways, quarantine ? "TSS_QuarantineMismatch" : "TSS_KillMismatch")
-			    .detail("TSSID", tssID.toString());
+			    .detail("TSSID", data.first.toString());
 			TEST(quarantine); // Quarantining TSS because it got mismatch
 			TEST(!quarantine); // Killing TSS because it got mismatch
 
@@ -851,13 +854,20 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 				try {
 					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
 					if (quarantine) {
-						tr->set(tssQuarantineKeyFor(tssID), LiteralStringRef(""));
+						tr->set(tssQuarantineKeyFor(data.first), LiteralStringRef(""));
 					} else {
-						tr->clear(serverTagKeyFor(tssID));
+						tr->clear(serverTagKeyFor(data.first));
 					}
 					tssMapDB.erase(tr, tssPairID);
+
+					for (const DetailedTSSMismatch& d : data.second) {
+						// <tssid, time, mismatchid> -> mismatch data
+						tssMismatchDB.set(
+						    tr,
+						    Tuple().append(data.first.toString()).append(d.timestamp).append(d.mismatchId.toString()),
+						    d.traceString);
+					}
 
 					wait(tr->commit());
 
@@ -868,7 +878,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 				tries++;
 				if (tries > 10) {
 					// Give up, it'll get another mismatch or a human will investigate eventually
-					TraceEvent("TSS_MismatchGaveUp").detail("TSSID", tssID.toString());
+					TraceEvent("TSS_MismatchGaveUp").detail("TSSID", data.first.toString());
 					break;
 				}
 			}

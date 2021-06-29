@@ -463,11 +463,13 @@ public:
 
 	bool isEnabled() const { return enabled; }
 
-	TraceEvent &setErrorKind(ErrorKind errorKind);
+	TraceEvent& setErrorKind(ErrorKind errorKind);
 
 	explicit operator bool() const { return enabled; }
 
 	void log();
+
+	void disable() { enabled = false; } // Disables the trace event so it doesn't get
 
 	~TraceEvent(); // Actually logs the event
 
@@ -475,6 +477,8 @@ public:
 	static unsigned long CountEventsLoggedAt(Severity);
 
 	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This just just a place to store fields
+
+	const TraceEventFields& getFields() const { return fields; }
 
 private:
 	bool initialized;
@@ -491,7 +495,7 @@ private:
 	int maxFieldLength;
 	int maxEventLength;
 	int timeIndex;
-	int errorKindIndex { -1 };
+	int errorKindIndex{ -1 };
 
 	void setSizeLimits();
 
