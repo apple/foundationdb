@@ -52,7 +52,7 @@ void doOnMainThreadVoid(Future<Void> signal, F f, Error* err) {
 } // namespace internal_thread_helper
 
 // onMainThreadVoid runs a functor on the FDB network thread. The value returned by the functor is ignored.
-// There is no way wait for the functor run to finish. For cases where you need a result back or simply need
+// There is no way to wait for the functor run to finish. For cases where you need a result back or simply need
 // to know when the functor has finished running, use `onMainThread`.
 //
 // WARNING: Successive invocations of `onMainThreadVoid` with different task priorities may run out of order.
