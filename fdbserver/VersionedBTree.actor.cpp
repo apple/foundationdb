@@ -1333,10 +1333,11 @@ struct RedwoodMetrics {
 			std::vector<pagerEventReasons> allReasons = {pagerEventReasons::pointRead, pagerEventReasons::rangeRead, pagerEventReasons::rangePrefetch, pagerEventReasons::commit, pagerEventReasons::lazyClear, pagerEventReasons::metaData};
 
 			for(auto e = allEvents.begin(); e != allEvents.end(); e++){
-				char eventCode = eventsCodes[(size_t)*e];
+				std::string code = "";
+				code += eventsCodes[(size_t)*e];
 				for(auto r = allReasons.begin(); r != allReasons.end(); r++){
 					char reasonCode = pagerEventReasonsCodes[(size_t)*r];
-					t->detail(format("L%d%s%s", h + 1, &eventCode, &reasonCode), eventReasons[(size_t)*e][(size_t)*r]);
+					t->detail(format("L%d%s", h + 1, (code+reasonCode).c_str()), eventReasons[(size_t)*e][(size_t)*r]);
 				}
 			}
 		}
