@@ -487,7 +487,7 @@ public:
 			debug_printf("FIFOQueue::Cursor(%s) writePage\n", toString().c_str());
 			VALGRIND_MAKE_MEM_DEFINED(raw()->begin(), offset);
 			VALGRIND_MAKE_MEM_DEFINED(raw()->begin() + offset, queue->dataBytesPerPage - raw()->endOffset);
-			queue->pager->updatePage(pagerEventReasons::commit, 0, pageID, page); // check if the level is 0
+			queue->pager->updatePage(pagerEventReasons::commit, 0, pageID, page);
 			if (firstPageIDWritten == invalidLogicalPageID) {
 				firstPageIDWritten = pageID;
 			}
@@ -2086,7 +2086,7 @@ public:
 					if (extents[i].queueID == remapQueueID) {
 						LogicalPageID extID = extents[i].extentID;
 						debug_printf("DWALPager Extents: ID: %s ", toString(extID).c_str());
-						self->readExtent(pagerEventReasons::metaData, 0, extID); // check if this should be 0?
+						self->readExtent(pagerEventReasons::metaData, 0, extID);
 					}
 				}
 			}
@@ -6374,7 +6374,7 @@ private:
 		MutationBuffer::const_iterator mBegin = mutations->upper_bound(all.subtreeLowerBound.key);
 		--mBegin;
 		MutationBuffer::const_iterator mEnd = mutations->lower_bound(all.subtreeUpperBound.key);
-		wait(commitSubtree(0,	// check if 0 is correct
+		wait(commitSubtree(0,
 						   self,
 		                   self->m_pager->getReadSnapshot(latestVersion),
 		                   mutations,
