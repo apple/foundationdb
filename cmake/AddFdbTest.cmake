@@ -261,6 +261,14 @@ function(create_correctness_package)
     )
   add_custom_target(package_tests ALL DEPENDS ${tar_file})
   add_dependencies(package_tests strip_only_fdbserver TestHarness)
+  set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/correctness.tar.gz")
+  add_custom_command(
+    OUTPUT "${unversioned_tar_file}"
+    DEPENDS "${tar_file}"
+    COMMAND ${CMAKE_COMMAND} -E copy "${tar_file}" "${unversioned_tar_file}"
+    COMMENT "Copy correctness package to ${unversioned_tar_file}")
+  add_custom_target(package_tests_u DEPENDS "${unversioned_tar_file}")
+  add_dependencies(package_tests_u package_tests)
 endfunction()
 
 function(create_valgrind_correctness_package)
@@ -288,6 +296,14 @@ function(create_valgrind_correctness_package)
       )
     add_custom_target(package_valgrind_tests ALL DEPENDS ${tar_file})
     add_dependencies(package_valgrind_tests strip_only_fdbserver TestHarness)
+    set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/valgrind.tar.gz")
+    add_custom_command(
+      OUTPUT "${unversioned_tar_file}"
+      DEPENDS "${tar_file}"
+      COMMAND ${CMAKE_COMMAND} -E copy "${tar_file}" "${unversioned_tar_file}"
+      COMMENT "Copy valgrind package to ${unversioned_tar_file}")
+    add_custom_target(package_valgrind_tests_u DEPENDS "${unversioned_tar_file}")
+    add_dependencies(package_valgrind_tests_u package_valgrind_tests)
   endif()
 endfunction()
 
