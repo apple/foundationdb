@@ -3,8 +3,17 @@ set(FDBBACKUP_SRCS
 	BackupTLSConfig.cpp
 	backup.actor.cpp)
 
+set(FDBRESTORE_SRCS
+  BackupRestoreCommon.cpp
+  BackupRestoreCommon.h
+	BackupTLSConfig.h
+	BackupTLSConfig.cpp
+  fdbrestore.actor.cpp)
+
 add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
+add_flow_target(EXECUTABLE NAME fdbrestore SRCS ${FDBRESTORE_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
+target_link_libraries(fdbrestore PRIVATE fdbclient)
 
 set(FDBCONVERT_SRCS
 	FileConverter.actor.cpp
@@ -24,25 +33,25 @@ if(NOT OPEN_FOR_IDE)
   if(GENERATE_DEBUG_PACKAGES)
     fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
     fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION backupagent COMPONENT clients RENAME backup_agent/backup_agent)
-    fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME fdbrestore)
+    #fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME fdbrestore)
     fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME dr_agent)
     fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME fdbdr)
   else()
     add_custom_target(prepare_fdbbackup_install ALL DEPENDS strip_only_fdbbackup)
     fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients)
     fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION backupagent COMPONENT clients RENAME backup_agent/backup_agent)
-    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME fdbrestore)
+    #fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME fdbrestore)
     fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME dr_agent)
     fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME fdbdr)
   endif()
   symlink_files(
     LOCATION packages/bin
     SOURCE fdbbackup
-    TARGETS fdbdr dr_agent backup_agent fdbrestore fastrestore_tool)
+    TARGETS fdbdr dr_agent backup_agent fastrestore_tool)
   symlink_files(
     LOCATION bin
     SOURCE fdbbackup
-    TARGETS fdbdr dr_agent backup_agent fdbrestore fastrestore_tool)
+    TARGETS fdbdr dr_agent backup_agent fastrestore_tool)
 endif()
 
 if (GPERFTOOLS_FOUND)
