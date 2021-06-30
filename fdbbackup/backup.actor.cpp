@@ -76,7 +76,7 @@ using std::endl;
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Type of program being executed
-enum class ProgramExe { AGENT, BACKUP, RESTORE, FASTRESTORE_TOOL, DR_AGENT, DB_BACKUP, UNDEFINED };
+enum class ProgramExe { AGENT, BACKUP, FASTRESTORE_TOOL, DR_AGENT, DB_BACKUP, UNDEFINED };
 
 enum class BackupType {
 	UNDEFINED = 0,
@@ -1298,9 +1298,6 @@ static void printUsage(ProgramExe programExe, bool devhelp) {
 	case ProgramExe::BACKUP:
 		printBackupUsage(devhelp);
 		break;
-	case ProgramExe::RESTORE:
-		printRestoreUsage(devhelp);
-		break;
 	case ProgramExe::FASTRESTORE_TOOL:
 		printFastRestoreUsage(devhelp);
 		break;
@@ -1357,14 +1354,7 @@ ProgramExe getProgramType(std::string programExe) {
 		enProgramExe = ProgramExe::BACKUP;
 	}
 
-	// Check if restore
-	else if ((programExe.length() >= exeRestore.size()) &&
-	         (programExe.compare(
-	              programExe.length() - exeRestore.size(), exeRestore.size(), (const char*)exeRestore.begin()) == 0)) {
-		enProgramExe = ProgramExe::RESTORE;
-	}
-
-	// Check if restore
+	// Check if fast restore
 	else if ((programExe.length() >= exeFastRestoreTool.size()) &&
 	         (programExe.compare(programExe.length() - exeFastRestoreTool.size(),
 	                             exeFastRestoreTool.size(),
@@ -3185,19 +3175,6 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			break;
-		case ProgramExe::RESTORE:
-			if (argc < 2) {
-				printRestoreUsage(false);
-				return FDB_EXIT_ERROR;
-			}
-			// Get the restore operation type
-			restoreType = getRestoreType(argv[1]);
-			if (restoreType == RestoreType::UNKNOWN) {
-				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
-			} else {
-				args = std::make_unique<CSimpleOpt>(argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT);
-			}
-			break;
 		case ProgramExe::FASTRESTORE_TOOL:
 			if (argc < 2) {
 				printFastRestoreUsage(false);
@@ -3661,12 +3638,6 @@ int main(int argc, char* argv[]) {
 				}
 				break;
 
-			case ProgramExe::RESTORE:
-				fprintf(stderr, "ERROR: FDB Restore does not support argument value `%s'\n", args->File(argLoop));
-				printHelpTeaser(argv[0]);
-				return FDB_EXIT_ERROR;
-				break;
-
 			case ProgramExe::FASTRESTORE_TOOL:
 				fprintf(
 				    stderr, "ERROR: FDB Fast Restore Tool does not support argument value `%s'\n", args->File(argLoop));
@@ -3984,51 +3955,6 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 
-			break;
-		case ProgramExe::RESTORE:
-
-			switch (restoreType) {
-			case RestoreType::START:
-				f = stopAfter(runRestore(db,
-				                         restoreClusterFileOrig,
-				                         tagName,
-				                         restoreContainer,
-				                         backupKeys,
-				                         beginVersion,
-				                         restoreVersion,
-				                         restoreTimestamp,
-				                         !dryRun,
-				                         !quietDisplay,
-				                         waitForDone,
-				                         addPrefix,
-				                         removePrefix,
-				                         onlyAppyMutationLogs,
-				                         inconsistentSnapshotOnly));
-				break;
-			case RestoreType::WAIT:
-				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), true)));
-				break;
-			case RestoreType::ABORT:
-				f = stopAfter(
-				    map(ba.abortRestore(db, KeyRef(tagName)), [tagName](FileBackupAgent::ERestoreState s) -> Void {
-					    printf("RESTORE_ABORT Tag: %s  State: %s\n",
-					           tagName.c_str(),
-					           FileBackupAgent::restoreStateText(s).toString().c_str());
-					    return Void();
-				    }));
-				break;
-			case RestoreType::STATUS:
-				// If no tag is specifically provided then print all tag status, don't just use "default"
-				if (tagProvided)
-					tag = tagName;
-				f = stopAfter(map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void {
-					printf("%s\n", s.c_str());
-					return Void();
-				}));
-				break;
-			default:
-				throw restore_error();
-			}
 			break;
 		case ProgramExe::FASTRESTORE_TOOL:
 			// Support --dest_cluster_file option as fdbrestore does

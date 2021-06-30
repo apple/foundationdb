@@ -262,6 +262,12 @@ class RestoreDriver : public Driver<RestoreDriver> {
 
 public:
 	void parseCommandLineArgs(int argc, char** argv) {
+		if (argc < 2) {
+			printUsage(false);
+			// TODO: Add new error code
+			throw restore_error();
+		}
+		// Get the restore operation type
 		auto restoreType = getRestoreType(argv[1]);
 		if (restoreType == RestoreType::UNKNOWN) {
 			// TODO: Handle general case
