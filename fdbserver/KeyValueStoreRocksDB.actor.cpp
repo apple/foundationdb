@@ -317,8 +317,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
 			Optional<UID> debugID;
+			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(KeyRef key, Optional<UID> debugID) : key(key), debugID(debugID) {}
+			ReadValueAction(KeyRef key, Optional<UID> debugID) : key(key), debugID(debugID), startTime(now()) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
@@ -326,6 +327,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (a.debugID.present()) {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
+			}
+			if (now() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT) {
+				TraceEvent(SevError, "RocksDBError")
+				    .detail("Error", "Read value request timedout")
+				    .detail("Method", "ReadValue")
+				    .detail("Timeout value", SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT);
+				a.result.send(Optional<Value>());
+				return;
 			}
 			rocksdb::PinnableSlice value;
 			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
@@ -347,9 +356,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Key key;
 			int maxLength;
 			Optional<UID> debugID;
+			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), debugID(debugID){};
+			  : key(key), maxLength(maxLength), debugID(debugID), startTime(now()){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
@@ -360,6 +370,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch.get().addEvent("GetValuePrefixDebug",
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+			}
+			if (now() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT) {
+				TraceEvent(SevError, "RocksDBError")
+				    .detail("Error", "Read value prefix request timedout")
+				    .detail("Method", "ReadValuePrefix")
+				    .detail("Timeout value", SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT);
+				a.result.send(Optional<Value>());
+				return;
 			}
 			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
