@@ -212,6 +212,7 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( ALL_DATA_REMOVED_DELAY,                                1.0 );
 	init( INITIAL_FAILURE_REACTION_DELAY,                       30.0 ); if( randomize && BUGGIFY ) INITIAL_FAILURE_REACTION_DELAY = 0.0;
 	init( CHECK_TEAM_DELAY,                                     30.0 );
+	init( PERPETUAL_WIGGLE_DELAY,                               50.0 );
 	init( LOG_ON_COMPLETION_DELAY,         DD_QUEUE_LOGGING_INTERVAL );
 	init( BEST_TEAM_MAX_TEAM_TRIES,                               10 );
 	init( BEST_TEAM_OPTION_COUNT,                                  4 );
@@ -463,6 +464,7 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( REPLACE_INTERFACE_CHECK_DELAY,                         5.0 );
 	init( COORDINATOR_REGISTER_INTERVAL,                         5.0 );
 	init( CLIENT_REGISTER_INTERVAL,                            600.0 );
+	init( CLUSTER_CONTROLLER_ENABLE_WORKER_HEALTH_MONITOR,     false );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );

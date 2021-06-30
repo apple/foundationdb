@@ -1034,6 +1034,13 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 			        ? tr->get(StringRef(encodeFailedServersKey(AddressExclusion(server.secondaryAddress().get().ip))))
 			        : Future<Optional<Value>>(Optional<Value>());
 
+			state vector<Future<Optional<Value>>> localityExclusions;
+			std::map<std::string, std::string> localityData = server.locality.getAllData();
+			for (const auto& l : localityData) {
+				localityExclusions.push_back(tr->get(StringRef(encodeExcludedLocalityKey(
+				    LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second))));
+			}
+
 			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
 			state Future<RangeResult> fHistoryTags = tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
 
@@ -1041,11 +1048,21 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 			     success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) &&
 			     success(fExclProc2) && success(fExclIP2) && success(fFailProc2) && success(fFailIP2));
 
-			// If we have been added to the excluded/failed state servers list, we have to fail
+			for (const auto& exclusion : localityExclusions) {
+				wait(success(exclusion));
+			}
+
+			// If we have been added to the excluded/failed state servers or localities list, we have to fail
 			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() ||
 			    fFailIP.get().present() || fExclProc2.get().present() || fExclIP2.get().present() ||
 			    fFailProc2.get().present() || fFailIP2.get().present()) {
 				throw recruitment_failed();
+			}
+
+			for (const auto& exclusion : localityExclusions) {
+				if (exclusion.get().present()) {
+					throw recruitment_failed();
+				}
 			}
 
 			if (fTagLocalities.get().more || fTags.get().more || fHistoryTags.get().more)

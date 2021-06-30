@@ -2891,10 +2891,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		wait(delay(0));
 
-		TraceEvent(SevDebug, "FetchKeysUnblocked", data->thisServerID)
-		    .detail("FKID", interval.pairID)
-		    .detail("Version", fetchVersion);
-
 		// Get the history
 		state int debug_getRangeRetries = 0;
 		state int debug_nextRetryToLog = 1;
@@ -2907,6 +2903,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		loop {
 			state Transaction tr(data->cx);
 			state Version fetchVersion = data->version.get();
+
+			TraceEvent(SevDebug, "FetchKeysUnblocked", data->thisServerID)
+			    .detail("FKID", interval.pairID)
+			    .detail("Version", fetchVersion);
+
 			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion)
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);

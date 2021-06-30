@@ -64,6 +64,9 @@ struct ProxyStats {
 	LatencySample commitLatencySample;
 	LatencyBands commitLatencyBands;
 
+	// Ratio of tlogs receiving empty commit messages.
+	LatencySample commitBatchingEmptyMessageRatio;
+
 	LatencySample commitBatchingWindowSize;
 
 	Future<Void> logger;
@@ -102,6 +105,10 @@ struct ProxyStats {
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+	    commitBatchingEmptyMessageRatio("CommitBatchingEmptyMessageRatio",
+	                                    id,
+	                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
