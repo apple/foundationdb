@@ -469,7 +469,7 @@ public:
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
-			nextPageReader = waitOrError(queue->pager->readPage(pagerEventReasons::metaData, 0, nextPageID, true), queue->pagerError); // check if 0 is correct
+			nextPageReader = waitOrError(queue->pager->readPage(pagerEventReasons::metaData, 0, nextPageID, true), queue->pagerError);
 		}
 
 		Future<Void> loadExtent() {
@@ -2918,7 +2918,7 @@ public:
 			Reference<ArenaPage> data = wait(self->readPage(pagerEventReasons::metaData, 0, p.newPageID, false, true));
 
 			// Write the data to the original page so it can be read using its original pageID
-			self->updatePage(pagerEventReasons::metaData, 0, p.originalPageID, data); // check if this should be 0
+			self->updatePage(pagerEventReasons::metaData, 0, p.originalPageID, data);
 			++g_redwoodMetrics.metric.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
 			++g_redwoodMetrics.metric.pagerRemapSkip;
@@ -8997,7 +8997,7 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 	pager->updatePage(pagerEventReasons::commit, 0, id, p);
 	pager->setMetaKey(LiteralStringRef("asdfasdf"));
 	wait(pager->commit());
-	Reference<ArenaPage> p2 = wait(pager->readPage(pagerEventReasons::pointRead, 0, id, true)); // check if this level 0 is correct
+	Reference<ArenaPage> p2 = wait(pager->readPage(pagerEventReasons::pointRead, 0, id, true));
 	printf("%s\n", StringRef(p2->begin(), p2->size()).toHexString().c_str());
 
 	// TODO: Verify reads, do more writes and reads to make this a real pager validator
