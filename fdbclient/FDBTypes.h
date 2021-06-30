@@ -25,6 +25,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 #include "flow/Arena.h"
 #include "flow/flow.h"
@@ -263,6 +264,11 @@ std::string describeList(T const& items, int max_items) {
 
 template <class T>
 std::string describe(std::vector<T> const& items, int max_items = -1) {
+	return describeList(items, max_items);
+}
+
+template <class T>
+std::string describe(std::unordered_set<T> const& items, int max_items = -1) {
 	return describeList(items, max_items);
 }
 

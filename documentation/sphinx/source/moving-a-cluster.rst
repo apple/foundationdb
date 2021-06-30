@@ -38,7 +38,7 @@ $ sudo service foundationdb stop
 
 7. Exclude the original machines from the cluster using ``exclude`` in ``fdbcli``. This command will not return until all database state has been moved off of the original machines and fully replicated to the new machines. For example::
 
-    fdb> exclude 192.168.1.1:4500 192.168.1.2:4500 192.168.1.3:4500
+    fdb> exclude 192.168.1.1:4500 192.168.1.2:4500 192.168.1.3:4500 locality_dcid:primary-satellite locality_zoneid:primary-satellite-log-2 locality_machineid:primary-stateless-1 locality_processid:223be2da244ca0182375364e4d122c30 or any locality
 
 8. Run ``coordinators auto`` in ``fdbcli`` to move coordination state to the new machines. Please note that this will cause the fdb.cluster file to be updated with the addresses of the new machines. Any currently connected clients will be notified and (assuming they have appropriate file system :ref:`permissions <cluster_file_permissions>`) will update their own copy of the cluster file. As long as the original machines are still running, any clients that connect to them will be automatically forwarded to the new cluster coordinators. However, if you have a client that has not yet connected or only connects intermittently, you will need to copy the new cluster file from one of the new machines to the client machine.
 

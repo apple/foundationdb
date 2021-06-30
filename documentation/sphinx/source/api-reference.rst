@@ -17,3 +17,4 @@ The following documents give detailed descriptions of the API for each language:
    api-c
    api-error-codes
    special-keys
+   global-configuration
