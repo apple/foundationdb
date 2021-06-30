@@ -30,15 +30,14 @@
 struct VersionVector {
 	std::unordered_map<Tag, Version> versions;
 	Version maxVersion; // Specifies the max version in this version vector. (Note:
-                        // there may or may not be a corresponding entry for this
-                        // version in the "versions" map.)
-
+	                    // there may or may not be a corresponding entry for this
+	                    // version in the "versions" map.)
 
 	VersionVector() : maxVersion(invalidVersion) {}
 	VersionVector(Version version) : maxVersion(version) {}
 
 	void setVersion(const Tag& tag, Version version) {
-        ASSERT(tag != invalidTag);
+		ASSERT(tag != invalidTag);
 		ASSERT(version > maxVersion);
 		versions[tag] = version;
 		maxVersion = version;
@@ -49,12 +48,12 @@ struct VersionVector {
 		return versions.find(tag) != versions.end();
 	}
 
-	// @pre assumes that the given tag has an entry in the "versions" map.
+	// @pre assumes that the given tag has an entry in the version vector.
 	Version getVersion(const Tag& tag) const {
 		ASSERT(tag != invalidTag);
-        auto iter = versions.find(tag);
-        ASSERT(iter != versions.end());
-        return iter->second;
+		auto iter = versions.find(tag);
+		ASSERT(iter != versions.end());
+		return iter->second;
 	}
 
 	bool operator==(const VersionVector& vv) const { return maxVersion == vv.maxVersion; }
@@ -67,8 +66,8 @@ struct VersionVector {
 	}
 };
 
-static const VersionVector minVersionVector{0};
-static const VersionVector maxVersionVector{MAX_VERSION};
-static const VersionVector invalidVersionVector{invalidVersion};
+static const VersionVector minVersionVector{ 0 };
+static const VersionVector maxVersionVector{ MAX_VERSION };
+static const VersionVector invalidVersionVector{ invalidVersion };
 
 #endif /* FDBCLIENT_VERSION_VECTOR_H */
