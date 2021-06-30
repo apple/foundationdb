@@ -1379,6 +1379,7 @@ ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, vector<UID> t
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			Optional<Value> _teamId = wait(tr.get(teamListKey));
 			if (_teamId.present()) {
