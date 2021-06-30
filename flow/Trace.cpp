@@ -838,12 +838,14 @@ TraceEvent::TraceEvent(const char* type, UID id)
   : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
+	setThreadId();
 }
 TraceEvent::TraceEvent(Severity severity, const char* type, UID id)
   : id(id), type(type), severity(severity), initialized(false), logged(false),
     enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
+	setThreadId();
 }
 TraceEvent::TraceEvent(TraceInterval& interval, UID id)
   : id(id), type(interval.type), severity(interval.severity), initialized(false), logged(false),
@@ -851,6 +853,7 @@ TraceEvent::TraceEvent(TraceInterval& interval, UID id)
 
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
+	setThreadId();
 
 	init(interval);
 }
@@ -860,6 +863,7 @@ TraceEvent::TraceEvent(Severity severity, TraceInterval& interval, UID id)
 
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
+	setThreadId();
 
 	init(interval);
 }
@@ -1119,6 +1123,22 @@ TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
 	}
 
 	return *this;
+}
+
+// The OS-provided thread ID of the current thread.  This is particularly important
+// for multithreaded or multiversion client setups and for multithreaded storage
+// engines.
+thread_local std::string threadIdString = "";
+
+void TraceEvent::setThreadId() {
+	if (threadIdString == "") {
+		// The thread_local threadIdString amortizes the cost of constructing the
+		// string each time we allocate a TraceEvent.
+		std::stringstream ss;
+		ss << std::this_thread::get_id();
+		threadIdString = ss.str();
+	}
+	this->detail("ThreadID", threadIdString);
 }
 
 int TraceEvent::getMaxFieldLength() const {
