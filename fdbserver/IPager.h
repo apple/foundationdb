@@ -42,8 +42,10 @@ typedef uint32_t QueueID;
 
 // Pager Events
 enum class events{ pagerCacheLookup = 0, pagerCacheHit, pagerCacheMiss, pagerWrite, MAXEVENTS};
+static constexpr char eventsCodes[] = "LHMW";
 // Reasons for page levle events.
 enum class pagerEventReasons{ pointRead = 0, rangeRead, rangePrefetch, commit, lazyClear, metaData, MAXEVENTREASONS};
+static constexpr char pagerEventReasonsCodes[] = "GRPWCM";
 
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
