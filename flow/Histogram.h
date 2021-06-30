@@ -131,7 +131,6 @@ public:
 	}
 	// Histogram buckets samples into linear interval of size 4 percent.
 	inline void samplePercentage(double pct) {
-		ASSERT(unit==Histogram::Unit::percentage);
 		ASSERT(pct>=0.0);
 		if (pct >= 1.28){
 			pct = 1.24;
@@ -144,13 +143,16 @@ public:
 	// Histogram buckets samples into one of the same sized buckets 
 	// This is used when the distance b/t upperBound and lowerBound are relativly small
 	inline void sampleRecordCounter(uint32_t sample) {
-		ASSERT(unit==Histogram::Unit::record_counter);
 		if(sample > upperBound){ 
 			sample = upperBound;
 		}
 		size_t idx = ( (sample - lowerBound) * 31.0 ) / (upperBound - lowerBound);
 		ASSERT(idx < 32);
 		buckets[idx]++;
+	}
+
+	void updateUpperBound(uint32_t upperBound){
+		this->upperBound = upperBound;
 	}
 
 	void clear() {

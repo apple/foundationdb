@@ -1289,7 +1289,7 @@ int nextPowerOf2(uint32_t x) {
 
 struct RedwoodMetrics {
 	static constexpr int btreeLevels = 5;
-	static constexpr int maxRecordCount = 315;
+	static int maxRecordCount;
 
 	struct eventReasonsArray{
 		unsigned int eventReasons[(size_t)events::MAXEVENTS][(size_t)pagerEventReasons::MAXEVENTREASONS];
@@ -1309,7 +1309,7 @@ struct RedwoodMetrics {
 			return eventReasons[(size_t)e][(size_t)r];
 		}
 
-		std::string report(int currLevel){
+		std::string ouputSummary(int currLevel){
 			std::string result = "";
 			std::map<events, std::string> allEvents = {{events::pagerCacheLookup, "pagerCacheLookup"}, {events::pagerCacheHit, "pagerCacheHit"}, {events::pagerCacheMiss, "pagerCacheMiss"}, {events::pagerWrite, "pagerWrite"}};
 			std::map<pagerEventReasons, std::string> allReasons = {{pagerEventReasons::pointRead, "pointRead"}, {pagerEventReasons::rangeRead, "rangeRead"}, {pagerEventReasons::rangePrefetch, "rangePrefetch"}, {pagerEventReasons::commit, "commit"}, {pagerEventReasons::lazyClear, "lazyClear"}, {pagerEventReasons::metaData, "metaData"}};
@@ -1327,7 +1327,18 @@ struct RedwoodMetrics {
 				result +="\n";
 			}
 			return result;
-			
+		}
+		void reportTrace(TraceEvent* t, int h){
+			std::vector<events> allEvents = {events::pagerCacheLookup, events::pagerCacheHit, events::pagerCacheMiss, events::pagerWrite};
+			std::vector<pagerEventReasons> allReasons = {pagerEventReasons::pointRead, pagerEventReasons::rangeRead, pagerEventReasons::rangePrefetch, pagerEventReasons::commit, pagerEventReasons::lazyClear, pagerEventReasons::metaData};
+
+			for(auto e = allEvents.begin(); e != allEvents.end(); e++){
+				char eventCode = eventsCodes[(size_t)*e];
+				for(auto r = allReasons.begin(); r != allReasons.end(); r++){
+					char reasonCode = pagerEventReasonsCodes[(size_t)*r];
+					t->detail(format("L%d%s%s", h + 1, &eventCode, &reasonCode), eventReasons[(size_t)*e][(size_t)*r]);
+				}
+			}
 		}
 
 	};
@@ -1368,7 +1379,7 @@ struct RedwoodMetrics {
 			levelClear(); 
 		}
 
-		void levelClear(unsigned int levelCounter = 0){
+		void levelClear(int levelCounter = -1){
 			metric = {};
 			if(!buildFillPctSketch.isValid() || buildFillPctSketch->name() != ("buildFillPct:" + std::to_string(levelCounter))){
 				buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
@@ -1415,6 +1426,7 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() { 
+		std::cout<<"redwoodmetrics initializer"<<maxRecordCount<<std::endl;
 		kvSizeWritten = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes);
 		kvSizeReadByGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet "), Histogram::Unit::bytes);
 		kvSizeReadByRangeGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByRangeGet"), Histogram::Unit::bytes);
@@ -1452,15 +1464,19 @@ struct RedwoodMetrics {
 
 	Level& level(unsigned int level) {
 		static Level outOfBound;
-		//ASSERT(level<=btreeLevels && level>0);
-		//  modify this later!
-		if(level>btreeLevels || level<=0){
-			level = 1;
-		}
-		if (level == 0 || level > btreeLevels) {
+		if (level <= 0 || level > btreeLevels) {
 			return outOfBound;
 		}
 		return levels[level - 1];
+	}
+
+	void updateMaxRecordCount(int maxRecordCount){
+		this->maxRecordCount = maxRecordCount;
+		for (int i = 0; i < btreeLevels; ++i) {
+			auto& level = levels[i];
+			level.buildItemCountSketch->updateUpperBound(maxRecordCount);
+			level.modifyItemCountSketch->updateUpperBound(maxRecordCount);
+		}
 	}
 
 	// This will populate a trace event and/or a string with Redwood metrics.
@@ -1493,6 +1509,7 @@ struct RedwoodMetrics {
 			                                               { "PagerRemapCopy", metric.pagerRemapCopy },
 			                                               { "PagerRemapSkip", metric.pagerRemapSkip } };
 		GetHistogramRegistry().logReport();
+		;
 
 		double elapsed = now() - startTime;
 
@@ -1503,6 +1520,7 @@ struct RedwoodMetrics {
 					e->detail(m.first, m.second);
 				}
 			}
+			metric.eventReasons.reportTrace(e, -1);
 		}
 
 		if (s != nullptr) {
@@ -1514,7 +1532,7 @@ struct RedwoodMetrics {
 				}
 			}
 			*s += "\n";
-			*s += metric.eventReasons.report(0);
+			*s += metric.eventReasons.ouputSummary(0);
 		}
 
 		for (int i = 0; i < btreeLevels; ++i) {
@@ -1555,6 +1573,7 @@ struct RedwoodMetrics {
 						e->detail(format("L%d%s", i + 1, m.first + (c == '-' ? 1 : 0)), m.second);
 					}
 				}
+				level.metric.eventReasons.reportTrace(e, i);
 			}
 
 			if (s != nullptr) {
@@ -1575,7 +1594,7 @@ struct RedwoodMetrics {
 					}
 				}
 				*s += '\n';
-				*s += level.metric.eventReasons.report(i+1);
+				*s += level.metric.eventReasons.ouputSummary(i+1);
 			}
 		}
 	}
@@ -1593,10 +1612,14 @@ struct RedwoodMetrics {
 };
 
 // Using a global for Redwood metrics because a single process shouldn't normally have multiple storage engines
+int RedwoodMetrics::maxRecordCount = 315;
 RedwoodMetrics g_redwoodMetrics = {};
 Future<Void> g_redwoodMetricsActor;
 
 ACTOR Future<Void> redwoodMetricsLogger() {
+	if(g_redwoodMetrics.maxRecordCount != 315 * SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE / 4096){
+		g_redwoodMetrics.updateMaxRecordCount(315 * SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE / 4096);
+	}
 	g_redwoodMetrics.clear();
 
 	loop {
@@ -4128,12 +4151,15 @@ public:
 	static RedwoodRecordRef dbEnd;
 
 	struct LazyClearQueueEntry {
+		uint8_t height;
 		Version version;
 		Standalone<BTreePageIDRef> pageID;
 
 		bool operator<(const LazyClearQueueEntry& rhs) const { return version < rhs.version; }
 
 		int readFromBytes(const uint8_t* src) {
+			height = *(uint8_t*)src;
+			src += sizeof(uint8_t);
 			version = *(Version*)src;
 			src += sizeof(Version);
 			int count = *src++;
@@ -4141,9 +4167,11 @@ public:
 			return bytesNeeded();
 		}
 
-		int bytesNeeded() const { return sizeof(Version) + 1 + (pageID.size() * sizeof(LogicalPageID)); }
+		int bytesNeeded() const { return sizeof(uint8_t) + sizeof(Version) + 1 + (pageID.size() * sizeof(LogicalPageID)); }
 
 		int writeToBytes(uint8_t* dst) const {
+			*(uint8_t*)dst = height;
+			dst += sizeof(uint8_t);
 			*(Version*)dst = version;
 			dst += sizeof(Version);
 			*dst++ = pageID.size();
@@ -4306,8 +4334,8 @@ public:
 					break;
 				}
 				// Start reading the page, without caching
-				int currLevel = (self!=nullptr && self->m_pHeader!=nullptr) ? self->m_pHeader->height : 0;
-				entries.push_back(std::make_pair(q.get(), self->readPage(pagerEventReasons::lazyClear, currLevel, snapshot, q.get().pageID, true, false)));
+
+				entries.push_back(std::make_pair(q.get(), self->readPage(pagerEventReasons::lazyClear, q.get().height, snapshot, q.get().pageID, true, false)));
 
 				--toPop;
 			}
@@ -4343,7 +4371,7 @@ public:
 						} else {
 							// Otherwise, queue them for lazy delete.
 							debug_printf("LazyClear: queuing child %s\n", toString(btChildPageID).c_str());
-							self->m_lazyClearQueue.pushFront(LazyClearQueueEntry{ v, btChildPageID });
+							self->m_lazyClearQueue.pushFront(LazyClearQueueEntry{ btPage.height, v, btChildPageID });
 							metrics.metric.lazyClearRequeue += 1;
 							metrics.metric.lazyClearRequeueExt += (btChildPageID.size() - 1);
 						}
@@ -6093,7 +6121,7 @@ private:
 										             context.c_str(),
 										             ::toString(rec.getChildPage()).c_str());
 										self->m_lazyClearQueue.pushFront(
-										    LazyClearQueueEntry{ writeVersion, rec.getChildPage() });
+										    LazyClearQueueEntry{ btPage->height, writeVersion, rec.getChildPage() });
 									}
 								}
 								c.moveNext();
@@ -6345,8 +6373,7 @@ private:
 		MutationBuffer::const_iterator mBegin = mutations->upper_bound(all.subtreeLowerBound.key);
 		--mBegin;
 		MutationBuffer::const_iterator mEnd = mutations->lower_bound(all.subtreeUpperBound.key);
-		int currLevel = (self->m_pHeader != nullptr) ? self->m_pHeader->height : 0;
-		wait(commitSubtree(currLevel,
+		wait(commitSubtree(0,	// check if 0 is correct
 						   self,
 		                   self->m_pager->getReadSnapshot(latestVersion),
 		                   mutations,
@@ -6557,7 +6584,7 @@ public:
 							// If there is a page link, preload it.
 							if (c.get().value.present()) {
 								BTreePageIDRef childPage = c.get().getChildPage();
-								preLoadPage(self->pager.getPtr(), self->getHeight()+1, childPage);
+								preLoadPage(self->pager.getPtr(), self->getHeight()-1, childPage);
 								prefetchBytes -= self->btree->m_blockSize * childPage.size();
 							}
 						}
@@ -6650,8 +6677,8 @@ public:
 					ASSERT(entry.cursor.movePrev());
 					ASSERT(entry.cursor.get().value.present());
 				}
-				int currLevel =  (entry.btPage() != nullptr) ? entry.btPage()->height : 0;
-				wait(self->pushPage(pagerEventReasons::metaData, currLevel, entry.cursor));
+				int currLevel = entry.btPage()->height;
+				wait(self->pushPage(pagerEventReasons::metaData, currLevel-1, entry.cursor));
 				auto& newEntry = self->path.back();
 				ASSERT(forward ? newEntry.cursor.moveFirst() : newEntry.cursor.moveLast());
 			}
