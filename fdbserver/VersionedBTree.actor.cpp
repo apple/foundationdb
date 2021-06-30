@@ -1618,9 +1618,6 @@ RedwoodMetrics g_redwoodMetrics = {};
 Future<Void> g_redwoodMetricsActor;
 
 ACTOR Future<Void> redwoodMetricsLogger() {
-	if(g_redwoodMetrics.maxRecordCount != 315 * SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE / 4096){
-		g_redwoodMetrics.updateMaxRecordCount(315 * SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE / 4096);
-	}
 	g_redwoodMetrics.clear();
 
 	loop {
@@ -1954,6 +1951,9 @@ public:
 	}
 
 	void setPageSize(int size) {
+		if(g_redwoodMetrics.maxRecordCount != 315 * size / 4096){
+			g_redwoodMetrics.updateMaxRecordCount(315 * size / 4096);
+		}
 		logicalPageSize = size;
 		// Physical page size is the total size of the smallest number of physical blocks needed to store
 		// logicalPageSize bytes
