@@ -136,7 +136,7 @@ public:
 			pct = 1.24;
 		}
 		size_t idx = (pct*100) / 4; 
-		ASSERT(idx < 32);
+		ASSERT(idx < 32 && idx >= 0);
 		buckets[idx]++;
 	}
 
@@ -147,7 +147,7 @@ public:
 			sample = upperBound;
 		}
 		size_t idx = ( (sample - lowerBound) * 31.0 ) / (upperBound - lowerBound);
-		ASSERT(idx < 32);
+		ASSERT(idx < 32 && idx >= 0);
 		buckets[idx]++;
 	}
 
