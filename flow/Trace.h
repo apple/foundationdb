@@ -426,6 +426,7 @@ private:
 	void setField(const char* key, int64_t value);
 	void setField(const char* key, double value);
 	void setField(const char* key, const std::string& value);
+	void setThreadId();
 
 	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
