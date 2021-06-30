@@ -153,6 +153,7 @@ public:
 
 	void updateUpperBound(uint32_t upperBound){
 		this->upperBound = upperBound;
+		clear();
 	}
 
 	void clear() {
