@@ -111,7 +111,7 @@ extern CSimpleOpt::SOption g_rgOptions[];
 
 void handleArgsError(CSimpleOpt const& args, const char* programName);
 
-void printHelpTeaser(const char* programName);
+void printHelpTeaser(std::string const& programName);
 
 Reference<IBackupContainer> openBackupContainer(const char* name, std::string const& destinationContainer);
 
@@ -132,6 +132,8 @@ protected:
 	bool processCommonArg(std::string const& programName, CSimpleOpt& arg);
 
 	void addBlobCredentials(std::string const& blobCreds) { tlsConfig.blobCredentials.push_back(blobCreds); }
+
+	void initTraceFile() const;
 
 public:
 	bool traceEnabled() const { return trace; }
@@ -167,7 +169,7 @@ protected:
 			        "ERROR: %s does not support argument value `%s'\n",
 			        T::getProgramName().c_str(),
 			        args.File(argLoop));
-			printHelpTeaser(T::getProgramName().c_str());
+			printHelpTeaser(T::getProgramName());
 			throw invalid_option_value();
 		}
 	}
@@ -367,3 +369,8 @@ int commonMain(int argc, char** argv) {
 	ASSERT(false);
 	return 0;
 }
+
+void initTraceFile(uint64_t traceRollSize,
+                   uint64_t traceMaxLogsSize,
+                   std::string const& traceDir,
+                   std::string const& traceLogGroup);

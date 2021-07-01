@@ -22,8 +22,8 @@
 
 extern bool g_crashOnError;
 
-void printHelpTeaser(const char* programName) {
-	fprintf(stderr, "Try `%s --help' for more information.\n", programName);
+void printHelpTeaser(std::string const& programName) {
+	fprintf(stderr, "Try `%s --help' for more information.\n", programName.c_str());
 }
 
 void handleArgsError(CSimpleOpt const& args, const char* programName) {
@@ -162,5 +162,12 @@ bool DriverBase::processCommonArg(std::string const& programName, CSimpleOpt& ar
 		return true;
 	default:
 		return false;
+	}
+}
+
+void DriverBase::initTraceFile() const {
+	if (trace) {
+		openTraceFile(
+		    NetworkAddress(), TRACE_DEFAULT_ROLL_SIZE, TRACE_DEFAULT_MAX_LOGS_SIZE, traceDir, "trace", traceLogGroup);
 	}
 }

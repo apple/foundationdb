@@ -8,6 +8,8 @@ set(FDBRESTORE_SRCS
   BackupRestoreCommon.h
 	BackupTLSConfig.h
 	BackupTLSConfig.cpp
+  RestoreDriver.cpp
+  RestoreDriver.h
   fdbrestore.actor.cpp)
 
 set(FDBBACKUPAGENT_SRCS
@@ -28,14 +30,25 @@ set(FDBDRAGENT_SRCS
   AgentDriver.h
   dragent.actor.cpp)
 
+set(FDBFASTRESTORE_SRCS
+  BackupRestoreCommon.cpp
+  BackupRestoreCommon.h
+	BackupTLSConfig.h
+	BackupTLSConfig.cpp
+  RestoreDriver.cpp
+  RestoreDriver.h
+  fastrestore.actor.cpp)
+
 add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
 add_flow_target(EXECUTABLE NAME fdbrestore SRCS ${FDBRESTORE_SRCS})
 add_flow_target(EXECUTABLE NAME backup_agent SRCS ${FDBBACKUPAGENT_SRCS})
 add_flow_target(EXECUTABLE NAME dr_agent SRCS ${FDBDRAGENT_SRCS})
+add_flow_target(EXECUTABLE NAME fastrestore_tool SRCS ${FDBFASTRESTORE_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 target_link_libraries(fdbrestore PRIVATE fdbclient)
 target_link_libraries(backup_agent PRIVATE fdbclient)
 target_link_libraries(dr_agent PRIVATE fdbclient)
+target_link_libraries(fastrestore_tool PRIVATE fdbclient)
 
 set(FDBCONVERT_SRCS
 	FileConverter.actor.cpp
@@ -65,11 +78,11 @@ if(NOT OPEN_FOR_IDE)
   symlink_files(
     LOCATION packages/bin
     SOURCE fdbbackup
-    TARGETS fdbdr fastrestore_tool)
+    TARGETS fdbdr)
   symlink_files(
     LOCATION bin
     SOURCE fdbbackup
-    TARGETS fdbdr fastrestore_tool)
+    TARGETS fdbdr)
 endif()
 
 if (GPERFTOOLS_FOUND)
