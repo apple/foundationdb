@@ -247,7 +247,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
-	// Captures the latest commit version for each storage server in the cluster.
+	// Captures the latest commit version targeted for each storage server in the cluster.
 	VersionVector ssVersionVector;
 
 	CounterCollection cc;
