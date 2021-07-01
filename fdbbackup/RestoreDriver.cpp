@@ -111,7 +111,7 @@ RestoreType getRestoreType(std::string const& name) {
 	return RestoreType::UNKNOWN;
 }
 
-CSimpleOpt::SOption const rg_restoreOptions[] = {
+CSimpleOpt::SOption const rgRestoreOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif

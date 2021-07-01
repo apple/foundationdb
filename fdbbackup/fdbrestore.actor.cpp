@@ -172,19 +172,23 @@ class RestoreDriver : public Driver<RestoreDriver> {
 public:
 	static std::string getProgramName() { return "fdbrestore"; }
 
+	static void printUsage(bool devhelp) { printRestoreUsage(getProgramName(), devhelp); }
+
 	void parseCommandLineArgs(int argc, char** argv) {
 		if (argc < 2) {
-			printRestoreUsage(getProgramName(), false);
+			printUsage(false);
 			// TODO: Add new error code
 			throw restore_error();
 		}
 		// Get the restore operation type
 		auto restoreType = getRestoreType(argv[1]);
 		if (restoreType == RestoreType::UNKNOWN) {
-			// TODO: Handle general case
-			ASSERT(false);
+			auto args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
+			runTopLevelCommand(*args);
+			// FIXME: Confusing to exit here?
+			flushAndExit(FDB_EXIT_SUCCESS);
 		}
-		auto args = std::make_unique<CSimpleOpt>(argc - 1, argv + 1, rg_restoreOptions, SO_O_EXACT);
+		auto args = std::make_unique<CSimpleOpt>(argc - 1, argv + 1, rgRestoreOptions, SO_O_EXACT);
 		processArgs(*args);
 	}
 

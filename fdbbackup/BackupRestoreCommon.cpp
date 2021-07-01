@@ -19,6 +19,7 @@
  */
 
 #include "fdbbackup/BackupRestoreCommon.h"
+#include "fdbclient/BuildFlags.h"
 
 extern bool g_crashOnError;
 
@@ -170,4 +171,14 @@ void DriverBase::initTraceFile() const {
 		openTraceFile(
 		    NetworkAddress(), TRACE_DEFAULT_ROLL_SIZE, TRACE_DEFAULT_MAX_LOGS_SIZE, traceDir, "trace", traceLogGroup);
 	}
+}
+
+void printVersion() {
+	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
+	printf("source version %s\n", getSourceVersion());
+	printf("protocol %llx\n", (long long)currentProtocolVersion.version());
+}
+
+void printBuildInformation() {
+	printf("%s", jsonBuildInformation().c_str());
 }

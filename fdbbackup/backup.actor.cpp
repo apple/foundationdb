@@ -76,7 +76,7 @@ using std::endl;
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Type of program being executed
-enum class ProgramExe { BACKUP, FASTRESTORE_TOOL, DB_BACKUP, UNDEFINED };
+enum class ProgramExe { BACKUP, DB_BACKUP, UNDEFINED };
 
 enum class BackupType {
 	UNDEFINED = 0,
@@ -657,84 +657,6 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
-// g_rgRestoreOptions is used by fastrestore_tool
-CSimpleOpt::SOption g_rgRestoreOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
-	{ OPT_RESTORE_CLUSTERFILE_DEST, "--dest_cluster_file", SO_REQ_SEP },
-	{ OPT_RESTORE_CLUSTERFILE_ORIG, "--orig_cluster_file", SO_REQ_SEP },
-	{ OPT_RESTORE_TIMESTAMP, "--timestamp", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
-	{ OPT_RESTORECONTAINER, "-r", SO_REQ_SEP },
-	{ OPT_PREFIX_ADD, "--add_prefix", SO_REQ_SEP },
-	{ OPT_PREFIX_REMOVE, "--remove_prefix", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
-	{ OPT_WAITFORDONE, "-w", SO_NONE },
-	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
-	{ OPT_RESTORE_VERSION, "--version", SO_REQ_SEP },
-	{ OPT_RESTORE_VERSION, "-v", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
-	{ OPT_DRYRUN, "-n", SO_NONE },
-	{ OPT_DRYRUN, "--dryrun", SO_NONE },
-	{ OPT_FORCE, "-f", SO_NONE },
-	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
-	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
-	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent_snapshot_only", SO_NONE },
-#ifndef TLS_DISABLED
-	TLS_OPTION_FLAGS
-#endif
-	    SO_END_OF_OPTIONS
-};
-
-CSimpleOpt::SOption g_rgDBAgentOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
-	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
-	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
-	{ OPT_VERSION, "--version", SO_NONE },
-	{ OPT_VERSION, "-v", SO_NONE },
-	{ OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_LOCALITY, "--locality_", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-#ifndef TLS_DISABLED
-	TLS_OPTION_FLAGS
-#endif
-	    SO_END_OF_OPTIONS
-};
-
 CSimpleOpt::SOption g_rgDBStartOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
@@ -890,11 +812,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
-const KeyRef exeAgent = LiteralStringRef("backup_agent");
 const KeyRef exeBackup = LiteralStringRef("fdbbackup");
-const KeyRef exeRestore = LiteralStringRef("fdbrestore");
-const KeyRef exeFastRestoreTool = LiteralStringRef("fastrestore_tool"); // must be lower case
-const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
 
 extern const char* getSourceVersion();
@@ -938,49 +856,6 @@ const char* BlobCredentialInfo =
 
 static void printHelpTeaser(const char* name) {
 	fprintf(stderr, "Try `%s --help' for more information.\n", name);
-}
-
-static void printAgentUsage(bool devhelp) {
-	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s [OPTIONS]\n\n", exeAgent.toString().c_str());
-	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-	       "                 FoundationDB cluster. The default is first the value of the\n"
-	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-	       "                 then `%s'.\n",
-	       platform::getDefaultClusterFilePath().c_str());
-	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
-	       "                 unspecified, defaults to the current directory. Has\n"
-	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG_GROUP\n"
-	       "                 Sets the LogGroup field with the specified value for all\n"
-	       "                 events in the trace output (defaults to `default').\n");
-	printf("  --trace_format FORMAT\n"
-	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
-	       "                 Has no effect unless --log is specified.\n");
-	printf("  -m SIZE, --memory SIZE\n"
-	       "                 Memory limit. The default value is 8GiB. When specified\n"
-	       "                 without a unit, MiB is assumed.\n");
-#ifndef TLS_DISABLED
-	printf(TLS_HELP);
-#endif
-	printf("  --build_flags  Print build information and exit.\n");
-	printf("  -v, --version  Print version information and exit.\n");
-	printf("  -h, --help     Display this help and exit.\n");
-
-	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
-	}
-
-	printf("\n");
-	puts(BlobCredentialInfo);
-
-	return;
 }
 
 void printBackupContainerInfo() {
@@ -1114,129 +989,6 @@ static void printBackupUsage(bool devhelp) {
 	return;
 }
 
-static void printRestoreUsage(bool devhelp) {
-	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | abort | wait) [OPTIONS]\n\n",
-	       exeRestore.toString().c_str());
-
-	printf(" TOP LEVEL OPTIONS:\n");
-	printf("  --build_flags  Print build information and exit.\n");
-	printf("  -v, --version  Print version information and exit.\n");
-	printf("  -h, --help     Display this help and exit.\n");
-	printf("\n");
-
-	printf(" ACTION OPTIONS:\n");
-	// printf("  FOLDERS        Paths to folders containing the backup files.\n");
-	printf("  Options for all commands:\n\n");
-	printf("  --dest_cluster_file CONNFILE\n");
-	printf("                 The cluster file to restore data into.\n");
-	printf("  -t, --tagname TAGNAME\n");
-	printf("                 The restore tag to act on.  Default is 'default'\n");
-	printf("\n");
-	printf("  Options for start:\n\n");
-	printf("  -r URL         The Backup URL for the restore to read from.\n");
-	printBackupContainerInfo();
-	printf("  -w, --waitfordone\n");
-	printf("                 Wait for the restore to complete before exiting.  Prints progress updates.\n");
-	printf("  -k KEYS        List of key ranges from the backup to restore.\n");
-	printf("  --remove_prefix PREFIX\n");
-	printf("                 Prefix to remove from the restored keys.\n");
-	printf("  --add_prefix PREFIX\n");
-	printf("                 Prefix to add to the restored keys\n");
-	printf("  -n, --dryrun   Perform a trial run with no changes made.\n");
-	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
-	       "                 unspecified, defaults to the current directory. Has\n"
-	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG_GROUP\n"
-	       "                 Sets the LogGroup field with the specified value for all\n"
-	       "                 events in the trace output (defaults to `default').\n");
-	printf("  --trace_format FORMAT\n"
-	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
-	       "                 Has no effect unless --log is specified.\n");
-	printf("  --incremental\n"
-	       "                 Performs incremental restore without the base backup.\n"
-	       "                 This tells the backup agent to only replay the log files from the backup source.\n"
-	       "                 This also allows a restore to be performed into a non-empty destination database.\n");
-	printf("  --begin_version\n"
-	       "                 To be used in conjunction with incremental restore.\n"
-	       "                 Indicates to the backup agent to only begin replaying log files from a certain version, "
-	       "instead of the entire set.\n");
-#ifndef TLS_DISABLED
-	printf(TLS_HELP);
-#endif
-	printf("  -v DBVERSION   The version at which the database will be restored.\n");
-	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in %s\n",
-	       BackupAgentBase::timeFormat().c_str());
-	printf(
-	    "                 and it will be converted to a version from that time using metadata in orig_cluster_file.\n");
-	printf("  --orig_cluster_file CONNFILE\n");
-	printf("                 The cluster file for the original database from which the backup was created.  The "
-	       "original database\n");
-	printf("                 is only needed to convert a --timestamp argument to a database version.\n");
-
-	if (devhelp) {
-#ifdef _WIN32
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
-	}
-
-	printf("\n"
-	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
-	printf("\n");
-	puts(BlobCredentialInfo);
-
-	return;
-}
-
-static void printFastRestoreUsage(bool devhelp) {
-	printf(" NOTE: Fast restore aims to support the same fdbrestore option list.\n");
-	printf("       But fast restore is still under development. The options may not be fully supported.\n");
-	printf(" Supported options are: --dest_cluster_file, -r, --waitfordone, --logdir\n");
-	printRestoreUsage(devhelp);
-	return;
-}
-
-static void printDBAgentUsage(bool devhelp) {
-	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s [OPTIONS]\n\n", exeDatabaseAgent.toString().c_str());
-	printf("  -d CONNFILE    The path of a file containing the connection string for the\n"
-	       "                 destination FoundationDB cluster.\n");
-	printf("  -s CONNFILE    The path of a file containing the connection string for the\n"
-	       "                 source FoundationDB cluster.\n");
-	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
-	       "                 unspecified, defaults to the current directory. Has\n"
-	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG_GROUP\n"
-	       "                 Sets the LogGroup field with the specified value for all\n"
-	       "                 events in the trace output (defaults to `default').\n");
-	printf("  --trace_format FORMAT\n"
-	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
-	       "                 Has no effect unless --log is specified.\n");
-	printf("  -m SIZE, --memory SIZE\n"
-	       "                 Memory limit. The default value is 8GiB. When specified\n"
-	       "                 without a unit, MiB is assumed.\n");
-#ifndef TLS_DISABLED
-	printf(TLS_HELP);
-#endif
-	printf("  --build_flags  Print build information and exit.\n");
-	printf("  -v, --version  Print version information and exit.\n");
-	printf("  -h, --help     Display this help and exit.\n");
-	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
-	}
-
-	return;
-}
-
 static void printDBBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | switch | abort | pause | resume) [OPTIONS]\n\n",
@@ -1295,9 +1047,6 @@ static void printUsage(ProgramExe programExe, bool devhelp) {
 	case ProgramExe::BACKUP:
 		printBackupUsage(devhelp);
 		break;
-	case ProgramExe::FASTRESTORE_TOOL:
-		printFastRestoreUsage(devhelp);
-		break;
 	case ProgramExe::DB_BACKUP:
 		printDBBackupUsage(devhelp);
 		break;
@@ -1339,14 +1088,6 @@ ProgramExe getProgramType(std::string programExe) {
 	         (programExe.compare(
 	              programExe.length() - exeBackup.size(), exeBackup.size(), (const char*)exeBackup.begin()) == 0)) {
 		enProgramExe = ProgramExe::BACKUP;
-	}
-
-	// Check if fast restore
-	else if ((programExe.length() >= exeFastRestoreTool.size()) &&
-	         (programExe.compare(programExe.length() - exeFastRestoreTool.size(),
-	                             exeFastRestoreTool.size(),
-	                             (const char*)exeFastRestoreTool.begin()) == 0)) {
-		enProgramExe = ProgramExe::FASTRESTORE_TOOL;
 	}
 
 	// Check if db backup
@@ -1835,237 +1576,6 @@ Reference<IBackupContainer> openBackupContainer(const char* name, std::string de
 	}
 
 	return c;
-}
-
-// Submit the restore request to the database if "performRestore" is true. Otherwise,
-// check if the restore can be performed.
-ACTOR Future<Void> runRestore(Database db,
-                              std::string originalClusterFile,
-                              std::string tagName,
-                              std::string container,
-                              Standalone<VectorRef<KeyRangeRef>> ranges,
-                              Version beginVersion,
-                              Version targetVersion,
-                              std::string targetTimestamp,
-                              bool performRestore,
-                              bool verbose,
-                              bool waitForDone,
-                              std::string addPrefix,
-                              std::string removePrefix,
-                              bool onlyAppyMutationLogs,
-                              bool inconsistentSnapshotOnly) {
-	if (ranges.empty()) {
-		ranges.push_back_deep(ranges.arena(), normalKeys);
-	}
-
-	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
-		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
-		throw restore_error();
-	}
-
-	state Optional<Database> origDb;
-
-	// Resolve targetTimestamp if given
-	if (!targetTimestamp.empty()) {
-		if (originalClusterFile.empty()) {
-			fprintf(stderr,
-			        "An original cluster file must be given in order to resolve restore target timestamp '%s'\n",
-			        targetTimestamp.c_str());
-			throw restore_error();
-		}
-
-		if (!fileExists(originalClusterFile)) {
-			fprintf(
-			    stderr, "Original source database cluster file '%s' does not exist.\n", originalClusterFile.c_str());
-			throw restore_error();
-		}
-
-		origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
-		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
-		printf("Timestamp '%s' resolves to version %" PRId64 "\n", targetTimestamp.c_str(), v);
-		targetVersion = v;
-	}
-
-	try {
-		state FileBackupAgent backupAgent;
-
-		state Reference<IBackupContainer> bc = openBackupContainer(exeRestore.toString().c_str(), container);
-
-		// If targetVersion is unset then use the maximum restorable version from the backup description
-		if (targetVersion == invalidVersion) {
-			if (verbose)
-				printf(
-				    "No restore target version given, will use maximum restorable version from backup description.\n");
-
-			BackupDescription desc = wait(bc->describeBackup());
-
-			if (onlyAppyMutationLogs && desc.contiguousLogEnd.present()) {
-				targetVersion = desc.contiguousLogEnd.get() - 1;
-			} else if (desc.maxRestorableVersion.present()) {
-				targetVersion = desc.maxRestorableVersion.get();
-			} else {
-				fprintf(stderr, "The specified backup is not restorable to any version.\n");
-				throw restore_error();
-			}
-
-			if (verbose)
-				printf("Using target restore version %" PRId64 "\n", targetVersion);
-		}
-
-		if (performRestore) {
-			Version restoredVersion = wait(backupAgent.restore(db,
-			                                                   origDb,
-			                                                   KeyRef(tagName),
-			                                                   KeyRef(container),
-			                                                   ranges,
-			                                                   waitForDone,
-			                                                   targetVersion,
-			                                                   verbose,
-			                                                   KeyRef(addPrefix),
-			                                                   KeyRef(removePrefix),
-			                                                   true,
-			                                                   onlyAppyMutationLogs,
-			                                                   inconsistentSnapshotOnly,
-			                                                   beginVersion));
-
-			if (waitForDone && verbose) {
-				// If restore is now complete then report version restored
-				printf("Restored to version %" PRId64 "\n", restoredVersion);
-			}
-		} else {
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
-
-			if (!rset.present()) {
-				fprintf(stderr,
-				        "Insufficient data to restore to version %" PRId64 ".  Describe backup for more information.\n",
-				        targetVersion);
-				throw restore_invalid_version();
-			}
-
-			printf("Backup can be used to restore to version %" PRId64 "\n", targetVersion);
-		}
-
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-		fprintf(stderr, "ERROR: %s\n", e.what());
-		throw;
-	}
-
-	return Void();
-}
-
-// Fast restore agent that kicks off the restore: send restore requests to restore workers.
-ACTOR Future<Void> runFastRestoreTool(Database db,
-                                      std::string tagName,
-                                      std::string container,
-                                      Standalone<VectorRef<KeyRangeRef>> ranges,
-                                      Version dbVersion,
-                                      bool performRestore,
-                                      bool verbose,
-                                      bool waitForDone) {
-	try {
-		state FileBackupAgent backupAgent;
-		state Version restoreVersion = invalidVersion;
-
-		if (ranges.size() > 1) {
-			fprintf(stdout, "[WARNING] Currently only a single restore range is tested!\n");
-		}
-
-		if (ranges.size() == 0) {
-			ranges.push_back(ranges.arena(), normalKeys);
-		}
-
-		printf("[INFO] runFastRestoreTool: restore_ranges:%d first range:%s\n",
-		       ranges.size(),
-		       ranges.front().toString().c_str());
-		TraceEvent ev("FastRestoreTool");
-		ev.detail("RestoreRanges", ranges.size());
-		for (int i = 0; i < ranges.size(); ++i) {
-			ev.detail(format("Range%d", i), ranges[i]);
-		}
-
-		if (performRestore) {
-			if (dbVersion == invalidVersion) {
-				TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", "Largest restorable version");
-				BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
-				if (!desc.maxRestorableVersion.present()) {
-					fprintf(stderr, "The specified backup is not restorable to any version.\n");
-					throw restore_error();
-				}
-
-				dbVersion = desc.maxRestorableVersion.get();
-				TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", dbVersion);
-			}
-			state UID randomUID = deterministicRandom()->randomUniqueID();
-			TraceEvent("FastRestoreTool")
-			    .detail("SubmitRestoreRequests", ranges.size())
-			    .detail("RestoreUID", randomUID);
-			wait(backupAgent.submitParallelRestore(db,
-			                                       KeyRef(tagName),
-			                                       ranges,
-			                                       KeyRef(container),
-			                                       dbVersion,
-			                                       true,
-			                                       randomUID,
-			                                       LiteralStringRef(""),
-			                                       LiteralStringRef("")));
-			// TODO: Support addPrefix and removePrefix
-			if (waitForDone) {
-				// Wait for parallel restore to finish and unlock DB after that
-				TraceEvent("FastRestoreTool").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
-				wait(backupAgent.parallelRestoreFinish(db, randomUID));
-				TraceEvent("FastRestoreTool").detail("BackupAndParallelRestore", "RestoreFinished");
-			} else {
-				TraceEvent("FastRestoreTool")
-				    .detail("RestoreUID", randomUID)
-				    .detail("OperationGuide", "Manually unlock DB when restore finishes");
-				printf("WARNING: DB will be in locked state after restore. Need UID:%s to unlock DB\n",
-				       randomUID.toString().c_str());
-			}
-
-			restoreVersion = dbVersion;
-		} else {
-			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
-			state BackupDescription description = wait(bc->describeBackup());
-
-			if (dbVersion <= 0) {
-				wait(description.resolveVersionTimes(db));
-				if (description.maxRestorableVersion.present())
-					restoreVersion = description.maxRestorableVersion.get();
-				else {
-					fprintf(stderr, "Backup is not restorable\n");
-					throw restore_invalid_version();
-				}
-			} else {
-				restoreVersion = dbVersion;
-			}
-
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
-			if (!rset.present()) {
-				fprintf(stderr, "Insufficient data to restore to version %" PRId64 "\n", restoreVersion);
-				throw restore_invalid_version();
-			}
-
-			// Display the restore information, if requested
-			if (verbose) {
-				printf("[DRY RUN] Restoring backup to version: %" PRId64 "\n", restoreVersion);
-				printf("%s\n", description.toString().c_str());
-			}
-		}
-
-		if (waitForDone && verbose) {
-			// If restore completed then report version restored
-			printf("Restored to version %" PRId64 "%s\n", restoreVersion, (performRestore) ? "" : " (DRY RUN)");
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-		fprintf(stderr, "ERROR: %s\n", e.what());
-		throw;
-	}
-
-	return Void();
 }
 
 ACTOR Future<Void> dumpBackupData(const char* name,
@@ -2667,7 +2177,6 @@ int main(int argc, char* argv[]) {
 
 		ProgramExe programExe = getProgramType(argv[0]);
 		BackupType backupType = BackupType::UNDEFINED;
-		RestoreType restoreType = RestoreType::UNKNOWN;
 		DBType dbType = DBType::UNDEFINED;
 
 		std::unique_ptr<CSimpleOpt> args;
@@ -2770,19 +2279,6 @@ int main(int argc, char* argv[]) {
 					args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
 					break;
 				}
-			}
-			break;
-		case ProgramExe::FASTRESTORE_TOOL:
-			if (argc < 2) {
-				printFastRestoreUsage(false);
-				return FDB_EXIT_ERROR;
-			}
-			// Get the restore operation type
-			restoreType = getRestoreType(argv[1]);
-			if (restoreType == RestoreType::UNKNOWN) {
-				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
-			} else {
-				args = std::make_unique<CSimpleOpt>(argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT);
 			}
 			break;
 		case ProgramExe::UNDEFINED:
@@ -3229,13 +2725,6 @@ int main(int argc, char* argv[]) {
 				}
 				break;
 
-			case ProgramExe::FASTRESTORE_TOOL:
-				fprintf(
-				    stderr, "ERROR: FDB Fast Restore Tool does not support argument value `%s'\n", args->File(argLoop));
-				printHelpTeaser(argv[0]);
-				return FDB_EXIT_ERROR;
-				break;
-
 			case ProgramExe::DB_BACKUP:
 				// Error, if the keys option was not specified
 				if (backupKeys.size() == 0) {
@@ -3535,74 +3024,6 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 
-			break;
-		case ProgramExe::FASTRESTORE_TOOL:
-			// Support --dest_cluster_file option as fdbrestore does
-			if (dryRun) {
-				if (restoreType != RestoreType::START) {
-					fprintf(stderr, "Restore dry run only works for 'start' command\n");
-					return FDB_EXIT_ERROR;
-				}
-
-				// Must explicitly call trace file options handling if not calling Database::createDatabase()
-				initTraceFile();
-			} else {
-				if (restoreClusterFileDest.empty()) {
-					fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-					return FDB_EXIT_ERROR;
-				}
-
-				if (!fileExists(restoreClusterFileDest)) {
-					fprintf(stderr,
-					        "Restore destination cluster file '%s' does not exist.\n",
-					        restoreClusterFileDest.c_str());
-					return FDB_EXIT_ERROR;
-				}
-
-				try {
-					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
-				} catch (Error& e) {
-					fprintf(stderr,
-					        "Restore destination cluster file '%s' invalid: %s\n",
-					        restoreClusterFileDest.c_str(),
-					        e.what());
-					return FDB_EXIT_ERROR;
-				}
-			}
-			// TODO: We have not implemented the code commented out in this case
-			switch (restoreType) {
-			case RestoreType::START:
-				f = stopAfter(runFastRestoreTool(
-				    db, tagName, restoreContainer, backupKeys, restoreVersion, !dryRun, !quietDisplay, waitForDone));
-				break;
-			case RestoreType::WAIT:
-				printf("[TODO][ERROR] FastRestore does not support RESTORE_WAIT yet!\n");
-				throw restore_error();
-				//					f = stopAfter( success(ba.waitRestore(db, KeyRef(tagName), true)) );
-				break;
-			case RestoreType::ABORT:
-				printf("[TODO][ERROR] FastRestore does not support RESTORE_ABORT yet!\n");
-				throw restore_error();
-				//					f = stopAfter( map(ba.abortRestore(db, KeyRef(tagName)),
-				//[tagName](FileBackupAgent::ERestoreState s) -> Void { 						printf("Tag: %s  State:
-				//%s\n", tagName.c_str(),
-				// FileBackupAgent::restoreStateText(s).toString().c_str()); 						return Void();
-				//					}) );
-				break;
-			case RestoreType::STATUS:
-				printf("[TODO][ERROR] FastRestore does not support RESTORE_STATUS yet!\n");
-				throw restore_error();
-				// If no tag is specifically provided then print all tag status, don't just use "default"
-				if (tagProvided)
-					tag = tagName;
-				//					f = stopAfter( map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void {
-				//						printf("%s\n", s.c_str());
-				//						return Void();
-				//					}) );
-				break;
-			default:
-				throw restore_error();
-			}
 			break;
 		case ProgramExe::DB_BACKUP:
 			if (!initCluster())

@@ -115,6 +115,9 @@ void printHelpTeaser(std::string const& programName);
 
 Reference<IBackupContainer> openBackupContainer(const char* name, std::string const& destinationContainer);
 
+void printVersion();
+void printBuildInformation();
+
 void printBackupContainerInfo();
 
 class DriverBase {
@@ -171,6 +174,23 @@ protected:
 			        args.File(argLoop));
 			printHelpTeaser(T::getProgramName());
 			throw invalid_option_value();
+		}
+	}
+
+	// TODO: Confusing to exit program in this function?
+	static void runTopLevelCommand(CSimpleOpt& args) {
+		auto optId = args.OptionId();
+		switch (optId) {
+		case OPT_VERSION:
+			printVersion();
+			break;
+			flushAndExit(FDB_EXIT_SUCCESS);
+		case OPT_BUILD_FLAGS:
+			printBuildInformation();
+			flushAndExit(FDB_EXIT_SUCCESS);
+		case OPT_HELP:
+			T::printUsage(false);
+			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 	}
 };
@@ -369,8 +389,3 @@ int commonMain(int argc, char** argv) {
 	ASSERT(false);
 	return 0;
 }
-
-void initTraceFile(uint64_t traceRollSize,
-                   uint64_t traceMaxLogsSize,
-                   std::string const& traceDir,
-                   std::string const& traceLogGroup);

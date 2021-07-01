@@ -28,4 +28,4 @@ enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 
 RestoreType getRestoreType(std::string const& name);
 
-extern CSimpleOpt::SOption const rg_restoreOptions[];
+extern CSimpleOpt::SOption const rgRestoreOptions[];

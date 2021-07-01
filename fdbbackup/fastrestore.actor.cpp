@@ -43,14 +43,6 @@ class FastRestoreDriver : public Driver<FastRestoreDriver> {
 	bool inconsistentSnapshotOnly{ false };
 	Version beginVersion{ ::invalidVersion };
 
-	static void printUsage(bool devhelp) {
-		printf(" NOTE: Fast restore aims to support the same fdbrestore option list.\n");
-		printf("       But fast restore is still under development. The options may not be fully supported.\n");
-		printf(" Supported options are: --dest_cluster_file, -r, --waitfordone, --logdir\n");
-		printRestoreUsage(getProgramName(), devhelp);
-		return;
-	}
-
 	// Fast restore agent that kicks off the restore: send restore requests to restore workers.
 	ACTOR static Future<Void> runFastRestoreTool(Database db,
 	                                             std::string tagName,
@@ -165,6 +157,14 @@ class FastRestoreDriver : public Driver<FastRestoreDriver> {
 	}
 
 public:
+	static void printUsage(bool devhelp) {
+		printf(" NOTE: Fast restore aims to support the same fdbrestore option list.\n");
+		printf("       But fast restore is still under development. The options may not be fully supported.\n");
+		printf(" Supported options are: --dest_cluster_file, -r, --waitfordone, --logdir\n");
+		printRestoreUsage(getProgramName(), devhelp);
+		return;
+	}
+
 	// FIXME: This is copy-pasted from fdbrestore.actor.cpp
 	void processArg(CSimpleOpt& args) {
 		int optId = args.OptionId();
@@ -224,10 +224,12 @@ public:
 		// Get the restore operation type
 		auto restoreType = getRestoreType(argv[1]);
 		if (restoreType == RestoreType::UNKNOWN) {
-			// TODO: Handle general case
-			ASSERT(false);
+			auto args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
+			runTopLevelCommand(*args);
+			// FIXME: Confusing to exit here?
+			flushAndExit(FDB_EXIT_SUCCESS);
 		}
-		auto args = std::make_unique<CSimpleOpt>(argc - 1, argv + 1, rg_restoreOptions, SO_O_EXACT);
+		auto args = std::make_unique<CSimpleOpt>(argc - 1, argv + 1, rgRestoreOptions, SO_O_EXACT);
 		processArgs(*args);
 	}
 
