@@ -177,8 +177,7 @@ public:
 	void parseCommandLineArgs(int argc, char** argv) {
 		if (argc < 2) {
 			printUsage(false);
-			// TODO: Add new error code
-			throw restore_error();
+			throw invalid_command_line_arguments();
 		}
 		// Get the restore operation type
 		auto restoreType = getRestoreType(argv[1]);
