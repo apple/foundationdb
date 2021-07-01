@@ -178,8 +178,7 @@ protected:
 	}
 
 	// TODO: Confusing to exit program in this function?
-	static void runTopLevelCommand(CSimpleOpt& args) {
-		auto optId = args.OptionId();
+	static void runTopLevelCommand(int optId) {
 		switch (optId) {
 		case OPT_VERSION:
 			printVersion();
@@ -191,6 +190,8 @@ protected:
 		case OPT_HELP:
 			T::printUsage(false);
 			flushAndExit(FDB_EXIT_SUCCESS);
+		default:
+			throw invalid_option();
 		}
 	}
 };

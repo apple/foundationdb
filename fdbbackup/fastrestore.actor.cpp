@@ -215,6 +215,7 @@ public:
 		}
 	}
 
+	// FIXME: Remove duplicate code from fdbrestore
 	void parseCommandLineArgs(int argc, char** argv) {
 		if (argc < 2) {
 			printUsage(false);
@@ -225,7 +226,10 @@ public:
 		auto restoreType = getRestoreType(argv[1]);
 		if (restoreType == RestoreType::UNKNOWN) {
 			auto args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
-			runTopLevelCommand(*args);
+			if (!args->Next()) {
+				throw invalid_command_line_arguments();
+			}
+			runTopLevelCommand(args->OptionId());
 			// FIXME: Confusing to exit here?
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
