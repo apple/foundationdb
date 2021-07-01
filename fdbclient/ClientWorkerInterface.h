@@ -31,8 +31,10 @@
 // A ClientWorkerInterface is embedded as the first element of a WorkerInterface.
 struct ClientWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 12418152;
+
 	RequestStream<struct RebootRequest> reboot;
 	RequestStream<struct ProfilerRequest> profiler;
+	RequestStream<struct SetFailureInjection> setFailureInjection;
 
 	bool operator==(ClientWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClientWorkerInterface const& r) const { return id() != r.id(); }
@@ -43,7 +45,7 @@ struct ClientWorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reboot, profiler);
+		serializer(ar, reboot, profiler, setFailureInjection);
 	}
 };
 
@@ -88,4 +90,23 @@ struct ProfilerRequest {
 	}
 };
 
+struct SetFailureInjection {
+	constexpr static FileIdentifier file_identifier = 15439864;
+	ReplyPromise<Void> reply;
+	struct ThrottleDiskCommand {
+		double time;
+		Optional<NetworkAddress> address; // TODO: NEELAM: how do we identify the machine
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, time, address);
+		}
+	};
+	Optional<ThrottleDiskCommand> throttleDisk;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, throttleDisk);
+	}
+};
 #endif

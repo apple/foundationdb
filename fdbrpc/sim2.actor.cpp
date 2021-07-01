@@ -1953,6 +1953,13 @@ public:
 	void clogPair(const IPAddress& from, const IPAddress& to, double seconds) override {
 		g_clogging.clogPairFor(from, to, seconds);
 	}
+	void throttleDisk(ProcessInfo* machine, double seconds) override {
+		machine->throttleDiskFor = seconds;
+		TraceEvent("ThrottleDisk").detail("Delay", seconds).
+			detail("Roles", getRoles(machine->address)).
+			detail("Address", machine->address).
+			detail("StartingClass", machine->startingClass.toString());
+	}
 	std::vector<ProcessInfo*> getAllProcesses() const override {
 		std::vector<ProcessInfo*> processes;
 		for (auto& c : machines) {
@@ -2394,11 +2401,19 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	diskParameters->nextOperation += (1.0 / diskParameters->iops) + (size / diskParameters->bandwidth);
 
 	double randomLatency;
-	if (sync) {
+	if (g_simulator.getCurrentProcess()->throttleDiskFor) {
+		randomLatency = g_simulator.getCurrentProcess()->throttleDiskFor;
+		TraceEvent("WaitUntilDiskReadyThrottling")
+		    .detail("Delay", randomLatency);
+	} else if (sync) {
 		randomLatency = .005 + deterministicRandom()->random01() * (BUGGIFY ? 1.0 : .010);
 	} else
 		randomLatency = 10 * deterministicRandom()->random01() / diskParameters->iops;
 
+	TraceEvent("WaitUntilDiskReady").detail("Delay", randomLatency).
+		detail("Roles", g_simulator.getRoles(g_simulator.getCurrentProcess()->address)).
+		detail("Address", g_simulator.getCurrentProcess()->address).
+		detail("ThrottleDiskFor", g_simulator.getCurrentProcess()->throttleDiskFor);
 	return delayUntil(diskParameters->nextOperation + randomLatency);
 }
 

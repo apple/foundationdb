@@ -138,6 +138,7 @@ set(FDBSERVER_SRCS
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
+  workloads/DiskThrottling.actor.cpp
   workloads/SuspendProcesses.actor.cpp
   workloads/CommitBugCheck.actor.cpp
   workloads/ConfigureDatabase.actor.cpp

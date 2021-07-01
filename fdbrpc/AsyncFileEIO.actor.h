@@ -162,14 +162,16 @@ public:
 	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileLogicalReads;
 		++countLogicalReads;
-		return read_impl(fd, data, length, offset);
+		double throttleFor = diskFailureInjector->getDiskDelay();
+		return read_impl(fd, data, length, offset, throttleFor);
 	}
 	Future<Void> write(void const* data, int length, int64_t offset) override // Copies data synchronously
 	{
 		++countFileLogicalWrites;
 		++countLogicalWrites;
+		double throttleFor = diskFailureInjector->getDiskDelay();
 		// Standalone<StringRef> copy = StringRef((const uint8_t*)data, length);
-		return write_impl(fd, err, StringRef((const uint8_t*)data, length), offset);
+		return write_impl(fd, err, StringRef((const uint8_t*)data, length), offset, throttleFor);
 	}
 	Future<Void> truncate(int64_t size) override {
 		++countFileLogicalWrites;
@@ -270,6 +272,7 @@ private:
 	int fd, flags;
 	Reference<ErrorInfo> err;
 	std::string filename;
+	//DiskFailureInjector* diskFailureInjector;
 	mutable Int64MetricHandle countFileLogicalWrites;
 	mutable Int64MetricHandle countFileLogicalReads;
 
@@ -277,7 +280,8 @@ private:
 	mutable Int64MetricHandle countLogicalReads;
 
 	AsyncFileEIO(int fd, int flags, std::string const& filename)
-	  : fd(fd), flags(flags), filename(filename), err(new ErrorInfo) {
+		: fd(fd), flags(flags), filename(filename), err(new ErrorInfo),
+		  diskFailureInjector(DiskFailureInjector::injector()) {
 		if (!g_network->isSimulated()) {
 			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
 			countFileLogicalReads.init(LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
@@ -329,13 +333,18 @@ private:
 		TraceEvent("AsyncFileClosed").suppressFor(1.0).detail("Fd", fd);
 	}
 
-	ACTOR static Future<int> read_impl(int fd, void* data, int length, int64_t offset) {
+	ACTOR static Future<int> read_impl(int fd, void* data, int length, int64_t offset, double throttleFor) {
 		state TaskPriority taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		// fprintf(stderr, "eio_read (fd=%d length=%d offset=%lld)\n", fd, length, offset);
 		state eio_req* r = eio_read(fd, data, length, offset, 0, eio_callback, &p);
 		try {
 			wait(p.getFuture());
+			// throttleDisk if enabled
+			//double throttleFor = diskFailureInjector->getDiskDelay();
+			if (throttleFor > 0.0) {
+				wait(delay(throttleFor));
+			}
 		} catch (...) {
 			g_network->setCurrentTask(taskID);
 			eio_cancel(r);
@@ -358,12 +367,17 @@ private:
 		}
 	}
 
-	ACTOR static Future<Void> write_impl(int fd, Reference<ErrorInfo> err, StringRef data, int64_t offset) {
+	ACTOR static Future<Void> write_impl(int fd, Reference<ErrorInfo> err, StringRef data, int64_t offset, double throttleFor) {
 		state TaskPriority taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		state eio_req* r = eio_write(fd, (void*)data.begin(), data.size(), offset, 0, eio_callback, &p);
 		try {
 			wait(p.getFuture());
+			// throttleDisk if enabled
+			//double throttleFor = diskFailureInjector->getDiskDelay();
+			if (throttleFor > 0.0) {
+				wait(delay(throttleFor));
+			}
 		} catch (...) {
 			g_network->setCurrentTask(taskID);
 			eio_cancel(r);
@@ -553,6 +567,8 @@ private:
 	static void apple_fsync(eio_req* req) { req->result = fcntl(req->int1, F_FULLFSYNC, 0); }
 	static void free_req(eio_req* req) { free(req); }
 #endif
+public:
+		DiskFailureInjector* diskFailureInjector;
 };
 
 #ifdef FILESYSTEM_IMPL
