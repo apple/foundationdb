@@ -60,7 +60,7 @@ class DrAgentDriver : public Driver<DrAgentDriver> {
 	LocalityData localities;
 
 public:
-	void processArg(CSimpleOpt& args) {
+	void processArg(CSimpleOpt const& args) {
 		// TODO: Implement
 		auto optId = args.OptionId();
 		switch (optId) {
@@ -84,7 +84,6 @@ public:
 	}
 
 	bool setup() {
-		// FIXME: Use quietDisplay here
 		auto _sourceDB = initCluster(sourceClusterFile, localities, quietDisplay);
 		if (!_sourceDB.present()) {
 			return false;

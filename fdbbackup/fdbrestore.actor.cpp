@@ -279,7 +279,7 @@ public:
 		}
 	}
 
-	void processArg(CSimpleOpt& args) {
+	void processArg(CSimpleOpt const& args) {
 		int optId = args.OptionId();
 		switch (optId) {
 		case OPT_RESTORE_TIMESTAMP:

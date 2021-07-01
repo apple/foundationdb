@@ -58,7 +58,7 @@ class BackupAgentDriver : public Driver<BackupAgentDriver> {
 	LocalityData localities;
 
 public:
-	void processArg(CSimpleOpt& args) {
+	void processArg(CSimpleOpt const& args) {
 		auto optId = args.OptionId();
 		switch (optId) {
 		case OPT_CLUSTERFILE:

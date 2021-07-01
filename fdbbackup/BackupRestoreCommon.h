@@ -162,8 +162,9 @@ protected:
 	void processArgs(CSimpleOpt& args) {
 		while (args.Next()) {
 			handleArgsError(args, T::getProgramName().c_str());
+			const auto& constArgs = args;
 			if (!processCommonArg(static_cast<T*>(this)->getProgramName(), args)) {
-				static_cast<T*>(this)->processArg(args);
+				static_cast<T*>(this)->processArg(constArgs);
 			}
 		}
 

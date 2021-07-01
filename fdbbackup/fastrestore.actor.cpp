@@ -166,7 +166,7 @@ public:
 	}
 
 	// FIXME: This is copy-pasted from fdbrestore.actor.cpp
-	void processArg(CSimpleOpt& args) {
+	void processArg(CSimpleOpt const& args) {
 		int optId = args.OptionId();
 		switch (optId) {
 		case OPT_RESTORE_TIMESTAMP:
@@ -181,7 +181,7 @@ public:
 		case OPT_RESTORECONTAINER:
 			restoreContainer = args.OptionArg();
 			// If the url starts with '/' then prepend "file://" for backwards compatibility
-			if (StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
+			if (StringRef(restoreContainer).startsWith("/"_sr))
 				restoreContainer = std::string("file://") + restoreContainer;
 			break;
 		case OPT_PREFIX_ADD:

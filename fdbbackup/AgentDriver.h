@@ -41,4 +41,4 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
 
 Optional<Database> initCluster(std::string const& clusterFile, LocalityData const& localities, bool isQuiet);
 
-void processLocalityArg(CSimpleOpt& args, LocalityData& localities);
+void processLocalityArg(CSimpleOpt const& args, LocalityData& localities);
