@@ -249,8 +249,9 @@ def consistencycheck(logger):
 def cache_range(logger):
     # this command is currently experimental
     # just test we can set and clear the cached range
-    run_fdbcli_command('cache_range', 'set', 'a', 'b')
-    run_fdbcli_command('cache_range', 'clear', 'a', 'b')
+    run_fdbcli_command('cache_range', 'set', 'a', 'd')
+    run_fdbcli_command('cache_range', 'clear', 'b', 'c')
+    run_fdbcli_command('cache_range', 'clear', 'a', 'd')
 
 @enable_logging()
 def datadistribution(logger):
