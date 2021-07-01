@@ -22,6 +22,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/S3BlobStore.h"
+
 #include "flow/actorcompiler.h" // must be last include
 
 namespace {
@@ -361,4 +362,39 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
                                Database taskDest,
                                std::string const& id) {
 	return _statusUpdateActor(statusUpdateDest, name, agentType, &pollDelay, taskDest, id);
+}
+
+Optional<Database> initCluster(std::string const& clusterFile, LocalityData const& localities, bool quiet) {
+	Optional<Database> db;
+	auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
+	Reference<ClusterConnectionFile> ccf;
+	try {
+		ccf = makeReference<ClusterConnectionFile>(resolvedSourceClusterFile.first);
+	} catch (Error& e) {
+		if (!quiet) {
+			fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedSourceClusterFile, e).c_str());
+		}
+		return {};
+	}
+
+	try {
+		db = Database::createDatabase(ccf, -1, true, localities);
+	} catch (Error& e) {
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+		return {};
+	}
+
+	return db;
+}
+
+void processLocalityArg(CSimpleOpt& args, LocalityData& localities) {
+	std::string syn = args.OptionSyntax();
+	if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
+		fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
+		throw invalid_option_value();
+	}
+	syn = syn.substr(std::string("--locality_").size());
+	std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
+	localities.set(Key(syn), Value(std::string(args.OptionArg())));
 }

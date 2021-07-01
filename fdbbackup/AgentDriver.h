@@ -22,6 +22,7 @@
 
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/flow.h"
+#include "flow/SimpleOpt.h"
 
 #include <string>
 
@@ -37,3 +38,7 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
                                double& pollDelay,
                                Database taskDest = Database(),
                                std::string const& id = nondeterministicRandom()->randomUniqueID().toString());
+
+Optional<Database> initCluster(std::string const& clusterFile, LocalityData const& localities, bool isQuiet);
+
+void processLocalityArg(CSimpleOpt& args, LocalityData& localities);

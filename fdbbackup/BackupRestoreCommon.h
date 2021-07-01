@@ -131,6 +131,8 @@ protected:
 	// Returns true iff common arg found
 	bool processCommonArg(std::string const& programName, CSimpleOpt& arg);
 
+	void addBlobCredentials(std::string const& blobCreds) { tlsConfig.blobCredentials.push_back(blobCreds); }
+
 public:
 	bool traceEnabled() const { return trace; }
 

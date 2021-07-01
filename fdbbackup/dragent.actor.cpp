@@ -1,5 +1,5 @@
 /*
- * backupagent.actor.cpp
+ * backup.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,26 +23,26 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // this must be the last include
 
-extern const char* getSourceVersion();
-
 namespace {
 
-ACTOR Future<Void> runAgent(Database db) {
+ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	state Future<Void> status = statusUpdateActor(db, "backup", AgentType::FILE, pollDelay);
+	std::string id = nondeterministicRandom()->randomUniqueID().toString();
+	state Future<Void> status = statusUpdateActor(src, "dr_backup", AgentType::DB, pollDelay, dest, id);
+	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", AgentType::DB, pollDelay, dest, id);
 
-	state FileBackupAgent backupAgent;
+	state DatabaseBackupAgent backupAgent(src);
 
 	loop {
 		try {
-			wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled)
 				throw;
 
-			TraceEvent(SevError, "BA_runAgent").error(e);
-			fprintf(stderr, "ERROR: backup agent encountered fatal error `%s'\n", e.what());
+			TraceEvent(SevError, "DA_runAgent").error(e);
+			fprintf(stderr, "ERROR: DR agent encountered fatal error `%s'\n", e.what());
 
 			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 		}
@@ -51,24 +51,27 @@ ACTOR Future<Void> runAgent(Database db) {
 	return Void();
 }
 
-class BackupAgentDriver : public Driver<BackupAgentDriver> {
+class DrAgentDriver : public Driver<DrAgentDriver> {
 	static CSimpleOpt::SOption const rgOptions[];
-	std::string clusterFile;
-	Database db;
+	std::string destClusterFile;
+	Database destDB;
+	std::string sourceClusterFile;
+	Database sourceDB;
 	LocalityData localities;
 
 public:
 	void processArg(CSimpleOpt& args) {
+		// TODO: Implement
 		auto optId = args.OptionId();
 		switch (optId) {
-		case OPT_CLUSTERFILE:
-			clusterFile = args.OptionArg();
+		case OPT_DEST_CLUSTER:
+			destClusterFile = args.OptionArg();
 			break;
 		case OPT_LOCALITY:
 			processLocalityArg(args, localities);
 			break;
-		case OPT_BLOB_CREDENTIALS:
-			addBlobCredentials(args.OptionArg());
+		case OPT_SOURCE_CLUSTER:
+			sourceClusterFile = args.OptionArg();
 			break;
 		default:
 			break;
@@ -81,31 +84,41 @@ public:
 	}
 
 	bool setup() {
-		auto _db = initCluster(clusterFile, localities, quietDisplay);
-		if (!_db.present()) {
+		// FIXME: Use quietDisplay here
+		auto _sourceDB = initCluster(sourceClusterFile, localities, quietDisplay);
+		if (!_sourceDB.present()) {
 			return false;
+		} else {
+			sourceDB = _sourceDB.get();
 		}
-		db = _db.get();
+		auto _destDB = initCluster(sourceClusterFile, localities, quietDisplay);
+		if (!_destDB.present()) {
+			return false;
+		} else {
+			destDB = _destDB.get();
+		}
 		return true;
 	}
 
-	Future<Optional<Void>> run() { return stopAfter(runAgent(db)); }
+	Future<Optional<Void>> run() { return stopAfter(runDBAgent(sourceDB, destDB)); }
 
-	static std::string getProgramName() { return "backup_agent"; }
+	static std::string getProgramName() { return "dr_agent"; }
 };
 
 } // namespace
 
 int main(int argc, char** argv) {
-	return commonMain<BackupAgentDriver>(argc, argv);
+	return commonMain<DrAgentDriver>(argc, argv);
 }
 
-CSimpleOpt::SOption const BackupAgentDriver::rgOptions[] = {
+CSimpleOpt::SOption const DrAgentDriver::rgOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 	{ OPT_VERSION, "--version", SO_NONE },
 	{ OPT_VERSION, "-v", SO_NONE },
@@ -124,7 +137,6 @@ CSimpleOpt::SOption const BackupAgentDriver::rgOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
