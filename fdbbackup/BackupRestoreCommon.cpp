@@ -20,6 +20,8 @@
 
 #include "fdbbackup/BackupRestoreCommon.h"
 
+extern bool g_crashOnError;
+
 void printHelpTeaser(const char* programName) {
 	fprintf(stderr, "Try `%s --help' for more information.\n", programName);
 }
@@ -112,9 +114,53 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_VERSION, "-v", SO_NONE },
 
 	                                  SO_END_OF_OPTIONS };
 
-void TraceFileInitializer::operator()() const {
-	if (trace) {
-		openTraceFile(
-		    NetworkAddress{}, TRACE_DEFAULT_ROLL_SIZE, TRACE_DEFAULT_MAX_LOGS_SIZE, traceDir, "trace", traceLogGroup);
+bool DriverBase::processCommonArg(std::string const& programName, CSimpleOpt& args) {
+	auto optId = args.OptionId();
+	switch (optId) {
+	case OPT_TRACE:
+		trace = true;
+		return true;
+	case OPT_TRACE_DIR:
+		trace = true;
+		traceDir = args.OptionArg();
+		return true;
+	case OPT_TRACE_FORMAT:
+		if (!validateTraceFormat(args.OptionArg())) {
+			fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+		}
+		traceFormat = args.OptionArg();
+		return true;
+	case OPT_TRACE_LOG_GROUP:
+		traceLogGroup = args.OptionArg();
+		return true;
+	case OPT_KNOB: {
+		std::string syn = args.OptionSyntax();
+		if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+			fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+			throw invalid_option();
+		}
+		syn = syn.substr(7);
+		knobs.emplace_back(syn, args.OptionArg());
+		return true;
+	}
+	case OPT_MEMLIMIT: {
+		auto ti = parse_with_suffix(args.OptionArg(), "MiB");
+		if (!ti.present()) {
+			fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args.OptionArg());
+			printHelpTeaser(programName.c_str());
+			throw invalid_option_value();
+		}
+		memLimit = ti.get();
+		return true;
+	}
+	case OPT_CRASHONERROR: {
+		g_crashOnError = true;
+		return true;
+	}
+	case OPT_QUIET:
+		quietDisplay = true;
+		return true;
+	default:
+		return false;
 	}
 }

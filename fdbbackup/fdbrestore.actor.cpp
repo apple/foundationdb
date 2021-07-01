@@ -177,7 +177,6 @@ class RestoreDriver : public Driver<RestoreDriver> {
 	bool waitForDone{ false };
 	Version restoreVersion{ ::invalidVersion };
 
-	bool quietDisplay{ false };
 	bool dryRun{ false };
 	bool onlyApplyMutationLogs{ false };
 	bool inconsistentSnapshotOnly{ false };
@@ -277,8 +276,8 @@ public:
 		processArgs(*args);
 	}
 
-	// Returns true iff validation is successful
-	bool validateParams() {
+	// Returns true iff setup is successful
+	bool setup() {
 		if (dryRun) {
 			if (restoreType != RestoreType::START) {
 				fprintf(stderr, "Restore dry run only works for 'start' command\n");

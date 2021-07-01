@@ -117,65 +117,7 @@ Reference<IBackupContainer> openBackupContainer(const char* name, std::string co
 
 void printBackupContainerInfo();
 
-class TraceFileInitializer {
-	bool trace{ false };
-	std::string traceDir;
-	std::string traceLogGroup;
-
-public:
-	TraceFileInitializer(bool trace, std::string const& traceDir, std::string const& traceLogGroup)
-	  : trace(trace), traceDir(traceDir), traceLogGroup(traceLogGroup) {}
-
-	void operator()() const;
-};
-
-template <class T>
-class Driver {
-	// Returns true iff common arg found
-	bool processCommonArg(CSimpleOpt& args) {
-		auto optId = args.OptionId();
-		switch (optId) {
-		case OPT_TRACE:
-			trace = true;
-			return true;
-		case OPT_TRACE_DIR:
-			trace = true;
-			traceDir = args.OptionArg();
-			return true;
-		case OPT_TRACE_FORMAT:
-			if (!validateTraceFormat(args.OptionArg())) {
-				fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
-			}
-			traceFormat = args.OptionArg();
-			return true;
-		case OPT_TRACE_LOG_GROUP:
-			traceLogGroup = args.OptionArg();
-			return true;
-		case OPT_KNOB: {
-			std::string syn = args.OptionSyntax();
-			if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
-				fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
-				throw invalid_option();
-			}
-			syn = syn.substr(7);
-			knobs.emplace_back(syn, args.OptionArg());
-			return true;
-		}
-		case OPT_MEMLIMIT: {
-			auto ti = parse_with_suffix(args.OptionArg(), "MiB");
-			if (!ti.present()) {
-				fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args.OptionArg());
-				printHelpTeaser(T::getProgramName().c_str());
-				throw invalid_option_value();
-			}
-			memLimit = ti.get();
-			return true;
-		}
-		default:
-			return false;
-		}
-	}
-
+class DriverBase {
 protected:
 	bool trace{ false };
 	std::string traceDir;
@@ -183,25 +125,11 @@ protected:
 	std::string traceLogGroup;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	uint64_t memLimit{ 8LL << 30 };
+	bool quietDisplay{ false };
 	BackupTLSConfig tlsConfig;
 
-	void processArgs(CSimpleOpt& args) {
-		while (args.Next()) {
-			handleArgsError(args, T::getProgramName().c_str());
-			if (!processCommonArg(args)) {
-				static_cast<T*>(this)->processArg(args);
-			}
-		}
-
-		for (int argLoop = 0; argLoop < args.FileCount(); ++argLoop) {
-			fprintf(stderr,
-			        "ERROR: %s does not support argument value `%s'\n",
-			        T::getProgramName().c_str(),
-			        args.File(argLoop));
-			printHelpTeaser(T::getProgramName().c_str());
-			throw invalid_option_value();
-		}
-	}
+	// Returns true iff common arg found
+	bool processCommonArg(std::string const& programName, CSimpleOpt& arg);
 
 public:
 	bool traceEnabled() const { return trace; }
@@ -219,6 +147,28 @@ public:
 	bool setupTLS() { return tlsConfig.setupTLS(); }
 
 	void setupBlobCredentials() { tlsConfig.setupBlobCredentials(); }
+};
+
+template <class T>
+class Driver : public DriverBase {
+protected:
+	void processArgs(CSimpleOpt& args) {
+		while (args.Next()) {
+			handleArgsError(args, T::getProgramName().c_str());
+			if (!processCommonArg(static_cast<T*>(this)->getProgramName(), args)) {
+				static_cast<T*>(this)->processArg(args);
+			}
+		}
+
+		for (int argLoop = 0; argLoop < args.FileCount(); ++argLoop) {
+			fprintf(stderr,
+			        "ERROR: %s does not support argument value `%s'\n",
+			        T::getProgramName().c_str(),
+			        args.File(argLoop));
+			printHelpTeaser(T::getProgramName().c_str());
+			throw invalid_option_value();
+		}
+	}
 };
 
 template <class Driver>
@@ -334,8 +284,8 @@ int commonMain(int argc, char** argv) {
 		// Sets up blob credentials, including one from the environment FDB_BLOB_CREDENTIALS.
 		driver.setupBlobCredentials();
 
-		if (!driver.validateParams()) {
-			TraceEvent("FailedToValidateParams");
+		if (!driver.setup()) {
+			TraceEvent(SevWarnAlways, "FailedDriverSetup");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 		Future<Optional<Void>> f = driver.run();

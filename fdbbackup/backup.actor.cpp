@@ -657,7 +657,7 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
-// g_rgRestoreOptions is used by fdbrestore and fastrestore_tool
+// g_rgRestoreOptions is used by fastrestore_tool
 CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
