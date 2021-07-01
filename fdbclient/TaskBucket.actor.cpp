@@ -472,7 +472,7 @@ public:
 	ACTOR static Future<Void> dispatch(Database cx,
 	                                   Reference<TaskBucket> taskBucket,
 	                                   Reference<FutureBucket> futureBucket,
-	                                   double* pollDelay,
+	                                   double const* pollDelay,
 	                                   int maxConcurrentTasks) {
 		state std::vector<Future<bool>> tasks(maxConcurrentTasks);
 		for (auto& f : tasks)
@@ -569,7 +569,7 @@ public:
 	ACTOR static Future<Void> run(Database cx,
 	                              Reference<TaskBucket> taskBucket,
 	                              Reference<FutureBucket> futureBucket,
-	                              double* pollDelay,
+	                              double const* pollDelay,
 	                              int maxConcurrentTasks) {
 		state Reference<AsyncVar<bool>> paused = makeReference<AsyncVar<bool>>(true);
 		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
@@ -971,7 +971,7 @@ Future<bool> TaskBucket::doTask(Database cx, Reference<FutureBucket> futureBucke
 
 Future<Void> TaskBucket::run(Database cx,
                              Reference<FutureBucket> futureBucket,
-                             double* pollDelay,
+                             double const* pollDelay,
                              int maxConcurrentTasks) {
 	return TaskBucketImpl::run(cx, Reference<TaskBucket>::addRef(this), futureBucket, pollDelay, maxConcurrentTasks);
 }

@@ -15,6 +15,8 @@ set(FDBBACKUPAGENT_SRCS
   BackupRestoreCommon.h
 	BackupTLSConfig.h
 	BackupTLSConfig.cpp
+  AgentDriver.actor.cpp
+  AgentDriver.h
   backupagent.actor.cpp)
 
 add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
