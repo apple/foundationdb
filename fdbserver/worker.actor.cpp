@@ -1829,6 +1829,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				startRole(Role::LOG_ROUTER, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.peekMessages);
+				DUMPTOKEN(recruited.peekStreamMessages);
 				DUMPTOKEN(recruited.popMessages);
 				DUMPTOKEN(recruited.commit);
 				DUMPTOKEN(recruited.lock);

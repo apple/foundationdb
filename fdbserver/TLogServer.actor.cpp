@@ -1568,6 +1568,14 @@ ACTOR Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, T
 	return relevantMessages;
 }
 
+ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
+	if (req.tag.locality == tagLocalityTxs && req.tag.id >= logData->txsTags && logData->txsTags > 0) {
+		req.tag.id = req.tag.id % logData->txsTags;
+	}
+	req.reply.setByteLimit(SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
+	return Void();
+}
+
 ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Reference<LogData> logData) {
 	state BinaryWriter messages(Unversioned());
 	state BinaryWriter messages2(Unversioned());
@@ -2400,7 +2408,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			}
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
-
+			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
 			logData->addActor.send(tLogPeekMessages(self, req, logData));
@@ -2658,7 +2666,7 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 	                                     SERVER_KNOBS->STORAGE_LOGGING_DELAY,
 	                                     &logData->cc,
 	                                     logData->logId.toString() + "/TLogMetrics",
-	                                     [self=self](TraceEvent& te) {
+	                                     [self = self](TraceEvent& te) {
 		                                     StorageBytes sbTlog = self->persistentData->getStorageBytes();
 		                                     te.detail("KvstoreBytesUsed", sbTlog.used);
 		                                     te.detail("KvstoreBytesFree", sbTlog.free);
@@ -2842,6 +2850,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		recruited.initEndpoints();
 
 		DUMPTOKEN(recruited.peekMessages);
+		DUMPTOKEN(recruited.peekStreamMessages);
 		DUMPTOKEN(recruited.popMessages);
 		DUMPTOKEN(recruited.commit);
 		DUMPTOKEN(recruited.lock);
@@ -2888,9 +2897,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		logsByVersion.emplace_back(ver, id1);
 
 		TraceEvent("TLogPersistentStateRestore", self->dbgid)
-			.detail("LogId", logData->logId)
-			.detail("Ver", ver)
-			.detail("RecoveryCount", logData->recoveryCount);
+		    .detail("LogId", logData->logId)
+		    .detail("Ver", ver)
+		    .detail("RecoveryCount", logData->recoveryCount);
 		// Restore popped keys.  Pop operations that took place after the last (committed) updatePersistentDataVersion
 		// might be lost, but that is fine because we will get the corresponding data back, too.
 		tagKeys = prefixRange(rawId.withPrefix(persistTagPoppedKeys.begin));

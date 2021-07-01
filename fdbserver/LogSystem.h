@@ -433,9 +433,11 @@ struct ILogSystem {
 
 		bool onlySpilled;
 		bool parallelGetMore;
+		bool usePeekStream;
 		int sequence;
 		Deque<Future<TLogPeekReply>> futureResults;
 		Future<Void> interfaceChanged;
+		Optional<ReplyPromiseStream<TLogPeekStreamReply>> peekReplyStream;
 
 		double lastReset;
 		Future<Void> resetCheck;
