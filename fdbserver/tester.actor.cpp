@@ -1587,7 +1587,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
  *
  * \returns A future which will be set after all tests finished.
  */
-ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> runTests(std::vector<Reference<ClusterConnectionFile>> connFiles,
                             test_type_t whatToRun,
                             test_location_t at,
                             int minTestersExpected,
@@ -1599,8 +1599,10 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	vector<Future<Void>> actors;
-	if (connFile) {
-		actors.push_back(reportErrors(monitorLeader(connFile, cc), "MonitorLeader"));
+	if (!connFiles.empty()) {
+		for (Reference<ClusterConnectionFile> connFile : connFiles) {
+			actors.push_back(reportErrors(monitorLeader(connFile, cc), "MonitorLeader"));
+		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 	}
 
@@ -1675,7 +1677,9 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		vector<TesterInterface> iTesters(1);
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
-		actors.push_back(reportErrors(testerServerCore(iTesters[0], connFile, db, locality), "TesterServerCore"));
+		for (Reference<ClusterConnectionFile> connFile : connFiles) {
+			actors.push_back(reportErrors(testerServerCore(iTesters[0], connFile, db, locality), "TesterServerCore"));
+		}
 		tests = runTests(cc, ci, iTesters, testSpecs, startingConfiguration, locality);
 	} else {
 		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality),

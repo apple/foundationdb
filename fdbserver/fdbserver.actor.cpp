@@ -816,6 +816,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
 		NetworkAddress currentPublicAddress;
 		if (autoPublicAddress) {
+			// what does it mean? infer public address from connection string?
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
 				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
@@ -936,9 +937,10 @@ enum class ServerRole {
 };
 struct CLIOptions {
 	std::string commandLine;
-	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString, logFolder = ".", metricsConnFile,
+	std::string fileSystemPath, dataFolder, seedConnFile, seedConnString, logFolder = ".", metricsConnFile,
 	                                                                                metricsPrefix;
 	std::string logGroup = "default";
+	std::vector<std::string> connFileNames;
 	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
 	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
 	bool maxLogsSizeSet = false;
@@ -983,13 +985,17 @@ struct CLIOptions {
 	std::string configPath;
 	UseConfigDB useConfigDB{ UseConfigDB::DISABLED };
 
-	Reference<ClusterConnectionFile> connectionFile;
+	std::vector<Reference<ClusterConnectionFile>> connectionFiles;
 	Standalone<StringRef> machineId;
 	UnitTestParameters testParams;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
+		if (opts.role != ServerRole::Test && opts.role != ServerRole::MultiTester && opts.connectionFiles.size() > 1) {
+			fprintf(stderr, "ERROR: only Tester or MultiTester can have more than 1 cluster file\n");
+			flushAndExit(FDB_EXIT_ERROR);
+		}
 		return opts;
 	}
 
@@ -1147,7 +1153,8 @@ private:
 				listenAddressStrs.insert(listenAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
 				break;
 			case OPT_CONNFILE:
-				connFile = args.OptionArg();
+				argStr = args.OptionArg();
+				boost::split(connFileNames, argStr, [](char c) { return c == ','; });
 				break;
 			case OPT_LOGGROUP:
 				logGroup = args.OptionArg();
@@ -1475,73 +1482,79 @@ private:
 
 		bool seedSpecified = seedConnFile.length() || seedConnString.length();
 
-		if (seedSpecified && !connFile.length()) {
+		if (seedSpecified && (connFileNames.size() == 0)) {
 			fprintf(stderr,
 			        "%s\n",
 			        "If -seed_cluster_file or --seed_connection_string is specified, -C must be specified as well.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (metricsConnFile == connFile)
+		if (find(connFileNames.begin(), connFileNames.end(), metricsConnFile) != connFileNames.end())
 			metricsConnFile = "";
+			// what does metrics connFile mean, does it have to be as the same number of
 
 		if (metricsConnFile != "" && metricsPrefix == "") {
 			fprintf(stderr, "If a metrics cluster file is specified, a metrics prefix is required.\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		bool autoPublicAddress =
-		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(), [](const std::string& addr) {
-			    return StringRef(addr).startsWith(LiteralStringRef("auto:"));
-		    });
-		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
-		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
-		     role != ServerRole::UnitTests) ||
-		    autoPublicAddress) {
+		for (int i = 0; i < connFileNames.size(); i++) {
+			std::string connFile = connFileNames[i];
+			bool autoPublicAddress =
+				std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(), [](const std::string& addr) {
+					return StringRef(addr).startsWith(LiteralStringRef("auto:"));
+				});
+			if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
+				role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
+				role != ServerRole::UnitTests) ||
+				autoPublicAddress) {
 
-			if (seedSpecified && !fileExists(connFile)) {
-				std::string connectionString = seedConnString.length() ? seedConnString : "";
-				ClusterConnectionString ccs;
-				if (seedConnFile.length()) {
+				if (seedSpecified && !fileExists(connFile)) {
+					std::string connectionString = seedConnString.length() ? seedConnString : "";
+					ClusterConnectionString ccs;
+					if (seedConnFile.length()) {
+						try {
+							connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
+						} catch (Error& e) {
+							fprintf(stderr,
+									"%s\n",
+									ClusterConnectionFile::getErrorString(std::make_pair(seedConnFile, false), e).c_str());
+							throw;
+						}
+					}
+
 					try {
-						connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
+						ccs = ClusterConnectionString(connectionString);
 					} catch (Error& e) {
-						fprintf(stderr,
-						        "%s\n",
-						        ClusterConnectionFile::getErrorString(std::make_pair(seedConnFile, false), e).c_str());
+						fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
+						throw;
+					}
+					connectionFiles.push_back(makeReference<ClusterConnectionFile>(connFile, ccs));
+				} else {
+					std::pair<std::string, bool> resolvedClusterFile;
+					try {
+						resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(connFile);
+						connectionFiles.push_back(makeReference<ClusterConnectionFile>(resolvedClusterFile.first));
+					} catch (Error& e) {
+						fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 						throw;
 					}
 				}
-
-				try {
-					ccs = ClusterConnectionString(connectionString);
-				} catch (Error& e) {
-					fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
-					throw;
-				}
-				connectionFile = makeReference<ClusterConnectionFile>(connFile, ccs);
-			} else {
-				std::pair<std::string, bool> resolvedClusterFile;
-				try {
-					resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(connFile);
-					connectionFile = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
-				} catch (Error& e) {
-					fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
-					throw;
-				}
+				// failmon?
 			}
 
-			// failmon?
 		}
 
-		try {
-			if (!publicAddressStrs.empty()) {
-				std::tie(publicAddresses, listenAddresses) =
-				    buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
+		for (auto connectionFile : connectionFiles) {
+			try {
+				if (!publicAddressStrs.empty()) {
+					std::tie(publicAddresses, listenAddresses) =
+						buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
+				}
+			} catch (Error&) {
+				printHelpTeaser(argv[0]);
+				flushAndExit(FDB_EXIT_ERROR);
 			}
-		} catch (Error&) {
-			printHelpTeaser(argv[0]);
-			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		if (role == ServerRole::ConsistencyCheck) {
@@ -1550,7 +1563,7 @@ private:
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
-			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
+			auto publicIP = determinePublicIPAutomatically(connectionFiles[0]->getConnectionString());
 			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
 		}
 
@@ -1787,9 +1800,9 @@ int main(int argc, char* argv[]) {
 		    .detail("FileSystem", opts.fileSystemPath)
 		    .detail("DataFolder", opts.dataFolder)
 		    .detail("WorkingDirectory", cwd)
-		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->getFilename().c_str() : "")
-		    .detail("ConnectionString",
-		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
+		    // .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->getFilename().c_str() : "")
+		    // .detail("ConnectionString",
+		    //         opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
 		    .detail("CommandLine", opts.commandLine)
@@ -1947,19 +1960,19 @@ int main(int argc, char* argv[]) {
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
 			if (opts.processClass == ProcessClass::FastRestoreClass) {
 				printf("Run as fast restore worker\n");
-				ASSERT(opts.connectionFile);
+				ASSERT(opts.connectionFiles[0]);
 				auto dataFolder = opts.dataFolder;
 				if (!dataFolder.size())
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
 				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
+				actors.push_back(restoreWorker(opts.connectionFiles[0], opts.localities, dataFolder));
 				f = stopAfter(waitForAll(actors));
 				printf("Fast restore worker started\n");
 				g_network->run();
 				printf("g_network->run() done\n");
 			} else { // Call fdbd roles in conventional way
-				ASSERT(opts.connectionFile);
+				ASSERT(opts.connectionFiles[0]);
 
 				setupRunLoopProfiler();
 
@@ -1968,7 +1981,7 @@ int main(int argc, char* argv[]) {
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
 				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-				actors.push_back(fdbd(opts.connectionFile,
+				actors.push_back(fdbd(opts.connectionFiles[0],
 				                      opts.localities,
 				                      opts.processClass,
 				                      dataFolder,
@@ -1989,7 +2002,7 @@ int main(int argc, char* argv[]) {
 			}
 		} else if (role == ServerRole::MultiTester) {
 			setupRunLoopProfiler();
-			f = stopAfter(runTests(opts.connectionFile,
+			f = stopAfter(runTests(opts.connectionFiles,
 			                       TEST_TYPE_FROM_FILE,
 			                       opts.testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS,
 			                       opts.minTesterCount,
@@ -2001,13 +2014,13 @@ int main(int argc, char* argv[]) {
 			setupRunLoopProfiler();
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(
-			    opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(), opts.localities));
+			    opts.connectionFiles, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(), opts.localities));
 			g_network->run();
 		} else if (role == ServerRole::ConsistencyCheck) {
 			setupRunLoopProfiler();
 
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
-			f = stopAfter(runTests(opts.connectionFile,
+			f = stopAfter(runTests(opts.connectionFiles,
 			                       TEST_TYPE_CONSISTENCY_CHECK,
 			                       TEST_HERE,
 			                       1,
@@ -2018,7 +2031,7 @@ int main(int argc, char* argv[]) {
 		} else if (role == ServerRole::UnitTests) {
 			setupRunLoopProfiler();
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
-			f = stopAfter(runTests(opts.connectionFile,
+			f = stopAfter(runTests(opts.connectionFiles,
 			                       TEST_TYPE_UNIT_TESTS,
 			                       TEST_HERE,
 			                       1,
@@ -2036,7 +2049,7 @@ int main(int argc, char* argv[]) {
 			f = stopAfter(networkTestServer());
 			g_network->run();
 		} else if (role == ServerRole::Restore) {
-			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
+			f = stopAfter(restoreWorker(opts.connectionFiles[0], opts.localities, opts.dataFolder));
 			g_network->run();
 		} else if (role == ServerRole::KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));

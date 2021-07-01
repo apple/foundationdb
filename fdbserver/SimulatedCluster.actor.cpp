@@ -2158,7 +2158,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
-		wait(timeoutError(runTests(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")),
+		std::vector<Reference<ClusterConnectionFile>> connectionFiles;
+		connectionFiles.push_back(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")));
+		wait(timeoutError(runTests(connectionFiles,
 		                           TEST_TYPE_FROM_FILE,
 		                           TEST_ON_TESTERS,
 		                           testerCount,
