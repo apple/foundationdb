@@ -46,6 +46,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
+#include "fdbclient/VersionVector.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -245,6 +246,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	int8_t primaryLocality;
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
+
+	// Captures the latest commit version targeted for each storage server in the cluster.
+	VersionVector ssVersionVector;
 
 	CounterCollection cc;
 	Counter changeCoordinatorsRequests;
