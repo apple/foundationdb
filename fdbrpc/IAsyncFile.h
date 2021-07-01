@@ -34,6 +34,7 @@
 // must complete or cancel, but you should probably look at the file implementations you'll be using.
 class IAsyncFile {
 public:
+	//explicit IAsyncFile() : diskFailureInjector(DiskFailureInjector::injector()) {}
 	virtual ~IAsyncFile();
 	// Pass these to g_network->open to get an IAsyncFile
 	enum {
@@ -95,6 +96,9 @@ public:
 	// Used for rate control, at present, only AsyncFileCached supports it
 	virtual Reference<IRateControl> const& getRateControl() { throw unsupported_operation(); }
 	virtual void setRateControl(Reference<IRateControl> const& rc) { throw unsupported_operation(); }
+
+//public:
+	//DiskFailureInjector* diskFailureInjector;
 };
 
 typedef void (*runCycleFuncPtr)();
