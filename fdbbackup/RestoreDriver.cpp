@@ -153,3 +153,89 @@ CSimpleOpt::SOption const rgRestoreOptions[] = {
 #endif
 	    SO_END_OF_OPTIONS
 };
+
+void RestoreDriverState::processArg(std::string const& programName, CSimpleOpt const& args) {
+	int optId = args.OptionId();
+	switch (optId) {
+	case OPT_RESTORE_TIMESTAMP:
+		targetTimestamp = args.OptionArg();
+		break;
+	case OPT_RESTORE_CLUSTERFILE_DEST:
+		restoreClusterFileDest = args.OptionArg();
+		break;
+	case OPT_RESTORE_CLUSTERFILE_ORIG:
+		restoreClusterFileOrig = args.OptionArg();
+		break;
+	case OPT_RESTORECONTAINER:
+		restoreContainer = args.OptionArg();
+		// If the url starts with '/' then prepend "file://" for backwards compatibility
+		if (StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
+			restoreContainer = std::string("file://") + restoreContainer;
+		break;
+	case OPT_PREFIX_ADD:
+		addPrefix = args.OptionArg();
+		break;
+	case OPT_PREFIX_REMOVE:
+		removePrefix = args.OptionArg();
+		break;
+	case OPT_TAGNAME:
+		tagName = args.OptionArg();
+		break;
+	case OPT_INCREMENTALONLY:
+		onlyApplyMutationLogs = true;
+		break;
+	case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY:
+		inconsistentSnapshotOnly = true;
+		break;
+	case OPT_RESTORE_BEGIN_VERSION: {
+		const char* a = args.OptionArg();
+		long long ver = 0;
+		if (!sscanf(a, "%lld", &ver)) {
+			fprintf(stderr, "ERROR: Could not parse database beginVersion `%s'\n", a);
+			printHelpTeaser(programName);
+			throw invalid_option_value();
+		}
+		beginVersion = ver;
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+bool RestoreDriverState::setup() {
+	if (dryRun) {
+		if (restoreType != RestoreType::START) {
+			fprintf(stderr, "Restore dry run only works for 'start' command\n");
+			return false;
+		}
+
+		// FIXME: Reenable
+		// Must explicitly call trace file options handling if not calling Database::createDatabase()
+		// initTraceFile();
+	} else {
+		if (restoreClusterFileDest.empty()) {
+			fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
+			return false;
+		}
+
+		if (!fileExists(restoreClusterFileDest)) {
+			fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
+			return false;
+		}
+
+		try {
+			createDatabase();
+		} catch (Error& e) {
+			fprintf(stderr,
+			        "Restore destination cluster file '%s' invalid: %s\n",
+			        restoreClusterFileDest.c_str(),
+			        e.what());
+			return false;
+		}
+	}
+
+	initializeBackupKeys();
+
+	return true;
+}

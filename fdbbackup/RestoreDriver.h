@@ -29,3 +29,51 @@ enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 RestoreType getRestoreType(std::string const& name);
 
 extern CSimpleOpt::SOption const rgRestoreOptions[];
+
+class RestoreDriverState {
+	bool waitForDone{ false };
+	std::string restoreClusterFileOrig;
+	std::string restoreClusterFileDest;
+	bool dryRun{ false };
+	RestoreType restoreType{ RestoreType::UNKNOWN };
+	Version targetVersion{ ::invalidVersion };
+	Version beginVersion{ ::invalidVersion };
+	std::string targetTimestamp;
+	Optional<std::string> tagName;
+	std::string restoreContainer;
+	std::string addPrefix;
+	std::string removePrefix;
+	bool onlyApplyMutationLogs{ false };
+	bool inconsistentSnapshotOnly{ false };
+	Database db;
+	Standalone<VectorRef<KeyRangeRef>> backupKeys;
+
+	void createDatabase() { db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST); }
+	void initializeBackupKeys() {
+		if (backupKeys.size() == 0) {
+			backupKeys.push_back(backupKeys.arena(), normalKeys);
+		}
+	}
+
+public:
+	void processArg(std::string const& programName, CSimpleOpt const& args);
+	bool shouldWaitForDone() const { return waitForDone; }
+	std::string const& getOrigClusterFile() const { return restoreClusterFileOrig; }
+	std::string const& getDestClusterFile() const { return restoreClusterFileDest; }
+	bool isDryRun() const { return dryRun; }
+	RestoreType getRestoreType() const { return restoreType; }
+	Version getTargetVersion() const { return targetVersion; }
+	Version getBeginVersion() const { return beginVersion; }
+	bool tagNameProvided() const { return tagName.present(); }
+	std::string getTagName() const { return tagName.orDefault(BackupAgentBase::getDefaultTag().toString()); }
+	std::string const& getTargetTimestamp() const { return targetTimestamp; }
+	std::string const& getRestoreContainer() const { return restoreContainer; }
+	std::string const& getAddPrefix() const { return addPrefix; }
+	std::string const& getRemovePrefix() const { return removePrefix; }
+	bool shouldOnlyApplyMutationLogs() const { return onlyApplyMutationLogs; }
+	bool restoreInconsistentSnapshotOnly() const { return inconsistentSnapshotOnly; }
+	Database const& getDatabase() const { return db; }
+	Standalone<VectorRef<KeyRangeRef>> const& getBackupKeys() const { return backupKeys; }
+	bool setup();
+	void parseCommandLineArgs(int argc, char** argv);
+};

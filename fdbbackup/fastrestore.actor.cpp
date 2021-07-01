@@ -24,85 +24,59 @@
 namespace {
 
 class FastRestoreDriver : public Driver<FastRestoreDriver> {
-	// FIXME: All of these fields are common to fdbrestore
-	Database db;
-	std::string restoreTimestamp;
-	std::string restoreClusterFileOrig;
-	std::string restoreClusterFileDest;
-	std::string restoreContainer;
-	std::string addPrefix;
-	std::string removePrefix;
-	Optional<std::string> tagName;
-	Standalone<VectorRef<KeyRangeRef>> backupKeys;
-	bool waitForDone{ false };
-	Version restoreVersion{ ::invalidVersion };
-	RestoreType restoreType{ RestoreType::UNKNOWN };
-
-	bool dryRun{ false };
-	bool onlyApplyMutationLogs{ false };
-	bool inconsistentSnapshotOnly{ false };
-	Version beginVersion{ ::invalidVersion };
+	RestoreDriverState driverState;
 
 	// Fast restore agent that kicks off the restore: send restore requests to restore workers.
-	ACTOR static Future<Void> runFastRestoreTool(Database db,
-	                                             std::string tagName,
-	                                             std::string container,
-	                                             Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                             Version dbVersion,
-	                                             bool performRestore,
-	                                             bool verbose,
-	                                             bool waitForDone) {
+	ACTOR static Future<Void> runFastRestoreTool(RestoreDriverState* driverState, bool verbose) {
 		try {
 			state FileBackupAgent backupAgent;
-			state Version restoreVersion = invalidVersion;
+			state Version restoreVersion = ::invalidVersion;
 
-			if (ranges.size() > 1) {
+			if (driverState->getBackupKeys().size() > 1) {
 				fprintf(stdout, "[WARNING] Currently only a single restore range is tested!\n");
 			}
 
-			if (ranges.size() == 0) {
-				ranges.push_back(ranges.arena(), normalKeys);
-			}
-
 			printf("[INFO] runFastRestoreTool: restore_ranges:%d first range:%s\n",
-			       ranges.size(),
-			       ranges.front().toString().c_str());
+			       driverState->getBackupKeys().size(),
+			       driverState->getBackupKeys().front().toString().c_str());
 			TraceEvent ev("FastRestoreTool");
-			ev.detail("RestoreRanges", ranges.size());
-			for (int i = 0; i < ranges.size(); ++i) {
-				ev.detail(format("Range%d", i), ranges[i]);
+			ev.detail("RestoreRanges", driverState->getBackupKeys().size());
+			for (int i = 0; i < driverState->getBackupKeys().size(); ++i) {
+				ev.detail(format("Range%d", i), driverState->getBackupKeys()[i]);
 			}
 
-			if (performRestore) {
-				if (dbVersion == invalidVersion) {
+			if (!driverState->isDryRun()) {
+				if (driverState->getTargetVersion() == ::invalidVersion) {
 					TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", "Largest restorable version");
-					BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
+					BackupDescription desc =
+					    wait(IBackupContainer::openContainer(driverState->getRestoreContainer())->describeBackup());
 					if (!desc.maxRestorableVersion.present()) {
 						fprintf(stderr, "The specified backup is not restorable to any version.\n");
 						throw restore_error();
 					}
 
-					dbVersion = desc.maxRestorableVersion.get();
-					TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", dbVersion);
+					restoreVersion = desc.maxRestorableVersion.get();
+					TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", driverState->getTargetVersion());
 				}
 				state UID randomUID = deterministicRandom()->randomUniqueID();
 				TraceEvent("FastRestoreTool")
-				    .detail("SubmitRestoreRequests", ranges.size())
+				    .detail("SubmitRestoreRequests", driverState->getBackupKeys().size())
 				    .detail("RestoreUID", randomUID);
-				wait(backupAgent.submitParallelRestore(db,
-				                                       KeyRef(tagName),
-				                                       ranges,
-				                                       KeyRef(container),
-				                                       dbVersion,
-				                                       true,
-				                                       randomUID,
-				                                       LiteralStringRef(""),
-				                                       LiteralStringRef("")));
+				wait(backupAgent.submitParallelRestore(
+				    driverState->getDatabase(),
+				    KeyRef(driverState->getTagName()),
+				    driverState->getBackupKeys(),
+				    KeyRef(driverState->getRestoreContainer()),
+				    driverState->getTargetVersion(), // FIXME: Shouldn't actual version be used here?
+				    true,
+				    randomUID,
+				    ""_sr,
+				    ""_sr));
 				// TODO: Support addPrefix and removePrefix
-				if (waitForDone) {
+				if (driverState->shouldWaitForDone()) {
 					// Wait for parallel restore to finish and unlock DB after that
 					TraceEvent("FastRestoreTool").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
-					wait(backupAgent.parallelRestoreFinish(db, randomUID));
+					wait(backupAgent.parallelRestoreFinish(driverState->getDatabase(), randomUID));
 					TraceEvent("FastRestoreTool").detail("BackupAndParallelRestore", "RestoreFinished");
 				} else {
 					TraceEvent("FastRestoreTool")
@@ -111,14 +85,14 @@ class FastRestoreDriver : public Driver<FastRestoreDriver> {
 					printf("WARNING: DB will be in locked state after restore. Need UID:%s to unlock DB\n",
 					       randomUID.toString().c_str());
 				}
-
-				restoreVersion = dbVersion;
+				restoreVersion = driverState->getTargetVersion();
 			} else {
-				state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
+				state Reference<IBackupContainer> bc =
+				    IBackupContainer::openContainer(driverState->getRestoreContainer());
 				state BackupDescription description = wait(bc->describeBackup());
 
-				if (dbVersion <= 0) {
-					wait(description.resolveVersionTimes(db));
+				if (driverState->getTargetVersion() <= 0) {
+					wait(description.resolveVersionTimes(driverState->getDatabase()));
 					if (description.maxRestorableVersion.present())
 						restoreVersion = description.maxRestorableVersion.get();
 					else {
@@ -126,7 +100,7 @@ class FastRestoreDriver : public Driver<FastRestoreDriver> {
 						throw restore_invalid_version();
 					}
 				} else {
-					restoreVersion = dbVersion;
+					restoreVersion = driverState->getTargetVersion();
 				}
 
 				state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
@@ -142,9 +116,11 @@ class FastRestoreDriver : public Driver<FastRestoreDriver> {
 				}
 			}
 
-			if (waitForDone && verbose) {
+			if (driverState->shouldWaitForDone() && verbose) {
 				// If restore completed then report version restored
-				printf("Restored to version %" PRId64 "%s\n", restoreVersion, (performRestore) ? "" : " (DRY RUN)");
+				printf("Restored to version %" PRId64 "%s\n",
+				       restoreVersion,
+				       (driverState->isDryRun()) ? " (DRY RUN)" : "");
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -165,62 +141,12 @@ public:
 		return;
 	}
 
-	// FIXME: This is copy-pasted from fdbrestore.actor.cpp
-	void processArg(CSimpleOpt const& args) {
-		int optId = args.OptionId();
-		switch (optId) {
-		case OPT_RESTORE_TIMESTAMP:
-			restoreTimestamp = args.OptionArg();
-			break;
-		case OPT_RESTORE_CLUSTERFILE_DEST:
-			restoreClusterFileDest = args.OptionArg();
-			break;
-		case OPT_RESTORE_CLUSTERFILE_ORIG:
-			restoreClusterFileOrig = args.OptionArg();
-			break;
-		case OPT_RESTORECONTAINER:
-			restoreContainer = args.OptionArg();
-			// If the url starts with '/' then prepend "file://" for backwards compatibility
-			if (StringRef(restoreContainer).startsWith("/"_sr))
-				restoreContainer = std::string("file://") + restoreContainer;
-			break;
-		case OPT_PREFIX_ADD:
-			addPrefix = args.OptionArg();
-			break;
-		case OPT_PREFIX_REMOVE:
-			removePrefix = args.OptionArg();
-			break;
-		case OPT_TAGNAME:
-			tagName = args.OptionArg();
-			break;
-		case OPT_INCREMENTALONLY:
-			onlyApplyMutationLogs = true;
-			break;
-		case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY:
-			inconsistentSnapshotOnly = true;
-			break;
-		case OPT_RESTORE_BEGIN_VERSION: {
-			const char* a = args.OptionArg();
-			long long ver = 0;
-			if (!sscanf(a, "%lld", &ver)) {
-				fprintf(stderr, "ERROR: Could not parse database beginVersion `%s'\n", a);
-				printHelpTeaser(getProgramName());
-				throw invalid_option_value();
-			}
-			beginVersion = ver;
-			break;
-		}
-		default:
-			break;
-		}
-	}
+	void processArg(CSimpleOpt const& args) { driverState.processArg(getProgramName(), args); }
 
-	// FIXME: Remove duplicate code from fdbrestore
 	void parseCommandLineArgs(int argc, char** argv) {
 		if (argc < 2) {
 			printUsage(false);
-			// TODO: Add new error code
-			throw restore_error();
+			throw invalid_command_line_arguments();
 		}
 		// Get the restore operation type
 		auto restoreType = getRestoreType(argv[1]);
@@ -237,54 +163,14 @@ public:
 		processArgs(*args);
 	}
 
-	// TODO: Reduce duplicate code with fdbrestore
-	bool setup() {
-		// Support --dest_cluster_file option as fdbrestore does
-		if (dryRun) {
-			if (restoreType != RestoreType::START) {
-				fprintf(stderr, "Restore dry run only works for 'start' command\n");
-				return false;
-			}
-
-			// Must explicitly call trace file options handling if not calling Database::createDatabase()
-			initTraceFile();
-		} else {
-			if (restoreClusterFileDest.empty()) {
-				fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-				return false;
-			}
-
-			if (!fileExists(restoreClusterFileDest)) {
-				fprintf(
-				    stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
-				return false;
-			}
-
-			try {
-				db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
-			} catch (Error& e) {
-				fprintf(stderr,
-				        "Restore destination cluster file '%s' invalid: %s\n",
-				        restoreClusterFileDest.c_str(),
-				        e.what());
-				return false;
-			}
-		}
-		return true;
-	}
+	// Returns true iff setup is successful
+	bool setup() { return driverState.setup(); }
 
 	Future<Optional<Void>> run() {
 		// TODO: We have not implemented the code commented out in this case
-		switch (restoreType) {
+		switch (driverState.getRestoreType()) {
 		case RestoreType::START:
-			return stopAfter(runFastRestoreTool(db,
-			                                    tagName.orDefault(BackupAgentBase::getDefaultTag().toString()),
-			                                    restoreContainer,
-			                                    backupKeys,
-			                                    restoreVersion,
-			                                    !dryRun,
-			                                    !quietDisplay,
-			                                    waitForDone));
+			return stopAfter(runFastRestoreTool(&driverState, !quietDisplay));
 		case RestoreType::WAIT:
 			printf("[TODO][ERROR] FastRestore does not support RESTORE_WAIT yet!\n");
 			throw restore_error();

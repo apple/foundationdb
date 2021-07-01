@@ -33,26 +33,10 @@ namespace {
 class RestoreDriver : public Driver<RestoreDriver> {
 	// Submit the restore request to the database if "performRestore" is true. Otherwise,
 	// check if the restore can be performed.
-	ACTOR static Future<Void> runRestore(Database db,
-	                                     std::string originalClusterFile,
-	                                     std::string tagName,
-	                                     std::string container,
-	                                     Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                     Version beginVersion,
-	                                     Version targetVersion,
-	                                     std::string targetTimestamp,
-	                                     bool performRestore,
-	                                     bool verbose,
-	                                     bool waitForDone,
-	                                     std::string addPrefix,
-	                                     std::string removePrefix,
-	                                     bool onlyApplyMutationLogs,
-	                                     bool inconsistentSnapshotOnly) {
-		if (ranges.empty()) {
-			ranges.push_back_deep(ranges.arena(), normalKeys);
-		}
+	ACTOR static Future<Void> runRestore(RestoreDriverState const* driverState, bool verbose) {
+		state Version restoreVersion = driverState->getTargetVersion();
 
-		if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
+		if (driverState->getTargetVersion() != ::invalidVersion && !driverState->getTargetTimestamp().empty()) {
 			fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
 			throw restore_error();
 		}
@@ -60,85 +44,88 @@ class RestoreDriver : public Driver<RestoreDriver> {
 		state Optional<Database> origDb;
 
 		// Resolve targetTimestamp if given
-		if (!targetTimestamp.empty()) {
-			if (originalClusterFile.empty()) {
+		if (!driverState->getTargetTimestamp().empty()) {
+			if (driverState->getOrigClusterFile().empty()) {
 				fprintf(stderr,
 				        "An original cluster file must be given in order to resolve restore target timestamp '%s'\n",
-				        targetTimestamp.c_str());
+				        driverState->getTargetTimestamp().c_str());
 				throw restore_error();
 			}
 
-			if (!fileExists(originalClusterFile)) {
+			if (!fileExists(driverState->getOrigClusterFile())) {
 				fprintf(stderr,
 				        "Original source database cluster file '%s' does not exist.\n",
-				        originalClusterFile.c_str());
+				        driverState->getOrigClusterFile().c_str());
 				throw restore_error();
 			}
 
-			origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
-			Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
-			printf("Timestamp '%s' resolves to version %" PRId64 "\n", targetTimestamp.c_str(), v);
-			targetVersion = v;
+			origDb = Database::createDatabase(driverState->getOrigClusterFile(), Database::API_VERSION_LATEST);
+			Version v = wait(timeKeeperVersionFromDatetime(driverState->getTargetTimestamp(), origDb.get()));
+			printf("Timestamp '%s' resolves to version %" PRId64 "\n", driverState->getTargetTimestamp().c_str(), v);
+			restoreVersion = v;
 		}
 
 		try {
 			state FileBackupAgent backupAgent;
 
-			state Reference<IBackupContainer> bc = openBackupContainer(getProgramName().c_str(), container);
+			state Reference<IBackupContainer> bc =
+			    openBackupContainer(getProgramName().c_str(), driverState->getRestoreContainer());
 
 			// If targetVersion is unset then use the maximum restorable version from the backup description
-			if (targetVersion == invalidVersion) {
-				if (verbose)
+			if (driverState->getTargetVersion() == ::invalidVersion) {
+				if (verbose) {
 					printf("No restore target version given, will use maximum restorable version from backup "
 					       "description.\n");
+				}
 
 				BackupDescription desc = wait(bc->describeBackup());
 
-				if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
-					targetVersion = desc.contiguousLogEnd.get() - 1;
+				if (driverState->shouldOnlyApplyMutationLogs() && desc.contiguousLogEnd.present()) {
+					restoreVersion = desc.contiguousLogEnd.get() - 1;
 				} else if (desc.maxRestorableVersion.present()) {
-					targetVersion = desc.maxRestorableVersion.get();
+					restoreVersion = desc.maxRestorableVersion.get();
 				} else {
 					fprintf(stderr, "The specified backup is not restorable to any version.\n");
 					throw restore_error();
 				}
 
 				if (verbose)
-					printf("Using target restore version %" PRId64 "\n", targetVersion);
+					printf("Using target restore version %" PRId64 "\n", restoreVersion);
 			}
 
-			if (performRestore) {
-				Version restoredVersion = wait(backupAgent.restore(db,
+			if (!driverState->isDryRun()) {
+				Version restoredVersion = wait(backupAgent.restore(driverState->getDatabase(),
 				                                                   origDb,
-				                                                   KeyRef(tagName),
-				                                                   KeyRef(container),
-				                                                   ranges,
-				                                                   waitForDone,
-				                                                   targetVersion,
+				                                                   KeyRef(driverState->getTagName()),
+				                                                   KeyRef(driverState->getRestoreContainer()),
+				                                                   driverState->getBackupKeys(),
+				                                                   driverState->shouldWaitForDone(),
+				                                                   restoreVersion,
 				                                                   verbose,
-				                                                   KeyRef(addPrefix),
-				                                                   KeyRef(removePrefix),
+				                                                   KeyRef(driverState->getAddPrefix()),
+				                                                   KeyRef(driverState->getRemovePrefix()),
 				                                                   true,
-				                                                   onlyApplyMutationLogs,
-				                                                   inconsistentSnapshotOnly,
-				                                                   beginVersion));
+				                                                   driverState->shouldOnlyApplyMutationLogs(),
+				                                                   driverState->restoreInconsistentSnapshotOnly(),
+				                                                   driverState->getBeginVersion()));
 
-				if (waitForDone && verbose) {
+				if (driverState->shouldWaitForDone() && verbose) {
 					// If restore is now complete then report version restored
 					printf("Restored to version %" PRId64 "\n", restoredVersion);
 				}
 			} else {
-				state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
+				state Optional<RestorableFileSet> rset =
+				    wait(bc->getRestoreSet(restoreVersion, driverState->getBackupKeys()));
 
 				if (!rset.present()) {
 					fprintf(stderr,
 					        "Insufficient data to restore to version %" PRId64
 					        ".  Describe backup for more information.\n",
-					        targetVersion);
+					        restoreVersion);
 					throw restore_invalid_version();
 				}
 
-				printf("Backup can be used to restore to version %" PRId64 "\n", targetVersion);
+				printf("Backup can be used to restore to version %" PRId64 "\n", restoreVersion);
 			}
 
 		} catch (Error& e) {
@@ -151,23 +138,7 @@ class RestoreDriver : public Driver<RestoreDriver> {
 		return Void();
 	}
 
-	Database db;
-	std::string restoreTimestamp;
-	std::string restoreClusterFileOrig;
-	std::string restoreClusterFileDest;
-	std::string restoreContainer;
-	std::string addPrefix;
-	std::string removePrefix;
-	Optional<std::string> tagName;
-	Standalone<VectorRef<KeyRangeRef>> backupKeys;
-	bool waitForDone{ false };
-	Version restoreVersion{ ::invalidVersion };
-	RestoreType restoreType{ RestoreType::UNKNOWN };
-
-	bool dryRun{ false };
-	bool onlyApplyMutationLogs{ false };
-	bool inconsistentSnapshotOnly{ false };
-	Version beginVersion{ ::invalidVersion };
+	RestoreDriverState driverState;
 
 public:
 	static std::string getProgramName() { return "fdbrestore"; }
@@ -195,80 +166,33 @@ public:
 	}
 
 	// Returns true iff setup is successful
-	bool setup() {
-		if (dryRun) {
-			if (restoreType != RestoreType::START) {
-				fprintf(stderr, "Restore dry run only works for 'start' command\n");
-				return false;
-			}
-
-			// Must explicitly call trace file options handling if not calling Database::createDatabase()
-			initTraceFile();
-		} else {
-			if (restoreClusterFileDest.empty()) {
-				fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-				return false;
-			}
-
-			if (!fileExists(restoreClusterFileDest)) {
-				fprintf(
-				    stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
-				return false;
-			}
-
-			try {
-				db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
-			} catch (Error& e) {
-				fprintf(stderr,
-				        "Restore destination cluster file '%s' invalid: %s\n",
-				        restoreClusterFileDest.c_str(),
-				        e.what());
-				return false;
-			}
-		}
-		return true;
-	}
+	bool setup() { return driverState.setup(); }
 
 	Future<Optional<Void>> run() {
 		FileBackupAgent ba;
 
-		switch (restoreType) {
+		switch (driverState.getRestoreType()) {
 		case RestoreType::START:
-			return stopAfter(runRestore(db,
-			                            restoreClusterFileOrig,
-			                            tagName.orDefault(BackupAgentBase::getDefaultTag().toString()),
-			                            restoreContainer,
-			                            backupKeys,
-			                            beginVersion,
-			                            restoreVersion,
-			                            restoreTimestamp,
-			                            !dryRun,
-			                            !quietDisplay,
-			                            waitForDone,
-			                            addPrefix,
-			                            removePrefix,
-			                            onlyApplyMutationLogs,
-			                            inconsistentSnapshotOnly));
+			return stopAfter(runRestore(&driverState, !quietDisplay));
 		case RestoreType::WAIT:
-			return stopAfter(success(
-			    ba.waitRestore(db, KeyRef(tagName.orDefault(BackupAgentBase::getDefaultTag().toString())), true)));
+			return stopAfter(
+			    success(ba.waitRestore(driverState.getDatabase(), KeyRef(driverState.getTagName()), true)));
 
 		case RestoreType::ABORT:
-			return stopAfter(map(ba.abortRestore(db, KeyRef(tagName.orDefault(""))),
-			                     [tagName = tagName.orDefault(BackupAgentBase::getDefaultTag().toString())](
-			                         FileBackupAgent::ERestoreState s) -> Void {
+			return stopAfter(map(ba.abortRestore(driverState.getDatabase(), KeyRef(driverState.getTagName())),
+			                     [tagName = driverState.getTagName()](FileBackupAgent::ERestoreState s) -> Void {
 				                     printf("RESTORE_ABORT Tag: %s  State: %s\n",
 				                            tagName.c_str(),
 				                            FileBackupAgent::restoreStateText(s).toString().c_str());
 				                     return Void();
 			                     }));
 		case RestoreType::STATUS: {
-			Key tag;
+			Optional<Key> tag;
 			// If no tag is specifically provided then print all tag status, don't just use "default"
-			if (tagName.present()) {
-				tag = tagName.get();
+			if (driverState.tagNameProvided()) {
+				tag = driverState.getTagName();
 			}
-			return stopAfter(map(ba.restoreStatus(db, KeyRef(tag)), [](std::string const& s) -> Void {
+			return stopAfter(map(ba.restoreStatus(driverState.getDatabase(), tag), [](std::string const& s) -> Void {
 				printf("%s\n", s.c_str());
 				return Void();
 			}));
@@ -279,54 +203,7 @@ public:
 		}
 	}
 
-	void processArg(CSimpleOpt const& args) {
-		int optId = args.OptionId();
-		switch (optId) {
-		case OPT_RESTORE_TIMESTAMP:
-			restoreTimestamp = args.OptionArg();
-			break;
-		case OPT_RESTORE_CLUSTERFILE_DEST:
-			restoreClusterFileDest = args.OptionArg();
-			break;
-		case OPT_RESTORE_CLUSTERFILE_ORIG:
-			restoreClusterFileOrig = args.OptionArg();
-			break;
-		case OPT_RESTORECONTAINER:
-			restoreContainer = args.OptionArg();
-			// If the url starts with '/' then prepend "file://" for backwards compatibility
-			if (StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
-				restoreContainer = std::string("file://") + restoreContainer;
-			break;
-		case OPT_PREFIX_ADD:
-			addPrefix = args.OptionArg();
-			break;
-		case OPT_PREFIX_REMOVE:
-			removePrefix = args.OptionArg();
-			break;
-		case OPT_TAGNAME:
-			tagName = args.OptionArg();
-			break;
-		case OPT_INCREMENTALONLY:
-			onlyApplyMutationLogs = true;
-			break;
-		case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY:
-			inconsistentSnapshotOnly = true;
-			break;
-		case OPT_RESTORE_BEGIN_VERSION: {
-			const char* a = args.OptionArg();
-			long long ver = 0;
-			if (!sscanf(a, "%lld", &ver)) {
-				fprintf(stderr, "ERROR: Could not parse database beginVersion `%s'\n", a);
-				printHelpTeaser(getProgramName());
-				throw invalid_option_value();
-			}
-			beginVersion = ver;
-			break;
-		}
-		default:
-			break;
-		}
-	}
+	void processArg(CSimpleOpt const& args) { driverState.processArg(getProgramName(), args); }
 };
 
 } // namespace
