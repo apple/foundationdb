@@ -19,6 +19,7 @@
  */
 
 #include <iterator>
+#include <stdlib.h>
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -203,6 +204,12 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	int64_t memoryLimit;
 	std::map<Optional<Value>, int8_t> dcId_locality;
 	std::vector<Tag> allTags;
+	// Percentage of "allTags" that are to be sent as part of GetRawCommittedVersionReply
+	// message to the grv proxy.
+	// @note If this is set to a value that is greater than 100 then a random number of
+	// tags will be sent.
+	// Default value: 110
+	int percentageOfTagsToBeSent;
 
 	int8_t getNextLocality() {
 		int8_t maxLocality = -1;
@@ -277,6 +284,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID");
+			percentageOfTagsToBeSent = 110; // send random number of tags to the proxy
 			forceRecovery = false;
 		}
 	}
@@ -1233,6 +1241,15 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
+				std::size_t count = 0;
+				if (self->percentageOfTagsToBeSent > 100) {
+					count = rand() % (self->allTags.size() + 1);
+				} else {
+					count = (self->percentageOfTagsToBeSent * self->allTags.size()) / 100;
+				}
+				for (std::size_t i=0; i<count; i++) {
+					reply.tags.emplace_back(self->allTags[i]);
+				}
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req =

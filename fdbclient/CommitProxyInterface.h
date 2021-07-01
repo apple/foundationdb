@@ -327,6 +327,7 @@ struct GetRawCommittedVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
+	std::vector<Tag> tags;
 
 	GetRawCommittedVersionReply()
 	  : debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()),
@@ -334,7 +335,7 @@ struct GetRawCommittedVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion);
+		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion, tags);
 	}
 };
 
