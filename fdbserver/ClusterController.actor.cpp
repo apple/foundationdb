@@ -1544,7 +1544,7 @@ public:
 	}
 
 	// Given datacenter ID, returns the primary and remote regions.
-	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(std::vector<RegionInfo> regions, Key dcId) {
+	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(const std::vector<RegionInfo>& regions, Key dcId) {
 		RegionInfo region;
 		RegionInfo remoteRegion;
 		for (const auto& r : regions) {
