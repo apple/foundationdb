@@ -258,7 +258,10 @@ public:
 		UNSTOPPABLE_ASSERT(impl.has_value());
 		return std::move(impl.value());
 	}
-	T orDefault(T const& default_value) const { return impl.value_or(default_value); }
+	template<class U>
+	T orDefault(U &&default_value) const& { return impl.value_or(std::forward<U>(default_value)); }
+	template<class U>
+	T orDefault(U &&default_value) && { return std::move(impl).value_or(std::forward<U>(default_value)); }
 
 	// Spaceship operator.  Treats not-present as less-than present.
 	int compare(Optional const& rhs) const {
