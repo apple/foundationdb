@@ -1,49 +1,44 @@
-set(FDBBACKUP_SRCS
-	BackupTLSConfig.h
-	BackupTLSConfig.cpp
-	backup.actor.cpp)
+set(COMMON_BACKUP_SRCS
+ BackupTLSConfig.h
+ BackupTLSConfig.cpp
+ BackupRestoreCommon.cpp
+ BackupRestoreCommon.h
+)
 
-set(FDBRESTORE_SRCS
-  BackupRestoreCommon.cpp
-  BackupRestoreCommon.h
-	BackupTLSConfig.h
-	BackupTLSConfig.cpp
+set(FDB_BACKUP_SRCS
+  BackupTLSConfig.h
+  BackupTLSConfig.cpp
+  backup.actor.cpp)
+
+set(FDB_RESTORE_SRCS
+  ${COMMON_BACKUP_SRCS}
   RestoreDriver.cpp
   RestoreDriver.h
   fdbrestore.actor.cpp)
 
-set(FDBBACKUPAGENT_SRCS
-  BackupRestoreCommon.cpp
-  BackupRestoreCommon.h
-	BackupTLSConfig.h
-	BackupTLSConfig.cpp
+set(FDB_BACKUP_AGENT_SRCS
+  ${COMMON_BACKUP_SRCS}
   AgentDriver.actor.cpp
   AgentDriver.h
   backupagent.actor.cpp)
 
-set(FDBDRAGENT_SRCS
-  BackupRestoreCommon.cpp
-  BackupRestoreCommon.h
-	BackupTLSConfig.h
-	BackupTLSConfig.cpp
+set(FDB_DR_AGENT_SRCS
+  ${COMMON_BACKUP_SRCS}
   AgentDriver.actor.cpp
   AgentDriver.h
   dragent.actor.cpp)
 
-set(FDBFASTRESTORE_SRCS
-  BackupRestoreCommon.cpp
-  BackupRestoreCommon.h
-	BackupTLSConfig.h
-	BackupTLSConfig.cpp
+set(FDB_FAST_RESTORE_SRCS
+  ${COMMON_BACKUP_SRCS}
   RestoreDriver.cpp
   RestoreDriver.h
   fastrestore.actor.cpp)
 
-add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
-add_flow_target(EXECUTABLE NAME fdbrestore SRCS ${FDBRESTORE_SRCS})
-add_flow_target(EXECUTABLE NAME backup_agent SRCS ${FDBBACKUPAGENT_SRCS})
-add_flow_target(EXECUTABLE NAME dr_agent SRCS ${FDBDRAGENT_SRCS})
-add_flow_target(EXECUTABLE NAME fastrestore_tool SRCS ${FDBFASTRESTORE_SRCS})
+add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDB_BACKUP_SRCS})
+add_flow_target(EXECUTABLE NAME fdbrestore SRCS ${FDB_RESTORE_SRCS})
+add_flow_target(EXECUTABLE NAME backup_agent SRCS ${FDB_BACKUP_AGENT_SRCS})
+add_flow_target(EXECUTABLE NAME dr_agent SRCS ${FDB_DR_AGENT_SRCS})
+add_flow_target(EXECUTABLE NAME fastrestore_tool SRCS ${FDB_FAST_RESTORE_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 target_link_libraries(fdbrestore PRIVATE fdbclient)
 target_link_libraries(backup_agent PRIVATE fdbclient)
@@ -67,12 +62,10 @@ target_link_libraries(fdbdecode PRIVATE fdbclient)
 if(NOT OPEN_FOR_IDE)
   if(GENERATE_DEBUG_PACKAGES)
     fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
-    #fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME fdbrestore)
     fdb_install(PROGRAMS $<TARGET_FILE:fdbbackup> DESTINATION bin COMPONENT clients RENAME fdbdr)
   else()
     add_custom_target(prepare_fdbbackup_install ALL DEPENDS strip_only_fdbbackup)
     fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients)
-    #fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME fdbrestore)
     fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients RENAME fdbdr)
   endif()
   symlink_files(

@@ -98,7 +98,6 @@ public:
 	}
 
 	void processArg(CSimpleOpt const& args) {
-		// TODO: Implement
 		auto optId = args.OptionId();
 		switch (optId) {
 		case OPT_DEST_CLUSTER:

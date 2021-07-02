@@ -158,12 +158,27 @@ public:
 
 template <class T>
 class Driver : public DriverBase {
+	bool processProgramSpecificArg(CSimpleOpt const& args) {
+		auto optId = args.OptionId();
+		switch (optId) {
+		case OPT_HELP:
+			T::printUsage(false);
+			// TODO: Flush and exit here?
+			return true;
+		case OPT_DEVHELP:
+			T::printUsage(true);
+			return true;
+		default:
+			return false;
+		}
+	}
+
 protected:
 	void processArgs(CSimpleOpt& args) {
 		while (args.Next()) {
 			handleArgsError(args, T::getProgramName().c_str());
 			const auto& constArgs = args;
-			if (!processCommonArg(static_cast<T*>(this)->getProgramName(), args)) {
+			if (!processCommonArg(static_cast<T*>(this)->getProgramName(), args) || !processProgramSpecificArg(args)) {
 				static_cast<T*>(this)->processArg(constArgs);
 			}
 		}
