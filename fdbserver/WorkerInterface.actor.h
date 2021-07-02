@@ -830,10 +830,16 @@ ACTOR Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
 
+#ifndef __DATABASE_BOOLEAN_PARAMS__
+#define __DATABASE_BOOLEAN_PARAMS__
+DECLARE_BOOLEAN_PARAM(EnableLocalityLoadBalance);
+DECLARE_BOOLEAN_PARAM(LockAware);
+#endif
+
 class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
-                              bool enableLocalityLoadBalance = true,
-                              bool lockAware = false);
+                              LockAware lockAware = LockAware::FALSE,
+                              EnableLocalityLoadBalance enableLocalityLoadBalance = EnableLocalityLoadBalance::TRUE);
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 

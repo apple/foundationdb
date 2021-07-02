@@ -251,7 +251,7 @@ public:
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
 		addCacheRange(CacheRangeInfo::newNotAssigned(allKeys));
-		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
+		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::TRUE);
 	}
 
 	// Puts the given cacheRange into cachedRangeMap.  The caller is responsible for adding cacheRanges
@@ -1392,7 +1392,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 					// TODO: NEELAM: what's this for?
 					// FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
-						data->cx->enableLocalityLoadBalance = false;
+						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::FALSE;
 					}
 
 					debug_getRangeRetries++;

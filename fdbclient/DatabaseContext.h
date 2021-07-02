@@ -146,6 +146,13 @@ public:
 	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
+#ifndef __DATABASE_BOOLEAN_PARAMS__
+#define __DATABASE_BOOLEAN_PARAMS__
+DECLARE_BOOLEAN_PARAM(LockAware);
+DECLARE_BOOLEAN_PARAM(EnableLocalityLoadBalance);
+#endif
+DECLARE_BOOLEAN_PARAM(IsSwitchable);
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -157,11 +164,11 @@ public:
 	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	                       Future<Void> clientInfoMonitor,
 	                       LocalityData clientLocality,
-	                       bool enableLocalityLoadBalance,
+	                       EnableLocalityLoadBalance,
 	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
-	                       bool lockAware = false,
+	                       LockAware lockAware = LockAware::FALSE,
 	                       int apiVersion = Database::API_VERSION_LATEST,
-	                       bool switchable = false);
+	                       IsSwitchable switchable = IsSwitchable::FALSE);
 
 	~DatabaseContext();
 
@@ -217,7 +224,7 @@ public:
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
 	Error deferredError;
-	bool lockAware;
+	LockAware lockAware{ LockAware::FALSE };
 
 	bool isError() const { return deferredError.code() != invalid_error_code; }
 
@@ -242,7 +249,7 @@ public:
 	// new cluster.
 	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
 	Future<Void> connectionFileChanged();
-	bool switchable = false;
+	IsSwitchable switchable{ IsSwitchable::FALSE };
 
 	// Management API, Attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
@@ -259,11 +266,11 @@ public:
 	                         Future<Void> clientInfoMonitor,
 	                         TaskPriority taskID,
 	                         LocalityData const& clientLocality,
-	                         bool enableLocalityLoadBalance,
-	                         bool lockAware,
-	                         bool internal = true,
+	                         EnableLocalityLoadBalance,
+	                         LockAware,
+	                         IsInternal internal = IsInternal::TRUE,
 	                         int apiVersion = Database::API_VERSION_LATEST,
-	                         bool switchable = false);
+	                         IsSwitchable switchable = IsSwitchable::FALSE);
 
 	explicit DatabaseContext(const Error& err);
 
@@ -282,7 +289,7 @@ public:
 	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
-	bool enableLocalityLoadBalance;
+	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::FALSE };
 
 	struct VersionRequest {
 		SpanID spanContext;
@@ -329,7 +336,7 @@ public:
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 
 	UID dbId;
-	bool internal; // Only contexts created through the C client and fdbcli are non-internal
+	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
 
 	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
 

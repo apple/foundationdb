@@ -27,6 +27,7 @@
 #elif !defined(FDBCLIENT_NATIVEAPI_ACTOR_H)
 #define FDBCLIENT_NATIVEAPI_ACTOR_H
 
+#include "flow/BooleanParam.h"
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -51,7 +52,8 @@ void addref(DatabaseContext* ptr);
 template <>
 void delref(DatabaseContext* ptr);
 
-void validateOptionValue(Optional<StringRef> value, bool shouldBePresent);
+void validateOptionValuePresent(Optional<StringRef> value);
+void validateOptionValueNotPresent(Optional<StringRef> value);
 
 void enableClientInfoLogging();
 
@@ -72,6 +74,9 @@ struct NetworkOptions {
 	NetworkOptions();
 };
 
+// TODO: Reduce scope?
+DECLARE_BOOLEAN_PARAM(IsInternal);
+
 class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
@@ -81,13 +86,13 @@ public:
 	// on another thread
 	static Database createDatabase(Reference<ClusterConnectionFile> connFile,
 	                               int apiVersion,
-	                               bool internal = true,
+	                               IsInternal internal = IsInternal::TRUE,
 	                               LocalityData const& clientLocality = LocalityData(),
 	                               DatabaseContext* preallocatedDb = nullptr);
 
 	static Database createDatabase(std::string connFileName,
 	                               int apiVersion,
-	                               bool internal = true,
+	                               IsInternal internal = IsInternal::TRUE,
 	                               LocalityData const& clientLocality = LocalityData());
 
 	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
@@ -111,8 +116,10 @@ private:
 
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
+DECLARE_BOOLEAN_PARAM(UseMetrics);
+
 // Configures the global networking machinery
-void setupNetwork(uint64_t transportId = 0, bool useMetrics = false);
+void setupNetwork(uint64_t transportId = 0, UseMetrics useMetrics = UseMetrics::FALSE);
 
 // This call blocks while the network is running.  To use the API in a single-threaded
 //  environment, the calling program must have ACTORs already launched that are waiting

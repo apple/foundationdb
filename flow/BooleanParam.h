@@ -1,0 +1,45 @@
+/*
+ * Arena.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+
+#include "flow/Trace.h"
+
+#define DECLARE_BOOLEAN_PARAM(ParamName)                                                                               \
+	class ParamName {                                                                                                  \
+		bool value;                                                                                                    \
+		explicit constexpr ParamName(bool value) : value(value) {}                                                     \
+                                                                                                                       \
+	public:                                                                                                            \
+		operator bool() const { return value; }                                                                        \
+		static ParamName const TRUE, FALSE;                                                                            \
+	};                                                                                                                 \
+	template <>                                                                                                        \
+	struct Traceable<ParamName> : std::true_type {                                                                     \
+		static std::string toString(ParamName const& value) { return Traceable<bool>::toString(value); }               \
+	};
+
+#define DEFINE_BOOLEAN_PARAM(ParamName)                                                                                \
+	ParamName const ParamName::TRUE = ParamName(true);                                                                 \
+	ParamName const ParamName::FALSE = ParamName(false);
+
+#define BOOLEAN_PARAM(ParamName)                                                                                       \
+	DECLARE_BOOLEAN_PARAM(ParamName)                                                                                   \
+	DEFINE_BOOLEAN_PARAM(ParamName)\

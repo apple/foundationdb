@@ -2165,7 +2165,7 @@ void ReadYourWritesTransaction::setOption(FDBTransactionOptions::Option option, 
 void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	switch (option) {
 	case FDBTransactionOptions::READ_YOUR_WRITES_DISABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 
 		if (!reading.isReady() || !cache.empty() || !writes.empty())
 			throw client_invalid_operation();
@@ -2174,26 +2174,26 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 		break;
 
 	case FDBTransactionOptions::READ_AHEAD_DISABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 
 		options.readAheadDisabled = true;
 		break;
 
 	case FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 
 		options.nextWriteDisableConflictRange = true;
 		break;
 
 	case FDBTransactionOptions::ACCESS_SYSTEM_KEYS:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 
 		options.readSystemKeys = true;
 		options.writeSystemKeys = true;
 		break;
 
 	case FDBTransactionOptions::READ_SYSTEM_KEYS:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 
 		options.readSystemKeys = true;
 		break;
@@ -2217,30 +2217,30 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 		transactionDebugInfo->transactionName = value.present() ? value.get().toString() : "";
 		break;
 	case FDBTransactionOptions::SNAPSHOT_RYW_ENABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 
 		options.snapshotRywEnabled++;
 		break;
 	case FDBTransactionOptions::SNAPSHOT_RYW_DISABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 
 		options.snapshotRywEnabled--;
 		break;
 	case FDBTransactionOptions::USED_DURING_COMMIT_PROTECTION_DISABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 
 		options.disableUsedDuringCommitProtection = true;
 		break;
 	case FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.specialKeySpaceRelaxed = true;
 		break;
 	case FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.specialKeySpaceChangeConfiguration = true;
 		break;
 	case FDBTransactionOptions::BYPASS_UNREADABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.bypassUnreadable = true;
 		break;
 	default:

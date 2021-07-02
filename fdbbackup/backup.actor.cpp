@@ -3769,7 +3769,7 @@ int main(int argc, char* argv[]) {
 		Reference<IBackupContainer> c;
 
 		try {
-			setupNetwork(0, true);
+			setupNetwork(0, UseMetrics::TRUE);
 		} catch (Error& e) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
 			return FDB_EXIT_ERROR;
@@ -3813,7 +3813,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				db = Database::createDatabase(ccf, -1, true, localities);
+				db = Database::createDatabase(ccf, -1, IsInternal::TRUE, localities);
 			} catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
 				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
@@ -3833,7 +3833,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				sourceDb = Database::createDatabase(sourceCcf, -1, true, localities);
+				sourceDb = Database::createDatabase(sourceCcf, -1, IsInternal::TRUE, localities);
 			} catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
 				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", sourceCcf->getFilename().c_str());

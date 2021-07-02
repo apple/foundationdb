@@ -85,6 +85,12 @@ using std::max;
 using std::min;
 using std::pair;
 
+DEFINE_BOOLEAN_PARAM(LockAware);
+DEFINE_BOOLEAN_PARAM(EnableLocalityLoadBalance);
+DEFINE_BOOLEAN_PARAM(IsSwitchable);
+DEFINE_BOOLEAN_PARAM(UseMetrics);
+DEFINE_BOOLEAN_PARAM(IsInternal);
+
 namespace {
 
 template <class Interface, class Request>
@@ -94,7 +100,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
     RequestStream<Request> Interface::*channel,
     const Request& request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-    bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
+    AtMostOnce atMostOnce =
+        AtMostOnce::FALSE, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = nullptr) {
 	if (alternatives->hasCaches) {
 		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
@@ -296,11 +303,16 @@ void DatabaseContext::validateVersion(Version version) {
 	ASSERT(version > 0 || version == latestVersion);
 }
 
-void validateOptionValue(Optional<StringRef> value, bool shouldBePresent) {
-	if (shouldBePresent && !value.present())
+void validateOptionValuePresent(Optional<StringRef> value) {
+	if (!value.present()) {
 		throw invalid_option_value();
-	if (!shouldBePresent && value.present() && value.get().size() > 0)
+	}
+}
+
+void validateOptionValueNotPresent(Optional<StringRef> value) {
+	if (value.present() && value.get().size() > 0) {
 		throw invalid_option_value();
+	}
 }
 
 void dumpMutations(const MutationListRef& mutations) {
@@ -1080,11 +1092,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  Future<Void> clientInfoMonitor,
                                  TaskPriority taskID,
                                  LocalityData const& clientLocality,
-                                 bool enableLocalityLoadBalance,
-                                 bool lockAware,
-                                 bool internal,
+                                 EnableLocalityLoadBalance enableLocalityLoadBalance,
+                                 LockAware lockAware,
+                                 IsInternal internal,
                                  int apiVersion,
-                                 bool switchable)
+                                 IsSwitchable switchable)
   : connectionFile(connectionFile), clientInfo(clientInfo), coordinator(coordinator),
     clientInfoMonitor(clientInfoMonitor), taskID(taskID), clientLocality(clientLocality),
     enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware), apiVersion(apiVersion),
@@ -1360,7 +1372,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000),
     readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(IsInternal::FALSE),
     transactionTracingEnabled(true) {}
 
 // Static constructor used by server processes to create a DatabaseContext
@@ -1368,11 +1380,11 @@ DatabaseContext::DatabaseContext(const Error& err)
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Future<Void> clientInfoMonitor,
                                  LocalityData clientLocality,
-                                 bool enableLocalityLoadBalance,
+                                 EnableLocalityLoadBalance enableLocalityLoadBalance,
                                  TaskPriority taskID,
-                                 bool lockAware,
+                                 LockAware lockAware,
                                  int apiVersion,
-                                 bool switchable) {
+                                 IsSwitchable switchable) {
 	return Database(new DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>>(),
 	                                    clientInfo,
 	                                    makeReference<AsyncVar<Optional<ClientLeaderRegInterface>>>(),
@@ -1381,7 +1393,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	                                    clientLocality,
 	                                    enableLocalityLoadBalance,
 	                                    lockAware,
-	                                    true,
+	                                    IsInternal::TRUE,
 	                                    apiVersion,
 	                                    switchable));
 }
@@ -1491,7 +1503,7 @@ bool DatabaseContext::sampleOnCost(uint64_t cost) const {
 }
 
 int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
-	validateOptionValue(value, true);
+	validateOptionValuePresent(value);
 	if (value.get().size() != 8) {
 		throw invalid_option_value();
 	}
@@ -1553,23 +1565,23 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
 		case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			snapshotRywEnabled++;
 			break;
 		case FDBDatabaseOptions::SNAPSHOT_RYW_DISABLE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			snapshotRywEnabled--;
 			break;
 		case FDBDatabaseOptions::DISTRIBUTED_TRANSACTION_TRACE_ENABLE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			transactionTracingEnabled++;
 			break;
 		case FDBDatabaseOptions::DISTRIBUTED_TRANSACTION_TRACE_DISABLE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			transactionTracingEnabled--;
 			break;
 		case FDBDatabaseOptions::USE_CONFIG_DATABASE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			useConfigDatabase = true;
 			break;
 		default:
@@ -1669,7 +1681,7 @@ extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& c
 // on another thread
 Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
                                   int apiVersion,
-                                  bool internal,
+                                  IsInternal internal,
                                   LocalityData const& clientLocality,
                                   DatabaseContext* preallocatedDb) {
 	if (!g_network)
@@ -1730,11 +1742,11 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                                          clientInfoMonitor,
 		                                          TaskPriority::DefaultEndpoint,
 		                                          clientLocality,
-		                                          true,
-		                                          false,
+		                                          EnableLocalityLoadBalance::TRUE,
+		                                          LockAware::FALSE,
 		                                          internal,
 		                                          apiVersion,
-		                                          /*switchable*/ true);
+		                                          IsSwitchable::TRUE);
 	} else {
 		db = new DatabaseContext(connectionFile,
 		                         clientInfo,
@@ -1742,11 +1754,11 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                         clientInfoMonitor,
 		                         TaskPriority::DefaultEndpoint,
 		                         clientLocality,
-		                         true,
-		                         false,
+		                         EnableLocalityLoadBalance::TRUE,
+		                         LockAware::FALSE,
 		                         internal,
 		                         apiVersion,
-		                         /*switchable*/ true);
+		                         IsSwitchable::TRUE);
 	}
 
 	auto database = Database(db);
@@ -1756,7 +1768,7 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 
 Database Database::createDatabase(std::string connFileName,
                                   int apiVersion,
-                                  bool internal,
+                                  IsInternal internal,
                                   LocalityData const& clientLocality) {
 	Reference<ClusterConnectionFile> rccf = Reference<ClusterConnectionFile>(
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFileName).first));
@@ -1803,15 +1815,15 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		networkOptions.traceDirectory = value.present() ? value.get().toString() : "";
 		break;
 	case FDBNetworkOptions::TRACE_ROLL_SIZE:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceRollSize = extractIntOption(value, 0, std::numeric_limits<int64_t>::max());
 		break;
 	case FDBNetworkOptions::TRACE_MAX_LOGS_SIZE:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceMaxLogsSize = extractIntOption(value, 0, std::numeric_limits<int64_t>::max());
 		break;
 	case FDBNetworkOptions::TRACE_FORMAT:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceFormat = value.get().toString();
 		if (!validateTraceFormat(networkOptions.traceFormat)) {
 			fprintf(stderr, "Unrecognized trace format: `%s'\n", networkOptions.traceFormat.c_str());
@@ -1819,7 +1831,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	case FDBNetworkOptions::TRACE_FILE_IDENTIFIER:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceFileIdentifier = value.get().toString();
 		if (networkOptions.traceFileIdentifier.length() > CLIENT_KNOBS->TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH) {
 			fprintf(stderr, "Trace file identifier provided is too long.\n");
@@ -1840,7 +1852,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	case FDBNetworkOptions::TRACE_CLOCK_SOURCE:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceClockSource = value.get().toString();
 		if (!validateTraceClockSource(networkOptions.traceClockSource)) {
 			fprintf(stderr, "Unrecognized trace clock source: `%s'\n", networkOptions.traceClockSource.c_str());
@@ -1848,7 +1860,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	case FDBNetworkOptions::KNOB: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 
 		std::string optionValue = value.get().toString();
 		TraceEvent("SetKnob").detail("KnobString", optionValue);
@@ -1872,42 +1884,42 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		break;
 	}
 	case FDBNetworkOptions::TLS_PLUGIN:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		break;
 	case FDBNetworkOptions::TLS_CERT_PATH:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setCertificatePath(value.get().toString());
 		break;
 	case FDBNetworkOptions::TLS_CERT_BYTES: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setCertificateBytes(value.get().toString());
 		break;
 	}
 	case FDBNetworkOptions::TLS_CA_PATH: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setCAPath(value.get().toString());
 		break;
 	}
 	case FDBNetworkOptions::TLS_CA_BYTES: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setCABytes(value.get().toString());
 		break;
 	}
 	case FDBNetworkOptions::TLS_PASSWORD:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setPassword(value.get().toString());
 		break;
 	case FDBNetworkOptions::TLS_KEY_PATH:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setKeyPath(value.get().toString());
 		break;
 	case FDBNetworkOptions::TLS_KEY_BYTES: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setKeyBytes(value.get().toString());
 		break;
 	}
 	case FDBNetworkOptions::TLS_VERIFY_PEERS:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.clearVerifyPeers();
 		tlsConfig.addVerifyPeers(value.get().toString());
 		break;
@@ -1918,16 +1930,16 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		enableBuggify(false, BuggifyType::Client);
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_ACTIVATED_PROBABILITY:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		clearBuggifySections(BuggifyType::Client);
 		P_BUGGIFIED_SECTION_ACTIVATED[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100)) / 100.0;
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_FIRED_PROBABILITY:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100)) / 100.0;
 		break;
 	case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
-		validateOptionValue(value, false);
+		validateOptionValuePresent(value);
 		networkOptions.logClientInfo = false;
 		break;
 	case FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS: {
@@ -1947,11 +1959,11 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		break;
 	}
 	case FDBNetworkOptions::ENABLE_RUN_LOOP_PROFILING: // Same as ENABLE_SLOW_TASK_PROFILING
-		validateOptionValue(value, false);
+		validateOptionValuePresent(value);
 		networkOptions.runLoopProfilingEnabled = true;
 		break;
 	case FDBNetworkOptions::DISTRIBUTED_CLIENT_TRACER: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		std::string tracer = value.get().toString();
 		if (tracer == "none" || tracer == "disabled") {
 			openTracer(TracerType::DISABLED);
@@ -1994,7 +2006,7 @@ ACTOR Future<Void> monitorNetworkBusyness() {
 }
 
 // Setup g_network and start monitoring for network busyness
-void setupNetwork(uint64_t transportId, bool useMetrics) {
+void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	if (g_network)
 		throw network_already_setup();
 
@@ -2469,7 +2481,7 @@ ACTOR Future<Optional<Value>> getValue(Future<Version> version,
 					         GetValueRequest(
 					             span.context, key, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), getValueID),
 					         TaskPriority::DefaultPromiseEndpoint,
-					         false,
+					         AtMostOnce::FALSE,
 					         cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
 					}
@@ -2581,7 +2593,7 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 					                          &StorageServerInterface::getKey,
 					                          req,
 					                          TaskPriority::DefaultPromiseEndpoint,
-					                          false,
+					                          AtMostOnce::FALSE,
 					                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
 					}
@@ -2974,7 +2986,7 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
 						                          &StorageServerInterface::getKeyValues,
 						                          req,
 						                          TaskPriority::DefaultPromiseEndpoint,
-						                          false,
+						                          AtMostOnce::FALSE,
 						                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 							rep = _rep;
 						}
@@ -3325,7 +3337,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 					                     &StorageServerInterface::getKeyValues,
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
-					                     false,
+					                     AtMostOnce::FALSE,
 					                     cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 					rep = _rep;
 					++cx->transactionPhysicalReadsCompleted;
@@ -4797,7 +4809,7 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			                         &CommitProxyInterface::commit,
 			                         req,
 			                         TaskPriority::DefaultPromiseEndpoint,
-			                         true);
+			                         AtMostOnce::TRUE);
 		}
 
 		choose {
@@ -5047,7 +5059,7 @@ Future<Void> Transaction::commit() {
 void Transaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	switch (option) {
 	case FDBTransactionOptions::INITIALIZE_NEW_DATABASE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		if (readVersion.isValid())
 			throw read_version_already_set();
 		readVersion = Version(0);
@@ -5055,37 +5067,37 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::CAUSAL_READ_RISKY:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.getReadVersionFlags |= GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY;
 		break;
 
 	case FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.priority = TransactionPriority::IMMEDIATE;
 		break;
 
 	case FDBTransactionOptions::PRIORITY_BATCH:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.priority = TransactionPriority::BATCH;
 		break;
 
 	case FDBTransactionOptions::CAUSAL_WRITE_RISKY:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.causalWriteRisky = true;
 		break;
 
 	case FDBTransactionOptions::COMMIT_ON_FIRST_PROXY:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.commitOnFirstProxy = true;
 		break;
 
 	case FDBTransactionOptions::CHECK_WRITES_ENABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.checkWritesEnabled = true;
 		break;
 
 	case FDBTransactionOptions::DEBUG_DUMP:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.debugDump = true;
 		break;
 
@@ -5095,7 +5107,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::DEBUG_TRANSACTION_IDENTIFIER:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 
 		if (value.get().size() > 100 || value.get().size() == 0) {
 			throw invalid_option_value();
@@ -5122,7 +5134,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::LOG_TRANSACTION:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		if (trLogInfo && !trLogInfo->identifier.empty()) {
 			trLogInfo->logTo(TransactionLogInfo::TRACE_LOG);
 		} else {
@@ -5133,7 +5145,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::TRANSACTION_LOGGING_MAX_FIELD_LENGTH:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		{
 			int maxFieldLength = extractIntOption(value, -1, std::numeric_limits<int32_t>::max());
 			if (maxFieldLength == 0) {
@@ -5147,7 +5159,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::SERVER_REQUEST_TRACING:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		debugTransaction(deterministicRandom()->randomUniqueID());
 		if (trLogInfo && !trLogInfo->identifier.empty()) {
 			TraceEvent(SevInfo, "TransactionBeingTraced")
@@ -5157,23 +5169,23 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::MAX_RETRY_DELAY:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		options.maxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
 		break;
 
 	case FDBTransactionOptions::SIZE_LIMIT:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		options.sizeLimit = extractIntOption(value, 32, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 		break;
 
 	case FDBTransactionOptions::LOCK_AWARE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.lockAware = true;
 		options.readOnly = false;
 		break;
 
 	case FDBTransactionOptions::READ_LOCK_AWARE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		if (!options.lockAware) {
 			options.lockAware = true;
 			options.readOnly = true;
@@ -5181,34 +5193,34 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::FIRST_IN_BATCH:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.firstInBatch = true;
 		break;
 
 	case FDBTransactionOptions::USE_PROVISIONAL_PROXIES:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.getReadVersionFlags |= GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES;
 		info.useProvisionalProxies = true;
 		break;
 
 	case FDBTransactionOptions::INCLUDE_PORT_IN_ADDRESS:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.includePort = true;
 		break;
 
 	case FDBTransactionOptions::TAG:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		options.tags.addTag(value.get());
 		break;
 
 	case FDBTransactionOptions::AUTO_THROTTLE_TAG:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		options.tags.addTag(value.get());
 		options.readTags.addTag(value.get());
 		break;
 
 	case FDBTransactionOptions::SPAN_PARENT:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		if (value.get().size() != 16) {
 			throw invalid_option_value();
 		}
@@ -5216,12 +5228,12 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.reportConflictingKeys = true;
 		break;
 
 	case FDBTransactionOptions::EXPENSIVE_CLEAR_COST_ESTIMATION_ENABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.expensiveClearCostEstimation = true;
 		break;
 
@@ -6117,7 +6129,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 				                           &CommitProxyInterface::proxySnapReq,
 				                           ProxySnapRequest(snapCmd, snapUID, snapUID),
 				                           cx->taskID,
-				                           true /*atmostOnce*/))) {
+				                           AtMostOnce::TRUE))) {
 					TraceEvent("SnapCreateExit").detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
 					return Void();
 				}

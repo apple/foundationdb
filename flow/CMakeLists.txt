@@ -6,6 +6,7 @@ set(FLOW_SRCS
   Arena.cpp
   Arena.h
   AsioReactor.h
+  BooleanParam.h
   CompressedInt.actor.cpp
   CompressedInt.h
   Deque.cpp
