@@ -154,6 +154,8 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValues.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.watchValue.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.watchValue.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesStream.getEndpoint(), metrics));
 	}
 }
 
@@ -166,6 +168,7 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 		queueModel.removeTssEndpoint(ssi.getKey.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKeyValues.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.watchValue.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first());
 	}
 }
 
@@ -3488,6 +3491,174 @@ ACTOR Future<RangeResult> getRange(Database cx,
 	}
 }
 
+template <class StreamReply>
+struct TSSDuplicateStreamData {
+	PromiseStream<StreamReply> stream;
+	Promise<Void> tssComparisonDone;
+
+	// empty constructor for optional?
+	TSSDuplicateStreamData() {}
+
+	TSSDuplicateStreamData(PromiseStream<StreamReply> stream) : stream(stream) {}
+
+	bool done() { return tssComparisonDone.getFuture().isReady(); }
+
+	void setDone() {
+		if (tssComparisonDone.canBeSet()) {
+			tssComparisonDone.send(Void());
+		}
+	}
+
+	~TSSDuplicateStreamData() {}
+};
+
+// Error tracking here is weird, and latency doesn't really mean the same thing here as it does with normal tss
+// comparisons, so this is pretty much just counting mismatches
+ACTOR template <class Request>
+static Future<Void> tssStreamComparison(Request request,
+                                        TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)> streamData,
+                                        ReplyPromiseStream<REPLYSTREAM_TYPE(Request)> tssReplyStream,
+                                        TSSEndpointData tssData) {
+	state bool ssEndOfStream = false;
+	state bool tssEndOfStream = false;
+	state Optional<REPLYSTREAM_TYPE(Request)> ssReply = Optional<REPLYSTREAM_TYPE(Request)>();
+	state Optional<REPLYSTREAM_TYPE(Request)> tssReply = Optional<REPLYSTREAM_TYPE(Request)>();
+
+	loop {
+		// reset replies
+		ssReply = Optional<REPLYSTREAM_TYPE(Request)>();
+		tssReply = Optional<REPLYSTREAM_TYPE(Request)>();
+
+		state double startTime = now();
+		// wait for ss response
+		try {
+			REPLYSTREAM_TYPE(Request) _ssReply = waitNext(streamData.stream.getFuture());
+			ssReply = _ssReply;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				streamData.setDone();
+				throw;
+			}
+			if (e.code() == error_code_end_of_stream) {
+				// ss response will be set to empty, to compare to the SS response if it wasn't empty and cause a
+				// mismatch
+				ssEndOfStream = true;
+			} else {
+				tssData.metrics->ssError(e.code());
+			}
+			TEST(e.code() != error_code_end_of_stream); // SS got error in TSS stream comparison
+		}
+
+		state double sleepTime = std::max(startTime + FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT - now(), 0.0);
+		// wait for tss response
+		try {
+			choose {
+				when(REPLYSTREAM_TYPE(Request) _tssReply = waitNext(tssReplyStream.getFuture())) {
+					tssReply = _tssReply;
+				}
+				when(wait(delay(sleepTime))) {
+					++tssData.metrics->tssTimeouts;
+					TEST(true); // Got TSS timeout in stream comparison
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				streamData.setDone();
+				throw;
+			}
+			if (e.code() == error_code_end_of_stream) {
+				// tss response will be set to empty, to compare to the SS response if it wasn't empty and cause a
+				// mismatch
+				tssEndOfStream = true;
+			} else {
+				tssData.metrics->tssError(e.code());
+			}
+			TEST(e.code() != error_code_end_of_stream); // TSS got error in TSS stream comparison
+		}
+
+		if (!ssEndOfStream || !tssEndOfStream) {
+			++tssData.metrics->streamComparisons;
+		}
+
+		// if both are successful, compare
+		if (ssReply.present() && tssReply.present()) {
+			// compare results
+			// FIXME: this code is pretty much identical to LoadBalance.h
+			// TODO could add team check logic in if we added synchronous way to turn this into a fixed getRange request
+			// and send it to the whole team and compare? I think it's fine to skip that for streaming though
+			TEST(ssEndOfStream != tssEndOfStream); // SS or TSS stream finished early!
+
+			// skip tss comparison if both are end of stream
+			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
+				TEST(true); // TSS mismatch in stream comparison
+				TraceEvent mismatchEvent(
+				    (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+				        ? SevWarnAlways
+				        : SevError,
+				    TSS_mismatchTraceName(request));
+				mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
+				mismatchEvent.detail("TSSID", tssData.tssId);
+
+				if (tssData.metrics->shouldRecordDetailedMismatch()) {
+					TSS_traceMismatch(mismatchEvent, request, ssReply.get(), tssReply.get());
+
+					TEST(FLOW_KNOBS
+					         ->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Full TSS Mismatch in stream comparison
+					TEST(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Partial TSS Mismatch in stream
+					                                                         // comparison and storing the rest in FDB
+
+					if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
+						mismatchEvent.disable();
+						UID mismatchUID = deterministicRandom()->randomUniqueID();
+						tssData.metrics->recordDetailedMismatchData(mismatchUID, mismatchEvent.getFields().toString());
+
+						// record a summarized trace event instead
+						TraceEvent summaryEvent((g_network->isSimulated() &&
+						                         g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+						                            ? SevWarnAlways
+						                            : SevError,
+						                        TSS_mismatchTraceName(request));
+						summaryEvent.detail("TSSID", tssData.tssId).detail("MismatchId", mismatchUID);
+					}
+				} else {
+					// don't record trace event
+					mismatchEvent.disable();
+				}
+				streamData.setDone();
+				return Void();
+			}
+		}
+		if (!ssReply.present() || !tssReply.present() || ssEndOfStream || tssEndOfStream) {
+			// if both streams don't still have more data, stop comparison
+			streamData.setDone();
+			return Void();
+		}
+	}
+}
+
+// Currently only used for GetKeyValuesStream but could easily be plugged for other stream types
+// User of the stream has to forward the SS's responses to the returned promise stream, if it is set
+template <class Request>
+Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>
+maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<Request> const* ssStream) {
+	if (model) {
+		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
+
+		if (tssData.present()) {
+			TEST(true); // duplicating stream to TSS
+			resetReply(req);
+			// FIXME: optimize to avoid creating new netNotifiedQueueWithAcknowledgements for each stream duplication
+			RequestStream<Request> tssRequestStream(tssData.get().endpoint);
+			ReplyPromiseStream<REPLYSTREAM_TYPE(Request)> tssReplyStream = tssRequestStream.getReplyStream(req);
+			PromiseStream<REPLYSTREAM_TYPE(Request)> ssDuplicateReplyStream;
+			TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)> streamData(ssDuplicateReplyStream);
+			model->addActor.send(tssStreamComparison(req, streamData, tssReplyStream, tssData.get()));
+			return Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>(streamData);
+		}
+	}
+	return Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>();
+}
+
 // Streams all of the KV pairs in a target key range into a ParallelStream fragment
 ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment* results,
                                           Database cx,
@@ -3508,6 +3679,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 		loop {
 			const KeyRange& range = locations[shard].first;
 
+			state Optional<TSSDuplicateStreamData<GetKeyValuesStreamReply>> tssDuplicateStream;
 			state GetKeyValuesStreamRequest req;
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
@@ -3515,6 +3687,9 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
+
+			// keep shard's arena around in case of async tss comparison
+			req.arena.dependsOn(range.arena());
 
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
@@ -3579,6 +3754,12 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 				    locations[shard]
 				        .second->get(useIdx, &StorageServerInterface::getKeyValuesStream)
 				        .getReplyStream(req);
+
+				tssDuplicateStream = maybeDuplicateTSSStreamFragment(
+				    req,
+				    cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr,
+				    &locations[shard].second->get(useIdx, &StorageServerInterface::getKeyValuesStream));
+
 				state bool breakAgain = false;
 				loop {
 					wait(results->onEmpty());
@@ -3586,6 +3767,9 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 						choose {
 							when(wait(cx->connectionFileChanged())) {
 								results->sendError(transaction_too_old());
+								if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
+									tssDuplicateStream.get().stream.sendError(transaction_too_old());
+								}
 								return Void();
 							}
 
@@ -3595,9 +3779,15 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 					} catch (Error& e) {
 						++cx->transactionPhysicalReadsCompleted;
 						if (e.code() == error_code_broken_promise) {
+							if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
+								tssDuplicateStream.get().stream.sendError(connection_failed());
+							}
 							throw connection_failed();
 						}
 						if (e.code() != error_code_end_of_stream) {
+							if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
+								tssDuplicateStream.get().stream.sendError(e);
+							}
 							throw;
 						}
 						rep = GetKeyValuesStreamReply();
@@ -3606,6 +3796,17 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 						g_traceBatch.addEvent(
 						    "TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
 					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
+
+					if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
+						// shallow copy the reply with an arena depends, and send it to the duplicate stream for TSS
+						GetKeyValuesStreamReply replyCopy;
+						replyCopy.version = rep.version;
+						replyCopy.more = rep.more;
+						replyCopy.cached = rep.cached;
+						replyCopy.arena.dependsOn(rep.arena);
+						replyCopy.data.append(replyCopy.arena, rep.data.begin(), rep.data.size());
+						tssDuplicateStream.get().stream.send(replyCopy);
+					}
 
 					int64_t bytes = 0;
 					for (const KeyValueRef& kv : output) {
@@ -3664,6 +3865,9 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 								output.readThrough = reverse ? keys.begin : keys.end;
 								results->send(std::move(output));
 								results->finish();
+								if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
+									tssDuplicateStream.get().stream.sendError(end_of_stream());
+								}
 								return Void();
 							}
 							keys = KeyRangeRef(begin, end);
@@ -3690,6 +3894,10 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 					break;
 				}
 			} catch (Error& e) {
+				// send errors to tss duplicate stream, including actor_cancelled
+				if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
+					tssDuplicateStream.get().stream.sendError(e);
+				}
 				if (e.code() == error_code_actor_cancelled) {
 					throw;
 				}
@@ -6274,21 +6482,20 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 }
 
 ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, bool lock_aware) {
-    state ReadYourWritesTransaction tr(cx);
-    loop {
-        try {
-            tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if(lock_aware) {
+	state ReadYourWritesTransaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (lock_aware) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
 
-            tr.set(perpetualStorageWiggleKey, enable ? LiteralStringRef("1") : LiteralStringRef("0"));
-            wait(tr.commit());
-            break;
-        }
-        catch (Error& e) {
-            wait(tr.onError(e));
-        }
-    }
-    return Void();
+			tr.set(perpetualStorageWiggleKey, enable ? LiteralStringRef("1") : LiteralStringRef("0"));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
 }
