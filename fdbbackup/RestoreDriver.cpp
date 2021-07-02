@@ -204,35 +204,22 @@ void RestoreDriverState::processArg(std::string const& programName, CSimpleOpt c
 }
 
 bool RestoreDriverState::setup() {
-	if (dryRun) {
-		if (restoreType != RestoreType::START) {
-			fprintf(stderr, "Restore dry run only works for 'start' command\n");
-			return false;
-		}
+	if (restoreClusterFileDest.empty()) {
+		fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
+		return false;
+	}
 
-		// FIXME: Reenable
-		// Must explicitly call trace file options handling if not calling Database::createDatabase()
-		// initTraceFile();
-	} else {
-		if (restoreClusterFileDest.empty()) {
-			fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-			return false;
-		}
+	if (!fileExists(restoreClusterFileDest)) {
+		fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
+		return false;
+	}
 
-		if (!fileExists(restoreClusterFileDest)) {
-			fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
-			return false;
-		}
-
-		try {
-			createDatabase();
-		} catch (Error& e) {
-			fprintf(stderr,
-			        "Restore destination cluster file '%s' invalid: %s\n",
-			        restoreClusterFileDest.c_str(),
-			        e.what());
-			return false;
-		}
+	try {
+		createDatabase();
+	} catch (Error& e) {
+		fprintf(
+		    stderr, "Restore destination cluster file '%s' invalid: %s\n", restoreClusterFileDest.c_str(), e.what());
+		return false;
 	}
 
 	initializeBackupKeys();

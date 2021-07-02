@@ -163,7 +163,20 @@ public:
 	}
 
 	// Returns true iff setup is successful
-	bool setup() { return driverState.setup(); }
+	bool setup() {
+		if (driverState.isDryRun()) {
+			if (driverState.getRestoreType() != RestoreType::START) {
+				fprintf(stderr, "Restore dry run only works for 'start' command\n");
+				return false;
+			}
+
+			// Must explicitly call trace file options handling if not calling Database::createDatabase()
+			initTraceFile();
+			return true;
+		} else {
+			return driverState.setup();
+		}
+	}
 
 	Future<Optional<Void>> run() {
 		// TODO: We have not implemented the code commented out in this case
