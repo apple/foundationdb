@@ -114,10 +114,7 @@ public:
 		}
 	}
 
-	void parseCommandLineArgs(int argc, char** argv) {
-		CSimpleOpt args(argc, argv, rgOptions, SO_O_EXACT);
-		processArgs(args);
-	}
+	void parseCommandLineArgs(int argc, char** argv) { processArgs(argc, argv, rgOptions); }
 
 	bool setup() {
 		auto _sourceDB = initCluster(sourceClusterFile, localities, quietDisplay);

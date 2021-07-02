@@ -159,8 +159,7 @@ public:
 			// FIXME: Confusing to exit here?
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
-		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_EXACT);
-		processArgs(args);
+		processArgs(argc, argv, g_rgOptions);
 	}
 
 	// Returns true iff setup is successful

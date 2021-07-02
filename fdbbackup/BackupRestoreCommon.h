@@ -174,7 +174,8 @@ class Driver : public DriverBase {
 	}
 
 protected:
-	void processArgs(CSimpleOpt& args) {
+	void processArgs(int argc, char** argv, CSimpleOpt::SOption const* options) {
+		CSimpleOpt args(argc, argv, options, SO_O_EXACT);
 		while (args.Next()) {
 			handleArgsError(args, T::getProgramName().c_str());
 			const auto& constArgs = args;
