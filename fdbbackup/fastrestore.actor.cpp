@@ -151,16 +151,16 @@ public:
 		// Get the restore operation type
 		auto restoreType = getRestoreType(argv[1]);
 		if (restoreType == RestoreType::UNKNOWN) {
-			auto args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
-			if (!args->Next()) {
+			CSimpleOpt args(argc, argv, g_rgOptions, SO_O_EXACT);
+			if (!args.Next()) {
 				throw invalid_command_line_arguments();
 			}
-			runTopLevelCommand(args->OptionId());
+			runTopLevelCommand(args.OptionId());
 			// FIXME: Confusing to exit here?
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
-		auto args = std::make_unique<CSimpleOpt>(argc - 1, argv + 1, rgRestoreOptions, SO_O_EXACT);
-		processArgs(*args);
+		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_EXACT);
+		processArgs(args);
 	}
 
 	// Returns true iff setup is successful

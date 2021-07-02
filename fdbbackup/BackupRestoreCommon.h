@@ -220,6 +220,12 @@ int commonMain(int argc, char** argv) {
 		// Set default of line buffering standard out and error
 		setvbuf(stdout, nullptr, _IONBF, 0);
 		setvbuf(stderr, nullptr, _IONBF, 0);
+
+		if (argc == 1) {
+			Driver::printUsage(false);
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
 		Driver driver;
 		try {
 			driver.parseCommandLineArgs(argc, argv);

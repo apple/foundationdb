@@ -60,6 +60,43 @@ class DrAgentDriver : public Driver<DrAgentDriver> {
 	LocalityData localities;
 
 public:
+	static void printUsage(bool devhelp) {
+		printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
+		printf("Usage: %s [OPTIONS]\n\n", getProgramName().c_str());
+		printf("  -d CONNFILE    The path of a file containing the connection string for the\n"
+		       "                 destination FoundationDB cluster.\n");
+		printf("  -s CONNFILE    The path of a file containing the connection string for the\n"
+		       "                 source FoundationDB cluster.\n");
+		printf("  --log          Enables trace file logging for the CLI session.\n"
+		       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		       "                 unspecified, defaults to the current directory. Has\n"
+		       "                 no effect unless --log is specified.\n");
+		printf("  --loggroup LOG_GROUP\n"
+		       "                 Sets the LogGroup field with the specified value for all\n"
+		       "                 events in the trace output (defaults to `default').\n");
+		printf("  --trace_format FORMAT\n"
+		       "                 Select the void name()ormat of the trace files. xml (the default) and json are "
+		       "supported.\n"
+		       "                 Has no effect unless --log is specified.\n");
+		printf("  -m SIZE, --memory SIZE\n"
+		       "                 Memory limit. The default value is 8GiB. When specified\n"
+		       "                 without a unit, MiB is assumed.\n");
+#ifndef TLS_DISABLED
+		printf(TLS_HELP);
+#endif
+		printf("  --build_flags  Print build information and exit.\n");
+		printf("  -v, --version  Print version information and exit.\n");
+		printf("  -h, --help     Display this help and exit.\n");
+		if (devhelp) {
+#ifdef _WIN32
+			printf("  -n             Create a new console.\n");
+			printf("  -q             Disable error dialog on crash.\n");
+			printf("  --parentpid PID\n");
+			printf("                 Specify a process after whose termination to exit.\n");
+#endif
+		}
+	}
+
 	void processArg(CSimpleOpt const& args) {
 		// TODO: Implement
 		auto optId = args.OptionId();
@@ -79,8 +116,8 @@ public:
 	}
 
 	void parseCommandLineArgs(int argc, char** argv) {
-		auto args = std::make_unique<CSimpleOpt>(argc, argv, rgOptions, SO_O_EXACT);
-		processArgs(*args);
+		CSimpleOpt args(argc, argv, rgOptions, SO_O_EXACT);
+		processArgs(args);
 	}
 
 	bool setup() {
