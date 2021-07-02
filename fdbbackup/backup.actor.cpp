@@ -188,37 +188,6 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_VERSION, "-v", SO_NONE },
 
 	                                  SO_END_OF_OPTIONS };
 
-CSimpleOpt::SOption g_rgAgentOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
-	{ OPT_VERSION, "--version", SO_NONE },
-	{ OPT_VERSION, "-v", SO_NONE },
-	{ OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_LOCALITY, "--locality_", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-#ifndef TLS_DISABLED
-	TLS_OPTION_FLAGS
-#endif
-	    SO_END_OF_OPTIONS
-};
-
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
