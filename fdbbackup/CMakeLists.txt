@@ -20,19 +20,19 @@ set(FDB_BACKUP_AGENT_SRCS
   ${COMMON_BACKUP_SRCS}
   AgentDriver.actor.cpp
   AgentDriver.h
-  backupagent.actor.cpp)
+  backup_agent.actor.cpp)
 
 set(FDB_DR_AGENT_SRCS
   ${COMMON_BACKUP_SRCS}
   AgentDriver.actor.cpp
   AgentDriver.h
-  dragent.actor.cpp)
+  dr_agent.actor.cpp)
 
 set(FDB_FAST_RESTORE_SRCS
   ${COMMON_BACKUP_SRCS}
   RestoreDriver.cpp
   RestoreDriver.h
-  fastrestore.actor.cpp)
+  fastrestore_tool.actor.cpp)
 
 add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDB_BACKUP_SRCS})
 add_flow_target(EXECUTABLE NAME fdbrestore SRCS ${FDB_RESTORE_SRCS})
