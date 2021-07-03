@@ -376,7 +376,7 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  KeyRangeRef range,
                                  bool terminator,
                                  bool systemAccess,
-                                 bool lockAware) {
+                                 LockAware lockAware) {
 	state KeySelector begin = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
 	state Transaction tr(cx);
@@ -452,7 +452,7 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
                                  bool terminator,
                                  bool systemAccess,
-                                 bool lockAware) {
+                                 LockAware lockAware) {
 	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
 
@@ -559,7 +559,7 @@ Future<Void> readCommitted(Database cx,
                            Reference<FlowLock> lock,
                            KeyRangeRef range,
                            std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy) {
-	return readCommitted(cx, results, Void(), lock, range, groupBy, true, true, true);
+	return readCommitted(cx, results, Void(), lock, range, groupBy, true, true, LockAware::TRUE);
 }
 
 ACTOR Future<int> dumpData(Database cx,

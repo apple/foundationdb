@@ -26,9 +26,7 @@ ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimula
 	initialize(randomize, clientKnobs, isSimulated);
 }
 
-void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsSimulated _isSimulated) {
-	bool const randomize = _randomize == Randomize::YES;
-	bool const isSimulated = _isSimulated == IsSimulated::YES;
+void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	// clang-format off
 	// Versions
 	init( VERSIONS_PER_SECOND,                                   1e6 );

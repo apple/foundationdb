@@ -1194,7 +1194,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 
 	try {
 		loop {
-			RangeResult rep = wait(tr.getRange(begin, end, limits, true));
+			RangeResult rep = wait(tr.getRange(begin, end, limits, Snapshot::TRUE));
 			limits.decrement(rep);
 
 			if (limits.isReached() || !rep.more) {

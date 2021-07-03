@@ -3151,7 +3151,7 @@ struct CLIOptions {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::NO, IsSimulated::NO);
+		g_knobs.initialize(Randomize::FALSE, IsSimulated::FALSE);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -4924,7 +4924,7 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::FALSE, IsSimulated::FALSE);
 
 #ifdef __unixish__
 	struct sigaction act;

@@ -146,13 +146,6 @@ public:
 	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
-#ifndef __DATABASE_BOOLEAN_PARAMS__
-#define __DATABASE_BOOLEAN_PARAMS__
-DECLARE_BOOLEAN_PARAM(LockAware);
-DECLARE_BOOLEAN_PARAM(EnableLocalityLoadBalance);
-#endif
-DECLARE_BOOLEAN_PARAM(IsSwitchable);
-
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -187,13 +180,13 @@ public:
 		                                    switchable));
 	}
 
-	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, bool isBackward = false);
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::FALSE);
 	bool getCachedLocations(const KeyRangeRef&,
 	                        vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
 	                        int limit,
-	                        bool reverse);
+	                        Reverse reverse);
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
-	void invalidateCache(const KeyRef&, bool isBackward = false);
+	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::FALSE);
 	void invalidateCache(const KeyRangeRef&);
 
 	bool sampleReadTags() const;

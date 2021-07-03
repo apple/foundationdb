@@ -85,12 +85,6 @@ using std::max;
 using std::min;
 using std::pair;
 
-DEFINE_BOOLEAN_PARAM(LockAware);
-DEFINE_BOOLEAN_PARAM(EnableLocalityLoadBalance);
-DEFINE_BOOLEAN_PARAM(IsSwitchable);
-DEFINE_BOOLEAN_PARAM(UseMetrics);
-DEFINE_BOOLEAN_PARAM(IsInternal);
-
 namespace {
 
 template <class Interface, class Request>
@@ -497,7 +491,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> ctrValue = wait(tr->get(KeyRef(clientLatencyAtomicCtr), true));
+			Optional<Value> ctrValue = wait(tr->get(KeyRef(clientLatencyAtomicCtr), Snapshot::TRUE));
 			if (!ctrValue.present()) {
 				TraceEvent(SevInfo, "NumClntTxnEntriesNotFound");
 				return Void();
@@ -1409,7 +1403,7 @@ DatabaseContext::~DatabaseContext() {
 	locationCache.insert(allKeys, Reference<LocationInfo>());
 }
 
-pair<KeyRange, Reference<LocationInfo>> DatabaseContext::getCachedLocation(const KeyRef& key, bool isBackward) {
+pair<KeyRange, Reference<LocationInfo>> DatabaseContext::getCachedLocation(const KeyRef& key, Reverse isBackward) {
 	if (isBackward) {
 		auto range = locationCache.rangeContainingKeyBefore(key);
 		return std::make_pair(range->range(), range->value());
@@ -1422,7 +1416,7 @@ pair<KeyRange, Reference<LocationInfo>> DatabaseContext::getCachedLocation(const
 bool DatabaseContext::getCachedLocations(const KeyRangeRef& range,
                                          vector<std::pair<KeyRange, Reference<LocationInfo>>>& result,
                                          int limit,
-                                         bool reverse) {
+                                         Reverse reverse) {
 	result.clear();
 
 	auto begin = locationCache.rangeContaining(range.begin);
@@ -1470,7 +1464,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation(const KeyRangeRef& ke
 	return loc;
 }
 
-void DatabaseContext::invalidateCache(const KeyRef& key, bool isBackward) {
+void DatabaseContext::invalidateCache(const KeyRef& key, Reverse isBackward) {
 	if (isBackward) {
 		locationCache.rangeContainingKeyBefore(key)->value() = Reference<LocationInfo>();
 	} else {
@@ -2175,7 +2169,7 @@ Future<RangeResult> getRange(Database const& cx,
                              KeySelector const& begin,
                              KeySelector const& end,
                              GetRangeLimits const& limits,
-                             bool const& reverse,
+                             Reverse const& reverse,
                              TransactionInfo const& info,
                              TagSet const& tags);
 
@@ -2251,7 +2245,7 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Database cx,
                                                                               Key key,
                                                                               TransactionInfo info,
-                                                                              bool isBackward = false) {
+                                                                              Reverse isBackward = Reverse::FALSE) {
 	state Span span("NAPI:getKeyLocation"_loc, info.spanID);
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);
@@ -2290,7 +2284,7 @@ Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& c
                                                                Key const& key,
                                                                F StorageServerInterface::*member,
                                                                TransactionInfo const& info,
-                                                               bool isBackward = false) {
+                                                               Reverse isBackward = Reverse::FALSE) {
 	// we first check whether this range is cached
 	auto ssi = cx->getCachedLocation(key, isBackward);
 	if (!ssi.second) {
@@ -2311,7 +2305,7 @@ Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& c
 ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations_internal(Database cx,
                                                                                             KeyRange keys,
                                                                                             int limit,
-                                                                                            bool reverse,
+                                                                                            Reverse reverse,
                                                                                             TransactionInfo info) {
 	state Span span("NAPI:getKeyRangeLocations"_loc, info.spanID);
 	if (info.debugID.present())
@@ -2360,7 +2354,7 @@ template <class F>
 Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations(Database const& cx,
                                                                              KeyRange const& keys,
                                                                              int limit,
-                                                                             bool reverse,
+                                                                             Reverse reverse,
                                                                              F StorageServerInterface::*member,
                                                                              TransactionInfo const& info) {
 	ASSERT(!keys.empty());
@@ -2397,8 +2391,8 @@ ACTOR Future<Void> warmRange_impl(Transaction* self, Database cx, KeyRange keys)
 	state int totalRanges = 0;
 	state int totalRequests = 0;
 	loop {
-		vector<pair<KeyRange, Reference<LocationInfo>>> locations =
-		    wait(getKeyRangeLocations_internal(cx, keys, CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT, false, self->info));
+		vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(
+		    getKeyRangeLocations_internal(cx, keys, CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT, Reverse::FALSE, self->info));
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
 		totalRequests++;
 		if (locations.size() == 0 || totalRanges >= cx->locationCacheSize ||
@@ -2568,7 +2562,7 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 
 		Key locationKey(k.getKey(), k.arena());
 		state pair<KeyRange, Reference<LocationInfo>> ssi =
-		    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, k.isBackward()));
+		    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, Reverse{ k.isBackward() }));
 
 		try {
 			if (info.debugID.present())
@@ -2616,7 +2610,7 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 			if (info.debugID.present())
 				g_traceBatch.addEvent("GetKeyDebug", getKeyID.get().first(), "NativeAPI.getKey.Error");
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
-				cx->invalidateCache(k.getKey(), k.isBackward());
+				cx->invalidateCache(k.getKey(), Reverse{ k.isBackward() });
 
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
@@ -2907,7 +2901,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
 	return Void();
 }
 
-void transformRangeLimits(GetRangeLimits limits, bool reverse, GetKeyValuesRequest& req) {
+void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesRequest& req) {
 	if (limits.bytes != 0) {
 		if (!limits.hasRowLimit())
 			req.limit = CLIENT_KNOBS->REPLY_BYTE_LIMIT; // Can't get more than this many rows anyway
@@ -2931,7 +2925,7 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
                                         Version version,
                                         KeyRange keys,
                                         GetRangeLimits limits,
-                                        bool reverse,
+                                        Reverse reverse,
                                         TransactionInfo info,
                                         TagSet tags) {
 	state RangeResult output;
@@ -3114,7 +3108,7 @@ ACTOR Future<RangeResult> getRangeFallback(Database cx,
                                            KeySelector begin,
                                            KeySelector end,
                                            GetRangeLimits limits,
-                                           bool reverse,
+                                           Reverse reverse,
                                            TransactionInfo info,
                                            TagSet tags) {
 	if (version == latestVersion) {
@@ -3169,9 +3163,9 @@ void getRangeFinished(Database cx,
                       double startTime,
                       KeySelector begin,
                       KeySelector end,
-                      bool snapshot,
+                      Snapshot snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
-                      bool reverse,
+                      Reverse reverse,
                       RangeResult result) {
 	int64_t bytes = 0;
 	for (const KeyValueRef& kv : result) {
@@ -3225,8 +3219,8 @@ ACTOR Future<RangeResult> getRange(Database cx,
                                    KeySelector end,
                                    GetRangeLimits limits,
                                    Promise<std::pair<Key, Key>> conflictRange,
-                                   bool snapshot,
-                                   bool reverse,
+                                   Snapshot snapshot,
+                                   Reverse reverse,
                                    TransactionInfo info,
                                    TagSet tags) {
 	state GetRangeLimits originalLimits(limits);
@@ -3261,7 +3255,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 			}
 
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
-			bool locationBackward = reverse ? (end - 1).isBackward() : begin.isBackward();
+			Reverse locationBackward{ reverse ? (end - 1).isBackward() : begin.isBackward() };
 			state pair<KeyRange, Reference<LocationInfo>> beginServer =
 			    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward));
 			state KeyRange shard = beginServer.first;
@@ -3471,7 +3465,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
 					cx->invalidateCache(reverse ? end.getKey() : begin.getKey(),
-					                    reverse ? (end - 1).isBackward() : begin.isBackward());
+					                    Reverse{ reverse ? (end - 1).isBackward() : begin.isBackward() });
 
 					if (e.code() == error_code_wrong_shard_server) {
 						RangeResult result = wait(getRangeFallback(
@@ -3517,8 +3511,8 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
                                           Version version,
                                           KeyRange keys,
                                           GetRangeLimits limits,
-                                          bool snapshot,
-                                          bool reverse,
+                                          Snapshot snapshot,
+                                          Reverse reverse,
                                           TransactionInfo info,
                                           TagSet tags,
                                           SpanID spanContext) {
@@ -3752,8 +3746,8 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
                                   KeySelector end,
                                   GetRangeLimits limits,
                                   Promise<std::pair<Key, Key>> conflictRange,
-                                  bool snapshot,
-                                  bool reverse,
+                                  Snapshot snapshot,
+                                  Reverse reverse,
                                   TransactionInfo info,
                                   TagSet tags) {
 
@@ -3833,7 +3827,7 @@ Future<RangeResult> getRange(Database const& cx,
                              KeySelector const& begin,
                              KeySelector const& end,
                              GetRangeLimits const& limits,
-                             bool const& reverse,
+                             Reverse const& reverse,
                              TransactionInfo const& info,
                              TagSet const& tags) {
 	return getRange(cx,
@@ -3843,7 +3837,7 @@ Future<RangeResult> getRange(Database const& cx,
 	                end,
 	                limits,
 	                Promise<std::pair<Key, Key>>(),
-	                true,
+	                Snapshot::TRUE,
 	                reverse,
 	                info,
 	                tags);
@@ -3939,7 +3933,7 @@ void Transaction::setVersion(Version v) {
 	readVersion = v;
 }
 
-Future<Optional<Value>> Transaction::get(const Key& key, bool snapshot) {
+Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 	++cx->transactionLogicalReads;
 	++cx->transactionGetValueRequests;
 	// ASSERT (key < allKeys.end);
@@ -4062,12 +4056,18 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key
 	                                                  lastLessOrEqual(serverTagKeys.begin),
 	                                                  firstGreaterThan(serverTagKeys.end),
 	                                                  GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                                  false,
+	                                                  Reverse::FALSE,
 	                                                  info,
 	                                                  options.readTags));
 	ASSERT(!serverTagResult.more && serverTagResult.size() < CLIENT_KNOBS->TOO_MANY);
-	Future<RangeResult> futureServerUids = getRange(
-	    cx, ver, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), false, info, options.readTags);
+	Future<RangeResult> futureServerUids = getRange(cx,
+	                                                ver,
+	                                                lastLessOrEqual(ksKey),
+	                                                firstGreaterThan(ksKey),
+	                                                GetRangeLimits(1),
+	                                                Reverse::FALSE,
+	                                                info,
+	                                                options.readTags);
 	RangeResult serverUids = wait(futureServerUids);
 
 	ASSERT(serverUids.size()); // every shard needs to have a team
@@ -4122,7 +4122,7 @@ ACTOR Future<Key> getKeyAndConflictRange(Database cx,
 	}
 }
 
-Future<Key> Transaction::getKey(const KeySelector& key, bool snapshot) {
+Future<Key> Transaction::getKey(const KeySelector& key, Snapshot snapshot) {
 	++cx->transactionLogicalReads;
 	++cx->transactionGetKeyRequests;
 	if (snapshot)
@@ -4136,8 +4136,8 @@ Future<Key> Transaction::getKey(const KeySelector& key, bool snapshot) {
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           const KeySelector& end,
                                           GetRangeLimits limits,
-                                          bool snapshot,
-                                          bool reverse) {
+                                          Snapshot snapshot,
+                                          Reverse reverse) {
 	++cx->transactionLogicalReads;
 	++cx->transactionGetRangeRequests;
 
@@ -4178,8 +4178,8 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           const KeySelector& end,
                                           int limit,
-                                          bool snapshot,
-                                          bool reverse) {
+                                          Snapshot snapshot,
+                                          Reverse reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
@@ -4189,8 +4189,8 @@ Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& resul
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          GetRangeLimits limits,
-                                         bool snapshot,
-                                         bool reverse) {
+                                         Snapshot snapshot,
+                                         Reverse reverse) {
 	++cx->transactionLogicalReads;
 	++cx->transactionGetRangeStreamRequests;
 
@@ -4239,8 +4239,8 @@ Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& resul
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          int limit,
-                                         bool snapshot,
-                                         bool reverse) {
+                                         Snapshot snapshot,
+                                         Reverse reverse) {
 	return getRangeStream(results, begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
@@ -4283,7 +4283,7 @@ void Transaction::makeSelfConflicting() {
 	tr.transaction.write_conflict_ranges.push_back(tr.arena, r);
 }
 
-void Transaction::set(const KeyRef& key, const ValueRef& value, bool addConflictRange) {
+void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange addConflictRange) {
 	++cx->transactionSetMutations;
 	if (key.size() >
 	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
@@ -4305,7 +4305,7 @@ void Transaction::set(const KeyRef& key, const ValueRef& value, bool addConflict
 void Transaction::atomicOp(const KeyRef& key,
                            const ValueRef& operand,
                            MutationRef::Type operationType,
-                           bool addConflictRange) {
+                           AddConflictRange addConflictRange) {
 	++cx->transactionAtomicMutations;
 	if (key.size() >
 	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
@@ -4333,7 +4333,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	TEST(true); // NativeAPI atomic operation
 }
 
-void Transaction::clear(const KeyRangeRef& range, bool addConflictRange) {
+void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRange) {
 	++cx->transactionClearMutations;
 	auto& req = tr;
 	auto& t = req.transaction;
@@ -4365,7 +4365,7 @@ void Transaction::clear(const KeyRangeRef& range, bool addConflictRange) {
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
-void Transaction::clear(const KeyRef& key, bool addConflictRange) {
+void Transaction::clear(const KeyRef& key, AddConflictRange addConflictRange) {
 	++cx->transactionClearMutations;
 	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT
 	if (key.size() >
@@ -4709,11 +4709,12 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 				    wait(getKeyRangeLocations(self->getDatabase(),
 				                              keyRange,
 				                              CLIENT_KNOBS->TOO_MANY,
-				                              false,
+				                              Reverse::FALSE,
 				                              &StorageServerInterface::getShardState,
 				                              self->info));
-				if (locations.empty())
+				if (locations.empty()) {
 					continue;
+				}
 
 				uint64_t bytes = 0;
 				if (locations.size() == 1) {
@@ -5379,7 +5380,7 @@ ACTOR Future<Version> extractReadVersion(Location location,
                                          TransactionPriority priority,
                                          Reference<TransactionLogInfo> trLogInfo,
                                          Future<GetReadVersionReply> f,
-                                         bool lockAware,
+                                         LockAware lockAware,
                                          double startTime,
                                          Promise<Optional<Value>> metadataVersion,
                                          TagSet tags) {
@@ -5512,7 +5513,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		                                 options.priority,
 		                                 trLogInfo,
 		                                 req.reply.getFuture(),
-		                                 options.lockAware,
+		                                 LockAware{ options.lockAware },
 		                                 startTime,
 		                                 metadataVersion,
 		                                 options.tags);
@@ -5702,7 +5703,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
 	                              std::numeric_limits<int>::max(),
-	                              false,
+	                              Reverse::FALSE,
 	                              &StorageServerInterface::waitMetrics,
 	                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 	state int nLocs = locations.size();
@@ -5801,7 +5802,7 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
 		                              shardLimit,
-		                              false,
+		                              Reverse::FALSE,
 		                              &StorageServerInterface::getReadHotRanges,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		try {
@@ -5869,7 +5870,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
 		                              shardLimit,
-		                              false,
+		                              Reverse::FALSE,
 		                              &StorageServerInterface::waitMetrics,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		if (expectedShardCount >= 0 && locations.size() != expectedShardCount) {
@@ -5961,7 +5962,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, Key
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
 		                              CLIENT_KNOBS->TOO_MANY,
-		                              false,
+		                              Reverse::FALSE,
 		                              &StorageServerInterface::getRangeSplitPoints,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		try {
@@ -6022,7 +6023,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
 		                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
-		                              false,
+		                              Reverse::FALSE,
 		                              &StorageServerInterface::splitMetrics,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		state StorageMetrics used;
@@ -6292,16 +6293,16 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, bool lock_aware) {
+ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
 	state ReadYourWritesTransaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if (lock_aware) {
+			if (lockAware) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
 
-			tr.set(perpetualStorageWiggleKey, enable ? LiteralStringRef("1") : LiteralStringRef("0"));
+			tr.set(perpetualStorageWiggleKey, enable ? "1"_sr : "0"_sr);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {

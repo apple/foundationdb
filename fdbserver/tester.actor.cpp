@@ -1468,7 +1468,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
-			wait(setPerpetualStorageWiggle(cx, true, true));
+			wait(setPerpetualStorageWiggle(cx, true, LockAware::TRUE));
 		}
 	}
 

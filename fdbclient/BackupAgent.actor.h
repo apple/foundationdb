@@ -412,7 +412,7 @@ public:
 
 	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	                                            Key tagName,
-	                                            bool snapshot = false);
+	                                            Snapshot snapshot = Snapshot::FALSE);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
@@ -540,25 +540,30 @@ public:
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
-	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
+	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr,
+	                                UID logUid,
+	                                Snapshot snapshot = Snapshot::FALSE);
 	Future<EnumState> getStateValue(Database cx, UID logUid) {
 		return runRYWTransaction(cx,
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return getStateValue(tr, logUid); });
 	}
 
-	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
+	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot snapshot = Snapshot::FALSE);
 	Future<UID> getDestUid(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return getDestUid(tr, logUid); });
 	}
 
-	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot = false);
+	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, Snapshot snapshot = Snapshot::FALSE);
 	Future<UID> getLogUid(Database cx, Key tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return getLogUid(tr, tagName); });
 	}
 
-	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
-	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
-
+	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr,
+	                                     UID logUid,
+	                                     Snapshot snapshot = Snapshot::FALSE);
+	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr,
+	                                   UID logUid,
+	                                   Snapshot snapshot = Snapshot::FALSE);
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
 	Future<EnumState> waitBackup(Database cx, Key tagName, bool stopWhenDone = true);
@@ -633,7 +638,7 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  KeyRangeRef range,
                                  bool terminator = true,
                                  bool systemAccess = false,
-                                 bool lockAware = false);
+                                 LockAware lockAware = LockAware::FALSE);
 ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RCGroup> results,
                                  Future<Void> active,
@@ -642,7 +647,7 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
                                  bool terminator = true,
                                  bool systemAccess = false,
-                                 bool lockAware = false);
+                                 LockAware lockAware = LockAware::FALSE);
 ACTOR Future<Void> applyMutations(Database cx,
                                   Key uid,
                                   Key addPrefix,
@@ -695,14 +700,15 @@ public:
 typedef KeyBackedMap<std::string, UidAndAbortedFlagT> TagMap;
 // Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
 class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
+	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
+	                                                           Reference<ReadYourWritesTransaction> tr,
+	                                                           Snapshot snapshot);
+
 public:
 	TagUidMap(const StringRef& prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
 
-	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
-	                                                           Reference<ReadYourWritesTransaction> tr,
-	                                                           bool snapshot);
-
-	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) {
+	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr,
+	                                         Snapshot snapshot = Snapshot::FALSE) {
 		return getAll_impl(this, tr, snapshot);
 	}
 
@@ -718,12 +724,12 @@ static inline KeyBackedTag makeBackupTag(std::string tagName) {
 }
 
 static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr,
-                                                                  bool snapshot = false) {
+                                                                  Snapshot snapshot = Snapshot::FALSE) {
 	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr, snapshot);
 }
 
 static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr,
-                                                                 bool snapshot = false) {
+                                                                 Snapshot snapshot = Snapshot::FALSE) {
 	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr, snapshot);
 }
 

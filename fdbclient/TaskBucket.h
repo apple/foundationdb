@@ -134,13 +134,16 @@ class FutureBucket;
 // instance may declare the Task a failure and move it back to the available subspace.
 class TaskBucket : public ReferenceCounted<TaskBucket> {
 public:
-	TaskBucket(const Subspace& subspace, bool sysAccess = false, bool priorityBatch = false, bool lockAware = false);
+	TaskBucket(const Subspace& subspace,
+	           bool sysAccess = false,
+	           bool priorityBatch = false,
+	           LockAware lockAware = LockAware::FALSE);
 	virtual ~TaskBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
 		if (system_access)
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		if (lock_aware)
+		if (lockAware)
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	}
 
@@ -250,7 +253,7 @@ public:
 
 	bool getSystemAccess() const { return system_access; }
 
-	bool getLockAware() const { return lock_aware; }
+	bool getLockAware() const { return lockAware; }
 
 	Key getPauseKey() const { return pauseKey; }
 
@@ -293,20 +296,20 @@ private:
 	uint32_t timeout;
 	bool system_access;
 	bool priority_batch;
-	bool lock_aware;
+	bool lockAware;
 };
 
 class TaskFuture;
 
 class FutureBucket : public ReferenceCounted<FutureBucket> {
 public:
-	FutureBucket(const Subspace& subspace, bool sysAccess = false, bool lockAware = false);
+	FutureBucket(const Subspace& subspace, bool sysAccess = false, LockAware lockAware = LockAware::FALSE);
 	virtual ~FutureBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
 		if (system_access)
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		if (lock_aware)
+		if (lockAware)
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	}
 
@@ -324,7 +327,7 @@ public:
 
 	Reference<TaskFuture> unpack(Key key);
 	bool isSystemAccess() const { return system_access; };
-	bool isLockAware() const { return lock_aware; };
+	bool isLockAware() const { return lockAware; };
 
 private:
 	friend class TaskFuture;
@@ -333,7 +336,7 @@ private:
 
 	Subspace prefix;
 	bool system_access;
-	bool lock_aware;
+	bool lockAware;
 };
 
 class TaskFuture : public ReferenceCounted<TaskFuture> {

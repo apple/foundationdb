@@ -31,6 +31,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ResolverInterface.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -829,12 +830,6 @@ void endRole(const Role& role, UID id, std::string reason, bool ok = true, Error
 ACTOR Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
-
-#ifndef __DATABASE_BOOLEAN_PARAMS__
-#define __DATABASE_BOOLEAN_PARAMS__
-DECLARE_BOOLEAN_PARAM(EnableLocalityLoadBalance);
-DECLARE_BOOLEAN_PARAM(LockAware);
-#endif
 
 class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,

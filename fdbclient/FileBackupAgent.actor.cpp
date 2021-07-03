@@ -117,7 +117,7 @@ Key FileBackupAgent::getPauseKey() {
 
 ACTOR Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap* tagsMap,
                                                                Reference<ReadYourWritesTransaction> tr,
-                                                               bool snapshot) {
+                                                               Snapshot snapshot) {
 	state Key prefix = tagsMap->prefix; // Copying it here as tagsMap lifetime is not tied to this actor
 	TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, std::string(), {}, 1e6, snapshot));
 	std::vector<KeyBackedTag> results;
@@ -248,9 +248,9 @@ public:
 	Key applyMutationsMapPrefix() { return uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid); }
 
 	ACTOR static Future<int64_t> getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
-		// Both of these are snapshot reads
-		state Future<Optional<Value>> beginVal = tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), true);
-		state Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), true);
+		state Future<Optional<Value>> beginVal =
+		    tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), Snapshot::TRUE);
+		state Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), Snapshot::TRUE);
 		wait(success(beginVal) && success(endVal));
 
 		if (!beginVal.get().present() || !endVal.get().present())
@@ -440,8 +440,8 @@ FileBackupAgent::FileBackupAgent()
     // The other subspaces have logUID -> value
     ,
     config(subspace.get(BackupAgentBase::keyConfig)), lastRestorable(subspace.get(FileBackupAgent::keyLastRestorable)),
-    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, true)),
-    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, true)) {}
+    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, LockAware::TRUE)),
+    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, LockAware::TRUE)) {}
 
 namespace fileBackup {
 
@@ -863,10 +863,10 @@ ACTOR static Future<Void> abortFiveOneBackup(FileBackupAgent* backupAgent,
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state KeyBackedTag tag = makeBackupTag(tagName);
-	state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
+	state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, Snapshot::FALSE, backup_unneeded()));
 
 	state BackupConfig config(current.first);
-	EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+	EBackupState status = wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
 
 	if (!backupAgent->isRunnable(status)) {
 		throw backup_unneeded();
@@ -1201,7 +1201,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		// retrieve kvData
 		state PromiseStream<RangeResultWithVersion> results;
 
-		state Future<Void> rc = readCommitted(cx, results, lock, KeyRangeRef(beginKey, endKey), true, true, true);
+		state Future<Void> rc =
+		    readCommitted(cx, results, lock, KeyRangeRef(beginKey, endKey), true, true, LockAware::TRUE);
 		state RangeFileWriter rangeFile;
 		state BackupConfig backup(task);
 
@@ -2044,7 +2045,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		state std::vector<Future<Void>> rc;
 
 		for (auto& range : ranges) {
-			rc.push_back(readCommitted(cx, results, lock, range, false, true, true));
+			rc.push_back(readCommitted(cx, results, lock, range, false, true, LockAware::TRUE));
 		}
 
 		state Future<Void> sendEOS = map(errorOr(waitForAll(rc)), [=](ErrorOr<Void> const& result) {
@@ -4058,12 +4059,13 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				wait(store(beginVersion, restore.beginVersion().getD(tr, false, invalidVersion)));
+				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::FALSE, ::invalidVersion)));
 
 				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
-				wait(store(logsOnly, restore.onlyAppyMutationLogs().getD(tr, false, false)));
-				wait(store(inconsistentSnapshotOnly, restore.inconsistentSnapshotOnly().getD(tr, false, false)));
+				wait(store(logsOnly, restore.onlyAppyMutationLogs().getD(tr, Snapshot::FALSE, false)));
+				wait(store(inconsistentSnapshotOnly,
+				           restore.inconsistentSnapshotOnly().getD(tr, Snapshot::FALSE, false)));
 
 				wait(taskBucket->keepRunning(tr, task));
 
@@ -4476,7 +4478,8 @@ public:
 				}
 
 				state BackupConfig config(oldUidAndAborted.get().first);
-				state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+				state EBackupState status =
+				    wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
 
 				// Break, if one of the following is true
 				//  - no longer runnable
@@ -4486,7 +4489,7 @@ public:
 
 					if (pContainer != nullptr) {
 						Reference<IBackupContainer> c =
-						    wait(config.backupContainer().getOrThrow(tr, false, backup_invalid_info()));
+						    wait(config.backupContainer().getOrThrow(tr, Snapshot::FALSE, backup_invalid_info()));
 						*pContainer = c;
 					}
 
@@ -4531,7 +4534,7 @@ public:
 		if (uidAndAbortedFlag.present()) {
 			state BackupConfig prevConfig(uidAndAbortedFlag.get().first);
 			state EBackupState prevBackupStatus =
-			    wait(prevConfig.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+			    wait(prevConfig.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
 			if (FileBackupAgent::isRunnable(prevBackupStatus)) {
 				throw backup_duplicate();
 			}
@@ -4794,9 +4797,9 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state KeyBackedTag tag = makeBackupTag(tagName.toString());
-		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, Snapshot::FALSE, backup_unneeded()));
 		state BackupConfig config(current.first);
-		state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+		state EBackupState status = wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
 
 		if (!FileBackupAgent::isRunnable(status)) {
 			throw backup_unneeded();
@@ -4845,11 +4848,11 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state KeyBackedTag tag = makeBackupTag(tagName);
-		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, Snapshot::FALSE, backup_unneeded()));
 
 		state BackupConfig config(current.first);
 		state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-		EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+		EBackupState status = wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
 
 		if (!backupAgent->isRunnable(status)) {
 			throw backup_unneeded();
@@ -4951,7 +4954,7 @@ public:
 					state BackupConfig config(uidAndAbortedFlag.get().first);
 
 					state EBackupState backupState =
-					    wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+					    wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
 					JsonBuilderObject statusDoc;
 					statusDoc.setKey("Name", BackupAgentBase::getStateName(backupState));
 					statusDoc.setKey("Description", BackupAgentBase::getStateText(backupState));
@@ -5095,7 +5098,8 @@ public:
 				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
-					EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+					EBackupState status =
+					    wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
 					backupState = status;
 				}
 
@@ -5257,7 +5261,7 @@ public:
 	ACTOR static Future<Optional<Version>> getLastRestorable(FileBackupAgent* backupAgent,
 	                                                         Reference<ReadYourWritesTransaction> tr,
 	                                                         Key tagName,
-	                                                         bool snapshot) {
+	                                                         Snapshot snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Optional<Value> version = wait(tr->get(backupAgent->lastRestorable.pack(tagName), snapshot));
@@ -5666,7 +5670,7 @@ Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagN
 
 Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr,
                                                              Key tagName,
-                                                             bool snapshot) {
+                                                             Snapshot snapshot) {
 	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName, snapshot);
 }
 

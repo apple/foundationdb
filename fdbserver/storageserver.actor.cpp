@@ -2790,7 +2790,7 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 		loop {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
-			state RangeResult rep = wait(tr->getRange(begin, end, limits, true));
+			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::TRUE));
 			if (!rep.more) {
 				rep.readThrough = keys.end;
 			}
@@ -2903,7 +2903,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			tr.info.taskID = TaskPriority::FetchKeys;
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING
-			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), true)
+			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), Snapshot::TRUE)
 			                              : tryGetRange(results, &tr, keys);
 			state Key nfk = keys.begin;
 

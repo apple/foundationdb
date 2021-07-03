@@ -25,9 +25,9 @@
 #define DECLARE_BOOLEAN_PARAM(ParamName)                                                                               \
 	class ParamName {                                                                                                  \
 		bool value;                                                                                                    \
-		explicit constexpr ParamName(bool value) : value(value) {}                                                     \
                                                                                                                        \
 	public:                                                                                                            \
+		explicit constexpr ParamName(bool value) : value(value) {}                                                     \
 		operator bool() const { return value; }                                                                        \
 		static ParamName const TRUE, FALSE;                                                                            \
 	};                                                                                                                 \

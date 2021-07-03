@@ -1463,7 +1463,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
                                          std::string id,
                                          ProgramExe exe,
                                          Database dest,
-                                         bool snapshot = false) {
+                                         Snapshot snapshot = Snapshot::FALSE) {
 	// This process will write a document that looks like this:
 	// { backup : { $expires : {<subdoc>}, version: <version from approximately 30 seconds from now> }
 	// so that the value under 'backup' will eventually expire to null and thus be ignored by
@@ -1639,7 +1639,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
                                  std::string name,
                                  std::string id,
                                  int limit = 1) {
-	state RangeResult docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
+	state RangeResult docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::TRUE));
 	state bool readMore = false;
 	state int i;
 	for (i = 0; i < docs.size(); ++i) {
@@ -1668,7 +1668,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 		}
 		if (readMore) {
 			limit = 10000;
-			RangeResult docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
+			RangeResult docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::TRUE));
 			docs = std::move(docs2);
 			readMore = false;
 		}
@@ -1757,7 +1757,8 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					state Future<std::string> futureStatusDoc = getLayerStatus(tr, name, id, exe, taskDest, true);
+					state Future<std::string> futureStatusDoc =
+					    getLayerStatus(tr, name, id, exe, taskDest, Snapshot::TRUE);
 					wait(cleanupStatus(tr, rootKey, name, id));
 					std::string statusdoc = wait(futureStatusDoc);
 					tr->set(instanceKey, statusdoc);
@@ -2838,7 +2839,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			}
 
 			state BackupConfig config(uidFlag.get().first);
-			EBackupState s = wait(config.stateEnum().getOrThrow(tr, false, backup_invalid_info()));
+			EBackupState s = wait(config.stateEnum().getOrThrow(tr, Snapshot::FALSE, backup_invalid_info()));
 			if (!FileBackupAgent::isRunnable(s)) {
 				fprintf(stderr, "Backup on tag '%s' is not runnable.\n", tagName.c_str());
 				throw backup_error();
@@ -2858,7 +2859,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			}
 
 			if (options.activeSnapshotIntervalSeconds.present()) {
-				Version begin = wait(config.snapshotBeginVersion().getOrThrow(tr, false, backup_error()));
+				Version begin = wait(config.snapshotBeginVersion().getOrThrow(tr, Snapshot::FALSE, backup_error()));
 				config.snapshotTargetEndVersion().set(tr,
 				                                      begin + ((int64_t)options.activeSnapshotIntervalSeconds.get() *
 				                                               CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
@@ -3704,7 +3705,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
+		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::FALSE, IsSimulated::FALSE);
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
@@ -3731,7 +3732,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::NO, IsSimulated::NO);
+		g_knobs.initialize(Randomize::FALSE, IsSimulated::FALSE);
 
 		if (trace) {
 			if (!traceLogGroup.empty())

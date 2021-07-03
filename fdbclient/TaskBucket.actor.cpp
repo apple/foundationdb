@@ -168,14 +168,14 @@ public:
 
 		{
 			// Get a task key that is <= a random UID task key, if successful then return it
-			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), true));
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), Snapshot::TRUE));
 			if (space.contains(k))
 				return Optional<Key>(k);
 		}
 
 		{
 			// Get a task key that is <= the maximum possible UID, if successful return it.
-			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), true));
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), Snapshot::TRUE));
 			if (space.contains(k))
 				return Optional<Key>(k);
 		}
@@ -863,11 +863,11 @@ public:
 	}
 };
 
-TaskBucket::TaskBucket(const Subspace& subspace, bool sysAccess, bool priorityBatch, bool lockAware)
+TaskBucket::TaskBucket(const Subspace& subspace, bool sysAccess, bool priorityBatch, LockAware lockAware)
   : prefix(subspace), active(prefix.get(LiteralStringRef("ac"))), available(prefix.get(LiteralStringRef("av"))),
     available_prioritized(prefix.get(LiteralStringRef("avp"))), timeouts(prefix.get(LiteralStringRef("to"))),
     pauseKey(prefix.pack(LiteralStringRef("pause"))), timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS),
-    system_access(sysAccess), priority_batch(priorityBatch), lock_aware(lockAware), cc("TaskBucket"),
+    system_access(sysAccess), priority_batch(priorityBatch), lockAware(lockAware), cc("TaskBucket"),
     dbgid(deterministicRandom()->randomUniqueID()), dispatchSlotChecksStarted("DispatchSlotChecksStarted", cc),
     dispatchErrors("DispatchErrors", cc), dispatchDoTasks("DispatchDoTasks", cc),
     dispatchEmptyTasks("DispatchEmptyTasks", cc), dispatchSlotChecksComplete("DispatchSlotChecksComplete", cc) {}
@@ -1041,8 +1041,8 @@ public:
 	}
 };
 
-FutureBucket::FutureBucket(const Subspace& subspace, bool sysAccess, bool lockAware)
-  : prefix(subspace), system_access(sysAccess), lock_aware(lockAware) {}
+FutureBucket::FutureBucket(const Subspace& subspace, bool sysAccess, LockAware lockAware)
+  : prefix(subspace), system_access(sysAccess), lockAware(lockAware) {}
 
 FutureBucket::~FutureBucket() {}
 
