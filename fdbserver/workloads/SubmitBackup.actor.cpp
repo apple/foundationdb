@@ -35,7 +35,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 	double delayFor;
 	int initSnapshotInterval;
 	int snapshotInterval;
-	bool stopWhenDone;
+	StopWhenDone stopWhenDone{ false };
 	bool incremental;
 
 	SubmitBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -44,7 +44,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 		delayFor = getOption(options, LiteralStringRef("delayFor"), 10.0);
 		initSnapshotInterval = getOption(options, LiteralStringRef("initSnapshotInterval"), 0);
 		snapshotInterval = getOption(options, LiteralStringRef("snapshotInterval"), 1e8);
-		stopWhenDone = getOption(options, LiteralStringRef("stopWhenDone"), true);
+		stopWhenDone.set(getOption(options, LiteralStringRef("stopWhenDone"), true));
 		incremental = getOption(options, LiteralStringRef("incremental"), false);
 	}
 
@@ -62,7 +62,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 			                                    self->tag.toString(),
 			                                    backupRanges,
 			                                    self->stopWhenDone,
-			                                    false,
+			                                    LockDB::FALSE,
 			                                    self->incremental));
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);

@@ -1847,7 +1847,8 @@ ACTOR Future<Void> submitDBBackup(Database src,
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		}
 
-		wait(backupAgent.submitBackup(dest, KeyRef(tagName), backupRanges, false, StringRef(), StringRef(), true));
+		wait(backupAgent.submitBackup(
+		    dest, KeyRef(tagName), backupRanges, StopWhenDone::FALSE, StringRef(), StringRef(), LockDB::TRUE));
 
 		// Check if a backup agent is running
 		bool agentRunning = wait(backupAgent.checkActive(dest));
@@ -1891,8 +1892,8 @@ ACTOR Future<Void> submitBackup(Database db,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                 std::string tagName,
                                 bool dryRun,
-                                bool waitForCompletion,
-                                bool stopWhenDone,
+                                WaitForComplete waitForCompletion,
+                                StopWhenDone stopWhenDone,
                                 bool usePartitionedLog,
                                 bool incrementalBackupOnly) {
 	try {
@@ -1997,7 +1998,7 @@ ACTOR Future<Void> switchDBBackup(Database src,
                                   Database dest,
                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                   std::string tagName,
-                                  bool forceAction) {
+                                  ForceAction forceAction) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
@@ -2132,7 +2133,7 @@ ACTOR Future<Void> cleanupMutations(Database db, bool deleteData) {
 	return Void();
 }
 
-ACTOR Future<Void> waitBackup(Database db, std::string tagName, bool stopWhenDone) {
+ACTOR Future<Void> waitBackup(Database db, std::string tagName, StopWhenDone stopWhenDone) {
 	try {
 		state FileBackupAgent backupAgent;
 
@@ -2151,7 +2152,7 @@ ACTOR Future<Void> waitBackup(Database db, std::string tagName, bool stopWhenDon
 	return Void();
 }
 
-ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool waitForCompletion) {
+ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, WaitForComplete waitForCompletion) {
 	try {
 		state FileBackupAgent backupAgent;
 
@@ -2256,8 +2257,8 @@ ACTOR Future<Void> runRestore(Database db,
                               Version targetVersion,
                               std::string targetTimestamp,
                               bool performRestore,
-                              bool verbose,
-                              bool waitForDone,
+                              Verbose verbose,
+                              WaitForComplete waitForDone,
                               std::string addPrefix,
                               std::string removePrefix,
                               bool onlyAppyMutationLogs,
@@ -2331,7 +2332,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   verbose,
 			                                                   KeyRef(addPrefix),
 			                                                   KeyRef(removePrefix),
-			                                                   true,
+			                                                   LockDB::TRUE,
 			                                                   onlyAppyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion));
@@ -2370,8 +2371,8 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
                                       Standalone<VectorRef<KeyRangeRef>> ranges,
                                       Version dbVersion,
                                       bool performRestore,
-                                      bool verbose,
-                                      bool waitForDone) {
+                                      Verbose verbose,
+                                      WaitForComplete waitForDone) {
 	try {
 		state FileBackupAgent backupAgent;
 		state Version restoreVersion = invalidVersion;
@@ -2414,7 +2415,7 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 			                                       ranges,
 			                                       KeyRef(container),
 			                                       dbVersion,
-			                                       true,
+			                                       LockDB::TRUE,
 			                                       randomUID,
 			                                       LiteralStringRef(""),
 			                                       LiteralStringRef("")));
@@ -2646,7 +2647,7 @@ ACTOR Future<Void> queryBackup(const char* name,
                                Version restoreVersion,
                                std::string originalClusterFile,
                                std::string restoreTimestamp,
-                               bool verbose) {
+                               Verbose verbose) {
 	state UID operationId = deterministicRandom()->randomUniqueID();
 	state JsonBuilderObject result;
 	state std::string errorMessage;
@@ -3245,13 +3246,13 @@ int main(int argc, char* argv[]) {
 		Version beginVersion = invalidVersion;
 		Version restoreVersion = invalidVersion;
 		std::string restoreTimestamp;
-		bool waitForDone = false;
-		bool stopWhenDone = true;
+		WaitForComplete waitForDone{ false };
+		StopWhenDone stopWhenDone{ true };
 		bool usePartitionedLog = false; // Set to true to use new backup system
 		bool incrementalBackupOnly = false;
 		bool onlyAppyMutationLogs = false;
 		bool inconsistentSnapshotOnly = false;
-		bool forceAction = false;
+		ForceAction forceAction{ false };
 		bool trace = false;
 		bool quietDisplay = false;
 		bool dryRun = false;
@@ -3362,7 +3363,7 @@ int main(int argc, char* argv[]) {
 				knobs.emplace_back("min_cleanup_seconds", args->OptionArg());
 				break;
 			case OPT_FORCE:
-				forceAction = true;
+				forceAction.set(true);
 				break;
 			case OPT_TRACE:
 				trace = true;
@@ -3504,10 +3505,10 @@ int main(int argc, char* argv[]) {
 				modifyOptions.verifyUID = args->OptionArg();
 				break;
 			case OPT_WAITFORDONE:
-				waitForDone = true;
+				waitForDone.set(true);
 				break;
 			case OPT_NOSTOPWHENDONE:
-				stopWhenDone = false;
+				stopWhenDone.set(false);
 				break;
 			case OPT_USE_PARTITIONED_LOG:
 				usePartitionedLog = true;
@@ -3969,7 +3970,7 @@ int main(int argc, char* argv[]) {
 				                          restoreVersion,
 				                          restoreClusterFileOrig,
 				                          restoreTimestamp,
-				                          !quietDisplay));
+				                          Verbose{ !quietDisplay }));
 				break;
 
 			case BackupType::DUMP:
@@ -4030,7 +4031,7 @@ int main(int argc, char* argv[]) {
 				                         restoreVersion,
 				                         restoreTimestamp,
 				                         !dryRun,
-				                         !quietDisplay,
+				                         Verbose{ !quietDisplay },
 				                         waitForDone,
 				                         addPrefix,
 				                         removePrefix,
@@ -4038,7 +4039,7 @@ int main(int argc, char* argv[]) {
 				                         inconsistentSnapshotOnly));
 				break;
 			case RestoreType::WAIT:
-				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), true)));
+				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), Verbose::TRUE)));
 				break;
 			case RestoreType::ABORT:
 				f = stopAfter(
@@ -4098,8 +4099,14 @@ int main(int argc, char* argv[]) {
 			// TODO: We have not implemented the code commented out in this case
 			switch (restoreType) {
 			case RestoreType::START:
-				f = stopAfter(runFastRestoreTool(
-				    db, tagName, restoreContainer, backupKeys, restoreVersion, !dryRun, !quietDisplay, waitForDone));
+				f = stopAfter(runFastRestoreTool(db,
+				                                 tagName,
+				                                 restoreContainer,
+				                                 backupKeys,
+				                                 restoreVersion,
+				                                 !dryRun,
+				                                 Verbose{ !quietDisplay },
+				                                 waitForDone));
 				break;
 			case RestoreType::WAIT:
 				printf("[TODO][ERROR] FastRestore does not support RESTORE_WAIT yet!\n");

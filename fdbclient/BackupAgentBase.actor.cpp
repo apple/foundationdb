@@ -26,6 +26,12 @@
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+DEFINE_BOOLEAN_PARAM(LockDB);
+DEFINE_BOOLEAN_PARAM(UnlockDB);
+DEFINE_BOOLEAN_PARAM(StopWhenDone);
+DEFINE_BOOLEAN_PARAM(Verbose);
+DEFINE_BOOLEAN_PARAM(WaitForComplete);
+DEFINE_BOOLEAN_PARAM(ForceAction);
 DEFINE_BOOLEAN_PARAM(Terminator);
 
 std::string BackupAgentBase::formatTime(int64_t epochs) {

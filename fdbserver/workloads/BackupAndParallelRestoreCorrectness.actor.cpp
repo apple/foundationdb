@@ -40,7 +40,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	bool differentialBackup, performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	static int backupAgentRequests;
-	bool locked;
+	LockDB locked{ false };
 	bool allowPauses;
 	bool shareLogRange;
 	bool usePartitionedLogs;
@@ -50,7 +50,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	std::map<Standalone<KeyRef>, Standalone<ValueRef>> dbKVs;
 
 	BackupAndParallelRestoreCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		locked = sharedRandomNumber % 2;
+		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, LiteralStringRef("backupAfter"), 10.0);
 		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 35.0);
 		performRestore = getOption(options, LiteralStringRef("performRestore"), true);
@@ -226,7 +226,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               stopDifferentialDelay ? false : true,
+			                               StopWhenDone{ !stopDifferentialDelay },
 			                               self->usePartitionedLogs));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
@@ -251,8 +251,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					// Wait until the backup is in a restorable state and get the status, URL, and UID atomically
 					state Reference<IBackupContainer> lastBackupContainer;
 					state UID lastBackupUID;
-					state EBackupState resultWait = wait(
-					    backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
+					state EBackupState resultWait = wait(backupAgent->waitBackup(
+					    cx, backupTag.tagName, StopWhenDone::FALSE, &lastBackupContainer, &lastBackupUID));
 
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID)
 					    .detail("Tag", backupTag.tagName)
@@ -333,7 +333,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BARW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
-		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
+		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::TRUE));
 
 		state std::string statusText;
 
@@ -377,9 +377,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				                                  cx,
 				                                  self->backupTag,
 				                                  KeyRef(lastBackupContainer),
-				                                  true,
-				                                  -1,
-				                                  true,
+				                                  WaitForComplete::TRUE,
+				                                  ::invalidVersion,
+				                                  Verbose::TRUE,
 				                                  normalKeys,
 				                                  Key(),
 				                                  Key(),
@@ -482,7 +482,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       true,
+					                                       StopWhenDone::TRUE,
 					                                       false);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
@@ -602,7 +602,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// Wait for parallel restore to finish before we can proceed
 				TraceEvent("FastRestoreWorkload").detail("WaitForRestoreToFinish", randomID);
 				// Do not unlock DB when restore finish because we need to transformDatabaseContents
-				wait(backupAgent.parallelRestoreFinish(cx, randomID, !self->hasPrefix()));
+				wait(backupAgent.parallelRestoreFinish(cx, randomID, UnlockDB{ !self->hasPrefix() }));
 				TraceEvent("FastRestoreWorkload").detail("RestoreFinished", randomID);
 
 				for (auto& restore : restores) {

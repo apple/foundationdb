@@ -2456,7 +2456,7 @@ public:
 	ACTOR static Future<EBackupState> waitBackup(DatabaseBackupAgent* backupAgent,
 	                                             Database cx,
 	                                             Key tagName,
-	                                             bool stopWhenDone) {
+	                                             StopWhenDone stopWhenDone) {
 		state std::string backTrace;
 		state UID logUid = wait(backupAgent->getLogUid(cx, tagName));
 		state Key statusKey = backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
@@ -2521,10 +2521,10 @@ public:
 	                                       Reference<ReadYourWritesTransaction> tr,
 	                                       Key tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                       bool stopWhenDone,
+	                                       StopWhenDone stopWhenDone,
 	                                       Key addPrefix,
 	                                       Key removePrefix,
-	                                       bool lockDB,
+	                                       LockDB lockDB,
 	                                       DatabaseBackupAgent::PreBackupAction backupAction) {
 		state UID logUid = deterministicRandom()->randomUniqueID();
 		state Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
@@ -2678,7 +2678,7 @@ public:
 	                                           Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                           Key addPrefix,
 	                                           Key removePrefix,
-	                                           bool forceAction) {
+	                                           ForceAction forceAction) {
 		state DatabaseBackupAgent drAgent(dest);
 		state UID destlogUid = wait(backupAgent->getLogUid(dest, tagName));
 		state EBackupState status = wait(backupAgent->getStateValue(dest, destlogUid));
@@ -2762,7 +2762,7 @@ public:
 				throw;
 		}
 
-		wait(success(backupAgent->waitBackup(dest, tagName, true)));
+		wait(success(backupAgent->waitBackup(dest, tagName, StopWhenDone::TRUE)));
 
 		TraceEvent("DBA_SwitchoverStopped");
 
@@ -2791,10 +2791,10 @@ public:
 			wait(drAgent.submitBackup(backupAgent->taskBucket->src,
 			                          tagName,
 			                          backupRanges,
-			                          false,
+			                          StopWhenDone::FALSE,
 			                          addPrefix,
 			                          removePrefix,
-			                          true,
+			                          LockDB::TRUE,
 			                          DatabaseBackupAgent::PreBackupAction::NONE));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_duplicate)
@@ -3246,7 +3246,7 @@ Future<Void> DatabaseBackupAgent::atomicSwitchover(Database dest,
                                                    Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                                    Key addPrefix,
                                                    Key removePrefix,
-                                                   bool forceAction) {
+                                                   ForceAction forceAction) {
 	return DatabaseBackupAgentImpl::atomicSwitchover(
 	    this, dest, tagName, backupRanges, addPrefix, removePrefix, forceAction);
 }
@@ -3254,10 +3254,10 @@ Future<Void> DatabaseBackupAgent::atomicSwitchover(Database dest,
 Future<Void> DatabaseBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr,
                                                Key tagName,
                                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                               bool stopWhenDone,
+                                               StopWhenDone stopWhenDone,
                                                Key addPrefix,
                                                Key removePrefix,
-                                               bool lockDatabase,
+                                               LockDB lockDatabase,
                                                PreBackupAction backupAction) {
 	return DatabaseBackupAgentImpl::submitBackup(
 	    this, tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase, backupAction);
@@ -3298,7 +3298,7 @@ Future<Void> DatabaseBackupAgent::waitUpgradeToLatestDrVersion(Database cx, Key 
 	return DatabaseBackupAgentImpl::waitUpgradeToLatestDrVersion(this, cx, tagName);
 }
 
-Future<EBackupState> DatabaseBackupAgent::waitBackup(Database cx, Key tagName, bool stopWhenDone) {
+Future<EBackupState> DatabaseBackupAgent::waitBackup(Database cx, Key tagName, StopWhenDone stopWhenDone) {
 	return DatabaseBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone);
 }
 

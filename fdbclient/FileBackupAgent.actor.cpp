@@ -4326,7 +4326,7 @@ public:
 	static constexpr int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	// Parallel restore
-	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true) {
+	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB unlockDB = UnlockDB::TRUE) {
 		state ReadYourWritesTransaction tr(cx);
 		state Optional<Value> restoreRequestDoneKeyValue;
 		TraceEvent("FastRestoreToolWaitForRestoreToFinish").detail("DBLock", randomUID);
@@ -4377,7 +4377,7 @@ public:
 	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                                Key bcUrl,
 	                                                Version targetVersion,
-	                                                bool lockDB,
+	                                                LockDB lockDB,
 	                                                UID randomUID,
 	                                                Key addPrefix,
 	                                                Key removePrefix) {
@@ -4470,7 +4470,7 @@ public:
 	ACTOR static Future<EBackupState> waitBackup(FileBackupAgent* backupAgent,
 	                                             Database cx,
 	                                             std::string tagName,
-	                                             bool stopWhenDone,
+	                                             StopWhenDone stopWhenDone,
 	                                             Reference<IBackupContainer>* pContainer = nullptr,
 	                                             UID* pUID = nullptr) {
 		state std::string backTrace;
@@ -4526,7 +4526,7 @@ public:
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                       bool stopWhenDone,
+	                                       StopWhenDone stopWhenDone,
 	                                       bool partitionedLog,
 	                                       bool incrementalBackupOnly) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -4657,7 +4657,7 @@ public:
 	                                        Version restoreVersion,
 	                                        Key addPrefix,
 	                                        Key removePrefix,
-	                                        bool lockDB,
+	                                        LockDB lockDB,
 	                                        bool onlyAppyMutationLogs,
 	                                        bool inconsistentSnapshotOnly,
 	                                        Version beginVersion,
@@ -4751,7 +4751,7 @@ public:
 	}
 
 	// This method will return the final status of the backup
-	ACTOR static Future<ERestoreState> waitRestore(Database cx, Key tagName, bool verbose) {
+	ACTOR static Future<ERestoreState> waitRestore(Database cx, Key tagName, Verbose verbose) {
 		state ERestoreState status;
 		loop {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -5315,12 +5315,12 @@ public:
 	                                     Key tagName,
 	                                     Key url,
 	                                     Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                     bool waitForComplete,
+	                                     WaitForComplete waitForComplete,
 	                                     Version targetVersion,
-	                                     bool verbose,
+	                                     Verbose verbose,
 	                                     Key addPrefix,
 	                                     Key removePrefix,
-	                                     bool lockDB,
+	                                     LockDB lockDB,
 	                                     bool onlyAppyMutationLogs,
 	                                     bool inconsistentSnapshotOnly,
 	                                     Version beginVersion,
@@ -5482,7 +5482,7 @@ public:
 			}
 		}
 
-		wait(success(waitBackup(backupAgent, cx, tagName.toString(), true)));
+		wait(success(waitBackup(backupAgent, cx, tagName.toString(), StopWhenDone::TRUE)));
 		TraceEvent("AS_BackupStopped");
 
 		ryw_tr->reset();
@@ -5507,13 +5507,19 @@ public:
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore");
-			Version targetVersion = -1;
-			bool lockDB = true;
-			wait(submitParallelRestore(
-			    cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, lockDB, randomUid, addPrefix, removePrefix));
+			Version targetVersion = ::invalidVersion;
+			wait(submitParallelRestore(cx,
+			                           tagName,
+			                           ranges,
+			                           KeyRef(bc->getURL()),
+			                           targetVersion,
+			                           LockDB::TRUE,
+			                           randomUid,
+			                           addPrefix,
+			                           removePrefix));
 			state bool hasPrefix = (addPrefix.size() > 0 || removePrefix.size() > 0);
 			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish").detail("HasPrefix", hasPrefix);
-			wait(parallelRestoreFinish(cx, randomUid, !hasPrefix));
+			wait(parallelRestoreFinish(cx, randomUid, UnlockDB{ !hasPrefix }));
 			// If addPrefix or removePrefix set, we want to transform the effect by copying data
 			if (hasPrefix) {
 				wait(transformRestoredDatabase(cx, ranges, addPrefix, removePrefix));
@@ -5528,15 +5534,15 @@ public:
 			                           tagName,
 			                           KeyRef(bc->getURL()),
 			                           ranges,
-			                           true,
-			                           -1,
-			                           true,
+			                           WaitForComplete::TRUE,
+			                           ::invalidVersion,
+			                           Verbose::TRUE,
 			                           addPrefix,
 			                           removePrefix,
-			                           true,
+			                           LockDB::TRUE,
 			                           false,
 			                           false,
-			                           invalidVersion,
+			                           ::invalidVersion,
 			                           randomUid));
 			return ver;
 		}
@@ -5560,7 +5566,7 @@ const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
 // Return if parallel restore has finished
-Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB) {
+Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID, UnlockDB unlockDB) {
 	return FileBackupAgentImpl::parallelRestoreFinish(cx, randomUID, unlockDB);
 }
 
@@ -5569,7 +5575,7 @@ Future<Void> FileBackupAgent::submitParallelRestore(Database cx,
                                                     Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                                     Key bcUrl,
                                                     Version targetVersion,
-                                                    bool lockDB,
+                                                    LockDB lockDB,
                                                     UID randomUID,
                                                     Key addPrefix,
                                                     Key removePrefix) {
@@ -5590,12 +5596,12 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          Key tagName,
                                          Key url,
                                          Standalone<VectorRef<KeyRangeRef>> ranges,
-                                         bool waitForComplete,
+                                         WaitForComplete waitForComplete,
                                          Version targetVersion,
-                                         bool verbose,
+                                         Verbose verbose,
                                          Key addPrefix,
                                          Key removePrefix,
-                                         bool lockDB,
+                                         LockDB lockDB,
                                          bool onlyAppyMutationLogs,
                                          bool inconsistentSnapshotOnly,
                                          Version beginVersion) {
@@ -5637,7 +5643,7 @@ Future<std::string> FileBackupAgent::restoreStatus(Reference<ReadYourWritesTrans
 	return fileBackup::restoreStatus(tr, tagName);
 }
 
-Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, bool verbose) {
+Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, Verbose verbose) {
 	return FileBackupAgentImpl::waitRestore(cx, tagName, verbose);
 };
 
@@ -5647,7 +5653,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            int snapshotIntervalSeconds,
                                            std::string tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                           bool stopWhenDone,
+                                           StopWhenDone stopWhenDone,
                                            bool partitionedLog,
                                            bool incrementalBackupOnly) {
 	return FileBackupAgentImpl::submitBackup(this,
@@ -5692,7 +5698,7 @@ void FileBackupAgent::setLastRestorable(Reference<ReadYourWritesTransaction> tr,
 
 Future<EBackupState> FileBackupAgent::waitBackup(Database cx,
                                                  std::string tagName,
-                                                 bool stopWhenDone,
+                                                 StopWhenDone stopWhenDone,
                                                  Reference<IBackupContainer>* pContainer,
                                                  UID* pUID) {
 	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone, pContainer, pUID);

@@ -93,8 +93,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 			loop {
 				// Wait for backup container to be created and avoid race condition
 				TraceEvent("IBackupWaitContainer");
-				wait(success(
-				    self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+				wait(success(self->backupAgent.waitBackup(
+				    cx, self->tag.toString(), StopWhenDone::FALSE, &backupContainer, &backupUID)));
 				if (!backupContainer.isValid()) {
 					TraceEvent("IBackupCheckListContainersAttempt");
 					state std::vector<std::string> containers =
@@ -151,7 +151,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			TraceEvent("IBackupSubmitAttempt");
 			try {
 				wait(self->backupAgent.submitBackup(
-				    cx, self->backupDir, 0, 1e8, self->tag.toString(), backupRanges, false, false, true));
+				    cx, self->backupDir, 0, 1e8, self->tag.toString(), backupRanges, StopWhenDone::FALSE, false, true));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {
@@ -179,7 +179,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
 			state Version beginVersion = invalidVersion;
-			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+			wait(success(self->backupAgent.waitBackup(
+			    cx, self->tag.toString(), StopWhenDone::FALSE, &backupContainer, &backupUID)));
 			if (self->checkBeginVersion) {
 				TraceEvent("IBackupReadSystemKeys");
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -221,13 +222,13 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       cx,
 			                                       Key(self->tag.toString()),
 			                                       backupURL,
-			                                       true,
+			                                       WaitForComplete::TRUE,
 			                                       invalidVersion,
-			                                       true,
+			                                       Verbose::TRUE,
 			                                       normalKeys,
 			                                       Key(),
 			                                       Key(),
-			                                       true,
+			                                       LockDB::TRUE,
 			                                       true,
 			                                       false,
 			                                       beginVersion)));

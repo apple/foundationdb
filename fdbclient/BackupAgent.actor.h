@@ -36,6 +36,14 @@
 #include "fdbclient/BackupContainer.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+DECLARE_BOOLEAN_PARAM(LockDB);
+DECLARE_BOOLEAN_PARAM(UnlockDB);
+DECLARE_BOOLEAN_PARAM(StopWhenDone);
+DECLARE_BOOLEAN_PARAM(Verbose);
+DECLARE_BOOLEAN_PARAM(WaitForComplete);
+DECLARE_BOOLEAN_PARAM(ForceAction);
+DECLARE_BOOLEAN_PARAM(Terminator);
+
 class BackupAgentBase : NonCopyable {
 public:
 	// Time formatter for anything backup or restore related
@@ -260,13 +268,13 @@ public:
 	static Key getPauseKey();
 
 	// parallel restore
-	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true);
+	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB unlockDB = UnlockDB::TRUE);
 	Future<Void> submitParallelRestore(Database cx,
 	                                   Key backupTag,
 	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                   Key bcUrl,
 	                                   Version targetVersion,
-	                                   bool lockDB,
+	                                   LockDB lockDB,
 	                                   UID randomUID,
 	                                   Key addPrefix,
 	                                   Key removePrefix);
@@ -288,12 +296,12 @@ public:
 	                        Key tagName,
 	                        Key url,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges,
-	                        bool waitForComplete = true,
-	                        Version targetVersion = -1,
-	                        bool verbose = true,
+	                        WaitForComplete waitForComplete = WaitForComplete::TRUE,
+	                        Version targetVersion = ::invalidVersion,
+	                        Verbose verbose = Verbose::TRUE,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
-	                        bool lockDB = true,
+	                        LockDB lockDB = LockDB::TRUE,
 	                        bool onlyAppyMutationLogs = false,
 	                        bool inconsistentSnapshotOnly = false,
 	                        Version beginVersion = -1);
@@ -301,16 +309,16 @@ public:
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
-	                        bool waitForComplete = true,
-	                        Version targetVersion = -1,
-	                        bool verbose = true,
+	                        WaitForComplete waitForComplete = WaitForComplete::TRUE,
+	                        Version targetVersion = ::invalidVersion,
+	                        Verbose verbose = Verbose::TRUE,
 	                        KeyRange range = normalKeys,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
-	                        bool lockDB = true,
+	                        LockDB lockDB = LockDB::TRUE,
 	                        bool onlyAppyMutationLogs = false,
 	                        bool inconsistentSnapshotOnly = false,
-	                        Version beginVersion = -1) {
+	                        Version beginVersion = ::invalidVersion) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
 		return restore(cx,
@@ -347,7 +355,7 @@ public:
 	Future<ERestoreState> abortRestore(Database cx, Key tagName);
 
 	// Waits for a restore tag to reach a final (stable) state.
-	Future<ERestoreState> waitRestore(Database cx, Key tagName, bool verbose);
+	Future<ERestoreState> waitRestore(Database cx, Key tagName, Verbose verbose);
 
 	// Get a string describing the status of a tag
 	Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName);
@@ -364,7 +372,7 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true,
+	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
 	                          bool partitionedLog = false,
 	                          bool incrementalBackupOnly = false);
 	Future<Void> submitBackup(Database cx,
@@ -373,7 +381,7 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true,
+	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
 	                          bool partitionedLog = false,
 	                          bool incrementalBackupOnly = false) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
@@ -419,7 +427,7 @@ public:
 	// will return when the backup directory is restorable.
 	Future<EnumState> waitBackup(Database cx,
 	                             std::string tagName,
-	                             bool stopWhenDone = true,
+	                             StopWhenDone stopWhenDone = StopWhenDone::TRUE,
 	                             Reference<IBackupContainer>* pContainer = nullptr,
 	                             UID* pUID = nullptr);
 
@@ -487,7 +495,7 @@ public:
 	                              Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                              Key addPrefix,
 	                              Key removePrefix,
-	                              bool forceAction = false);
+	                              ForceAction forceAction = ForceAction::FALSE);
 
 	Future<Void> unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> unlockBackup(Database cx, Key tagName) {
@@ -506,18 +514,18 @@ public:
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true,
+	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
 	                          Key addPrefix = StringRef(),
 	                          Key removePrefix = StringRef(),
-	                          bool lockDatabase = false,
+	                          LockDB lockDatabase = LockDB::FALSE,
 	                          PreBackupAction backupAction = PreBackupAction::VERIFY);
 	Future<Void> submitBackup(Database cx,
 	                          Key tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true,
+	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
 	                          Key addPrefix = StringRef(),
 	                          Key removePrefix = StringRef(),
-	                          bool lockDatabase = false,
+	                          LockDB lockDatabase = LockDB::FALSE,
 	                          PreBackupAction backupAction = PreBackupAction::VERIFY) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(
@@ -566,7 +574,7 @@ public:
 	                                   Snapshot snapshot = Snapshot::FALSE);
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<EnumState> waitBackup(Database cx, Key tagName, bool stopWhenDone = true);
+	Future<EnumState> waitBackup(Database cx, Key tagName, StopWhenDone stopWhenDone = StopWhenDone::TRUE);
 	Future<EnumState> waitSubmitted(Database cx, Key tagName);
 	Future<Void> waitUpgradeToLatestDrVersion(Database cx, Key tagName);
 
@@ -612,8 +620,6 @@ struct RCGroup {
 		serializer(ar, items, version, groupKey);
 	}
 };
-
-DECLARE_BOOLEAN_PARAM(Terminator);
 
 bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key);
 Version getVersionFromString(std::string const& value);
