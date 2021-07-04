@@ -47,8 +47,11 @@ DatabaseBackupAgent::DatabaseBackupAgent()
   : subspace(Subspace(databaseBackupPrefixRange.begin)), tagNames(subspace.get(BackupAgentBase::keyTagName)),
     states(subspace.get(BackupAgentBase::keyStates)), config(subspace.get(BackupAgentBase::keyConfig)),
     errors(subspace.get(BackupAgentBase::keyErrors)), ranges(subspace.get(BackupAgentBase::keyRanges)),
-    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, LockAware::TRUE)),
-    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, LockAware::TRUE)),
+    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks),
+                              AccessSystemKeys::TRUE,
+                              PriorityBatch::FALSE,
+                              LockAware::TRUE)),
+    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::TRUE, LockAware::TRUE)),
     sourceStates(subspace.get(BackupAgentBase::keySourceStates)),
     sourceTagNames(subspace.get(BackupAgentBase::keyTagName)) {}
 
@@ -56,8 +59,11 @@ DatabaseBackupAgent::DatabaseBackupAgent(Database src)
   : subspace(Subspace(databaseBackupPrefixRange.begin)), tagNames(subspace.get(BackupAgentBase::keyTagName)),
     states(subspace.get(BackupAgentBase::keyStates)), config(subspace.get(BackupAgentBase::keyConfig)),
     errors(subspace.get(BackupAgentBase::keyErrors)), ranges(subspace.get(BackupAgentBase::keyRanges)),
-    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, LockAware::TRUE)),
-    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, LockAware::TRUE)),
+    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks),
+                              AccessSystemKeys::TRUE,
+                              PriorityBatch::FALSE,
+                              LockAware::TRUE)),
+    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::TRUE, LockAware::TRUE)),
     sourceStates(subspace.get(BackupAgentBase::keySourceStates)),
     sourceTagNames(subspace.get(BackupAgentBase::keyTagName)) {
 	taskBucket->src = src;
@@ -234,7 +240,8 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		// retrieve kvData
 		state PromiseStream<RangeResultWithVersion> results;
 
-		state Future<Void> rc = readCommitted(taskBucket->src, results, lock, range, true, true, LockAware::TRUE);
+		state Future<Void> rc = readCommitted(
+		    taskBucket->src, results, lock, range, Terminator::TRUE, AccessSystemKeys::TRUE, LockAware::TRUE);
 		state Key rangeBegin = range.begin;
 		state Key rangeEnd;
 		state bool endOfStream = false;
@@ -890,8 +897,8 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 				                           locks[j],
 				                           ranges[j],
 				                           decodeBKMutationLogKey,
-				                           true,
-				                           true,
+				                           Terminator::TRUE,
+				                           AccessSystemKeys::TRUE,
 				                           LockAware::TRUE));
 			}
 
@@ -1596,8 +1603,8 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 			                           lock,
 			                           ranges[i],
 			                           decodeBKMutationLogKey,
-			                           true,
-			                           true,
+			                           Terminator::TRUE,
+			                           AccessSystemKeys::TRUE,
 			                           LockAware::TRUE));
 			dump.push_back(dumpData(cx, task, results[i], lock.getPtr(), taskBucket));
 		}

@@ -613,6 +613,8 @@ struct RCGroup {
 	}
 };
 
+DECLARE_BOOLEAN_PARAM(Terminator);
+
 bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key);
 Version getVersionFromString(std::string const& value);
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion,
@@ -636,8 +638,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RangeResultWithVersion> results,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
-                                 bool terminator = true,
-                                 bool systemAccess = false,
+                                 Terminator terminator = Terminator::TRUE,
+                                 AccessSystemKeys systemAccess = AccessSystemKeys::FALSE,
                                  LockAware lockAware = LockAware::FALSE);
 ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RCGroup> results,
@@ -645,8 +647,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
-                                 bool terminator = true,
-                                 bool systemAccess = false,
+                                 Terminator terminator = Terminator::TRUE,
+                                 AccessSystemKeys systemAccess = AccessSystemKeys::FALSE,
                                  LockAware lockAware = LockAware::FALSE);
 ACTOR Future<Void> applyMutations(Database cx,
                                   Key uid,

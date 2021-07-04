@@ -35,6 +35,11 @@
 class FutureBucket;
 class TaskFuture;
 
+DECLARE_BOOLEAN_PARAM(AccessSystemKeys);
+DECLARE_BOOLEAN_PARAM(PriorityBatch);
+DECLARE_BOOLEAN_PARAM(VerifyTask);
+DECLARE_BOOLEAN_PARAM(UpdateParams);
+
 // A Task is a set of key=value parameters that constitute a unit of work for a TaskFunc to perform.
 // The parameter keys are specific to the TaskFunc that the Task is for, except for a set of reserved
 // parameter keys which are used by TaskBucket to determine which TaskFunc to run and provide
@@ -135,8 +140,8 @@ class FutureBucket;
 class TaskBucket : public ReferenceCounted<TaskBucket> {
 public:
 	TaskBucket(const Subspace& subspace,
-	           bool sysAccess = false,
-	           bool priorityBatch = false,
+	           AccessSystemKeys sysAccess = AccessSystemKeys::FALSE,
+	           PriorityBatch priorityBatch = PriorityBatch::FALSE,
 	           LockAware lockAware = LockAware::FALSE);
 	virtual ~TaskBucket();
 
@@ -210,11 +215,11 @@ public:
 	// Extend the task's timeout as if it just started and also save any parameter changes made to the task
 	Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr,
 	                              Reference<Task> task,
-	                              bool updateParams,
+	                              UpdateParams updateParams,
 	                              Version newTimeoutVersion = invalidVersion);
 	Future<Void> extendTimeout(Database cx,
 	                           Reference<Task> task,
-	                           bool updateParams,
+	                           UpdateParams updateParams,
 	                           Version newTimeoutVersion = invalidVersion) {
 		return map(runRYWTransaction(cx,
 		                             [=](Reference<ReadYourWritesTransaction> tr) {
@@ -303,7 +308,9 @@ class TaskFuture;
 
 class FutureBucket : public ReferenceCounted<FutureBucket> {
 public:
-	FutureBucket(const Subspace& subspace, bool sysAccess = false, LockAware lockAware = LockAware::FALSE);
+	FutureBucket(const Subspace& subspace,
+	             AccessSystemKeys sysAccess = AccessSystemKeys::FALSE,
+	             LockAware lockAware = LockAware::FALSE);
 	virtual ~FutureBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {

@@ -22,6 +22,11 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+DEFINE_BOOLEAN_PARAM(AccessSystemKeys);
+DEFINE_BOOLEAN_PARAM(PriorityBatch);
+DEFINE_BOOLEAN_PARAM(VerifyTask);
+DEFINE_BOOLEAN_PARAM(UpdateParams);
+
 Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 	return fb->unpack(params[reservedTaskParamKeyDone]);
 }
@@ -328,7 +333,7 @@ public:
 	                                        Reference<FutureBucket> futureBucket,
 	                                        Reference<Task> task,
 	                                        Reference<TaskFuncBase> taskFunc,
-	                                        bool verifyTask) {
+	                                        VerifyTask verifyTask) {
 		bool isFinished = wait(taskBucket->isFinished(tr, task));
 		if (isFinished) {
 			return Void();
@@ -390,7 +395,7 @@ public:
 					taskBucket->setOptions(tr);
 
 					// Attempt to extend the task's timeout
-					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, false));
+					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, UpdateParams::FALSE));
 					wait(tr->commit());
 					task->timeoutVersion = newTimeout;
 					versionNow = tr->getCommittedVersion();
@@ -406,15 +411,16 @@ public:
 	                                 Reference<TaskBucket> taskBucket,
 	                                 Reference<FutureBucket> futureBucket,
 	                                 Reference<Task> task) {
+		state Reference<TaskFuncBase> taskFunc;
+		state VerifyTask verifyTask = false;
+
 		if (!task || !TaskFuncBase::isValidTask(task))
 			return false;
-
-		state Reference<TaskFuncBase> taskFunc;
 
 		try {
 			taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
 			if (taskFunc) {
-				state bool verifyTask = (task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
+				verifyTask.set(task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
 
 				if (verifyTask) {
 					loop {
@@ -812,7 +818,7 @@ public:
 	ACTOR static Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr,
 	                                           Reference<TaskBucket> taskBucket,
 	                                           Reference<Task> task,
-	                                           bool updateParams,
+	                                           UpdateParams updateParams,
 	                                           Version newTimeoutVersion) {
 		taskBucket->setOptions(tr);
 
@@ -863,7 +869,10 @@ public:
 	}
 };
 
-TaskBucket::TaskBucket(const Subspace& subspace, bool sysAccess, bool priorityBatch, LockAware lockAware)
+TaskBucket::TaskBucket(const Subspace& subspace,
+                       AccessSystemKeys sysAccess,
+                       PriorityBatch priorityBatch,
+                       LockAware lockAware)
   : prefix(subspace), active(prefix.get(LiteralStringRef("ac"))), available(prefix.get(LiteralStringRef("av"))),
     available_prioritized(prefix.get(LiteralStringRef("avp"))), timeouts(prefix.get(LiteralStringRef("to"))),
     pauseKey(prefix.pack(LiteralStringRef("pause"))), timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS),
@@ -1001,7 +1010,7 @@ Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Referen
 
 Future<Version> TaskBucket::extendTimeout(Reference<ReadYourWritesTransaction> tr,
                                           Reference<Task> task,
-                                          bool updateParams,
+                                          UpdateParams updateParams,
                                           Version newTimeoutVersion) {
 	return TaskBucketImpl::extendTimeout(
 	    tr, Reference<TaskBucket>::addRef(this), task, updateParams, newTimeoutVersion);
@@ -1041,7 +1050,7 @@ public:
 	}
 };
 
-FutureBucket::FutureBucket(const Subspace& subspace, bool sysAccess, LockAware lockAware)
+FutureBucket::FutureBucket(const Subspace& subspace, AccessSystemKeys sysAccess, LockAware lockAware)
   : prefix(subspace), system_access(sysAccess), lockAware(lockAware) {}
 
 FutureBucket::~FutureBucket() {}

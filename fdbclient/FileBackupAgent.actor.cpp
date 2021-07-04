@@ -440,8 +440,12 @@ FileBackupAgent::FileBackupAgent()
     // The other subspaces have logUID -> value
     ,
     config(subspace.get(BackupAgentBase::keyConfig)), lastRestorable(subspace.get(FileBackupAgent::keyLastRestorable)),
-    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, LockAware::TRUE)),
-    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, LockAware::TRUE)) {}
+    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks),
+                              AccessSystemKeys::TRUE,
+                              PriorityBatch::FALSE,
+                              LockAware::TRUE)),
+    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::TRUE, LockAware::TRUE)) {
+}
 
 namespace fileBackup {
 
@@ -1107,7 +1111,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				Params.beginKey().set(task, range.end);
 
 				// Save and extend the task with the new begin parameter
-				state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, true));
+				state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, UpdateParams::TRUE));
 
 				// Update the range bytes written in the backup config
 				backup.rangeBytesWritten().atomicOp(tr, file->size(), MutationRef::AddValue);
@@ -1201,8 +1205,13 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		// retrieve kvData
 		state PromiseStream<RangeResultWithVersion> results;
 
-		state Future<Void> rc =
-		    readCommitted(cx, results, lock, KeyRangeRef(beginKey, endKey), true, true, LockAware::TRUE);
+		state Future<Void> rc = readCommitted(cx,
+		                                      results,
+		                                      lock,
+		                                      KeyRangeRef(beginKey, endKey),
+		                                      Terminator::TRUE,
+		                                      AccessSystemKeys::TRUE,
+		                                      LockAware::TRUE);
 		state RangeFileWriter rangeFile;
 		state BackupConfig backup(task);
 
@@ -2045,7 +2054,8 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		state std::vector<Future<Void>> rc;
 
 		for (auto& range : ranges) {
-			rc.push_back(readCommitted(cx, results, lock, range, false, true, LockAware::TRUE));
+			rc.push_back(
+			    readCommitted(cx, results, lock, range, Terminator::FALSE, AccessSystemKeys::TRUE, LockAware::TRUE));
 		}
 
 		state Future<Void> sendEOS = map(errorOr(waitForAll(rc)), [=](ErrorOr<Void> const& result) {

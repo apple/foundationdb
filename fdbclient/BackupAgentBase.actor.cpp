@@ -26,6 +26,8 @@
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+DEFINE_BOOLEAN_PARAM(Terminator);
+
 std::string BackupAgentBase::formatTime(int64_t epochs) {
 	time_t curTime = (time_t)epochs;
 	char buffer[30];
@@ -374,8 +376,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RangeResultWithVersion> results,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
-                                 bool terminator,
-                                 bool systemAccess,
+                                 Terminator terminator,
+                                 AccessSystemKeys systemAccess,
                                  LockAware lockAware) {
 	state KeySelector begin = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
@@ -450,8 +452,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
-                                 bool terminator,
-                                 bool systemAccess,
+                                 Terminator terminator,
+                                 AccessSystemKeys systemAccess,
                                  LockAware lockAware) {
 	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
@@ -559,7 +561,8 @@ Future<Void> readCommitted(Database cx,
                            Reference<FlowLock> lock,
                            KeyRangeRef range,
                            std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy) {
-	return readCommitted(cx, results, Void(), lock, range, groupBy, true, true, LockAware::TRUE);
+	return readCommitted(
+	    cx, results, Void(), lock, range, groupBy, Terminator::TRUE, AccessSystemKeys::TRUE, LockAware::TRUE);
 }
 
 ACTOR Future<int> dumpData(Database cx,
