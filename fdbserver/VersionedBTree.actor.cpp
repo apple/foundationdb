@@ -6341,20 +6341,18 @@ public:
 		//     If there is a record in the tree > query then moveNext() will move to it.
 		// If non-zero is returned then the cursor is valid and the return value is logically equivalent
 		// to query.compare(cursor.get())
-		ACTOR Future<int> seek_impl(BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
+		ACTOR Future<int> seek_impl(BTreeCursor* self, RedwoodRecordRef query) {
 			state RedwoodRecordRef internalPageQuery = query.withMaxPageID();
 			self->path.resize(1);
-			debug_printf(
-			    "seek(%s, %d) start cursor = %s\n", query.toString().c_str(), prefetchBytes, self->toString().c_str());
+			debug_printf("seek(%s) start cursor = %s\n", query.toString().c_str(), self->toString().c_str());
 
 			loop {
 				auto& entry = self->path.back();
 				if (entry.btPage()->isLeaf()) {
 					int cmp = entry.cursor.seek(query);
 					self->valid = entry.cursor.valid() && !entry.cursor.isErased();
-					debug_printf("seek(%s, %d) loop exit cmp=%d cursor=%s\n",
+					debug_printf("seek(%s) loop exit cmp=%d cursor=%s\n",
 					             query.toString().c_str(),
-					             prefetchBytes,
 					             cmp,
 					             self->toString().c_str());
 					return self->valid ? cmp : 0;
@@ -6365,68 +6363,97 @@ public:
 				// to and will be updated if anything is inserted into the cleared range, so if the seek fails
 				// or it finds an entry with a null child page then query does not exist in the BTree.
 				if (entry.cursor.seekLessThan(internalPageQuery) && entry.cursor.get().value.present()) {
-					debug_printf("seek(%s, %d) loop seek success cursor=%s\n",
-					             query.toString().c_str(),
-					             prefetchBytes,
-					             self->toString().c_str());
+					debug_printf(
+					    "seek(%s) loop seek success cursor=%s\n", query.toString().c_str(), self->toString().c_str());
 					Future<Void> f = self->pushPage(entry.cursor);
-
-					// Prefetch siblings, at least prefetchBytes, at level 2 but without jumping to another level 2
-					// sibling
-					if (prefetchBytes != 0 && entry.btPage()->height == 2) {
-						auto c = entry.cursor;
-						bool fwd = prefetchBytes > 0;
-						prefetchBytes = abs(prefetchBytes);
-						// While we should still preload more bytes and a move in the target direction is successful
-						while (prefetchBytes > 0 && (fwd ? c.moveNext() : c.movePrev())) {
-							// If there is a page link, preload it.
-							if (c.get().value.present()) {
-								BTreePageIDRef childPage = c.get().getChildPage();
-								preLoadPage(self->pager.getPtr(), childPage);
-								prefetchBytes -= self->btree->m_blockSize * childPage.size();
-							}
-						}
-					}
-
 					wait(f);
 				} else {
 					self->valid = false;
-					debug_printf("seek(%s, %d) loop exit cmp=0 cursor=%s\n",
-					             query.toString().c_str(),
-					             prefetchBytes,
-					             self->toString().c_str());
+					debug_printf(
+					    "seek(%s) loop exit cmp=0 cursor=%s\n", query.toString().c_str(), self->toString().c_str());
 					return 0;
 				}
 			}
 		}
 
-		Future<int> seek(RedwoodRecordRef query, int prefetchBytes) { return seek_impl(this, query, prefetchBytes); }
+		Future<int> seek(RedwoodRecordRef query) { return seek_impl(this, query); }
 
-		ACTOR Future<Void> seekGTE_impl(BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
-			debug_printf("seekGTE(%s, %d) start\n", query.toString().c_str(), prefetchBytes);
-			int cmp = wait(self->seek(query, prefetchBytes));
+		ACTOR Future<Void> seekGTE_impl(BTreeCursor* self, RedwoodRecordRef query) {
+			debug_printf("seekGTE(%s) start\n", query.toString().c_str());
+			int cmp = wait(self->seek(query));
 			if (cmp > 0 || (cmp == 0 && !self->isValid())) {
 				wait(self->moveNext());
 			}
 			return Void();
 		}
 
-		Future<Void> seekGTE(RedwoodRecordRef query, int prefetchBytes) {
-			return seekGTE_impl(this, query, prefetchBytes);
+		Future<Void> seekGTE(RedwoodRecordRef query) { return seekGTE_impl(this, query); }
+
+		// Start fetching sibling nodes in the forward or backward direction, stopping after recordLimit or byteLimit
+		void prefetch(KeyRef rangeEnd, bool directionForward, int recordLimit, int byteLimit) {
+			// Prefetch scans level 2 so if there are less than 2 nodes in the path there is no level 2
+			if (path.size() < 2) {
+				return;
+			}
+
+			auto firstLeaf = path.back().btPage();
+
+			// We know the first leaf's record count, so assume they are all relevant to the query,
+			// even though some may not be.
+			int recordsRead = firstLeaf->tree()->numItems;
+
+			// We can't know for sure how many records are in a node without reading it, so just guess
+			// that siblings have about the same record count as the first leaf.
+			int estRecordsPerPage = recordsRead;
+
+			// Use actual KVBytes stored for the first leaf, but use node capacity for siblings below
+			int bytesRead = firstLeaf->kvBytes;
+
+			// Cursor for moving through siblings.
+			// Note that only immediate siblings under the same parent are considered for prefetch so far.
+			BTreePage::BinaryTree::Cursor c = path[path.size() - 2].cursor;
+
+			// The loop conditions are split apart into different if blocks for readability.
+			// While query limits are not exceeded
+			while (recordsRead < recordLimit && bytesRead < byteLimit) {
+				// If prefetching right siblings
+				if (directionForward) {
+					// If there is no right sibling or its lower boundary is greater
+					// or equal to than the range end then stop.
+					if(!c.moveNext() || c.get().key >= rangeEnd) {
+						break;
+					}
+				}
+				else {
+					// Prefetching left siblings
+					// If the current leaf lower boundary is less than or equal to the range end
+					// or there is no left sibling then stop
+					if(c.get().key <= rangeEnd || !c.movePrev()) {
+						break;
+					}
+				}
+
+				// Prefetch the sibling if the link is not null
+				if (c.get().value.present()) {
+					BTreePageIDRef childPage = c.get().getChildPage();
+					preLoadPage(pager.getPtr(), childPage);
+					recordsRead += estRecordsPerPage;
+					// Use sibling node capacity as an estimate of bytes read.
+					bytesRead += childPage.size() * this->btree->m_blockSize;
+				}
+			}
 		}
 
-		ACTOR Future<Void> seekLT_impl(BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
-			debug_printf("seekLT(%s, %d) start\n", query.toString().c_str(), prefetchBytes);
-			int cmp = wait(self->seek(query, prefetchBytes));
+		ACTOR Future<Void> seekLT_impl(BTreeCursor* self, RedwoodRecordRef query) {
+			debug_printf("seekLT(%s) start\n", query.toString().c_str());
+			int cmp = wait(self->seek(query));
 			if (cmp <= 0) {
 				wait(self->movePrev());
 			}
 			return Void();
 		}
 
-		Future<Void> seekLT(RedwoodRecordRef query, int prefetchBytes) {
-			return seekLT_impl(this, query, -prefetchBytes);
-		}
+		Future<Void> seekLT(RedwoodRecordRef query) { return seekLT_impl(this, query); }
 
 		ACTOR Future<Void> move_impl(BTreeCursor* self, bool forward) {
 			// Try to the move cursor at the end of the path in the correct direction
@@ -6511,7 +6538,8 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID)
-	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS) {
+	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS),
+	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
@@ -6619,11 +6647,13 @@ public:
 			return result;
 		}
 
-		// Prefetch is disabled for now pending some decent logic for deciding how much to fetch
-		state int prefetchBytes = 0;
-
 		if (rowLimit > 0) {
-			wait(cur.seekGTE(keys.begin, prefetchBytes));
+			wait(cur.seekGTE(keys.begin));
+
+			if (self->prefetch) {
+				cur.prefetch(keys.end, true, rowLimit, byteLimit);
+			}
+
 			while (cur.isValid()) {
 				// Read page contents without using waits
 				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
@@ -6665,7 +6695,12 @@ public:
 				wait(cur.moveNext());
 			}
 		} else {
-			wait(cur.seekLT(keys.end, prefetchBytes));
+			wait(cur.seekLT(keys.end));
+
+			if (self->prefetch) {
+				cur.prefetch(keys.begin, false, -rowLimit, byteLimit);
+			}
+
 			while (cur.isValid()) {
 				// Read page contents without using waits
 				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
@@ -6726,7 +6761,7 @@ public:
 		state FlowLock::Releaser releaser(self->m_concurrentReads);
 		++g_redwoodMetrics.opGet;
 
-		wait(cur.seekGTE(key, 0));
+		wait(cur.seekGTE(key));
 		if (cur.isValid() && cur.get().key == key) {
 			// Return a Value whose arena depends on the source page arena
 			Value v;
@@ -6762,6 +6797,7 @@ private:
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
 	FlowLock m_concurrentReads;
+	bool prefetch;
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {
@@ -6842,12 +6878,12 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 		             start.printable().c_str(),
 		             end.printable().c_str(),
 		             randomKey.toString().c_str());
-		wait(success(cur.seek(randomKey, 0)));
+		wait(success(cur.seek(randomKey)));
 	}
 
 	debug_printf(
 	    "VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.printable().c_str(), end.printable().c_str());
-	wait(cur.seekGTE(start, 0));
+	wait(cur.seekGTE(start));
 
 	state Standalone<VectorRef<KeyValueRef>> results;
 
@@ -6947,7 +6983,7 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	}
 
 	// Now read the range from the tree in reverse order and compare to the saved results
-	wait(cur.seekLT(end, 0));
+	wait(cur.seekLT(end));
 
 	state std::reverse_iterator<const KeyValueRef*> r = results.rbegin();
 
@@ -7024,7 +7060,7 @@ ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree,
 			state Optional<std::string> val = i->second;
 			debug_printf("Verifying @%" PRId64 " '%s'\n", ver, key.c_str());
 			state Arena arena;
-			wait(cur.seekGTE(RedwoodRecordRef(KeyRef(arena, key)), 0));
+			wait(cur.seekGTE(RedwoodRecordRef(KeyRef(arena, key))));
 			bool foundKey = cur.isValid() && cur.get().key == key;
 			bool hasValue = foundKey && cur.get().value.present();
 
@@ -7149,7 +7185,7 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree) {
 			}
 
 			state KeyValue kv = randomKV(10, 0);
-			wait(cur.seekGTE(kv.key, 0));
+			wait(cur.seekGTE(kv.key));
 			state int c = deterministicRandom()->randomInt(0, 100);
 			state bool direction = deterministicRandom()->coinflip();
 			while (cur.isValid() && c-- > 0) {
@@ -8729,7 +8765,7 @@ ACTOR Future<Void> randomSeeks(VersionedBTree* btree, int count, char firstChar,
 	wait(btree->initBTreeCursor(&cur, readVer));
 	while (c < count) {
 		state Key k = randomString(20, firstChar, lastChar);
-		wait(cur.seekGTE(k, 0));
+		wait(cur.seekGTE(k));
 		++c;
 	}
 	double elapsed = timer() - readStart;
@@ -8740,7 +8776,7 @@ ACTOR Future<Void> randomSeeks(VersionedBTree* btree, int count, char firstChar,
 ACTOR Future<Void> randomScans(VersionedBTree* btree,
                                int count,
                                int width,
-                               int readAhead,
+                               int prefetchBytes,
                                char firstChar,
                                char lastChar) {
 	state Version readVer = btree->getLatestVersion();
@@ -8749,29 +8785,34 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 	state VersionedBTree::BTreeCursor cur;
 	wait(btree->initBTreeCursor(&cur, readVer));
 
-	state bool adaptive = readAhead < 0;
 	state int totalScanBytes = 0;
 	while (c++ < count) {
 		state Key k = randomString(20, firstChar, lastChar);
-		wait(cur.seekGTE(k, readAhead));
-		if (adaptive) {
-			readAhead = totalScanBytes / c;
-		}
+		wait(cur.seekGTE(k));
 		state int w = width;
-		state bool direction = deterministicRandom()->coinflip();
+		state bool directionFwd = deterministicRandom()->coinflip();
+
+		if (prefetchBytes > 0) {
+			cur.prefetch(directionFwd ? VersionedBTree::dbEnd.key : VersionedBTree::dbBegin.key,
+			             directionFwd,
+			             width,
+			             prefetchBytes);
+		}
+
 		while (w > 0 && cur.isValid()) {
 			totalScanBytes += cur.get().expectedSize();
-			wait(success(direction ? cur.moveNext() : cur.movePrev()));
+			wait(success(directionFwd ? cur.moveNext() : cur.movePrev()));
 			--w;
 		}
 	}
 	double elapsed = timer() - readStart;
-	printf("Completed %d scans: readAhead=%d width=%d bytesRead=%d scansRate=%d/s\n",
+	printf("Completed %d scans: width=%d totalbytesRead=%d prefetchBytes=%d scansRate=%d scans/s  %.2f MB/s\n",
 	       count,
-	       readAhead,
 	       width,
 	       totalScanBytes,
-	       int(count / elapsed));
+	       prefetchBytes,
+	       int(count / elapsed),
+	       double(totalScanBytes) / 1e6 / elapsed);
 	return Void();
 }
 
@@ -8999,6 +9040,8 @@ TEST_CASE(":/redwood/performance/set") {
 	state int concurrentScans = params.getInt("concurrentScans").orDefault(64);
 	state int seeks = params.getInt("seeks").orDefault(1000000);
 	state int scans = params.getInt("scans").orDefault(20000);
+	state int scanWidth = params.getInt("scanWidth").orDefault(50);
+	state int scanPrefetchBytes = params.getInt("scanPrefetchBytes").orDefault(0);
 	state bool pagerMemoryOnly = params.getInt("pagerMemoryOnly").orDefault(0);
 	state bool traceMetrics = params.getInt("traceMetrics").orDefault(0);
 
@@ -9022,6 +9065,8 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("concurrentSeeks: %d\n", concurrentSeeks);
 	printf("seeks: %d\n", seeks);
 	printf("scans: %d\n", scans);
+	printf("scanWidth: %d\n", scanWidth);
+	printf("scanPrefetchBytes: %d\n", scanPrefetchBytes);
 	printf("fileName: %s\n", fileName.c_str());
 	printf("openExisting: %d\n", openExisting);
 	printf("insertRecords: %d\n", insertRecords);
@@ -9134,9 +9179,14 @@ TEST_CASE(":/redwood/performance/set") {
 	}
 
 	if (scans > 0) {
-		printf("Parallel scans, count=%d, concurrency=%d, no readAhead ...\n", scans, concurrentScans);
+		printf("Parallel scans, concurrency=%d, scans=%d, scanWidth=%d, scanPreftchBytes=%d ...\n",
+		       concurrentScans,
+		       scans,
+		       scanWidth,
+		       scanPrefetchBytes);
 		for (int x = 0; x < concurrentScans; ++x) {
-			actors.add(randomScans(btree, scans / concurrentScans, 50, 0, firstKeyChar, lastKeyChar));
+			actors.add(
+			    randomScans(btree, scans / concurrentScans, scanWidth, scanPrefetchBytes, firstKeyChar, lastKeyChar));
 		}
 		wait(actors.signalAndReset());
 		if (!traceMetrics) {
@@ -9145,7 +9195,7 @@ TEST_CASE(":/redwood/performance/set") {
 	}
 
 	if (seeks > 0) {
-		printf("Parallel seeks, count=%d, concurrency=%d ...\n", seeks, concurrentSeeks);
+		printf("Parallel seeks, concurrency=%d, seeks=%d ...\n", concurrentSeeks, seeks);
 		for (int x = 0; x < concurrentSeeks; ++x) {
 			actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
 		}
