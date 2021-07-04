@@ -358,8 +358,8 @@ struct UnreadableWorkload : TestWorkload {
 					//TraceEvent("RYWT_SetVersionstampKey").detail("Range", printable(range));
 				} else if (r == 16) {
 					range = RandomTestImpl::getRandomRange(arena);
-					snapshot = Snapshot{ deterministicRandom()->random01() < 0.05 };
-					reverse = Reverse{ deterministicRandom()->coinflip() };
+					snapshot.set(deterministicRandom()->random01() < 0.05);
+					reverse.set(deterministicRandom()->coinflip());
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
@@ -393,8 +393,8 @@ struct UnreadableWorkload : TestWorkload {
 					begin = RandomTestImpl::getRandomKeySelector(arena);
 					end = RandomTestImpl::getRandomKeySelector(arena);
 					limit = deterministicRandom()->randomInt(1, 100); // maximum number of results to return from the db
-					snapshot = Snapshot{ deterministicRandom()->random01() < 0.05 };
-					reverse = Reverse{ deterministicRandom()->coinflip() };
+					snapshot.set(deterministicRandom()->random01() < 0.05);
+					reverse.set(deterministicRandom()->coinflip());
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
@@ -438,7 +438,7 @@ struct UnreadableWorkload : TestWorkload {
 					}
 				} else if (r == 18) {
 					key = RandomTestImpl::getRandomKey(arena);
-					snapshot = Snapshot{ deterministicRandom()->random01() < 0.05 };
+					snapshot.set(deterministicRandom()->random01() < 0.05);
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);

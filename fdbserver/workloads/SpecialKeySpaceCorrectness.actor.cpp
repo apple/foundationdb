@@ -129,7 +129,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		state Reverse reverse = Reverse::FALSE;
 		loop {
 			wait(poisson(&lastTime, 1.0 / self->transactionsPerSecond));
-			reverse = Reverse{ deterministicRandom()->coinflip() };
+			reverse.set(deterministicRandom()->coinflip());
 			state GetRangeLimits limit = self->randomLimits();
 			state KeySelector begin = self->randomKeySelector();
 			state KeySelector end = self->randomKeySelector();

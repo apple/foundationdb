@@ -138,20 +138,20 @@ struct SerializabilityWorkload : TestWorkload {
 			if (operationType == 0) {
 				GetKeyOperation getKey;
 				getKey.key = getRandomKeySelector();
-				getKey.snapshot = Snapshot{ deterministicRandom()->coinflip() };
+				getKey.snapshot.set(deterministicRandom()->coinflip());
 				op.getKeyOp = getKey;
 			} else if (operationType == 1) {
 				GetRangeOperation getRange;
 				getRange.begin = getRandomKeySelector();
 				getRange.end = getRandomKeySelector();
 				getRange.limit = deterministicRandom()->randomInt(0, 1 << deterministicRandom()->randomInt(1, 10));
-				getRange.reverse = Reverse{ deterministicRandom()->coinflip() };
-				getRange.snapshot = Snapshot{ deterministicRandom()->coinflip() };
+				getRange.reverse.set(deterministicRandom()->coinflip());
+				getRange.snapshot.set(deterministicRandom()->coinflip());
 				op.getRangeOp = getRange;
 			} else if (operationType == 2) {
 				GetOperation getOp;
 				getOp.key = getRandomKey();
-				getOp.snapshot = Snapshot{ deterministicRandom()->coinflip() };
+				getOp.snapshot.set(deterministicRandom()->coinflip());
 				op.getOp = getOp;
 			} else if (operationType == 3) {
 				KeyRange range = getRandomRange(maxClearSize);

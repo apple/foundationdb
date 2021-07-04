@@ -30,6 +30,7 @@
 		explicit constexpr ParamName(bool value) : value(value) {}                                                     \
 		operator bool() const { return value; }                                                                        \
 		static ParamName const TRUE, FALSE;                                                                            \
+		void set(bool value) { this->value = value; }                                                                  \
 	};                                                                                                                 \
 	template <>                                                                                                        \
 	struct Traceable<ParamName> : std::true_type {                                                                     \

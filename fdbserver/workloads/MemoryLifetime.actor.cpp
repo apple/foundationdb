@@ -76,14 +76,14 @@ struct MemoryLifetime : KVWorkload {
 			try {
 				int op = deterministicRandom()->randomInt(0, 4);
 				if (op == 0) {
-					reverse = Reverse{ deterministicRandom()->coinflip() };
+					reverse.set(deterministicRandom()->coinflip());
 					state Key getRange_startKey = self->getRandomKey();
 					state KeyRange getRange_queryRange =
 					    reverse ? KeyRangeRef(normalKeys.begin, keyAfter(getRange_startKey))
 					            : KeyRangeRef(getRange_startKey, normalKeys.end);
 					state bool getRange_randomStart = deterministicRandom()->random01();
 					state Value getRange_newValue = self->randomValue();
-					snapshot = Snapshot{ deterministicRandom()->coinflip() };
+					snapshot.set(deterministicRandom()->coinflip());
 
 					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", reverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", snapshot);
 					if (getRange_randomStart)
@@ -123,7 +123,7 @@ struct MemoryLifetime : KVWorkload {
 					state Key get_startKey = self->getRandomKey();
 					state bool get_randomStart = deterministicRandom()->random01();
 					state Value get_newValue = self->randomValue();
-					snapshot = Snapshot{ deterministicRandom()->coinflip() };
+					snapshot.set(deterministicRandom()->coinflip());
 
 					if (get_randomStart)
 						tr.set(get_startKey, get_newValue);
@@ -138,7 +138,7 @@ struct MemoryLifetime : KVWorkload {
 					state KeySelector getKey_selector = self->getRandomKeySelector();
 					state bool getKey_randomStart = deterministicRandom()->random01();
 					state Value getKey_newValue = self->randomValue();
-					snapshot = Snapshot{ deterministicRandom()->coinflip() };
+					snapshot.set(deterministicRandom()->coinflip());
 
 					if (getKey_randomStart)
 						tr.set(getKey_selector.getKey(), getKey_newValue);

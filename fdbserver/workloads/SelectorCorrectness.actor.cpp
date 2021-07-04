@@ -166,7 +166,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						onEqualB = deterministicRandom()->randomInt(0, 2) != 0;
 						offsetA = 1; //-1*deterministicRandom()->randomInt( 0, self->maxOffset );
 						offsetB = deterministicRandom()->randomInt(1, self->maxOffset);
-						reverse = Reverse{ deterministicRandom()->coinflip() };
+						reverse.set(deterministicRandom()->coinflip());
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("Direction",direction);
 						state int expectedSize =

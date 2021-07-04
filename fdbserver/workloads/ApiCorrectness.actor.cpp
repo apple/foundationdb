@@ -481,7 +481,7 @@ public:
 	// Gets a single range of values using key selectors from the database and memory store and compares them, returning
 	// true if the results were the same
 	ACTOR Future<bool> runGetRangeSelector(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
-		state Reverse reverse = Reverse{ deterministicRandom()->coinflip() };
+		state Reverse reverse = deterministicRandom()->coinflip();
 
 		KeySelector selectors[2];
 		Key keys[2];

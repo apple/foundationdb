@@ -438,7 +438,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						randomLimit = deterministicRandom()->randomInt(0, 2 * self->maxOffset + self->maxKeySpace);
 						randomByteLimit =
 						    deterministicRandom()->randomInt(0, (self->maxOffset + self->maxKeySpace) * 512);
-						reverse = Reverse{ deterministicRandom()->coinflip() };
+						reverse.set(deterministicRandom()->coinflip());
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("RandomLimit",randomLimit).detail("RandomByteLimit", randomByteLimit).detail("Reverse", reverse);
 
