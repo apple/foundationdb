@@ -35,12 +35,12 @@
 	template <>                                                                                                        \
 	struct Traceable<ParamName> : std::true_type {                                                                     \
 		static std::string toString(ParamName const& value) { return Traceable<bool>::toString(value); }               \
-	};
+	}
 
 #define DEFINE_BOOLEAN_PARAM(ParamName)                                                                                \
 	ParamName const ParamName::TRUE = ParamName(true);                                                                 \
-	ParamName const ParamName::FALSE = ParamName(false);
+	ParamName const ParamName::FALSE = ParamName(false)
 
 #define BOOLEAN_PARAM(ParamName)                                                                                       \
-	DECLARE_BOOLEAN_PARAM(ParamName)                                                                                   \
-	DEFINE_BOOLEAN_PARAM(ParamName)\
+	DECLARE_BOOLEAN_PARAM(ParamName);                                                                                  \
+	DEFINE_BOOLEAN_PARAM(ParamName)
