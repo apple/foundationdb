@@ -33,6 +33,7 @@
 #include "fdbserver/ptxn/StorageServerInterface.h"
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "fdbserver/ResolverInterface.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/UnitTest.h"
 
@@ -133,6 +134,9 @@ struct TestDriverContext {
 	// Stores the generated commits
 	Arena mutationsArena;
 	std::vector<CommitRecord> commitRecord;
+
+	// ServerDBInfo
+	ServerDBInfo dbInfo;
 };
 
 // Returns an initialized TestDriverContext with default values specified in "options".

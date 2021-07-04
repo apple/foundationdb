@@ -68,6 +68,27 @@ TestDriverOptions::TestDriverOptions(const UnitTestParameters& params)
     transferModel(static_cast<MessageTransferModel>(
         params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)))) {}
 
+namespace {
+// Initialize the server DB info in TestDriverContext, this should be called after all other parts of TestDriverContext
+// get initialized.
+void initServerDBInfo(std::shared_ptr<TestDriverContext> pContext) {
+	auto& dbInfo = pContext->dbInfo;
+
+	dbInfo.id = randomUID();
+	// FIXME fake cluster controller?
+	// dbInfo.clusterInterface = ??
+	// FIXME ClientDBINfo?
+	// dbInfo.client = ??;
+	dbInfo.distributor.reset();
+	dbInfo.master = *pContext->sequencerInterface;
+	dbInfo.ratekeeper.reset();
+	std::transform(std::begin(pContext->resolverInterfaces),
+	               std::end(pContext->resolverInterfaces),
+	               std::back_inserter(dbInfo.resolvers),
+	               [](const auto& ptr) -> auto { return *ptr; });
+}
+} // anonymous namespace
+
 std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions& options) {
 	print::print(options);
 
@@ -145,6 +166,10 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 		++index;
 		index %= context->tLogGroups.size();
 	}
+
+	// Initialize ServerDBInfo
+	initServerDBInfo(context);
+
 	return context;
 }
 
@@ -157,7 +182,8 @@ std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerI
 	return storageTeamIDStorageServerInterfaceMapper.at(storageTeamID);
 }
 
-std::pair<Version, Version> TestDriverContext::getCommitVersionPair(const StorageTeamID& storageTeamId, const Version& currentVersion) {
+std::pair<Version, Version> TestDriverContext::getCommitVersionPair(const StorageTeamID& storageTeamId,
+                                                                    const Version& currentVersion) {
 	ASSERT(storageTeamIDTLogGroupIDMapper.count(storageTeamId));
 	Version prevVersion = tLogGroupVersion[storageTeamIDTLogGroupIDMapper.at(storageTeamId)];
 	Version commitVersion = currentVersion;
