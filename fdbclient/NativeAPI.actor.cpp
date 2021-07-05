@@ -1933,7 +1933,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100)) / 100.0;
 		break;
 	case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
-		validateOptionValuePresent(value);
+		validateOptionValueNotPresent(value);
 		networkOptions.logClientInfo = false;
 		break;
 	case FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS: {
