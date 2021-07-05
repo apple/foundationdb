@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "fdbserver/IPager.h"
 #include "fdbclient/Tuple.h"
@@ -93,6 +94,91 @@ void writePrefixedLines(FILE* fout, std::string prefix, std::string msg) {
 		fprintf(fout, "%s %s\n", prefix.c_str(), line.toString().c_str());
 	}
 }
+
+class PriorityMultiLock {
+public:
+	// Waiting on the lock returns a Lock, which is really just a Promise<Void>
+	// Calling release() is not necessary, it exists in case the Lock holder wants to explicitly release
+	// the Lock before it goes out of scope.
+	struct Lock {
+		void release() { promise.send(Void()); }
+
+		// This is exposed in case the caller wants to use/copy it directly
+		Promise<Void> promise;
+	};
+
+private:
+	struct Slot {
+		Promise<Lock> lock;
+	};
+
+	typedef Deque<Slot> Queue;
+
+public:
+	PriorityMultiLock(int concurrency, int levels) : concurrency(concurrency), outstanding(0), queues(levels) {
+	}
+
+	Future<Lock> lock(int priority = 0) {
+		debug_printf("lock begin %d/%d\n", outstanding, concurrency);
+
+		if(outstanding < concurrency) {
+			++outstanding;
+			Lock p;
+			addReleaser(p);
+			debug_printf("lock exit immediate %d/%d\n", outstanding, concurrency);
+			return p;
+		}
+
+		Queue &q = queues[priority];
+		q.emplace_back(Slot());
+		debug_printf("lock exit queued %d/%d\n", outstanding, concurrency);
+		return q.back().lock.getFuture();
+	}
+
+private:
+	void next() {
+		debug_printf("next %d/%d\n", outstanding, concurrency);
+		// Clean up any finished releasers at the front of the releasers queue
+		while(releasers.front().isReady()) {
+			debug_printf("next cleaned up releaser %d/%d\n", outstanding, concurrency);
+			releasers.pop_front();
+		}
+
+		// Try to start the next task, highest priorities first.
+		// If successful, the outstanding count does not change
+		for(int priority = queues.size() - 1; priority >= 0; --priority) {
+			auto &q = queues[priority];
+			if(!q.empty()) {
+				debug_printf("next found waiter at priority %d, %d/%d\n", priority, outstanding, concurrency);
+				Slot s = q.front();
+				q.pop_front();
+				Lock lock;
+				addReleaser(lock);
+				debug_printf("next sending %d/%d\n", outstanding, concurrency);
+				s.lock.send(lock);
+				debug_printf("next exit sent %d/%d\n", outstanding, concurrency);
+				return;
+			}
+		}
+
+		// There were no tasks to start, so outstanding is reduced.
+		--outstanding;
+		debug_printf("next exit nowaiters %d/%d\n", outstanding, concurrency);
+	}
+
+	void addReleaser(Lock &lock) {
+		releasers.push_back(map(yieldedFuture(ready(lock.promise.getFuture())), [=](Void) {
+			next();
+			return Void();
+		}));
+	}
+
+	int concurrency;
+	int outstanding;
+	std::vector<Queue> queues;
+	Deque<Future<Void>> releasers;
+	Future<Void> error;
+};
 
 // Some convenience functions for debugging to stringify various structures
 // Classes can add compatibility by either specializing toString<T> or implementing
@@ -6538,7 +6624,7 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID)
-	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS),
+	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 1),
 	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
@@ -6635,8 +6721,8 @@ public:
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
-		wait(self->m_concurrentReads.take());
-		state FlowLock::Releaser releaser(self->m_concurrentReads);
+		ASSERT(!self->m_error.isSet());
+		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
 		++g_redwoodMetrics.opGetRange;
 
 		state RangeResult result;
@@ -6757,8 +6843,7 @@ public:
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
-		wait(self->m_concurrentReads.take());
-		state FlowLock::Releaser releaser(self->m_concurrentReads);
+		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
 		++g_redwoodMetrics.opGet;
 
 		wait(cur.seekGTE(key));
@@ -6796,7 +6881,7 @@ private:
 	Future<Void> m_init;
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
-	FlowLock m_concurrentReads;
+	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 
 	template <typename T>
