@@ -71,18 +71,18 @@ public:
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
-	Future<Optional<Value>> get(const Key& key, Snapshot snapshot = Snapshot::FALSE) override;
-	Future<Key> getKey(const KeySelector& key, Snapshot snapshot = Snapshot::FALSE) override;
+	Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::FALSE) override;
+	Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
 	                                            const KeySelector& end,
 	                                            int limit,
-	                                            Snapshot snapshot = Snapshot::FALSE,
-	                                            Reverse reverse = Reverse::FALSE) override;
+	                                            Snapshot = Snapshot::FALSE,
+	                                            Reverse = Reverse::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
 	                                            KeySelector end,
 	                                            GetRangeLimits limits,
-	                                            Snapshot snapshot = Snapshot::FALSE,
-	                                            Reverse reverse = Reverse::FALSE) override;
+	                                            Snapshot = Snapshot::FALSE,
+	                                            Reverse = Reverse::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
 	                                            int limit,
 	                                            Snapshot snapshot = Snapshot::FALSE,

@@ -159,9 +159,9 @@ public:
 	                       LocalityData clientLocality,
 	                       EnableLocalityLoadBalance,
 	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
-	                       LockAware lockAware = LockAware::FALSE,
+	                       LockAware = LockAware::FALSE,
 	                       int apiVersion = Database::API_VERSION_LATEST,
-	                       IsSwitchable switchable = IsSwitchable::FALSE);
+	                       IsSwitchable = IsSwitchable::FALSE);
 
 	~DatabaseContext();
 
@@ -242,7 +242,7 @@ public:
 	// new cluster.
 	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
 	Future<Void> connectionFileChanged();
-	IsSwitchable switchable{ IsSwitchable::FALSE };
+	IsSwitchable switchable{ false };
 
 	// Management API, Attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
@@ -261,9 +261,9 @@ public:
 	                         LocalityData const& clientLocality,
 	                         EnableLocalityLoadBalance,
 	                         LockAware,
-	                         IsInternal internal = IsInternal::TRUE,
+	                         IsInternal = IsInternal::TRUE,
 	                         int apiVersion = Database::API_VERSION_LATEST,
-	                         IsSwitchable switchable = IsSwitchable::FALSE);
+	                         IsSwitchable = IsSwitchable::FALSE);
 
 	explicit DatabaseContext(const Error& err);
 

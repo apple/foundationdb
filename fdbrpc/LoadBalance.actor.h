@@ -249,7 +249,7 @@ struct RequestData : NonCopyable {
 
 	Future<Reply> response;
 	Reference<ModelHolder> modelHolder;
-	TriedAllOptions triedAllOptions{ TriedAllOptions::FALSE };
+	TriedAllOptions triedAllOptions{ false };
 
 	bool requestStarted = false; // true once the request has been sent to an alternative
 	bool requestProcessed = false; // true once a response has been received and handled by checkAndProcessResult

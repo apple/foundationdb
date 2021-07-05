@@ -38,17 +38,17 @@ public:
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
-	Future<Optional<Value>> get(Key const& key, Snapshot snapshot = Snapshot::FALSE) override;
+	Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(KeySelector const& begin,
 	                                            KeySelector const& end,
 	                                            int limit,
-	                                            Snapshot snapshot = Snapshot::FALSE,
-	                                            Reverse reverse = Reverse::FALSE) override;
+	                                            Snapshot = Snapshot::FALSE,
+	                                            Reverse = Reverse::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
 	                                            KeySelector end,
 	                                            GetRangeLimits limits,
-	                                            Snapshot snapshot = Snapshot::FALSE,
-	                                            Reverse reverse = Reverse::FALSE) override;
+	                                            Snapshot = Snapshot::FALSE,
+	                                            Reverse = Reverse::FALSE) override;
 	void set(KeyRef const& key, ValueRef const& value) override;
 	void clear(KeyRangeRef const&) override { throw client_invalid_operation(); }
 	void clear(KeyRef const&) override;

@@ -280,7 +280,7 @@ public:
 	static Key getPauseKey();
 
 	// parallel restore
-	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB unlockDB = UnlockDB::TRUE);
+	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB = UnlockDB::TRUE);
 	Future<Void> submitParallelRestore(Database cx,
 	                                   Key backupTag,
 	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -308,12 +308,12 @@ public:
 	                        Key tagName,
 	                        Key url,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges,
-	                        WaitForComplete waitForComplete = WaitForComplete::TRUE,
+	                        WaitForComplete = WaitForComplete::TRUE,
 	                        Version targetVersion = ::invalidVersion,
-	                        Verbose verbose = Verbose::TRUE,
+	                        Verbose = Verbose::TRUE,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
-	                        LockDB lockDB = LockDB::TRUE,
+	                        LockDB = LockDB::TRUE,
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::FALSE,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::FALSE,
 	                        Version beginVersion = ::invalidVersion);
@@ -367,7 +367,7 @@ public:
 	Future<ERestoreState> abortRestore(Database cx, Key tagName);
 
 	// Waits for a restore tag to reach a final (stable) state.
-	Future<ERestoreState> waitRestore(Database cx, Key tagName, Verbose verbose);
+	Future<ERestoreState> waitRestore(Database cx, Key tagName, Verbose);
 
 	// Get a string describing the status of a tag
 	Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName);
@@ -384,7 +384,7 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
+	                          StopWhenDone = StopWhenDone::TRUE,
 	                          UsePartitionedLog = UsePartitionedLog::FALSE,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::FALSE);
 	Future<Void> submitBackup(Database cx,
@@ -432,14 +432,14 @@ public:
 
 	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	                                            Key tagName,
-	                                            Snapshot snapshot = Snapshot::FALSE);
+	                                            Snapshot = Snapshot::FALSE);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
 	Future<EnumState> waitBackup(Database cx,
 	                             std::string tagName,
-	                             StopWhenDone stopWhenDone = StopWhenDone::TRUE,
+	                             StopWhenDone = StopWhenDone::TRUE,
 	                             Reference<IBackupContainer>* pContainer = nullptr,
 	                             UID* pUID = nullptr);
 
@@ -507,7 +507,7 @@ public:
 	                              Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                              Key addPrefix,
 	                              Key removePrefix,
-	                              ForceAction forceAction = ForceAction::FALSE);
+	                              ForceAction = ForceAction::FALSE);
 
 	Future<Void> unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> unlockBackup(Database cx, Key tagName) {
@@ -526,7 +526,7 @@ public:
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
+	                          StopWhenDone = StopWhenDone::TRUE,
 	                          Key addPrefix = StringRef(),
 	                          Key removePrefix = StringRef(),
 	                          LockDB lockDatabase = LockDB::FALSE,
@@ -566,25 +566,23 @@ public:
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return getStateValue(tr, logUid); });
 	}
 
-	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot snapshot = Snapshot::FALSE);
+	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::FALSE);
 	Future<UID> getDestUid(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return getDestUid(tr, logUid); });
 	}
 
-	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, Snapshot snapshot = Snapshot::FALSE);
+	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, Snapshot = Snapshot::FALSE);
 	Future<UID> getLogUid(Database cx, Key tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return getLogUid(tr, tagName); });
 	}
 
 	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr,
 	                                     UID logUid,
-	                                     Snapshot snapshot = Snapshot::FALSE);
-	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr,
-	                                   UID logUid,
-	                                   Snapshot snapshot = Snapshot::FALSE);
+	                                     Snapshot = Snapshot::FALSE);
+	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::FALSE);
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<EnumState> waitBackup(Database cx, Key tagName, StopWhenDone stopWhenDone = StopWhenDone::TRUE);
+	Future<EnumState> waitBackup(Database cx, Key tagName, StopWhenDone = StopWhenDone::TRUE);
 	Future<EnumState> waitSubmitted(Database cx, Key tagName);
 	Future<Void> waitUpgradeToLatestDrVersion(Database cx, Key tagName);
 

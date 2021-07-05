@@ -115,7 +115,7 @@ private:
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
 // Configures the global networking machinery
-void setupNetwork(uint64_t transportId = 0, UseMetrics useMetrics = UseMetrics::FALSE);
+void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::FALSE);
 
 // This call blocks while the network is running.  To use the API in a single-threaded
 //  environment, the calling program must have ACTORs already launched that are waiting
@@ -251,20 +251,20 @@ public:
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
-	[[nodiscard]] Future<Optional<Value>> get(const Key& key, Snapshot snapshot = Snapshot::FALSE);
+	[[nodiscard]] Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::FALSE);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
-	[[nodiscard]] Future<Key> getKey(const KeySelector& key, Snapshot snapshot = Snapshot::FALSE);
+	[[nodiscard]] Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::FALSE);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
 	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
 	                                           const KeySelector& end,
 	                                           int limit,
-	                                           Snapshot snapshot = Snapshot::FALSE,
-	                                           Reverse reverse = Reverse::FALSE);
+	                                           Snapshot = Snapshot::FALSE,
+	                                           Reverse = Reverse::FALSE);
 	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
 	                                           const KeySelector& end,
 	                                           GetRangeLimits limits,
-	                                           Snapshot snapshot = Snapshot::FALSE,
-	                                           Reverse reverse = Reverse::FALSE);
+	                                           Snapshot = Snapshot::FALSE,
+	                                           Reverse = Reverse::FALSE);
 	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
 	                                           int limit,
 	                                           Snapshot snapshot = Snapshot::FALSE,
@@ -292,14 +292,14 @@ public:
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          int limit,
-	                                          Snapshot snapshot = Snapshot::FALSE,
-	                                          Reverse reverse = Reverse::FALSE);
+	                                          Snapshot = Snapshot::FALSE,
+	                                          Reverse = Reverse::FALSE);
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          GetRangeLimits limits,
-	                                          Snapshot snapshot = Snapshot::FALSE,
-	                                          Reverse reverse = Reverse::FALSE);
+	                                          Snapshot = Snapshot::FALSE,
+	                                          Reverse = Reverse::FALSE);
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeyRange& keys,
 	                                          int limit,
@@ -351,13 +351,13 @@ public:
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
-	void set(const KeyRef& key, const ValueRef& value, AddConflictRange addConflictRange = AddConflictRange::TRUE);
+	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::TRUE);
 	void atomicOp(const KeyRef& key,
 	              const ValueRef& value,
 	              MutationRef::Type operationType,
-	              AddConflictRange addConflictRange = AddConflictRange::TRUE);
-	void clear(const KeyRangeRef& range, AddConflictRange addConflictRange = AddConflictRange::TRUE);
-	void clear(const KeyRef& key, AddConflictRange addConflictRange = AddConflictRange::TRUE);
+	              AddConflictRange = AddConflictRange::TRUE);
+	void clear(const KeyRangeRef& range, AddConflictRange = AddConflictRange::TRUE);
+	void clear(const KeyRef& key, AddConflictRange = AddConflictRange::TRUE);
 	[[nodiscard]] Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());

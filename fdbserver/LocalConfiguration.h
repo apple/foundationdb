@@ -51,7 +51,7 @@ public:
 	LocalConfiguration(std::string const& dataFolder,
 	                   std::string const& configPath,
 	                   std::map<std::string, std::string> const& manualKnobOverrides,
-	                   IsTest isTest = IsTest::FALSE);
+	                   IsTest = IsTest::FALSE);
 	LocalConfiguration(LocalConfiguration&&);
 	LocalConfiguration& operator=(LocalConfiguration&&);
 	~LocalConfiguration();
