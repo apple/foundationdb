@@ -1705,7 +1705,10 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 
 // Read layer status for this layer and get the total count of agent processes (instances) then adjust the poll delay
 // based on that and BACKUP_AGGREGATE_POLL_RATE
-ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::string name, double* pollDelay) {
+ACTOR Future<Void> updateAgentPollRate(Database src,
+                                       std::string rootKey,
+                                       std::string name,
+                                       std::shared_ptr<double> pollDelay) {
 	loop {
 		try {
 			json_spirit::mObject status = wait(getLayerStatus(src, rootKey));
@@ -1727,7 +1730,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
                                      std::string name,
                                      ProgramExe exe,
-                                     double* pollDelay,
+                                     std::shared_ptr<double> pollDelay,
                                      Database taskDest = Database(),
                                      std::string id = nondeterministicRandom()->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
@@ -1774,7 +1777,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 
 			// Now that status was written at least once by this process (and hopefully others), start the poll rate
 			// control updater if it wasn't started yet
-			if (!pollRateUpdater.isValid() && pollDelay != nullptr)
+			if (!pollRateUpdater.isValid())
 				pollRateUpdater = updateAgentPollRate(statusUpdateDest, rootKey, name, pollDelay);
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnableToWriteStatus").error(e);
@@ -1784,17 +1787,17 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 }
 
 ACTOR Future<Void> runDBAgent(Database src, Database dest) {
-	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
+	state std::shared_ptr<double> pollDelay = std::make_shared<double>(1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE);
 	std::string id = nondeterministicRandom()->randomUniqueID().toString();
-	state Future<Void> status = statusUpdateActor(src, "dr_backup", ProgramExe::DR_AGENT, &pollDelay, dest, id);
+	state Future<Void> status = statusUpdateActor(src, "dr_backup", ProgramExe::DR_AGENT, pollDelay, dest, id);
 	state Future<Void> status_other =
-	    statusUpdateActor(dest, "dr_backup_dest", ProgramExe::DR_AGENT, &pollDelay, dest, id);
+	    statusUpdateActor(dest, "dr_backup_dest", ProgramExe::DR_AGENT, pollDelay, dest, id);
 
 	state DatabaseBackupAgent backupAgent(src);
 
 	loop {
 		try {
-			wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(dest, pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled)
@@ -1811,14 +1814,14 @@ ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 }
 
 ACTOR Future<Void> runAgent(Database db) {
-	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	state Future<Void> status = statusUpdateActor(db, "backup", ProgramExe::AGENT, &pollDelay);
+	state std::shared_ptr<double> pollDelay = std::make_shared<double>(1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE);
+	state Future<Void> status = statusUpdateActor(db, "backup", ProgramExe::AGENT, pollDelay);
 
 	state FileBackupAgent backupAgent;
 
 	loop {
 		try {
-			wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(db, pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled)
