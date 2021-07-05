@@ -1902,12 +1902,29 @@ ACTOR Future<TLogPeekReply> peekTLog(
 
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
+	state Version begin = req.begin;
+	state bool onlySpilled = false;
 	if (req.tag.locality == tagLocalityTxs && req.tag.id >= logData->txsTags && logData->txsTags > 0) {
 		req.tag.id = req.tag.id % logData->txsTags;
 	}
-	req.reply.setByteLimit(SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
-	// loop { wait(req.reply.onReady()); };
-	return Void();
+	req.reply.setByteLimit(std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, req.limitBytes));
+	loop {
+		state TLogPeekStreamReply reply;
+		try {
+			wait(req.reply.onReady() && store(reply.rep, peekTLog(self, logData, begin, req.tag, false, onlySpilled)));
+			req.reply.send(reply);
+			begin = reply.rep.end;
+			onlySpilled = reply.rep.onlySpilled;
+
+			wait(delay(0.005, TaskPriority::TLogPeekReply));
+		} catch (Error& e) {
+			if(e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
+				req.reply.sendError(e);
+				return Void();
+			}
+			throw;
+		}
+	}
 }
 
 ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Reference<LogData> logData) {

@@ -423,7 +423,7 @@ struct ILogSystem {
 
 		TLogPeekReply results;
 		ArenaReader rd;
-		LogMessageVersion messageVersion, end;
+		LogMessageVersion messageVersion, end; // the version of current message; the intended end version of current cursor
 		Version poppedVersion;
 		TagsAndMessage messageAndTags;
 		bool hasMsg;
