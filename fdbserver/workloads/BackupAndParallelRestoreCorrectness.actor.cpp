@@ -43,7 +43,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	LockDB locked{ false };
 	bool allowPauses;
 	bool shareLogRange;
-	bool usePartitionedLogs;
+	UsePartitionedLog usePartitionedLogs{ false };
 	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
 	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 
@@ -75,8 +75,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
-		usePartitionedLogs = getOption(
-		    options, LiteralStringRef("usePartitionedLogs"), deterministicRandom()->random01() < 0.5 ? true : false);
+		usePartitionedLogs.set(
+		    getOption(options, LiteralStringRef("usePartitionedLogs"), deterministicRandom()->coinflip()));
 		addPrefix = getOption(options, LiteralStringRef("addPrefix"), LiteralStringRef(""));
 		removePrefix = getOption(options, LiteralStringRef("removePrefix"), LiteralStringRef(""));
 
@@ -179,7 +179,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
 		state FileBackupAgent agent;
 		loop {
-			std::string status = wait(agent.getStatus(cx, true, tag));
+			std::string status = wait(agent.getStatus(cx, ShowErrors::TRUE, tag));
 			puts(status.c_str());
 			wait(delay(2.0));
 		}
@@ -337,7 +337,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		state std::string statusText;
 
-		std::string _statusText = wait(backupAgent->getStatus(cx, 5, tag.toString()));
+		std::string _statusText = wait(backupAgent->getStatus(cx, ShowErrors::TRUE, tag.toString()));
 		statusText = _statusText;
 		// Can we validate anything about status?
 
@@ -483,7 +483,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
 					                                       StopWhenDone::TRUE,
-					                                       false);
+					                                       UsePartitionedLog::FALSE);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)

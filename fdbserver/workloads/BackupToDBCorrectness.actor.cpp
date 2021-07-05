@@ -704,10 +704,10 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					// not be set yet. Adding "waitForDestUID" flag to avoid the race.
 					wait(backupAgent.abortBackup(self->extraDB,
 					                             self->backupTag,
-					                             /*partial=*/false,
-					                             /*abortOldBackup=*/false,
-					                             /*dstOnly=*/false,
-					                             /*waitForDestUID*/ true));
+					                             PartialBackup::FALSE,
+					                             AbortOldBackup::FALSE,
+					                             DstOnly::FALSE,
+					                             WaitForDestUID::TRUE));
 				} catch (Error& e) {
 					TraceEvent("BARW_AbortBackupExtraException", randomID).error(e);
 					if (e.code() != error_code_backup_unneeded)

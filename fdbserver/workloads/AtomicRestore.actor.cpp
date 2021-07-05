@@ -31,7 +31,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 	double startAfter, restoreAfter;
 	bool fastRestore; // true: use fast restore, false: use old style restore
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
-	bool usePartitionedLogs;
+	UsePartitionedLog usePartitionedLogs{ false };
 	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
 	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 
@@ -41,8 +41,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 20.0);
 		fastRestore = getOption(options, LiteralStringRef("fastRestore"), false);
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		usePartitionedLogs = getOption(
-		    options, LiteralStringRef("usePartitionedLogs"), deterministicRandom()->random01() < 0.5 ? true : false);
+		usePartitionedLogs.set(getOption(
+		    options, LiteralStringRef("usePartitionedLogs"), deterministicRandom()->random01() < 0.5 ? true : false));
 
 		addPrefix = getOption(options, LiteralStringRef("addPrefix"), LiteralStringRef(""));
 		removePrefix = getOption(options, LiteralStringRef("removePrefix"), LiteralStringRef(""));

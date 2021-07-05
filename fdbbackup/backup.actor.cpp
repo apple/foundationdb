@@ -1894,8 +1894,8 @@ ACTOR Future<Void> submitBackup(Database db,
                                 bool dryRun,
                                 WaitForComplete waitForCompletion,
                                 StopWhenDone stopWhenDone,
-                                bool usePartitionedLog,
-                                bool incrementalBackupOnly) {
+                                UsePartitionedLog usePartitionedLog,
+                                IncrementalBackupOnly incrementalBackupOnly) {
 	try {
 		state FileBackupAgent backupAgent;
 
@@ -2048,7 +2048,7 @@ ACTOR Future<Void> statusDBBackup(Database src, Database dest, std::string tagNa
 	return Void();
 }
 
-ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showErrors, bool json) {
+ACTOR Future<Void> statusBackup(Database db, std::string tagName, ShowErrors showErrors, bool json) {
 	try {
 		state FileBackupAgent backupAgent;
 
@@ -2065,11 +2065,15 @@ ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showError
 	return Void();
 }
 
-ACTOR Future<Void> abortDBBackup(Database src, Database dest, std::string tagName, bool partial, bool dstOnly) {
+ACTOR Future<Void> abortDBBackup(Database src,
+                                 Database dest,
+                                 std::string tagName,
+                                 PartialBackup partial,
+                                 DstOnly dstOnly) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
-		wait(backupAgent.abortBackup(dest, Key(tagName), partial, false, dstOnly));
+		wait(backupAgent.abortBackup(dest, Key(tagName), partial, AbortOldBackup::FALSE, dstOnly));
 		wait(backupAgent.unlockBackup(dest, Key(tagName)));
 
 		printf("The DR on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
@@ -2120,7 +2124,7 @@ ACTOR Future<Void> abortBackup(Database db, std::string tagName) {
 	return Void();
 }
 
-ACTOR Future<Void> cleanupMutations(Database db, bool deleteData) {
+ACTOR Future<Void> cleanupMutations(Database db, DeleteData deleteData) {
 	try {
 		wait(cleanupBackup(db, deleteData));
 	} catch (Error& e) {
@@ -2261,8 +2265,8 @@ ACTOR Future<Void> runRestore(Database db,
                               WaitForComplete waitForDone,
                               std::string addPrefix,
                               std::string removePrefix,
-                              bool onlyAppyMutationLogs,
-                              bool inconsistentSnapshotOnly) {
+                              OnlyApplyMutationLogs onlyApplyMutationLogs,
+                              InconsistentSnapshotOnly inconsistentSnapshotOnly) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2308,7 +2312,7 @@ ACTOR Future<Void> runRestore(Database db,
 
 			BackupDescription desc = wait(bc->describeBackup());
 
-			if (onlyAppyMutationLogs && desc.contiguousLogEnd.present()) {
+			if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 				targetVersion = desc.contiguousLogEnd.get() - 1;
 			} else if (desc.maxRestorableVersion.present()) {
 				targetVersion = desc.maxRestorableVersion.get();
@@ -2333,7 +2337,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   KeyRef(addPrefix),
 			                                                   KeyRef(removePrefix),
 			                                                   LockDB::TRUE,
-			                                                   onlyAppyMutationLogs,
+			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion));
 
@@ -3248,10 +3252,10 @@ int main(int argc, char* argv[]) {
 		std::string restoreTimestamp;
 		WaitForComplete waitForDone{ false };
 		StopWhenDone stopWhenDone{ true };
-		bool usePartitionedLog = false; // Set to true to use new backup system
-		bool incrementalBackupOnly = false;
-		bool onlyAppyMutationLogs = false;
-		bool inconsistentSnapshotOnly = false;
+		UsePartitionedLog usePartitionedLog{ false }; // Set to true to use new backup system
+		IncrementalBackupOnly incrementalBackupOnly{ false };
+		OnlyApplyMutationLogs onlyApplyMutationLogs{ false };
+		InconsistentSnapshotOnly inconsistentSnapshotOnly{ false };
 		ForceAction forceAction{ false };
 		bool trace = false;
 		bool quietDisplay = false;
@@ -3262,8 +3266,8 @@ int main(int argc, char* argv[]) {
 		uint64_t traceRollSize = TRACE_DEFAULT_ROLL_SIZE;
 		uint64_t traceMaxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
 		ESOError lastError;
-		bool partial = true;
-		bool dstOnly = false;
+		PartialBackup partial{ true };
+		DstOnly dstOnly{ false };
 		LocalityData localities;
 		uint64_t memLimit = 8LL << 30;
 		Optional<uint64_t> ti;
@@ -3273,7 +3277,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreClusterFileDest;
 		std::string restoreClusterFileOrig;
 		bool jsonOutput = false;
-		bool deleteData = false;
+		DeleteData deleteData{ false };
 
 		BackupModifyOptions modifyOptions;
 
@@ -3357,7 +3361,7 @@ int main(int argc, char* argv[]) {
 				dryRun = true;
 				break;
 			case OPT_DELETE_DATA:
-				deleteData = true;
+				deleteData.set(true);
 				break;
 			case OPT_MIN_CLEANUP_SECONDS:
 				knobs.emplace_back("min_cleanup_seconds", args->OptionArg());
@@ -3443,10 +3447,10 @@ int main(int argc, char* argv[]) {
 				sourceClusterFile = args->OptionArg();
 				break;
 			case OPT_CLEANUP:
-				partial = false;
+				partial.set(false);
 				break;
 			case OPT_DSTONLY:
-				dstOnly = true;
+				dstOnly.set(true);
 				break;
 			case OPT_KNOB: {
 				std::string syn = args->OptionSyntax();
@@ -3511,11 +3515,11 @@ int main(int argc, char* argv[]) {
 				stopWhenDone.set(false);
 				break;
 			case OPT_USE_PARTITIONED_LOG:
-				usePartitionedLog = true;
+				usePartitionedLog.set(true);
 				break;
 			case OPT_INCREMENTALONLY:
-				incrementalBackupOnly = true;
-				onlyAppyMutationLogs = true;
+				incrementalBackupOnly.set(true);
+				onlyApplyMutationLogs.set(true);
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
@@ -3567,7 +3571,7 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY: {
-				inconsistentSnapshotOnly = true;
+				inconsistentSnapshotOnly.set(true);
 				break;
 			}
 #ifdef _WIN32
@@ -3881,7 +3885,7 @@ int main(int argc, char* argv[]) {
 			case BackupType::STATUS:
 				if (!initCluster())
 					return FDB_EXIT_ERROR;
-				f = stopAfter(statusBackup(db, tagName, true, jsonOutput));
+				f = stopAfter(statusBackup(db, tagName, ShowErrors::TRUE, jsonOutput));
 				break;
 
 			case BackupType::ABORT:
@@ -4035,7 +4039,7 @@ int main(int argc, char* argv[]) {
 				                         waitForDone,
 				                         addPrefix,
 				                         removePrefix,
-				                         onlyAppyMutationLogs,
+				                         onlyApplyMutationLogs,
 				                         inconsistentSnapshotOnly));
 				break;
 			case RestoreType::WAIT:

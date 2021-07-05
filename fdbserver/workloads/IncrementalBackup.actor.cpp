@@ -150,8 +150,15 @@ struct IncrementalBackupWorkload : TestWorkload {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 			TraceEvent("IBackupSubmitAttempt");
 			try {
-				wait(self->backupAgent.submitBackup(
-				    cx, self->backupDir, 0, 1e8, self->tag.toString(), backupRanges, StopWhenDone::FALSE, false, true));
+				wait(self->backupAgent.submitBackup(cx,
+				                                    self->backupDir,
+				                                    0,
+				                                    1e8,
+				                                    self->tag.toString(),
+				                                    backupRanges,
+				                                    StopWhenDone::FALSE,
+				                                    UsePartitionedLog::FALSE,
+				                                    IncrementalBackupOnly::TRUE));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {
@@ -229,8 +236,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       Key(),
 			                                       Key(),
 			                                       LockDB::TRUE,
-			                                       true,
-			                                       false,
+			                                       OnlyApplyMutationLogs::TRUE,
+			                                       InconsistentSnapshotOnly::FALSE,
 			                                       beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
 		}

@@ -36,7 +36,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 	int initSnapshotInterval;
 	int snapshotInterval;
 	StopWhenDone stopWhenDone{ false };
-	bool incremental;
+	IncrementalBackupOnly incremental{ false };
 
 	SubmitBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
@@ -45,7 +45,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 		initSnapshotInterval = getOption(options, LiteralStringRef("initSnapshotInterval"), 0);
 		snapshotInterval = getOption(options, LiteralStringRef("snapshotInterval"), 1e8);
 		stopWhenDone.set(getOption(options, LiteralStringRef("stopWhenDone"), true));
-		incremental = getOption(options, LiteralStringRef("incremental"), false);
+		incremental.set(getOption(options, LiteralStringRef("incremental"), false));
 	}
 
 	static constexpr const char* DESCRIPTION = "SubmitBackup";
@@ -62,7 +62,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 			                                    self->tag.toString(),
 			                                    backupRanges,
 			                                    self->stopWhenDone,
-			                                    LockDB::FALSE,
+			                                    UsePartitionedLog::FALSE,
 			                                    self->incremental));
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);

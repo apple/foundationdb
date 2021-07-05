@@ -644,7 +644,7 @@ struct EraseLogRangeTaskFunc : TaskFuncBase {
 				    task->params[BackupAgentBase::keyConfigLogUid],
 				    task->params[BackupAgentBase::destUid],
 				    Optional<Version>(endVersion),
-				    true,
+				    CheckBackupUID::TRUE,
 				    BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned())));
 				wait(tr->commit());
 				return Void();
@@ -1202,7 +1202,7 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 				                           task->params[DatabaseBackupAgent::keyFolderId], Unversioned()))
 					return Void();
 
-				wait(eraseLogData(tr, logUidValue, destUidValue, Optional<Version>(), true, backupUid));
+				wait(eraseLogData(tr, logUidValue, destUidValue, Optional<Version>(), CheckBackupUID::TRUE, backupUid));
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
@@ -1712,7 +1712,7 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 		}
 
 		TraceEvent("DBA_AbortOldBackup").detail("TagName", tagNameKey.printable());
-		wait(srcDrAgent.abortBackup(cx, tagNameKey, false, true));
+		wait(srcDrAgent.abortBackup(cx, tagNameKey, PartialBackup::FALSE, AbortOldBackup::TRUE));
 
 		return Void();
 	}
@@ -2846,10 +2846,10 @@ public:
 	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent,
 	                                      Database cx,
 	                                      Key tagName,
-	                                      bool partial,
-	                                      bool abortOldBackup,
-	                                      bool dstOnly,
-	                                      bool waitForDestUID) {
+	                                      PartialBackup partial,
+	                                      AbortOldBackup abortOldBackup,
+	                                      DstOnly dstOnly,
+	                                      WaitForDestUID waitForDestUID) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Key logUidValue, destUidValue;
 		state UID logUid, destUid;
@@ -3269,10 +3269,10 @@ Future<Void> DatabaseBackupAgent::discontinueBackup(Reference<ReadYourWritesTran
 
 Future<Void> DatabaseBackupAgent::abortBackup(Database cx,
                                               Key tagName,
-                                              bool partial,
-                                              bool abortOldBackup,
-                                              bool dstOnly,
-                                              bool waitForDestUID) {
+                                              PartialBackup partial,
+                                              AbortOldBackup abortOldBackup,
+                                              DstOnly dstOnly,
+                                              WaitForDestUID waitForDestUID) {
 	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup, dstOnly, waitForDestUID);
 }
 

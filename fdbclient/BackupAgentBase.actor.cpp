@@ -33,6 +33,16 @@ DEFINE_BOOLEAN_PARAM(Verbose);
 DEFINE_BOOLEAN_PARAM(WaitForComplete);
 DEFINE_BOOLEAN_PARAM(ForceAction);
 DEFINE_BOOLEAN_PARAM(Terminator);
+DEFINE_BOOLEAN_PARAM(UsePartitionedLog);
+DEFINE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
+DEFINE_BOOLEAN_PARAM(ShowErrors);
+DEFINE_BOOLEAN_PARAM(AbortOldBackup);
+DEFINE_BOOLEAN_PARAM(DstOnly);
+DEFINE_BOOLEAN_PARAM(WaitForDestUID);
+DEFINE_BOOLEAN_PARAM(CheckBackupUID);
+DEFINE_BOOLEAN_PARAM(DeleteData);
+DEFINE_BOOLEAN_PARAM(SetValidation);
+DEFINE_BOOLEAN_PARAM(PartialBackup);
 
 std::string BackupAgentBase::formatTime(int64_t epochs) {
 	time_t curTime = (time_t)epochs;
@@ -779,7 +789,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
                                         Key logUidValue,
                                         Key destUidValue,
                                         Optional<Version> endVersion,
-                                        bool checkBackupUid,
+                                        CheckBackupUID checkBackupUid,
                                         Version backupUid) {
 	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
 	state Key backupLatestVersionsKey = logUidValue.withPrefix(backupLatestVersionsPath);
@@ -907,7 +917,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
                           Key logUidValue,
                           Key destUidValue,
                           Optional<Version> endVersion,
-                          bool checkBackupUid,
+                          CheckBackupUID checkBackupUid,
                           Version backupUid) {
 	return _eraseLogData(tr, logUidValue, destUidValue, endVersion, checkBackupUid, backupUid);
 }
@@ -1004,7 +1014,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 	}
 }
 
-ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData) {
+ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {

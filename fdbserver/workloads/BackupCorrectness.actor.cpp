@@ -215,7 +215,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
 		state FileBackupAgent agent;
 		loop {
-			std::string status = wait(agent.getStatus(cx, true, tag));
+			std::string status = wait(agent.getStatus(cx, ShowErrors::TRUE, tag));
 			puts(status.c_str());
 			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
 			puts(statusJSON.c_str());
@@ -376,7 +376,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		state std::string statusText;
 
-		std::string _statusText = wait(backupAgent->getStatus(cx, 5, tag.toString()));
+		std::string _statusText = wait(backupAgent->getStatus(cx, ShowErrors::TRUE, tag.toString()));
 		statusText = _statusText;
 		// Can we validate anything about status?
 

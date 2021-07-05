@@ -43,6 +43,18 @@ DECLARE_BOOLEAN_PARAM(Verbose);
 DECLARE_BOOLEAN_PARAM(WaitForComplete);
 DECLARE_BOOLEAN_PARAM(ForceAction);
 DECLARE_BOOLEAN_PARAM(Terminator);
+DECLARE_BOOLEAN_PARAM(IncrementalBackupOnly);
+DECLARE_BOOLEAN_PARAM(UsePartitionedLog);
+DECLARE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
+DECLARE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
+DECLARE_BOOLEAN_PARAM(ShowErrors);
+DECLARE_BOOLEAN_PARAM(AbortOldBackup);
+DECLARE_BOOLEAN_PARAM(DstOnly); // TODO: More descriptive name?
+DECLARE_BOOLEAN_PARAM(WaitForDestUID);
+DECLARE_BOOLEAN_PARAM(CheckBackupUID);
+DECLARE_BOOLEAN_PARAM(DeleteData);
+DECLARE_BOOLEAN_PARAM(SetValidation);
+DECLARE_BOOLEAN_PARAM(PartialBackup);
 
 class BackupAgentBase : NonCopyable {
 public:
@@ -302,9 +314,9 @@ public:
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
 	                        LockDB lockDB = LockDB::TRUE,
-	                        bool onlyAppyMutationLogs = false,
-	                        bool inconsistentSnapshotOnly = false,
-	                        Version beginVersion = -1);
+	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::FALSE,
+	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::FALSE,
+	                        Version beginVersion = ::invalidVersion);
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
@@ -316,8 +328,8 @@ public:
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
 	                        LockDB lockDB = LockDB::TRUE,
-	                        bool onlyAppyMutationLogs = false,
-	                        bool inconsistentSnapshotOnly = false,
+	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::FALSE,
+	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::FALSE,
 	                        Version beginVersion = ::invalidVersion) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
@@ -332,7 +344,7 @@ public:
 		               addPrefix,
 		               removePrefix,
 		               lockDB,
-		               onlyAppyMutationLogs,
+		               onlyApplyMutationLogs,
 		               inconsistentSnapshotOnly,
 		               beginVersion);
 	}
@@ -373,8 +385,8 @@ public:
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
-	                          bool partitionedLog = false,
-	                          bool incrementalBackupOnly = false);
+	                          UsePartitionedLog = UsePartitionedLog::FALSE,
+	                          IncrementalBackupOnly = IncrementalBackupOnly::FALSE);
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          int initialSnapshotIntervalSeconds,
@@ -382,8 +394,8 @@ public:
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
-	                          bool partitionedLog = false,
-	                          bool incrementalBackupOnly = false) {
+	                          UsePartitionedLog partitionedLog = UsePartitionedLog::FALSE,
+	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::FALSE) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -415,7 +427,7 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return abortBackup(tr, tagName); });
 	}
 
-	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
+	Future<std::string> getStatus(Database cx, ShowErrors, std::string tagName);
 	Future<std::string> getStatusJSON(Database cx, std::string tagName);
 
 	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr,
@@ -541,16 +553,14 @@ public:
 
 	Future<Void> abortBackup(Database cx,
 	                         Key tagName,
-	                         bool partial = false,
-	                         bool abortOldBackup = false,
-	                         bool dstOnly = false,
-	                         bool waitForDestUID = false);
+	                         PartialBackup = PartialBackup::FALSE,
+	                         AbortOldBackup = AbortOldBackup::FALSE,
+	                         DstOnly = DstOnly::FALSE,
+	                         WaitForDestUID = WaitForDestUID::FALSE);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
-	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr,
-	                                UID logUid,
-	                                Snapshot snapshot = Snapshot::FALSE);
+	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::FALSE);
 	Future<EnumState> getStateValue(Database cx, UID logUid) {
 		return runRYWTransaction(cx,
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return getStateValue(tr, logUid); });
@@ -632,7 +642,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
                           Key logUidValue,
                           Key destUidValue,
                           Optional<Version> endVersion = Optional<Version>(),
-                          bool checkBackupUid = false,
+                          CheckBackupUID = CheckBackupUID::FALSE,
                           Version backupUid = 0);
 Key getApplyKey(Version version, Key backupUid);
 Version getLogKeyVersion(Key key);
@@ -665,7 +675,7 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   RequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
                                   Reference<KeyRangeMap<Version>> keyVersion);
-ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData);
+ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 
 using EBackupState = BackupAgentBase::EnumState;
 template <>
@@ -752,7 +762,9 @@ public:
 
 	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
 
-	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool setValidation = true) {
+	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr,
+	                    Reference<Task> task,
+	                    SetValidation setValidation = SetValidation::TRUE) {
 		// Set the uid task parameter
 		TaskParams.uid().set(task, uid);
 
