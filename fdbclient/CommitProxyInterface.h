@@ -24,6 +24,7 @@
 
 #include <utility>
 #include <vector>
+#include <map>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -197,6 +198,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
+	std::map<Tag, Version> ssVersionVector;
+
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
 	template <class Ar>
@@ -207,7 +210,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           locked,
 		           metadataVersion,
 		           tagThrottleInfo,
-		           midShardSize);
+		           midShardSize,
+		           ssVersionVector);
 	}
 };
 
@@ -327,6 +331,7 @@ struct GetRawCommittedVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
+	std::map<Tag, Version> ssVersionVector;
 
 	GetRawCommittedVersionReply()
 	  : debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()),
@@ -334,7 +339,7 @@ struct GetRawCommittedVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion);
+		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion, ssVersionVector);
 	}
 };
 

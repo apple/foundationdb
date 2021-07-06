@@ -19,6 +19,7 @@
  */
 
 #include <iterator>
+#include <stdlib.h>
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -1233,6 +1234,22 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
+
+				int tagCount = 0;
+				if (SERVER_KNOBS->NUMBER_OF_SS_TAGS_TO_SEND > 0) {
+					tagCount = std::min(SERVER_KNOBS->NUMBER_OF_SS_TAGS_TO_SEND, (int)self->allTags.size());
+				} else if (SERVER_KNOBS->PERCENTAGE_OF_SS_TAGS_TO_SEND > 0) {
+					if (SERVER_KNOBS->PERCENTAGE_OF_SS_TAGS_TO_SEND > 100){
+					tagCount = deterministicRandom()->randomInt(0, self->allTags.size() + 1);
+					} else {
+						tagCount = (SERVER_KNOBS->PERCENTAGE_OF_SS_TAGS_TO_SEND * self->allTags.size()) / 100;
+					}
+				}
+				ASSERT(tagCount <= self->allTags.size());
+
+				for (int i=0; i<tagCount; i++) {
+					reply.ssVersionVector.insert(std::pair<Tag, Version>(self->allTags[i], reply.version));
+				}
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req =
