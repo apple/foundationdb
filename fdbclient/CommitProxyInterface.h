@@ -24,7 +24,7 @@
 
 #include <utility>
 #include <vector>
-#include <map>
+#include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -198,7 +198,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
-	std::map<Tag, Version> ssVersionVector;
+	std::unordered_map<Tag, Version> ssVersionVector;
 
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
@@ -331,7 +331,7 @@ struct GetRawCommittedVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
-	std::map<Tag, Version> ssVersionVector;
+	std::unordered_map<Tag, Version> ssVersionVector;
 
 	GetRawCommittedVersionReply()
 	  : debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()),

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include <map>
+#include <unordered_map>
 
 #include "fdbclient/Notified.h"
 #include "fdbserver/LogSystem.h"
@@ -234,7 +234,7 @@ struct GrvProxyData {
 
 	Version minKnownCommittedVersion; // we should ask master for this version.
 
-	std::map<Tag, Version> ssVersionVector;
+	std::unordered_map<Tag, Version> ssVersionVector;
 
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
