@@ -422,6 +422,8 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( PROVISIONAL_DELAY_GROWTH,                              1.5 );
 	init( SECONDS_BEFORE_RECRUIT_BACKUP_WORKER,                  4.0 ); if( randomize && BUGGIFY ) SECONDS_BEFORE_RECRUIT_BACKUP_WORKER = deterministicRandom()->random01() * 8;
 	init( CC_INTERFACE_TIMEOUT,                                 10.0 ); if( randomize && BUGGIFY ) CC_INTERFACE_TIMEOUT = 0.0;
+	init( NUMBER_OF_SS_TAGS_TO_SEND,                               0 );
+	init( PERCENTAGE_OF_SS_TAGS_TO_SEND,                         110 );
 
 	// Resolver
 	init( SAMPLE_OFFSET_PER_KEY,                                 100 );

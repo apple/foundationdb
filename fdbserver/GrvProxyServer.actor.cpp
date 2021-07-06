@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <map>
+
 #include "fdbclient/Notified.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -231,6 +233,8 @@ struct GrvProxyData {
 	NotifiedDouble lastCommitTime;
 
 	Version minKnownCommittedVersion; // we should ask master for this version.
+
+	std::map<Tag, Version> ssVersionVector;
 
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
@@ -543,6 +547,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
+	grvProxyData->ssVersionVector = repFromMaster.ssVersionVector;
 
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
@@ -555,6 +560,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	rep.processBusyTime += FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION *
 	                       (g_network->isSimulated() ? deterministicRandom()->random01()
 	                                                 : g_network->networkInfo.metrics.lastRunLoopBusyness);
+	rep.ssVersionVector = grvProxyData->ssVersionVector;
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
