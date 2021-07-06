@@ -501,6 +501,10 @@ extern const KeyRange globalConfigKnobKeys;
 extern const KeyRangeRef configKnobKeys;
 extern const KeyRangeRef configClassKeys;
 
+// blob range special keys
+extern const KeyRef blobRangeChangeKey;
+extern const KeyRangeRef blobRangeKeys;
+
 #pragma clang diagnostic pop
 
 #endif

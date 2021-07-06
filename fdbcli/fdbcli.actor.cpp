@@ -680,6 +680,7 @@ void initHelp() {
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
+	hiddenCommands.insert("blobrange");
 }
 
 void printVersion() {
@@ -1871,6 +1872,29 @@ ACTOR Future<Void> triggerDDTeamInfoLog(Database db) {
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
+		}
+	}
+}
+
+// copy to standalones for krm
+ACTOR Future<Void> setBlobRange(Database db, Key startKey, Key endKey, Value value) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
+			wait(krmSetRangeCoalescing(
+			    tr, blobRangeKeys.begin, KeyRange(KeyRangeRef(startKey, endKey)), KeyRange(allKeys), value));
+			wait(tr->commit());
+			printf("Successfully updated blob range [%s - %s) to %s\n",
+			       startKey.printable().c_str(),
+			       endKey.printable().c_str(),
+			       value.printable().c_str());
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -3391,7 +3415,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 			// Don't put dangerous commands in the command history
 			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
-			    line.find("unlock") == std::string::npos)
+			    line.find("unlock") == std::string::npos && line.find("blobrange") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
@@ -4429,6 +4453,39 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						} else {
 							printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 							       "<ssfailure|rebalance>>\n");
+							is_error = true;
+						}
+					}
+					continue;
+				}
+
+				// enables blob writing for the given range
+				if (tokencmp(tokens[0], "blobrange")) {
+					if (tokens.size() != 4) {
+						printf("Usage: blobrange <start|stop> <startkey> <endkey>");
+						is_error = true;
+					} else if (tokens[3] > LiteralStringRef("\xff")) {
+						// TODO is this something we want?
+						printf("Cannot blobbify system keyspace! Problematic End Key: %s\n",
+						       tokens[3].printable().c_str());
+						is_error = true;
+					} else if (tokens[2] >= tokens[3]) {
+						printf("Invalid blob range [%s - %s)\n",
+						       tokens[2].printable().c_str(),
+						       tokens[3].printable().c_str());
+					} else {
+						if (tokencmp(tokens[1], "start")) {
+							printf("Starting blobbify range for [%s - %s)\n",
+							       tokens[2].printable().c_str(),
+							       tokens[3].printable().c_str());
+							wait(setBlobRange(db, tokens[2], tokens[3], LiteralStringRef("1")));
+						} else if (tokencmp(tokens[1], "stop")) {
+							printf("Stopping blobbify range for [%s - %s)\n",
+							       tokens[2].printable().c_str(),
+							       tokens[3].printable().c_str());
+							wait(setBlobRange(db, tokens[2], tokens[3], StringRef()));
+						} else {
+							printf("Usage: blobrange <start|stop> <startkey> <endkey>");
 							is_error = true;
 						}
 					}

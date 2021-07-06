@@ -1035,6 +1035,10 @@ const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
 
+// key to watch for changes in active blob ranges + KeyRangeMap of active blob ranges
+const KeyRef blobRangeChangeKey = LiteralStringRef("\xff\x02/blobRangeChange");
+const KeyRangeRef blobRangeKeys(LiteralStringRef("\xff/blobRange/"), LiteralStringRef("\xff/blobRange0"));
+
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",

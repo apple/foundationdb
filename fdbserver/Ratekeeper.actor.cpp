@@ -1408,6 +1408,45 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 	}
 }
 
+// TODO MOVE ELSEWHERE
+ACTOR Future<Void> blobManagerPoc(RatekeeperData* self) {
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+
+		printf("Blob manager checking for range updates\n");
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				// TODO probably knobs here? This should always be pretty small though
+				RangeResult results = wait(krmGetRanges(
+				    tr, blobRangeKeys.begin, KeyRange(allKeys), 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+
+				bool foundRange = false;
+				for (int i = 0; i < results.size() - 1; i++) {
+					if (results[i].value == LiteralStringRef("1")) {
+						ASSERT(!foundRange); // TODO for now only assume at most 1 range is set
+						ASSERT(results[i + 1].value == StringRef());
+						printf("Blob manager sees range [%s - %s)\n",
+						       results[i].key.printable().c_str(),
+						       results[i + 1].key.printable().c_str());
+						foundRange = true;
+					}
+				}
+
+				state Future<Void> watchFuture = tr->watch(blobRangeChangeKey);
+				wait(tr->commit());
+				wait(watchFuture);
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Future<Void> timeout = Void();
@@ -1429,6 +1468,9 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	RatekeeperData* selfPtr = &self; // let flow compiler capture self
 	self.addActor.send(
 	    recurring([selfPtr]() { refreshStorageServerCommitCost(selfPtr); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+
+	// TODO MOVE eventually
+	self.addActor.send(blobManagerPoc(&self));
 
 	TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
 	    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
