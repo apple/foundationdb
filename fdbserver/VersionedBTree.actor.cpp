@@ -166,8 +166,16 @@ private:
 		debug_printf("next exit nowaiters %d/%d\n", outstanding, concurrency);
 	}
 
-	void addReleaser(Lock &lock) {
-		releasers.push_back(map(yieldedFuture(ready(lock.promise.getFuture())), [=](Void) {
+	void addReleaser(Lock& lock) {
+		static int sinceYield = 0;
+
+		Future<Void> released = ready(lock.promise.getFuture());
+		if (++sinceYield == 1000) {
+			sinceYield = 0;
+			released = yieldedFuture(released);
+		}
+
+		releasers.push_back(map(released, [=](Void) {
 			next();
 			return Void();
 		}));
