@@ -163,8 +163,7 @@ class Driver : public DriverBase {
 		switch (optId) {
 		case OPT_HELP:
 			T::printUsage(false);
-			// TODO: Flush and exit here?
-			return true;
+			flushAndExit(FDB_EXIT_SUCCESS);
 		case OPT_DEVHELP:
 			T::printUsage(true);
 			return true;
@@ -178,8 +177,8 @@ protected:
 		CSimpleOpt args(argc, argv, options, SO_O_EXACT);
 		while (args.Next()) {
 			handleArgsError(args, T::getProgramName().c_str());
-			const auto& constArgs = args;
-			if (!processCommonArg(static_cast<T*>(this)->getProgramName(), args) || !processProgramSpecificArg(args)) {
+			auto const& constArgs = args;
+			if (!processCommonArg(static_cast<T*>(this)->getProgramName(), args) && !processProgramSpecificArg(args)) {
 				static_cast<T*>(this)->processArg(constArgs);
 			}
 		}
