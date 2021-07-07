@@ -1973,7 +1973,8 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
 // Decodes the locality string to a pair of locality prefix and its value.
 // The prefix could be dcid, processid, machineid, processid.
 std::pair<std::string, std::string> decodeLocality(const std::string& locality) {
-	StringRef localityRef(locality.c_str());
+	StringRef localityRef((const uint8_t*)(locality.c_str()), locality.size());
+
 	std::string localityKeyValue = localityRef.removePrefix(LocalityData::ExcludeLocalityPrefix).toString();
 	int split = localityKeyValue.find(':');
 	if (split != std::string::npos) {
