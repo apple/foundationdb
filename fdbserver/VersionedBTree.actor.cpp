@@ -115,13 +115,12 @@ private:
 	typedef Deque<Slot> Queue;
 
 public:
-	PriorityMultiLock(int concurrency, int levels) : concurrency(concurrency), outstanding(0), queues(levels) {
-	}
+	PriorityMultiLock(int concurrency, int levels) : concurrency(concurrency), outstanding(0), queues(levels) {}
 
 	Future<Lock> lock(int priority = 0) {
 		debug_printf("lock begin %d/%d\n", outstanding, concurrency);
 
-		if(outstanding < concurrency) {
+		if (outstanding < concurrency) {
 			++outstanding;
 			Lock p;
 			addReleaser(p);
@@ -129,7 +128,7 @@ public:
 			return p;
 		}
 
-		Queue &q = queues[priority];
+		Queue& q = queues[priority];
 		q.emplace_back(Slot());
 		debug_printf("lock exit queued %d/%d\n", outstanding, concurrency);
 		return q.back().lock.getFuture();
@@ -139,16 +138,16 @@ private:
 	void next() {
 		debug_printf("next %d/%d\n", outstanding, concurrency);
 		// Clean up any finished releasers at the front of the releasers queue
-		while(releasers.front().isReady()) {
+		while (releasers.front().isReady()) {
 			debug_printf("next cleaned up releaser %d/%d\n", outstanding, concurrency);
 			releasers.pop_front();
 		}
 
 		// Try to start the next task, highest priorities first.
 		// If successful, the outstanding count does not change
-		for(int priority = queues.size() - 1; priority >= 0; --priority) {
-			auto &q = queues[priority];
-			if(!q.empty()) {
+		for (int priority = queues.size() - 1; priority >= 0; --priority) {
+			auto& q = queues[priority];
+			if (!q.empty()) {
 				debug_printf("next found waiter at priority %d, %d/%d\n", priority, outstanding, concurrency);
 				Slot s = q.front();
 				q.pop_front();
@@ -920,11 +919,11 @@ public:
 				page.clear();
 				debug_printf("FIFOQueue::Cursor(%s) readNext page exhausted, moved to new page\n", toString().c_str());
 				if (mode == POP) {
-					if(!queue->usesExtents) {
+					if (!queue->usesExtents) {
 						// Freeing the old page must happen after advancing the cursor and clearing the page reference
 						// because freePage() could cause a push onto a queue that causes a newPageID() call which could
-						// pop() from this very same queue. Queue pages are freed at version 0 because they can be reused
-						// after the next commit.
+						// pop() from this very same queue. Queue pages are freed at version 0 because they can be
+						// reused after the next commit.
 						queue->pager->freePage(oldPageID, 0);
 					} else if (extentCurPageID == extentEndPageID) {
 						// Figure out the beginning of the extent
@@ -6514,15 +6513,14 @@ public:
 				if (directionForward) {
 					// If there is no right sibling or its lower boundary is greater
 					// or equal to than the range end then stop.
-					if(!c.moveNext() || c.get().key >= rangeEnd) {
+					if (!c.moveNext() || c.get().key >= rangeEnd) {
 						break;
 					}
-				}
-				else {
+				} else {
 					// Prefetching left siblings
 					// If the current leaf lower boundary is less than or equal to the range end
 					// or there is no left sibling then stop
-					if(c.get().key <= rangeEnd || !c.movePrev()) {
+					if (c.get().key <= rangeEnd || !c.movePrev()) {
 						break;
 					}
 				}
