@@ -4962,8 +4962,8 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 	state VersionIndexerPeekReply reply;
 	state int i = 0;
 	state Version prevVersion;
-	for (auto& i : self->db->get().versionIndexers) {
-		interfaces.emplace_back(new ReferencedInterface<VersionIndexerInterface>(i));
+	for (auto& vInterface : self->db->get().versionIndexers) {
+		interfaces.emplace_back(new ReferencedInterface<VersionIndexerInterface>(vInterface));
 	}
 	multi = Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>>(
 	    new MultiInterface<ReferencedInterface<VersionIndexerInterface>>(interfaces));

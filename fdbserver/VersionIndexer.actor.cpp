@@ -71,7 +71,7 @@ struct VersionIndexerState {
 	Version committedVersion = invalidVersion, previousVersion = invalidVersion;
 	std::deque<VersionEntry> versionWindow;
 	VersionIndexerStats stats;
-	explicit VersionIndexerState(UID id) : id(id), stats(id) {}
+	explicit VersionIndexerState(UID id) : id(id), stats(id) { version.set(invalidVersion); }
 	void truncate(Version to) {
 		while (versionWindow.front().version > to) {
 			previousVersion = versionWindow.front().version;
@@ -93,6 +93,7 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 	auto iter = std::lower_bound(self->versionWindow.begin(), self->versionWindow.end(), searchEntry);
 	ASSERT(iter != self->versionWindow.end());
 	VersionIndexerPeekReply reply;
+	reply.committedVersion = self->committedVersion;
 	if (iter->version != req.lastKnownVersion) {
 		// storage fell behind and will need to catch up -- but we'll still send the
 		reply.previousVersion = invalidVersion;
@@ -112,14 +113,35 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 	return Void();
 }
 
+void truncateWindow(VersionIndexerState* self) {
+	if (self->versionWindow.front().version >
+	    self->versionWindow.back().version + 4 * SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS) {
+		auto iter = std::lower_bound(
+		    self->versionWindow.begin(),
+		    self->versionWindow.end(),
+		    std::make_pair(self->versionWindow.front().version + SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS,
+		                   invalidTag),
+		    [](auto const& lhs, auto const& rhs) { return lhs.first < lhs.second; });
+		self->versionWindow.erase(self->versionWindow.begin(), iter);
+	}
+}
+
 ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitRequest req) {
+	state bool firstCommit = self->version.get() == invalidVersion;
 	self->committedVersion = std::max(self->committedVersion, req.committedVersion);
-	req.reply.send(Void());
+	if (!firstCommit) {
+		req.reply.send(Void());
+	}
 	++self->stats.commits;
 	self->stats.lastCommittedVersion = std::max(self->stats.lastCommittedVersion, req.committedVersion);
-	wait(self->version.whenAtLeast(req.previousVersion));
+	if (self->version.get() != invalidVersion) {
+		wait(self->version.whenAtLeast(req.previousVersion));
+	}
 	if (self->version.get() < req.version) {
-		ASSERT(self->version.get() == req.previousVersion);
+		ASSERT(firstCommit || self->version.get() == req.previousVersion);
+		if (firstCommit) {
+			self->previousVersion = req.previousVersion;
+		}
 		VersionIndexerState::VersionEntry entry;
 		entry.version = req.version;
 		entry.tags = std::move(req.tags);
@@ -127,19 +149,13 @@ ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitReq
 		self->versionWindow.emplace_back(std::move(entry));
 		self->version.set(req.version);
 		self->stats.windowEnd = req.version;
+		if (firstCommit) {
+			req.reply.send(Void());
+		}
 	}
+	wait(yield());
+	truncateWindow(self);
 	return Void();
-}
-
-ACTOR Future<Void> windowTruncator(VersionIndexerState* self) {
-	wait(self->version.whenAtLeast(1)); // wait for first commit
-	loop {
-		wait(self->version.whenAtLeast(self->versionWindow.front().version +
-		                               4 * SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS));
-		auto truncateTo = self->version.get() - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-		self->truncate(truncateTo);
-		self->stats.windowBegin = truncateTo;
-	}
 }
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
@@ -167,12 +183,10 @@ ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface,
 	state ActorCollection actors(false);
 	state Future<Void> removed = checkRemoved(db, req.recoveryCount, interface);
 	actors.add(waitFailureServer(interface.waitFailure.getFuture()));
-	actors.add(windowTruncator(&self));
 	try {
 		loop {
 			choose {
 				when(VersionIndexerCommitRequest req = waitNext(interface.commit.getFuture())) {
-					TraceEvent("VersionIndexerCommitRequest");
 					actors.add(addVersion(&self, req));
 				}
 				when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }

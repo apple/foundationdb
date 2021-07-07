@@ -1513,12 +1513,15 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 	return tagData->versionMessages;
 };
 
-Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest const& req) {
+ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest const& req) {
 	auto tagData = self->getTagData(req.tag);
 	if (tagData.isValid()) {
 		return Void();
 	}
-	return self->waitingTags[req.tag].getFuture();
+	wait(self->waitingTags[req.tag].getFuture());
+	// we want the caller to finish first, otherwise the data structure it is building might not be complete
+	wait(delay(0.0));
+	return Void();
 }
 
 void peekMessagesFromMemory(Reference<LogData> self,
@@ -1850,7 +1853,10 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		if (req.onlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			wait(waitForMessagesForTag(logData, req));
+			if (req.tag.locality >= 0 && !req.returnIfBlocked) {
+				// wait for at most 1 second
+				wait(waitForMessagesForTag(logData, req) || delay(1.0));
+			}
 			peekMessagesFromMemory(logData, req, messages, endVersion);
 		}
 
