@@ -126,7 +126,7 @@
 #define LeaveCriticalSection(m) pthread_mutex_unlock(m)
 #endif
 
-#if (defined(__GNUG__))
+#if (defined(__GNUG__) || defined(_MSC_VER))
 #include <memory>
 #include <functional>
 #endif
