@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <boost/functional/hash.hpp>
 
 #include "flow/Arena.h"
 #include "flow/flow.h"

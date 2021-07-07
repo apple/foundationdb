@@ -38,6 +38,7 @@
 #include "fdbclient/EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbclient/VersionVector.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -429,8 +430,11 @@ public:
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
 
-	// Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
-	// Requests to the storage server will be duplicated to the TSS.
+	// Cache of the latest commit versions of storage servers.
+	VersionVector ssVersionVectorCache;
+
+        // Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
+        // Requests to the storage server will be duplicated to the TSS.
 	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
 
 	// Removes the storage server and its TSS pair from the TSS mapping (if present).
