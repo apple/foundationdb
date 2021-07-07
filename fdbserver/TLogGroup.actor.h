@@ -97,8 +97,10 @@ public:
 
 	// Start monitoring storage teams by reading \xff keyspace.
 	// TODO: Get notifications from DD.
-	void monitorStorageTeams(Database cx);
-	ACTOR Future<Void> storageTeamMonitor(TLogGroupCollection* self, Database cx);
+	void initializeOrRecoverStorageTeamAssignments(Database cx);
+	ACTOR Future<Void> initializeOrRecoverStorageTeamAssignmentActor(TLogGroupCollection* self, Database cx);
+
+	void seedTLogGroups(Arena& arena, CommitTransactionRef& tr, vector<StorageServerInterface> servers);
 
 private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers
@@ -129,7 +131,7 @@ private:
 	std::map<ptxn::StorageTeamID, TLogGroupRef> storageTeamToTLogGroupMap;
 
 	// Holds the future returned by `storageTeamMonitor` actor. Set by calling `monitorStorageTeams()`.
-	Future<Void> storageTeamMonitorF;
+	Future<Void> initializeOrReocverStorageTeamAssignments;
 };
 
 // Represents a single TLogGroup which consists of TLog workers.

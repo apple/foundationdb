@@ -153,10 +153,20 @@ void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store) {
 	}
 }
 
-void TLogGroupCollection::monitorStorageTeams(Database cx) {
-	storageTeamMonitorF = storageTeamMonitor(this, cx);
+void TLogGroupCollection::seedTLogGroups(Arena& arena,
+                                         CommitTransactionRef& tr,
+                                         vector<StorageServerInterface> servers) {
+
+	// TODO (tLogGroup): Assign storage team to tLogGorup initially, when database was first created. e.g.
+	// seedShardServers.
 }
 
+void TLogGroupCollection::initializeOrRecoverStorageTeamAssignments(Database cx) {
+	initializeOrReocverStorageTeamAssignments = initializeOrRecoverStorageTeamAssignmentActor(this, cx);
+}
+
+// Returns a map from StorageTeamID that uniquely identifies a team, to the
+// list of storage servers in that storage team.
 ACTOR Future<std::map<ptxn::StorageTeamID, std::vector<UID>>> fetchStorageTeams(Database cx) {
 	state Transaction tr(cx);
 	state std::map<ptxn::StorageTeamID, vector<UID>> teams;
@@ -189,6 +199,11 @@ ACTOR Future<std::map<ptxn::StorageTeamID, std::vector<UID>>> fetchStorageTeams(
 	return teams;
 }
 
+// Restore storage team to TLogGroup assignments. This will make sure that across recovery, we don't assign
+// a different TLogGroup to a team. It reads the state from `storageTeamIdToTLogGroupRange` range.
+//
+// TODO (tLogGroup): Reads the existing assignments from recoveryCommit. This can't be a normal transaction as proxy
+// isn't accepting commits yet.
 ACTOR Future<Void> restoreStorageTeamToGroupAssignment(TLogGroupCollection* self, Database cx) {
 	state Transaction tr(cx);
 	loop {
@@ -214,9 +229,9 @@ ACTOR Future<Void> restoreStorageTeamToGroupAssignment(TLogGroupCollection* self
 	return Void();
 }
 
-ACTOR Future<Void> TLogGroupCollection::storageTeamMonitor(TLogGroupCollection* self, Database cx) {
-	// TODO: Monitoring teams. Removing when gone.
-	// TODO: Clean this up. The way assignments and team info is managed..
+// TODO (tLogGroup): Set new assignments in recoveryCommitReq. This needs to be refactored accordingly.
+ACTOR Future<Void> TLogGroupCollection::initializeOrRecoverStorageTeamAssignmentActor(TLogGroupCollection* self,
+                                                                                      Database cx) {
 	wait(restoreStorageTeamToGroupAssignment(self, cx));
 
 	loop {
@@ -226,7 +241,7 @@ ACTOR Future<Void> TLogGroupCollection::storageTeamMonitor(TLogGroupCollection* 
 			for (it = teams.begin(); it != teams.end(); ++it) {
 				state ptxn::StorageTeamID teamId = it->first;
 
-				if (self->storageTeams.find(teamId) == self->storageTeams.end()) {
+				if (self->storageTeams.find(teamId) != self->storageTeams.end()) {
 					continue;
 				}
 
@@ -241,12 +256,6 @@ ACTOR Future<Void> TLogGroupCollection::storageTeamMonitor(TLogGroupCollection* 
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr.set(storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(group->id(), Unversioned()));
 						wait(tr.commit());
-						if (self->storageTeamToTLogGroupMap.find(teamId) == self->storageTeamToTLogGroupMap.end()) {
-							// Check if this is already assigned. Possible when we recovered.
-							self->assignStorageTeam(teamId, group);
-						}
-
-						self->storageTeams[teamId] = it->second;
 					} catch (Error& e) {
 						if (e.code() == error_code_actor_cancelled) {
 							throw;
@@ -258,9 +267,22 @@ ACTOR Future<Void> TLogGroupCollection::storageTeamMonitor(TLogGroupCollection* 
 						wait(tr.onError(e));
 					}
 				}
+
+				// Once \xff key-space is updated, update our internal state.
+
+				// Check if this is already assigned. Possible when we recovered. Check
+				// `restoreStorageTramGroupAssignment()`.
+				if (self->storageTeamToTLogGroupMap.find(teamId) == self->storageTeamToTLogGroupMap.end()) {
+
+					self->assignStorageTeam(teamId, group);
+				}
+
+				self->storageTeams[teamId] = it->second;
 			}
 
-			wait(delay(1.0));
+			// All teams successfully assigned.
+			break;
+
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;

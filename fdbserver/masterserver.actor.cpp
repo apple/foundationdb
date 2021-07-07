@@ -1890,6 +1890,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
+		self->tLogGroupCollection->seedTLogGroups(recoveryCommitRequest.arena, tr, seedServers);
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely
@@ -1990,6 +1991,10 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	TraceEvent(recoveryInterval.end(), self->dbgid)
 	    .detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
+	// TODO: Need to update the recovery duration?
+	// TODO: This may slow up the recovery?
+	wait(self->tLogGroupCollection->initializeOrRecoverStorageTeamAssignments(cx));
+
 	self->recoveryState = RecoveryState::ACCEPTING_COMMITS;
 	double recoveryDuration = now() - recoverStartTime;
 
@@ -2022,7 +2027,6 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
 	}
 
-	self->tLogGroupCollection->monitorStorageTeams(cx);
 	wait(Future<Void>(Never()));
 	throw internal_error();
 }

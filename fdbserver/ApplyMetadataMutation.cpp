@@ -184,6 +184,10 @@ void applyMetadataMutations(SpanID const& spanContext,
 				if (!initialCommit) {
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				}
+			} else if (m.param1.startsWith(storageTeamIdKeyPrefix)) {
+				// TODO (tLogGroup): Storage Team ID to Storage Server List
+			} else if (m.param1.startsWith(storageTeamIdToTLogGroupPrefix)) {
+				// TODO (tLogGroup): Storage Team ID to TLogGroup
 			} else if (m.param1.startsWith(storageCachePrefix)) {
 				if (cacheInfo) {
 					KeyRef k = m.param1.removePrefix(storageCachePrefix);
