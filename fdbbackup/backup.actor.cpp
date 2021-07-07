@@ -69,8 +69,8 @@ using std::endl;
 #endif
 #endif
 
+#include "fdbbackup/BackupRestoreCommon.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/BuildFlags.h"
 
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -98,95 +98,6 @@ enum class BackupType {
 };
 
 enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME };
-
-// New fast restore reuses the type from legacy slow restore
-enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
-
-//
-enum {
-	// Backup constants
-	OPT_DESTCONTAINER,
-	OPT_SNAPSHOTINTERVAL,
-	OPT_INITIAL_SNAPSHOT_INTERVAL,
-	OPT_ERRORLIMIT,
-	OPT_NOSTOPWHENDONE,
-	OPT_EXPIRE_BEFORE_VERSION,
-	OPT_EXPIRE_BEFORE_DATETIME,
-	OPT_EXPIRE_DELETE_BEFORE_DAYS,
-	OPT_EXPIRE_RESTORABLE_AFTER_VERSION,
-	OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,
-	OPT_EXPIRE_MIN_RESTORABLE_DAYS,
-	OPT_BASEURL,
-	OPT_BLOB_CREDENTIALS,
-	OPT_DESCRIBE_DEEP,
-	OPT_DESCRIBE_TIMESTAMPS,
-	OPT_DUMP_BEGIN,
-	OPT_DUMP_END,
-	OPT_JSON,
-	OPT_DELETE_DATA,
-	OPT_MIN_CLEANUP_SECONDS,
-	OPT_USE_PARTITIONED_LOG,
-
-	// Backup and Restore constants
-	OPT_TAGNAME,
-	OPT_BACKUPKEYS,
-	OPT_WAITFORDONE,
-	OPT_BACKUPKEYS_FILTER,
-	OPT_INCREMENTALONLY,
-
-	// Backup Modify
-	OPT_MOD_ACTIVE_INTERVAL,
-	OPT_MOD_VERIFY_UID,
-
-	// Restore constants
-	OPT_RESTORECONTAINER,
-	OPT_RESTORE_VERSION,
-	OPT_RESTORE_TIMESTAMP,
-	OPT_PREFIX_ADD,
-	OPT_PREFIX_REMOVE,
-	OPT_RESTORE_CLUSTERFILE_DEST,
-	OPT_RESTORE_CLUSTERFILE_ORIG,
-	OPT_RESTORE_BEGIN_VERSION,
-	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
-
-	// Shared constants
-	OPT_CLUSTERFILE,
-	OPT_QUIET,
-	OPT_DRYRUN,
-	OPT_FORCE,
-	OPT_HELP,
-	OPT_DEVHELP,
-	OPT_VERSION,
-	OPT_BUILD_FLAGS,
-	OPT_PARENTPID,
-	OPT_CRASHONERROR,
-	OPT_NOBUFSTDOUT,
-	OPT_BUFSTDOUTERR,
-	OPT_TRACE,
-	OPT_TRACE_DIR,
-	OPT_KNOB,
-	OPT_TRACE_LOG_GROUP,
-	OPT_MEMLIMIT,
-	OPT_LOCALITY,
-
-	// DB constants
-	OPT_SOURCE_CLUSTER,
-	OPT_DEST_CLUSTER,
-	OPT_CLEANUP,
-	OPT_DSTONLY,
-
-	OPT_TRACE_FORMAT,
-};
-
-// Top level binary commands.
-CSimpleOpt::SOption g_rgOptions[] = { { OPT_VERSION, "-v", SO_NONE },
-	                                  { OPT_VERSION, "--version", SO_NONE },
-	                                  { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
-	                                  { OPT_HELP, "-?", SO_NONE },
-	                                  { OPT_HELP, "-h", SO_NONE },
-	                                  { OPT_HELP, "--help", SO_NONE },
-
-	                                  SO_END_OF_OPTIONS };
 
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 #ifdef _WIN32
@@ -781,10 +692,8 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
-const KeyRef exeBackup = LiteralStringRef("fdbbackup");
-const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
-
-extern const char* getSourceVersion();
+const KeyRef exeBackup = "fdbbackup"_sr;
+const KeyRef exeDatabaseBackup = "fdbdr"_sr;
 
 #ifdef _WIN32
 void parentWatcher(void* parentHandle) {
@@ -797,43 +706,6 @@ void parentWatcher(void* parentHandle) {
 }
 
 #endif
-
-static void printVersion() {
-	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getSourceVersion());
-	printf("protocol %llx\n", (long long)currentProtocolVersion.version());
-}
-
-static void printBuildInformation() {
-	printf("%s", jsonBuildInformation().c_str());
-}
-
-const char* BlobCredentialInfo =
-    "  BLOB CREDENTIALS\n"
-    "     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
-    "     loaded, if possible, from 1 or more blob credentials definition files.\n\n"
-    "     These files can be specified with the --blob_credentials argument described above or via the environment "
-    "variable\n"
-    "     FDB_BLOB_CREDENTIALS, whose value is a colon-separated list of files.  The command line takes priority over\n"
-    "     over the environment but all files from both sources are used.\n\n"
-    "     At connect time, the specified files are read in order and the first matching account specification "
-    "(user@host)\n"
-    "     will be used to obtain the secret key.\n\n"
-    "     The JSON schema is:\n"
-    "        { \"accounts\" : { \"user@host\" : { \"secret\" : \"SECRETKEY\" }, \"user2@host2\" : { \"secret\" : "
-    "\"SECRET\" } } }\n";
-
-static void printHelpTeaser(const char* name) {
-	fprintf(stderr, "Try `%s --help' for more information.\n", name);
-}
-
-void printBackupContainerInfo() {
-	printf("                 Backup URL forms:\n\n");
-	std::vector<std::string> formats = IBackupContainer::getURLFormats();
-	for (const auto& f : formats)
-		printf("                     %s\n", f.c_str());
-	printf("\n");
-}
 
 static void printBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
@@ -1011,7 +883,6 @@ static void printDBBackupUsage(bool devhelp) {
 }
 
 static void printUsage(ProgramExe programExe, bool devhelp) {
-
 	switch (programExe) {
 	case ProgramExe::BACKUP:
 		printBackupUsage(devhelp);
@@ -1023,7 +894,6 @@ static void printUsage(ProgramExe programExe, bool devhelp) {
 	default:
 		break;
 	}
-
 	return;
 }
 
@@ -1100,18 +970,6 @@ BackupType getBackupType(std::string backupType) {
 		enBackupType = i->second;
 
 	return enBackupType;
-}
-
-RestoreType getRestoreType(std::string name) {
-	if (name == "start")
-		return RestoreType::START;
-	if (name == "abort")
-		return RestoreType::ABORT;
-	if (name == "status")
-		return RestoreType::STATUS;
-	if (name == "wait")
-		return RestoreType::WAIT;
-	return RestoreType::UNKNOWN;
 }
 
 DBType getDBType(std::string dbType) {
@@ -1521,30 +1379,6 @@ ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause
 	}
 
 	return Void();
-}
-
-Reference<IBackupContainer> openBackupContainer(const char* name, std::string destinationContainer) {
-	// Error, if no dest container was specified
-	if (destinationContainer.empty()) {
-		fprintf(stderr, "ERROR: No backup destination was specified.\n");
-		printHelpTeaser(name);
-		throw backup_error();
-	}
-
-	Reference<IBackupContainer> c;
-	try {
-		c = IBackupContainer::openContainer(destinationContainer);
-	} catch (Error& e) {
-		std::string msg = format("ERROR: '%s' on URL '%s'", e.what(), destinationContainer.c_str());
-		if (e.code() == error_code_backup_invalid_url && !IBackupContainer::lastOpenError.empty()) {
-			msg += format(": %s", IBackupContainer::lastOpenError.c_str());
-		}
-		fprintf(stderr, "%s\n", msg.c_str());
-		printHelpTeaser(name);
-		throw;
-	}
-
-	return c;
 }
 
 ACTOR Future<Void> dumpBackupData(const char* name,

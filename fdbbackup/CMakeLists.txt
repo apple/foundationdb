@@ -1,13 +1,12 @@
 set(COMMON_BACKUP_SRCS
- BackupTLSConfig.h
  BackupTLSConfig.cpp
+ BackupTLSConfig.h
  BackupRestoreCommon.cpp
  BackupRestoreCommon.h
 )
 
 set(FDB_BACKUP_SRCS
-  BackupTLSConfig.h
-  BackupTLSConfig.cpp
+  ${COMMON_BACKUP_SRCS}
   backup.actor.cpp)
 
 set(FDB_RESTORE_SRCS

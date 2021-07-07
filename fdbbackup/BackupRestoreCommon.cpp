@@ -56,7 +56,7 @@ void handleArgsError(CSimpleOpt const& args, const char* programName) {
 	}
 
 	printHelpTeaser(programName);
-	throw internal_error(); // TODO: Throw different error?
+	throw invalid_command_line_arguments();
 }
 
 Reference<IBackupContainer> openBackupContainer(const char* name, std::string const& destinationContainer) {
