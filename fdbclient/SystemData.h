@@ -505,6 +505,11 @@ extern const KeyRangeRef configClassKeys;
 extern const KeyRef blobRangeChangeKey;
 extern const KeyRangeRef blobRangeKeys;
 
+// blob granule keys
+
+// \xff/blobGranule/(startKey, endKey, {snapshot,delta}, version) = [[filename]]
+extern const KeyRangeRef blobGranuleKeys;
+
 #pragma clang diagnostic pop
 
 #endif

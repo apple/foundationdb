@@ -744,6 +744,13 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
+	// Blob granlues
+	init( BG_URL,                                                 "" );
+	init( BG_BUCKET,                                              "" );
+	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 );
+	init( BG_DELTA_BYTES_BEFORE_COMPACT, BG_SNAPSHOT_FILE_TARGET_BYTES/2 );
+	init( BG_DELTA_FILE_TARGET_BYTES,   BG_DELTA_BYTES_BEFORE_COMPACT/10 );
+
 	// clang-format on
 
 	if (clientKnobs) {
