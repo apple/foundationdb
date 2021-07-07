@@ -5415,6 +5415,7 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	}
 
 	metadataVersion.send(rep.metadataVersion);
+	cx->ssVersionVectorCache = rep.ssVersionVector;
 	return rep.version;
 }
 

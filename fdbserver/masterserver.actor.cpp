@@ -1237,6 +1237,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
+				reply.ssVersionVector = self->ssVersionVector;
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req =
