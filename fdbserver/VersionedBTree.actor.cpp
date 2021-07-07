@@ -1726,42 +1726,19 @@ public:
 	// After a get(), the object for i is the last in evictionOrder.
 	// If noHit is set, do not consider this access to be cache hit if the object is present
 	// If noMiss is set, do not consider this access to be a cache miss if the object is not present
-	ObjectType& get(pagerEventReasons r, unsigned int l, const IndexType& index, bool noHit = false, bool noMiss = false) {
+	ObjectType& get(const IndexType& index, bool noHit = false) {
 		Entry& entry = cache[index];
 
 		// If entry is linked into evictionOrder then move it to the back of the order
 		if (entry.is_linked()) {
 			if (!noHit) {
 				++entry.hits;
-				++g_redwoodMetrics.metric.pagerCacheHit;
-				if(l==0){
-					g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheHit, r);
-					g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
-				}
-				else{
-					auto metrics = g_redwoodMetrics.level(l).metric;
-					metrics.eventReasons.addEventReason(events::pagerCacheHit, r);
-					metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
-				}
-
 				// Move the entry to the back of the eviction order
 				evictionOrder.erase(evictionOrder.iterator_to(entry));
 				evictionOrder.push_back(entry);
 			}
 		} else {
 			// Otherwise it was a cache miss
-			if (!noMiss) {
-				++g_redwoodMetrics.metric.pagerCacheMiss;
-				if(l==0){
-					g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheMiss, r);
-					g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
-				}
-				else{
-					auto metrics = g_redwoodMetrics.level(l).metric;
-					metrics.eventReasons.addEventReason(events::pagerCacheMiss, r);
-					metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
-				}
-			}
 			// Finish initializing entry
 			entry.index = index;
 			entry.hits = 0;
@@ -2416,7 +2393,7 @@ public:
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
 		// this metaData reason will not be accounted since its not a cache hit or cache miss
-		PageCacheEntry& cacheEntry = pageCache.get(r, l, pageID, true, true); 
+		PageCacheEntry& cacheEntry = pageCache.get(pageID, true); 
 		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n",
 		             filename.c_str(),
 		             toString(pageID).c_str(),
@@ -2652,7 +2629,7 @@ public:
 			return forwardError(readPhysicalPage(this, (PhysicalPageID)pageID), errorPromise);
 		}
 
-		PageCacheEntry& cacheEntry = pageCache.get(r, l, pageID, noHit);
+		PageCacheEntry& cacheEntry = pageCache.get(pageID, noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
 		             filename.c_str(),
 		             toString(pageID).c_str(),
@@ -2665,6 +2642,29 @@ public:
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageID).c_str());
 			cacheEntry.readFuture = forwardError(readPhysicalPage(this, (PhysicalPageID)pageID), errorPromise);
 			cacheEntry.writeFuture = Void();
+
+			++g_redwoodMetrics.metric.pagerCacheMiss;
+			if(l==0){
+				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheMiss, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			}
+			else{
+				auto metrics = g_redwoodMetrics.level(l).metric;
+				metrics.eventReasons.addEventReason(events::pagerCacheMiss, r);
+				metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			}
+		}
+		else{
+			++g_redwoodMetrics.metric.pagerCacheHit;
+			if(l==0){
+				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheHit, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			}
+			else{
+				auto metrics = g_redwoodMetrics.level(l).metric;
+				metrics.eventReasons.addEventReason(events::pagerCacheHit, r);
+				metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			}
 		}
 
 		return cacheEntry.readFuture;
@@ -2809,7 +2809,7 @@ public:
 		else if (tailExt)
 			readSize = (tailPageID - pageID + 1) * physicalPageSize;
 
-		PageCacheEntry& cacheEntry = extentCache.get(r, l, pageID);
+		PageCacheEntry& cacheEntry = extentCache.get(pageID);
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = Void();
 			cacheEntry.readFuture =
@@ -2817,6 +2817,29 @@ public:
 			debug_printf("DWALPager(%s) Set the cacheEntry readFuture for page: %s\n",
 			             filename.c_str(),
 			             toString(pageID).c_str());
+
+			++g_redwoodMetrics.metric.pagerCacheMiss;
+			if(l==0){
+				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheMiss, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			}
+			else{
+				auto metrics = g_redwoodMetrics.level(l).metric;
+				metrics.eventReasons.addEventReason(events::pagerCacheMiss, r);
+				metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			}
+		}
+		else{
+			++g_redwoodMetrics.metric.pagerCacheHit;
+			if(l==0){
+				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheHit, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			}
+			else{
+				auto metrics = g_redwoodMetrics.level(l).metric;
+				metrics.eventReasons.addEventReason(events::pagerCacheHit, r);
+				metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			}
 		}
 		return cacheEntry.readFuture;
 	}
