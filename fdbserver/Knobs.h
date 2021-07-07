@@ -66,6 +66,8 @@ public:
 	                                              // message (measured in 1/1024ths, e.g. a value of 2048 yields a
 	                                              // factor of 2).
 	int64_t VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
+	int64_t TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE;
+ 	bool ENABLE_DETAILED_TLOG_POP_TRACE;
 	double TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	int64_t TLOG_MESSAGE_BLOCK_BYTES;
 	int64_t MAX_MESSAGE_SIZE;
