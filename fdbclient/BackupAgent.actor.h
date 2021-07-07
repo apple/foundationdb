@@ -124,7 +124,11 @@ public:
 
 	KeyBackedProperty<Key> lastBackupTimestamp() { return config.pack(LiteralStringRef(__FUNCTION__)); }
 
-	Future<Void> run(Database cx, double* pollDelay, int maxConcurrentTasks) {
+	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
+		return taskBucket->run(cx, futureBucket, std::make_shared<double const>(pollDelay), maxConcurrentTasks);
+	}
+
+	Future<Void> run(Database cx, std::shared_ptr<double const> pollDelay, int maxConcurrentTasks) {
 		return taskBucket->run(cx, futureBucket, pollDelay, maxConcurrentTasks);
 	}
 
@@ -359,7 +363,11 @@ public:
 		sourceTagNames = std::move(r.sourceTagNames);
 	}
 
-	Future<Void> run(Database cx, double* pollDelay, int maxConcurrentTasks) {
+	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
+		return taskBucket->run(cx, futureBucket, std::make_shared<double const>(pollDelay), maxConcurrentTasks);
+	}
+
+	Future<Void> run(Database cx, std::shared_ptr<double const> pollDelay, int maxConcurrentTasks) {
 		return taskBucket->run(cx, futureBucket, pollDelay, maxConcurrentTasks);
 	}
 

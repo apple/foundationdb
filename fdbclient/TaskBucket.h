@@ -191,7 +191,10 @@ public:
 
 	Future<bool> doOne(Database cx, Reference<FutureBucket> futureBucket);
 
-	Future<Void> run(Database cx, Reference<FutureBucket> futureBucket, double* pollDelay, int maxConcurrentTasks);
+	Future<Void> run(Database cx,
+	                 Reference<FutureBucket> futureBucket,
+	                 std::shared_ptr<double const> pollDelay,
+	                 int maxConcurrentTasks);
 	Future<Void> watchPaused(Database cx, Reference<AsyncVar<bool>> paused);
 
 	Future<bool> isEmpty(Reference<ReadYourWritesTransaction> tr);
