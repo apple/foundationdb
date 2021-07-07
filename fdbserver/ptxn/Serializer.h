@@ -269,7 +269,7 @@ bool headeredItemDeserializerBase(const Arena& arena, StringRef serialized, Head
 
 	if (reader.empty()) {
 		return false;
-	};
+	}
 
 	reader >> header;
 	while (!reader.empty()) {
