@@ -2486,7 +2486,7 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	}
 }
 
-// remote tLog pull data from log routers
+// remote tLog pull data from log routers or pull recovery version range during recovery
 ACTOR Future<Void> pullAsyncData(TLogData* self,
                                  Reference<LogData> logData,
                                  std::vector<Tag> tags,
@@ -2722,7 +2722,7 @@ ACTOR Future<Void> checkRecovered(TLogData* self) {
 	return Void();
 }
 
-// Recovery persistent state of tLog from disk
+// Recover persistent state of tLog from disk
 ACTOR Future<Void> restorePersistentState(TLogData* self,
                                           LocalityData locality,
                                           Promise<Void> oldLog,
