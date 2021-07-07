@@ -547,7 +547,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
-	grvProxyData->ssVersionVector = repFromMaster.ssVersionVector;
+	grvProxyData->ssVersionVector = std::move(repFromMaster.ssVersionVector);
 
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
