@@ -125,6 +125,7 @@ StringRef DecryptionStreamCipher::finish(Arena& arena) {
 	return StringRef(plaintext, finalBlockBytes);
 }
 
+// Only used to link unit tests
 void forceLinkStreamCipherTests() {}
 
 // Tests both encryption and decryption of random data

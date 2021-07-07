@@ -173,7 +173,6 @@ public:
 		if (self->usesEncryption()) {
 			f = makeReference<AsyncFileEncrypted>(f, false);
 		}
-		f = makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
 		return f;
 	}
 
