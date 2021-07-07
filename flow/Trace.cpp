@@ -1121,6 +1121,17 @@ TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
 	return *this;
 }
 
+// A unique, per-thread ID.  This is particularly important for multithreaded
+// or multiversion client setups and for multithreaded storage engines.
+thread_local uint64_t threadId = 0;
+
+void TraceEvent::setThreadId() {
+	while (threadId == 0) {
+		threadId = deterministicRandom()->randomUInt64();
+	}
+	this->detail("ThreadID", threadId);
+}
+
 int TraceEvent::getMaxFieldLength() const {
 	return maxFieldLength;
 }
@@ -1173,6 +1184,8 @@ void TraceEvent::log() {
 				if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 					fields.mutate(timeIndex + 1).second = TraceEvent::printRealTime(time);
 				}
+
+				setThreadId();
 
 				if (this->severity == SevError) {
 					severity = SevInfo;

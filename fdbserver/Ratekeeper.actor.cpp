@@ -1394,9 +1394,10 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 
 				self->configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
 
-				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) ||
-				                                 tr.watch(excludedServersVersionKey) ||
-				                                 tr.watch(failedServersVersionKey);
+				state Future<Void> watchFuture =
+				    tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) ||
+				    tr.watch(failedServersVersionKey) || tr.watch(excludedLocalityVersionKey) ||
+				    tr.watch(failedLocalityVersionKey);
 				wait(tr.commit());
 				wait(watchFuture);
 				break;
