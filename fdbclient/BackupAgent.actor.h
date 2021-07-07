@@ -164,20 +164,21 @@ public:
 	                        Key url,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges,
 	                        bool waitForComplete = true,
-	                        Version targetVersion = -1,
+	                        Version targetVersion = ::invalidVersion,
 	                        bool verbose = true,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
 	                        bool lockDB = true,
 	                        bool onlyAppyMutationLogs = false,
 	                        bool inconsistentSnapshotOnly = false,
-	                        Version beginVersion = -1);
+	                        Version beginVersion = ::invalidVersion,
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
 	                        bool waitForComplete = true,
-	                        Version targetVersion = -1,
+	                        Version targetVersion = ::invalidVersion,
 	                        bool verbose = true,
 	                        KeyRange range = normalKeys,
 	                        Key addPrefix = Key(),
@@ -185,7 +186,8 @@ public:
 	                        bool lockDB = true,
 	                        bool onlyAppyMutationLogs = false,
 	                        bool inconsistentSnapshotOnly = false,
-	                        Version beginVersion = -1) {
+	                        Version beginVersion = ::invalidVersion,
+	                        Optional<std::string> const& encryptionKeyFileName = {}) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
 		return restore(cx,
@@ -201,7 +203,8 @@ public:
 		               lockDB,
 		               onlyAppyMutationLogs,
 		               inconsistentSnapshotOnly,
-		               beginVersion);
+		               beginVersion,
+		               encryptionKeyFileName);
 	}
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
@@ -237,20 +240,22 @@ public:
 	                          Key outContainer,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
-	                          std::string tagName,
+	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          bool stopWhenDone = true,
 	                          bool partitionedLog = false,
-	                          bool incrementalBackupOnly = false);
+	                          bool incrementalBackupOnly = false,
+	                          Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
-	                          std::string tagName,
+	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          bool stopWhenDone = true,
 	                          bool partitionedLog = false,
-	                          bool incrementalBackupOnly = false) {
+	                          bool incrementalBackupOnly = false,
+	                          Optional<std::string> const& encryptionKeyFileName = {}) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -260,7 +265,8 @@ public:
 			                    backupRanges,
 			                    stopWhenDone,
 			                    partitionedLog,
-			                    incrementalBackupOnly);
+			                    incrementalBackupOnly,
+			                    encryptionKeyFileName);
 		});
 	}
 
