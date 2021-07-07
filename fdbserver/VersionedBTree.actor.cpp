@@ -1329,16 +1329,28 @@ struct RedwoodMetrics {
 			return result;
 		}
 		void reportTrace(TraceEvent* t, int h){
-			std::vector<events> allEvents = {events::pagerCacheLookup, events::pagerCacheHit, events::pagerCacheMiss, events::pagerWrite};
-			std::vector<pagerEventReasons> allReasons = {pagerEventReasons::pointRead, pagerEventReasons::rangeRead, pagerEventReasons::rangePrefetch, pagerEventReasons::commit, pagerEventReasons::lazyClear, pagerEventReasons::metaData};
+			const std::vector<std::pair<events,pagerEventReasons>> possibleEventReasonPairs = {
+				{events::pagerCacheLookup, pagerEventReasons::pointRead},{events::pagerCacheLookup, pagerEventReasons::rangeRead},
+				{events::pagerCacheLookup, pagerEventReasons::rangePrefetch},{events::pagerCacheLookup, pagerEventReasons::commit},
+				{events::pagerCacheLookup, pagerEventReasons::lazyClear},{events::pagerCacheLookup, pagerEventReasons::metaData},
 
-			for(auto e = allEvents.begin(); e != allEvents.end(); e++){
-				std::string code = "";
-				code += eventsCodes[(size_t)*e];
-				for(auto r = allReasons.begin(); r != allReasons.end(); r++){
-					char reasonCode = pagerEventReasonsCodes[(size_t)*r];
-					t->detail(format("L%d%s", h + 1, (code+reasonCode).c_str()), eventReasons[(size_t)*e][(size_t)*r]);
-				}
+				{events::pagerCacheHit, pagerEventReasons::pointRead},{events::pagerCacheHit, pagerEventReasons::rangeRead},
+				{events::pagerCacheHit, pagerEventReasons::rangePrefetch},
+				{events::pagerCacheHit, pagerEventReasons::lazyClear},{events::pagerCacheHit, pagerEventReasons::metaData},
+
+				{events::pagerCacheMiss, pagerEventReasons::pointRead},{events::pagerCacheMiss, pagerEventReasons::rangeRead},
+				{events::pagerCacheMiss, pagerEventReasons::rangePrefetch},
+				{events::pagerCacheMiss, pagerEventReasons::lazyClear},{events::pagerCacheMiss, pagerEventReasons::metaData},
+
+				{events::pagerWrite, pagerEventReasons::commit},
+				{events::pagerWrite, pagerEventReasons::lazyClear},{events::pagerWrite, pagerEventReasons::metaData},
+			};
+			for ( const auto &ER : possibleEventReasonPairs ){
+				t->detail(format("L%d%s", 
+								 h + 1, 
+								 (eventsCodes[(size_t)ER.first]+pagerEventReasonsCodes[(size_t)ER.second]).c_str()), 
+								 eventReasons[(size_t)ER.first][(size_t)ER.second]
+								);
 			}
 		}
 
@@ -1346,7 +1358,7 @@ struct RedwoodMetrics {
 
 	// Page levle events 
 	struct Level {
-		struct levelMetrics{
+		struct Metrics{
 			unsigned int pageRead;
 			unsigned int pageReadExt;
 			unsigned int pageBuild;
@@ -1368,7 +1380,7 @@ struct RedwoodMetrics {
 			unsigned int modifyItemCount;
 			eventReasonsArray eventReasons;
 		};
-		levelMetrics metric;
+		Metrics metric;
 		Reference<Histogram> buildFillPctSketch;
 		Reference<Histogram> modifyFillPctSketch;
 		Reference<Histogram> buildStoredPctSketch;
@@ -1377,10 +1389,10 @@ struct RedwoodMetrics {
 		Reference<Histogram> modifyItemCountSketch;
 
 		Level() {
-			levelClear(); 
+			Clear(); 
 		}
 
-		void levelClear(int levelCounter = -1){
+		void Clear(int levelCounter = -1){
 			metric = {};
 			if(!buildFillPctSketch.isValid() || buildFillPctSketch->name() != ("buildFillPct:" + std::to_string(levelCounter))){
 				buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
@@ -1427,7 +1439,6 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() { 
-		std::cout<<"redwoodmetrics initializer"<<maxRecordCount<<std::endl;
 		kvSizeWritten = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes);
 		kvSizeReadByGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet "), Histogram::Unit::bytes);
 		kvSizeReadByRangeGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByRangeGet"), Histogram::Unit::bytes);
@@ -1437,9 +1448,10 @@ struct RedwoodMetrics {
 	void clear() {
 		unsigned int levelCounter = 1;
 		for (RedwoodMetrics::Level& level : levels) {
-			level.levelClear(levelCounter);
+			level.Clear(levelCounter);
 			++levelCounter;
 		}
+		level(100).Clear();
 		metric = {};
 		metric.eventReasons.clear();
 
@@ -1727,8 +1739,9 @@ public:
 					g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
 				}
 				else{
-					g_redwoodMetrics.level(l).metric.eventReasons.addEventReason(events::pagerCacheHit, r);
-					g_redwoodMetrics.level(l).metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+					auto metrics = g_redwoodMetrics.level(l).metric;
+					metrics.eventReasons.addEventReason(events::pagerCacheHit, r);
+					metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
 				}
 
 				// Move the entry to the back of the eviction order
@@ -1744,8 +1757,9 @@ public:
 					g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
 				}
 				else{
-					g_redwoodMetrics.level(l).metric.eventReasons.addEventReason(events::pagerCacheMiss, r);
-					g_redwoodMetrics.level(l).metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+					auto metrics = g_redwoodMetrics.level(l).metric;
+					metrics.eventReasons.addEventReason(events::pagerCacheMiss, r);
+					metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
 				}
 			}
 			// Finish initializing entry
