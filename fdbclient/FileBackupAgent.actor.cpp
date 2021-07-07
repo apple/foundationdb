@@ -4522,6 +4522,7 @@ public:
 		}
 	}
 
+	// TODO: Get rid of all of these confusing boolean flags
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent,
 	                                       Reference<ReadYourWritesTransaction> tr,
 	                                       Key outContainer,
@@ -4531,7 +4532,8 @@ public:
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
-	                                       IncrementalBackupOnly incrementalBackupOnly) {
+	                                       IncrementalBackupOnly incrementalBackupOnly,
+	                                       Optional<std::string> encryptionKeyFileName) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -4569,7 +4571,7 @@ public:
 			backupContainer = joinPath(backupContainer, std::string("backup-") + nowStr.toString());
 		}
 
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupContainer);
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupContainer, encryptionKeyFileName);
 		try {
 			wait(timeoutError(bc->create(), 30));
 		} catch (Error& e) {
@@ -5327,6 +5329,7 @@ public:
 	                                     OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                     InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                     Version beginVersion,
+	                                     Optional<std::string> encryptionKeyFileName,
 	                                     UID randomUid) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
 		if (ranges.empty()) {
@@ -5546,6 +5549,7 @@ public:
 			                           OnlyApplyMutationLogs::FALSE,
 			                           InconsistentSnapshotOnly::FALSE,
 			                           ::invalidVersion,
+			                           {},
 			                           randomUid));
 			return ver;
 		}
@@ -5565,8 +5569,6 @@ public:
 	}
 };
 
-const std::string BackupAgentBase::defaultTagName = "default";
-const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
 // Return if parallel restore has finished
@@ -5608,7 +5610,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          LockDB lockDB,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                                         Version beginVersion) {
+                                         Version beginVersion,
+                                         Optional<std::string> const& encryptionKeyFileName) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -5624,6 +5627,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    onlyApplyMutationLogs,
 	                                    inconsistentSnapshotOnly,
 	                                    beginVersion,
+	                                    encryptionKeyFileName,
 	                                    deterministicRandom()->randomUniqueID());
 }
 
@@ -5656,11 +5660,12 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            Key outContainer,
                                            int initialSnapshotIntervalSeconds,
                                            int snapshotIntervalSeconds,
-                                           std::string tagName,
+                                           std::string const& tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                            StopWhenDone stopWhenDone,
                                            UsePartitionedLog partitionedLog,
-                                           IncrementalBackupOnly incrementalBackupOnly) {
+                                           IncrementalBackupOnly incrementalBackupOnly,
+                                           Optional<std::string> const& encryptionKeyFileName) {
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
@@ -5670,7 +5675,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         backupRanges,
 	                                         stopWhenDone,
 	                                         partitionedLog,
-	                                         incrementalBackupOnly);
+	                                         incrementalBackupOnly,
+	                                         encryptionKeyFileName);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {
@@ -5764,8 +5770,8 @@ ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef
 	state ReadYourWritesTransaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			KeyRef k1 = kvs[begin].key;
 			KeyRef k2 = end < kvs.size() ? kvs[end].key : normalKeys.end;
 			TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVReadBack")

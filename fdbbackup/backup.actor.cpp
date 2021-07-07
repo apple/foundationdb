@@ -133,6 +133,7 @@ enum {
 	OPT_WAITFORDONE,
 	OPT_BACKUPKEYS_FILTER,
 	OPT_INCREMENTALONLY,
+	OPT_ENCRYPTION_KEY_FILE,
 
 	// Backup Modify
 	OPT_MOD_ACTIVE_INTERVAL,
@@ -259,6 +260,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
+	{ OPT_ENCRYPTION_KEY_FILE, "--encryption_key_file", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -697,6 +699,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent_snapshot_only", SO_NONE },
+	{ OPT_ENCRYPTION_KEY_FILE, "--encryption_key_file", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1089,6 +1092,8 @@ static void printBackupUsage(bool devhelp) {
 	       "                 Performs incremental backup without the base backup.\n"
 	       "                 This option indicates to the backup agent that it will only need to record the log files, "
 	       "and ignore the range files.\n");
+	printf("  --encryption_key_file"
+	       "                 The AES-128-GCM key in the provided file is used for encrypting backup files.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1162,6 +1167,8 @@ static void printRestoreUsage(bool devhelp) {
 	       "                 To be used in conjunction with incremental restore.\n"
 	       "                 Indicates to the backup agent to only begin replaying log files from a certain version, "
 	       "instead of the entire set.\n");
+	printf("  --encryption_key_file"
+	       "                 The AES-128-GCM key in the provided file is used for decrypting backup files.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1705,7 +1712,10 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 
 // Read layer status for this layer and get the total count of agent processes (instances) then adjust the poll delay
 // based on that and BACKUP_AGGREGATE_POLL_RATE
-ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::string name, double* pollDelay) {
+ACTOR Future<Void> updateAgentPollRate(Database src,
+                                       std::string rootKey,
+                                       std::string name,
+                                       std::shared_ptr<double> pollDelay) {
 	loop {
 		try {
 			json_spirit::mObject status = wait(getLayerStatus(src, rootKey));
@@ -1727,7 +1737,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
                                      std::string name,
                                      ProgramExe exe,
-                                     double* pollDelay,
+                                     std::shared_ptr<double> pollDelay,
                                      Database taskDest = Database(),
                                      std::string id = nondeterministicRandom()->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
@@ -1775,7 +1785,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 
 			// Now that status was written at least once by this process (and hopefully others), start the poll rate
 			// control updater if it wasn't started yet
-			if (!pollRateUpdater.isValid() && pollDelay != nullptr)
+			if (!pollRateUpdater.isValid())
 				pollRateUpdater = updateAgentPollRate(statusUpdateDest, rootKey, name, pollDelay);
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnableToWriteStatus").error(e);
@@ -1785,17 +1795,17 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 }
 
 ACTOR Future<Void> runDBAgent(Database src, Database dest) {
-	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
+	state std::shared_ptr<double> pollDelay = std::make_shared<double>(1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE);
 	std::string id = nondeterministicRandom()->randomUniqueID().toString();
-	state Future<Void> status = statusUpdateActor(src, "dr_backup", ProgramExe::DR_AGENT, &pollDelay, dest, id);
+	state Future<Void> status = statusUpdateActor(src, "dr_backup", ProgramExe::DR_AGENT, pollDelay, dest, id);
 	state Future<Void> status_other =
-	    statusUpdateActor(dest, "dr_backup_dest", ProgramExe::DR_AGENT, &pollDelay, dest, id);
+	    statusUpdateActor(dest, "dr_backup_dest", ProgramExe::DR_AGENT, pollDelay, dest, id);
 
 	state DatabaseBackupAgent backupAgent(src);
 
 	loop {
 		try {
-			wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(dest, pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled)
@@ -1812,14 +1822,14 @@ ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 }
 
 ACTOR Future<Void> runAgent(Database db) {
-	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	state Future<Void> status = statusUpdateActor(db, "backup", ProgramExe::AGENT, &pollDelay);
+	state std::shared_ptr<double> pollDelay = std::make_shared<double>(1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE);
+	state Future<Void> status = statusUpdateActor(db, "backup", ProgramExe::AGENT, pollDelay);
 
 	state FileBackupAgent backupAgent;
 
 	loop {
 		try {
-			wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(db, pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled)
@@ -2226,7 +2236,9 @@ ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause
 	return Void();
 }
 
-Reference<IBackupContainer> openBackupContainer(const char* name, std::string destinationContainer) {
+Reference<IBackupContainer> openBackupContainer(const char* name,
+                                                std::string destinationContainer,
+                                                Optional<std::string> const& encryptionKeyFile = {}) {
 	// Error, if no dest container was specified
 	if (destinationContainer.empty()) {
 		fprintf(stderr, "ERROR: No backup destination was specified.\n");
@@ -2236,7 +2248,7 @@ Reference<IBackupContainer> openBackupContainer(const char* name, std::string de
 
 	Reference<IBackupContainer> c;
 	try {
-		c = IBackupContainer::openContainer(destinationContainer);
+		c = IBackupContainer::openContainer(destinationContainer, encryptionKeyFile);
 	} catch (Error& e) {
 		std::string msg = format("ERROR: '%s' on URL '%s'", e.what(), destinationContainer.c_str());
 		if (e.code() == error_code_backup_invalid_url && !IBackupContainer::lastOpenError.empty()) {
@@ -2266,7 +2278,8 @@ ACTOR Future<Void> runRestore(Database db,
                               std::string addPrefix,
                               std::string removePrefix,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
-                              InconsistentSnapshotOnly inconsistentSnapshotOnly) {
+                              InconsistentSnapshotOnly inconsistentSnapshotOnly,
+                              Optional<std::string> encryptionKeyFile) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2302,7 +2315,8 @@ ACTOR Future<Void> runRestore(Database db,
 	try {
 		state FileBackupAgent backupAgent;
 
-		state Reference<IBackupContainer> bc = openBackupContainer(exeRestore.toString().c_str(), container);
+		state Reference<IBackupContainer> bc =
+		    openBackupContainer(exeRestore.toString().c_str(), container, encryptionKeyFile);
 
 		// If targetVersion is unset then use the maximum restorable version from the backup description
 		if (targetVersion == invalidVersion) {
@@ -2339,7 +2353,8 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   LockDB::TRUE,
 			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
-			                                                   beginVersion));
+			                                                   beginVersion,
+			                                                   encryptionKeyFile));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -2518,7 +2533,8 @@ ACTOR Future<Void> expireBackupData(const char* name,
                                     Database db,
                                     bool force,
                                     Version restorableAfterVersion,
-                                    std::string restorableAfterDatetime) {
+                                    std::string restorableAfterDatetime,
+                                    Optional<std::string> encryptionKeyFile) {
 	if (!endDatetime.empty()) {
 		Version v = wait(timeKeeperVersionFromDatetime(endDatetime, db));
 		endVersion = v;
@@ -2537,7 +2553,7 @@ ACTOR Future<Void> expireBackupData(const char* name,
 	}
 
 	try {
-		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
+		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, encryptionKeyFile);
 
 		state IBackupContainer::ExpireProgress progress;
 		state std::string lastProgress;
@@ -2619,9 +2635,10 @@ ACTOR Future<Void> describeBackup(const char* name,
                                   std::string destinationContainer,
                                   bool deep,
                                   Optional<Database> cx,
-                                  bool json) {
+                                  bool json,
+                                  Optional<std::string> encryptionKeyFile) {
 	try {
-		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
+		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, encryptionKeyFile);
 		state BackupDescription desc = wait(c->describeBackup(deep));
 		if (cx.present())
 			wait(desc.resolveVersionTimes(cx.get()));
@@ -3278,6 +3295,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreClusterFileOrig;
 		bool jsonOutput = false;
 		DeleteData deleteData{ false };
+		Optional<std::string> encryptionKeyFile;
 
 		BackupModifyOptions modifyOptions;
 
@@ -3520,6 +3538,9 @@ int main(int argc, char* argv[]) {
 			case OPT_INCREMENTALONLY:
 				incrementalBackupOnly.set(true);
 				onlyApplyMutationLogs.set(true);
+				break;
+			case OPT_ENCRYPTION_KEY_FILE:
+				encryptionKeyFile = args->OptionArg();
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
@@ -3859,7 +3880,7 @@ int main(int argc, char* argv[]) {
 				if (!initCluster())
 					return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
-				openBackupContainer(argv[0], destinationContainer);
+				openBackupContainer(argv[0], destinationContainer, encryptionKeyFile);
 				f = stopAfter(submitBackup(db,
 				                           destinationContainer,
 				                           initialSnapshotIntervalSeconds,
@@ -3938,7 +3959,8 @@ int main(int argc, char* argv[]) {
 				                               db,
 				                               forceAction,
 				                               expireRestorableAfterVersion,
-				                               expireRestorableAfterDatetime));
+				                               expireRestorableAfterDatetime,
+				                               encryptionKeyFile));
 				break;
 
 			case BackupType::DELETE_BACKUP:
@@ -3958,7 +3980,8 @@ int main(int argc, char* argv[]) {
 				                             destinationContainer,
 				                             describeDeep,
 				                             describeTimestamps ? Optional<Database>(db) : Optional<Database>(),
-				                             jsonOutput));
+				                             jsonOutput,
+				                             encryptionKeyFile));
 				break;
 
 			case BackupType::LIST:
@@ -4040,7 +4063,8 @@ int main(int argc, char* argv[]) {
 				                         addPrefix,
 				                         removePrefix,
 				                         onlyApplyMutationLogs,
-				                         inconsistentSnapshotOnly));
+				                         inconsistentSnapshotOnly,
+				                         encryptionKeyFile));
 				break;
 			case RestoreType::WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), Verbose::TRUE)));

@@ -113,32 +113,32 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	return ts;
 }
 
-const Key BackupAgentBase::keyFolderId = LiteralStringRef("config_folderid");
-const Key BackupAgentBase::keyBeginVersion = LiteralStringRef("beginVersion");
-const Key BackupAgentBase::keyEndVersion = LiteralStringRef("endVersion");
-const Key BackupAgentBase::keyPrevBeginVersion = LiteralStringRef("prevBeginVersion");
-const Key BackupAgentBase::keyConfigBackupTag = LiteralStringRef("config_backup_tag");
-const Key BackupAgentBase::keyConfigLogUid = LiteralStringRef("config_log_uid");
-const Key BackupAgentBase::keyConfigBackupRanges = LiteralStringRef("config_backup_ranges");
-const Key BackupAgentBase::keyConfigStopWhenDoneKey = LiteralStringRef("config_stop_when_done");
-const Key BackupAgentBase::keyStateStop = LiteralStringRef("state_stop");
-const Key BackupAgentBase::keyStateStatus = LiteralStringRef("state_status");
-const Key BackupAgentBase::keyLastUid = LiteralStringRef("last_uid");
-const Key BackupAgentBase::keyBeginKey = LiteralStringRef("beginKey");
-const Key BackupAgentBase::keyEndKey = LiteralStringRef("endKey");
-const Key BackupAgentBase::keyDrVersion = LiteralStringRef("drVersion");
-const Key BackupAgentBase::destUid = LiteralStringRef("destUid");
-const Key BackupAgentBase::backupStartVersion = LiteralStringRef("backupStartVersion");
+const Key BackupAgentBase::keyFolderId = "config_folderid"_sr;
+const Key BackupAgentBase::keyBeginVersion = "beginVersion"_sr;
+const Key BackupAgentBase::keyEndVersion = "endVersion"_sr;
+const Key BackupAgentBase::keyPrevBeginVersion = "prevBeginVersion"_sr;
+const Key BackupAgentBase::keyConfigBackupTag = "config_backup_tag"_sr;
+const Key BackupAgentBase::keyConfigLogUid = "config_log_uid"_sr;
+const Key BackupAgentBase::keyConfigBackupRanges = "config_backup_ranges"_sr;
+const Key BackupAgentBase::keyConfigStopWhenDoneKey = "config_stop_when_done"_sr;
+const Key BackupAgentBase::keyStateStop = "state_stop"_sr;
+const Key BackupAgentBase::keyStateStatus = "state_status"_sr;
+const Key BackupAgentBase::keyLastUid = "last_uid"_sr;
+const Key BackupAgentBase::keyBeginKey = "beginKey"_sr;
+const Key BackupAgentBase::keyEndKey = "endKey"_sr;
+const Key BackupAgentBase::keyDrVersion = "drVersion"_sr;
+const Key BackupAgentBase::destUid = "destUid"_sr;
+const Key BackupAgentBase::backupStartVersion = "backupStartVersion"_sr;
 
-const Key BackupAgentBase::keyTagName = LiteralStringRef("tagname");
-const Key BackupAgentBase::keyStates = LiteralStringRef("state");
-const Key BackupAgentBase::keyConfig = LiteralStringRef("config");
-const Key BackupAgentBase::keyErrors = LiteralStringRef("errors");
-const Key BackupAgentBase::keyRanges = LiteralStringRef("ranges");
-const Key BackupAgentBase::keyTasks = LiteralStringRef("tasks");
-const Key BackupAgentBase::keyFutures = LiteralStringRef("futures");
-const Key BackupAgentBase::keySourceStates = LiteralStringRef("source_states");
-const Key BackupAgentBase::keySourceTagName = LiteralStringRef("source_tagname");
+const Key BackupAgentBase::keyTagName = "tagname"_sr;
+const Key BackupAgentBase::keyStates = "state"_sr;
+const Key BackupAgentBase::keyConfig = "config"_sr;
+const Key BackupAgentBase::keyErrors = "errors"_sr;
+const Key BackupAgentBase::keyRanges = "ranges"_sr;
+const Key BackupAgentBase::keyTasks = "tasks"_sr;
+const Key BackupAgentBase::keyFutures = "futures"_sr;
+const Key BackupAgentBase::keySourceStates = "source_states"_sr;
+const Key BackupAgentBase::keySourceTagName = "source_tagname"_sr;
 
 bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key) {
 	if (source) {
@@ -1033,3 +1033,124 @@ ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
 		}
 	}
 }
+
+// Convert the status text to an enumerated value
+BackupAgentBase::EnumState BackupAgentBase::getState(std::string const& stateText) {
+	auto enState = EnumState::STATE_ERRORED;
+
+	if (stateText.empty()) {
+		enState = EnumState::STATE_NEVERRAN;
+	}
+
+	else if (!stateText.compare("has been submitted")) {
+		enState = EnumState::STATE_SUBMITTED;
+	}
+
+	else if (!stateText.compare("has been started")) {
+		enState = EnumState::STATE_RUNNING;
+	}
+
+	else if (!stateText.compare("is differential")) {
+		enState = EnumState::STATE_RUNNING_DIFFERENTIAL;
+	}
+
+	else if (!stateText.compare("has been completed")) {
+		enState = EnumState::STATE_COMPLETED;
+	}
+
+	else if (!stateText.compare("has been aborted")) {
+		enState = EnumState::STATE_ABORTED;
+	}
+
+	else if (!stateText.compare("has been partially aborted")) {
+		enState = EnumState::STATE_PARTIALLY_ABORTED;
+	}
+
+	return enState;
+}
+
+const char* BackupAgentBase::getStateText(EnumState enState) {
+	const char* stateText;
+
+	switch (enState) {
+	case EnumState::STATE_ERRORED:
+		stateText = "has errored";
+		break;
+	case EnumState::STATE_NEVERRAN:
+		stateText = "has never been started";
+		break;
+	case EnumState::STATE_SUBMITTED:
+		stateText = "has been submitted";
+		break;
+	case EnumState::STATE_RUNNING:
+		stateText = "has been started";
+		break;
+	case EnumState::STATE_RUNNING_DIFFERENTIAL:
+		stateText = "is differential";
+		break;
+	case EnumState::STATE_COMPLETED:
+		stateText = "has been completed";
+		break;
+	case EnumState::STATE_ABORTED:
+		stateText = "has been aborted";
+		break;
+	case EnumState::STATE_PARTIALLY_ABORTED:
+		stateText = "has been partially aborted";
+		break;
+	default:
+		stateText = "<undefined>";
+		break;
+	}
+
+	return stateText;
+}
+
+const char* BackupAgentBase::getStateName(EnumState enState) {
+	switch (enState) {
+	case EnumState::STATE_ERRORED:
+		return "Errored";
+	case EnumState::STATE_NEVERRAN:
+		return "NeverRan";
+	case EnumState::STATE_SUBMITTED:
+		return "Submitted";
+		break;
+	case EnumState::STATE_RUNNING:
+		return "Running";
+	case EnumState::STATE_RUNNING_DIFFERENTIAL:
+		return "RunningDifferentially";
+	case EnumState::STATE_COMPLETED:
+		return "Completed";
+	case EnumState::STATE_ABORTED:
+		return "Aborted";
+	case EnumState::STATE_PARTIALLY_ABORTED:
+		return "Aborting";
+	default:
+		return "<undefined>";
+	}
+}
+
+bool BackupAgentBase::isRunnable(EnumState enState) {
+	switch (enState) {
+	case EnumState::STATE_SUBMITTED:
+	case EnumState::STATE_RUNNING:
+	case EnumState::STATE_RUNNING_DIFFERENTIAL:
+	case EnumState::STATE_PARTIALLY_ABORTED:
+		return true;
+	default:
+		return false;
+	}
+}
+
+Standalone<StringRef> BackupAgentBase::getCurrentTime() {
+	double t = now();
+	time_t curTime = t;
+	char buffer[128];
+	struct tm* timeinfo;
+	timeinfo = localtime(&curTime);
+	strftime(buffer, 128, "%Y-%m-%d-%H-%M-%S", timeinfo);
+
+	std::string time(buffer);
+	return StringRef(time + format(".%06d", (int)(1e6 * (t - curTime))));
+}
+
+std::string const BackupAgentBase::defaultTagName = "default";

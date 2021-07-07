@@ -293,7 +293,8 @@ public:
 	                                                          Version beginVersion = -1) = 0;
 
 	// Get an IBackupContainer based on a container spec string
-	static Reference<IBackupContainer> openContainer(const std::string& url);
+	static Reference<IBackupContainer> openContainer(const std::string& url,
+	                                                 const Optional<std::string>& encryptionKeyFileName = {});
 	static std::vector<std::string> getURLFormats();
 	static Future<std::vector<std::string>> listContainers(const std::string& baseURL);
 

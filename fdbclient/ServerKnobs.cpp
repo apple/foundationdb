@@ -100,6 +100,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PUSH_STATS_SLOW_AMOUNT,                                  2 );
 	init( PUSH_STATS_SLOW_RATIO,                                 0.5 );
 	init( TLOG_POP_BATCH_SIZE,                                  1000 ); if ( randomize && BUGGIFY ) TLOG_POP_BATCH_SIZE = 10;
+	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     250e6 );
+	init( ENABLE_DETAILED_TLOG_POP_TRACE,                       true );
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );
@@ -718,6 +720,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_DEFAULT_EXTENT_READ_SIZE,              1024 * 1024 );
 	init( REDWOOD_EXTENT_CONCURRENT_READS,                         4 );
 	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
+	init( REDWOOD_KVSTORE_RANGE_PREFETCH,                       true );
 	init( REDWOOD_PAGE_REBUILD_MAX_SLACK,                       0.33 );
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );

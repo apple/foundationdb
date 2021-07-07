@@ -102,151 +102,26 @@ public:
 	static const Key keySourceStates;
 	static const Key keySourceTagName;
 
-	static const int logHeaderSize;
+	static constexpr int logHeaderSize = 12;
 
 	// Convert the status text to an enumerated value
-	static EnumState getState(std::string stateText) {
-		auto enState = EnumState::STATE_ERRORED;
-
-		if (stateText.empty()) {
-			enState = EnumState::STATE_NEVERRAN;
-		}
-
-		else if (!stateText.compare("has been submitted")) {
-			enState = EnumState::STATE_SUBMITTED;
-		}
-
-		else if (!stateText.compare("has been started")) {
-			enState = EnumState::STATE_RUNNING;
-		}
-
-		else if (!stateText.compare("is differential")) {
-			enState = EnumState::STATE_RUNNING_DIFFERENTIAL;
-		}
-
-		else if (!stateText.compare("has been completed")) {
-			enState = EnumState::STATE_COMPLETED;
-		}
-
-		else if (!stateText.compare("has been aborted")) {
-			enState = EnumState::STATE_ABORTED;
-		}
-
-		else if (!stateText.compare("has been partially aborted")) {
-			enState = EnumState::STATE_PARTIALLY_ABORTED;
-		}
-
-		return enState;
-	}
+	static EnumState getState(std::string const& stateText);
 
 	// Convert the status enum to a text description
-	static const char* getStateText(EnumState enState) {
-		const char* stateText;
-
-		switch (enState) {
-		case EnumState::STATE_ERRORED:
-			stateText = "has errored";
-			break;
-		case EnumState::STATE_NEVERRAN:
-			stateText = "has never been started";
-			break;
-		case EnumState::STATE_SUBMITTED:
-			stateText = "has been submitted";
-			break;
-		case EnumState::STATE_RUNNING:
-			stateText = "has been started";
-			break;
-		case EnumState::STATE_RUNNING_DIFFERENTIAL:
-			stateText = "is differential";
-			break;
-		case EnumState::STATE_COMPLETED:
-			stateText = "has been completed";
-			break;
-		case EnumState::STATE_ABORTED:
-			stateText = "has been aborted";
-			break;
-		case EnumState::STATE_PARTIALLY_ABORTED:
-			stateText = "has been partially aborted";
-			break;
-		default:
-			stateText = "<undefined>";
-			break;
-		}
-
-		return stateText;
-	}
+	static const char* getStateText(EnumState enState);
 
 	// Convert the status enum to a name
-	static const char* getStateName(EnumState enState) {
-		const char* s;
-
-		switch (enState) {
-		case EnumState::STATE_ERRORED:
-			s = "Errored";
-			break;
-		case EnumState::STATE_NEVERRAN:
-			s = "NeverRan";
-			break;
-		case EnumState::STATE_SUBMITTED:
-			s = "Submitted";
-			break;
-		case EnumState::STATE_RUNNING:
-			s = "Running";
-			break;
-		case EnumState::STATE_RUNNING_DIFFERENTIAL:
-			s = "RunningDifferentially";
-			break;
-		case EnumState::STATE_COMPLETED:
-			s = "Completed";
-			break;
-		case EnumState::STATE_ABORTED:
-			s = "Aborted";
-			break;
-		case EnumState::STATE_PARTIALLY_ABORTED:
-			s = "Aborting";
-			break;
-		default:
-			s = "<undefined>";
-			break;
-		}
-
-		return s;
-	}
+	static const char* getStateName(EnumState enState);
 
 	// Determine if the specified state is runnable
-	static bool isRunnable(EnumState enState) {
-		bool isRunnable = false;
+	static bool isRunnable(EnumState enState);
 
-		switch (enState) {
-		case EnumState::STATE_SUBMITTED:
-		case EnumState::STATE_RUNNING:
-		case EnumState::STATE_RUNNING_DIFFERENTIAL:
-		case EnumState::STATE_PARTIALLY_ABORTED:
-			isRunnable = true;
-			break;
-		default:
-			break;
-		}
+	static KeyRef getDefaultTag() { return StringRef(defaultTagName); }
 
-		return isRunnable;
-	}
-
-	static const KeyRef getDefaultTag() { return StringRef(defaultTagName); }
-
-	static const std::string getDefaultTagName() { return defaultTagName; }
+	static std::string getDefaultTagName() { return defaultTagName; }
 
 	// This is only used for automatic backup name generation
-	static Standalone<StringRef> getCurrentTime() {
-		double t = now();
-		time_t curTime = t;
-		char buffer[128];
-		struct tm* timeinfo;
-		timeinfo = localtime(&curTime);
-		strftime(buffer, 128, "%Y-%m-%d-%H-%M-%S", timeinfo);
-
-		std::string time(buffer);
-		return StringRef(time + format(".%06d", (int)(1e6 * (t - curTime))));
-	}
+	static Standalone<StringRef> getCurrentTime();
 
 protected:
 	static const std::string defaultTagName;
@@ -269,7 +144,11 @@ public:
 
 	KeyBackedProperty<Key> lastBackupTimestamp() { return config.pack(LiteralStringRef(__FUNCTION__)); }
 
-	Future<Void> run(Database cx, double* pollDelay, int maxConcurrentTasks) {
+	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
+		return taskBucket->run(cx, futureBucket, std::make_shared<double const>(pollDelay), maxConcurrentTasks);
+	}
+
+	Future<Void> run(Database cx, std::shared_ptr<double const> pollDelay, int maxConcurrentTasks) {
 		return taskBucket->run(cx, futureBucket, pollDelay, maxConcurrentTasks);
 	}
 
@@ -316,7 +195,8 @@ public:
 	                        LockDB = LockDB::TRUE,
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::FALSE,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::FALSE,
-	                        Version beginVersion = ::invalidVersion);
+	                        Version beginVersion = ::invalidVersion,
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
@@ -330,7 +210,8 @@ public:
 	                        LockDB lockDB = LockDB::TRUE,
 	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::FALSE,
 	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::FALSE,
-	                        Version beginVersion = ::invalidVersion) {
+	                        Version beginVersion = ::invalidVersion,
+	                        Optional<std::string> const& encryptionKeyFileName = {}) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
 		return restore(cx,
@@ -346,7 +227,8 @@ public:
 		               lockDB,
 		               onlyApplyMutationLogs,
 		               inconsistentSnapshotOnly,
-		               beginVersion);
+		               beginVersion,
+		               encryptionKeyFileName);
 	}
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
@@ -382,20 +264,22 @@ public:
 	                          Key outContainer,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
-	                          std::string tagName,
+	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          StopWhenDone = StopWhenDone::TRUE,
 	                          UsePartitionedLog = UsePartitionedLog::FALSE,
-	                          IncrementalBackupOnly = IncrementalBackupOnly::FALSE);
+	                          IncrementalBackupOnly = IncrementalBackupOnly::FALSE,
+	                          Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
-	                          std::string tagName,
+	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::FALSE,
-	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::FALSE) {
+	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::FALSE,
+	                          Optional<std::string> const& encryptionKeyFileName = {}) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -405,7 +289,8 @@ public:
 			                    backupRanges,
 			                    stopWhenDone,
 			                    partitionedLog,
-			                    incrementalBackupOnly);
+			                    incrementalBackupOnly,
+			                    encryptionKeyFileName);
 		});
 	}
 
@@ -498,7 +383,11 @@ public:
 		sourceTagNames = std::move(r.sourceTagNames);
 	}
 
-	Future<Void> run(Database cx, double* pollDelay, int maxConcurrentTasks) {
+	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
+		return taskBucket->run(cx, futureBucket, std::make_shared<double const>(pollDelay), maxConcurrentTasks);
+	}
+
+	Future<Void> run(Database cx, std::shared_ptr<double const> pollDelay, int maxConcurrentTasks) {
 		return taskBucket->run(cx, futureBucket, pollDelay, maxConcurrentTasks);
 	}
 
