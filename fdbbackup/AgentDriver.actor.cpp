@@ -387,14 +387,3 @@ Optional<Database> initCluster(std::string const& clusterFile, LocalityData cons
 
 	return db;
 }
-
-void processLocalityArg(CSimpleOpt const& args, LocalityData& localities) {
-	std::string syn = args.OptionSyntax();
-	if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
-		fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
-		throw invalid_option_value();
-	}
-	syn = syn.substr(std::string("--locality_").size());
-	std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
-	localities.set(Key(syn), Value(std::string(args.OptionArg())));
-}

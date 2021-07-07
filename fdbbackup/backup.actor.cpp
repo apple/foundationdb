@@ -2253,14 +2253,7 @@ int main(int argc, char* argv[]) {
 				traceLogGroup = args->OptionArg();
 				break;
 			case OPT_LOCALITY: {
-				std::string syn = args->OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
-					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
-					return FDB_EXIT_ERROR;
-				}
-				syn = syn.substr(11);
-				std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
-				localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args->OptionArg())));
+				processLocalityArg(*args, localities);
 				break;
 			}
 			case OPT_EXPIRE_BEFORE_DATETIME:

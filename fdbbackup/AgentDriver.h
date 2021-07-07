@@ -40,5 +40,3 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
                                std::string const& id = nondeterministicRandom()->randomUniqueID().toString());
 
 Optional<Database> initCluster(std::string const& clusterFile, LocalityData const& localities, bool isQuiet);
-
-void processLocalityArg(CSimpleOpt const& args, LocalityData& localities);

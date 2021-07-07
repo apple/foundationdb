@@ -412,3 +412,5 @@ int commonMain(int argc, char** argv) {
 	ASSERT(false);
 	return 0;
 }
+
+void processLocalityArg(CSimpleOpt const& args, LocalityData& localities);
