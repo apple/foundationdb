@@ -335,7 +335,7 @@ int commonMain(int argc, char** argv) {
 			TraceEvent(SevWarnAlways, "FailedDriverSetup");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
-		Future<Optional<Void>> f = driver.run();
+		Future<Optional<Void>> f = stopAfter(driver.run());
 
 		runNetwork();
 

@@ -178,11 +178,11 @@ public:
 		}
 	}
 
-	Future<Optional<Void>> run() {
+	Future<Void> run() {
 		// TODO: We have not implemented the code commented out in this case
 		switch (driverState.getRestoreType()) {
 		case RestoreType::START:
-			return stopAfter(runFastRestoreTool(&driverState, !quietDisplay));
+			return runFastRestoreTool(&driverState, !quietDisplay);
 		case RestoreType::WAIT:
 			printf("[TODO][ERROR] FastRestore does not support RESTORE_WAIT yet!\n");
 			throw restore_error();
@@ -211,7 +211,7 @@ public:
 		default:
 			throw restore_error();
 		}
-		return Optional<Void>{};
+		return Void();
 	}
 
 	static std::string getProgramName() { return "fastrestore_tool"; }

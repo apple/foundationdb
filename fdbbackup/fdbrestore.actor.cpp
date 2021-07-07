@@ -180,34 +180,33 @@ public:
 		}
 	}
 
-	Future<Optional<Void>> run() {
+	Future<Void> run() {
 		FileBackupAgent ba;
 
 		switch (driverState.getRestoreType()) {
 		case RestoreType::START:
-			return stopAfter(runRestore(&driverState, !quietDisplay));
+			return runRestore(&driverState, !quietDisplay);
 		case RestoreType::WAIT:
-			return stopAfter(
-			    success(ba.waitRestore(driverState.getDatabase(), KeyRef(driverState.getTagName()), true)));
+			return success(ba.waitRestore(driverState.getDatabase(), KeyRef(driverState.getTagName()), true));
 
 		case RestoreType::ABORT:
-			return stopAfter(map(ba.abortRestore(driverState.getDatabase(), KeyRef(driverState.getTagName())),
+			return map(ba.abortRestore(driverState.getDatabase(), KeyRef(driverState.getTagName())),
 			                     [tagName = driverState.getTagName()](FileBackupAgent::ERestoreState s) -> Void {
 				                     printf("RESTORE_ABORT Tag: %s  State: %s\n",
 				                            tagName.c_str(),
 				                            FileBackupAgent::restoreStateText(s).toString().c_str());
 				                     return Void();
-			                     }));
+			                     });
 		case RestoreType::STATUS: {
 			Optional<Key> tag;
 			// If no tag is specifically provided then print all tag status, don't just use "default"
 			if (driverState.tagNameProvided()) {
 				tag = driverState.getTagName();
 			}
-			return stopAfter(map(ba.restoreStatus(driverState.getDatabase(), tag), [](std::string const& s) -> Void {
+			return map(ba.restoreStatus(driverState.getDatabase(), tag), [](std::string const& s) -> Void {
 				printf("%s\n", s.c_str());
 				return Void();
-			}));
+			});
 		}
 		default:
 			ASSERT(false);

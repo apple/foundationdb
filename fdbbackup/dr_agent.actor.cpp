@@ -132,7 +132,7 @@ public:
 		return true;
 	}
 
-	Future<Optional<Void>> run() { return stopAfter(runDBAgent(sourceDB, destDB)); }
+	Future<Void> run() { return runDBAgent(sourceDB, destDB); }
 
 	static std::string getProgramName() { return "dr_agent"; }
 };

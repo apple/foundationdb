@@ -128,7 +128,7 @@ public:
 		return true;
 	}
 
-	Future<Optional<Void>> run() { return stopAfter(runAgent(db)); }
+	Future<Void> run() { return runAgent(db); }
 
 	static std::string getProgramName() { return "backup_agent"; }
 };
