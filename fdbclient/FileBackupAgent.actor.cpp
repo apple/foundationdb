@@ -5541,8 +5541,6 @@ public:
 	}
 };
 
-const std::string BackupAgentBase::defaultTagName = "default";
-const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
 // Return if parallel restore has finished
