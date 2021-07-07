@@ -30,6 +30,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/GlobalConfig.h"
+#include "fdbclient/VersionVector.h"
 
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -198,6 +199,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
+	VersionVector ssVersionVector;
+
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
 	template <class Ar>
@@ -208,7 +211,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           locked,
 		           metadataVersion,
 		           tagThrottleInfo,
-		           midShardSize);
+		           midShardSize,
+		           ssVersionVector);
 	}
 };
 
@@ -328,6 +332,7 @@ struct GetRawCommittedVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
+	VersionVector ssVersionVector;
 
 	GetRawCommittedVersionReply()
 	  : debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()),
@@ -335,7 +340,7 @@ struct GetRawCommittedVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion);
+		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion, ssVersionVector);
 	}
 };
 

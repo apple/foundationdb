@@ -26,6 +26,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/flow.h"
+#include "fdbclient/VersionVector.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct GrvProxyStats {
@@ -233,6 +234,9 @@ struct GrvProxyData {
 	NotifiedDouble lastCommitTime;
 
 	Version minKnownCommittedVersion; // we should ask master for this version.
+
+	// Cache of the latest commit versions of storage servers.
+	VersionVector ssVersionVectorCache;
 
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
@@ -545,6 +549,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
+	grvProxyData->ssVersionVectorCache = repFromMaster.ssVersionVector;
 
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
@@ -557,6 +562,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	rep.processBusyTime += FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION *
 	                       (g_network->isSimulated() ? deterministicRandom()->random01()
 	                                                 : g_network->networkInfo.metrics.lastRunLoopBusyness);
+	rep.ssVersionVector = grvProxyData->ssVersionVectorCache;
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
