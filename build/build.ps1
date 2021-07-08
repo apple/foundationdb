@@ -2,9 +2,9 @@ param (
     [string]$SourceDir = (Resolve-Path "$PSScriptRoot\.."),
     [string]$ImageName = "fdb-windows",
     # By default we want to leave one CPU core for the OS so the user has some minimal control over the system
-    [string]$Cpus = (Get-WmiObject -Class Win32_Processor).NumberOfLogicalProcessors - 2,
+    [string]$Cpus = (Get-CimInstance -ClassName Win32_Processor -Filter "DeviceID='CPU0'").NumberOfLogicalProcessors - 2,
     # We want to leave at least 1GB of memory for the OS
-    [string]$Memory = (Get-WmiObject Win32_ComputerSystem).TotalPhysicalMemory - 2*[Math]::Pow(2, 30),
+    [string]$Memory = (Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory - 2*[Math]::Pow(2, 30),
     [Parameter(Mandatory=$true)][string]$BuildDir,
     [switch]$DryRun = $false,
     [switch]$ForceConfigure = $false,
