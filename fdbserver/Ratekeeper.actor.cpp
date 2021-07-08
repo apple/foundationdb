@@ -1423,106 +1423,268 @@ struct GranuleSnapshot : VectorRef<KeyValueRef> {
 	}
 };
 
-/*
-struct MutationRefAndVersion {
-    constexpr static FileIdentifier file_identifier = 4268041;
-    MutationRef m;
-    Version v;
+struct MutationAndVersion {
+	constexpr static FileIdentifier file_identifier = 4268041;
+	MutationRef m;
+	Version v;
 
-    template <class Ar>
-    void serialize(Ar& ar) {
-        serializer(ar, m, v);
-    }
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, m, v);
+	}
 };
 
-struct GranuleDeltas : VectorRef<MutationRefAndVersion> {
-    constexpr static FileIdentifier file_identifier = 4268042;
+struct GranuleDeltas : VectorRef<MutationAndVersion> {
+	constexpr static FileIdentifier file_identifier = 4268042;
 
-    template <class Ar>
-    void serialize(Ar& ar) {
-        serializer(ar, ((VectorRef<MutationRefAndVersion>&)*this));
-    }
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((VectorRef<MutationAndVersion>&)*this));
+	}
 };
-*/
+
+ACTOR Future<std::pair<Version, std::string>> writeDeltaFile(RatekeeperData* self,
+                                                             Reference<S3BlobStoreEndpoint> bstore,
+                                                             std::string bucket,
+                                                             Key startKey,
+                                                             Key endKey,
+                                                             GranuleDeltas const* deltasToWrite) {
+
+	// TODO some sort of directory structure would be useful?
+	state Version lastVersion = deltasToWrite->back().v;
+	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
+	                          std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(lastVersion) +
+	                          ".delta";
+
+	Value serialized = ObjectWriter::toValue(*deltasToWrite, Unversioned());
+
+	printf("blob worker writing %d delta bytes\n", serialized.size());
+
+	// write to s3 using multi part upload
+	state Reference<AsyncFileS3BlobStoreWrite> objectFile =
+	    makeReference<AsyncFileS3BlobStoreWrite>(bstore, bucket, fname);
+	wait(objectFile->write(serialized.begin(), serialized.size(), 0));
+	wait(objectFile->sync());
+
+	printf("blob worker wrote to s3 delta file %s\n", fname.c_str());
+
+	// update FDB with new file
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	loop {
+		try {
+			Tuple deltaFileKey;
+			deltaFileKey.append(startKey).append(endKey);
+			deltaFileKey.append(LiteralStringRef("delta")).append(lastVersion);
+			tr->set(deltaFileKey.getDataAsStandalone().withPrefix(blobGranuleKeys.begin), fname);
+
+			wait(tr->commit());
+			printf("blob worker updated fdb with delta file %s at version %lld\n", fname.c_str(), lastVersion);
+			return std::pair<Version, std::string>(lastVersion, fname);
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<std::pair<Version, std::string>> dumpSnapshotFromFDB(RatekeeperData* self,
+                                                                  Reference<S3BlobStoreEndpoint> bstore,
+                                                                  std::string bucket,
+                                                                  Key startKey,
+                                                                  Key endKey) {
+	printf("Dumping snapshot from FDB for [%s - %s)\n", startKey.printable().c_str(), endKey.printable().c_str());
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	loop {
+		state std::string fname = "";
+		try {
+			state Version readVersion = wait(tr->getReadVersion());
+			fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
+			        std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(readVersion) + ".snapshot";
+
+			// TODO some sort of directory structure would be useful?
+			state Arena arena;
+			state GranuleSnapshot allRows;
+
+			state Key beginKey = startKey;
+			loop {
+				// TODO knob for limit?
+				RangeResult res = wait(tr->getRange(KeyRangeRef(beginKey, endKey), 1000));
+				printf("blob worker read %d%s rows\n", res.size(), res.more ? "+" : "");
+				arena.dependsOn(res.arena());
+				allRows.append(arena, res.begin(), res.size());
+				if (res.more) {
+					beginKey = keyAfter(res.back().key);
+				} else {
+					break;
+				}
+			}
+
+			printf("Blob worker read %d snapshot rows from fdb\n", allRows.size());
+			// TODO is this easy to read as a flatbuffer from reader? Need to be sure about this data format
+			Value serialized = ObjectWriter::toValue(allRows, Unversioned());
+
+			printf("blob worker writing %d snapshot bytes\n", serialized.size());
+
+			// write to s3 using multi part upload
+			state Reference<AsyncFileS3BlobStoreWrite> objectFile =
+			    makeReference<AsyncFileS3BlobStoreWrite>(bstore, bucket, fname);
+			wait(objectFile->write(serialized.begin(), serialized.size(), 0));
+			wait(objectFile->sync());
+
+			printf("blob worker wrote snapshot to s3 file %s\n", fname.c_str());
+
+			// TODO could move this into separate txn to avoid the timeout, it'll need to be separate later anyway
+			// object uploaded successfully, save it to system key space (TODO later - and memory file history)
+			// TODO add conflict range for writes?
+			Tuple snapshotFileKey;
+			snapshotFileKey.append(startKey).append(endKey);
+			snapshotFileKey.append(LiteralStringRef("snapshot")).append(readVersion);
+			tr->set(snapshotFileKey.getDataAsStandalone().withPrefix(blobGranuleKeys.begin), fname);
+			wait(tr->commit());
+			printf("Blob worker committed new snapshot file for range\n");
+			return std::pair<Version, std::string>(readVersion, fname);
+		} catch (Error& e) {
+			// TODO REMOVE
+			printf("dump range txn got error %s\n", e.name());
+			if (fname != "") {
+				// TODO delete unsuccessfully written file
+				bstore->deleteObject(bucket, fname);
+				printf("deleting s3 object %s\n", fname.c_str());
+			}
+			wait(tr->onError(e));
+		}
+	}
+}
+
+struct GranuleMetadata {
+	std::deque<std::pair<Version, std::string>> snapshotFiles;
+	std::deque<std::pair<Version, std::string>> deltaFiles;
+	GranuleDeltas currentDeltas;
+	uint64_t bytesInNewDeltaFiles = 0;
+	Version lastWriteVersion = 0;
+	uint64_t currentDeltaBytes = 0;
+};
 
 // TODO might need to use IBackupFile instead of blob store interface to support non-s3 things like azure
 ACTOR Future<Void> blobWorker(RatekeeperData* self,
                               Reference<S3BlobStoreEndpoint> bstore,
                               std::string bucket,
+                              PromiseStream<MutationAndVersion> rangeFeed,
+                              PromiseStream<Version> snapshotVersions, // update fake range feed with actual versions
                               Key startKey,
                               Key endKey) {
+	state GranuleMetadata metadata;
+	state Arena deltaArena;
 	printf("Blob worker starting for [%s - %s) for bucket %s\n",
 	       startKey.printable().c_str(),
 	       endKey.printable().c_str(),
 	       bucket.c_str());
-	state Tuple keyRangeTuple;
-	keyRangeTuple.append(startKey).append(endKey);
 
-	// just periodically dump range to file for now
+	// dump snapshot at the start
+	std::pair<Version, std::string> newSnapshotFile = wait(dumpSnapshotFromFDB(self, bstore, bucket, startKey, endKey));
+	metadata.snapshotFiles.push_back(newSnapshotFile);
+	metadata.lastWriteVersion = newSnapshotFile.first;
+	snapshotVersions.send(newSnapshotFile.first);
+
 	loop {
-		wait(delay(60.0));
-		printf("Blob worker dumping range [%s - %s)\n", startKey.printable().c_str(), endKey.printable().c_str());
+		MutationAndVersion m = waitNext(rangeFeed.getFuture());
+		metadata.currentDeltas.push_back(deltaArena, m);
+		// 8 for version, 1 for type, 4 for each param length then actual param size
+		metadata.currentDeltaBytes += 17 + m.m.param1.size() + m.m.param2.size();
 
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		if (metadata.currentDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
+		    metadata.currentDeltas.back().v > metadata.lastWriteVersion) {
+			printf("Blob worker flushing delta file after %d bytes\n", metadata.currentDeltaBytes);
+			std::pair<Version, std::string> newDeltaFile =
+			    wait(writeDeltaFile(self, bstore, bucket, startKey, endKey, &metadata.currentDeltas));
 
-		loop {
-			state std::string fname = "";
-			try {
-				state Version readVersion = wait(tr->getReadVersion());
-				fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
-				        std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(readVersion) + ".snapshot";
+			// add new delta file
+			metadata.deltaFiles.push_back(newDeltaFile);
+			metadata.lastWriteVersion = newDeltaFile.first;
+			metadata.bytesInNewDeltaFiles += metadata.currentDeltaBytes;
 
-				// TODO some sort of directory structure would be useful?
-				state Arena arena;
-				state GranuleSnapshot allRows;
+			// reset current deltas
+			deltaArena = Arena();
+			metadata.currentDeltas = GranuleDeltas();
+			metadata.currentDeltaBytes = 0;
+		}
 
-				state Key beginKey = startKey;
-				loop {
-					// TODO knob for limit?
-					RangeResult res = wait(tr->getRange(KeyRangeRef(beginKey, endKey), 1000));
-					printf("blob worker read %d%s rows\n", res.size(), res.more ? "+" : "");
-					arena.dependsOn(res.arena());
-					allRows.append(arena, res.begin(), res.size());
-					if (res.more) {
-						beginKey = keyAfter(res.back().key);
-					} else {
-						break;
-					}
+		if (metadata.bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
+			printf("Blob worker compacting after %d bytes\n", metadata.bytesInNewDeltaFiles);
+			// TODO this should read previous snapshot + delta file instead, unless it knows it's really small or
+			// there was a huge clear or something
+			std::pair<Version, std::string> newSnapshotFile =
+			    wait(dumpSnapshotFromFDB(self, bstore, bucket, startKey, endKey));
+
+			// add new snapshot file
+			metadata.snapshotFiles.push_back(newSnapshotFile);
+			metadata.lastWriteVersion = newSnapshotFile.first;
+			snapshotVersions.send(newSnapshotFile.first);
+
+			// reset metadata
+			metadata.bytesInNewDeltaFiles = 0;
+		}
+	}
+}
+
+// dumb series of mutations that just sets/clears same key that is unrelated to actual db transactions
+ACTOR Future<Void> fakeRangeFeed(PromiseStream<MutationAndVersion> mutationStream,
+                                 PromiseStream<Version> snapshotVersions,
+                                 Key startKey,
+                                 Key endKey) {
+	state Version version = waitNext(snapshotVersions.getFuture());
+	state uint32_t targetKbPerSec = (uint32_t)(SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES) / 10;
+	state Arena arena;
+	printf("Fake range feed got initial version %lld\n", version);
+	loop {
+		// dumb series of mutations that just sets/clears same key that is unrelated to actual db transactions
+		state uint32_t bytesGenerated = 0;
+		state uint32_t targetKbThisSec =
+		    targetKbPerSec / 2 + (uint32_t)(deterministicRandom()->random01() * targetKbPerSec);
+		state uint32_t mutationsGenerated = 0;
+		while (bytesGenerated < targetKbThisSec) {
+			MutationAndVersion update;
+			update.v = version;
+			update.m.param1 = startKey;
+			update.m.param2 = startKey;
+			if (deterministicRandom()->random01() < 0.5) {
+				// clear start key
+				update.m.type = MutationRef::Type::ClearRange;
+			} else {
+				// set
+				update.m.type = MutationRef::Type::SetValue;
+			}
+			mutationsGenerated++;
+			bytesGenerated += 17 + 2 * startKey.size();
+			mutationStream.send(update);
+
+			// simulate multiple mutations with same version (TODO: this should be possible right)
+			if (deterministicRandom()->random01() < 0.4) {
+				version++;
+			}
+			if (mutationsGenerated % 1000 == 0) {
+				wait(yield());
+			}
+		}
+
+		printf("Fake range feed generated %d mutations at version %lld\n", mutationsGenerated, version);
+
+		choose {
+			when(wait(delay(1.0))) {
+				// slightly slower than real versions, to try to ensure it doesn't get ahead
+				version += 950000;
+			}
+			when(Version _v = waitNext(snapshotVersions.getFuture())) {
+				if (_v > version) {
+					printf("updating fake range feed from %lld to snapshot version %lld\n", version, _v);
+					version = _v;
+				} else {
+					printf("snapshot version %lld was ahead of fake range feed version %lld, keeping fake version\n",
+					       _v,
+					       version);
 				}
-
-				printf("Blob worker read %d rows from fdb\n", allRows.size());
-				// TODO is this easy to read as a flatbuffer from reader? Need to be sure about this data format
-				Value serialized = ObjectWriter::toValue(allRows, Unversioned());
-
-				printf("blob worker writing %d bytes\n", serialized.size());
-
-				// write to s3 using multi part upload
-				state Reference<AsyncFileS3BlobStoreWrite> objectFile =
-				    makeReference<AsyncFileS3BlobStoreWrite>(bstore, bucket, fname);
-				wait(objectFile->write(serialized.begin(), serialized.size(), 0));
-				wait(objectFile->sync());
-
-				printf("blob worker wrote to s3 file %s\n", fname.c_str());
-
-				// TODO could move this into separate txn to avoid the timeout, it'll need to be separate later anyway
-				// object uploaded successfully, save it to system key space (TODO later - and memory file history)
-				// TODO add conflict range for writes?
-				Tuple snapshotFileKey = keyRangeTuple;
-				snapshotFileKey.append(LiteralStringRef("snapshot")).append(readVersion);
-				tr->set(snapshotFileKey.getDataAsStandalone().withPrefix(blobGranuleKeys.begin), fname);
-				wait(tr->commit());
-				printf("Blob worker committed new snapshot file for range\n");
-				break;
-			} catch (Error& e) {
-				// TODO REMOVE
-				printf("dump range txn got error %s\n", e.name());
-				if (fname != "") {
-					// TODO delete unsuccessfully written file
-					bstore->deleteObject(bucket, fname);
-					printf("deleting s3 object %s\n", fname.c_str());
-				}
-				wait(tr->onError(e));
 			}
 		}
 	}
@@ -1531,6 +1693,7 @@ ACTOR Future<Void> blobWorker(RatekeeperData* self,
 // TODO MOVE ELSEWHERE
 ACTOR Future<Void> blobManagerPoc(RatekeeperData* self) {
 	state Future<Void> currentWorker;
+	state Future<Void> currentRangeFeed;
 	state Reference<S3BlobStoreEndpoint> bstore;
 	state std::string bucket = SERVER_KNOBS->BG_BUCKET;
 
@@ -1572,7 +1735,12 @@ ACTOR Future<Void> blobManagerPoc(RatekeeperData* self) {
 						       results[i].key.printable().c_str(),
 						       results[i + 1].key.printable().c_str());
 						foundRange = true;
-						currentWorker = blobWorker(self, bstore, bucket, results[i].key, results[i + 1].key);
+						PromiseStream<MutationAndVersion> mutationStream;
+						PromiseStream<Version> snapshotVersions;
+						currentRangeFeed =
+						    fakeRangeFeed(mutationStream, snapshotVersions, results[i].key, results[i + 1].key);
+						currentWorker = blobWorker(
+						    self, bstore, bucket, mutationStream, snapshotVersions, results[i].key, results[i + 1].key);
 					}
 				}
 
