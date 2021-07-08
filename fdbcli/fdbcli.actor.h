@@ -77,6 +77,8 @@ void printUsage(StringRef command);
 // All fdbcli commands (alphabetically)
 // advanceversion command
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// cache_range command
+ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
