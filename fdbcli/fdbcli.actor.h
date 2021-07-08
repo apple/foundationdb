@@ -22,6 +22,7 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated
 // version of this file.  In intellisense use the source version.
+#include "flow/FastRef.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLI_FDBCLI_ACTOR_G_H)
 #define FDBCLI_FDBCLI_ACTOR_G_H
 #include "fdbcli/fdbcli.actor.g.h"
@@ -67,7 +68,9 @@ extern const KeyRef ddIgnoreRebalanceSpecialKey;
 // maintenance
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
-
+// setclass
+extern const KeyRangeRef processClassSourceSpecialKeyRange;
+extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // help functions (Copied from fdbcli.actor.cpp)
 
 // compare StringRef with the given c string
@@ -92,6 +95,8 @@ ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
                                     bool printWarning = false,
                                     bool clearSSFailureZoneString = false);
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// setclass command
+ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
 ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 

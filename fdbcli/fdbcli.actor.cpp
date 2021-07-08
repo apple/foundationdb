@@ -566,15 +566,6 @@ void initHelp() {
 	    "pair in <ADDRESS...> or any LocalityData (like dcid, zoneid, machineid, processid), removes any "
 	    "matching exclusions from the excluded servers and localities list. "
 	    "(A specified IP will match all IP:* exclusion entries)");
-	helpMap["setclass"] =
-	    CommandHelp("setclass [<ADDRESS> <CLASS>]",
-	                "change the class of a process",
-	                "If no address and class are specified, lists the classes of all servers.\n\nSetting the class to "
-	                "`default' resets the process class to the class specified on the command line. The available "
-	                "classes are `unset', `storage', `transaction', `resolution', `commit_proxy', `grv_proxy', "
-	                "`master', `test', "
-	                "`stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', "
-	                "`coordinator', `ratekeeper', `storage_cache', `backup', and `default'.");
 	helpMap["status"] =
 	    CommandHelp("status [minimal|details|json]",
 	                "get the status of a FoundationDB cluster",
@@ -2742,45 +2733,6 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	return false;
 }
 
-ACTOR Future<bool> setClass(Database db, std::vector<StringRef> tokens) {
-	if (tokens.size() == 1) {
-		vector<ProcessData> _workers = wait(makeInterruptable(getWorkers(db)));
-		auto workers = _workers; // strip const
-
-		if (!workers.size()) {
-			printf("No processes are registered in the database.\n");
-			return false;
-		}
-
-		std::sort(workers.begin(), workers.end(), ProcessData::sort_by_address());
-
-		printf("There are currently %zu processes in the database:\n", workers.size());
-		for (const auto& w : workers)
-			printf("  %s: %s (%s)\n",
-			       w.address.toString().c_str(),
-			       w.processClass.toString().c_str(),
-			       w.processClass.sourceString().c_str());
-		return false;
-	}
-
-	AddressExclusion addr = AddressExclusion::parse(tokens[1]);
-	if (!addr.isValid()) {
-		fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", tokens[1].toString().c_str());
-		if (tokens[1].toString().find(":tls") != std::string::npos)
-			printf("        Do not include the `:tls' suffix when naming a process\n");
-		return true;
-	}
-
-	ProcessClass processClass(tokens[2].toString(), ProcessClass::DBSource);
-	if (processClass.classType() == ProcessClass::InvalidClass && tokens[2] != LiteralStringRef("default")) {
-		fprintf(stderr, "ERROR: '%s' is not a valid process class\n", tokens[2].toString().c_str());
-		return true;
-	}
-
-	wait(makeInterruptable(setClass(db, addr, processClass)));
-	return false;
-};
-
 Reference<ReadYourWritesTransaction> getTransaction(Database db,
                                                     Reference<ReadYourWritesTransaction>& tr,
                                                     FdbOptions* options,
@@ -3689,14 +3641,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "setclass")) {
-					if (tokens.size() != 3 && tokens.size() != 1) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(setClassCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						bool err = wait(setClass(db, tokens));
-						if (err)
-							is_error = true;
-					}
 					continue;
 				}
 
