@@ -1507,10 +1507,11 @@ template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 
 	struct Entry : public boost::intrusive::list_base_hook<> {
-		Entry() : hits(0) {}
+		Entry() : hits(0), size(1) {}
 		IndexType index;
 		ObjectType item;
 		int hits;
+		int size;
 	};
 
 	typedef std::unordered_map<IndexType, Entry> CacheT;
@@ -1559,6 +1560,7 @@ public:
 		if (toEvict.hits == 0) {
 			++g_redwoodMetrics.pagerEvictUnhit;
 		}
+		currentSize -= toEvict.size;
 		evictionOrder.erase(evictionOrder.iterator_to(toEvict));
 		cache.erase(i);
 		return true;
@@ -1568,7 +1570,7 @@ public:
 	// After a get(), the object for i is the last in evictionOrder.
 	// If noHit is set, do not consider this access to be cache hit if the object is present
 	// If noMiss is set, do not consider this access to be a cache miss if the object is not present
-	ObjectType& get(const IndexType& index, bool noHit = false, bool noMiss = false) {
+	ObjectType& get(const IndexType& index, unsigned int size = 1, bool noHit = false, bool noMiss = false) {
 		Entry& entry = cache[index];
 
 		// If entry is linked into evictionOrder then move it to the back of the order
@@ -1589,11 +1591,13 @@ public:
 			// Finish initializing entry
 			entry.index = index;
 			entry.hits = 0;
+			entry.size = size;
+			currentSize += size;
 			// Insert the newly created Entry at the back of the eviction order
 			evictionOrder.push_back(entry);
 
 			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
-			while (cache.size() > sizeLimit) {
+			while (currentSize > sizeLimit) {
 				Entry& toEvict = evictionOrder.front();
 
 				// It's critical that we do not evict the item we just added because it would cause the reference
@@ -1618,6 +1622,7 @@ public:
 					if (toEvict.hits == 0) {
 						++g_redwoodMetrics.pagerEvictUnhit;
 					}
+					currentSize -= toEvict.size;
 					debug_printf(
 					    "Evicting %s to make room for %s\n", toString(toEvict.index).c_str(), toString(index).c_str());
 					evictionOrder.pop_front();
@@ -1653,7 +1658,7 @@ public:
 
 		evictionOrder.clear();
 		cache.clear();
-
+		currentSize = 0;
 		return Void();
 	}
 
@@ -1666,6 +1671,7 @@ public:
 
 private:
 	int64_t sizeLimit;
+	int64_t currentSize;
 
 	CacheT cache;
 	EvictionOrderT evictionOrder;
@@ -2150,6 +2156,14 @@ public:
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
 
+	VectorRef<LogicalPageID> newPageIDs(size_t size){ 
+		VectorRef<LogicalPageID> newPages;
+		for(int i=0; i<size; ++i){
+			newPages.push_back( wait(newPageID()) );
+		}
+		return newPages;
+	}
+
 	// Get a new, previously available extent and it's first page ID.  The page will be considered in-use after the next
 	// commit regardless of whether or not it was written to, until it is returned to the pager via freePage()
 	ACTOR static Future<LogicalPageID> newExtentPageID_impl(DWALPager* self, QueueID queueID) {
@@ -2185,7 +2199,7 @@ public:
 
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
-	Future<Void> writePhysicalPage(PhysicalPageID pageID, Reference<ArenaPage> page, bool header = false) {
+	Future<Void> writePhysicalPage(VectorRef<PhysicalPageID> pageIDs, Reference<ArenaPage> page, bool header = false) {
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysical"),
@@ -2194,11 +2208,11 @@ public:
 
 		++g_redwoodMetrics.pagerDiskWrite;
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
-		page->updateChecksum(pageID);
+		page->updateChecksum(pageIDs.front());
 		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
 		             filename.c_str(),
-		             toString(pageID).c_str(),
-		             page->calculateChecksum(pageID),
+		             toString(pageIDs.front()).c_str(),
+		             page->calculateChecksum(pageIDs.front()),
 		             page->getChecksum());
 
 		if (memoryOnly) {
@@ -2207,31 +2221,40 @@ public:
 
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
-		Future<Void> f =
-		    holdWhile(page, map(pageFile->write(page->begin(), blockSize, (int64_t)pageID * blockSize), [=](Void) {
+		std::vector<Future<Void>> writers;
+		// for each page id
+		for(size_t i = 0; i<pageIDs.size(); i++){
+			Future<Void> p = pageFile->write(page->begin() + i*blockSize, blockSize, (int64_t)pageIDs[i] * blockSize);
+			if(REDWOOD_DEBUG) {
+				Standalone<VectorRef<PhysicalPageID>> pageIDsCopy = pageIDs;
+				p = map(p, [=](Void) {
 			              debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
 			                           filename.c_str(),
 			                           (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
-			                           toString(pageID).c_str(),
+			                           toString(pageIDsCopy.front()).c_str(),
 			                           page->begin(),
-			                           (pageID * blockSize));
+			                           (pageIDsCopy.front() * blockSize));
 			              return Void();
-		              }));
+						  });
+			}
+			writers.push_back(p);
+		}
+		Future<Void> f = holdWhile(page, waitForAll(writers));
 		operations.add(f);
 		return f;
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
-		return writePhysicalPage(pageID, page, true);
+		return writePhysicalPage(VectorRef<PhysicalPageID>&pageID, page, true);
 	}
 
-	void updatePage(LogicalPageID pageID, Reference<ArenaPage> data) override {
+	void updatePage(VectorRef<LogicalPageID> pageIDs, Reference<ArenaPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
-		PageCacheEntry& cacheEntry = pageCache.get(pageID, true, true);
+		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), true, true);
 		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n",
 		             filename.c_str(),
-		             toString(pageID).c_str(),
+		             toString(pageIDs.front()).c_str(),
 		             cacheEntry.initialized(),
 		             cacheEntry.initialized() && cacheEntry.reading(),
 		             cacheEntry.initialized() && cacheEntry.writing());
@@ -2244,11 +2267,11 @@ public:
 		// future reads of the version are not allowed) and the write of the next newest version over top
 		// of the original page begins.
 		if (!cacheEntry.initialized()) {
-			cacheEntry.writeFuture = writePhysicalPage(pageID, data);
+			cacheEntry.writeFuture = writePhysicalPage(pageIDs, data);
 		} else if (cacheEntry.reading()) {
 			// Wait for the read to finish, then start the write.
 			cacheEntry.writeFuture = map(success(cacheEntry.readFuture), [=](Void) {
-				writePhysicalPage(pageID, data);
+				writePhysicalPage(pageIDs, data);
 				return Void();
 			});
 		}
@@ -2256,34 +2279,34 @@ public:
 		// writes happen in the correct order
 		else if (cacheEntry.writing()) {
 			cacheEntry.writeFuture = map(cacheEntry.writeFuture, [=](Void) {
-				writePhysicalPage(pageID, data);
+				writePhysicalPage(pageIDs, data);
 				return Void();
 			});
 		} else {
-			cacheEntry.writeFuture = writePhysicalPage(pageID, data);
+			cacheEntry.writeFuture = writePhysicalPage(pageIDs, data);
 		}
 
 		// Always update the page contents immediately regardless of what happened above.
 		cacheEntry.readFuture = data;
 	}
 
-	Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<ArenaPage> data, Version v) override {
+	Future<VectorRef<LogicalPageID>> atomicUpdatePage(VectorRef<LogicalPageID> pageIDs, Reference<ArenaPage> data, Version v) override {
 		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageID).c_str(), v);
-		Future<LogicalPageID> f = map(newPageID(), [=](LogicalPageID newPageID) {
-			updatePage(newPageID, data);
+		VectorRef<Future<LogicalPageID>> f = map(newPageIDs(pageIDs.size()), [=](VectorRef<LogicalPageID> newIDs) {
+			updatePage(newIDs, data);
 			// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
-			RemappedPage r{ v, pageID, newPageID };
+			RemappedPage r{ v, pageIDs.front(), newIDs.front()};
 			remapQueue.pushBack(r);
-			auto& versionedMap = remappedPages[pageID];
+			auto& versionedMap = remappedPages[pageIDs.front()];
 
 			// An update page is unlikely to have its old version read again soon, so prioritize its cache eviction
 			// If the versioned map is empty for this page then the prior version of the page is at stored at the
 			// PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered map.
-			pageCache.prioritizeEviction(versionedMap.empty() ? pageID : versionedMap.rbegin()->second);
-			versionedMap[v] = newPageID;
+			pageCache.prioritizeEviction(versionedMap.empty() ? pageIDs.front() : versionedMap.rbegin()->second);
+			versionedMap[v] = newIDs.front();
 
 			debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
-			return pageID;
+			return pageIDs;
 		});
 
 		// No need for forwardError here because newPageID() is already wrapped in forwardError
@@ -2389,8 +2412,8 @@ public:
 	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
-	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
-	                                                           PhysicalPageID pageID,
+	ACTOR static Future<Reference<ArenaPage>> readPhysicalPages(DWALPager* self,
+	                                                           VectorRef<PhysicalPageID> pageIDs,
 	                                                           bool header = false) {
 		ASSERT(!self->memoryOnly);
 		++g_redwoodMetrics.pagerDiskRead;
@@ -2400,34 +2423,35 @@ public:
 		}
 
 		state Reference<ArenaPage> page =
-		    header ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock, smallestPhysicalBlock))
+		    header ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock * pageIDs.size(), smallestPhysicalBlock * pageIDs.size()))
 		           : self->newPageBuffer();
 		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p\n",
 		             self->filename.c_str(),
-		             toString(pageID).c_str(),
+		             toString(pageIDs.front()).c_str(),
 		             page->begin());
 
 		int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
-		int readBytes = wait(self->pageFile->read(page->mutate(), blockSize, (int64_t)pageID * blockSize));
-		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
-		             self->filename.c_str(),
-		             toString(pageID).c_str(),
-		             page->begin(),
-		             readBytes);
-
+		for(size_t i= 0; i<pageIDs.size(); i++){
+			int readBytes = wait(self->pageFile->read(page->mutate() + i*blockSize, blockSize, (int64_t)pageIDs[i] * blockSize));
+				debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
+		         self->filename.c_str(),
+		         toString(pageIDs[i]).c_str(),
+		         page->begin() + i*blockSize,
+		         readBytes);
+		}
 		// Header reads are checked explicitly during recovery
 		if (!header) {
-			if (!page->verifyChecksum(pageID)) {
+			if (!page->verifyChecksum(pageIDs.front())) {
 				debug_printf(
 				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageID).c_str());
 				Error e = checksum_failed();
 				TraceEvent(SevError, "RedwoodChecksumFailed")
 				    .detail("Filename", self->filename.c_str())
-				    .detail("PageID", pageID)
+				    .detail("PageID", pageIDs.front())
 				    .detail("PageSize", self->physicalPageSize)
-				    .detail("Offset", pageID * self->physicalPageSize)
-				    .detail("CalculatedChecksum", page->calculateChecksum(pageID))
+				    .detail("Offset", pageIDs.front() * self->physicalPageSize)
+				    .detail("CalculatedChecksum", page->calculateChecksum(pageIDs.front()))
 				    .detail("ChecksumInPage", page->getChecksum())
 				    .error(e);
 				ASSERT(false);
@@ -2438,7 +2462,7 @@ public:
 	}
 
 	static Future<Reference<ArenaPage>> readHeaderPage(DWALPager* self, PhysicalPageID pageID) {
-		return readPhysicalPage(self, pageID, true);
+		return readPhysicalPages(self, VectorRef<PhysicalPageID>&pageID, true);
 	}
 
 	bool tryEvictPage(LogicalPageID logicalID, Version v) {
@@ -2448,12 +2472,12 @@ public:
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
-	Future<Reference<ArenaPage>> readPage(LogicalPageID pageID, bool cacheable, bool noHit = false) override {
+	Future<Reference<ArenaPage>> readPage( VectorRef<PhysicalPageID> pageIDs, bool cacheable, bool noHit = false) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		if (!cacheable) {
 			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
-			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageID);
+			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageIDs.front());
 
 			if (pCacheEntry != nullptr) {
 				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageID).c_str());
@@ -2461,13 +2485,13 @@ public:
 			}
 
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
-			return forwardError(readPhysicalPage(this, (PhysicalPageID)pageID), errorPromise);
+			return forwardError(readPhysicalPages(this, pageIDs), errorPromise);
 		}
 
-		PageCacheEntry& cacheEntry = pageCache.get(pageID, noHit);
+		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
 		             filename.c_str(),
-		             toString(pageID).c_str(),
+		             toString(pageIDs.front()).c_str(),
 		             cacheEntry.initialized(),
 		             cacheEntry.initialized() && cacheEntry.reading(),
 		             cacheEntry.initialized() && cacheEntry.writing(),
@@ -2475,7 +2499,7 @@ public:
 
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageID).c_str());
-			cacheEntry.readFuture = forwardError(readPhysicalPage(this, (PhysicalPageID)pageID), errorPromise);
+			cacheEntry.readFuture = forwardError(readPhysicalPages(this, pageIDs), errorPromise);
 			cacheEntry.writeFuture = Void();
 		}
 
@@ -2510,10 +2534,17 @@ public:
 
 		return (PhysicalPageID)pageID;
 	}
+	VectorRef<PhysicalPageID> getPhysicalPageIDs(VectorRef<LogicalPageID> logicalIDs, Version v) {
+		VectorRef<physicalPageID> physicalIDs;
+		for(auto& id : logicalIDs){
+			physicalIDs.push_back( getPhysicalPageID(id, v) );
+		}
+		return physicalIDs;
+	}
 
-	Future<Reference<ArenaPage>> readPageAtVersion(LogicalPageID logicalID, Version v, bool cacheable, bool noHit) {
-		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
-		return readPage(physicalID, cacheable, noHit);
+	Future<Reference<ArenaPage>> readPageAtVersion(VectorRef<LogicalPageID> logicalIDs, Version v, bool cacheable, bool noHit) {
+		VectorRef<PhysicalPageID> physicalIDs = getPhysicalPageIDs(logicalIDs, v);
+		return readPage(physicalIDs, cacheable, noHit);
 	}
 
 	void releaseExtentReadLock() override { concurrentExtentReads->release(); }
@@ -2621,7 +2652,7 @@ public:
 		else if (tailExt)
 			readSize = (tailPageID - pageID + 1) * physicalPageSize;
 
-		PageCacheEntry& cacheEntry = extentCache.get(pageID);
+		PageCacheEntry& cacheEntry = extentCache.get(VectorRef<PhysicalPageID>&pageID);
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = Void();
 			cacheEntry.readFuture =
@@ -3214,11 +3245,11 @@ public:
 	  : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {}
 	~DWALPagerSnapshot() override {}
 
-	Future<Reference<const ArenaPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool noHit) override {
+	Future<Reference<const ArenaPage>> getPhysicalPage(VectorRef<LogicalPageID> pageIDs, bool cacheable, bool noHit) override {
 		if (expired.isError()) {
 			throw expired.getError();
 		}
-		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit),
+		return map(pager->readPageAtVersion(pageIDs, version, cacheable, noHit),
 		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
 
@@ -4905,10 +4936,14 @@ private:
 			// If we are only writing 1 page and it has the same BTreePageID size as the original then try to reuse the
 			// LogicalPageIDs in previousID and try to update them atomically.
 			if (pagesToBuild.size() == 1 && previousID.size() == pages.size()) {
-				for (k = 0; k < pages.size(); ++k) {
+				/*for (k = 0; k < pages.size(); ++k) {
 					LogicalPageID id = wait(self->m_pager->atomicUpdatePage(previousID[k], pages[k], v));
 					childPageID.push_back(records.arena(), id);
+				}*/
+				for(const LogicalPageID& id :  wait(self->m_pager->atomicUpdatePage(previousID, pages, v))){
+					childPageID.push_back(records.arena(), id);
 				}
+				
 			} else {
 				// Either the original page is being split, or it's not but it has changed BTreePageID size.
 				// Either way, there is no point in reusing any of the original page IDs because the parent
@@ -4917,9 +4952,13 @@ private:
 				if (records.empty()) {
 					self->freeBTreePage(previousID, v);
 				}
-				for (k = 0; k < pages.size(); ++k) {
+				/*for (k = 0; k < pages.size(); ++k) {
 					LogicalPageID id = wait(self->m_pager->newPageID());
 					self->m_pager->updatePage(id, pages[k]);
+					childPageID.push_back(records.arena(), id);
+				}*/
+				VectorRef<LogicalPageID> emptyPages = wait(self->m_pager->newPageIDs(pages.size()));
+				for(const LogicalPageID& id :  wait(self->m_pager->atomicUpdatePage(emptyPages, pages, v))){
 					childPageID.push_back(records.arena(), id);
 				}
 			}
@@ -4998,7 +5037,7 @@ private:
 
 		state Reference<const ArenaPage> page;
 
-		if (id.size() == 1) {
+		/*if (id.size() == 1) {
 			Reference<const ArenaPage> p = wait(snapshot->getPhysicalPage(id.front(), cacheable, false));
 			page = std::move(p);
 		} else {
@@ -5010,7 +5049,8 @@ private:
 			std::vector<Reference<const ArenaPage>> pages = wait(getAll(reads));
 			// TODO:  Cache reconstituted super pages somehow, perhaps with help from the Pager.
 			page = ArenaPage::concatPages(pages);
-		}
+		}*/
+		page = wait(snapshot->getPhysicalPage(id, cacheable, false));
 
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
 		const BTreePage* pTreePage = (const BTreePage*)page->begin();
@@ -5055,9 +5095,10 @@ private:
 		g_redwoodMetrics.btreeLeafPreload += 1;
 		g_redwoodMetrics.btreeLeafPreloadExt += (id.size() - 1);
 
-		for (auto pageID : id) {
+		/*for (auto pageID : id) {
 			snapshot->getPhysicalPage(pageID, true, true);
-		}
+		}*/
+		snapshot->getPhysicalPage(id, true, true);
 	}
 
 	void freeBTreePage(BTreePageIDRef btPageID, Version v) {
@@ -5089,7 +5130,7 @@ private:
 			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
 		}
 
-		if (oldID.size() == 1) {
+		/*if (oldID.size() == 1) {
 			LogicalPageID id = wait(self->m_pager->atomicUpdatePage(oldID.front(), page, writeVersion));
 			newID.front() = id;
 		} else {
@@ -5112,7 +5153,8 @@ private:
 				LogicalPageID id = wait(self->m_pager->atomicUpdatePage(oldID[i], pages[i], writeVersion));
 				newID[i] = id;
 			}
-		}
+		}*/
+		newID =  wait(self->m_pager->atomicUpdatePage(oldID, page, writeVersion));
 
 		return newID;
 	}
