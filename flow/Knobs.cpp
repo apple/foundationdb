@@ -63,7 +63,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
 	// Chaos testing
-	init( ENABLE_CHAOS_FEATURES,                             false );
+	init( ENABLE_CHAOS_FEATURES,                             true );
 
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;

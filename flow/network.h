@@ -662,25 +662,25 @@ struct DiskFailureInjector : FastAllocated<DiskFailureInjector> {
 		return static_cast<DiskFailureInjector*>(res);
 	}
 
-	//double getSendDelay(NetworkAddress const& peer);
-	//double getReceiveDelay(NetworkAddress const& peer);
-
 	//virtual void throttleFor(double time) = 0;
 	//virtual double getDiskDelay() = 0;
 
 	void throttleFor(double time) {
+		TraceEvent("DiskFailureInjectorBefore").detail("ThrottleUntil", throttleUntil);
 		throttleUntil = std::max(throttleUntil, timer_monotonic() + time);
+		TraceEvent("DiskFailureInjectorAfter").detail("ThrottleUntil", throttleUntil);
 	}
 
 	double getDiskDelay() {
 		if (!FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 			return 0.0;
 		}
-		return throttleUntil;
+		return std::max(0.0, throttleUntil - timer_monotonic());
 	}
 
 private: // members
 	double throttleUntil = 0.0;
+	std::unordered_map<NetworkAddress, double> throttleDisk;
 
 private: // construction
 	DiskFailureInjector() = default;
