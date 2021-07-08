@@ -99,6 +99,9 @@ struct UnitTestCollection {
 
 extern UnitTestCollection g_unittests;
 
+// Set this to `true` to disable RNG state checking after simulation runs.
+ extern bool noUnseed;
+
 #define APPEND(a, b) a##b
 
 // FILE_UNIQUE_NAME(basename) expands to a name like basename456 if on line 456
