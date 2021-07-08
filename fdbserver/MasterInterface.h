@@ -201,13 +201,13 @@ struct GetTlogPrevCommitVersionReply {
 
 struct GetTlogPrevCommitVersionRequest {
 	constexpr static FileIdentifier file_identifier = 16683184;
-	std::set<uint16_t> locSet;
+	std::set<uint16_t> writtenTLogs;
 	ReplyPromise<GetTlogPrevCommitVersionReply> reply;
 	GetTlogPrevCommitVersionRequest() {}
-	GetTlogPrevCommitVersionRequest(std::set<uint16_t>& locSet) : locSet(locSet) {}
+	GetTlogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs) : writtenTLogs(writtenTLogs) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, locSet, reply);
+		serializer(ar, writtenTLogs, reply);
 	}
 };
 
@@ -217,7 +217,7 @@ struct ReportRawCommittedVersionRequest {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
-	Optional<std::set<Tag>> tagSet;
+	Optional<std::set<Tag>> writtenTags;
 	ReplyPromise<Void> reply;
 
 	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
@@ -225,13 +225,13 @@ struct ReportRawCommittedVersionRequest {
 	                                 bool locked,
 	                                 Optional<Value> metadataVersion,
 	                                 Version minKnownCommittedVersion,
-	                                 Optional<std::set<Tag>> tagSet = Optional<std::set<Tag>>())
+	                                 Optional<std::set<Tag>> writtenTags = Optional<std::set<Tag>>())
 	  : version(version), locked(locked), metadataVersion(metadataVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion), tagSet(tagSet) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion), writtenTags(writtenTags) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, tagSet, reply);
+		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, writtenTags, reply);
 	}
 };
 
