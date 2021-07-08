@@ -67,6 +67,8 @@ extern const KeyRef ignoreSSFailureSpecialKey;
 // setclass
 extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
+// Other special keys
+inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
 // help functions (Copied from fdbcli.actor.cpp)
 
 // compare StringRef with the given c string
