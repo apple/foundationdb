@@ -92,7 +92,6 @@ void prepareProxySerializedMessages(const CommitRecord& commitRecord,
 }
 
 bool isAllRecordsValidated(const CommitRecord& commitRecord) {
-	std::cout << " Check validation " << std::endl;
 	for (const auto& [_1, storageTeamTagMap] : commitRecord.tags) {
 		for (const auto& [_2, commitRecordTag] : storageTeamTagMap) {
 			if (!commitRecordTag.allValidated()) {
