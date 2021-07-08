@@ -95,6 +95,8 @@ void writePrefixedLines(FILE* fout, std::string prefix, std::string msg) {
 	}
 }
 
+// Strict priority lock with N concurrent holders.  When a lock is granted to a waiter, it will always be
+// the highest priority waiter.
 class PriorityMultiLock {
 public:
 	// Waiting on the lock returns a Lock, which is really just a Promise<Void>
@@ -108,83 +110,87 @@ public:
 	};
 
 private:
-	struct Slot {
-		Promise<Lock> lock;
-	};
-
+	typedef Promise<Lock> Slot;
 	typedef Deque<Slot> Queue;
 
 public:
-	PriorityMultiLock(int concurrency, int levels) : concurrency(concurrency), outstanding(0), queues(levels) {}
+	PriorityMultiLock(int concurrency, int levels) : concurrency(concurrency), outstanding(0) {
+		waiters.resize(levels);
+		fRunner = runner(this);
+	}
 
 	Future<Lock> lock(int priority = 0) {
 		debug_printf("lock begin %d/%d\n", outstanding, concurrency);
 
+		// This shortcut may enable a waiter to jump the line when the releaser loop yields
 		if (outstanding < concurrency) {
 			++outstanding;
 			Lock p;
-			addReleaser(p);
+			addRunner(p);
 			debug_printf("lock exit immediate %d/%d\n", outstanding, concurrency);
 			return p;
 		}
 
-		Queue& q = queues[priority];
-		q.emplace_back(Slot());
+		Slot s;
+		waiters[priority].push_back(s);
 		debug_printf("lock exit queued %d/%d\n", outstanding, concurrency);
-		return q.back().lock.getFuture();
+		return s.getFuture();
 	}
 
 private:
-	void next() {
-		debug_printf("next %d/%d\n", outstanding, concurrency);
-		// Clean up any finished releasers at the front of the releasers queue
-		while (releasers.front().isReady()) {
-			debug_printf("next cleaned up releaser %d/%d\n", outstanding, concurrency);
-			releasers.pop_front();
-		}
-
-		// Try to start the next task, highest priorities first.
-		// If successful, the outstanding count does not change
-		for (int priority = queues.size() - 1; priority >= 0; --priority) {
-			auto& q = queues[priority];
-			if (!q.empty()) {
-				debug_printf("next found waiter at priority %d, %d/%d\n", priority, outstanding, concurrency);
-				Slot s = q.front();
-				q.pop_front();
-				Lock lock;
-				addReleaser(lock);
-				debug_printf("next sending %d/%d\n", outstanding, concurrency);
-				s.lock.send(lock);
-				debug_printf("next exit sent %d/%d\n", outstanding, concurrency);
-				return;
-			}
-		}
-
-		// There were no tasks to start, so outstanding is reduced.
-		--outstanding;
-		debug_printf("next exit nowaiters %d/%d\n", outstanding, concurrency);
-	}
-
-	void addReleaser(Lock& lock) {
-		static int sinceYield = 0;
-
-		Future<Void> released = ready(lock.promise.getFuture());
-		if (++sinceYield == 1000) {
-			sinceYield = 0;
-			released = yieldedFuture(released);
-		}
-
-		releasers.push_back(map(released, [=](Void) {
-			next();
+	void addRunner(Lock& lock) {
+		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
+			--outstanding;
+			release.trigger();
 			return Void();
 		}));
 	}
 
+	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
+		state int sinceYield = 0;
+
+		loop {
+			// Cleanup finished runner futures at the front of the runner queue.
+			while (!self->runners.empty() && self->runners.front().isReady()) {
+				self->runners.pop_front();
+			}
+
+			// Wait for a runner to release its lock
+			wait(self->release.onTrigger());
+			debug_printf("runner wakeup %d/%d\n", self->outstanding, self->concurrency);
+
+			if (++sinceYield == 100) {
+				sinceYield = 0;
+				wait(yield());
+			}
+
+			// Start tasks, highest priority first
+			for (int priority = self->waiters.size() - 1; priority >= 0 && self->outstanding < self->concurrency;
+			     --priority) {
+				auto& q = self->waiters[priority];
+				while (!q.empty() && self->outstanding < self->concurrency) {
+					++self->outstanding;
+					debug_printf("Running next waiter at priority=%d  levelSize=%d  slots %d/%d\n",
+					             priority,
+					             q.size(),
+					             self->outstanding,
+					             self->concurrency);
+					Slot s = q.front();
+					q.pop_front();
+					Lock lock;
+					self->addRunner(lock);
+					s.send(lock);
+				}
+			}
+		}
+	}
+
 	int concurrency;
 	int outstanding;
-	std::vector<Queue> queues;
-	Deque<Future<Void>> releasers;
-	Future<Void> error;
+	std::vector<Queue> waiters;
+	Deque<Future<Void>> runners;
+	Future<Void> fRunner;
+	AsyncTrigger release;
 };
 
 // Some convenience functions for debugging to stringify various structures
