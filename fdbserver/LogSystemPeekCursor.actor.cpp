@@ -33,8 +33,8 @@ void tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
 		self->peekReplyStream.reset();
 		return;
 	}
-	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(
-	    TLogPeekStreamRequest(self->messageVersion.version, self->tag, std::numeric_limits<int>::max()));
+	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(TLogPeekStreamRequest(
+	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max()));
 }
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
@@ -339,12 +339,10 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 		} catch (Error& e) {
 			if (e.code() == error_code_connection_failed) {
 				self->peekReplyStream.reset();
-			}
-			else if(e.code() == error_code_end_of_stream) {
+			} else if (e.code() == error_code_end_of_stream) {
 				self->end.reset(self->messageVersion.version);
 				return Void();
-			}
-			else {
+			} else {
 				throw;
 			}
 		}

@@ -235,16 +235,17 @@ struct TLogPeekStreamRequest {
 	Arena arena;
 	Version begin;
 	Tag tag;
+    bool returnIfBlocked;
 	int limitBytes;
 	ReplyPromiseStream<TLogPeekStreamReply> reply;
 
 	TLogPeekStreamRequest() {}
-	TLogPeekStreamRequest(Version version, Tag tag, int limitBytes)
-	  : begin(version), tag(tag), limitBytes(limitBytes) {}
+	TLogPeekStreamRequest(Version version, Tag tag, bool returnIfBlocked, int limitBytes)
+	  : begin(version), tag(tag), returnIfBlocked(returnIfBlocked), limitBytes(limitBytes) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, begin, tag, limitBytes, reply);
+		serializer(ar, arena, begin, tag, returnIfBlocked, limitBytes, reply);
 	}
 };
 
