@@ -119,6 +119,10 @@ public:
 		fRunner = runner(this);
 	}
 
+	~PriorityMultiLock() {
+		debug_printf("destruct");
+	}
+
 	Future<Lock> lock(int priority = 0) {
 		debug_printf("lock begin %d/%d\n", outstanding, concurrency);
 
@@ -140,6 +144,7 @@ public:
 private:
 	void addRunner(Lock& lock) {
 		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
+			debug_printf("Runner callback\n");
 			--outstanding;
 			release.trigger();
 			return Void();
@@ -148,6 +153,7 @@ private:
 
 	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
 		state int sinceYield = 0;
+		state Future<Void> error = self->brokenOnDestruct.getFuture();
 
 		loop {
 			// Cleanup finished runner futures at the front of the runner queue.
@@ -159,7 +165,7 @@ private:
 			wait(self->release.onTrigger());
 			debug_printf("runner wakeup %d/%d\n", self->outstanding, self->concurrency);
 
-			if (++sinceYield == 100) {
+			if (++sinceYield == 1000) {
 				sinceYield = 0;
 				wait(yield());
 			}
@@ -167,6 +173,7 @@ private:
 			// Start tasks, highest priority first
 			for (int priority = self->waiters.size() - 1; priority >= 0 && self->outstanding < self->concurrency;
 			     --priority) {
+				debug_printf("checking priority %d\n", priority);
 				auto& q = self->waiters[priority];
 				while (!q.empty() && self->outstanding < self->concurrency) {
 					++self->outstanding;
@@ -178,8 +185,13 @@ private:
 					Slot s = q.front();
 					q.pop_front();
 					Lock lock;
-					self->addRunner(lock);
 					s.send(lock);
+					self->addRunner(lock);
+
+					// Self may have been destructed during the lock callback
+					if(error.isReady()) {
+						throw error.getError();
+					}
 				}
 			}
 		}
@@ -191,6 +203,7 @@ private:
 	Deque<Future<Void>> runners;
 	Future<Void> fRunner;
 	AsyncTrigger release;
+	Promise<Void> brokenOnDestruct;
 };
 
 // Some convenience functions for debugging to stringify various structures
@@ -565,7 +578,7 @@ public:
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
-			nextPageReader = waitOrError(queue->pager->readPage(nextPageID, true), queue->pagerError);
+			nextPageReader = queue->pager->readPage(nextPageID, true);
 		}
 
 		Future<Void> loadExtent() {
