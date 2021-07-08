@@ -755,16 +755,8 @@ void applyMetadataMutations(SpanID const& spanContext,
 					break;
 				}
 			} else {
-				keyEnd = itr->first;
-				mutationEnd = itr->second;
-				++itr;
-				if (itr != cachedRangeInfo.end()) {
-					keyBegin = itr->first;
-					mutationBegin = itr->second;
-				} else {
-					//TraceEvent(SevDebug, "BeginKeyNotFound", dbgid).detail("KeyEnd", keyEnd.toString());
-					break;
-				}
+				// skip the ending keys
+				continue;
 			}
 
 			// Now get all the storage server tags for the cached key-ranges
