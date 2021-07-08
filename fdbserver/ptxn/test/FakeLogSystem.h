@@ -1,5 +1,5 @@
 /*
- * MockLogSystem.h
+ * FakeLogSystem.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,29 +18,26 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_MOCK_LOG_SYSTEM_H
-#define FDBSERVER_MOCK_LOG_SYSTEM_H
+#ifndef FDBSERVER_PTXN_TEST_MOCK_LOG_SYSTEM_H
+#define FDBSERVER_PTXN_TEST_MOCK_LOG_SYSTEM_H
 
-#include <vector>
+#pragma once
 
 #include "fdbserver/LogSystem.h"
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
+namespace ptxn::test {
+
+struct FakeLogSystem : ILogSystem, ReferenceCounted<FakeLogSystem> {
 	Reference<ILogSystem::IPeekCursor> cursor;
 
-	std::unordered_map<ptxn::TLogGroupID, std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>
-	    ptxnTLogGroups;
-	std::unordered_map<ptxn::StorageTeamID, ptxn::TLogGroupID> storageTLogIDMapper;
+	FakeLogSystem();
 
-	MockLogSystem();
+	FakeLogSystem(const FakeLogSystem&);
+	FakeLogSystem& operator=(const FakeLogSystem&);
 
-	MockLogSystem(const MockLogSystem&);
-	MockLogSystem& operator=(const MockLogSystem&);
-
-	MockLogSystem(const MockLogSystem&&) = delete;
-	MockLogSystem& operator=(const MockLogSystem&&) = delete;
+	FakeLogSystem(const FakeLogSystem&&) = delete;
+	FakeLogSystem& operator=(const FakeLogSystem&&) = delete;
 
 	void addref() final;
 	void delref() final;
@@ -58,7 +55,7 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	                     struct LogPushData& data,
 	                     const SpanID& spanContext,
 	                     Optional<UID> debugID,
-	                     Optional<ptxn::TLogGroupID> tLogGroup) final;
+						 Optional<ptxn::TLogGroupID> tLogGroup) final;
 	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) final;
 	Reference<IPeekCursor> peek(UID dbgid,
 	                            Version begin,
@@ -94,7 +91,7 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	                                       int8_t remoteLocality,
 	                                       const vector<Tag>& allTags,
 	                                       const Reference<AsyncVar<bool>>& recruitmentStalled,
-	                                       Reference<TLogGroupCollection> tLogGroupCollection) final;
+										   TLogGroupCollectionRef tLogGroupCollection) final;
 	LogSystemConfig getLogSystemConfig() const final;
 	Standalone<StringRef> getLogsValue() const final;
 	Future<Void> onLogSystemConfigChange() final;
@@ -114,4 +111,6 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	void setOldestBackupEpoch(LogEpoch epoch) final;
 };
 
-#endif // FDBSERVER_MOCK_LOG_SYSTEM_H
+} // namespace ptxn::test
+
+#endif // FDBSERVER_PTXN_TEST_MOCK_LOG_SYSTEM_H
