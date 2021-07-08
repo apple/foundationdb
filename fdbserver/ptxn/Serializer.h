@@ -47,6 +47,32 @@ size_t getSerializedBytes() {
 	return value;
 }
 
+using SerializationProtocolVersion = uint8_t;
+
+// Base class for headers with multiple items following
+struct MultipleItemHeaderBase {
+	// The version of the protocol
+	SerializationProtocolVersion protocolVersion;
+
+	// Number of items
+	int32_t numItems = 0;
+
+	// The raw length, i.e. the number of bytes, in this message, excluding the header
+	int32_t length = 0;
+
+	explicit MultipleItemHeaderBase(SerializationProtocolVersion protocolVersion_)
+	  : protocolVersion(protocolVersion_) {}
+
+	std::string toString() const {
+		return concatToString("Protocol=", static_cast<int>(protocolVersion), " Items=", numItems, " Length=", length);
+	}
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, protocolVersion, numItems, length);
+	}
+};
+
 // Encode objects in format
 //
 //  | Header | Item | Item | ... |
@@ -121,15 +147,28 @@ public:
 	}
 };
 
+namespace details {
+template <typename Header>
+Header readSerializedHeader(StringRef serializedData) {
+	BinaryReader reader(serializedData, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+
+	Header header;
+	reader >> header;
+
+	return header;
+}
+
+} // namespace details
+
 // Encode objects in format
 //
 //   | Main Header | Section Header | Item | Item | ... | Section Header | Item | ... |
 //
-// Main Header and Section Header *must* have a fixed size. Each Item is an object that being serialized into a StringRef,
-// and the user must provide informations (e.g. object type, length, etc.) to deserialize them.
-// Main Header and Section Header *should* inherit from MultipleItemHeaderBase
-// It is obvious that TwoLevelHeaderedItemSerializer can be implemented using HeaderedItemsSerializer. The reason of not
-// using this strategy is that one additional memory copy will be included when a new section is opened.
+// Main Header and Section Header *must* have a fixed size. Each Item is an object that being serialized into a
+// StringRef, and the user must provide informations (e.g. object type, length, etc.) to deserialize them. Main Header
+// and Section Header *should* inherit from MultipleItemHeaderBase It is obvious that TwoLevelHeaderedItemSerializer can
+// be implemented using HeaderedItemsSerializer. The reason not use this strategy is that one additional memory copy
+// will be included when a new section is opened.
 template <typename MainHeader, typename SectionHeader>
 class TwoLevelHeaderedItemsSerializer {
 	BinaryWriter writer;
@@ -205,19 +244,26 @@ public:
 		++numItems;
 	}
 
-	// Writes an serialized section
-	void writeSerializedSection(StringRef serialized) {
+	// Writes an serialized section. The section will be closed from further appending.
+	// The serialized data should *NOT* have the protocol version information prefixed.
+	// Returns the header of the section
+	section_header_t writeSerializedSection(StringRef serialized) {
 		ASSERT(!isAllItemsCompleted() && isSectionCompleted());
 
-		BinaryReader reader(serialized, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
-		section_header_t sectionHeader;
-		reader >> sectionHeader;
+		// We assume a protocol version, the assumed version is *NEVER* used.
+		section_header_t sectionHeader =
+		    BinaryReader::fromStringRef<section_header_t>(serialized, AssumeVersion(currentProtocolVersion));
 
-		numItemsCurrentSection = sectionHeader.numItems;
-		numItems += sectionHeader.numItems;
+		if constexpr (std::is_base_of<MultipleItemHeaderBase, section_header_t>::value) {
+			numItemsCurrentSection = sectionHeader.numItems;
+			numItems += sectionHeader.numItems;
+		}
+
 		++numSections;
 
 		writer.serializeBytes(serialized);
+
+		return sectionHeader;
 	}
 
 	// Returns the size of the main header, in bytes
@@ -234,9 +280,6 @@ public:
 
 	// Returns the number of items in the current section
 	size_t getNumItemsCurrentSection() const { return numItemsCurrentSection; }
-
-	// Returns the number of items in *ALL* sections
-	size_t getNumItems() const { return numItems; }
 
 	// Marks the current section not accepting new items, and the section header is ready to be written.
 	void completeSectionWriting() { sectionComplete = true; }
@@ -283,16 +326,15 @@ bool headeredItemDeserializerBase(const Arena& arena, StringRef serialized, Head
 // Deserializes the TwoLevelHeaderedItemsSerializer
 template <typename MainHeader, typename SectionHeader>
 class TwoLevelHeaderedItemsDeserializer {
-	ArenaReader reader;
+	BinaryReader reader;
 
 public:
 	using main_header_t = MainHeader;
 	using section_header_t = SectionHeader;
 
-	// arena is the arena that contains the serialized data
 	// serialized is the StringRef points to the serialied data
-	TwoLevelHeaderedItemsDeserializer(const Arena& arena, StringRef serialized)
-	  : reader(arena, serialized, IncludeVersion(ProtocolVersion::withPartitionTransaction())) {
+	TwoLevelHeaderedItemsDeserializer(StringRef serialized)
+	  : reader(serialized, IncludeVersion(ProtocolVersion::withPartitionTransaction())) {
 		// The serialized data *MUST* have a header
 		ASSERT(!allConsumed());
 	}
@@ -300,20 +342,16 @@ public:
 	// Extracts an element from serialized data in Main Header format
 	// NOTE It is the caller's obligation to ensure the element is in main header format
 	main_header_t deserializeAsMainHeader() {
-		ASSERT(!allConsumed());
-
 		main_header_t mainHeader;
-		reader >> mainHeader;
+		deserializeItem(mainHeader);
 		return mainHeader;
 	}
 
 	// Extracts an element from serialized data in Section Header format
 	// NOTE It is the caller's obligation to ensure the element is in section header format
 	section_header_t deserializeAsSectionHeader() {
-		ASSERT(!allConsumed());
-
 		section_header_t sectionHeader;
-		reader >> sectionHeader;
+		deserializeItem(sectionHeader);
 		return sectionHeader;
 	}
 
@@ -338,33 +376,6 @@ public:
 
 	// Peeks raw bytes, but doesn't consume the bytes
 	const uint8_t* peekBytes(int nBytes) const { return reinterpret_cast<const uint8_t*>(reader.peekBytes(nBytes)); }
-};
-
-using SerializationProtocolVersion = uint8_t;
-
-// Base class for headers with multiple items following
-struct MultipleItemHeaderBase {
-	// The version of the protocol
-	SerializationProtocolVersion protocolVersion;
-
-	// Number of items
-	size_t numItems = 0;
-
-	// The raw length, i.e. the number of bytes, in this message, excluding the header
-	size_t length = 0;
-
-	explicit MultipleItemHeaderBase(SerializationProtocolVersion protocolVersion_)
-	  : protocolVersion(protocolVersion_) {}
-
-	template <typename Reader>
-	void loadFromArena(Reader& reader) {
-		reader >> protocolVersion >> numItems >> length;
-	}
-
-	template <typename Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, protocolVersion, numItems, length);
-	}
 };
 
 } // namespace ptxn

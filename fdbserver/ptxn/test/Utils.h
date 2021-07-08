@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-#include "fdbserver/ptxn/test/Driver.h"
+#include "fdbserver/ptxn/test/CommitUtils.h"
 #include "fdbserver/ptxn/test/TestTLogPeek.h"
 #include "fdbserver/ptxn/TLogInterface.h"
 
@@ -58,6 +58,9 @@ typename Container::const_reference randomlyPick(const Container& container) {
 	return container[deterministicRandom()->randomInt(0, container.size())];
 };
 
+// Get a random alphabetical/numeric string with length between lower and upper
+std::string getRandomAlnum(int lower, int upper);
+
 namespace print {
 
 void print(const TLogCommitRequest&);
@@ -69,7 +72,6 @@ void print(const CommitRecord&);
 void print(const ptxn::test::TestTLogPeekOptions&);
 
 void printCommitRecords(const std::vector<CommitRecord>&);
-void printNotValidatedRecords(const std::vector<CommitRecord>&);
 
 // Prints timing per step
 class PrintTiming {
@@ -95,28 +97,28 @@ public:
 	// Support iomanips like std::endl
 	// Here we *MUST* use pointers instead of std::function, since the  see, e.g.:
 	//   * http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0551r3.pdf
-	friend DummyOStream operator<<(PrintTiming&, std::ostream&(*)(std::ostream&));
+	friend DummyOStream operator<<(PrintTiming&, std::ostream& (*)(std::ostream&));
 
-	friend DummyOStream operator<<(PrintTiming&, std::ios_base&(*)(std::ios_base&));
+	friend DummyOStream operator<<(PrintTiming&, std::ios_base& (*)(std::ios_base&));
 
 	template <typename T>
 	friend DummyOStream&& operator<<(DummyOStream&&, const T& object);
 
-	friend DummyOStream&& operator<<(DummyOStream&&, std::ostream&(*)(std::ostream&));
+	friend DummyOStream&& operator<<(DummyOStream&&, std::ostream& (*)(std::ostream&));
 
-	friend DummyOStream&& operator<<(DummyOStream&&, std::ios_base&(*)(std::ios_base&));
+	friend DummyOStream&& operator<<(DummyOStream&&, std::ios_base& (*)(std::ios_base&));
 };
 
 template <typename T>
 PrintTiming::DummyOStream operator<<(PrintTiming& printTiming, const T& object) {
 	auto now = PrintTiming::clock_t::now();
-	std::cout << std::setw(25) << printTiming.functionName << ">> "
+	std::cout << std::setw(40) << printTiming.functionName << ">> "
 	          << "[" << std::setw(12) << std::fixed << std::setprecision(6)
 	          << PrintTiming::duration_t(now - printTiming.startTime).count() << "] ";
 	std::cout << object;
 	printTiming.lastTagTime = now;
 
-    return PrintTiming::DummyOStream();
+	return PrintTiming::DummyOStream();
 }
 
 template <typename T>

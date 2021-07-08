@@ -47,15 +47,6 @@
 
 namespace ptxn::test {
 
-CommitRecord::CommitRecord(const Version& version_,
-                           const StorageTeamID& storageTeamID_,
-                           std::vector<Message>&& messages_)
-  : version(version_), storageTeamID(storageTeamID_), messages(std::move(messages_)) {}
-
-bool CommitValidationRecord::validated() const {
-	return tLogValidated && storageServerValidated;
-}
-
 TestDriverOptions::TestDriverOptions(const UnitTestParameters& params)
   : numCommits(params.getInt("numCommits").orDefault(DEFAULT_NUM_COMMITS)),
     numStorageTeams(params.getInt("numStorageTeams").orDefault(DEFAULT_NUM_TEAMS)),
@@ -69,6 +60,7 @@ TestDriverOptions::TestDriverOptions(const UnitTestParameters& params)
         params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)))) {}
 
 std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions& options) {
+	print::PrintTiming printTiming(__FUNCTION__);
 	print::print(options);
 
 	std::shared_ptr<TestDriverContext> context(new TestDriverContext());
@@ -80,6 +72,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	// FIXME use C++20 range
 	for (int i = 0; i < context->numStorageTeamIDs; ++i) {
 		context->storageTeamIDs.push_back(getNewStorageTeamID());
+		printTiming << "Storage Team ID: " << context->storageTeamIDs.back().toString() << std::endl;
 	}
 
 	context->commitVersionGap = 10000;
@@ -213,81 +206,6 @@ void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<T
 		actors.emplace_back(
 		    getFakeStorageServerActor(pTestDriverContext->messageTransferModel, pFakeStorageServerContext));
 	}
-}
-
-bool isAllRecordsValidated(const std::vector<CommitRecord>& records) {
-	for (auto& record : records) {
-		if (!record.validation.validated()) {
-			return false;
-		}
-	}
-	return true;
-}
-
-// For messages with a given version and storage team ID, check if messages match previous committed records.
-void verifyMessagesInRecord(std::vector<CommitRecord>& records,
-                            const Version& version,
-                            const StorageTeamID& storageTeamID,
-                            const SubsequencedMessageDeserializer& deserializedMessages,
-                            std::function<void(CommitValidationRecord&)> validateUpdater) {
-
-	print::PrintTiming printTiming("verifyMessagesInRecord");
-
-	// Locate the record matching given storageTeamID/version
-	size_t recordIndex = 0;
-	for (; recordIndex < records.size(); ++recordIndex) {
-		const auto& record = records[recordIndex];
-		if (record.version == version && record.storageTeamID == storageTeamID) {
-			break;
-		}
-	}
-
-	if (recordIndex == records.size()) {
-		printTiming << concatToString(
-		                   "Message not found in records: Version = ", version, " Storage Team ID: ", storageTeamID)
-		            << std::endl;
-		print::printCommitRecords(records);
-		throw internal_error_msg("Messages not found");
-	}
-
-	// Check each message to see they match
-	auto& record = records[recordIndex];
-	int index = 0;
-	auto recordedIter = record.messages.cbegin();
-	auto incomingIter = deserializedMessages.cbegin();
-
-	while (recordedIter != record.messages.cend() && incomingIter != deserializedMessages.cend()) {
-		const auto recordedMessage = *recordedIter;
-		const auto incomingMessage = incomingIter->message;
-
-		if (recordedMessage != incomingMessage) {
-			std::string errorOutput;
-			errorOutput += concatToString("Version = ", version, "  ");
-			errorOutput += concatToString("StorageTeamID = ", storageTeamID, "  ");
-			errorOutput += concatToString(" Messages not match at index ", index, ":\n");
-			errorOutput += concatToString(std::setw(20), "Deserialized: ", incomingMessage, "\n");
-			errorOutput += concatToString(std::setw(20), "Record: ", recordedMessage, "\n");
-			printTiming << errorOutput << std::endl;
-			print::printCommitRecords(records);
-			throw internal_error_msg("Message not consistent");
-		}
-
-		++recordedIter;
-		++incomingIter;
-		++index;
-	}
-
-	while (incomingIter != deserializedMessages.cend()) {
-		printTiming << concatToString("Extra item from deserialized messages: ", *incomingIter++);
-		throw internal_error_msg("Extra item(s) found in deserialized messages");
-	}
-
-	while (recordedIter != record.messages.cend()) {
-		printTiming << concatToString("Extra item from recorded messages: ", *recordedIter++);
-		throw internal_error_msg("Extra item(s) found in recorded messages");
-	}
-
-	validateUpdater(record.validation);
 }
 
 } // namespace ptxn::test

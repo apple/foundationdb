@@ -40,7 +40,7 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/run_tlog_server'
+    testsMatching = '/fdbserver/ptxn/test/peek_tlog_server'
 
     numProxies = 5
     numTLogs = 2
