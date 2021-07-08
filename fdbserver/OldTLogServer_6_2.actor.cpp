@@ -1444,6 +1444,19 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 			}
 		}
 
+		uint64_t PoppedVersionLag = logData->persistentDataDurableVersion - logData->queuePoppedVersion;
+  		if ( SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
+  			(logData->queuePoppedVersion > 0) && //avoid generating massive events at beginning
+  			(tagData->unpoppedRecovered || PoppedVersionLag >= SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { //when recovery or long lag
+  			TraceEvent("TLogPopDetails", logData->logId)
+  				.detail("Tag", tagData->tag.toString())
+  				.detail("UpTo", upTo)
+  				.detail("PoppedVersionLag", PoppedVersionLag)
+  				.detail("MinPoppedTag", logData->minPoppedTag.toString())
+  				.detail("QueuePoppedVersion", logData->queuePoppedVersion)
+  				.detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
+  				.detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
+  		}
 		if (upTo > logData->persistentDataDurableVersion)
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
 		//TraceEvent("TLogPop", self->dbgid).detail("Tag", tag.toString()).detail("To", upTo);
