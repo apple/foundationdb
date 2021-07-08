@@ -72,6 +72,7 @@ void prepareProxySerializedMessages(
     const CommitRecord& commitRecord,
     const Version& version,
     std::function<std::shared_ptr<ProxySubsequencedMessageSerializer>(StorageTeamID)> serializer) {
+
 	if (commitRecord.messages.find(version) == commitRecord.messages.end()) {
 		// Version not found, skips the serialization
 		return;
@@ -92,7 +93,15 @@ void prepareProxySerializedMessages(
 	}
 }
 
+void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
+                            const Version& version,
+                            const StorageTeamID& storageTeamID,
+                            CommitRecord& commitRecord) {
+	distributeMutationRefs(mutationRefs, version, std::vector<StorageTeamID>{ storageTeamID }, commitRecord);
+}
+
 bool isAllRecordsValidated(const CommitRecord& commitRecord) {
+	std::cout << " Check validation " << std::endl;
 	for (const auto& [_1, storageTeamTagMap] : commitRecord.tags) {
 		for (const auto& [_2, commitRecordTag] : storageTeamTagMap) {
 			if (!commitRecordTag.allValidated()) {

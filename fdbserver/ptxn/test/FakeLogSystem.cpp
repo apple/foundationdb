@@ -1,5 +1,5 @@
 /*
- * MockLogSystem.cpp
+ * FakeLogSystem.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,90 +18,90 @@
  * limitations under the License.
  */
 
-#include "fdbserver/MockLogSystem.h"
-#include "fdbserver/ptxn/TLogPeekCursor.actor.h" // for DEMO
-#include "fdbserver/ptxn/test/Utils.h"
+#include "fdbserver/ptxn/test/FakeLogSystem.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+namespace ptxn::test {
 
 const static bool LOG_METHOD_CALLS = false;
 
 static void logMethodName(std::string methodName) {
 	if (LOG_METHOD_CALLS) {
-		std::cout << "MockLogSystem::" << methodName << std::endl;
+		std::cout << "FakeLogSystem::" << methodName << std::endl;
 	}
 }
 
-MockLogSystem::MockLogSystem() {
+FakeLogSystem::FakeLogSystem() {
 	logMethodName(__func__);
 }
 
-MockLogSystem::MockLogSystem(const MockLogSystem& that) : cursor(that.cursor) {
+FakeLogSystem::FakeLogSystem(const FakeLogSystem& that) : cursor(that.cursor) {
 	logMethodName(__func__);
 }
 
-MockLogSystem& MockLogSystem::operator=(const MockLogSystem& that) {
+FakeLogSystem& FakeLogSystem::operator=(const FakeLogSystem& that) {
 	logMethodName(__func__);
 	cursor = that.cursor;
 	return *this;
 }
 
-void MockLogSystem::addref() {
+void FakeLogSystem::addref() {
 	logMethodName(__func__);
-	ReferenceCounted<MockLogSystem>::addref();
+	ReferenceCounted<FakeLogSystem>::addref();
 }
 
-void MockLogSystem::delref() {
+void FakeLogSystem::delref() {
 	logMethodName(__func__);
-	ReferenceCounted<MockLogSystem>::delref();
+	ReferenceCounted<FakeLogSystem>::delref();
 }
 
-std::string MockLogSystem::describe() const {
+std::string FakeLogSystem::describe() const {
 	logMethodName(__func__);
 	return std::string();
 }
 
-UID MockLogSystem::getDebugID() const {
+UID FakeLogSystem::getDebugID() const {
 	logMethodName(__func__);
 	return UID();
 }
 
-void MockLogSystem::toCoreState(DBCoreState& coreState) {
+void FakeLogSystem::toCoreState(DBCoreState& coreState) {
 	logMethodName(__func__);
 }
 
-bool MockLogSystem::remoteStorageRecovered() {
+bool FakeLogSystem::remoteStorageRecovered() {
 	logMethodName(__func__);
 	return false;
 }
 
-Future<Void> MockLogSystem::onCoreStateChanged() {
+Future<Void> FakeLogSystem::onCoreStateChanged() {
 	logMethodName(__func__);
 	return Future<Void>();
 }
 
-void MockLogSystem::coreStateWritten(const DBCoreState& newState) {
+void FakeLogSystem::coreStateWritten(const DBCoreState& newState) {
 	logMethodName(__func__);
 }
 
-Future<Void> MockLogSystem::onError() {
+Future<Void> FakeLogSystem::onError() {
 	logMethodName(__func__);
 	return Future<Void>();
 }
 
-Future<Version> MockLogSystem::push(Version prevVersion,
+Future<Version> FakeLogSystem::push(Version prevVersion,
                                     Version version,
                                     Version knownCommittedVersion,
                                     Version minKnownCommittedVersion,
                                     struct LogPushData& data,
                                     const SpanID& spanContext,
                                     Optional<UID> debugID,
-                                    Optional<ptxn::TLogGroupID> tLogGroup) {
+									Optional<ptxn::TLogGroupID> tLogGroup) {
 	logMethodName(__func__);
 	return Future<Version>();
 }
 
-Reference<ILogSystem::IPeekCursor> MockLogSystem::peek(UID dbgid,
+Reference<ILogSystem::IPeekCursor> FakeLogSystem::peek(UID dbgid,
                                                        Version begin,
                                                        Optional<Version> end,
                                                        Tag tag,
@@ -110,7 +110,7 @@ Reference<ILogSystem::IPeekCursor> MockLogSystem::peek(UID dbgid,
 	return Reference<IPeekCursor>();
 }
 
-Reference<ILogSystem::IPeekCursor> MockLogSystem::peek(UID dbgid,
+Reference<ILogSystem::IPeekCursor> FakeLogSystem::peek(UID dbgid,
                                                        Version begin,
                                                        Optional<Version> end,
                                                        std::vector<Tag> tags,
@@ -120,7 +120,7 @@ Reference<ILogSystem::IPeekCursor> MockLogSystem::peek(UID dbgid,
 }
 
 // Return mocked cursor.
-Reference<ILogSystem::IPeekCursor> MockLogSystem::peekSingle(UID dbgid,
+Reference<ILogSystem::IPeekCursor> FakeLogSystem::peekSingle(UID dbgid,
                                                              Version begin,
                                                              Tag tag,
                                                              Optional<ptxn::StorageTeamID> storageTeam,
@@ -129,12 +129,12 @@ Reference<ILogSystem::IPeekCursor> MockLogSystem::peekSingle(UID dbgid,
 	return cursor;
 }
 
-Reference<ILogSystem::IPeekCursor> MockLogSystem::peekLogRouter(UID dbgid, Version begin, Tag tag) {
+Reference<ILogSystem::IPeekCursor> FakeLogSystem::peekLogRouter(UID dbgid, Version begin, Tag tag) {
 	logMethodName(__func__);
 	return Reference<IPeekCursor>();
 }
 
-Reference<ILogSystem::IPeekCursor> MockLogSystem::peekTxs(UID dbgid,
+Reference<ILogSystem::IPeekCursor> FakeLogSystem::peekTxs(UID dbgid,
                                                           Version begin,
                                                           int8_t peekLocality,
                                                           Version localEnd,
@@ -143,55 +143,55 @@ Reference<ILogSystem::IPeekCursor> MockLogSystem::peekTxs(UID dbgid,
 	return Reference<IPeekCursor>();
 }
 
-Future<Version> MockLogSystem::getTxsPoppedVersion() {
+Future<Version> FakeLogSystem::getTxsPoppedVersion() {
 	logMethodName(__func__);
 	return Future<Version>();
 }
 
-Version MockLogSystem::getKnownCommittedVersion() {
+Version FakeLogSystem::getKnownCommittedVersion() {
 	logMethodName(__func__);
 	return 0;
 }
 
-Future<Void> MockLogSystem::onKnownCommittedVersionChange() {
+Future<Void> FakeLogSystem::onKnownCommittedVersionChange() {
 	logMethodName(__func__);
 	return Future<Void>();
 }
 
-void MockLogSystem::popTxs(Version upTo, int8_t popLocality) {
+void FakeLogSystem::popTxs(Version upTo, int8_t popLocality) {
 	logMethodName(__func__);
 }
 
-void MockLogSystem::pop(Version upTo, Tag tag, Version knownCommittedVersion, int8_t popLocality) {
+void FakeLogSystem::pop(Version upTo, Tag tag, Version knownCommittedVersion, int8_t popLocality) {
 	logMethodName(__func__);
 }
 
-Future<Void> MockLogSystem::confirmEpochLive(Optional<UID> debugID) {
-	logMethodName(__func__);
-	return Future<Void>();
-}
-
-Future<Void> MockLogSystem::endEpoch() {
+Future<Void> FakeLogSystem::confirmEpochLive(Optional<UID> debugID) {
 	logMethodName(__func__);
 	return Future<Void>();
 }
 
-Version MockLogSystem::getEnd() const {
+Future<Void> FakeLogSystem::endEpoch() {
+	logMethodName(__func__);
+	return Future<Void>();
+}
+
+Version FakeLogSystem::getEnd() const {
 	logMethodName(__func__);
 	return 0;
 }
 
-Version MockLogSystem::getBackupStartVersion() const {
+Version FakeLogSystem::getBackupStartVersion() const {
 	logMethodName(__func__);
 	return 0;
 }
 
-std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> MockLogSystem::getOldEpochTagsVersionsInfo() const {
+std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> FakeLogSystem::getOldEpochTagsVersionsInfo() const {
 	logMethodName(__func__);
 	return std::map<LogEpoch, EpochTagsVersionsInfo>();
 }
 
-Future<Reference<ILogSystem>> MockLogSystem::newEpoch(
+Future<Reference<ILogSystem>> FakeLogSystem::newEpoch(
     const RecruitFromConfigurationReply& recr,
     const Future<struct RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
     const DatabaseConfiguration& config,
@@ -200,88 +200,90 @@ Future<Reference<ILogSystem>> MockLogSystem::newEpoch(
     int8_t remoteLocality,
     const vector<Tag>& allTags,
     const Reference<AsyncVar<bool>>& recruitmentStalled,
-    Reference<TLogGroupCollection> tLogGroupCollection) {
+	TLogGroupCollectionRef tLogGroupCollection) {
 	logMethodName(__func__);
 	return Future<Reference<ILogSystem>>();
 }
 
-LogSystemConfig MockLogSystem::getLogSystemConfig() const {
+LogSystemConfig FakeLogSystem::getLogSystemConfig() const {
 	logMethodName(__func__);
 	return LogSystemConfig();
 }
 
-Standalone<StringRef> MockLogSystem::getLogsValue() const {
+Standalone<StringRef> FakeLogSystem::getLogsValue() const {
 	logMethodName(__func__);
 	return Standalone<StringRef>();
 }
 
-Future<Void> MockLogSystem::onLogSystemConfigChange() {
+Future<Void> FakeLogSystem::onLogSystemConfigChange() {
 	logMethodName(__func__);
 	return Future<Void>();
 }
 
-void MockLogSystem::getPushLocations(VectorRef<Tag> tags, vector<int>& locations, bool allLocations) const {
+void FakeLogSystem::getPushLocations(VectorRef<Tag> tags, vector<int>& locations, bool allLocations) const {
 	logMethodName(__func__);
 }
 
-bool MockLogSystem::hasRemoteLogs() const {
+bool FakeLogSystem::hasRemoteLogs() const {
 	logMethodName(__func__);
 	return false;
 }
 
-Tag MockLogSystem::getRandomRouterTag() const {
+Tag FakeLogSystem::getRandomRouterTag() const {
 	logMethodName(__func__);
 	return Tag();
 }
 
-int MockLogSystem::getLogRouterTags() const {
+int FakeLogSystem::getLogRouterTags() const {
 	logMethodName(__func__);
 	return 0;
 }
 
-Tag MockLogSystem::getRandomTxsTag() const {
+Tag FakeLogSystem::getRandomTxsTag() const {
 	logMethodName(__func__);
 	return Tag();
 }
 
-TLogVersion MockLogSystem::getTLogVersion() const {
+TLogVersion FakeLogSystem::getTLogVersion() const {
 	logMethodName(__func__);
 	return TLogVersion();
 }
 
-void MockLogSystem::stopRejoins() {
+void FakeLogSystem::stopRejoins() {
 	logMethodName(__func__);
 }
 
-Tag MockLogSystem::getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const {
+Tag FakeLogSystem::getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const {
 	logMethodName(__func__);
 	return Tag();
 }
 
-bool MockLogSystem::hasPseudoLocality(int8_t locality) const {
+bool FakeLogSystem::hasPseudoLocality(int8_t locality) const {
 	logMethodName(__func__);
 	return false;
 }
 
-Version MockLogSystem::popPseudoLocalityTag(Tag tag, Version upTo) {
+Version FakeLogSystem::popPseudoLocalityTag(Tag tag, Version upTo) {
 	logMethodName(__func__);
 	return 0;
 }
 
-void MockLogSystem::setBackupWorkers(const std::vector<InitializeBackupReply>& replies) {
+void FakeLogSystem::setBackupWorkers(const std::vector<InitializeBackupReply>& replies) {
 	logMethodName(__func__);
 }
 
-bool MockLogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
+bool FakeLogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
 	logMethodName(__func__);
 	return false;
 }
 
-LogEpoch MockLogSystem::getOldestBackupEpoch() const {
+LogEpoch FakeLogSystem::getOldestBackupEpoch() const {
 	logMethodName(__func__);
 	return 0;
 }
 
-void MockLogSystem::setOldestBackupEpoch(LogEpoch epoch) {
+void FakeLogSystem::setOldestBackupEpoch(LogEpoch epoch) {
 	logMethodName(__func__);
 }
+
+} // namespace ptxn::test

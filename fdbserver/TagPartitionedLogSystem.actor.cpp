@@ -38,7 +38,8 @@ LogSet::LogSet(const TLogSet& tLogSet)
   : tLogWriteAntiQuorum(tLogSet.tLogWriteAntiQuorum), tLogReplicationFactor(tLogSet.tLogReplicationFactor),
     tLogLocalities(tLogSet.tLogLocalities), tLogVersion(tLogSet.tLogVersion), tLogPolicy(tLogSet.tLogPolicy),
     isLocal(tLogSet.isLocal), locality(tLogSet.locality), startVersion(tLogSet.startVersion),
-    satelliteTagLocations(tLogSet.satelliteTagLocations) {
+    satelliteTagLocations(tLogSet.satelliteTagLocations),
+    storageTeamIDTLogGroupIDMapper(tLogSet.storageTeamIDTLogGroupIDMapper) {
 	for (const auto& log : tLogSet.tLogs) {
 		logServers.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(log));
 	}

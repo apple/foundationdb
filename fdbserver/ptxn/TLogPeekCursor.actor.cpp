@@ -230,6 +230,10 @@ bool StorageTeamPeekCursor::hasRemainingImpl() const {
 	return deserializerIter != deserializer.end();
 }
 
+//////////////////////////////////////////////////////////////////////////////////
+// ServerPeekCursor used for demo
+//////////////////////////////////////////////////////////////////////////////////
+
 ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> const& interf,
                                    Tag tag,
                                    StorageTeamID storageTeamId,
@@ -241,6 +245,7 @@ ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInte
   : interf(interf), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID), messageVersion(begin), end(end),
     hasMsg(false), rd(results.arena, results.data, Unversioned()), dbgid(deterministicRandom()->randomUniqueID()),
     poppedVersion(0), returnIfBlocked(returnIfBlocked), parallelGetMore(parallelGetMore) {
+
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	TraceEvent(SevDebug, "SPC_Starting", dbgid)
@@ -264,9 +269,15 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
     rd(results.arena, results.data, Unversioned()), messageVersion(messageVersion), end(end), messageAndTags(message),
     hasMsg(hasMsg), dbgid(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion),
     returnIfBlocked(false), parallelGetMore(false) {
+
 	TraceEvent(SevDebug, "SPC_Clone", dbgid);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
+
+	// Consume the message header
+	details::MessageHeader messageHeader;
+	rd >> messageHeader;
+
 	if (hasMsg)
 		nextMessage();
 
@@ -327,6 +338,7 @@ void ServerPeekCursor::nextMessage() {
 			return;
 		}
 	}
+
 	Subsequence subsequence;
 	rd >> subsequence;
 	messageVersion.sub = subsequence;
@@ -428,6 +440,8 @@ ACTOR Future<TLogPeekReply> recordRequestMetrics(ServerPeekCursor* self,
 }
 
 ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriority taskID) {
+	// Not supported in DEMO
+	ASSERT(false);
 	if (!self->interf || self->messageVersion >= self->end) {
 		if (self->hasMessage())
 			return Void();
@@ -479,7 +493,11 @@ ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriorit
 					if (res.popped.present())
 						self->poppedVersion =
 						    std::min(std::max(self->poppedVersion, res.popped.get()), self->end.version);
-					self->rd = ArenaReader(self->results.arena, self->results.data, Unversioned());
+					self->rd = ArenaReader(self->results.arena,
+					                       self->results.data,
+					                       IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+					details::MessageHeader messageHeader;
+					self->rd >> messageHeader;
 					LogMessageVersion skipSeq = self->messageVersion;
 					self->hasMsg = true;
 					self->nextMessage();
@@ -641,5 +659,9 @@ Optional<UID> ServerPeekCursor::getCurrentPeekLocation() const {
 Version ServerPeekCursor::popped() const {
 	return poppedVersion;
 }
+
+//////////////////////////////////////////////////////////////////////////////////
+// ServerPeekCursor used for demo -- end
+//////////////////////////////////////////////////////////////////////////////////
 
 } // namespace ptxn

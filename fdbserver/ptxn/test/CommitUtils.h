@@ -21,6 +21,7 @@
 #ifndef FDBSERVER_PTXN_TEST_GENERATEDCOMMITS_H
 #define FDBSERVER_PTXN_TEST_GENERATEDCOMMITS_H
 
+#include <functional>
 #include <unordered_map>
 #include <utility>
 #include <vector>

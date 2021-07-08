@@ -97,6 +97,8 @@ void delref(P* ptr) {
 template <class P>
 class Reference {
 public:
+	using element_type = P;
+
 	Reference() : ptr(nullptr) {}
 	explicit Reference(P* ptr) : ptr(ptr) {}
 	static Reference<P> addRef(P* ptr) {

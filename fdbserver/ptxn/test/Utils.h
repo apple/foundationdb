@@ -66,12 +66,14 @@ namespace print {
 
 void print(const TLogCommitRequest&);
 void print(const TLogCommitReply&);
+void print(const TLogGroup&);
 void print(const TLogPeekRequest&);
 void print(const TLogPeekReply&);
 void print(const TestDriverOptions&);
 void print(const CommitRecord&);
 void print(const ptxn::test::TestTLogPeekOptions&);
-void print(const TLogGroup&);
+
+void printCommitRecords(const std::vector<CommitRecord>&);
 
 // Prints timing per step
 class PrintTiming {
