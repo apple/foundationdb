@@ -152,7 +152,7 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 	    pFakeTLogContext->storageTeamMessages.end()) {
 
 		printTiming << "Team ID " << request.storageTeamID.toString() << " not found." << std::endl;
-		request.reply.sendError(teamid_not_found());
+		request.reply.sendError(storage_team_id_not_found());
 		return Void();
 	}
 

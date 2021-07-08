@@ -111,16 +111,19 @@ struct TLogPeekReply {
 
 	Optional<UID> debugID;
 
-	// Arena containing the serialized mutation data, see TLogStorageServerPeekSerializer
+	// Arena containing the serialized mutation data
 	Arena arena;
-	// StringRef referring the serialized mutation data, see TLogStorageServerPeekSerializer
+	// StringRef referring the serialized mutation data
 	StringRef data;
 
-	Version end;
+	Optional<Version> beginVersion;
+	Version endVersion;
+
 	Optional<Version> popped;
+
 	Version maxKnownVersion;
 	Version minKnownCommittedVersion;
-	Optional<Version> begin;
+
 	bool onlySpilled = false;
 
 	TLogPeekReply() = default;
@@ -129,8 +132,16 @@ struct TLogPeekReply {
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, debugID, arena, data, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled);
+		serializer(ar,
+		           debugID,
+		           arena,
+		           data,
+		           beginVersion,
+		           endVersion,
+		           popped,
+		           maxKnownVersion,
+		           minKnownCommittedVersion,
+		           onlySpilled);
 	}
 };
 
@@ -161,8 +172,17 @@ struct TLogPeekRequest {
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, debugID, arena, beginVersion, endVersion, storageTeamID, tag, returnIfBlocked, onlySpilled, sequence, reply);
+		serializer(ar,
+		           debugID,
+		           arena,
+		           beginVersion,
+		           endVersion,
+		           storageTeamID,
+		           tag,
+		           returnIfBlocked,
+		           onlySpilled,
+		           sequence,
+		           reply);
 	}
 };
 

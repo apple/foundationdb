@@ -41,7 +41,6 @@ void SubsequencedMessageSerializer::startVersionWriting(const Version& version) 
 		header.firstVersion = version;
 	}
 	header.lastVersion = version;
-	header.length = serializer.getTotalBytes() - serializer.getMainHeaderBytes();
 
 	sectionHeader.version = version;
 
@@ -105,6 +104,22 @@ const Subsequence& SubsequencedMessageSerializer::getCurrentSubsequence() const 
 	return sectionHeader.lastSubsequence;
 }
 
+void SubsequencedMessageSerializer::writeSection(StringRef serialized) {
+	ASSERT(serializer.isSectionCompleted());
+
+	const auto incomingSectionHeader = serializer.writeSerializedSection(serialized);
+	if (header.firstVersion == invalidVersion) {
+		header.firstVersion = incomingSectionHeader.version;
+	} else {
+		ASSERT(header.lastVersion < incomingSectionHeader.version);
+	}
+	header.lastVersion = incomingSectionHeader.version;
+
+	serializer.completeSectionWriting();
+
+	header.length = serializer.getTotalBytes() - serializer.getMainHeaderBytes();
+}
+
 void SubsequencedMessageSerializer::completeVersionWriting() {
 	serializer.completeSectionWriting();
 
@@ -139,6 +154,23 @@ Standalone<StringRef> SubsequencedMessageSerializer::getSerialized() {
 }
 
 size_t SubsequencedMessageSerializer::getTotalBytes() const {
+	return serializer.getTotalBytes();
+}
+
+TLogSubsequencedMessageSerializer::TLogSubsequencedMessageSerializer(const StorageTeamID& storageTeamID_)
+  : serializer(storageTeamID_) {}
+
+void TLogSubsequencedMessageSerializer::writeSerializedVersionSection(StringRef serialized) {
+	serializer.writeSection(serialized);
+}
+
+Standalone<StringRef> TLogSubsequencedMessageSerializer::getSerialized() {
+	serializer.completeMessageWriting();
+
+	return serializer.getSerialized();
+}
+
+size_t TLogSubsequencedMessageSerializer::getTotalBytes() const {
 	return serializer.getTotalBytes();
 }
 
@@ -181,7 +213,7 @@ void ProxySubsequencedMessageSerializer::write(const StringRef& serialized, cons
 	serializers.at(storageTeamID).write(subsequence++, serialized);
 }
 
-StringRef ProxySubsequencedMessageSerializer::getSerialized(const StorageTeamID& storageTeamID) {
+Standalone<StringRef> ProxySubsequencedMessageSerializer::getSerialized(const StorageTeamID& storageTeamID) {
 	auto& serializer = serializers.at(storageTeamID);
 
 	serializer.completeVersionWriting();
@@ -198,39 +230,34 @@ std::unordered_map<StorageTeamID, Standalone<StringRef>> ProxySubsequencedMessag
 	return result;
 }
 
-SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const StringRef serialized_)
-  : endIterator(serialized_, true) {
-	reset(serialized_);
-}
+namespace details {
 
-void SubsequencedMessageDeserializer::reset(const StringRef serialized_) {
+void SubsequencedMessageDeserializerBase::resetImpl(const StringRef serialized_) {
 	ASSERT(serialized_.size() > 0);
 
 	serialized = serialized_;
-
-	DeserializerImpl deserializer(serialized);
-	header = deserializer.deserializeAsMainHeader();
-
-	endIterator = iterator(serialized, true);
+	header = ptxn::details::readSerializedHeader<MessageHeader>(serialized);
 }
 
-const StorageTeamID& SubsequencedMessageDeserializer::getStorageTeamID() const {
+const StorageTeamID& SubsequencedMessageDeserializerBase::getStorageTeamID() const {
 	return header.storageTeamID;
 }
 
-size_t SubsequencedMessageDeserializer::getNumVersions() const {
+size_t SubsequencedMessageDeserializerBase::getNumVersions() const {
 	return header.numItems;
 }
 
-const Version& SubsequencedMessageDeserializer::getFirstVersion() const {
+const Version& SubsequencedMessageDeserializerBase::getFirstVersion() const {
 	return header.firstVersion;
 }
 
-const Version& SubsequencedMessageDeserializer::getLastVersion() const {
+const Version& SubsequencedMessageDeserializerBase::getLastVersion() const {
 	return header.lastVersion;
 }
-SubsequencedMessageDeserializer::iterator::iterator(StringRef serialized_,
-                                                    bool isEndIterator)
+
+} // namespace details
+
+SubsequencedMessageDeserializer::iterator::iterator(const StringRef serialized_, bool isEndIterator)
   : deserializer(serialized_), rawSerializedData(serialized_) {
 
 	header = deserializer.deserializeAsMainHeader();
@@ -314,6 +341,18 @@ SubsequencedMessageDeserializer::iterator SubsequencedMessageDeserializer::itera
 	iterator prev(*this);
 	this->operator++();
 	return prev;
+}
+
+SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const StringRef serialized_)
+  : endIterator(serialized_, true) {
+
+	reset(serialized_);
+}
+
+void SubsequencedMessageDeserializer::reset(const StringRef serialized_) {
+	details::SubsequencedMessageDeserializerBase::resetImpl(serialized_);
+
+	endIterator = iterator(serialized, true);
 }
 
 SubsequencedMessageDeserializer::iterator SubsequencedMessageDeserializer::begin() const {
