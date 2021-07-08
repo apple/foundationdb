@@ -49,6 +49,10 @@ std::vector<StorageTeamID> generateRandomStorageTeamIDs(const int numStorageTeam
 	return result;
 }
 
+std::string getRandomAlnum(int lower, int upper) {
+	return deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(lower, upper));
+}
+
 namespace print {
 
 namespace {
@@ -128,18 +132,6 @@ void print(const TestDriverOptions& option) {
 	          << formatKVPair("Message Transfer Model", option.transferModel) << std::endl;
 }
 
-void print(const CommitRecord& record) {
-	std::cout << std::endl << ">> ptxn/test/Driver.h:CommitRecord:" << std::endl;
-
-	std::cout << formatKVPair("Verson", record.version) << std::endl
-	          << formatKVPair("storageTeamID", record.storageTeamID) << std::endl;
-
-	std::cout << formatKVPair("Muations", record.messages.size()) << std::endl;
-	for (const auto& message : record.messages) {
-		std::cout << "\t" << message << std::endl;
-	}
-}
-
 void print(const ptxn::test::TestTLogPeekOptions& option) {
 	std::cout << std::endl << ">> ptxn/test//Driver.actor.cpp:DriverTestOptions:" << std::endl;
 
@@ -148,36 +140,15 @@ void print(const ptxn::test::TestTLogPeekOptions& option) {
 	          << formatKVPair("Intial version", option.initialVersion) << std::endl;
 }
 
-void printCommitRecords(const std::vector<CommitRecord>& records) {
-	std::cout << ">> ptxn/test/Driver.h:std::vector<CommitRecord>:" << std::endl;
-	Version currentVersion = 0;
-	for (const auto& record : records) {
-		if (record.version != currentVersion) {
-			std::cout << "\n\tVersion: " << record.version << "\n\n";
-			currentVersion = record.version;
-		}
-		std::cout << "\t\tTeam ID: " << record.storageTeamID.toString() << std::endl;
-		for (const auto& message : record.messages) {
-			std::cout << "\t\t\t" << message << std::endl;
-		}
-	}
-}
-
-void printNotValidatedRecords(const std::vector<CommitRecord>& records) {
-	std::cout << "Unvalidated commits: \n\n";
-	for (const auto& record : records) {
-		if (record.validation.validated())
-			continue;
-		std::cout << "\tVersion: " << record.version << "\tTeam ID: " << record.storageTeamID.toString() << std::endl;
-		for (const auto& message : record.messages) {
-			std::cout << "\t\t\t" << message.toString() << std::endl;
-		}
-
-		if (!record.validation.tLogValidated) {
-			std::cout << "\tTLog has not validated the reception of this commit." << std::endl;
-		}
-		if (!record.validation.storageServerValidated) {
-			std::cout << "\tStorageServer has not validated the reception of this commit." << std::endl;
+void printCommitRecords(const CommitRecord& record) {
+	std::cout << ">> ptxn/test/CommitUtils.h:CommitRecord:" << std::endl;
+	for (const auto& [version, storageTeamIDMessageMap] : record.messages) {
+		std::cout << "\n\tVersion: " << version << std::endl;
+		for (const auto& [storageTeamID, subsequenceMessage] : storageTeamIDMessageMap) {
+			std::cout << "\t\tStorage Team ID: " << storageTeamID.toString() << std::endl;
+			for (const auto& [subsequence, message] : subsequenceMessage) {
+				std::cout << "\t\t\t" << message << std::endl;
+			}
 		}
 	}
 }

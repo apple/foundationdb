@@ -24,102 +24,33 @@
 #include <iostream>
 #include <vector>
 
-#include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/MessageSerializer.h"
-#include "fdbserver/ptxn/test/Utils.h"
+#include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/StorageServerInterface.h"
+#include "fdbserver/ptxn/test/CommitUtils.h"
+#include "fdbserver/ptxn/test/Utils.h"
 
 #include "flow/actorcompiler.h" // has to be the last file included
 
 namespace ptxn::test {
 
-// Generates numMutations random mutations, store them in mutations.
-void generateRandomMutations(const Version& initialVersion,
-                             const int numMutations,
-                             Arena& mutationRefArena,
-                             VectorRef<VersionSubsequenceMessage>& mutations) {
-	print::PrintTiming printTiming("generateRandomMutations");
-	Version currentVersion = initialVersion;
-	Subsequence currentSubsequence = 1;
-	for (int i = 0; i < numMutations; ++i) {
-		// Create a new version
-		if (deterministicRandom()->randomInt(0, 10) == 0) {
-			currentVersion += deterministicRandom()->randomInt(1, 5);
-			currentSubsequence = 1;
-		}
-
-		StringRef key = StringRef(mutationRefArena, deterministicRandom()->randomAlphaNumeric(10));
-		StringRef value = StringRef(
-		    mutationRefArena, deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(10, 1000)));
-
-		mutations.emplace_back(
-		    mutationRefArena, currentVersion, currentSubsequence++, MutationRef(MutationRef::SetValue, key, value));
-	}
-
-	printTiming << "Generated " << numMutations << " random mutations, version range [" << mutations.front().version
-	            << "," << mutations.back().version << " ]." << std::endl;
-}
-
-// Randomly distributes the mutations to teams in the same TLog server
-void distributeMutations(Arena& arena,
-                         std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMessage>>& storageTeamMessages,
-                         const std::vector<StorageTeamID>& storageTeamIDs,
-                         const VectorRef<VersionSubsequenceMessage>& messages) {
-	print::PrintTiming printTiming("distributeMutations");
-	printTiming << "Distributing " << messages.size() << " mutations to " << storageTeamIDs.size() << "teams."
-	            << std::endl;
-
-	for (const auto& message : messages) {
-		const StorageTeamID& storageTeamID = randomlyPick(storageTeamIDs);
-		storageTeamMessages[storageTeamID].push_back(arena, message);
-	}
-
-	for (const auto& storageTeamID : storageTeamIDs) {
-		printTiming << "Team " << storageTeamID.toString() << " has " << storageTeamMessages[storageTeamID].size()
-		            << " mutations." << std::endl;
-	}
-}
-
-void fillTLogWithRandomMutations(std::shared_ptr<FakeTLogContext> pContext,
-                                 const Version& initialVersion,
-                                 const int numMutations,
-                                 const int numStorageTeams) {
-	// Set up teams
-	if (numStorageTeams != 0) {
-		pContext->storageTeamIDs.resize(numStorageTeams);
-		for (auto& storageTeamID : pContext->storageTeamIDs) {
-			storageTeamID = getNewStorageTeamID();
-		}
-	}
-
-	// Generate mutations
-	pContext->persistenceArena = Arena();
-	pContext->storageTeamMessages.clear();
-	pContext->allMessages.resize(pContext->persistenceArena, 0);
-
-	generateRandomMutations(initialVersion, numMutations, pContext->persistenceArena, pContext->allMessages);
-	distributeMutations(
-	    pContext->persistenceArena, pContext->storageTeamMessages, pContext->storageTeamIDs, pContext->allMessages);
-
-	// Update versions
-	pContext->versions.clear();
-	for (const auto& item : pContext->allMessages) {
-		pContext->versions.push_back(item.version);
-	}
-	std::sort(std::begin(pContext->versions), std::end(pContext->versions));
-	auto last = std::unique(std::begin(pContext->versions), std::end(pContext->versions));
-	pContext->versions.erase(last, std::end(pContext->versions));
-}
-
 void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
                               const TLogCommitRequest& commitRequest) {
+	const Version& version = commitRequest.version;
+	const StorageTeamID& storageTeamID = commitRequest.storageTeamID;
 	SubsequencedMessageDeserializer deserializer(commitRequest.messages);
 
-	verifyMessagesInRecord(pFakeTLogContext->pTestDriverContext->commitRecord,
-	                       commitRequest.version,
-	                       commitRequest.storageTeamID,
-	                       deserializer,
-	                       [](CommitValidationRecord& record) { record.tLogValidated = true; });
+	// Check the committed data matches the record
+	{
+		int index = 0;
+		for (auto vsm : deserializer) {
+			const auto& message = vsm.message;
+			// We skip the subsequence check, as SpanContextMessage is broadcasted to all storage teams, it will be
+			// interfering the subsequence of mutationRefs.
+			ASSERT(message == pFakeTLogContext->pTestDriverContext->commitRecord.messages[version][storageTeamID][index++].second);
+		}
+		pFakeTLogContext->pTestDriverContext->commitRecord.tags[version][storageTeamID].tLogValidated = true;
+	}
 
 	// "Persist" the data into memory
 	for (const auto& vsm : deserializer) {

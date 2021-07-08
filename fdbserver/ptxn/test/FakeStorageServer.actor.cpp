@@ -40,12 +40,18 @@ ACTOR Future<Void> fakeStorageServer_PassivelyReceive(
 
 	loop choose {
 		when(StorageServerPushRequest request = waitNext(pStorageServerInterface->pushRequests.getFuture())) {
+			const Version version = request.version;
+			const StorageTeamID storageTeamID = request.storageTeamID;
 			SubsequencedMessageDeserializer deserializer(request.messages);
-			verifyMessagesInRecord(pTestDriverContext->commitRecord,
-			                       request.version,
-			                       request.storageTeamID,
-			                       deserializer,
-			                       [](CommitValidationRecord& record) { record.storageServerValidated = true; });
+			int index = 0;
+			for (auto vsm : deserializer) {
+				const auto& message = vsm.message;
+				// We skip the subsequence check, as SpanContextMessage is broadcasted to all storage teams, it will be
+				// interfering the subsequence of mutationRefs.
+				ASSERT(message == pTestDriverContext->commitRecord.messages[version][storageTeamID][index++].second);
+			}
+			pTestDriverContext->commitRecord.tags[version][storageTeamID].storageServerValidated = true;
+
 			request.reply.send(StorageServerPushReply());
 		}
 	}

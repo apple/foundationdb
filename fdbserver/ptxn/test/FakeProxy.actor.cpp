@@ -25,6 +25,7 @@
 #include <utility>
 
 #include "fdbserver/ptxn/MessageSerializer.h"
+#include "fdbserver/ptxn/test/CommitUtils.h"
 #include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/test/Utils.h"
 #include "fdbserver/ptxn/TLogInterface.h"
@@ -40,84 +41,64 @@ const int MAX_CHECK_TIMES = 10;
 
 namespace {
 
-std::vector<std::pair<StorageTeamID, Message>> prepareMessage(const std::vector<StorageTeamID>& storageTeamIDs,
-                                                              Arena& mutationsArena) {
-	std::vector<std::pair<StorageTeamID, Message>> messages;
-	for (int _ = 0; _ < deterministicRandom()->randomInt(1, 12); ++_) {
-		StorageTeamID storageTeamID = randomlyPick(storageTeamIDs);
+const int NUM_MESSAGE_PER_COMMIT = 100;
 
-		messages.emplace_back(randomlyPick(storageTeamIDs),
-		                      Message(std::in_place_type<MutationRef>,
-		                              mutationsArena,
-		                              MutationRef::SetValue,
-		                              StringRef(format("Key%d", deterministicRandom()->randomInt(0, 100))),
-		                              StringRef(format("Value%d", deterministicRandom()->randomInt(0, 100)))));
-	}
-
-	return messages;
-}
-
-void recordMessages(const std::vector<std::pair<StorageTeamID, Message>>& messages,
-                    const Version& version,
-                    std::vector<CommitRecord>& commitRecord) {
-
-	std::unordered_map<StorageTeamID, std::vector<Message>> storageTeamMessages;
-	for (const auto& [storageTeamID, message] : messages) {
-		storageTeamMessages[storageTeamID].push_back(message);
-	}
-	for (auto& [storageTeamID, messages] : storageTeamMessages) {
-		commitRecord.emplace_back(version, storageTeamID, std::move(messages));
-	}
+void prepareMessageForVersion(const Version& version,
+                              const int numMessages,
+                              const std::vector<StorageTeamID> storageTeamIDs,
+                              CommitRecord& commitRecord) {
+	Arena& arena = commitRecord.messageArena;
+	VectorRef<MutationRef> mutationRefs;
+	generateMutationRefs(numMessages, arena, mutationRefs);
+	distributeMutationRefs(mutationRefs, version, storageTeamIDs, commitRecord);
 }
 
 } // anonymous namespace
 
 ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext) {
+	state print::PrintTiming printTiming(concatToString("fakeProxy ", pFakeProxyContext->proxyID));
+
 	state std::shared_ptr<TestDriverContext> pTestDriverContext = pFakeProxyContext->pTestDriverContext;
 	state std::shared_ptr<MasterInterface> pSequencerInterface =
 	    pFakeProxyContext->pTestDriverContext->sequencerInterface;
-	state int numStorageTeams = pFakeProxyContext->pTestDriverContext->numStorageTeamIDs;
-	state std::vector<std::pair<StorageTeamID, Message>> fakeMessages;
-	state std::vector<CommitRecord>& commitRecord = pFakeProxyContext->pTestDriverContext->commitRecord;
+	state std::vector<StorageTeamID>& storageTeamIDs = pFakeProxyContext->pTestDriverContext->storageTeamIDs;
+	state CommitRecord& commitRecord = pFakeProxyContext->pTestDriverContext->commitRecord;
+
 	state int version = 0;
 	state int commitCount = 0;
 	state std::vector<Future<TLogCommitReply>> tLogCommitReplies;
-	state print::PrintTiming printTiming(concatToString("fakeProxy ", pFakeProxyContext->proxyID));
 
 	loop {
 		printTiming << "Commit " << commitCount << std::endl;
-
-		fakeMessages = prepareMessage(pTestDriverContext->storageTeamIDs, pTestDriverContext->mutationsArena);
 
 		// Pre-resolution: get the version of the commit
 		GetCommitVersionRequest commitVersionRequest(UID(), commitCount, commitCount - 1, UID());
 		state GetCommitVersionReply commitVersionReply =
 		    wait(pSequencerInterface->getCommitVersion.getReply(commitVersionRequest));
+		version = commitVersionReply.version;
 
-		recordMessages(fakeMessages, commitVersionReply.version, commitRecord);
+		// Prepare the mutations -- since this is a test, the mutations are generated *AFTER* the version is retrieved.
+		prepareMessageForVersion(version, NUM_MESSAGE_PER_COMMIT, storageTeamIDs, commitRecord);
 
 		// Resolve
 		// FIXME use the resolver role
-		/*
-		ResolveTransactionBatchRequest resolveRequest;
-		resolveRequest.prevVersion = commitVersionReply.prevVersion;
-		resolveRequest.version = commitVersionReply.version;
-		resolveRequest.lastReceivedVersion = commitVersionReply.prevVersion;
-		// FIXME we do not need all teams
-		resolveRequest.teams = pTestDriverContext->storageTeamIDs;
-		state ResolveTransactionBatchReply resolveReply =
-		    wait(randomlyPick(pTestDriverContext->resolverInterfaces)->resolve.getReply(resolveRequest));
-		    */
+		// ResolveTransactionBatchRequest resolveRequest;
+		// resolveRequest.prevVersion = commitVersionReply.prevVersion;
+		// resolveRequest.version = commitVersionReply.version;
+		// resolveRequest.lastReceivedVersion = commitVersionReply.prevVersion;
+		// // FIXME we do not need all teams
+		// resolveRequest.teams = pTestDriverContext->storageTeamIDs;
+		// state ResolveTransactionBatchReply resolveReply =
+		// wait(randomlyPick(pTestDriverContext->resolverInterfaces)->resolve.getReply(resolveRequest));
 
 		// TLog
-		ProxySubsequencedMessageSerializer serializer(commitVersionReply.version);
-		for (const auto& [storageTeamID, message] : fakeMessages) {
-			serializer.write(std::get<MutationRef>(message), storageTeamID);
-		}
-
+		ProxySubsequencedMessageSerializer serializer(version);
+		prepareProxySerializedMessages(commitRecord, version, serializer);
 		std::unordered_map<StorageTeamID, Standalone<StringRef>> serialized = serializer.getAllSerialized();
+
 		for (const auto& [storageTeamID, messages] : serialized) {
-			auto commitVersionPair = pTestDriverContext->getCommitVersionPair(storageTeamID, commitVersionReply.version);
+			auto commitVersionPair =
+			    pTestDriverContext->getCommitVersionPair(storageTeamID, commitVersionReply.version);
 			printTiming << commitVersionReply.prevVersion << '\t' << commitVersionReply.version << std::endl;
 			printTiming << storageTeamID.toString() << '\t' << commitVersionPair.first << '\t'
 			            << commitVersionPair.second << std::endl;
@@ -127,8 +108,6 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 			                          messages,
 			                          commitVersionPair.first,
 			                          commitVersionPair.second,
-			                          // commitVersionReply.prevVersion,
-			                          // commitVersionReply.version,
 			                          0,
 			                          0,
 			                          Optional<UID>(deterministicRandom()->randomUniqueID()));
@@ -158,7 +137,6 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 		}
 		wait(delay(CHECK_PERSIST_INTERVAL));
 	}
-
 	return Void();
 }
 

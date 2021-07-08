@@ -57,19 +57,9 @@ struct FakeTLogContext {
 	// keep its own version of data, to simulate the "persistence" behavior.
 	Arena persistenceArena;
 
-	// All mutations stored in the TLog
-	VectorRef<VersionSubsequenceMessage> allMessages;
-
-	// Mutations grouped by teams
+	// Deseriqlized messages grouped by teams
 	std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMessage>> storageTeamMessages;
 };
-
-// Fill the FakeTLog server with random mutations
-// If numStorageTeams is 0, the exiting storageTeamIDs will be used.
-void fillTLogWithRandomMutations(std::shared_ptr<FakeTLogContext> pContext,
-                                 const Version& initialVersion,
-                                 const int numMutations,
-                                 const int numStorageTeams = 0);
 
 ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeTLogContext);
 ACTOR Future<Void> fakeTLog_PassivelyProvide(std::shared_ptr<FakeTLogContext> pFakeTLogContext);
