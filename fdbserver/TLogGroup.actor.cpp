@@ -119,7 +119,7 @@ TLogGroupRef TLogGroupCollection::selectFreeGroup() {
 }
 
 bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group) {
-	ASSERT(storageTeamToTLogGroupMap.find(teamId) != storageTeamToTLogGroupMap.end());
+	ASSERT(storageTeamToTLogGroupMap.find(teamId) == storageTeamToTLogGroupMap.end());
 	storageTeamToTLogGroupMap[teamId] = group;
 	group->assignStorageTeam(teamId);
 	return true;
@@ -153,12 +153,35 @@ void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store) {
 	}
 }
 
-void TLogGroupCollection::seedTLogGroups(Arena& arena,
-                                         CommitTransactionRef& tr,
-                                         vector<StorageServerInterface> servers) {
+void TLogGroupCollection::seedTLogGroupAssignment(Arena& arena,
+                                                  CommitTransactionRef& tr,
+                                                  vector<StorageServerInterface> servers) {
 
-	// TODO (tLogGroup): Assign storage team to tLogGorup initially, when database was first created. e.g.
-	// seedShardServers.
+	// Collect UID of SS
+	std::vector<UID> serverSrcUID;
+	serverSrcUID.reserve(servers.size());
+	for (auto& s : servers) {
+		serverSrcUID.push_back(s.id());
+	}
+
+	// Step 1: Create the first storage server team.
+	auto teamId = deterministicRandom()->randomUniqueID();
+	tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(serverSrcUID));
+
+	// Step 2: Map from SS to teamID.
+	for (const auto& ss : serverSrcUID) {
+		Key teamIdKey = storageServerToTeamIdKey(ss).withSuffix(BinaryWriter::toValue(teamId, Unversioned()));
+		BinaryWriter wr(Unversioned());
+		wr << 1;
+		wr << teamId;
+		tr.set(arena, teamIdKey, wr.toValue());
+	}
+
+	// Step 3: Assign the storage team to a TLogGroup (Storage Team -> TLogGroup).
+	TLogGroupRef group = selectFreeGroup();
+	tr.set(arena, storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(group->id(), Unversioned()));
+	assignStorageTeam(teamId, group);
+	storageTeams[teamId] = serverSrcUID;
 }
 
 void TLogGroupCollection::initializeOrRecoverStorageTeamAssignments(Database cx) {
@@ -256,6 +279,7 @@ ACTOR Future<Void> TLogGroupCollection::initializeOrRecoverStorageTeamAssignment
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr.set(storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(group->id(), Unversioned()));
 						wait(tr.commit());
+						break;
 					} catch (Error& e) {
 						if (e.code() == error_code_actor_cancelled) {
 							throw;
@@ -290,6 +314,8 @@ ACTOR Future<Void> TLogGroupCollection::initializeOrRecoverStorageTeamAssignment
 			TraceEvent(SevWarn, "TLogGroupMonitorError");
 		}
 	}
+
+	return Void();
 }
 
 void TLogGroup::addServer(const TLogWorkerDataRef& workerData) {
