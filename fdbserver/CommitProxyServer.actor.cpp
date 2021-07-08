@@ -480,8 +480,8 @@ struct CommitBatchContext {
 
 	double commitStartTime;
 
-	std::set<uint16_t> locSet; // the set of tlog locations written to in the mutation.
-	std::set<Tag> tagSet; // the set of tags written to in the mutation.
+	std::set<uint16_t> writtenTLogs; // the set of tlog locations written to in the mutation.
+	std::set<Tag> writtenTags; // the set of tags written to in the mutation.
 
 	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
 
@@ -878,7 +878,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 ACTOR Future<Void> getTPCV(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	GetTlogPrevCommitVersionReply rep = wait(brokenPromiseToNever(
-	    pProxyCommitData->master.getTlogPrevCommitVersion.getReply(GetTlogPrevCommitVersionRequest(self->locSet))));
+	    pProxyCommitData->master.getTlogPrevCommitVersion.getReply(GetTlogPrevCommitVersionRequest(self->writtenTLogs))));
 	// TraceEvent("GetTlogPrevCommitVersionRequest");
 	return Void();
 }
@@ -959,9 +959,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.saveTags(self->tagSet);
+				self->toCommit.saveTags(self->writtenTags);
 				self->toCommit.writeTypedMessage(m);
-				self->toCommit.saveLocations(self->locSet, self->tagSet);
+				self->toCommit.saveLocations(self->writtenTLogs);
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
@@ -1017,9 +1017,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.saveTags(self->tagSet);
+				self->toCommit.saveTags(self->writtenTags);
 				self->toCommit.writeTypedMessage(m);
-				self->toCommit.saveLocations(self->locSet, self->tagSet);
+				self->toCommit.saveLocations(self->writtenTLogs);
 			} else {
 				UNREACHABLE();
 			}
@@ -1299,16 +1299,16 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// self->committedVersion.
 	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // A later version was reported committed first
 	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
-		state Optional<std::set<Tag>> tagSet;
+		state Optional<std::set<Tag>> writtenTags;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-			tagSet = self->tagSet;
+			writtenTags = self->writtenTags;
 		}
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 		    ReportRawCommittedVersionRequest(self->commitVersion,
 		                                     self->lockedAfter,
 		                                     self->metadataVersionAfter,
 		                                     pProxyCommitData->minKnownCommittedVersion,
-		                                     tagSet),
+		                                     writtenTags),
 		    TaskPriority::ProxyMasterVersionReply));
 	}
 	if (self->commitVersion > pProxyCommitData->committedVersion.get()) {
