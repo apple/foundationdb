@@ -1248,10 +1248,10 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			when(ReportRawCommittedVersionRequest req =
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
 				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.tagSet.present()) {
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
 					if (req.version > self->ssVersionVector.maxVersion) {
 						// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-						self->ssVersionVector.setVersions(req.tagSet.get(), req.version);
+						self->ssVersionVector.setVersions(req.writtenTags.get(), req.version);
 					}
 				}
 				if (req.version > self->liveCommittedVersion) {
@@ -1265,10 +1265,10 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			when(GetTlogPrevCommitVersionRequest req =
 			         waitNext(self->myInterface.getTlogPrevCommitVersion.getFuture())) {
 				GetTlogPrevCommitVersionReply reply;
-				for (uint16_t loc : req.locSet) {
+				for (uint16_t tLog : req.writtenTLogs) {
 					// TraceEvent("Received GetTlogPrevCommitVersionRequest").detail("Loc", loc);
-					if (self->tpcvMap.find(loc) != self->tpcvMap.end()) {
-						reply.tpcvMap[loc] = self->tpcvMap[loc];
+					if (self->tpcvMap.find(tLog) != self->tpcvMap.end()) {
+						reply.tpcvMap[tLog] = self->tpcvMap[tLog];
 					}
 				}
 				req.reply.send(reply);
