@@ -16,7 +16,7 @@ if(WIX_FOUND)
             -DVERSION=${CMAKE_PROJECT_VERSION}
             -DVERSION_NAME=${FDB_VERSION}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/generate_wxs.cmake
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/FDBInstaller.wxs ${CMAKE_CURRENT_SOURCE_DIR}/generate_wsx.cmake
+    DEPENDS ${CMAKE_SOURCE_DIR}/packaging/msi/FDBInstaller.wxs ${CMAKE_SOURCE_DIR}/packaging/msi/generate_wxs.cmake
     COMMENT "Generate WIX file")
   add_custom_target(wix_file DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.wxs)
   add_custom_command(

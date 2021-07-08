@@ -16,7 +16,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-cmake_minimum_required(VERSION 3.13)
+if(WIN32)
+  cmake_minimum_required(VERSION 3.15)
+else()
+  cmake_minimum_required(VERSION 3.13)
+endif()
+
 project(foundationdb
   VERSION 7.1.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
