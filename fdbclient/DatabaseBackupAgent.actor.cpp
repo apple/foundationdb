@@ -3106,7 +3106,7 @@ public:
 					state std::string logVersionText
 					    = logVersionKey.present() 
 					    ? ". Last log version is " + format("%lld", BinaryReader::fromStringRef<Version>(logVersionKey.get(), Unversioned())) 
-					    : "";
+					    : "unset";
 					Optional<Key> backupKeysPacked = wait(fBackupKeysPacked);
 
 					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
