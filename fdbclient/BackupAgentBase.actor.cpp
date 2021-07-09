@@ -123,6 +123,7 @@ const Key BackupAgentBase::keyConfigBackupRanges = "config_backup_ranges"_sr;
 const Key BackupAgentBase::keyConfigStopWhenDoneKey = "config_stop_when_done"_sr;
 const Key BackupAgentBase::keyStateStop = "state_stop"_sr;
 const Key BackupAgentBase::keyStateStatus = "state_status"_sr;
+const Key BackupAgentBase::keyStateLogBeginVersion = "last_begin_version"_sr;
 const Key BackupAgentBase::keyLastUid = "last_uid"_sr;
 const Key BackupAgentBase::keyBeginKey = "beginKey"_sr;
 const Key BackupAgentBase::keyEndKey = "endKey"_sr;
