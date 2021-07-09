@@ -28,7 +28,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-DEFINE_BOOLEAN_PARAM(IsTest);
+FDB_DEFINE_BOOLEAN_PARAM(IsTest);
 
 namespace {
 

@@ -24,8 +24,8 @@
 #include <cmath>
 #include <cinttypes>
 
-BOOLEAN_PARAM(IsSimulated);
-BOOLEAN_PARAM(Randomize);
+FDB_BOOLEAN_PARAM(IsSimulated);
+FDB_BOOLEAN_PARAM(Randomize);
 
 FlowKnobs::FlowKnobs(Randomize randomize, IsSimulated isSimulated) {
 	initialize(randomize, isSimulated);

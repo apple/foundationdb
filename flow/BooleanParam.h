@@ -22,25 +22,25 @@
 
 #include "flow/Trace.h"
 
-#define DECLARE_BOOLEAN_PARAM(ParamName)                                                                               \
+#define FDB_DECLARE_BOOLEAN_PARAM(ParamName)                                                                           \
 	class ParamName {                                                                                                  \
 		bool value;                                                                                                    \
                                                                                                                        \
 	public:                                                                                                            \
 		explicit constexpr ParamName(bool value) : value(value) {}                                                     \
-		operator bool() const { return value; }                                                                        \
+		constexpr operator bool() const { return value; }                                                              \
 		static ParamName const TRUE, FALSE;                                                                            \
-		void set(bool value) { this->value = value; }                                                                  \
+		constexpr void set(bool value) { this->value = value; }                                                        \
 	};                                                                                                                 \
 	template <>                                                                                                        \
 	struct Traceable<ParamName> : std::true_type {                                                                     \
 		static std::string toString(ParamName const& value) { return Traceable<bool>::toString(value); }               \
 	}
 
-#define DEFINE_BOOLEAN_PARAM(ParamName)                                                                                \
+#define FDB_DEFINE_BOOLEAN_PARAM(ParamName)                                                                            \
 	ParamName const ParamName::TRUE = ParamName(true);                                                                 \
 	ParamName const ParamName::FALSE = ParamName(false)
 
-#define BOOLEAN_PARAM(ParamName)                                                                                       \
-	DECLARE_BOOLEAN_PARAM(ParamName);                                                                                  \
-	DEFINE_BOOLEAN_PARAM(ParamName)
+#define FDB_BOOLEAN_PARAM(ParamName)                                                                                   \
+	FDB_DECLARE_BOOLEAN_PARAM(ParamName);                                                                              \
+	FDB_DEFINE_BOOLEAN_PARAM(ParamName)

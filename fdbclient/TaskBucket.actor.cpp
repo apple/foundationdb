@@ -22,10 +22,10 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-DEFINE_BOOLEAN_PARAM(AccessSystemKeys);
-DEFINE_BOOLEAN_PARAM(PriorityBatch);
-DEFINE_BOOLEAN_PARAM(VerifyTask);
-DEFINE_BOOLEAN_PARAM(UpdateParams);
+FDB_DEFINE_BOOLEAN_PARAM(AccessSystemKeys);
+FDB_DEFINE_BOOLEAN_PARAM(PriorityBatch);
+FDB_DEFINE_BOOLEAN_PARAM(VerifyTask);
+FDB_DEFINE_BOOLEAN_PARAM(UpdateParams);
 
 Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 	return fb->unpack(params[reservedTaskParamKeyDone]);

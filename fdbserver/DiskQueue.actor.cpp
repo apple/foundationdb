@@ -29,7 +29,7 @@
 typedef bool (*compare_pages)(void*, void*);
 typedef int64_t loc_t;
 
-DEFINE_BOOLEAN_PARAM(CheckHashes);
+FDB_DEFINE_BOOLEAN_PARAM(CheckHashes);
 
 // 0 -> 0
 // 1 -> 4k
