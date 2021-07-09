@@ -5125,31 +5125,7 @@ private:
 			        ? "<noDecodeCache>"
 			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
 		}
-
-		/*if (oldID.size() == 1) {
-			LogicalPageID id = wait(self->m_pager->atomicUpdatePage(oldID.front(), page, writeVersion));
-			newID.front() = id;
-		} else {
-			state std::vector<Reference<ArenaPage>> pages;
-			const uint8_t* rptr = page->begin();
-			int bytesLeft = page->size();
-			while (bytesLeft > 0) {
-				Reference<ArenaPage> p = self->m_pager->newPageBuffer();
-				int blockSize = p->size();
-				memcpy(p->mutate(), rptr, blockSize);
-				rptr += blockSize;
-				bytesLeft -= blockSize;
-				pages.push_back(p);
-			}
-			ASSERT(pages.size() == oldID.size());
-
-			// Write pages, trying to reuse original page IDs
-			state int i = 0;
-			for (; i < pages.size(); ++i) {
-				LogicalPageID id = wait(self->m_pager->atomicUpdatePage(oldID[i], pages[i], writeVersion));
-				newID[i] = id;
-			}
-		}*/
+		
 		auto f = map(self->m_pager->atomicUpdatePage(oldID, page, writeVersion), [=](VectorRef<LogicalPageID> ids) {
 			for(size_t i =0; i<ids.size(); i++){
 				newID[i] = ids[i];
