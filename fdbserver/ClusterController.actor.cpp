@@ -4128,6 +4128,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
 				if (self->changedDcIds.get().second.present()) {
 					TraceEvent("UpdateChangedDatacenter", self->id).detail("CCFirst", self->changedDcIds.get().first);
 					if (!self->changedDcIds.get().first) {
+						// All other workers' DC priority have updated. Updating the cluster controller's now.
 						auto& worker = self->id_worker[self->clusterControllerProcessId];
 						uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness(
 						    worker.details.interf.locality.dcId(), self->changedDcIds.get().second.get());
