@@ -292,6 +292,14 @@ struct LogSystemConfig {
 		return results;
 	}
 
+	int numLogs() const {
+		int numLogs=0;
+		for (auto& tLogSet : tLogs) {
+			numLogs += tLogSet.tLogs.size();
+		}
+		return numLogs;
+	}
+
 	std::vector<TLogInterface> allPresentLogs() const {
 		std::vector<TLogInterface> results;
 		for (int i = 0; i < tLogs.size(); i++) {

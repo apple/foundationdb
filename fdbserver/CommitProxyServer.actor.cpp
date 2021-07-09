@@ -877,9 +877,9 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 // Message the sequencer to obtain the previous commit version for each storage server's tag
 ACTOR Future<Void> getTPCV(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	GetTlogPrevCommitVersionReply rep = wait(brokenPromiseToNever(
-	    pProxyCommitData->master.getTlogPrevCommitVersion.getReply(GetTlogPrevCommitVersionRequest(self->writtenTLogs))));
-	// TraceEvent("GetTlogPrevCommitVersionRequest");
+	GetTLogPrevCommitVersionReply rep = wait(brokenPromiseToNever(
+	    pProxyCommitData->master.getTLogPrevCommitVersion.getReply(GetTLogPrevCommitVersionRequest(self->writtenTLogs))));
+	// TraceEvent("GetTLogPrevCommitVersionRequest");
 	return Void();
 }
 

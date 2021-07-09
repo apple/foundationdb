@@ -251,8 +251,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	VersionVector ssVersionVector;
 
 	// The previous commit versions per tlog
-	std::map<uint16_t, Version> tpcvMap;
-
+	std::vector<Version> tpcvVector;
 	CounterCollection cc;
 	Counter changeCoordinatorsRequests;
 	Counter getCommitVersionRequests;
@@ -1249,6 +1248,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
 				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
 				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
+					// NB: this if-condition is not needed after wait-for-prev is ported to this branch
 					if (req.version > self->ssVersionVector.maxVersion) {
 						// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
 						self->ssVersionVector.setVersions(req.writtenTags.get(), req.version);
@@ -1262,14 +1262,11 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				++self->reportLiveCommittedVersionRequests;
 				req.reply.send(Void());
 			}
-			when(GetTlogPrevCommitVersionRequest req =
-			         waitNext(self->myInterface.getTlogPrevCommitVersion.getFuture())) {
-				GetTlogPrevCommitVersionReply reply;
+			when(GetTLogPrevCommitVersionRequest req =
+			         waitNext(self->myInterface.getTLogPrevCommitVersion.getFuture())) {
+				GetTLogPrevCommitVersionReply reply;
 				for (uint16_t tLog : req.writtenTLogs) {
-					// TraceEvent("Received GetTlogPrevCommitVersionRequest").detail("Loc", loc);
-					if (self->tpcvMap.find(tLog) != self->tpcvMap.end()) {
-						reply.tpcvMap[tLog] = self->tpcvMap[tLog];
-					}
+					reply.tpcvMap[tLog] = self->tpcvVector[tLog]; // TODO (placeholder)
 				}
 				req.reply.send(reply);
 			}
@@ -1910,6 +1907,11 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	                                                     // window of the resolver(s)
 
 	TraceEvent("MasterRecoveryCommit", self->dbgid).log();
+
+	// resize the previous commit version vector to the number of tlogs.
+	int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
+	self->tpcvVector.resize(1 + numLogs, invalidVersion);
+
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
 	self->addActor.send(waitResolverFailure(self->resolvers));
@@ -2048,6 +2050,9 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 						wait(delay(5));
 					throw worker_removed();
 				}
+				// resize the previous commit version vector to the number of tlogs.
+				int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
+				self->tpcvVector.resize(1 + numLogs, invalidVersion);
 			}
 			when(BackupWorkerDoneRequest req = waitNext(mi.notifyBackupWorkerDone.getFuture())) {
 				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {
