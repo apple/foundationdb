@@ -45,6 +45,7 @@ struct VersionVector {
 
 	void setVersions(const std::set<Tag>& tags, Version version) {
 		ASSERT(version > maxVersion);
+		maxVersion = version;
 		for (auto& tag : tags) {
 			ASSERT(tag != invalidTag);
 			versions[tag] = version;

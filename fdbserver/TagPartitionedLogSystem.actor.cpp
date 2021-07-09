@@ -550,7 +550,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
 	                     SpanID const& spanContext,
-	                     Optional<UID> debugID) final {
+	                     Optional<UID> debugID,
+						 Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final {
 		// FIXME: Randomize request order as in LegacyLogSystem?
 		vector<Future<Void>> quorumResults;
 		vector<Future<TLogCommitReply>> allReplies;
@@ -566,18 +567,29 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				vector<Future<Void>> tLogCommitResults;
 				for (int loc = 0; loc < it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
-					allReplies.push_back(recordPushMetrics(
+					Version logPrevVersion = prevVersion;
+					bool send = true;
+					if (0 && SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+						if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
+							logPrevVersion = tpcvMap.get()[location];
+						} else {
+							send = false;
+						}
+					}
+					if (send) {
+						allReplies.push_back(recordPushMetrics(
 					    it->connectionResetTrackers[loc],
 					    it->logServers[loc]->get().interf().address(),
 					    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
 					                                                                          msg.arena(),
-					                                                                          prevVersion,
+					                                                                          logPrevVersion,
 					                                                                          version,
 					                                                                          knownCommittedVersion,
 					                                                                          minKnownCommittedVersion,
 					                                                                          msg,
 					                                                                          debugID),
 					                                                        TaskPriority::ProxyTLogCommitReply)));
+					}
 					Future<Void> commitSuccess = success(allReplies.back());
 					addActor.get().send(commitSuccess);
 					tLogCommitResults.push_back(commitSuccess);

@@ -412,6 +412,9 @@ struct CommitBatchContext {
 
 	Optional<UID> debugID;
 
+	// The previous commit versions per tlog, obtained from the sequencer
+	std::unordered_map<uint16_t, Version> tpcvMap;
+
 	bool forceRecovery = false;
 	bool rejected = false; // If rejected due to long queue length
 
@@ -879,9 +882,11 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 // Message the sequencer to obtain the previous commit version for each storage server's tag
 ACTOR Future<Void> getTPCV(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	GetTlogPrevCommitVersionReply rep = wait(brokenPromiseToNever(
-	    pProxyCommitData->master.getTlogPrevCommitVersion.getReply(GetTlogPrevCommitVersionRequest(self->writtenTLogs))));
+	GetTlogPrevCommitVersionReply rep =
+	    wait(brokenPromiseToNever(pProxyCommitData->master.getTlogPrevCommitVersion.getReply(
+	        GetTlogPrevCommitVersionRequest(self->writtenTLogs, self->commitVersion))));
 	// TraceEvent("GetTlogPrevCommitVersionRequest");
+	self->tpcvMap = rep.tpcvMap;
 	return Void();
 }
 
@@ -1189,22 +1194,30 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion); //< Is this valid?
 
-	//TraceEvent("ProxyPush", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion)
-	//	.detail("TransactionsSubmitted", trs.size()).detail("TransactionsCommitted", commitCount).detail("TxsPopTo",
-	// msg.popTo);
+	// TraceEvent("ProxyPush", pProxyCommitData->dbgid)
+	//     .detail("PrevVersion", self->prevVersion)
+	//     .detail("Version", self->commitVersion)
+	//     .detail("TransactionsSubmitted", trs.size())
+	//     .detail("TransactionsCommitted", self->commitCount)
+	//     .detail("TxsPopTo", self->msg.popTo);
 
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion);
 
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
+	Optional<std::unordered_map<uint16_t, Version>> tpcvMap;
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		tpcvMap=self->tpcvMap;
+	}
 	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
 	                                                          self->commitVersion,
 	                                                          pProxyCommitData->committedVersion.get(),
 	                                                          pProxyCommitData->minKnownCommittedVersion,
 	                                                          self->toCommit,
 	                                                          span.context,
-	                                                          self->debugID);
+	                                                          self->debugID,
+															  tpcvMap);
 
 	if (!self->forceRecovery) {
 		ASSERT(pProxyCommitData->latestLocalCommitBatchLogging.get() == self->localBatchNumber - 1);
@@ -1281,7 +1294,9 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
 
-	//TraceEvent("ProxyPushed", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion);
+	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
+	//     .detail("PrevVersion", self->prevVersion)
+	//     .detail("Version", self->commitVersion);
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterLogPush");
 
@@ -1307,6 +1322,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		                                     self->lockedAfter,
 		                                     self->metadataVersionAfter,
 		                                     pProxyCommitData->minKnownCommittedVersion,
+											 self->prevVersion,
 		                                     writtenTags),
 		    TaskPriority::ProxyMasterVersionReply));
 	}

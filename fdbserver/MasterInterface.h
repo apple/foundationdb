@@ -202,12 +202,13 @@ struct GetTlogPrevCommitVersionReply {
 struct GetTlogPrevCommitVersionRequest {
 	constexpr static FileIdentifier file_identifier = 16683184;
 	std::set<uint16_t> writtenTLogs;
+	Version commitVersion;
 	ReplyPromise<GetTlogPrevCommitVersionReply> reply;
 	GetTlogPrevCommitVersionRequest() {}
-	GetTlogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs) : writtenTLogs(writtenTLogs) {}
+	GetTlogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs, Version commitVersion) : writtenTLogs(writtenTLogs), commitVersion(commitVersion) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, writtenTLogs, reply);
+		serializer(ar, writtenTLogs, commitVersion, reply);
 	}
 };
 
@@ -218,6 +219,7 @@ struct ReportRawCommittedVersionRequest {
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
 	Optional<std::set<Tag>> writtenTags;
+	Optional<Version> prevVersion; // if present, wait for prevVersion to be committed before replying
 	ReplyPromise<Void> reply;
 
 	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
@@ -225,13 +227,14 @@ struct ReportRawCommittedVersionRequest {
 	                                 bool locked,
 	                                 Optional<Value> metadataVersion,
 	                                 Version minKnownCommittedVersion,
+	                                 Optional<Version> prevVersion,
 	                                 Optional<std::set<Tag>> writtenTags = Optional<std::set<Tag>>())
 	  : version(version), locked(locked), metadataVersion(metadataVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion), writtenTags(writtenTags) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion), writtenTags(writtenTags), prevVersion(prevVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, writtenTags, reply);
+		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, writtenTags, prevVersion, reply);
 	}
 };
 
