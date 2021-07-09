@@ -1916,15 +1916,17 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			req.reply.send(reply);
 			begin = reply.rep.end;
 			onlySpilled = reply.rep.onlySpilled;
-
-			wait(delay(0.005, TaskPriority::TLogPeekReply));
 			// return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {
 				req.reply.sendError(e);
 				return Void();
+			}
+			else if (e.code() == error_code_operation_obsolete) {
+				// reply stream is cancelled on the client
+			    return Void();
 			} else {
-				throw;
+					throw;
 			}
 		}
 	}

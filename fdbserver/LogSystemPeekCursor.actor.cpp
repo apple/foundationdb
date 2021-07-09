@@ -386,13 +386,15 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		if (usePeekStream) {
+		if (usePeekStream && taskID == TaskPriority::TLogPeekReply) {
 			more = serverPeekStreamGetMore(this, taskID);
-		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
-			more = serverPeekParallelGetMore(this, taskID);
-		} else {
-			more = serverPeekGetMore(this, taskID);
 		}
+//        if (parallelGetMore || onlySpilled || futureResults.size()) {
+//            more = serverPeekParallelGetMore(this, taskID);
+//        }
+		else {
+            more = serverPeekGetMore(this, taskID);
+        }
 	}
 	return more;
 }
