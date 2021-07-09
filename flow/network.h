@@ -81,7 +81,7 @@ enum class TaskPriority {
 	GetConsistentReadVersion = 8500,
 	GetLiveCommittedVersionReply = 8490,
 	GetLiveCommittedVersion = 8480,
-	GetTlogPrevCommitVersion = 8400,
+	GetTLogPrevCommitVersion = 8400,
 	DefaultPromiseEndpoint = 8000,
 	DefaultOnMainThread = 7500,
 	DefaultDelay = 7010,

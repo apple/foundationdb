@@ -44,7 +44,7 @@ struct MasterInterface {
 	RequestStream<struct GetRawCommittedVersionRequest> getLiveCommittedVersion;
 	// Report a proxy's committed version.
 	RequestStream<struct ReportRawCommittedVersionRequest> reportLiveCommittedVersion;
-	RequestStream<struct GetTlogPrevCommitVersionRequest> getTlogPrevCommitVersion;
+	RequestStream<struct GetTLogPrevCommitVersionRequest> getTLogPrevCommitVersion;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 	NetworkAddressList addresses() const { return changeCoordinators.getEndpoint().addresses; }
@@ -68,8 +68,8 @@ struct MasterInterface {
 			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(5));
 			reportLiveCommittedVersion = RequestStream<struct ReportRawCommittedVersionRequest>(
 			    waitFailure.getEndpoint().getAdjustedEndpoint(6));
-			getTlogPrevCommitVersion =
-			    RequestStream<struct GetTlogPrevCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(7));
+			getTLogPrevCommitVersion =
+			    RequestStream<struct GetTLogPrevCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(7));
 		}
 	}
 
@@ -82,7 +82,7 @@ struct MasterInterface {
 		streams.push_back(notifyBackupWorkerDone.getReceiver());
 		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetLiveCommittedVersion));
 		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ReportLiveCommittedVersion));
-		streams.push_back(getTlogPrevCommitVersion.getReceiver(TaskPriority::GetTlogPrevCommitVersion));
+		streams.push_back(getTLogPrevCommitVersion.getReceiver(TaskPriority::GetTLogPrevCommitVersion));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -189,22 +189,22 @@ struct GetCommitVersionRequest {
 	}
 };
 
-struct GetTlogPrevCommitVersionReply {
+struct GetTLogPrevCommitVersionReply {
 	constexpr static FileIdentifier file_identifier = 16683183;
 	std::unordered_map<uint16_t, Version> tpcvMap;
-	GetTlogPrevCommitVersionReply() {}
+	GetTLogPrevCommitVersionReply() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, tpcvMap);
 	}
 };
 
-struct GetTlogPrevCommitVersionRequest {
+struct GetTLogPrevCommitVersionRequest {
 	constexpr static FileIdentifier file_identifier = 16683184;
 	std::set<uint16_t> writtenTLogs;
-	ReplyPromise<GetTlogPrevCommitVersionReply> reply;
-	GetTlogPrevCommitVersionRequest() {}
-	GetTlogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs) : writtenTLogs(writtenTLogs) {}
+	ReplyPromise<GetTLogPrevCommitVersionReply> reply;
+	GetTLogPrevCommitVersionRequest() {}
+	GetTLogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs) : writtenTLogs(writtenTLogs) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, writtenTLogs, reply);
