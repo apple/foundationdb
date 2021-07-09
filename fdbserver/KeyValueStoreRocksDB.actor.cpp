@@ -7,6 +7,7 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/table.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
+#include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
 
@@ -283,7 +284,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                              std::min(value.size(), size_t(a.maxLength)))));
 			} else {
 				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix");
+					TraceEvent(SevError, "RocksDBError")
+					    .detail("Error", s.ToString())
+					    .detail("Method", "ReadValuePrefix");
 				}
 				a.result.send(Optional<Value>());
 			}
@@ -367,8 +370,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
-		writeThread = createGenericThreadPool();
-		readThreads = createGenericThreadPool();
+		if (g_network->isSimulated()) {
+			writeThread = CoroThreadPool::createThreadPool();
+			readThreads = CoroThreadPool::createThreadPool();
+		} else {
+			writeThread = createGenericThreadPool();
+			readThreads = createGenericThreadPool();
+		}
 		writeThread->addThread(new Writer(db, id), "fdb-rocksdb-wr");
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
