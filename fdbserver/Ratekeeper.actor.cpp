@@ -543,6 +543,36 @@ struct GrvProxyInfo {
 	}
 };
 
+// TODO MOVE elsewhere
+struct GranuleSnapshot : VectorRef<KeyValueRef> {
+
+	constexpr static FileIdentifier file_identifier = 4268040;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((VectorRef<KeyValueRef>&)*this));
+	}
+};
+
+struct GranuleDeltas : VectorRef<MutationAndVersion> {
+	constexpr static FileIdentifier file_identifier = 4268042;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((VectorRef<MutationAndVersion>&)*this));
+	}
+};
+
+// TODO make refcounted so it can go in RatekeeperData and the blob worker
+struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
+	std::deque<std::pair<Version, std::string>> snapshotFiles;
+	std::deque<std::pair<Version, std::string>> deltaFiles;
+	GranuleDeltas currentDeltas;
+	uint64_t bytesInNewDeltaFiles = 0;
+	Version lastWriteVersion = 0;
+	uint64_t currentDeltaBytes = 0;
+};
+
 struct RatekeeperData {
 	UID id;
 	Database db;
@@ -574,6 +604,11 @@ struct RatekeeperData {
 	Future<Void> expiredTagThrottleCleanup;
 
 	bool autoThrottlingEnabled;
+
+	// Blob granule crap
+	// assumes single blob granule for now
+	KeyRange granuleRange;
+	Reference<GranuleMetadata> granuleMetadata;
 
 	RatekeeperData(UID id, Database db)
 	  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
@@ -1411,38 +1446,6 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 	}
 }
 
-// TODO MOVE
-// TODO is there a "proper" way to pick file identifiers?
-struct GranuleSnapshot : VectorRef<KeyValueRef> {
-
-	constexpr static FileIdentifier file_identifier = 4268040;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ((VectorRef<KeyValueRef>&)*this));
-	}
-};
-
-struct MutationAndVersion {
-	constexpr static FileIdentifier file_identifier = 4268041;
-	MutationRef m;
-	Version v;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, m, v);
-	}
-};
-
-struct GranuleDeltas : VectorRef<MutationAndVersion> {
-	constexpr static FileIdentifier file_identifier = 4268042;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ((VectorRef<MutationAndVersion>&)*this));
-	}
-};
-
 ACTOR Future<std::pair<Version, std::string>> writeDeltaFile(RatekeeperData* self,
                                                              Reference<S3BlobStoreEndpoint> bstore,
                                                              std::string bucket,
@@ -1558,24 +1561,15 @@ ACTOR Future<std::pair<Version, std::string>> dumpSnapshotFromFDB(RatekeeperData
 	}
 }
 
-struct GranuleMetadata {
-	std::deque<std::pair<Version, std::string>> snapshotFiles;
-	std::deque<std::pair<Version, std::string>> deltaFiles;
-	GranuleDeltas currentDeltas;
-	uint64_t bytesInNewDeltaFiles = 0;
-	Version lastWriteVersion = 0;
-	uint64_t currentDeltaBytes = 0;
-};
-
 // TODO might need to use IBackupFile instead of blob store interface to support non-s3 things like azure
 ACTOR Future<Void> blobWorker(RatekeeperData* self,
+                              Reference<GranuleMetadata> metadata,
                               Reference<S3BlobStoreEndpoint> bstore,
                               std::string bucket,
                               PromiseStream<MutationAndVersion> rangeFeed,
                               PromiseStream<Version> snapshotVersions, // update fake range feed with actual versions
                               Key startKey,
                               Key endKey) {
-	state GranuleMetadata metadata;
 	state Arena deltaArena;
 	printf("Blob worker starting for [%s - %s) for bucket %s\n",
 	       startKey.printable().c_str(),
@@ -1584,47 +1578,47 @@ ACTOR Future<Void> blobWorker(RatekeeperData* self,
 
 	// dump snapshot at the start
 	std::pair<Version, std::string> newSnapshotFile = wait(dumpSnapshotFromFDB(self, bstore, bucket, startKey, endKey));
-	metadata.snapshotFiles.push_back(newSnapshotFile);
-	metadata.lastWriteVersion = newSnapshotFile.first;
+	metadata->snapshotFiles.push_back(newSnapshotFile);
+	metadata->lastWriteVersion = newSnapshotFile.first;
 	snapshotVersions.send(newSnapshotFile.first);
 
 	loop {
 		MutationAndVersion m = waitNext(rangeFeed.getFuture());
-		metadata.currentDeltas.push_back(deltaArena, m);
+		metadata->currentDeltas.push_back(deltaArena, m);
 		// 8 for version, 1 for type, 4 for each param length then actual param size
-		metadata.currentDeltaBytes += 17 + m.m.param1.size() + m.m.param2.size();
+		metadata->currentDeltaBytes += 17 + m.m.param1.size() + m.m.param2.size();
 
-		if (metadata.currentDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
-		    metadata.currentDeltas.back().v > metadata.lastWriteVersion) {
-			printf("Blob worker flushing delta file after %d bytes\n", metadata.currentDeltaBytes);
+		if (metadata->currentDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
+		    metadata->currentDeltas.back().v > metadata->lastWriteVersion) {
+			printf("Blob worker flushing delta file after %d bytes\n", metadata->currentDeltaBytes);
 			std::pair<Version, std::string> newDeltaFile =
-			    wait(writeDeltaFile(self, bstore, bucket, startKey, endKey, &metadata.currentDeltas));
+			    wait(writeDeltaFile(self, bstore, bucket, startKey, endKey, &metadata->currentDeltas));
 
 			// add new delta file
-			metadata.deltaFiles.push_back(newDeltaFile);
-			metadata.lastWriteVersion = newDeltaFile.first;
-			metadata.bytesInNewDeltaFiles += metadata.currentDeltaBytes;
+			metadata->deltaFiles.push_back(newDeltaFile);
+			metadata->lastWriteVersion = newDeltaFile.first;
+			metadata->bytesInNewDeltaFiles += metadata->currentDeltaBytes;
 
 			// reset current deltas
 			deltaArena = Arena();
-			metadata.currentDeltas = GranuleDeltas();
-			metadata.currentDeltaBytes = 0;
+			metadata->currentDeltas = GranuleDeltas();
+			metadata->currentDeltaBytes = 0;
 		}
 
-		if (metadata.bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
-			printf("Blob worker compacting after %d bytes\n", metadata.bytesInNewDeltaFiles);
+		if (metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
+			printf("Blob worker compacting after %d bytes\n", metadata->bytesInNewDeltaFiles);
 			// TODO this should read previous snapshot + delta file instead, unless it knows it's really small or
 			// there was a huge clear or something
 			std::pair<Version, std::string> newSnapshotFile =
 			    wait(dumpSnapshotFromFDB(self, bstore, bucket, startKey, endKey));
 
 			// add new snapshot file
-			metadata.snapshotFiles.push_back(newSnapshotFile);
-			metadata.lastWriteVersion = newSnapshotFile.first;
+			metadata->snapshotFiles.push_back(newSnapshotFile);
+			metadata->lastWriteVersion = newSnapshotFile.first;
 			snapshotVersions.send(newSnapshotFile.first);
 
 			// reset metadata
-			metadata.bytesInNewDeltaFiles = 0;
+			metadata->bytesInNewDeltaFiles = 0;
 		}
 	}
 }
@@ -1734,13 +1728,23 @@ ACTOR Future<Void> blobManagerPoc(RatekeeperData* self) {
 						printf("Blob manager sees range [%s - %s)\n",
 						       results[i].key.printable().c_str(),
 						       results[i + 1].key.printable().c_str());
+
+						// TODO better way to make standalone to copy the keys into?
+						self->granuleRange = KeyRangeRef(results[i].key, results[i + 1].key);
+						self->granuleMetadata = makeReference<GranuleMetadata>();
 						foundRange = true;
 						PromiseStream<MutationAndVersion> mutationStream;
 						PromiseStream<Version> snapshotVersions;
 						currentRangeFeed =
 						    fakeRangeFeed(mutationStream, snapshotVersions, results[i].key, results[i + 1].key);
-						currentWorker = blobWorker(
-						    self, bstore, bucket, mutationStream, snapshotVersions, results[i].key, results[i + 1].key);
+						currentWorker = blobWorker(self,
+						                           self->granuleMetadata,
+						                           bstore,
+						                           bucket,
+						                           mutationStream,
+						                           snapshotVersions,
+						                           results[i].key,
+						                           results[i + 1].key);
 					}
 				}
 
@@ -1753,6 +1757,67 @@ ACTOR Future<Void> blobManagerPoc(RatekeeperData* self) {
 			}
 		}
 	}
+}
+
+static void handleBlobGranuleFileRequest(RatekeeperData* self, const BlobGranuleFileRequest& req) {
+	if (!self->granuleMetadata.isValid()) {
+		printf("No blob granule found, skipping request\n");
+		req.reply.sendError(transaction_too_old());
+		return;
+	}
+	BlobGranuleFileReply rep;
+	// TODO could check for intersection, but just assume it intersects for now
+
+	// copy everything into reply's arena
+	BlobGranuleChunk chunk;
+	chunk.keyRange =
+	    KeyRangeRef(StringRef(rep.arena, self->granuleRange.begin), StringRef(rep.arena, self->granuleRange.end));
+
+	// handle snapshot files
+	int i = self->granuleMetadata->snapshotFiles.size() - 1;
+	while (i >= 0 && self->granuleMetadata->snapshotFiles[i].first > req.readVersion) {
+		i--;
+	}
+	// if version is older than oldest snapshot file (or no snapshot files), throw too old
+	if (i < 0) {
+		req.reply.sendError(transaction_too_old());
+		return;
+	}
+	chunk.snapshotFileName = StringRef(rep.arena, self->granuleMetadata->snapshotFiles[i].second);
+	Version snapshotVersion = self->granuleMetadata->snapshotFiles[i].first;
+
+	// handle delta files
+	i = self->granuleMetadata->deltaFiles.size() - 1;
+	// skip delta files that are too new
+	while (i >= 0 && self->granuleMetadata->deltaFiles[i].first > req.readVersion) {
+		i--;
+	}
+	if (i < self->granuleMetadata->deltaFiles.size() - 1) {
+		i++;
+	}
+	// only include delta files after the snapshot file
+	int j = i;
+	while (j >= 0 && self->granuleMetadata->deltaFiles[j].first > snapshotVersion) {
+		j--;
+	}
+	j++;
+	while (j <= i) {
+		chunk.deltaFileNames.push_back_deep(rep.arena, self->granuleMetadata->deltaFiles[j].second);
+		j++;
+	}
+
+	// new deltas (if version is larger than version of last delta file)
+	if (!self->granuleMetadata->deltaFiles.size() ||
+	    req.readVersion >= self->granuleMetadata->deltaFiles.back().first) {
+		for (auto& delta : self->granuleMetadata->currentDeltas) {
+			if (delta.v <= req.readVersion) {
+				chunk.newDeltas.push_back_deep(rep.arena, delta);
+			}
+		}
+	}
+
+	rep.chunks.push_back(rep.arena, chunk);
+	req.reply.send(rep);
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
@@ -1878,6 +1943,12 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 			when(ReportCommitCostEstimationRequest req = waitNext(rkInterf.reportCommitCostEstimation.getFuture())) {
 				updateCommitCostEstimation(&self, req.ssTrTagCommitCost);
 				req.reply.send(Void());
+			}
+			when(BlobGranuleFileRequest req = waitNext(rkInterf.blobGranuleFileRequest.getFuture())) {
+				printf("Got blob granule request [%s - %s)\n",
+				       req.keyRange.begin.printable().c_str(),
+				       req.keyRange.end.printable().c_str());
+				handleBlobGranuleFileRequest(&self, req);
 			}
 			when(wait(err.getFuture())) {}
 			when(wait(dbInfo->onChange())) {
