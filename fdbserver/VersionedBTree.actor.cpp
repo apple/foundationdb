@@ -1658,7 +1658,7 @@ public:
 
 		evictionOrder.clear();
 		cache.clear();
-		currentSize = 0;
+		self->currentSize = 0; // TODO: check if the currentSize should be 0?
 		return Void();
 	}
 
@@ -2156,10 +2156,13 @@ public:
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
 
-	VectorRef<LogicalPageID> newPageIDs(size_t size){ 
-		VectorRef<LogicalPageID> newPages;
-		for(int i=0; i<size; ++i){
-			newPages.push_back( wait(newPageID()) );
+	Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs(size_t size) override { return newPageIDs_impl(this, size); }
+	ACTOR static Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs_impl(DWALPager* self, size_t size) { 
+		state Standalone<VectorRef<LogicalPageID>> newPages;
+		state size_t i = 0;
+		for(; i<size; ++i){
+			LogicalPageID id = wait(self->newPageID());
+			newPages.push_back(newPages.arena(), id);
 		}
 		return newPages;
 	}
@@ -2245,7 +2248,7 @@ public:
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
-		return writePhysicalPage(VectorRef<PhysicalPageID>&pageID, page, true);
+		return writePhysicalPage(VectorRef<LogicalPageID>(&pageID, 1), page, true);
 	}
 
 	void updatePage(VectorRef<LogicalPageID> pageIDs, Reference<ArenaPage> data) override {
@@ -2292,7 +2295,7 @@ public:
 
 	Future<VectorRef<LogicalPageID>> atomicUpdatePage(VectorRef<LogicalPageID> pageIDs, Reference<ArenaPage> data, Version v) override {
 		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageID).c_str(), v);
-		VectorRef<Future<LogicalPageID>> f = map(newPageIDs(pageIDs.size()), [=](VectorRef<LogicalPageID> newIDs) {
+		Future<VectorRef<LogicalPageID>> f = map(newPageIDs(pageIDs.size()), [=](Standalone<VectorRef<LogicalPageID>> newIDs) {
 			updatePage(newIDs, data);
 			// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
 			RemappedPage r{ v, pageIDs.front(), newIDs.front()};
@@ -2430,9 +2433,10 @@ public:
 		             toString(pageIDs.front()).c_str(),
 		             page->begin());
 
-		int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
+		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
-		for(size_t i= 0; i<pageIDs.size(); i++){
+		state size_t i =0;
+		for(; i<pageIDs.size(); i++){
 			int readBytes = wait(self->pageFile->read(page->mutate() + i*blockSize, blockSize, (int64_t)pageIDs[i] * blockSize));
 				debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
 		         self->filename.c_str(),
@@ -2462,7 +2466,7 @@ public:
 	}
 
 	static Future<Reference<ArenaPage>> readHeaderPage(DWALPager* self, PhysicalPageID pageID) {
-		return readPhysicalPages(self, VectorRef<PhysicalPageID>&pageID, true);
+		return readPhysicalPages(self, VectorRef<LogicalPageID>(&pageID, 1), true);
 	}
 
 	bool tryEvictPage(LogicalPageID logicalID, Version v) {
@@ -2534,10 +2538,10 @@ public:
 
 		return (PhysicalPageID)pageID;
 	}
-	VectorRef<PhysicalPageID> getPhysicalPageIDs(VectorRef<LogicalPageID> logicalIDs, Version v) {
-		VectorRef<physicalPageID> physicalIDs;
+	Standalone<VectorRef<PhysicalPageID>> getPhysicalPageIDs(VectorRef<LogicalPageID> logicalIDs, Version v) {
+		Standalone<VectorRef<PhysicalPageID>> physicalIDs;
 		for(auto& id : logicalIDs){
-			physicalIDs.push_back( getPhysicalPageID(id, v) );
+			physicalIDs.push_back(physicalIDs.arena(), getPhysicalPageID(id, v));
 		}
 		return physicalIDs;
 	}
@@ -2652,7 +2656,7 @@ public:
 		else if (tailExt)
 			readSize = (tailPageID - pageID + 1) * physicalPageSize;
 
-		PageCacheEntry& cacheEntry = extentCache.get(VectorRef<PhysicalPageID>&pageID);
+		PageCacheEntry& cacheEntry = extentCache.get(pageID);
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = Void();
 			cacheEntry.readFuture =
@@ -2772,10 +2776,10 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data = wait(self->readPage(p.newPageID, false, true));
+			Reference<ArenaPage> data = wait(self->readPage(VectorRef<LogicalPageID>(&p.newPageID,1), false, true));
 
 			// Write the data to the original page so it can be read using its original pageID
-			self->updatePage(p.originalPageID, data);
+			self->updatePage(VectorRef<LogicalPageID>(&p.originalPageID,1), data);
 			++g_redwoodMetrics.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
 			++g_redwoodMetrics.pagerRemapSkip;
@@ -4872,13 +4876,13 @@ private:
 				pageUpperBound.truncate(commonPrefix + 1);
 			}
 
-			state std::vector<Reference<ArenaPage>> pages;
+			state Reference<ArenaPage> pages = Reference<ArenaPage>(new ArenaPage(p.blockSize * p.blockCount, p.blockSize * p.blockCount));
 			BTreePage* btPage;
 
 			if (p.blockCount == 1) {
 				Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 				btPage = (BTreePage*)page->mutate();
-				pages.push_back(std::move(page));
+				pages = std::move(page);
 			} else {
 				ASSERT(p.blockCount > 1);
 				btPage = (BTreePage*)new uint8_t[p.pageSize];
@@ -4921,10 +4925,8 @@ private:
 				VALGRIND_MAKE_MEM_DEFINED(((uint8_t*)btPage) + written, (p.blockCount * p.blockSize) - written);
 				const uint8_t* rptr = (const uint8_t*)btPage;
 				for (int b = 0; b < p.blockCount; ++b) {
-					Reference<ArenaPage> page = self->m_pager->newPageBuffer();
-					memcpy(page->mutate(), rptr, p.blockSize);
+					memcpy(pages->mutate() + b*p.blockSize, rptr, p.blockSize);
 					rptr += p.blockSize;
-					pages.push_back(std::move(page));
 				}
 				delete[](uint8_t*) btPage;
 			}
@@ -4935,15 +4937,11 @@ private:
 
 			// If we are only writing 1 page and it has the same BTreePageID size as the original then try to reuse the
 			// LogicalPageIDs in previousID and try to update them atomically.
-			if (pagesToBuild.size() == 1 && previousID.size() == pages.size()) {
-				/*for (k = 0; k < pages.size(); ++k) {
-					LogicalPageID id = wait(self->m_pager->atomicUpdatePage(previousID[k], pages[k], v));
-					childPageID.push_back(records.arena(), id);
-				}*/
-				for(const LogicalPageID& id :  wait(self->m_pager->atomicUpdatePage(previousID, pages, v))){
+			if (pagesToBuild.size() == 1 && previousID.size() == p.blockCount) {
+				VectorRef<LogicalPageID> childPages = wait(self->m_pager->atomicUpdatePage(previousID, pages, v));
+				for(const LogicalPageID& id : childPages){
 					childPageID.push_back(records.arena(), id);
 				}
-				
 			} else {
 				// Either the original page is being split, or it's not but it has changed BTreePageID size.
 				// Either way, there is no point in reusing any of the original page IDs because the parent
@@ -4952,13 +4950,10 @@ private:
 				if (records.empty()) {
 					self->freeBTreePage(previousID, v);
 				}
-				/*for (k = 0; k < pages.size(); ++k) {
-					LogicalPageID id = wait(self->m_pager->newPageID());
-					self->m_pager->updatePage(id, pages[k]);
-					childPageID.push_back(records.arena(), id);
-				}*/
-				VectorRef<LogicalPageID> emptyPages = wait(self->m_pager->newPageIDs(pages.size()));
-				for(const LogicalPageID& id :  wait(self->m_pager->atomicUpdatePage(emptyPages, pages, v))){
+				//Standalone<VectorRef<LogicalPageID>> emptyPages = wait(self->m_pager->newPageIDs(self->m_pager, p.blockCount));
+				Standalone<VectorRef<LogicalPageID>> emptyPages = wait(self->m_pager->newPageIDs(p.blockCount));
+				VectorRef<LogicalPageID> childPages = wait(self->m_pager->atomicUpdatePage(emptyPages, pages, v));
+				for(const LogicalPageID& id : childPages){
 					childPageID.push_back(records.arena(), id);
 				}
 			}
@@ -5050,7 +5045,8 @@ private:
 			// TODO:  Cache reconstituted super pages somehow, perhaps with help from the Pager.
 			page = ArenaPage::concatPages(pages);
 		}*/
-		page = wait(snapshot->getPhysicalPage(id, cacheable, false));
+		Reference<const ArenaPage> p = wait(snapshot->getPhysicalPage(id, cacheable, false));
+		page = std::move(p);
 
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
 		const BTreePage* pTreePage = (const BTreePage*)page->begin();
@@ -5154,8 +5150,12 @@ private:
 				newID[i] = id;
 			}
 		}*/
-		newID =  wait(self->m_pager->atomicUpdatePage(oldID, page, writeVersion));
-
+		auto f = map(self->m_pager->atomicUpdatePage(oldID, page, writeVersion), [=](VectorRef<LogicalPageID> ids) {
+			for(size_t i =0; i<ids.size(); i++){
+				newID[i] = ids[i];
+			}
+			return Void();
+		});
 		return newID;
 	}
 
