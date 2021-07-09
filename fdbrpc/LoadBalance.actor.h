@@ -28,6 +28,7 @@
 #elif !defined(FLOW_LOADBALANCE_ACTOR_H)
 #define FLOW_LOADBALANCE_ACTOR_H
 
+#include "flow/BooleanParam.h"
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 
@@ -238,6 +239,9 @@ Future<Void> tssComparison(Req req,
 	return Void();
 }
 
+FDB_DECLARE_BOOLEAN_PARAM(AtMostOnce);
+FDB_DECLARE_BOOLEAN_PARAM(TriedAllOptions);
+
 // Stores state for a request made by the load balancer
 template <class Request, class Interface, class Multi>
 struct RequestData : NonCopyable {
@@ -245,7 +249,7 @@ struct RequestData : NonCopyable {
 
 	Future<Reply> response;
 	Reference<ModelHolder> modelHolder;
-	bool triedAllOptions = false;
+	TriedAllOptions triedAllOptions{ false };
 
 	bool requestStarted = false; // true once the request has been sent to an alternative
 	bool requestProcessed = false; // true once a response has been received and handled by checkAndProcessResult
@@ -284,7 +288,7 @@ struct RequestData : NonCopyable {
 	// Initializes the request state and starts it, possibly after a backoff delay
 	void startRequest(
 	    double backoff,
-	    bool triedAllOptions,
+	    TriedAllOptions triedAllOptions,
 	    RequestStream<Request> const* stream,
 	    Request& request,
 	    QueueModel* model,
@@ -320,8 +324,8 @@ struct RequestData : NonCopyable {
 	// A return value with an error means that the error should be thrown back to original caller
 	static ErrorOr<bool> checkAndProcessResultImpl(Reply const& result,
 	                                               Reference<ModelHolder> modelHolder,
-	                                               bool atMostOnce,
-	                                               bool triedAllOptions) {
+	                                               AtMostOnce atMostOnce,
+	                                               TriedAllOptions triedAllOptions) {
 		ASSERT(modelHolder);
 
 		Optional<LoadBalancedReply> loadBalancedReply;
@@ -377,7 +381,7 @@ struct RequestData : NonCopyable {
 	// A return value of true means that the request completed successfully
 	// A return value of false means that the request failed but should be retried
 	// In the event of a non-retryable failure, an error is thrown indicating the failure
-	bool checkAndProcessResult(bool atMostOnce) {
+	bool checkAndProcessResult(AtMostOnce atMostOnce) {
 		ASSERT(response.isReady());
 		requestProcessed = true;
 
@@ -412,9 +416,9 @@ struct RequestData : NonCopyable {
 
 		// We need to process the lagging request in order to update the queue model
 		Reference<ModelHolder> holderCapture = std::move(modelHolder);
-		bool triedAllOptionsCapture = triedAllOptions;
+		auto triedAllOptionsCapture = triedAllOptions;
 		Future<Void> updateModel = map(response, [holderCapture, triedAllOptionsCapture](Reply result) {
-			checkAndProcessResultImpl(result, holderCapture, false, triedAllOptionsCapture);
+			checkAndProcessResultImpl(result, holderCapture, AtMostOnce::FALSE, triedAllOptionsCapture);
 			return Void();
 		});
 		model->addActor.send(updateModel);
@@ -441,7 +445,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
     RequestStream<Request> Interface::*channel,
     Request request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-    bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
+    AtMostOnce atMostOnce =
+        AtMostOnce::FALSE, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = nullptr) {
 
 	state RequestData<Request, Interface, Multi> firstRequestData;
@@ -452,6 +457,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 	state Promise<Void> requestFinished;
 	state double startTime = now();
+
+	state TriedAllOptions triedAllOptions = TriedAllOptions::FALSE;
 
 	setReplyPriority(request, taskID);
 	if (!alternatives)
@@ -556,7 +563,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 	state int numAttempts = 0;
 	state double backoff = 0;
-	state bool triedAllOptions = false;
 	// Issue requests to selected servers.
 	loop {
 		if (now() - startTime > (g_network->isSimulated() ? 30.0 : 600.0)) {
@@ -595,7 +601,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				break;
 			nextAlt = (nextAlt + 1) % alternatives->size();
 			if (nextAlt == startAlt)
-				triedAllOptions = true;
+				triedAllOptions = TriedAllOptions::TRUE;
 			stream = nullptr;
 		}
 
@@ -702,7 +708,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 		nextAlt = (nextAlt + 1) % alternatives->size();
 		if (nextAlt == startAlt)
-			triedAllOptions = true;
+			triedAllOptions = TriedAllOptions::TRUE;
 		resetReply(request, taskID);
 		secondDelay = Never();
 	}
@@ -724,7 +730,7 @@ Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> al
                                              RequestStream<Request> Interface::*channel,
                                              Request request = Request(),
                                              TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-                                             bool atMostOnce = false) {
+                                             AtMostOnce atMostOnce = AtMostOnce::FALSE) {
 	setReplyPriority(request, taskID);
 	if (!alternatives)
 		return Never();

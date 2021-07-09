@@ -2473,7 +2473,8 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 			tr.clear(sysRangeClear);
 			tr.clear(privateRange);
 			tr.addReadConflictRange(privateRange);
-			RangeResult previous = wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, true));
+			RangeResult previous =
+			    wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, Snapshot::TRUE));
 			bool prevIsCached = false;
 			if (!previous.empty()) {
 				std::vector<uint16_t> prevVal;
@@ -2489,7 +2490,7 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 				tr.set(sysRange.begin, trueValue);
 				tr.set(privateRange.begin, serverKeysTrue);
 			}
-			RangeResult after = wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
+			RangeResult after = wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, Snapshot::FALSE));
 			bool afterIsCached = false;
 			if (!after.empty()) {
 				std::vector<uint16_t> afterVal;

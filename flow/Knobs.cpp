@@ -18,24 +18,26 @@
  * limitations under the License.
  */
 
-#include "flow/Knobs.h"
 #include "flow/flow.h"
+#include "flow/Knobs.h"
+#include "flow/BooleanParam.h"
 #include <cmath>
 #include <cinttypes>
+
+FDB_BOOLEAN_PARAM(IsSimulated);
+FDB_BOOLEAN_PARAM(Randomize);
 
 FlowKnobs::FlowKnobs(Randomize randomize, IsSimulated isSimulated) {
 	initialize(randomize, isSimulated);
 }
 
-FlowKnobs bootstrapGlobalFlowKnobs(Randomize::NO, IsSimulated::NO);
+FlowKnobs bootstrapGlobalFlowKnobs(Randomize::FALSE, IsSimulated::FALSE);
 FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 
 #define init(knob, value) initKnob(knob, value, #knob)
 
 // clang-format off
-void FlowKnobs::initialize(Randomize _randomize, IsSimulated _isSimulated) {
-	bool const randomize = _randomize == Randomize::YES;
-	bool const isSimulated = _isSimulated == IsSimulated::YES;
+void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );

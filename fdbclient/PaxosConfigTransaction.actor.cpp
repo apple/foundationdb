@@ -33,7 +33,7 @@ Optional<Version> PaxosConfigTransaction::getCachedReadVersion() const {
 	return ::invalidVersion;
 }
 
-Future<Optional<Value>> PaxosConfigTransaction::get(Key const& key, bool snapshot) {
+Future<Optional<Value>> PaxosConfigTransaction::get(Key const& key, Snapshot snapshot) {
 	// TODO: Implement
 	return Optional<Value>{};
 }
@@ -41,8 +41,8 @@ Future<Optional<Value>> PaxosConfigTransaction::get(Key const& key, bool snapsho
 Future<Standalone<RangeResultRef>> PaxosConfigTransaction::getRange(KeySelector const& begin,
                                                                     KeySelector const& end,
                                                                     int limit,
-                                                                    bool snapshot,
-                                                                    bool reverse) {
+                                                                    Snapshot snapshot,
+                                                                    Reverse reverse) {
 	// TODO: Implement
 	ASSERT(false);
 	return Standalone<RangeResultRef>{};
@@ -51,9 +51,9 @@ Future<Standalone<RangeResultRef>> PaxosConfigTransaction::getRange(KeySelector 
 Future<Standalone<RangeResultRef>> PaxosConfigTransaction::getRange(KeySelector begin,
                                                                     KeySelector end,
                                                                     GetRangeLimits limits,
-                                                                    bool snapshot,
-                                                                    bool reverse) {
-	// TODO: Implememnt
+                                                                    Snapshot snapshot,
+                                                                    Reverse reverse) {
+	// TODO: Implement
 	ASSERT(false);
 	return Standalone<RangeResultRef>{};
 }

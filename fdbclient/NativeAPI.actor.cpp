@@ -94,7 +94,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
     RequestStream<Request> Interface::*channel,
     const Request& request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-    bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
+    AtMostOnce atMostOnce =
+        AtMostOnce::FALSE, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = nullptr) {
 	if (alternatives->hasCaches) {
 		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
@@ -296,11 +297,16 @@ void DatabaseContext::validateVersion(Version version) {
 	ASSERT(version > 0 || version == latestVersion);
 }
 
-void validateOptionValue(Optional<StringRef> value, bool shouldBePresent) {
-	if (shouldBePresent && !value.present())
+void validateOptionValuePresent(Optional<StringRef> value) {
+	if (!value.present()) {
 		throw invalid_option_value();
-	if (!shouldBePresent && value.present() && value.get().size() > 0)
+	}
+}
+
+void validateOptionValueNotPresent(Optional<StringRef> value) {
+	if (value.present() && value.get().size() > 0) {
 		throw invalid_option_value();
+	}
 }
 
 void dumpMutations(const MutationListRef& mutations) {
@@ -485,7 +491,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> ctrValue = wait(tr->get(KeyRef(clientLatencyAtomicCtr), true));
+			Optional<Value> ctrValue = wait(tr->get(KeyRef(clientLatencyAtomicCtr), Snapshot::TRUE));
 			if (!ctrValue.present()) {
 				TraceEvent(SevInfo, "NumClntTxnEntriesNotFound");
 				return Void();
@@ -1080,11 +1086,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  Future<Void> clientInfoMonitor,
                                  TaskPriority taskID,
                                  LocalityData const& clientLocality,
-                                 bool enableLocalityLoadBalance,
-                                 bool lockAware,
-                                 bool internal,
+                                 EnableLocalityLoadBalance enableLocalityLoadBalance,
+                                 LockAware lockAware,
+                                 IsInternal internal,
                                  int apiVersion,
-                                 bool switchable)
+                                 IsSwitchable switchable)
   : connectionFile(connectionFile), clientInfo(clientInfo), coordinator(coordinator),
     clientInfoMonitor(clientInfoMonitor), taskID(taskID), clientLocality(clientLocality),
     enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware), apiVersion(apiVersion),
@@ -1360,7 +1366,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000),
     readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(IsInternal::FALSE),
     transactionTracingEnabled(true) {}
 
 // Static constructor used by server processes to create a DatabaseContext
@@ -1368,11 +1374,11 @@ DatabaseContext::DatabaseContext(const Error& err)
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Future<Void> clientInfoMonitor,
                                  LocalityData clientLocality,
-                                 bool enableLocalityLoadBalance,
+                                 EnableLocalityLoadBalance enableLocalityLoadBalance,
                                  TaskPriority taskID,
-                                 bool lockAware,
+                                 LockAware lockAware,
                                  int apiVersion,
-                                 bool switchable) {
+                                 IsSwitchable switchable) {
 	return Database(new DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>>(),
 	                                    clientInfo,
 	                                    makeReference<AsyncVar<Optional<ClientLeaderRegInterface>>>(),
@@ -1381,7 +1387,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	                                    clientLocality,
 	                                    enableLocalityLoadBalance,
 	                                    lockAware,
-	                                    true,
+	                                    IsInternal::TRUE,
 	                                    apiVersion,
 	                                    switchable));
 }
@@ -1397,7 +1403,7 @@ DatabaseContext::~DatabaseContext() {
 	locationCache.insert(allKeys, Reference<LocationInfo>());
 }
 
-pair<KeyRange, Reference<LocationInfo>> DatabaseContext::getCachedLocation(const KeyRef& key, bool isBackward) {
+pair<KeyRange, Reference<LocationInfo>> DatabaseContext::getCachedLocation(const KeyRef& key, Reverse isBackward) {
 	if (isBackward) {
 		auto range = locationCache.rangeContainingKeyBefore(key);
 		return std::make_pair(range->range(), range->value());
@@ -1410,7 +1416,7 @@ pair<KeyRange, Reference<LocationInfo>> DatabaseContext::getCachedLocation(const
 bool DatabaseContext::getCachedLocations(const KeyRangeRef& range,
                                          vector<std::pair<KeyRange, Reference<LocationInfo>>>& result,
                                          int limit,
-                                         bool reverse) {
+                                         Reverse reverse) {
 	result.clear();
 
 	auto begin = locationCache.rangeContaining(range.begin);
@@ -1458,7 +1464,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation(const KeyRangeRef& ke
 	return loc;
 }
 
-void DatabaseContext::invalidateCache(const KeyRef& key, bool isBackward) {
+void DatabaseContext::invalidateCache(const KeyRef& key, Reverse isBackward) {
 	if (isBackward) {
 		locationCache.rangeContainingKeyBefore(key)->value() = Reference<LocationInfo>();
 	} else {
@@ -1491,7 +1497,7 @@ bool DatabaseContext::sampleOnCost(uint64_t cost) const {
 }
 
 int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
-	validateOptionValue(value, true);
+	validateOptionValuePresent(value);
 	if (value.get().size() != 8) {
 		throw invalid_option_value();
 	}
@@ -1553,23 +1559,23 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
 		case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			snapshotRywEnabled++;
 			break;
 		case FDBDatabaseOptions::SNAPSHOT_RYW_DISABLE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			snapshotRywEnabled--;
 			break;
 		case FDBDatabaseOptions::DISTRIBUTED_TRANSACTION_TRACE_ENABLE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			transactionTracingEnabled++;
 			break;
 		case FDBDatabaseOptions::DISTRIBUTED_TRANSACTION_TRACE_DISABLE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			transactionTracingEnabled--;
 			break;
 		case FDBDatabaseOptions::USE_CONFIG_DATABASE:
-			validateOptionValue(value, false);
+			validateOptionValueNotPresent(value);
 			useConfigDatabase = true;
 			break;
 		default:
@@ -1669,7 +1675,7 @@ extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& c
 // on another thread
 Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
                                   int apiVersion,
-                                  bool internal,
+                                  IsInternal internal,
                                   LocalityData const& clientLocality,
                                   DatabaseContext* preallocatedDb) {
 	if (!g_network)
@@ -1730,11 +1736,11 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                                          clientInfoMonitor,
 		                                          TaskPriority::DefaultEndpoint,
 		                                          clientLocality,
-		                                          true,
-		                                          false,
+		                                          EnableLocalityLoadBalance::TRUE,
+		                                          LockAware::FALSE,
 		                                          internal,
 		                                          apiVersion,
-		                                          /*switchable*/ true);
+		                                          IsSwitchable::TRUE);
 	} else {
 		db = new DatabaseContext(connectionFile,
 		                         clientInfo,
@@ -1742,11 +1748,11 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                         clientInfoMonitor,
 		                         TaskPriority::DefaultEndpoint,
 		                         clientLocality,
-		                         true,
-		                         false,
+		                         EnableLocalityLoadBalance::TRUE,
+		                         LockAware::FALSE,
 		                         internal,
 		                         apiVersion,
-		                         /*switchable*/ true);
+		                         IsSwitchable::TRUE);
 	}
 
 	auto database = Database(db);
@@ -1756,7 +1762,7 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 
 Database Database::createDatabase(std::string connFileName,
                                   int apiVersion,
-                                  bool internal,
+                                  IsInternal internal,
                                   LocalityData const& clientLocality) {
 	Reference<ClusterConnectionFile> rccf = Reference<ClusterConnectionFile>(
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFileName).first));
@@ -1803,15 +1809,15 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		networkOptions.traceDirectory = value.present() ? value.get().toString() : "";
 		break;
 	case FDBNetworkOptions::TRACE_ROLL_SIZE:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceRollSize = extractIntOption(value, 0, std::numeric_limits<int64_t>::max());
 		break;
 	case FDBNetworkOptions::TRACE_MAX_LOGS_SIZE:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceMaxLogsSize = extractIntOption(value, 0, std::numeric_limits<int64_t>::max());
 		break;
 	case FDBNetworkOptions::TRACE_FORMAT:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceFormat = value.get().toString();
 		if (!validateTraceFormat(networkOptions.traceFormat)) {
 			fprintf(stderr, "Unrecognized trace format: `%s'\n", networkOptions.traceFormat.c_str());
@@ -1819,7 +1825,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	case FDBNetworkOptions::TRACE_FILE_IDENTIFIER:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceFileIdentifier = value.get().toString();
 		if (networkOptions.traceFileIdentifier.length() > CLIENT_KNOBS->TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH) {
 			fprintf(stderr, "Trace file identifier provided is too long.\n");
@@ -1840,7 +1846,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	case FDBNetworkOptions::TRACE_CLOCK_SOURCE:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		networkOptions.traceClockSource = value.get().toString();
 		if (!validateTraceClockSource(networkOptions.traceClockSource)) {
 			fprintf(stderr, "Unrecognized trace clock source: `%s'\n", networkOptions.traceClockSource.c_str());
@@ -1848,7 +1854,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	case FDBNetworkOptions::KNOB: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 
 		std::string optionValue = value.get().toString();
 		TraceEvent("SetKnob").detail("KnobString", optionValue);
@@ -1872,42 +1878,42 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		break;
 	}
 	case FDBNetworkOptions::TLS_PLUGIN:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		break;
 	case FDBNetworkOptions::TLS_CERT_PATH:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setCertificatePath(value.get().toString());
 		break;
 	case FDBNetworkOptions::TLS_CERT_BYTES: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setCertificateBytes(value.get().toString());
 		break;
 	}
 	case FDBNetworkOptions::TLS_CA_PATH: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setCAPath(value.get().toString());
 		break;
 	}
 	case FDBNetworkOptions::TLS_CA_BYTES: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setCABytes(value.get().toString());
 		break;
 	}
 	case FDBNetworkOptions::TLS_PASSWORD:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setPassword(value.get().toString());
 		break;
 	case FDBNetworkOptions::TLS_KEY_PATH:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setKeyPath(value.get().toString());
 		break;
 	case FDBNetworkOptions::TLS_KEY_BYTES: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.setKeyBytes(value.get().toString());
 		break;
 	}
 	case FDBNetworkOptions::TLS_VERIFY_PEERS:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		tlsConfig.clearVerifyPeers();
 		tlsConfig.addVerifyPeers(value.get().toString());
 		break;
@@ -1918,16 +1924,16 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		enableBuggify(false, BuggifyType::Client);
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_ACTIVATED_PROBABILITY:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		clearBuggifySections(BuggifyType::Client);
 		P_BUGGIFIED_SECTION_ACTIVATED[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100)) / 100.0;
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_FIRED_PROBABILITY:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100)) / 100.0;
 		break;
 	case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		networkOptions.logClientInfo = false;
 		break;
 	case FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS: {
@@ -1947,11 +1953,11 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		break;
 	}
 	case FDBNetworkOptions::ENABLE_RUN_LOOP_PROFILING: // Same as ENABLE_SLOW_TASK_PROFILING
-		validateOptionValue(value, false);
+		validateOptionValuePresent(value);
 		networkOptions.runLoopProfilingEnabled = true;
 		break;
 	case FDBNetworkOptions::DISTRIBUTED_CLIENT_TRACER: {
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		std::string tracer = value.get().toString();
 		if (tracer == "none" || tracer == "disabled") {
 			openTracer(TracerType::DISABLED);
@@ -1994,7 +2000,7 @@ ACTOR Future<Void> monitorNetworkBusyness() {
 }
 
 // Setup g_network and start monitoring for network busyness
-void setupNetwork(uint64_t transportId, bool useMetrics) {
+void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	if (g_network)
 		throw network_already_setup();
 
@@ -2163,7 +2169,7 @@ Future<RangeResult> getRange(Database const& cx,
                              KeySelector const& begin,
                              KeySelector const& end,
                              GetRangeLimits const& limits,
-                             bool const& reverse,
+                             Reverse const& reverse,
                              TransactionInfo const& info,
                              TagSet const& tags);
 
@@ -2239,7 +2245,7 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Database cx,
                                                                               Key key,
                                                                               TransactionInfo info,
-                                                                              bool isBackward = false) {
+                                                                              Reverse isBackward = Reverse::FALSE) {
 	state Span span("NAPI:getKeyLocation"_loc, info.spanID);
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);
@@ -2278,7 +2284,7 @@ Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& c
                                                                Key const& key,
                                                                F StorageServerInterface::*member,
                                                                TransactionInfo const& info,
-                                                               bool isBackward = false) {
+                                                               Reverse isBackward = Reverse::FALSE) {
 	// we first check whether this range is cached
 	auto ssi = cx->getCachedLocation(key, isBackward);
 	if (!ssi.second) {
@@ -2299,7 +2305,7 @@ Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& c
 ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations_internal(Database cx,
                                                                                             KeyRange keys,
                                                                                             int limit,
-                                                                                            bool reverse,
+                                                                                            Reverse reverse,
                                                                                             TransactionInfo info) {
 	state Span span("NAPI:getKeyRangeLocations"_loc, info.spanID);
 	if (info.debugID.present())
@@ -2348,7 +2354,7 @@ template <class F>
 Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations(Database const& cx,
                                                                              KeyRange const& keys,
                                                                              int limit,
-                                                                             bool reverse,
+                                                                             Reverse reverse,
                                                                              F StorageServerInterface::*member,
                                                                              TransactionInfo const& info) {
 	ASSERT(!keys.empty());
@@ -2385,8 +2391,8 @@ ACTOR Future<Void> warmRange_impl(Transaction* self, Database cx, KeyRange keys)
 	state int totalRanges = 0;
 	state int totalRequests = 0;
 	loop {
-		vector<pair<KeyRange, Reference<LocationInfo>>> locations =
-		    wait(getKeyRangeLocations_internal(cx, keys, CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT, false, self->info));
+		vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(
+		    getKeyRangeLocations_internal(cx, keys, CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT, Reverse::FALSE, self->info));
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
 		totalRequests++;
 		if (locations.size() == 0 || totalRanges >= cx->locationCacheSize ||
@@ -2469,7 +2475,7 @@ ACTOR Future<Optional<Value>> getValue(Future<Version> version,
 					         GetValueRequest(
 					             span.context, key, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), getValueID),
 					         TaskPriority::DefaultPromiseEndpoint,
-					         false,
+					         AtMostOnce::FALSE,
 					         cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
 					}
@@ -2556,7 +2562,7 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 
 		Key locationKey(k.getKey(), k.arena());
 		state pair<KeyRange, Reference<LocationInfo>> ssi =
-		    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, k.isBackward()));
+		    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, Reverse{ k.isBackward() }));
 
 		try {
 			if (info.debugID.present())
@@ -2581,7 +2587,7 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 					                          &StorageServerInterface::getKey,
 					                          req,
 					                          TaskPriority::DefaultPromiseEndpoint,
-					                          false,
+					                          AtMostOnce::FALSE,
 					                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
 					}
@@ -2604,7 +2610,7 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 			if (info.debugID.present())
 				g_traceBatch.addEvent("GetKeyDebug", getKeyID.get().first(), "NativeAPI.getKey.Error");
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
-				cx->invalidateCache(k.getKey(), k.isBackward());
+				cx->invalidateCache(k.getKey(), Reverse{ k.isBackward() });
 
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
@@ -2895,7 +2901,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
 	return Void();
 }
 
-void transformRangeLimits(GetRangeLimits limits, bool reverse, GetKeyValuesRequest& req) {
+void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesRequest& req) {
 	if (limits.bytes != 0) {
 		if (!limits.hasRowLimit())
 			req.limit = CLIENT_KNOBS->REPLY_BYTE_LIMIT; // Can't get more than this many rows anyway
@@ -2919,7 +2925,7 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
                                         Version version,
                                         KeyRange keys,
                                         GetRangeLimits limits,
-                                        bool reverse,
+                                        Reverse reverse,
                                         TransactionInfo info,
                                         TagSet tags) {
 	state RangeResult output;
@@ -2974,7 +2980,7 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
 						                          &StorageServerInterface::getKeyValues,
 						                          req,
 						                          TaskPriority::DefaultPromiseEndpoint,
-						                          false,
+						                          AtMostOnce::FALSE,
 						                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 							rep = _rep;
 						}
@@ -3102,7 +3108,7 @@ ACTOR Future<RangeResult> getRangeFallback(Database cx,
                                            KeySelector begin,
                                            KeySelector end,
                                            GetRangeLimits limits,
-                                           bool reverse,
+                                           Reverse reverse,
                                            TransactionInfo info,
                                            TagSet tags) {
 	if (version == latestVersion) {
@@ -3157,9 +3163,9 @@ void getRangeFinished(Database cx,
                       double startTime,
                       KeySelector begin,
                       KeySelector end,
-                      bool snapshot,
+                      Snapshot snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
-                      bool reverse,
+                      Reverse reverse,
                       RangeResult result) {
 	int64_t bytes = 0;
 	for (const KeyValueRef& kv : result) {
@@ -3213,8 +3219,8 @@ ACTOR Future<RangeResult> getRange(Database cx,
                                    KeySelector end,
                                    GetRangeLimits limits,
                                    Promise<std::pair<Key, Key>> conflictRange,
-                                   bool snapshot,
-                                   bool reverse,
+                                   Snapshot snapshot,
+                                   Reverse reverse,
                                    TransactionInfo info,
                                    TagSet tags) {
 	state GetRangeLimits originalLimits(limits);
@@ -3249,7 +3255,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 			}
 
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
-			bool locationBackward = reverse ? (end - 1).isBackward() : begin.isBackward();
+			Reverse locationBackward{ reverse ? (end - 1).isBackward() : begin.isBackward() };
 			state pair<KeyRange, Reference<LocationInfo>> beginServer =
 			    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward));
 			state KeyRange shard = beginServer.first;
@@ -3325,7 +3331,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 					                     &StorageServerInterface::getKeyValues,
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
-					                     false,
+					                     AtMostOnce::FALSE,
 					                     cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 					rep = _rep;
 					++cx->transactionPhysicalReadsCompleted;
@@ -3459,7 +3465,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
 					cx->invalidateCache(reverse ? end.getKey() : begin.getKey(),
-					                    reverse ? (end - 1).isBackward() : begin.isBackward());
+					                    Reverse{ reverse ? (end - 1).isBackward() : begin.isBackward() });
 
 					if (e.code() == error_code_wrong_shard_server) {
 						RangeResult result = wait(getRangeFallback(
@@ -3505,8 +3511,8 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
                                           Version version,
                                           KeyRange keys,
                                           GetRangeLimits limits,
-                                          bool snapshot,
-                                          bool reverse,
+                                          Snapshot snapshot,
+                                          Reverse reverse,
                                           TransactionInfo info,
                                           TagSet tags,
                                           SpanID spanContext) {
@@ -3740,8 +3746,8 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
                                   KeySelector end,
                                   GetRangeLimits limits,
                                   Promise<std::pair<Key, Key>> conflictRange,
-                                  bool snapshot,
-                                  bool reverse,
+                                  Snapshot snapshot,
+                                  Reverse reverse,
                                   TransactionInfo info,
                                   TagSet tags) {
 
@@ -3821,7 +3827,7 @@ Future<RangeResult> getRange(Database const& cx,
                              KeySelector const& begin,
                              KeySelector const& end,
                              GetRangeLimits const& limits,
-                             bool const& reverse,
+                             Reverse const& reverse,
                              TransactionInfo const& info,
                              TagSet const& tags) {
 	return getRange(cx,
@@ -3831,7 +3837,7 @@ Future<RangeResult> getRange(Database const& cx,
 	                end,
 	                limits,
 	                Promise<std::pair<Key, Key>>(),
-	                true,
+	                Snapshot::TRUE,
 	                reverse,
 	                info,
 	                tags);
@@ -3927,7 +3933,7 @@ void Transaction::setVersion(Version v) {
 	readVersion = v;
 }
 
-Future<Optional<Value>> Transaction::get(const Key& key, bool snapshot) {
+Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 	++cx->transactionLogicalReads;
 	++cx->transactionGetValueRequests;
 	// ASSERT (key < allKeys.end);
@@ -4050,12 +4056,18 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key
 	                                                  lastLessOrEqual(serverTagKeys.begin),
 	                                                  firstGreaterThan(serverTagKeys.end),
 	                                                  GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                                  false,
+	                                                  Reverse::FALSE,
 	                                                  info,
 	                                                  options.readTags));
 	ASSERT(!serverTagResult.more && serverTagResult.size() < CLIENT_KNOBS->TOO_MANY);
-	Future<RangeResult> futureServerUids = getRange(
-	    cx, ver, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), false, info, options.readTags);
+	Future<RangeResult> futureServerUids = getRange(cx,
+	                                                ver,
+	                                                lastLessOrEqual(ksKey),
+	                                                firstGreaterThan(ksKey),
+	                                                GetRangeLimits(1),
+	                                                Reverse::FALSE,
+	                                                info,
+	                                                options.readTags);
 	RangeResult serverUids = wait(futureServerUids);
 
 	ASSERT(serverUids.size()); // every shard needs to have a team
@@ -4110,7 +4122,7 @@ ACTOR Future<Key> getKeyAndConflictRange(Database cx,
 	}
 }
 
-Future<Key> Transaction::getKey(const KeySelector& key, bool snapshot) {
+Future<Key> Transaction::getKey(const KeySelector& key, Snapshot snapshot) {
 	++cx->transactionLogicalReads;
 	++cx->transactionGetKeyRequests;
 	if (snapshot)
@@ -4124,8 +4136,8 @@ Future<Key> Transaction::getKey(const KeySelector& key, bool snapshot) {
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           const KeySelector& end,
                                           GetRangeLimits limits,
-                                          bool snapshot,
-                                          bool reverse) {
+                                          Snapshot snapshot,
+                                          Reverse reverse) {
 	++cx->transactionLogicalReads;
 	++cx->transactionGetRangeRequests;
 
@@ -4166,8 +4178,8 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           const KeySelector& end,
                                           int limit,
-                                          bool snapshot,
-                                          bool reverse) {
+                                          Snapshot snapshot,
+                                          Reverse reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
@@ -4177,8 +4189,8 @@ Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& resul
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          GetRangeLimits limits,
-                                         bool snapshot,
-                                         bool reverse) {
+                                         Snapshot snapshot,
+                                         Reverse reverse) {
 	++cx->transactionLogicalReads;
 	++cx->transactionGetRangeStreamRequests;
 
@@ -4227,8 +4239,8 @@ Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& resul
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          int limit,
-                                         bool snapshot,
-                                         bool reverse) {
+                                         Snapshot snapshot,
+                                         Reverse reverse) {
 	return getRangeStream(results, begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
@@ -4271,7 +4283,7 @@ void Transaction::makeSelfConflicting() {
 	tr.transaction.write_conflict_ranges.push_back(tr.arena, r);
 }
 
-void Transaction::set(const KeyRef& key, const ValueRef& value, bool addConflictRange) {
+void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange addConflictRange) {
 	++cx->transactionSetMutations;
 	if (key.size() >
 	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
@@ -4293,7 +4305,7 @@ void Transaction::set(const KeyRef& key, const ValueRef& value, bool addConflict
 void Transaction::atomicOp(const KeyRef& key,
                            const ValueRef& operand,
                            MutationRef::Type operationType,
-                           bool addConflictRange) {
+                           AddConflictRange addConflictRange) {
 	++cx->transactionAtomicMutations;
 	if (key.size() >
 	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
@@ -4321,7 +4333,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	TEST(true); // NativeAPI atomic operation
 }
 
-void Transaction::clear(const KeyRangeRef& range, bool addConflictRange) {
+void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRange) {
 	++cx->transactionClearMutations;
 	auto& req = tr;
 	auto& t = req.transaction;
@@ -4353,7 +4365,7 @@ void Transaction::clear(const KeyRangeRef& range, bool addConflictRange) {
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
-void Transaction::clear(const KeyRef& key, bool addConflictRange) {
+void Transaction::clear(const KeyRef& key, AddConflictRange addConflictRange) {
 	++cx->transactionClearMutations;
 	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT
 	if (key.size() >
@@ -4697,11 +4709,12 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 				    wait(getKeyRangeLocations(self->getDatabase(),
 				                              keyRange,
 				                              CLIENT_KNOBS->TOO_MANY,
-				                              false,
+				                              Reverse::FALSE,
 				                              &StorageServerInterface::getShardState,
 				                              self->info));
-				if (locations.empty())
+				if (locations.empty()) {
 					continue;
+				}
 
 				uint64_t bytes = 0;
 				if (locations.size() == 1) {
@@ -4797,7 +4810,7 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			                         &CommitProxyInterface::commit,
 			                         req,
 			                         TaskPriority::DefaultPromiseEndpoint,
-			                         true);
+			                         AtMostOnce::TRUE);
 		}
 
 		choose {
@@ -5047,7 +5060,7 @@ Future<Void> Transaction::commit() {
 void Transaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	switch (option) {
 	case FDBTransactionOptions::INITIALIZE_NEW_DATABASE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		if (readVersion.isValid())
 			throw read_version_already_set();
 		readVersion = Version(0);
@@ -5055,37 +5068,37 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::CAUSAL_READ_RISKY:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.getReadVersionFlags |= GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY;
 		break;
 
 	case FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.priority = TransactionPriority::IMMEDIATE;
 		break;
 
 	case FDBTransactionOptions::PRIORITY_BATCH:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.priority = TransactionPriority::BATCH;
 		break;
 
 	case FDBTransactionOptions::CAUSAL_WRITE_RISKY:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.causalWriteRisky = true;
 		break;
 
 	case FDBTransactionOptions::COMMIT_ON_FIRST_PROXY:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.commitOnFirstProxy = true;
 		break;
 
 	case FDBTransactionOptions::CHECK_WRITES_ENABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.checkWritesEnabled = true;
 		break;
 
 	case FDBTransactionOptions::DEBUG_DUMP:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.debugDump = true;
 		break;
 
@@ -5095,7 +5108,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::DEBUG_TRANSACTION_IDENTIFIER:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 
 		if (value.get().size() > 100 || value.get().size() == 0) {
 			throw invalid_option_value();
@@ -5122,7 +5135,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::LOG_TRANSACTION:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		if (trLogInfo && !trLogInfo->identifier.empty()) {
 			trLogInfo->logTo(TransactionLogInfo::TRACE_LOG);
 		} else {
@@ -5133,7 +5146,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::TRANSACTION_LOGGING_MAX_FIELD_LENGTH:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		{
 			int maxFieldLength = extractIntOption(value, -1, std::numeric_limits<int32_t>::max());
 			if (maxFieldLength == 0) {
@@ -5147,7 +5160,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::SERVER_REQUEST_TRACING:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		debugTransaction(deterministicRandom()->randomUniqueID());
 		if (trLogInfo && !trLogInfo->identifier.empty()) {
 			TraceEvent(SevInfo, "TransactionBeingTraced")
@@ -5157,23 +5170,23 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::MAX_RETRY_DELAY:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		options.maxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
 		break;
 
 	case FDBTransactionOptions::SIZE_LIMIT:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		options.sizeLimit = extractIntOption(value, 32, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 		break;
 
 	case FDBTransactionOptions::LOCK_AWARE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.lockAware = true;
 		options.readOnly = false;
 		break;
 
 	case FDBTransactionOptions::READ_LOCK_AWARE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		if (!options.lockAware) {
 			options.lockAware = true;
 			options.readOnly = true;
@@ -5181,34 +5194,34 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::FIRST_IN_BATCH:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.firstInBatch = true;
 		break;
 
 	case FDBTransactionOptions::USE_PROVISIONAL_PROXIES:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.getReadVersionFlags |= GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES;
 		info.useProvisionalProxies = true;
 		break;
 
 	case FDBTransactionOptions::INCLUDE_PORT_IN_ADDRESS:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.includePort = true;
 		break;
 
 	case FDBTransactionOptions::TAG:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		options.tags.addTag(value.get());
 		break;
 
 	case FDBTransactionOptions::AUTO_THROTTLE_TAG:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		options.tags.addTag(value.get());
 		options.readTags.addTag(value.get());
 		break;
 
 	case FDBTransactionOptions::SPAN_PARENT:
-		validateOptionValue(value, true);
+		validateOptionValuePresent(value);
 		if (value.get().size() != 16) {
 			throw invalid_option_value();
 		}
@@ -5216,12 +5229,12 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.reportConflictingKeys = true;
 		break;
 
 	case FDBTransactionOptions::EXPENSIVE_CLEAR_COST_ESTIMATION_ENABLE:
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.expensiveClearCostEstimation = true;
 		break;
 
@@ -5367,7 +5380,7 @@ ACTOR Future<Version> extractReadVersion(Location location,
                                          TransactionPriority priority,
                                          Reference<TransactionLogInfo> trLogInfo,
                                          Future<GetReadVersionReply> f,
-                                         bool lockAware,
+                                         LockAware lockAware,
                                          double startTime,
                                          Promise<Optional<Value>> metadataVersion,
                                          TagSet tags) {
@@ -5500,7 +5513,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		                                 options.priority,
 		                                 trLogInfo,
 		                                 req.reply.getFuture(),
-		                                 options.lockAware,
+		                                 LockAware{ options.lockAware },
 		                                 startTime,
 		                                 metadataVersion,
 		                                 options.tags);
@@ -5690,7 +5703,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
 	                              std::numeric_limits<int>::max(),
-	                              false,
+	                              Reverse::FALSE,
 	                              &StorageServerInterface::waitMetrics,
 	                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 	state int nLocs = locations.size();
@@ -5789,7 +5802,7 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
 		                              shardLimit,
-		                              false,
+		                              Reverse::FALSE,
 		                              &StorageServerInterface::getReadHotRanges,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		try {
@@ -5857,7 +5870,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
 		                              shardLimit,
-		                              false,
+		                              Reverse::FALSE,
 		                              &StorageServerInterface::waitMetrics,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		if (expectedShardCount >= 0 && locations.size() != expectedShardCount) {
@@ -5949,7 +5962,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, Key
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
 		                              CLIENT_KNOBS->TOO_MANY,
-		                              false,
+		                              Reverse::FALSE,
 		                              &StorageServerInterface::getRangeSplitPoints,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		try {
@@ -6010,7 +6023,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
 		                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
-		                              false,
+		                              Reverse::FALSE,
 		                              &StorageServerInterface::splitMetrics,
 		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		state StorageMetrics used;
@@ -6117,7 +6130,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 				                           &CommitProxyInterface::proxySnapReq,
 				                           ProxySnapRequest(snapCmd, snapUID, snapUID),
 				                           cx->taskID,
-				                           true /*atmostOnce*/))) {
+				                           AtMostOnce::TRUE))) {
 					TraceEvent("SnapCreateExit").detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
 					return Void();
 				}
@@ -6280,16 +6293,16 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, bool lock_aware) {
+ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
 	state ReadYourWritesTransaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if (lock_aware) {
+			if (lockAware) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
 
-			tr.set(perpetualStorageWiggleKey, enable ? LiteralStringRef("1") : LiteralStringRef("0"));
+			tr.set(perpetualStorageWiggleKey, enable ? "1"_sr : "0"_sr);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {

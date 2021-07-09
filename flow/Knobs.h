@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_KNOBS_H
-#define FLOW_KNOBS_H
+#ifndef __FLOW_KNOBS_H__
+#define __FLOW_KNOBS_H__
+
 #pragma once
 
 #include "flow/Platform.h"
@@ -35,10 +36,6 @@
 // in a cyclic dependency, so we use this intermediate ParsedKnobValue type
 struct NoKnobFound {};
 using ParsedKnobValue = std::variant<NoKnobFound, int, double, int64_t, bool, std::string>;
-
-// To be used as effectively boolean parameters with added type safety
-enum class IsSimulated { NO, YES };
-enum class Randomize { NO, YES };
 
 class Knobs {
 protected:
@@ -290,8 +287,8 @@ public:
 	bool HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS;
 	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
 	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
-	FlowKnobs(Randomize, IsSimulated);
-	void initialize(Randomize, IsSimulated);
+	FlowKnobs(class Randomize, class IsSimulated);
+	void initialize(class Randomize, class IsSimulated);
 };
 
 // Flow knobs are needed before the knob collections are available, so a global FlowKnobs object is used to bootstrap

@@ -167,14 +167,15 @@ ACTOR Future<bool> compareDatabaseToMemory(ApiWorkload* self) {
 
 	loop {
 		// Fetch a subset of the results from each of the database and the memory store and compare them
-		state RangeResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), resultsPerRange, false);
+		state RangeResult storeResults =
+		    self->store.getRange(KeyRangeRef(startKey, endKey), resultsPerRange, Reverse::FALSE);
 
 		state Reference<TransactionWrapper> transaction = self->createTransaction();
 		state KeyRangeRef range(startKey, endKey);
 
 		loop {
 			try {
-				state RangeResult dbResults = wait(transaction->getRange(range, resultsPerRange, false));
+				state RangeResult dbResults = wait(transaction->getRange(range, resultsPerRange, Reverse::FALSE));
 
 				// Compare results of database and memory store
 				Version v = wait(transaction->getReadVersion());

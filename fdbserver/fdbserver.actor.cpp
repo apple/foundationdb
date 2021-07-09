@@ -1641,8 +1641,9 @@ int main(int argc, char* argv[]) {
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
 		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,
-		                                         Randomize::YES,
-		                                         role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
+		                                         Randomize::TRUE,
+		                                         role == ServerRole::Simulation ? IsSimulated::TRUE
+		                                                                        : IsSimulated::FALSE);
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("log_directory", KnobValue::create(opts.logFolder));
 		if (role != ServerRole::Simulation) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("commit_batches_mem_bytes_hard_limit",
@@ -1677,7 +1678,7 @@ int main(int argc, char* argv[]) {
 		                                                          KnobValue::create(int64_t{ opts.memLimit }));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		IKnobCollection::getMutableGlobalKnobCollection().initialize(
-		    Randomize::YES, role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
+		    Randomize::TRUE, role == ServerRole::Simulation ? IsSimulated::TRUE : IsSimulated::FALSE);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);

@@ -386,7 +386,7 @@ struct TLogData : NonCopyable {
 	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
 	                                              LiteralStringRef("commit"),
 	                                              Histogram::Unit::microseconds)) {
-		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
+		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
 	}
 };
 
@@ -1798,7 +1798,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 			state std::vector<Future<Standalone<StringRef>>> messageReads;
 			messageReads.reserve(commitLocations.size());
 			for (const auto& pair : commitLocations) {
-				messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::YES));
+				messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::TRUE));
 			}
 			commitLocations.clear();
 			wait(waitForAll(messageReads));

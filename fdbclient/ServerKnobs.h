@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"

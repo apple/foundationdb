@@ -26,6 +26,24 @@
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+FDB_DEFINE_BOOLEAN_PARAM(LockDB);
+FDB_DEFINE_BOOLEAN_PARAM(UnlockDB);
+FDB_DEFINE_BOOLEAN_PARAM(StopWhenDone);
+FDB_DEFINE_BOOLEAN_PARAM(Verbose);
+FDB_DEFINE_BOOLEAN_PARAM(WaitForComplete);
+FDB_DEFINE_BOOLEAN_PARAM(ForceAction);
+FDB_DEFINE_BOOLEAN_PARAM(Terminator);
+FDB_DEFINE_BOOLEAN_PARAM(UsePartitionedLog);
+FDB_DEFINE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
+FDB_DEFINE_BOOLEAN_PARAM(ShowErrors);
+FDB_DEFINE_BOOLEAN_PARAM(AbortOldBackup);
+FDB_DEFINE_BOOLEAN_PARAM(DstOnly);
+FDB_DEFINE_BOOLEAN_PARAM(WaitForDestUID);
+FDB_DEFINE_BOOLEAN_PARAM(CheckBackupUID);
+FDB_DEFINE_BOOLEAN_PARAM(DeleteData);
+FDB_DEFINE_BOOLEAN_PARAM(SetValidation);
+FDB_DEFINE_BOOLEAN_PARAM(PartialBackup);
+
 std::string BackupAgentBase::formatTime(int64_t epochs) {
 	time_t curTime = (time_t)epochs;
 	char buffer[30];
@@ -374,9 +392,9 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RangeResultWithVersion> results,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
-                                 bool terminator,
-                                 bool systemAccess,
-                                 bool lockAware) {
+                                 Terminator terminator,
+                                 AccessSystemKeys systemAccess,
+                                 LockAware lockAware) {
 	state KeySelector begin = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
 	state Transaction tr(cx);
@@ -450,9 +468,9 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
-                                 bool terminator,
-                                 bool systemAccess,
-                                 bool lockAware) {
+                                 Terminator terminator,
+                                 AccessSystemKeys systemAccess,
+                                 LockAware lockAware) {
 	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
 
@@ -559,7 +577,8 @@ Future<Void> readCommitted(Database cx,
                            Reference<FlowLock> lock,
                            KeyRangeRef range,
                            std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy) {
-	return readCommitted(cx, results, Void(), lock, range, groupBy, true, true, true);
+	return readCommitted(
+	    cx, results, Void(), lock, range, groupBy, Terminator::TRUE, AccessSystemKeys::TRUE, LockAware::TRUE);
 }
 
 ACTOR Future<int> dumpData(Database cx,
@@ -770,7 +789,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
                                         Key logUidValue,
                                         Key destUidValue,
                                         Optional<Version> endVersion,
-                                        bool checkBackupUid,
+                                        CheckBackupUID checkBackupUid,
                                         Version backupUid) {
 	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
 	state Key backupLatestVersionsKey = logUidValue.withPrefix(backupLatestVersionsPath);
@@ -898,7 +917,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
                           Key logUidValue,
                           Key destUidValue,
                           Optional<Version> endVersion,
-                          bool checkBackupUid,
+                          CheckBackupUID checkBackupUid,
                           Version backupUid) {
 	return _eraseLogData(tr, logUidValue, destUidValue, endVersion, checkBackupUid, backupUid);
 }
@@ -995,7 +1014,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 	}
 }
 
-ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData) {
+ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
