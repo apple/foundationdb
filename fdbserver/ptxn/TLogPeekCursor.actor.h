@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/LogSystem.h"
 #include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/TLogInterface.h"
@@ -167,6 +168,76 @@ protected:
 	virtual void nextImpl() override;
 	virtual const VersionSubsequenceMessage& getImpl() const override;
 	virtual bool hasRemainingImpl() const override;
+};
+
+struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<ServerPeekCursor> {
+	Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> interf;
+	const Tag tag;
+	const StorageTeamID storageTeamId;
+
+	TLogPeekReply results;
+	ArenaReader rd;
+	LogMessageVersion messageVersion, end;
+	Version poppedVersion;
+	TagsAndMessage messageAndTags; // TODO: do we still have tag concept in a message
+	bool hasMsg;
+	Future<Void> more;
+	UID randomID; // TODO: figure out what's this
+	bool returnIfBlocked;
+
+	bool onlySpilled;
+	bool parallelGetMore;
+	int sequence;
+	Deque<Future<TLogPeekReply>> futureResults;
+	Future<Void> interfaceChanged;
+
+	double lastReset;
+	Future<Void> resetCheck;
+	int slowReplies;
+	int fastReplies;
+	int unknownReplies;
+
+	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> const& interf,
+	                 Tag tag,
+	                 StorageTeamID storageTeamID,
+	                 Version begin,
+	                 Version end,
+	                 bool returnIfBlocked,
+	                 bool parallelGetMore);
+	ServerPeekCursor(TLogPeekReply const& results,
+	                 LogMessageVersion const& messageVersion,
+	                 LogMessageVersion const& end,
+	                 TagsAndMessage const& message,
+	                 bool hasMsg,
+	                 Version poppedVersion,
+	                 Tag tag,
+	                 StorageTeamID storageTeamID);
+
+	Reference<IPeekCursor> cloneNoMore() override;
+	void setProtocolVersion(ProtocolVersion version) override;
+	Arena& arena() override;
+	ArenaReader* reader() override;
+	bool hasMessage() const override;
+	void nextMessage() override;
+	StringRef getMessage() override;
+	StringRef getMessageWithTags() override;
+	VectorRef<Tag> getTags() const override;
+	void advanceTo(LogMessageVersion n) override;
+	Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+	Future<Void> onFailed() override;
+	bool isActive() const override;
+	bool isExhausted() const override;
+	const LogMessageVersion& version() const override;
+	Version popped() const override;
+	Version getMinKnownCommittedVersion() const override;
+	Optional<UID> getPrimaryPeekLocation() const override;
+	Optional<UID> getCurrentPeekLocation() const override;
+
+	void addref() override { ReferenceCounted<ServerPeekCursor>::addref(); }
+
+	void delref() override { ReferenceCounted<ServerPeekCursor>::delref(); }
+
+	Version getMaxKnownVersion() const override { return results.maxKnownVersion; }
 };
 
 } // namespace ptxn

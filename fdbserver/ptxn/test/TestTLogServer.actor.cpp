@@ -23,6 +23,7 @@
 #include <random>
 #include <vector>
 
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/test/Driver.h"
@@ -133,7 +134,7 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	ptxn::test::print::print(commitReply);
 
 	// Peek
-	ptxn::TLogPeekRequest peekRequest(debugID, beginVersion, endVersion, storageTeamID);
+	ptxn::TLogPeekRequest peekRequest(debugID, beginVersion, endVersion, false, false, storageTeamID);
 	ptxn::test::print::print(peekRequest);
 
 	ptxn::TLogPeekReply peekReply = wait(tli->peek.getReply(peekRequest));
@@ -155,6 +156,60 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	printTiming << "Received " << i << " mutations" << std::endl;
 	ASSERT_EQ(i, pContext->commitRecord.messages[beginVersion][storageTeamID].size());
 
+	return Void();
+}
+
+ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
+                                       std::shared_ptr<ptxn::test::TestDriverContext> pContext,
+                                       std::string folder) {
+	// For demo purpose, each storage server only has one storage team
+	ASSERT(pContext->numStorageServers == pContext->numStorageTeamIDs);
+	state std::vector<InitializeStorageRequest> storageInitializations;
+	state uint8_t locality = 0; // data center locality
+	ServerDBInfo dbInfoBuilder;
+	dbInfoBuilder.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	dbInfoBuilder.logSystemConfig.tLogs.emplace_back();
+	auto& tLogSet = dbInfoBuilder.logSystemConfig.tLogs.back();
+	tLogSet.locality = locality;
+	for (auto tLogGroup : pContext->tLogGroupLeaders) {
+		tLogSet.ptxnTLogGroups[tLogGroup.first].push_back(OptionalInterface<ptxn::TLogInterface_PassivelyPull>(
+		    *std::dynamic_pointer_cast<ptxn::TLogInterface_PassivelyPull>(tLogGroup.second)));
+	}
+	state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
+	state Version tssSeedVersion = 0;
+	state int i = 0;
+	for (; i < pContext->numStorageServers; i++) {
+		pContext->storageServers.emplace_back();
+		auto& recruited = pContext->storageServers.back();
+		PromiseStream<InitializeStorageRequest> initializeStorage;
+		Promise<Void> recovered;
+		storageInitializations.emplace_back();
+
+		actors->push_back(storageServer(openKVStore(KeyValueStoreType::StoreType::SSD_BTREE_V2,
+		                                            joinPath(folder, "storage-" + recruited.id().toString() + ".ssd-2"),
+		                                            recruited.id(),
+		                                            0),
+		                                recruited,
+		                                Tag(locality, i),
+		                                tssSeedVersion,
+		                                storageInitializations.back().reply,
+		                                dbInfo,
+		                                folder,
+		                                nullptr,
+		                                pContext->storageTeamIDs[i]));
+		initializeStorage.send(storageInitializations.back());
+		std::cout << "Recruit storage server " << i << " : " << recruited.id().shortString() << "\n";
+	}
+
+	// replace fake TLogInterface with recruited interface
+	std::vector<Future<InitializeStorageReply>> interfaceFutures(pContext->numTLogs);
+	for (i = 0; i < pContext->numStorageServers; i++) {
+		interfaceFutures[i] = storageInitializations[i].reply.getFuture();
+	}
+	std::vector<InitializeStorageReply> interfaces = wait(getAll(interfaceFutures));
+	for (i = 0; i < pContext->numStorageServers; i++) {
+		pContext->storageServers[i] = interfaces[i].interf;
+	}
 	return Void();
 }
 
@@ -193,6 +248,30 @@ TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
 	// start a real TLog server
 	wait(startTLogServers(&actors, pContext, folder));
 	wait(commitPeekAndCheck(pContext));
+
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/run_storage_server") {
+	state ptxn::test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+
+	for (const auto& group : pContext->tLogGroups) {
+		std::cout << "TLog Group " << group.logGroupId;
+		for (const auto& [storageTeamId, tags] : group.storageTeams) {
+			std::cout << ", SS team " << storageTeamId;
+		}
+		std::cout << "\n";
+	}
+
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+	// start real TLog servers
+	wait(startTLogServers(&actors, pContext, folder));
+	// start real storage servers
+	//	wait(startStorageServers(&actors, pContext, folder));
 
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
@@ -266,7 +345,7 @@ ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pCo
 
 	state int receivedVersions = 0;
 	loop {
-		ptxn::TLogPeekRequest request(Optional<UID>(), version, 0, storageTeamID);
+		ptxn::TLogPeekRequest request(Optional<UID>(), version, 0, false, false, storageTeamID);
 		request.endVersion.reset();
 		ptxn::TLogPeekReply reply = wait(pInterface->peek.getReply(request));
 

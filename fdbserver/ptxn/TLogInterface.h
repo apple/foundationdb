@@ -166,9 +166,12 @@ struct TLogPeekRequest {
 	TLogPeekRequest() = default;
 	TLogPeekRequest(const Optional<UID>& debugID_,
 	                const Version& beginVersion_,
-	                const Version& endVersion_,
+	                const Optional<Version>& endVersion_,
+	                bool returnIfBlocked_,
+	                bool onlySpilled_,
 	                const StorageTeamID& storageTeamID_)
-	  : debugID(debugID_), beginVersion(beginVersion_), endVersion(endVersion_), storageTeamID(storageTeamID_) {}
+	  : debugID(debugID_), beginVersion(beginVersion_), endVersion(endVersion_), returnIfBlocked(returnIfBlocked_),
+	    onlySpilled(onlySpilled_), storageTeamID(storageTeamID_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {

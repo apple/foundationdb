@@ -442,6 +442,8 @@ public:
 	} currentRunningFetchKeys;
 
 	Tag tag;
+	// StorageTeamId for this storage server. Exists iff this is a ptxn storage server
+	Optional<ptxn::StorageTeamID> storageTeamID;
 	vector<std::pair<Version, Tag>> history;
 	vector<std::pair<Version, Tag>> allHistory;
 	Version poppedAllAfter;
@@ -490,6 +492,11 @@ public:
 	void byteSampleApplyClear(KeyRangeRef range, Version ver);
 
 	void popVersion(Version v, bool popAllTags = false) {
+		// Disable pop if it's ptxn storage server
+		if (storageTeamID.present()) {
+			return;
+		}
+
 		if (logSystem && !isTss()) {
 			if (v > poppedAllAfter) {
 				popAllTags = true;
@@ -5049,7 +5056,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self,
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
 						}
 						self->logCursor = self->logSystem->peekSingle(
-						    self->thisServerID, self->version.get() + 1, self->tag, self->history);
+						    self->thisServerID, self->version.get() + 1, self->tag, self->storageTeamID, self->history);
 						self->popVersion(self->durableVersion.get() + 1, true);
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be
@@ -5177,7 +5184,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo>> db,
                                  std::string folder,
                                  // Only applicable when logSystemType is mock.
-                                 std::shared_ptr<MockLogSystem> mockLogSystem) {
+                                 std::shared_ptr<MockLogSystem> mockLogSystem,
+                                 Optional<ptxn::StorageTeamID> storageTeamID) {
 
 	state StorageServer self(persistentData, db, ssi, mockLogSystem != nullptr);
 	if (ssi.isTss()) {
@@ -5205,6 +5213,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		} else {
 			self.tag = seedTag;
 		}
+		self.storageTeamID = storageTeamID;
 
 		self.storage.makeNewStorageServerDurable();
 		wait(self.storage.commit());
