@@ -95,9 +95,12 @@ void writePrefixedLines(FILE* fout, std::string prefix, std::string msg) {
 	}
 }
 
+#define PRIORITYMULTILOCK_DEBUG 0
+
 // Strict priority lock with N concurrent holders.  When a lock is granted to a waiter, it will always be
 // the highest priority waiter.
 class PriorityMultiLock {
+
 public:
 	// Waiting on the lock returns a Lock, which is really just a Promise<Void>
 	// Calling release() is not necessary, it exists in case the Lock holder wants to explicitly release
@@ -113,40 +116,47 @@ private:
 	typedef Promise<Lock> Slot;
 	typedef Deque<Slot> Queue;
 
+#if PRIORITYMULTILOCK_DEBUG
+#define prioritylock_printf(...) printf(__VA_ARGS__)
+#else
+#define prioritylock_printf(...)
+#endif
+
 public:
-	PriorityMultiLock(int concurrency, int levels) : concurrency(concurrency), outstanding(0) {
+	PriorityMultiLock(int concurrency, int levels) : concurrency(concurrency), available(concurrency), waiting(0) {
 		waiters.resize(levels);
 		fRunner = runner(this);
 	}
 
-	~PriorityMultiLock() {
-		debug_printf("destruct");
-	}
+	~PriorityMultiLock() { prioritylock_printf("destruct"); }
 
 	Future<Lock> lock(int priority = 0) {
-		debug_printf("lock begin %d/%d\n", outstanding, concurrency);
+		prioritylock_printf("lock begin %s\n", toString().c_str());
 
 		// This shortcut may enable a waiter to jump the line when the releaser loop yields
-		if (outstanding < concurrency) {
-			++outstanding;
+		if (available > 0) {
+			--available;
 			Lock p;
 			addRunner(p);
-			debug_printf("lock exit immediate %d/%d\n", outstanding, concurrency);
+			prioritylock_printf("lock exit immediate %s\n", toString().c_str());
 			return p;
 		}
 
 		Slot s;
 		waiters[priority].push_back(s);
-		debug_printf("lock exit queued %d/%d\n", outstanding, concurrency);
+		++waiting;
+		prioritylock_printf("lock exit queued %s\n", toString().c_str());
 		return s.getFuture();
 	}
 
 private:
 	void addRunner(Lock& lock) {
 		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
-			debug_printf("Runner callback\n");
-			--outstanding;
-			release.trigger();
+			prioritylock_printf("Lock released\n");
+			++available;
+			if (waiting > 0 || runners.size() > 100) {
+				release.trigger();
+			}
 			return Void();
 		}));
 	}
@@ -154,6 +164,7 @@ private:
 	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
 		state int sinceYield = 0;
 		state Future<Void> error = self->brokenOnDestruct.getFuture();
+		state int maxPriority = self->waiters.size() - 1;
 
 		loop {
 			// Cleanup finished runner futures at the front of the runner queue.
@@ -163,42 +174,63 @@ private:
 
 			// Wait for a runner to release its lock
 			wait(self->release.onTrigger());
-			debug_printf("runner wakeup %d/%d\n", self->outstanding, self->concurrency);
+			prioritylock_printf("runner wakeup %s\n", self->toString().c_str());
 
 			if (++sinceYield == 1000) {
 				sinceYield = 0;
 				wait(yield());
 			}
 
-			// Start tasks, highest priority first
-			for (int priority = self->waiters.size() - 1; priority >= 0 && self->outstanding < self->concurrency;
-			     --priority) {
-				debug_printf("checking priority %d\n", priority);
+			// While there are available slots and there are waiters, launch tasks
+			int priority = maxPriority;
+
+			while (self->available > 0 && self->waiting > 0) {
 				auto& q = self->waiters[priority];
-				while (!q.empty() && self->outstanding < self->concurrency) {
-					++self->outstanding;
-					debug_printf("Running next waiter at priority=%d  levelSize=%d  slots %d/%d\n",
-					             priority,
-					             q.size(),
-					             self->outstanding,
-					             self->concurrency);
+				prioritylock_printf(
+				    "Checking priority=%d prioritySize=%d %s\n", priority, q.size(), self->toString().c_str());
+
+				while (!q.empty()) {
 					Slot s = q.front();
 					q.pop_front();
+					--self->waiting;
 					Lock lock;
+					prioritylock_printf("  Running waiter priority=%d prioritySize=%d\n", priority, q.size());
 					s.send(lock);
-					self->addRunner(lock);
 
 					// Self may have been destructed during the lock callback
-					if(error.isReady()) {
+					if (error.isReady()) {
 						throw error.getError();
 					}
+
+					// If the lock was not already released, add it to the runners future queue
+					if (lock.promise.canBeSet()) {
+						self->addRunner(lock);
+
+						// A slot has been consumed, so stop reading from this queue if there aren't any more
+						if (--self->available == 0) {
+							break;
+						}
+					}
+				}
+
+				// Wrap around to highest priority
+				if (priority == 0) {
+					priority = maxPriority;
+				} else {
+					--priority;
 				}
 			}
 		}
 	}
 
+	std::string toString() const {
+		return format(
+		    "{ slots=%d/%d waiting=%d runners=%d }", (concurrency - available), concurrency, waiting, runners.size());
+	}
+
 	int concurrency;
-	int outstanding;
+	int available;
+	int waiting;
 	std::vector<Queue> waiters;
 	Deque<Future<Void>> runners;
 	Future<Void> fRunner;
