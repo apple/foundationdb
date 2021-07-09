@@ -638,7 +638,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    ValueRef());
 			}
 			RangeResult result = wait(tx->getRange(
-			    KeyRangeRef("options/"_sr, "options0"_sr)
+			    KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
 			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin),
 			    CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);

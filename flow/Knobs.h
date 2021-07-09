@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef __FLOW_KNOBS_H__
+#define __FLOW_KNOBS_H__
+
 #pragma once
 
 #include "flow/Platform.h"
@@ -291,3 +294,5 @@ public:
 // Flow knobs are needed before the knob collections are available, so a global FlowKnobs object is used to bootstrap
 extern FlowKnobs bootstrapGlobalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
+
+#endif
