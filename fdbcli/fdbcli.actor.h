@@ -28,6 +28,7 @@
 #elif !defined(FDBCLI_FDBCLI_ACTOR_H)
 #define FDBCLI_FDBCLI_ACTOR_H
 
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IClientApi.h"
 #include "flow/Arena.h"
 
@@ -73,6 +74,10 @@ extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
 inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
 // help functions (Copied from fdbcli.actor.cpp)
+// decode worker interfaces
+ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                Reference<FlowLock> connectLock,
+                                KeyValue kv);
 
 // compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
@@ -93,6 +98,11 @@ ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std:
 ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// kill command
+ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
+                                    Reference<ITransaction> tr,
+                                    std::vector<StringRef> tokens,
+                                    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,

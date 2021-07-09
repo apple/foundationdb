@@ -40,6 +40,7 @@
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
+#include "flow/Arena.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 
@@ -623,13 +624,6 @@ void initHelp() {
 	helpMap["writemode"] = CommandHelp("writemode <on|off>",
 	                                   "enables or disables sets and clears",
 	                                   "Setting or clearing keys from the CLI is not recommended.");
-	helpMap["kill"] = CommandHelp(
-	    "kill all|list|<ADDRESS...>",
-	    "attempts to kill one or more processes in the cluster",
-	    "If no addresses are specified, populates the list of processes which can be killed. Processes cannot be "
-	    "killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known "
-	    "processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is "
-	    "unresponsive.\n\nFor each IP:port pair in <ADDRESS ...>, attempt to kill the specified process.");
 	helpMap["suspend"] = CommandHelp(
 	    "suspend <SECONDS> <ADDRESS...>",
 	    "attempts to suspend one or more processes in the cluster",
@@ -3209,13 +3203,19 @@ Future<T> stopNetworkAfter(Future<T> what) {
 	}
 }
 
-ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                Reference<FlowLock> connectLock,
-                                KeyValue kv) {
+ACTOR Future<Void> fdb_cli::addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                         Reference<FlowLock> connectLock,
+                                         KeyValue kv) {
 	wait(connectLock->take());
 	state FlowLock::Releaser releaser(*connectLock);
-	state ClientWorkerInterface workerInterf =
-	    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+	state ClientWorkerInterface workerInterf;
+	try {
+		// the interface is back-ward compatible, thus if parsing failed, it needs to upgrade cli version
+		workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+	} catch (Error& e) {
+		fprintf(stderr, "Error: %s; CLI version is too old, please update to use a newer version\n", e.what());
+		return Void();
+	}
 	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
 	choose {
 		when(Optional<LeaderInfo> rep =
@@ -3757,62 +3757,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "kill")) {
-					getTransaction(db, tr, options, intrans);
-					if (tokens.size() == 1) {
-						RangeResult kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-						                                   CLIENT_KNOBS->TOO_MANY)));
-						ASSERT(!kvs.more);
-						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
-						std::vector<Future<Void>> addInterfs;
-						for (auto it : kvs) {
-							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
-						}
-						wait(waitForAll(addInterfs));
-					}
-					if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
-						if (address_interface.size() == 0) {
-							printf("\nNo addresses can be killed.\n");
-						} else if (address_interface.size() == 1) {
-							printf("\nThe following address can be killed:\n");
-						} else {
-							printf("\nThe following %zu addresses can be killed:\n", address_interface.size());
-						}
-						for (auto it : address_interface) {
-							printf("%s\n", printable(it.first).c_str());
-						}
-						printf("\n");
-					} else if (tokencmp(tokens[1], "all")) {
-						for (auto it : address_interface) {
-							BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
-							    .reboot.send(RebootRequest());
-						}
-						if (address_interface.size() == 0) {
-							fprintf(stderr,
-							        "ERROR: no processes to kill. You must run the `kill’ command before "
-							        "running `kill all’.\n");
-						} else {
-							printf("Attempted to kill %zu processes\n", address_interface.size());
-						}
-					} else {
-						for (int i = 1; i < tokens.size(); i++) {
-							if (!address_interface.count(tokens[i])) {
-								fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
-								is_error = true;
-								break;
-							}
-						}
-
-						if (!is_error) {
-							for (int i = 1; i < tokens.size(); i++) {
-								BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[tokens[i]].first,
-								                                                   IncludeVersion())
-								    .reboot.send(RebootRequest());
-							}
-							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
-						}
-					}
+					getTransaction(db, tr, tr2, options, intrans);
+					bool _result = wait(makeInterruptable(killCommandActor(db2, tr2, tokens, &address_interface)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
