@@ -38,6 +38,7 @@
 #include "fdbclient/EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbclient/VersionVector.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -429,6 +430,9 @@ public:
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
+
+	// Cache of the latest commit versions of storage servers.
+	VersionVector ssVersionVectorCache;
 
         // Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
         // Requests to the storage server will be duplicated to the TSS.
