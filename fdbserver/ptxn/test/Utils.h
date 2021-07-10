@@ -30,6 +30,7 @@
 #include "fdbserver/ptxn/test/CommitUtils.h"
 #include "fdbserver/ptxn/test/TestTLogPeek.h"
 #include "fdbserver/ptxn/TLogInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 
 namespace ptxn::test {
 
@@ -70,8 +71,7 @@ void print(const TLogPeekReply&);
 void print(const TestDriverOptions&);
 void print(const CommitRecord&);
 void print(const ptxn::test::TestTLogPeekOptions&);
-
-void printCommitRecords(const std::vector<CommitRecord>&);
+void print(const TLogGroup&);
 
 // Prints timing per step
 class PrintTiming {

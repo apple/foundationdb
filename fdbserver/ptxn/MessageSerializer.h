@@ -359,6 +359,12 @@ public:
 
 		// Postfix operator++, this is more expensive and should be avoided.
 		iterator operator++(int);
+
+		// Returns the arena used by the deserializer. Any objects deserialized and required an arena, e.g. StringRefs,
+		// will depend on this arena. If the arena destructed when the iterator destructs, those objects would be
+		// invalidated, i.e. the life cycle will be the same to the iterator. To extend the life cycle, this arena
+		// should be dependent on other arenas.
+		Arena& arena();
 	};
 
 private:
@@ -370,9 +376,10 @@ public:
 	// serialized_ refers to the serialized data
 	SubsequencedMessageDeserializer(const StringRef serialized_);
 
-	// Reset the deserializer, this will invalidate all iterators
+	// Resets the deserializer, this will invalidate all iterators
 	void reset(const StringRef serialized_);
 
+	// Returns an iterator.
 	iterator begin() const;
 	// end() is called multiple times in typical for loop:
 	//    for(auto iter = deserializer.begin(); iter != deserializer.end(); ++iter)
