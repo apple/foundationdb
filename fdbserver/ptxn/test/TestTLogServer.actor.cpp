@@ -218,7 +218,7 @@ ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> p
 
 	state std::vector<ptxn::TLogCommitRequest> requests;
 	for (auto i = 0; i < numCommits; ++i) {
-		generateMutations(currVersion, 1, { storageTeamID }, pContext->commitRecord);
+		generateMutations(currVersion, 16, { storageTeamID }, pContext->commitRecord);
 		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
 
 		requests.emplace_back(ptxn::test::randomUID(),
