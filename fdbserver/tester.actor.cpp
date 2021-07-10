@@ -234,6 +234,15 @@ vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, vector<st
 	return defaultValue;
 }
 
+bool hasOption(VectorRef<KeyValueRef> options, Key key) {
+	for (const auto& option : options) {
+		if (option.key == key) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // returns unconsumed options
 Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef> options) {
 	static StringRef nothing = LiteralStringRef("");
