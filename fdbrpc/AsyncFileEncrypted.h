@@ -20,13 +20,13 @@
 
 #pragma once
 
-#if ENCRYPTION_ENABLED
-
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
 #include "flow/IRandom.h"
 #include "flow/StreamCipher.h"
+
+#if ENCRYPTION_ENABLED
 
 #include <array>
 
