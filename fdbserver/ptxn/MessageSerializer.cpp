@@ -343,6 +343,10 @@ SubsequencedMessageDeserializer::iterator SubsequencedMessageDeserializer::itera
 	return prev;
 }
 
+Arena& SubsequencedMessageDeserializer::iterator::arena() {
+	return deserializer.arena();
+}
+
 SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const StringRef serialized_)
   : endIterator(serialized_, true) {
 

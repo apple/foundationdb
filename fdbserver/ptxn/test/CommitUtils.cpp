@@ -51,7 +51,7 @@ void generateMutationRefs(const int numMutations,
 
 void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
                             const Version& version,
-                            const std::vector<StorageTeamID> storageTeamIDs,
+                            const std::vector<StorageTeamID>& storageTeamIDs,
                             CommitRecord& commitRecord) {
 	auto& storageTeamMessageMap = commitRecord.messages[version];
 
@@ -89,6 +89,13 @@ void prepareProxySerializedMessages(const CommitRecord& commitRecord,
 			}
 		}
 	}
+}
+
+void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
+                            const Version& version,
+                            const StorageTeamID& storageTeamID,
+                            CommitRecord& commitRecord) {
+	distributeMutationRefs(mutationRefs, version, { storageTeamID }, commitRecord);
 }
 
 bool isAllRecordsValidated(const CommitRecord& commitRecord) {

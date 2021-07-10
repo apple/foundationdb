@@ -57,7 +57,12 @@ void generateMutationRefs(const int numMutations,
 // Distribute MutationRefs to StorageTeamIDs in CommitRecord
 void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
                             const Version& version,
-                            const std::vector<StorageTeamID> storageTeamIDs,
+                            const std::vector<StorageTeamID>& storageTeamIDs,
+                            CommitRecord& commitRecord);
+
+void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
+                            const Version& version,
+                            const StorageTeamID& storageTeamIDs,
                             CommitRecord& commitRecord);
 
 // For a given version, serialize the messages from CommitRecord for Proxy use

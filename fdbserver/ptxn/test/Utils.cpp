@@ -140,7 +140,7 @@ void print(const ptxn::test::TestTLogPeekOptions& option) {
 	          << formatKVPair("Intial version", option.initialVersion) << std::endl;
 }
 
-void printCommitRecords(const CommitRecord& record) {
+void print(const CommitRecord& record) {
 	std::cout << ">> ptxn/test/CommitUtils.h:CommitRecord:" << std::endl;
 	for (const auto& [version, storageTeamIDMessageMap] : record.messages) {
 		std::cout << "\n\tVersion: " << version << std::endl;
@@ -149,6 +149,17 @@ void printCommitRecords(const CommitRecord& record) {
 			for (const auto& [subsequence, message] : subsequenceMessage) {
 				std::cout << "\t\t\t" << message << std::endl;
 			}
+		}
+	}
+}
+
+void print(const TLogGroup& tLogGroup) {
+	std::cout << ">> WorkInterface.actor.h:TLogGroup:"<<std::endl;
+	for(const auto& [storageTeamID, tags] : tLogGroup.storageTeams) {
+		std::cout << concatToString("\tStorage Team ID: ", storageTeamID, "\n");
+		std::cout << "\tTags:" << std::endl;
+		for(const auto& tag : tags) {
+			std::cout << concatToString("\t\t", tag, "\n");
 		}
 	}
 }

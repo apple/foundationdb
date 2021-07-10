@@ -96,7 +96,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 
 	request.debugID = peekRemoteContext.debugID;
 	request.beginVersion = *peekRemoteContext.pLastVersion + 1;
-	request.endVersion = -1; // we *ALWAYS* try to extract *ALL* data
+	request.endVersion = invalidVersion; // we *ALWAYS* try to extract *ALL* data
 	request.storageTeamID = peekRemoteContext.storageTeamID;
 
 	try {

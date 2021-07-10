@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <memory>
+#include <random>
 #include <vector>
 
 #include "fdbserver/ptxn/TLogInterface.h"
@@ -73,28 +75,30 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	return Void();
 }
 
-#if 0
-
-std::pair<Standalone<StringRef>, std::vector<ptxn::Message>> generateSerializedCommitdata(
-    const Version& version,
-    const int numMutations,
-    const ptxn::StorageTeamID& storageTeamID,
-    Arena& arena) {
-
-	std::vector<ptxn::Message> messages;
-	for (int i = 0; i < numMutations; i++) {
-		messages.emplace_back(MutationRef(arena,
-		                                  MutationRef::SetValue,
-		                                  deterministicRandom()->randomAlphaNumeric(10),
-		                                  deterministicRandom()->randomAlphaNumeric(16)));
-	}
-
-	ptxn::ProxySubsequencedMessageSerializer serializer(version);
-	for (const auto& message : messages)
-		serializer.write(message, storageTeamID);
-
-	return { serializer.getSerialized(storageTeamID), std::move(messages) };
+void generateMutations(const Version& version,
+                       const int numMutations,
+                       const std::vector<ptxn::StorageTeamID>& storageTeamIDs,
+                       ptxn::test::CommitRecord& commitRecord) {
+	Arena arena;
+	VectorRef<MutationRef> mutationRefs;
+	ptxn::test::generateMutationRefs(numMutations, arena, mutationRefs);
+	ptxn::test::distributeMutationRefs(mutationRefs, version, storageTeamIDs, commitRecord);
+	commitRecord.messageArena.dependsOn(arena);
 }
+
+Standalone<StringRef> serializeMutations(const Version& version,
+                                         const ptxn::StorageTeamID storageTeamID,
+                                         const ptxn::test::CommitRecord& commitRecord) {
+	ptxn::ProxySubsequencedMessageSerializer serializer(version);
+	for (const auto& [_, message] : commitRecord.messages.at(version).at(storageTeamID)) {
+		serializer.write(std::get<MutationRef>(message), storageTeamID);
+	};
+	auto serialized = serializer.getSerialized(storageTeamID);
+	return serialized;
+}
+
+const int COMMIT_PEEK_CHECK_MUTATIONS = 20;
+
 // Randomly commit to a tlog, then peek data, and verify if the data is consistent.
 ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverContext> pContext) {
 	state ptxn::test::print::PrintTiming printTiming("tlog/commitPeekAndCheck");
@@ -110,12 +114,19 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	state Version endVersion(beginVersion + deterministicRandom()->randomInt(5, 20));
 	state Optional<UID> debugID(ptxn::test::randomUID());
 
-	// printTiming << "Generated " << numMutations << " mutations" << std::endl;
-	Standalone<StringRef> message = serializer.getSerialized(storageTeamID);
+	generateMutations(beginVersion, COMMIT_PEEK_CHECK_MUTATIONS, { storageTeamID }, pContext->commitRecord);
+	auto serialized = serializeMutations(beginVersion, storageTeamID, pContext->commitRecord);
 
 	// Commit
-	ptxn::TLogCommitRequest commitRequest(
-	    ptxn::test::randomUID(), storageTeamID, message.arena(), message, prevVersion, beginVersion, 0, 0, debugID);
+	ptxn::TLogCommitRequest commitRequest(ptxn::test::randomUID(),
+	                                      storageTeamID,
+	                                      serialized.arena(),
+	                                      serialized,
+	                                      prevVersion,
+	                                      beginVersion,
+	                                      0,
+	                                      0,
+	                                      debugID);
 	ptxn::test::print::print(commitRequest);
 
 	ptxn::TLogCommitReply commitReply = wait(tli->commit.getReply(commitRequest));
@@ -138,14 +149,14 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 		const ptxn::VersionSubsequenceMessage& m = *iter;
 		ASSERT_EQ(beginVersion, m.version);
 		ASSERT_EQ(i + 1, m.subsequence); // subsequence starts from 1
-		ASSERT(mutations[i] == std::get<MutationRef>(m.message));
+		ASSERT(pContext->commitRecord.messages[beginVersion][storageTeamID][i].second ==
+		       std::get<MutationRef>(m.message));
 	}
 	printTiming << "Received " << i << " mutations" << std::endl;
-	ASSERT_EQ(i, mutations.size());
+	ASSERT_EQ(i, pContext->commitRecord.messages[beginVersion][storageTeamID].size());
 
 	return Void();
 }
-#endif // #if 0
 
 } // anonymous namespace
 
@@ -174,18 +185,14 @@ TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
 	for (const auto& group : pContext->tLogGroups) {
-		std::cout << "TLog Group " << group.logGroupId;
-		for (const auto& [storageTeamId, tags] : group.storageTeams) {
-			std::cout << ", SS team " << storageTeamId;
-		}
-		std::cout << "\n";
+		ptxn::test::print::print(group);
 	}
 
 	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 	// start a real TLog server
 	wait(startTLogServers(&actors, pContext, folder));
-	// wait(commitPeekAndCheck(pContext));
+	wait(commitPeekAndCheck(pContext));
 
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
@@ -193,10 +200,156 @@ TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
 
 namespace {
 
-// ACTOR Future<Void> commitInject
+Version& increaseVersion(Version& version) {
+	version += deterministicRandom()->randomInt(5, 10);
+	return version;
+}
+
+ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> pContext,
+                                ptxn::StorageTeamID storageTeamID,
+                                int numCommits) {
+	state ptxn::test::print::PrintTiming printTiming("tlog/commitInject");
+
+	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogInterface(storageTeamID);
+
+	state Version currVersion = 0;
+	state Version prevVersion = currVersion;
+	increaseVersion(currVersion);
+
+	state std::vector<ptxn::TLogCommitRequest> requests;
+	for (auto i = 0; i < numCommits; ++i) {
+		generateMutations(currVersion, 1, { storageTeamID }, pContext->commitRecord);
+		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
+
+		requests.emplace_back(ptxn::test::randomUID(),
+		                      storageTeamID,
+		                      serialized.arena(),
+		                      serialized,
+		                      prevVersion,
+		                      currVersion,
+		                      0,
+		                      0,
+		                      Optional<UID>());
+
+		prevVersion = currVersion;
+		increaseVersion(currVersion);
+	}
+	printTiming << "Generated " << numCommits << " commit requests" << std::endl;
+
+	{
+		std::random_device rd;
+		std::mt19937 g(rd());
+		std::shuffle(std::begin(requests), std::end(requests), g);
+	}
+
+	state std::vector<Future<ptxn::TLogCommitReply>> replies;
+	state int index = 0;
+	for (index = 0; index < numCommits; ++index) {
+		printTiming << "Sending version " << requests[index].version << std::endl;
+		replies.push_back(pInterface->commit.getReply(requests[index]));
+		wait(delay(0.5));
+	}
+	wait(waitForAll(replies));
+	printTiming << "Received all replies" << std::endl;
+
+	return Void();
+}
+
+ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pContext,
+                              ptxn::StorageTeamID storageTeamID,
+                              int numCommits) {
+	state ptxn::test::print::PrintTiming printTiming("tlog/verifyPeek");
+
+	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogInterface(storageTeamID);
+
+	state Version version = 0;
+
+	state int receivedVersions = 0;
+	loop {
+		ptxn::TLogPeekRequest request(Optional<UID>(), version, 0, storageTeamID);
+		request.endVersion.reset();
+		ptxn::TLogPeekReply reply = wait(pInterface->peek.getReply(request));
+
+		ptxn::SubsequencedMessageDeserializer deserializer(reply.data);
+		Version v = deserializer.getFirstVersion();
+
+		if (v == invalidVersion) {
+			// The TLog has not received committed data, wait and check again
+			wait(delay(0.001));
+		} else {
+			printTiming << concatToString("Received version range [",
+			                              deserializer.getFirstVersion(),
+			                              ", ",
+			                              deserializer.getLastVersion(),
+			                              "]")
+			            << std::endl;
+			std::vector<MutationRef> mutationRefs;
+			auto iter = deserializer.begin();
+			Arena deserializeArena = iter.arena();
+			for (; iter != deserializer.end(); ++iter) {
+				const auto& vsm = *iter;
+				if (v != vsm.version) {
+					printTiming << "Checking version " << v << std::endl;
+					ASSERT(pContext->commitRecord.messages.find(v) != pContext->commitRecord.messages.end());
+					const auto& recordedMessages = pContext->commitRecord.messages.at(v).at(storageTeamID);
+					ASSERT(mutationRefs.size() == recordedMessages.size());
+					for (size_t i = 0; i < mutationRefs.size(); ++i) {
+						ASSERT(mutationRefs[i] == std::get<MutationRef>(recordedMessages[i].second));
+					}
+
+					mutationRefs.clear();
+					v = vsm.version;
+					++receivedVersions;
+				}
+				mutationRefs.emplace_back(std::get<MutationRef>(vsm.message));
+			}
+
+			{
+				printTiming << "Checking version " << v << std::endl;
+				const auto& recordedMessages = pContext->commitRecord.messages.at(v).at(storageTeamID);
+				ASSERT(mutationRefs.size() == recordedMessages.size());
+				for (size_t i = 0; i < mutationRefs.size(); ++i) {
+					ASSERT(mutationRefs[i] == std::get<MutationRef>(recordedMessages[i].second));
+				}
+
+				++receivedVersions;
+			}
+
+			version = deserializer.getLastVersion() + 1;
+		}
+
+		if (receivedVersions == numCommits) {
+			printTiming << "Over" << std::endl;
+			break;
+		}
+	}
+
+	return Void();
+}
 
 } // anonymous namespace
 
 TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
+	state ptxn::test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+
+	for (const auto& group : pContext->tLogGroups) {
+		ptxn::test::print::print(group);
+	}
+
+	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
+	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+
+	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+
+	wait(startTLogServers(&actors, pContext, folder));
+	const int NUM_COMMITS = 10;
+	std::vector<Future<Void>> communicateActors{ commitInject(pContext, storageTeamID, NUM_COMMITS),
+		                                         verifyPeek(pContext, storageTeamID, NUM_COMMITS) };
+	wait(waitForAll(communicateActors));
+
+	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
