@@ -20,7 +20,7 @@
 
 #pragma once
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if ENCRYPTION_ENABLED
 
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/FastRef.h"
@@ -82,4 +82,4 @@ public:
 	int64_t debugFD() const override;
 };
 
-#endif // Encryption enabled
+#endif // ENCRYPTION_ENABLED

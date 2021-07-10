@@ -171,7 +171,7 @@ std::string BackupContainerS3BlobStore::getURLFormat() {
 
 Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreRead>(m_bstore, m_bucket, dataPath(path));
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if ENCRYPTED_ENABLED
 	if (usesEncryption()) {
 		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
 	}
@@ -191,7 +191,7 @@ Future<std::vector<std::string>> BackupContainerS3BlobStore::listURLs(Reference<
 
 Future<Reference<IBackupFile>> BackupContainerS3BlobStore::writeFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreWrite>(m_bstore, m_bucket, dataPath(path));
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if ENCRYPTION_ENABLED
 	if (usesEncryption()) {
 		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 	}
