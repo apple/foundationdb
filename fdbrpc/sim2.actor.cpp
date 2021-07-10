@@ -33,9 +33,7 @@
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "fdbrpc/AsyncFileEncrypted.h"
-#endif
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"

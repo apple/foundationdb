@@ -20,6 +20,8 @@
 
 #pragma once
 
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
@@ -79,3 +81,5 @@ public:
 	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 	int64_t debugFD() const override;
 };
+
+#endif // Encryption enabled

@@ -20,6 +20,8 @@
 
 #pragma once
 
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
@@ -78,3 +80,5 @@ public:
 	StringRef decrypt(unsigned char const* ciphertext, int len, Arena&);
 	StringRef finish(Arena&);
 };
+
+#endif // encryption enabled

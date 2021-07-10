@@ -170,9 +170,11 @@ public:
 		}
 		Reference<IAsyncFile> f =
 		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		if (self->usesEncryption()) {
 			f = makeReference<AsyncFileEncrypted>(f, false);
 		}
+#endif
 		return f;
 	}
 
@@ -183,9 +185,11 @@ public:
 			    return Void();
 		    }));
 		auto f = makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		if (self->usesEncryption()) {
 			f = makeReference<AsyncFileEncrypted>(f, true);
 		}
+#endif
 		return makeReference<BackupFile>(fileName, f);
 	}
 
