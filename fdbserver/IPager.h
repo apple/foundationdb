@@ -44,6 +44,7 @@ typedef uint32_t QueueID;
 enum class PagerEvents{ pagerCacheLookup = 0, pagerCacheHit, pagerCacheMiss, pagerWrite, MAXEVENTS};
 static const std::string PagerEventsCodes[] = {"Lookup", "Hit", "Miss", "Write"};
 // Reasons for page levle events.
+
 enum class PagerEventReasons{ pointRead = 0, rangeRead, rangePrefetch, commit, lazyClear, metaData, MAXEVENTREASONS};
 static const std::string PagerEventReasonsCodes[] = {"Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta"};
 
