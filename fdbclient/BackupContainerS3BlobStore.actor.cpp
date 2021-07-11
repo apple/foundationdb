@@ -171,7 +171,7 @@ std::string BackupContainerS3BlobStore::getURLFormat() {
 
 Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreRead>(m_bstore, m_bucket, dataPath(path));
-#if ENCRYPTED_ENABLED
+#if ENCRYPTION_ENABLED
 	if (usesEncryption()) {
 		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
 	}
