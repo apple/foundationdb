@@ -469,13 +469,13 @@ public:
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
-			nextPageReader = waitOrError(queue->pager->readPage(pagerEventReasons::metaData, 0, nextPageID, true), queue->pagerError);
+			nextPageReader = waitOrError(queue->pager->readPage(PagerEventReasons::metaData, 0, nextPageID, true), queue->pagerError);
 		}
 
 		Future<Void> loadExtent() {
 			ASSERT(mode == POP | mode == READONLY);
 			debug_printf("FIFOQueue::Cursor(%s) loadExtent\n", toString().c_str());
-			return map(queue->pager->readExtent(pagerEventReasons::metaData, 0, pageID), [=](Reference<ArenaPage> p) {
+			return map(queue->pager->readExtent(PagerEventReasons::metaData, 0, pageID), [=](Reference<ArenaPage> p) {
 				page = p;
 				debug_printf("FIFOQueue::Cursor(%s) loadExtent done. Page: %p\n", toString().c_str(), page->begin());
 				return Void();
@@ -487,7 +487,7 @@ public:
 			debug_printf("FIFOQueue::Cursor(%s) writePage\n", toString().c_str());
 			VALGRIND_MAKE_MEM_DEFINED(raw()->begin(), offset);
 			VALGRIND_MAKE_MEM_DEFINED(raw()->begin() + offset, queue->dataBytesPerPage - raw()->endOffset);
-			queue->pager->updatePage(pagerEventReasons::commit, 0, pageID, page);
+			queue->pager->updatePage(PagerEventReasons::commit, 0, pageID, page);
 			if (firstPageIDWritten == invalidLogicalPageID) {
 				firstPageIDWritten = pageID;
 			}
@@ -1292,34 +1292,35 @@ struct RedwoodMetrics {
 	static int maxRecordCount;
 
 	struct eventReasonsArray{
-		unsigned int eventReasons[(size_t)events::MAXEVENTS][(size_t)pagerEventReasons::MAXEVENTREASONS];
+		unsigned int eventReasons[(size_t)PagerEvents::MAXEVENTS][(size_t)PagerEventReasons::MAXEVENTREASONS];
 
 		eventReasonsArray(){clear();}
 		void clear(){
-			for(size_t i = 0; i<(size_t)events::MAXEVENTS; i++){
-				for(size_t j = 0; j<(size_t)pagerEventReasons::MAXEVENTREASONS; j++){
+			for(size_t i = 0; i<(size_t)PagerEvents::MAXEVENTS; i++){
+				for(size_t j = 0; j<(size_t)PagerEventReasons::MAXEVENTREASONS; j++){
 					eventReasons[i][j] = 0;
 				}
 			}
 		}
-		void addEventReason(events e, pagerEventReasons r){
+		void addEventReason(PagerEvents e, PagerEventReasons r){
 			eventReasons[(size_t)e][(size_t)r] += 1;
 		}
-		const unsigned int& getEventReason(events e, pagerEventReasons r){
+		const unsigned int& getEventReason(PagerEvents e, PagerEventReasons r){
 			return eventReasons[(size_t)e][(size_t)r];
 		}
 
 		std::string ouputSummary(int currLevel){
 			std::string result = "";
-			std::map<events, std::string> allEvents = {{events::pagerCacheLookup, "pagerCacheLookup"}, {events::pagerCacheHit, "pagerCacheHit"}, {events::pagerCacheMiss, "pagerCacheMiss"}, {events::pagerWrite, "pagerWrite"}};
-			std::map<pagerEventReasons, std::string> allReasons = {{pagerEventReasons::pointRead, "pointRead"}, {pagerEventReasons::rangeRead, "rangeRead"}, {pagerEventReasons::rangePrefetch, "rangePrefetch"}, {pagerEventReasons::commit, "commit"}, {pagerEventReasons::lazyClear, "lazyClear"}, {pagerEventReasons::metaData, "metaData"}};
-			
-			for(auto e = allEvents.begin(); e != allEvents.end(); e++){
-				result += e->second + "\n\t";
-				for(auto r = allReasons.begin(); r != allReasons.end(); r++){
-					std::string num = std::to_string(eventReasons[(size_t)e->first][(size_t)r->first]);
-					result += r->second; 
-					result.append(16 - r->second.length(), ' ');
+			static const std::pair<PagerEvents, const char *> allEvents[] = {{PagerEvents::pagerCacheLookup, "pagerCacheLookup"}, {PagerEvents::pagerCacheHit, "pagerCacheHit"}, {PagerEvents::pagerCacheMiss, "pagerCacheMiss"}, {PagerEvents::pagerWrite, "pagerWrite"}};
+			static const std::pair<PagerEventReasons, const char *> allReasons[] = {{PagerEventReasons::pointRead, "pointRead"}, {PagerEventReasons::rangeRead, "rangeRead"}, {PagerEventReasons::rangePrefetch, "rangePrefetch"}, {PagerEventReasons::commit, "commit"}, {PagerEventReasons::lazyClear, "lazyClear"}, {PagerEventReasons::metaData, "metaData"}};
+
+			for(auto &e : allEvents){
+				result += e.second;
+				result += "\n\t";
+				for(auto &r : allReasons){
+					std::string num = std::to_string(eventReasons[(size_t)e.first][(size_t)r.first]);
+					result += r.second; 
+					result.append(16 - strlen(r.second), ' ');
 					result.append(8 - num.length(), ' ');
 					result += num;
 					result.append(13, ' ');
@@ -1329,26 +1330,26 @@ struct RedwoodMetrics {
 			return result;
 		}
 		void reportTrace(TraceEvent* t, int h){
-			const std::vector<std::pair<events,pagerEventReasons>> possibleEventReasonPairs = {
-				{events::pagerCacheLookup, pagerEventReasons::pointRead},{events::pagerCacheLookup, pagerEventReasons::rangeRead},
-				{events::pagerCacheLookup, pagerEventReasons::rangePrefetch},{events::pagerCacheLookup, pagerEventReasons::commit},
-				{events::pagerCacheLookup, pagerEventReasons::lazyClear},{events::pagerCacheLookup, pagerEventReasons::metaData},
+			static const std::pair<PagerEvents,PagerEventReasons> possibleEventReasonPairs[] = {
+				{PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead},{PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead},
+				{PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch},{PagerEvents::pagerCacheLookup, PagerEventReasons::commit},
+				{PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear},{PagerEvents::pagerCacheLookup, PagerEventReasons::metaData},
 
-				{events::pagerCacheHit, pagerEventReasons::pointRead},{events::pagerCacheHit, pagerEventReasons::rangeRead},
-				{events::pagerCacheHit, pagerEventReasons::rangePrefetch},
-				{events::pagerCacheHit, pagerEventReasons::lazyClear},{events::pagerCacheHit, pagerEventReasons::metaData},
+				{PagerEvents::pagerCacheHit, PagerEventReasons::pointRead},{PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead},
+				{PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch},
+				{PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear},{PagerEvents::pagerCacheHit, PagerEventReasons::metaData},
 
-				{events::pagerCacheMiss, pagerEventReasons::pointRead},{events::pagerCacheMiss, pagerEventReasons::rangeRead},
-				{events::pagerCacheMiss, pagerEventReasons::rangePrefetch},
-				{events::pagerCacheMiss, pagerEventReasons::lazyClear},{events::pagerCacheMiss, pagerEventReasons::metaData},
+				{PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead},{PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead},
+				{PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch},
+				{PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear},{PagerEvents::pagerCacheMiss, PagerEventReasons::metaData},
 
-				{events::pagerWrite, pagerEventReasons::commit},
-				{events::pagerWrite, pagerEventReasons::lazyClear},{events::pagerWrite, pagerEventReasons::metaData},
+				{PagerEvents::pagerWrite, PagerEventReasons::commit},
+				{PagerEvents::pagerWrite, PagerEventReasons::lazyClear},{PagerEvents::pagerWrite, PagerEventReasons::metaData},
 			};
 			for ( const auto &ER : possibleEventReasonPairs ){
 				t->detail(format("L%d%s", 
 								 h + 1, 
-								 (eventsCodes[(size_t)ER.first]+pagerEventReasonsCodes[(size_t)ER.second]).c_str()), 
+								 (PagerEventsCodes[(size_t)ER.first]+PagerEventReasonsCodes[(size_t)ER.second]).c_str()), 
 								 eventReasons[(size_t)ER.first][(size_t)ER.second]
 								);
 			}
@@ -1358,7 +1359,7 @@ struct RedwoodMetrics {
 
 	// Page levle events 
 	struct Level {
-		struct Metrics{
+		struct Counters{
 			unsigned int pageRead;
 			unsigned int pageReadExt;
 			unsigned int pageBuild;
@@ -1372,15 +1373,9 @@ struct RedwoodMetrics {
 			unsigned int lazyClearFreeExt;
 			unsigned int forceUpdate;
 			unsigned int detachChild;
-			double buildStoredPct;
-			double buildFillPct;
-			unsigned int buildItemCount;
-			double modifyStoredPct;
-			double modifyFillPct;
-			unsigned int modifyItemCount;
 			eventReasonsArray eventReasons;
 		};
-		Metrics metric;
+		Counters metric;
 		Reference<Histogram> buildFillPctSketch;
 		Reference<Histogram> modifyFillPctSketch;
 		Reference<Histogram> buildStoredPctSketch;
@@ -1569,14 +1564,6 @@ struct RedwoodMetrics {
 				{ "ForceUpdate", level.metric.forceUpdate },
 				{ "DetachChild", level.metric.detachChild },
 				{ "", 0 },
-				{ "-BldAvgCount", level.metric.pageBuild ? level.metric.buildItemCount / level.metric.pageBuild : 0 },
-				{ "-BldAvgFillPct", level.metric.pageBuild ? level.metric.buildFillPct / level.metric.pageBuild * 100 : 0 },
-				{ "-BldAvgStoredPct", level.metric.pageBuild ? level.metric.buildStoredPct / level.metric.pageBuild * 100 : 0 },
-				{ "", 0 },
-				{ "-ModAvgCount", level.metric.pageModify ? level.metric.modifyItemCount / level.metric.pageModify : 0 },
-				{ "-ModAvgFillPct", level.metric.pageModify ? level.metric.modifyFillPct / level.metric.pageModify * 100 : 0 },
-				{ "-ModAvgStoredPct", level.metric.pageModify ? level.metric.modifyStoredPct / level.metric.pageModify * 100 : 0 },
-				{ "", 0 },
 			};
 
 			if (e != nullptr) {
@@ -1671,27 +1658,27 @@ public:
 
 	// Get the object for i if it exists, else return nullptr.
 	// If the object exists, its eviction order will NOT change as this is not a cache hit.
-	ObjectType* getIfExists(pagerEventReasons r, unsigned int l, const IndexType& index) {
+	ObjectType* getIfExists(PagerEventReasons r, unsigned int l, const IndexType& index) {
 		auto i = cache.find(index);
 		if (i != cache.end()) {
 			++i->second.hits;
 			++g_redwoodMetrics.metric.pagerProbeHit;
 			if (l == 0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 			else{
 				auto& metrics = g_redwoodMetrics.level(l);
-				metrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 			return &i->second.item;
 		}
 		++g_redwoodMetrics.metric.pagerProbeMiss;
 		if (l == 0 ){
-			g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 		}
 		else{
 			auto& metrics = g_redwoodMetrics.level(l);
-			metrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+			metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 		}
 		return nullptr;
 	}
@@ -2077,7 +2064,7 @@ public:
 					if (extents[i].queueID == remapQueueID) {
 						LogicalPageID extID = extents[i].extentID;
 						debug_printf("DWALPager Extents: ID: %s ", toString(extID).c_str());
-						self->readExtent(pagerEventReasons::metaData, 0, extID);
+						self->readExtent(PagerEventReasons::metaData, 0, extID);
 					}
 				}
 			}
@@ -2118,7 +2105,7 @@ public:
 			// If this fails, the backup header is still in tact for the next recovery attempt.
 			if (recoveredHeader) {
 				// Write the header to page 0
-				wait(self->writeHeaderPage(pagerEventReasons::metaData, 0, self->headerPage));
+				wait(self->writeHeaderPage(PagerEventReasons::metaData, 0, self->headerPage));
 
 				// Wait for all outstanding writes to complete
 				wait(self->operations.signalAndCollapse());
@@ -2341,7 +2328,7 @@ public:
 
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
-	Future<Void> writePhysicalPage(pagerEventReasons r, unsigned int l, PhysicalPageID pageID, Reference<ArenaPage> page, bool header = false) {
+	Future<Void> writePhysicalPage(PagerEventReasons r, unsigned int l, PhysicalPageID pageID, Reference<ArenaPage> page, bool header = false) {
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysical"),
@@ -2350,11 +2337,11 @@ public:
 
 		++g_redwoodMetrics.metric.pagerDiskWrite;
 		if (l == 0){ 
-			g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerWrite, r);
+			g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerWrite, r);
 		}
 		else{
 			auto& metrics = g_redwoodMetrics.level(l);
-			metrics.metric.eventReasons.addEventReason(events::pagerWrite, r);
+			metrics.metric.eventReasons.addEventReason(PagerEvents::pagerWrite, r);
 		}
 
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
@@ -2385,11 +2372,11 @@ public:
 		return f;
 	}
 
-	Future<Void> writeHeaderPage(pagerEventReasons r, PhysicalPageID pageID, Reference<ArenaPage> page) {
+	Future<Void> writeHeaderPage(PagerEventReasons r, PhysicalPageID pageID, Reference<ArenaPage> page) {
 		return writePhysicalPage(r, 0, pageID, page, true);
 	}
 
-	void updatePage(pagerEventReasons r, unsigned int l, LogicalPageID pageID, Reference<ArenaPage> data) override {
+	void updatePage(PagerEventReasons r, unsigned int l, LogicalPageID pageID, Reference<ArenaPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
 		// this metaData reason will not be accounted since its not a cache hit or cache miss
@@ -2435,7 +2422,7 @@ public:
 	Future<LogicalPageID> atomicUpdatePage(unsigned int l, LogicalPageID pageID, Reference<ArenaPage> data, Version v) override {
 		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageID).c_str(), v);
 		Future<LogicalPageID> f = map(newPageID(), [=](LogicalPageID newPageID) {
-			updatePage(pagerEventReasons::commit, l, newPageID, data);
+			updatePage(PagerEventReasons::commit, l, newPageID, data);
 			// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
 			RemappedPage r{ v, pageID, newPageID };
 			remapQueue.pushBack(r);
@@ -2613,7 +2600,7 @@ public:
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
-	Future<Reference<ArenaPage>> readPage(pagerEventReasons r, unsigned int l, LogicalPageID pageID, bool cacheable, bool noHit = false) override {
+	Future<Reference<ArenaPage>> readPage(PagerEventReasons r, unsigned int l, LogicalPageID pageID, bool cacheable, bool noHit = false) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		if (!cacheable) {
@@ -2645,25 +2632,25 @@ public:
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
 			if(l==0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheMiss, r);
-				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 			else{
 				auto metrics = g_redwoodMetrics.level(l).metric;
-				metrics.eventReasons.addEventReason(events::pagerCacheMiss, r);
-				metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
+				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 		}
 		else{
 			++g_redwoodMetrics.metric.pagerCacheHit;
 			if(l==0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheHit, r);
-				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 			else{
 				auto metrics = g_redwoodMetrics.level(l).metric;
-				metrics.eventReasons.addEventReason(events::pagerCacheHit, r);
-				metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
+				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 		}
 
@@ -2699,7 +2686,7 @@ public:
 		return (PhysicalPageID)pageID;
 	}
 
-	Future<Reference<ArenaPage>> readPageAtVersion(pagerEventReasons r, unsigned int l, LogicalPageID logicalID, Version v, bool cacheable, bool noHit) {
+	Future<Reference<ArenaPage>> readPageAtVersion(PagerEventReasons r, unsigned int l, LogicalPageID logicalID, Version v, bool cacheable, bool noHit) {
 		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
 		return readPage(r, l, physicalID, cacheable, noHit);
 	}
@@ -2780,7 +2767,7 @@ public:
 		return extent;
 	}
 
-	Future<Reference<ArenaPage>> readExtent(pagerEventReasons r, unsigned int l, LogicalPageID pageID) override {
+	Future<Reference<ArenaPage>> readExtent(PagerEventReasons r, unsigned int l, LogicalPageID pageID) override {
 		debug_printf("DWALPager(%s) op=readExtent %s\n", filename.c_str(), toString(pageID).c_str());
 		PageCacheEntry* pCacheEntry = extentCache.getIfExists(r, l, pageID);
 		if (pCacheEntry != nullptr) {
@@ -2820,25 +2807,25 @@ public:
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
 			if(l==0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheMiss, r);
-				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 			else{
 				auto metrics = g_redwoodMetrics.level(l).metric;
-				metrics.eventReasons.addEventReason(events::pagerCacheMiss, r);
-				metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
+				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 		}
 		else{
 			++g_redwoodMetrics.metric.pagerCacheHit;
 			if(l==0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheHit, r);
-				g_redwoodMetrics.metric.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
+				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 			else{
 				auto metrics = g_redwoodMetrics.level(l).metric;
-				metrics.eventReasons.addEventReason(events::pagerCacheHit, r);
-				metrics.eventReasons.addEventReason(events::pagerCacheLookup, r);
+				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
+				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			}
 		}
 		return cacheEntry.readFuture;
@@ -2952,10 +2939,10 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data = wait(self->readPage(pagerEventReasons::metaData, 0, p.newPageID, false, true));
+			Reference<ArenaPage> data = wait(self->readPage(PagerEventReasons::metaData, 0, p.newPageID, false, true));
 
 			// Write the data to the original page so it can be read using its original pageID
-			self->updatePage(pagerEventReasons::metaData, 0, p.originalPageID, data);
+			self->updatePage(PagerEventReasons::metaData, 0, p.originalPageID, data);
 			++g_redwoodMetrics.metric.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
 			++g_redwoodMetrics.metric.pagerRemapSkip;
@@ -3100,7 +3087,7 @@ public:
 		debug_printf("DWALPager(%s) commit begin\n", self->filename.c_str());
 
 		// Write old committed header to Page 1
-		self->writeHeaderPage(pagerEventReasons::commit, 1, self->lastCommittedHeaderPage);
+		self->writeHeaderPage(PagerEventReasons::commit, 1, self->lastCommittedHeaderPage);
 
 		// Trigger the remap eraser to stop and then wait for it.
 		self->remapCleanupStop = true;
@@ -3132,7 +3119,7 @@ public:
 		}
 
 		// Update header on disk and sync again.
-		wait(self->writeHeaderPage(pagerEventReasons::commit, 0, self->headerPage));
+		wait(self->writeHeaderPage(PagerEventReasons::commit, 0, self->headerPage));
 		if (g_network->getCurrentTask() > TaskPriority::DiskWrite) {
 			wait(delay(0, TaskPriority::DiskWrite));
 		}
@@ -3425,7 +3412,7 @@ public:
 	  : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {}
 	~DWALPagerSnapshot() override {}
 
-	Future<Reference<const ArenaPage>> getPhysicalPage(pagerEventReasons r, unsigned int l, LogicalPageID pageID, bool cacheable, bool noHit) override {
+	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons r, unsigned int l, LogicalPageID pageID, bool cacheable, bool noHit) override {
 		if (expired.isError()) {
 			throw expired.getError();
 		}
@@ -4373,7 +4360,7 @@ public:
 				}
 				// Start reading the page, without caching
 
-				entries.push_back(std::make_pair(q.get(), self->readPage(pagerEventReasons::lazyClear, q.get().height, snapshot, q.get().pageID, true, false)));
+				entries.push_back(std::make_pair(q.get(), self->readPage(PagerEventReasons::lazyClear, q.get().height, snapshot, q.get().pageID, true, false)));
 
 				--toPop;
 			}
@@ -4469,7 +4456,7 @@ public:
 			++latest;
 			Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 			makeEmptyRoot(page);
-			self->m_pager->updatePage(pagerEventReasons::metaData, 0, id, page);
+			self->m_pager->updatePage(PagerEventReasons::metaData, 0, id, page);
 			self->m_pager->setCommitVersion(latest);
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
@@ -5099,9 +5086,6 @@ private:
 			state unsigned int currLevel = btPage->height;
 			metrics.metric.pageBuild += 1;
 			metrics.metric.pageBuildExt += p.blockCount - 1;
-			metrics.metric.buildFillPct += p.usedFraction();
-			metrics.metric.buildStoredPct += p.kvFraction();
-			metrics.metric.buildItemCount += p.count;
 
 			metrics.buildFillPctSketch->samplePercentage(p.usedFraction());
 			metrics.buildStoredPctSketch->samplePercentage(p.kvFraction());
@@ -5143,7 +5127,7 @@ private:
 				}
 				for (k = 0; k < pages.size(); ++k) {
 					LogicalPageID id = wait(self->m_pager->newPageID());
-					self->m_pager->updatePage(pagerEventReasons::commit, height, id, pages[k]);
+					self->m_pager->updatePage(PagerEventReasons::commit, height, id, pages[k]);
 					childPageID.push_back(records.arena(), id);
 				}
 			}
@@ -5210,7 +5194,7 @@ private:
 		return pager->tryEvictPage(id.front());
 	}
 
-	ACTOR static Future<Reference<const ArenaPage>> readPage(pagerEventReasons r,
+	ACTOR static Future<Reference<const ArenaPage>> readPage(PagerEventReasons r,
 															 unsigned int l, 
 															 Reference<IPagerSnapshot> snapshot,
 	                                                         BTreePageIDRef id,
@@ -5282,7 +5266,7 @@ private:
 		g_redwoodMetrics.metric.btreeLeafPreloadExt += (id.size() - 1);
 
 		for (auto pageID : id) {
-			snapshot->getPhysicalPage(pagerEventReasons::rangePrefetch, l, pageID, true, true); // prefetch btree leaf node
+			snapshot->getPhysicalPage(PagerEventReasons::rangePrefetch, l, pageID, true, true); // prefetch btree leaf node
 		}
 	}
 
@@ -5429,9 +5413,6 @@ private:
 			auto& metrics = g_redwoodMetrics.level(btPage->height);
 			metrics.metric.pageModify += 1;
 			metrics.metric.pageModifyExt += (maybeNewID.size() - 1);
-			metrics.metric.modifyFillPct += (double)btPage->size() / capacity;
-			metrics.metric.modifyStoredPct += (double)btPage->kvBytes / capacity;
-			metrics.metric.modifyItemCount += btPage->tree()->numItems;
 
 			metrics.modifyFillPctSketch->samplePercentage((double)btPage->size() / capacity);
 			metrics.modifyStoredPctSketch->samplePercentage((double)btPage->kvBytes / capacity);
@@ -5695,7 +5676,7 @@ private:
 			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
-		state Reference<const ArenaPage> page = wait(readPage(pagerEventReasons::commit, l, snapshot, rootID, false, false));
+		state Reference<const ArenaPage> page = wait(readPage(PagerEventReasons::commit, l, snapshot, rootID, false, false));
 		state Version writeVersion = self->getLastCommittedVersion() + 1;
 
 		// If the page exists in the cache, it must be copied before modification.
@@ -6429,7 +6410,7 @@ private:
 				Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 				makeEmptyRoot(page);
 				self->m_pHeader->height = 1;
-				self->m_pager->updatePage(pagerEventReasons::commit, 1, newRootID, page);
+				self->m_pager->updatePage(PagerEventReasons::commit, 1, newRootID, page);
 				rootPageID = BTreePageIDRef((LogicalPageID*)&newRootID, 1);
 			} else {
 				Standalone<VectorRef<RedwoodRecordRef>> newRootLevel(all.newLinks, all.newLinks.arena());
@@ -6538,7 +6519,7 @@ public:
 		PathEntry& back() { return path.back(); }
 		void popPath() { path.pop_back(); }
 
-		Future<Void> pushPage(pagerEventReasons r, unsigned int l, const BTreePage::BinaryTree::Cursor& link) {
+		Future<Void> pushPage(PagerEventReasons r, unsigned int l, const BTreePage::BinaryTree::Cursor& link) {
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
 			return map(readPage(r, l, pager, link.get().getChildPage()), [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
@@ -6550,7 +6531,7 @@ public:
 			});
 		}
 
-		Future<Void> pushPage(pagerEventReasons r, unsigned int l,  BTreePageIDRef id) {
+		Future<Void> pushPage(PagerEventReasons r, unsigned int l,  BTreePageIDRef id) {
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
 			return map(readPage(r, l, pager, id), [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
@@ -6569,7 +6550,7 @@ public:
 			path.clear();
 			path.reserve(6);
 			valid = false;
-			return pushPage(pagerEventReasons::commit, 1, root);
+			return pushPage(PagerEventReasons::commit, 1, root);
 		}
 
 		// Seeks cursor to query if it exists, the record before or after it, or an undefined and invalid
@@ -6581,7 +6562,7 @@ public:
 		//     If there is a record in the tree > query then moveNext() will move to it.
 		// If non-zero is returned then the cursor is valid and the return value is logically equivalent
 		// to query.compare(cursor.get())
-		ACTOR Future<int> seek_impl(pagerEventReasons r, BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
+		ACTOR Future<int> seek_impl(PagerEventReasons r, BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
 			state RedwoodRecordRef internalPageQuery = query.withMaxPageID();
 			self->path.resize(1);
 			debug_printf(
@@ -6640,9 +6621,9 @@ public:
 			}
 		}
 
-		Future<int> seek(pagerEventReasons r, RedwoodRecordRef query, int prefetchBytes) { return seek_impl(r, this, query, prefetchBytes); }
+		Future<int> seek(PagerEventReasons r, RedwoodRecordRef query, int prefetchBytes) { return seek_impl(r, this, query, prefetchBytes); }
 
-		ACTOR Future<Void> seekGTE_impl(pagerEventReasons r, BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
+		ACTOR Future<Void> seekGTE_impl(PagerEventReasons r, BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
 			debug_printf("seekGTE(%s, %d) start\n", query.toString().c_str(), prefetchBytes);
 			int cmp = wait(self->seek(r, query, prefetchBytes));
 			if (cmp > 0 || (cmp == 0 && !self->isValid())) {
@@ -6651,11 +6632,11 @@ public:
 			return Void();
 		}
 
-		Future<Void> seekGTE(pagerEventReasons r, RedwoodRecordRef query, int prefetchBytes) {
+		Future<Void> seekGTE(PagerEventReasons r, RedwoodRecordRef query, int prefetchBytes) {
 			return seekGTE_impl(r, this, query, prefetchBytes);
 		}
 
-		ACTOR Future<Void> seekLT_impl(pagerEventReasons r, BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
+		ACTOR Future<Void> seekLT_impl(PagerEventReasons r, BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
 			debug_printf("seekLT(%s, %d) start\n", query.toString().c_str(), prefetchBytes);
 			int cmp = wait(self->seek(r, query, prefetchBytes));
 			if (cmp <= 0) {
@@ -6664,7 +6645,7 @@ public:
 			return Void();
 		}
 
-		Future<Void> seekLT(pagerEventReasons r, RedwoodRecordRef query, int prefetchBytes) {
+		Future<Void> seekLT(PagerEventReasons r, RedwoodRecordRef query, int prefetchBytes) {
 			return seekLT_impl(r, this, query, -prefetchBytes);
 		}
 
@@ -6716,7 +6697,7 @@ public:
 					ASSERT(entry.cursor.get().value.present());
 				}
 				int currLevel = entry.btPage()->height;
-				wait(self->pushPage(pagerEventReasons::metaData, currLevel-1, entry.cursor));
+				wait(self->pushPage(PagerEventReasons::metaData, currLevel-1, entry.cursor));
 				auto& newEntry = self->path.back();
 				ASSERT(forward ? newEntry.cursor.moveFirst() : newEntry.cursor.moveLast());
 			}
@@ -6863,7 +6844,7 @@ public:
 		state int prefetchBytes = 0;
 
 		if (rowLimit > 0) {
-			wait(cur.seekGTE(pagerEventReasons::rangeRead, keys.begin, prefetchBytes));
+			wait(cur.seekGTE(PagerEventReasons::rangeRead, keys.begin, prefetchBytes));
 			while (cur.isValid()) {
 				// Read page contents without using waits
 				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
@@ -6905,7 +6886,7 @@ public:
 				wait(cur.moveNext());
 			}
 		} else {
-			wait(cur.seekLT(pagerEventReasons::rangeRead, keys.end, prefetchBytes));
+			wait(cur.seekLT(PagerEventReasons::rangeRead, keys.end, prefetchBytes));
 			while (cur.isValid()) {
 				// Read page contents without using waits
 				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
@@ -6967,7 +6948,7 @@ public:
 		state FlowLock::Releaser releaser(self->m_concurrentReads);
 		++g_redwoodMetrics.metric.opGet;
 
-		wait(cur.seekGTE(pagerEventReasons::pointRead, key, 0));
+		wait(cur.seekGTE(PagerEventReasons::pointRead, key, 0));
 		if (cur.isValid() && cur.get().key == key) {
 			// Return a Value whose arena depends on the source page arena
 			Value v;
@@ -7084,12 +7065,12 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 		             start.printable().c_str(),
 		             end.printable().c_str(),
 		             randomKey.toString().c_str());
-		wait(success(cur.seek(pagerEventReasons::rangeRead, randomKey, 0)));
+		wait(success(cur.seek(PagerEventReasons::rangeRead, randomKey, 0)));
 	}
 
 	debug_printf(
 	    "VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.printable().c_str(), end.printable().c_str());
-	wait(cur.seekGTE(pagerEventReasons::rangeRead, start, 0));
+	wait(cur.seekGTE(PagerEventReasons::rangeRead, start, 0));
 
 	state Standalone<VectorRef<KeyValueRef>> results;
 
@@ -7189,7 +7170,7 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	}
 
 	// Now read the range from the tree in reverse order and compare to the saved results
-	wait(cur.seekLT(pagerEventReasons::rangeRead, end, 0));
+	wait(cur.seekLT(PagerEventReasons::rangeRead, end, 0));
 
 	state std::reverse_iterator<const KeyValueRef*> r = results.rbegin();
 
@@ -7266,7 +7247,7 @@ ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree,
 			state Optional<std::string> val = i->second;
 			debug_printf("Verifying @%" PRId64 " '%s'\n", ver, key.c_str());
 			state Arena arena;
-			wait(cur.seekGTE(pagerEventReasons::metaData, RedwoodRecordRef(KeyRef(arena, key)), 0));
+			wait(cur.seekGTE(PagerEventReasons::metaData, RedwoodRecordRef(KeyRef(arena, key)), 0));
 			bool foundKey = cur.isValid() && cur.get().key == key;
 			bool hasValue = foundKey && cur.get().value.present();
 
@@ -7391,7 +7372,7 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree) {
 			}
 
 			state KeyValue kv = randomKV(10, 0);
-			wait(cur.seekGTE(pagerEventReasons::pointRead, kv.key, 0));
+			wait(cur.seekGTE(PagerEventReasons::pointRead, kv.key, 0));
 			state int c = deterministicRandom()->randomInt(0, 100);
 			state bool direction = deterministicRandom()->coinflip();
 			while (cur.isValid() && c-- > 0) {
@@ -8971,7 +8952,7 @@ ACTOR Future<Void> randomSeeks(VersionedBTree* btree, int count, char firstChar,
 	wait(btree->initBTreeCursor(&cur, readVer));
 	while (c < count) {
 		state Key k = randomString(20, firstChar, lastChar);
-		wait(cur.seekGTE(pagerEventReasons::pointRead, k, 0));
+		wait(cur.seekGTE(PagerEventReasons::pointRead, k, 0));
 		++c;
 	}
 	double elapsed = timer() - readStart;
@@ -8995,7 +8976,7 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 	state int totalScanBytes = 0;
 	while (c++ < count) {
 		state Key k = randomString(20, firstChar, lastChar);
-		wait(cur.seekGTE(pagerEventReasons::pointRead, k, readAhead));
+		wait(cur.seekGTE(PagerEventReasons::pointRead, k, readAhead));
 		if (adaptive) {
 			readAhead = totalScanBytes / c;
 		}
@@ -9031,10 +9012,10 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 	state LogicalPageID id = wait(pager->newPageID());
 	Reference<ArenaPage> p = pager->newPageBuffer();
 	memset(p->mutate(), (char)id, p->size());
-	pager->updatePage(pagerEventReasons::commit, 0, id, p);
+	pager->updatePage(PagerEventReasons::commit, 0, id, p);
 	pager->setMetaKey(LiteralStringRef("asdfasdf"));
 	wait(pager->commit());
-	Reference<ArenaPage> p2 = wait(pager->readPage(pagerEventReasons::pointRead, 0, id, true));
+	Reference<ArenaPage> p2 = wait(pager->readPage(PagerEventReasons::pointRead, 0, id, true));
 	printf("%s\n", StringRef(p2->begin(), p2->size()).toHexString().c_str());
 
 	// TODO: Verify reads, do more writes and reads to make this a real pager validator
@@ -9164,7 +9145,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	state int i;
 	for (i = 1; i < extentIDs.size() - 1; i++) {
 		LogicalPageID extID = extentIDs[i];
-		pager->readExtent(pagerEventReasons::rangeRead, 1, extID);
+		pager->readExtent(PagerEventReasons::rangeRead, 1, extID);
 	}
 
 	state PromiseStream<Standalone<VectorRef<ExtentQueueEntry<16>>>> resultStream;
