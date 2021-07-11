@@ -31,6 +31,7 @@
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/ActorCollection.h"
+#include "flow/network.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "fdbrpc/RangeMap.h"
@@ -61,7 +62,7 @@ private:
 	Future<Void> shutdown;
 
 public:
-	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file) { shutdown = doShutdown(this); }
+	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file), diskFailureInjector(DiskFailureInjector::injector()) { shutdown = doShutdown(this); }
 
 	ACTOR Future<Void> doShutdown(AsyncFileDetachable* self) {
 		wait(success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture()));
@@ -84,12 +85,20 @@ public:
 	Future<int> read(void* data, int length, int64_t offset) override {
 		if (!file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady())
 			return io_error().asInjectedFault();
+		// throttleDisk if enabled
+		auto throttleFor = diskFailureInjector->getDiskDelay();
+		if (throttleFor > 0.0) {
+			TraceEvent("AsyncFileDetachable_Read").detail("ThrottleDelay", throttleFor);
+			//wait(delay(throttleFor));
+		}
 		return sendErrorOnShutdown(file->read(data, length, offset));
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
 		if (!file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady())
 			return io_error().asInjectedFault();
+		if (diskFailureInjector->getDiskDelay() > 0.0)
+			TraceEvent("AsyncFileDetachable_Write").detail("ThrottleDelay", diskFailureInjector->getDiskDelay());
 		return sendErrorOnShutdown(file->write(data, length, offset));
 	}
 
@@ -121,6 +130,8 @@ public:
 			throw io_error().asInjectedFault();
 		return file->getFilename();
 	}
+public:
+		DiskFailureInjector* diskFailureInjector;
 };
 
 // An async file implementation which wraps another async file and will randomly destroy sectors that it is writing when
@@ -190,11 +201,12 @@ private:
 	                    Reference<DiskParameters> diskParameters,
 	                    NetworkAddress openedAddress,
 	                    bool aio)
-	  : filename(filename), initialFilename(initialFilename), file(file), diskParameters(diskParameters),
-	    openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false),
-	    aio(aio) {
+		: filename(filename), initialFilename(initialFilename), file(file), diskParameters(diskParameters),
+		  openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false),
+		  aio(aio), diskFailureInjector(DiskFailureInjector::injector())
+		{
 
-		// This is only designed to work in simulation
+			// This is only designed to work in simulation
 		ASSERT(g_network->isSimulated());
 		this->id = deterministicRandom()->randomUniqueID();
 
@@ -309,7 +321,7 @@ public:
 
 	// Passes along reads straight to the underlying file, waiting for any outstanding changes that could affect the
 	// results
-	Future<int> read(void* data, int length, int64_t offset) override { return read(this, data, length, offset); }
+	Future<int> read(void* data, int length, int64_t offset) override { return read(this, data, length, offset, diskFailureInjector->getDiskDelay()); }
 
 	// Writes data to the file.  Writes are delayed a random amount of time before being
 	// passed to the underlying file
@@ -324,7 +336,7 @@ public:
 
 		Promise<Void> writeStarted;
 		Promise<Future<Void>> writeEnded;
-		writeEnded.send(write(this, writeStarted, writeEnded.getFuture(), data, length, offset));
+		writeEnded.send(write(this, writeStarted, writeEnded.getFuture(), data, length, offset, diskFailureInjector->getDiskDelay()));
 		return writeStarted.getFuture();
 	}
 
@@ -432,7 +444,7 @@ private:
 		return readFuture.get();
 	}
 
-	ACTOR Future<int> read(AsyncFileNonDurable* self, void* data, int length, int64_t offset) {
+	ACTOR Future<int> read(AsyncFileNonDurable* self, void* data, int length, int64_t offset, double throttleFor = 0.0) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait(g_simulator.onMachine(currentProcess));
@@ -441,6 +453,11 @@ private:
 			state int rep = wait(self->onRead(self, data, length, offset));
 			wait(g_simulator.onProcess(currentProcess, currentTaskID));
 
+			// throttleDisk if enabled
+			if (throttleFor > 0.0) {
+				TraceEvent("AsyncFileNonDurable_ReadDone", self->id).detail("ThrottleDelay", throttleFor).detail("Filename", self->filename).detail("ReadLength", length).detail("Offset", offset);
+				wait(delay(throttleFor));
+			}
 			return rep;
 		} catch (Error& e) {
 			state Error err = e;
@@ -457,7 +474,8 @@ private:
 	                         Future<Future<Void>> ownFuture,
 	                         void const* data,
 	                         int length,
-	                         int64_t offset) {
+							 int64_t offset,
+							 double throttleFor = 0.0) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait(g_simulator.onMachine(currentProcess));
@@ -621,6 +639,11 @@ private:
 		}
 
 		wait(waitForAll(writeFutures));
+		// throttleDisk if enabled
+		if (throttleFor > 0.0) {
+			TraceEvent("AsyncFileNonDurable_WriteDone", self->id).detail("ThrottleDelay", throttleFor).detail("Filename", self->filename).detail("WriteLength", length).detail("Offset", offset);
+			wait(delay(throttleFor));
+		}
 		//TraceEvent("AsyncFileNonDurable_WriteDone", self->id).detail("Delay", delayDuration).detail("Filename", self->filename).detail("WriteLength", length).detail("Offset", offset);
 		return Void();
 	}
@@ -866,6 +889,8 @@ private:
 			throw err;
 		}
 	}
+public:
+		DiskFailureInjector* diskFailureInjector;
 };
 
 #include "flow/unactorcompiler.h"

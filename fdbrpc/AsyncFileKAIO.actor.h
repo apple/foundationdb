@@ -195,7 +195,10 @@ public:
 
 	void addref() override { ReferenceCounted<AsyncFileKAIO>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileKAIO>::delref(); }
-
+	ACTOR static void throttleDisk(double throttleFor) {
+		if (throttleFor > 0.0)
+			wait(delay(throttleFor));
+	}
 	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileLogicalReads;
 		++countLogicalReads;
@@ -212,6 +215,9 @@ public:
 
 		enqueue(io, "read", this);
 		Future<int> result = io->result.getFuture();
+
+		// throttleDisk if enabled
+		throttleDisk(diskFailureInjector->getDiskDelay());
 
 #if KAIO_LOGGING
 		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
@@ -237,6 +243,9 @@ public:
 
 		enqueue(io, "write", this);
 		Future<int> result = io->result.getFuture();
+
+		// throttleDisk if enabled
+		throttleDisk(diskFailureInjector->getDiskDelay());
 
 #if KAIO_LOGGING
 		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
@@ -749,6 +758,9 @@ private:
 			}
 		}
 	}
+
+public:
+		DiskFailureInjector* diskFailureInjector;
 };
 
 #if KAIO_LOGGING

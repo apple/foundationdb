@@ -486,7 +486,8 @@ public:
 		enNetworkAddressesFunc = 11,
 		enClientFailureMonitor = 12,
 		enSQLiteInjectedError = 13,
-		enGlobalConfig = 14
+		enGlobalConfig = 14,
+		enFailureInjector = 15
 	};
 
 	virtual void longTaskCheck(const char* name) {}
@@ -644,6 +645,41 @@ public:
 		return static_cast<INetworkConnections*>((void*)g_network->global(INetwork::enNetworkConnections));
 	}
 	// Returns the interface that should be used to make and accept socket connections
+};
+
+struct DiskFailureInjector : FastAllocated<DiskFailureInjector> {
+	static DiskFailureInjector* injector() {
+		auto res = g_network->global(INetwork::enFailureInjector);
+		if (!res) {
+			res = new DiskFailureInjector();
+			g_network->setGlobal(INetwork::enFailureInjector, res);
+		}
+		return static_cast<DiskFailureInjector*>(res);
+	}
+
+	//virtual void throttleFor(double time) = 0;
+	//virtual double getDiskDelay() = 0;
+
+	void throttleFor(double time) {
+		TraceEvent("DiskFailureInjectorBefore").detail("ThrottleUntil", throttleUntil);
+		throttleUntil = std::max(throttleUntil, timer_monotonic() + time);
+		TraceEvent("DiskFailureInjectorAfter").detail("ThrottleUntil", throttleUntil);
+	}
+
+	double getDiskDelay() {
+		if (!FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+			return 0.0;
+		}
+		return std::max(0.0, throttleUntil - timer_monotonic());
+	}
+
+private: // members
+	double throttleUntil = 0.0;
+	std::unordered_map<NetworkAddress, double> throttleDisk;
+
+private: // construction
+	DiskFailureInjector() = default;
+	DiskFailureInjector(DiskFailureInjector const&) = delete;
 };
 
 #endif
