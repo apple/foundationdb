@@ -45,7 +45,7 @@ enum class events{ pagerCacheLookup = 0, pagerCacheHit, pagerCacheMiss, pagerWri
 static const std::string eventsCodes[] = {"Lookup", "Hit", "Miss", "Write"};
 // Reasons for page levle events.
 enum class pagerEventReasons{ pointRead = 0, rangeRead, rangePrefetch, commit, lazyClear, metaData, MAXEVENTREASONS};
-static const std::string pagerEventReasonsCodes[] = {"Get", "RRed", "RPre", "Commit", "Clear", "Meta"};
+static const std::string pagerEventReasonsCodes[] = {"Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta"};
 
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
