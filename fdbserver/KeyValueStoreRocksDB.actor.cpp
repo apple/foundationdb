@@ -319,7 +319,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Optional<UID> debugID;
 			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(KeyRef key, Optional<UID> debugID) : key(key), debugID(debugID), startTime(now()) {}
+			ReadValueAction(KeyRef key, Optional<UID> debugID)
+			  : key(key), debugID(debugID), startTime(timer_monotonic()) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
@@ -328,12 +329,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
-			if (now() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT) {
-				TraceEvent(SevError, "RocksDBError")
+			if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT) {
+				TraceEvent(SevWarn, "RocksDBError")
 				    .detail("Error", "Read value request timedout")
-				    .detail("Method", "ReadValue")
+				    .detail("Method", "ReadValueAction")
 				    .detail("Timeout value", SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT);
-				a.result.send(Optional<Value>());
+				a.result.sendError(transaction_too_old());
 				return;
 			}
 			rocksdb::PinnableSlice value;
@@ -359,11 +360,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), debugID(debugID), startTime(now()){};
+			  : key(key), maxLength(maxLength), debugID(debugID), startTime(timer_monotonic()){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
-			rocksdb::PinnableSlice value;
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
 				traceBatch = { TraceBatch{} };
@@ -371,14 +371,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			if (now() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT) {
-				TraceEvent(SevError, "RocksDBError")
+			if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT) {
+				TraceEvent(SevWarn, "RocksDBError")
 				    .detail("Error", "Read value prefix request timedout")
-				    .detail("Method", "ReadValuePrefix")
+				    .detail("Method", "ReadValuePrefixAction")
 				    .detail("Timeout value", SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT);
-				a.result.send(Optional<Value>());
+				a.result.sendError(transaction_too_old());
 				return;
 			}
+			rocksdb::PinnableSlice value;
 			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValuePrefixDebug",
@@ -402,12 +403,22 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
+			double startTime;
 			ThreadReturnPromise<RangeResult> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
+			if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT) {
+				TraceEvent(SevWarn, "RocksDBError")
+				    .detail("Error", "Read range request timedout")
+				    .detail("Method", "ReadRangeAction")
+				    .detail("Timeout value", SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT);
+				a.result.sendError(transaction_too_old());
+				return;
+			}
+
 			RangeResult result;
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				a.result.send(result);
