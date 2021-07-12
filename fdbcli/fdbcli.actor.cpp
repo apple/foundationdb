@@ -166,14 +166,16 @@ std::string lineWrap(const char* text, int col) {
 class FdbOptions {
 public:
 	// Prints an error and throws invalid_option or invalid_option_value if the option could not be set
+	// TODO: remove Reference<ReadYourWritesTransaction> after we refactor all fdbcli code
 	void setOption(Reference<ReadYourWritesTransaction> tr,
+	               Reference<ITransaction> tr2,
 	               StringRef optionStr,
 	               bool enabled,
 	               Optional<StringRef> arg,
 	               bool intrans) {
 		auto transactionItr = transactionOptions.legalOptions.find(optionStr.toString());
 		if (transactionItr != transactionOptions.legalOptions.end())
-			setTransactionOption(tr, transactionItr->second, enabled, arg, intrans);
+			setTransactionOption(tr, tr2, transactionItr->second, enabled, arg, intrans);
 		else {
 			fprintf(stderr,
 			        "ERROR: invalid option '%s'. Try `help options' for a list of available options.\n",
@@ -216,7 +218,9 @@ public:
 
 private:
 	// Sets a transaction option. If intrans == true, then this option is also applied to the passed in transaction.
+	// TODO: remove Reference<ReadYourWritesTransaction> after we refactor all fdbcli code
 	void setTransactionOption(Reference<ReadYourWritesTransaction> tr,
+	                          Reference<ITransaction> tr2,
 	                          FDBTransactionOptions::Option option,
 	                          bool enabled,
 	                          Optional<StringRef> arg,
@@ -226,8 +230,10 @@ private:
 			throw invalid_option_value();
 		}
 
-		if (intrans)
+		if (intrans) {
 			tr->setOption(option, arg);
+			tr2->setOption(option, arg);
+		}
 
 		transactionOptions.setOption(option, enabled, arg.castTo<StringRef>());
 	}
@@ -4003,7 +4009,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						Optional<StringRef> arg = (tokens.size() > 3) ? tokens[3] : Optional<StringRef>();
 
 						try {
-							options->setOption(tr, tokens[2], isOn, arg, intrans);
+							options->setOption(tr, tr2, tokens[2], isOn, arg, intrans);
 							printf("Option %s for %s\n",
 							       isOn ? "enabled" : "disabled",
 							       intrans ? "current transaction" : "all transactions");
