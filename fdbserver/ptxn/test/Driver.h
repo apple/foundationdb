@@ -109,6 +109,7 @@ struct TestDriverContext {
 	bool useFakeStorageServer;
 	int numStorageServers;
 	std::vector<std::shared_ptr<StorageServerInterfaceBase>> storageServerInterfaces;
+	std::vector<StorageServerInterface> storageServers;
 	std::unordered_map<StorageTeamID, std::shared_ptr<StorageServerInterfaceBase>>
 	    storageTeamIDStorageServerInterfaceMapper;
 	std::shared_ptr<StorageServerInterfaceBase> getStorageServerInterface(const StorageTeamID&);

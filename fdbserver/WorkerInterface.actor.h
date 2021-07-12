@@ -659,6 +659,7 @@ struct InitializeStorageRequest {
 	Tag seedTag; //< If this server will be passed to seedShardServers, this will be a tag, otherwise it is invalidTag
 	UID reqId;
 	UID interfaceId;
+	Optional<ptxn::StorageTeamID> storageTeamId;
 	KeyValueStoreType storeType;
 	Optional<std::pair<UID, Version>>
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
@@ -666,7 +667,7 @@ struct InitializeStorageRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion);
+		serializer(ar, seedTag, reqId, interfaceId, storageTeamId, storeType, reply, tssPairIDAndVersion);
 	}
 };
 
@@ -901,7 +902,9 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     // Only applicable when logSystemType is mock.
     // This has to be a shared_ptr rather than unique_ptr or Reference because MockLogSystem is only forward declared.
-    std::shared_ptr<MockLogSystem> mockLogSystem = nullptr);
+    std::shared_ptr<MockLogSystem> mockLogSystem = nullptr,
+    // Storage team id of a ptxn storage server
+    Optional<ptxn::StorageTeamID> storageTeamId = Optional<ptxn::StorageTeamID>());
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,

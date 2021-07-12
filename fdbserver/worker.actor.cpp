@@ -1700,6 +1700,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				                 [&req](const auto& p) { return p.second != req.storeType; }) ||
 				     req.seedTag != invalidTag)) {
 
+					// if req.storageTeamId exists, means it's a new storage server in ptxn
 					bool isTss = req.tssPairIDAndVersion.present();
 
 					StorageServerInterface recruited(req.interfaceId);
@@ -1746,7 +1747,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                               storageReady,
 					                               dbInfo,
 					                               folder,
-					                               nullptr);
+					                               nullptr,
+					                               req.storageTeamId);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,

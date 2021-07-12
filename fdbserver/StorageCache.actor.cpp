@@ -1846,8 +1846,11 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 				when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) { break; }
 				when(wait(dbInfoChange)) {
 					if (data->logSystem) {
-						cursor = data->logSystem->peekSingle(
-						    data->thisServerID, data->peekVersion, cacheTag, std::vector<std::pair<Version, Tag>>());
+						cursor = data->logSystem->peekSingle(data->thisServerID,
+						                                     data->peekVersion,
+						                                     cacheTag,
+						                                     Optional<ptxn::StorageTeamID>(),
+						                                     std::vector<std::pair<Version, Tag>>());
 					} else
 						cursor = Reference<ILogSystem::IPeekCursor>();
 					dbInfoChange = data->db->onChange();
