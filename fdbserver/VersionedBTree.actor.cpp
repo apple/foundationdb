@@ -1291,10 +1291,10 @@ struct RedwoodMetrics {
 	static constexpr int btreeLevels = 5;
 	static int maxRecordCount;
 
-	struct eventReasonsArray{
+	struct EventReasonsArray{
 		unsigned int eventReasons[(size_t)PagerEvents::MAXEVENTS][(size_t)PagerEventReasons::MAXEVENTREASONS];
 
-		eventReasonsArray(){clear();}
+		EventReasonsArray(){clear();}
 		void clear(){
 			for(size_t i = 0; i<(size_t)PagerEvents::MAXEVENTS; i++){
 				for(size_t j = 0; j<(size_t)PagerEventReasons::MAXEVENTREASONS; j++){
@@ -1387,7 +1387,7 @@ struct RedwoodMetrics {
 			unsigned int lazyClearFreeExt;
 			unsigned int forceUpdate;
 			unsigned int detachChild;
-			eventReasonsArray eventReasons;
+			EventReasonsArray eventReasons;
 		};
 		Counters metric;
 		Reference<Histogram> buildFillPctSketch;
