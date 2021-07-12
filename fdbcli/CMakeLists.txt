@@ -11,6 +11,7 @@ set(FDBCLI_SRCS
   ForceRecoveryWithDataLossCommand.actor.cpp
   KillCommand.actor.cpp
   MaintenanceCommand.actor.cpp
+  ProfileCommand.actor.cpp
   SetClassCommand.actor.cpp
   SnapshotCommand.actor.cpp
   SuspendCommand.actor.cpp
