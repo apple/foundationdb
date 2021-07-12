@@ -6628,7 +6628,7 @@ public:
 				// Prefetch the sibling if the link is not null
 				if (c.get().value.present()) {
 					BTreePageIDRef childPage = c.get().getChildPage();
-					preLoadPage(pager.getPtr(), path[path.size() - 2].getHeight()-1, childPage);
+					preLoadPage(pager.getPtr(), path[path.size() - 2].btPage()->height-1, childPage);
 					recordsRead += estRecordsPerPage;
 					// Use sibling node capacity as an estimate of bytes read.
 					bytesRead += childPage.size() * this->btree->m_blockSize;
