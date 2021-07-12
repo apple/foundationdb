@@ -295,7 +295,9 @@ struct LogSystemConfig {
 	int numLogs() const {
 		int numLogs=0;
 		for (auto& tLogSet : tLogs) {
-			numLogs += tLogSet.tLogs.size();
+			if (tLogSet.isLocal == true) {
+				numLogs += tLogSet.tLogs.size();
+			}
 		}
 		return numLogs;
 	}
