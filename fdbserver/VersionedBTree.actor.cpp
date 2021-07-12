@@ -1666,18 +1666,12 @@ public:
 
 	// Get the object for i if it exists, else return nullptr.
 	// If the object exists, its eviction order will NOT change as this is not a cache hit.
-	ObjectType* getIfExists(PagerEventReasons r, unsigned int l, const IndexType& index) {
+	ObjectType* getIfExists(const IndexType& index) {
 		auto i = cache.find(index);
 		if (i != cache.end()) {
 			++i->second.hits;
-			++g_redwoodMetrics.metric.pagerProbeHit;
-			auto& metrics = g_redwoodMetrics.level(l);
-			metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			return &i->second.item;
 		}
-		++g_redwoodMetrics.metric.pagerProbeMiss;
-		auto& metrics = g_redwoodMetrics.level(l);
-		metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 		return nullptr;
 	}
 
@@ -2598,13 +2592,16 @@ public:
 		// Otherwise, read the page and return it but don't add it to the cache
 		if (!cacheable) {
 			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
-			PageCacheEntry* pCacheEntry = pageCache.getIfExists(r, l, pageID);
-
+			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageID);
+			auto& metrics = g_redwoodMetrics.level(l);
 			if (pCacheEntry != nullptr) {
+				++g_redwoodMetrics.metric.pagerProbeHit;
+				metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageID).c_str());
 				return pCacheEntry->readFuture;
 			}
-
+			++g_redwoodMetrics.metric.pagerProbeMiss;
+			metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
 			return forwardError(readPhysicalPage(this, (PhysicalPageID)pageID), errorPromise);
 		}
@@ -2749,11 +2746,16 @@ public:
 
 	Future<Reference<ArenaPage>> readExtent(PagerEventReasons r, unsigned int l, LogicalPageID pageID) override {
 		debug_printf("DWALPager(%s) op=readExtent %s\n", filename.c_str(), toString(pageID).c_str());
-		PageCacheEntry* pCacheEntry = extentCache.getIfExists(r, l, pageID);
+		PageCacheEntry* pCacheEntry = extentCache.getIfExists(pageID);
+		auto& metrics = g_redwoodMetrics.level(l);
 		if (pCacheEntry != nullptr) {
+			++g_redwoodMetrics.metric.pagerProbeHit;
+			metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			debug_printf("DWALPager(%s) Cache Entry exists for %s\n", filename.c_str(), toString(pageID).c_str());
 			return pCacheEntry->readFuture;
 		}
+		++g_redwoodMetrics.metric.pagerProbeMiss;
+		metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 
 		LogicalPageID headPageID = pHeader->remapQueue.headPageID;
 		LogicalPageID tailPageID = pHeader->remapQueue.tailPageID;
