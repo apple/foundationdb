@@ -700,7 +700,7 @@ private:
 // Binds an AsyncTrigger object to an AsyncVar, so when the AsyncVar changes
 // the AsyncTrigger is triggered.
 ACTOR template <class T>
-void forward(Reference<AsyncVar<T>> from, AsyncTrigger* to) {
+void forward(Reference<AsyncVar<T> const> from, AsyncTrigger* to) {
 	loop {
 		wait(from->onChange());
 		to->trigger();

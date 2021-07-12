@@ -72,7 +72,7 @@ public:
 	// to allow global configuration to run transactions on the latest
 	// database.
 	template <class T>
-	static void create(Database& cx, Reference<AsyncVar<T>> db, const ClientDBInfo* dbInfo) {
+	static void create(Database& cx, Reference<AsyncVar<T> const> db, const ClientDBInfo* dbInfo) {
 		if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
 			auto config = new GlobalConfig{ cx };
 			g_network->setGlobal(INetwork::enGlobalConfig, config);

@@ -1756,7 +1756,8 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 	}
 
 	auto database = Database(db);
-	GlobalConfig::create(database, clientInfo, std::addressof(clientInfo->get()));
+	GlobalConfig::create(
+	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
 	return database;
 }
 

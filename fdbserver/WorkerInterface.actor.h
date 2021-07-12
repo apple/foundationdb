@@ -831,7 +831,7 @@ ACTOR Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
 
-class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
+class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
                               LockAware = LockAware::FALSE,
                               EnableLocalityLoadBalance = EnableLocalityLoadBalance::TRUE);
@@ -879,7 +879,7 @@ ACTOR Future<Void> storageServer(
     Reference<ClusterConnectionFile>
         connFile); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo>> db,
+                                Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators serverCoordinators,
                                 LifetimeToken lifetime,
