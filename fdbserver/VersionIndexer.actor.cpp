@@ -90,20 +90,11 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 	wait(self->version.whenAtLeast(req.lastKnownVersion + 1));
 	VersionIndexerState::VersionEntry searchEntry;
 	searchEntry.version = req.lastKnownVersion;
-	auto iter = std::lower_bound(self->versionWindow.begin(), self->versionWindow.end(), searchEntry);
+	auto iter = std::upper_bound(self->versionWindow.begin(), self->versionWindow.end(), searchEntry);
 	ASSERT(iter != self->versionWindow.end());
 	VersionIndexerPeekReply reply;
 	reply.committedVersion = self->committedVersion;
-	if (iter->version != req.lastKnownVersion) {
-		// storage fell behind and will need to catch up -- but we'll still send the
-		reply.previousVersion = invalidVersion;
-	} else if (iter == self->versionWindow.begin()) {
-		reply.previousVersion = self->previousVersion;
-		++iter;
-	} else {
-		reply.previousVersion = (iter - 1)->version;
-		++iter;
-	}
+	reply.previousVersion = iter != self->versionWindow.begin() ? (iter - 1)->version : self->previousVersion;
 	for (; iter != self->versionWindow.end(); ++iter) {
 		auto i = std::lower_bound(iter->tags.begin(), iter->tags.end(), req.tag);
 		bool hasMutations = i != iter->tags.end() && *i != req.tag;
@@ -116,12 +107,10 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 void truncateWindow(VersionIndexerState* self) {
 	if (self->versionWindow.front().version >
 	    self->versionWindow.back().version + 4 * SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS) {
-		auto iter = std::lower_bound(
-		    self->versionWindow.begin(),
-		    self->versionWindow.end(),
-		    std::make_pair(self->versionWindow.front().version + SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS,
-		                   invalidTag),
-		    [](auto const& lhs, auto const& rhs) { return lhs.first < lhs.second; });
+		VersionIndexerState::VersionEntry searchEntry;
+		searchEntry.version = self->versionWindow.front().version + SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+		auto iter = std::lower_bound(self->versionWindow.begin(), self->versionWindow.end(), searchEntry);
+		self->previousVersion = iter->version;
 		self->versionWindow.erase(self->versionWindow.begin(), iter);
 	}
 }
