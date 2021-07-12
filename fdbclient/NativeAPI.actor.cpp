@@ -1956,7 +1956,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		break;
 	}
 	case FDBNetworkOptions::ENABLE_RUN_LOOP_PROFILING: // Same as ENABLE_SLOW_TASK_PROFILING
-		validateOptionValuePresent(value);
+		validateOptionValueNotPresent(value);
 		networkOptions.runLoopProfilingEnabled = true;
 		break;
 	case FDBNetworkOptions::DISTRIBUTED_CLIENT_TRACER: {
