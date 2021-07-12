@@ -156,14 +156,13 @@ public:
 		return map<R>([](const T& v) { return (R)v; });
 	}
 
-	// TODO: Rvalue ref overload
 	template <class R>
-	ErrorOr<R> map(std::function<R(T)> f) const {
-		if (present()) {
-			return ErrorOr<R>(f(get()));
-		} else {
-			return ErrorOr<R>(getError());
-		}
+	ErrorOr<R> map(std::function<R(T)> f) const& {
+		return present() ? ErrorOr<R>(f(get())) : ErrorOr<R>(getError());
+	}
+	template <class R>
+	ErrorOr<R> map(std::function<R(T)> f) && {
+		return present() ? ErrorOr<R>(f(std::move(*this).get())) : ErrorOr<R>(getError());
 	}
 
 	bool present() const { return std::holds_alternative<T>(value); }
