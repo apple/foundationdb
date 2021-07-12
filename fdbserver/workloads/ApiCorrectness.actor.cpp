@@ -435,6 +435,8 @@ public:
 	// Gets a single range of values from the database and memory stores and compares them, returning true if the
 	// results were the same
 	ACTOR Future<bool> runGetRange(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
+		state Reverse reverse = deterministicRandom()->coinflip();
+
 		// Generate a random range
 		Key key = self->selectRandomKey(data, 0.5);
 		Key key2 = self->selectRandomKey(data, 0.5);
@@ -444,7 +446,6 @@ public:
 
 		// Generate a random maximum number of results
 		state int limit = deterministicRandom()->randomInt(0, 101);
-		state bool reverse = deterministicRandom()->random01() > 0.5 ? false : true;
 
 		// Get the range from memory
 		state RangeResult storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
@@ -480,6 +481,8 @@ public:
 	// Gets a single range of values using key selectors from the database and memory store and compares them, returning
 	// true if the results were the same
 	ACTOR Future<bool> runGetRangeSelector(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
+		state Reverse reverse = deterministicRandom()->coinflip();
+
 		KeySelector selectors[2];
 		Key keys[2];
 
@@ -530,7 +533,6 @@ public:
 
 		// Choose a random maximum number of results
 		state int limit = deterministicRandom()->randomInt(0, 101);
-		state bool reverse = deterministicRandom()->random01() < 0.5 ? false : true;
 
 		// Get the range from the memory store
 		state RangeResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);
