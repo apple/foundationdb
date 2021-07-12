@@ -886,7 +886,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
                                 bool forceRecovery);
 ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo>> db,
+                                     Reference<AsyncVar<ServerDBInfo> const> db,
                                      std::string whitelistBinPaths);
 ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
                                   InitializeGrvProxyRequest req,
