@@ -1826,19 +1826,19 @@ int printStatusFromJSON(std::string const& jsonFileName) {
 	}
 }
 
-ACTOR Future<Void> triggerDDTeamInfoLog(Database db) {
-	state ReadYourWritesTransaction tr(db);
+ACTOR Future<Void> triggerDDTeamInfoLog(Reference<IDatabase> db) {
+	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			std::string v = deterministicRandom()->randomUniqueID().toString();
-			tr.set(triggerDDTeamInfoPrintKey, v);
-			wait(tr.commit());
+			tr->set(triggerDDTeamInfoPrintKey, v);
+			wait(safeThreadFutureToFuture(tr->commit()));
 			printf("Triggered team info logging in data distribution.\n");
 			return Void();
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
 }
@@ -3462,7 +3462,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
-					wait(triggerDDTeamInfoLog(db));
+					wait(triggerDDTeamInfoLog(db2));
 					continue;
 				}
 
