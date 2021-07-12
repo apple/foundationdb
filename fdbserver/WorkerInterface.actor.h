@@ -906,7 +906,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Reference<AsyncVar<UID>> activeSharedTLog);
 ACTOR Future<Void> resolver(ResolverInterface resolver,
                             InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo>> db);
+                            Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> logRouter(TLogInterface interf,
                              InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db);
