@@ -1971,11 +1971,14 @@ public:
 	static Reference<IAsyncListener> create(Reference<AsyncVar<Output>> const& output);
 };
 
+namespace IAsyncListenerImpl {
+
 template <class Input, class Output, class F>
 class AsyncListener final : public IAsyncListener<Output> {
-	Reference<AsyncVar<Output>> output;
+	// Order matters here, output must outlive monitorActor
+	AsyncVar<Output> output;
 	Future<Void> monitorActor;
-	ACTOR static Future<Void> monitor(Reference<AsyncVar<Input>> input, Reference<AsyncVar<Output>> output, F f) {
+	ACTOR static Future<Void> monitor(Reference<AsyncVar<Input> const> input, AsyncVar<Output>* output, F f) {
 		loop {
 			wait(input->onChange());
 			output->set(f(input->get()));
@@ -1983,22 +1986,24 @@ class AsyncListener final : public IAsyncListener<Output> {
 	}
 
 public:
-	AsyncListener(Reference<AsyncVar<Input>> const& input, F const& f)
-	  : output(makeReference<AsyncVar<Output>>(f(input->get()))), monitorActor(monitor(input, output, f)) {}
-	Output const& get() const override { return output->get(); }
-	Future<Void> onChange() const override { return output->onChange(); }
+	AsyncListener(Reference<AsyncVar<Input> const> const& input, F const& f)
+	  : output(f(input->get())), monitorActor(monitor(input, &output, f)) {}
+	Output const& get() const override { return output.get(); }
+	Future<Void> onChange() const override { return output.onChange(); }
 };
+
+} // namespace IAsyncListenerImpl
 
 template <class Output>
 template <class Input, class F>
 Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Input>> const& input, F const& f) {
-	return makeReference<AsyncListener<Input, Output, F>>(input, f);
+	return makeReference<IAsyncListenerImpl::AsyncListener<Input, Output, F>>(input, f);
 }
 
 template <class Output>
 Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Output>> const& input) {
 	auto identity = [](const auto& x) { return x; };
-	return makeReference<AsyncListener<Output, Output, decltype(identity)>>(input, identity);
+	return makeReference<IAsyncListenerImpl::AsyncListener<Output, Output, decltype(identity)>>(input, identity);
 }
 
 // A weak reference type to wrap a future Reference<T> object.
