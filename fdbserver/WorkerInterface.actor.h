@@ -915,7 +915,9 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<Server
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,
                                       Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> backupWorker(BackupInterface bi, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> backupWorker(BackupInterface bi,
+                                InitializeBackupRequest req,
+                                Reference<AsyncVar<ServerDBInfo> const> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);

@@ -237,7 +237,7 @@ struct BackupData {
 	CounterCollection cc;
 	Future<Void> logger;
 
-	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
+	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo> const> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
@@ -987,7 +987,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch recoveryCount, BackupData* self) {
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch recoveryCount, BackupData* self) {
 	loop {
 		bool isDisplaced =
 		    db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED;
@@ -1033,7 +1033,7 @@ ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
 
 ACTOR Future<Void> backupWorker(BackupInterface interf,
                                 InitializeBackupRequest req,
-                                Reference<AsyncVar<ServerDBInfo>> db) {
+                                Reference<AsyncVar<ServerDBInfo> const> db) {
 	state BackupData self(interf.id(), db, req);
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
