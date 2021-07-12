@@ -1313,7 +1313,6 @@ struct RedwoodMetrics {
 			std::string result = "";
 			static const std::pair<PagerEvents, const char *> allEvents[] = {{PagerEvents::pagerCacheLookup, "pagerCacheLookup"}, {PagerEvents::pagerCacheHit, "pagerCacheHit"}, {PagerEvents::pagerCacheMiss, "pagerCacheMiss"}, {PagerEvents::pagerWrite, "pagerWrite"}};
 			static const std::pair<PagerEventReasons, const char *> allReasons[] = {{PagerEventReasons::pointRead, "pointRead"}, {PagerEventReasons::rangeRead, "rangeRead"}, {PagerEventReasons::rangePrefetch, "rangePrefetch"}, {PagerEventReasons::commit, "commit"}, {PagerEventReasons::lazyClear, "lazyClear"}, {PagerEventReasons::metaData, "metaData"}};
-
 			for(auto &e : allEvents){
 				result += e.second;
 				result += "\n\t";
@@ -1346,15 +1345,30 @@ struct RedwoodMetrics {
 				{PagerEvents::pagerWrite, PagerEventReasons::commit},
 				{PagerEvents::pagerWrite, PagerEventReasons::lazyClear},{PagerEvents::pagerWrite, PagerEventReasons::metaData},
 			};
-			for ( const auto &ER : possibleEventReasonPairs ){
-				t->detail(format("L%d%s", 
-								 h + 1, 
-								 (PagerEventsCodes[(size_t)ER.first]+PagerEventReasonsCodes[(size_t)ER.second]).c_str()), 
-								 eventReasons[(size_t)ER.first][(size_t)ER.second]
-								);
+			static const std::pair<PagerEvents,PagerEventReasons> L0PossibleEventReasonPairs[] = {
+				{PagerEvents::pagerCacheLookup, PagerEventReasons::commit}, {PagerEvents::pagerCacheLookup, PagerEventReasons::metaData},
+				{PagerEvents::pagerCacheHit, PagerEventReasons::metaData}, {PagerEvents::pagerCacheMiss, PagerEventReasons::metaData},
+				{PagerEvents::pagerWrite, PagerEventReasons::commit}, {PagerEvents::pagerWrite, PagerEventReasons::metaData},
+			};
+			if(h==0){
+				for ( const auto &ER : L0PossibleEventReasonPairs ){
+					t->detail(format("L%d%s", 
+									h, 
+									(PagerEventsCodes[(size_t)ER.first]+PagerEventReasonsCodes[(size_t)ER.second]).c_str()), 
+									eventReasons[(size_t)ER.first][(size_t)ER.second]
+									);
+				}
+			}
+			else{
+				for ( const auto &ER : possibleEventReasonPairs ){
+					t->detail(format("L%d%s", 
+									h, 
+									(PagerEventsCodes[(size_t)ER.first]+PagerEventReasonsCodes[(size_t)ER.second]).c_str()), 
+									eventReasons[(size_t)ER.first][(size_t)ER.second]
+									);
+				}
 			}
 		}
-
 	};
 
 	// Page levle events 
@@ -1397,7 +1411,6 @@ struct RedwoodMetrics {
 				buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
 				modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
 			}
-
 			metric.eventReasons.clear();
 			buildFillPctSketch->clear();
 			modifyFillPctSketch->clear();
@@ -1430,7 +1443,6 @@ struct RedwoodMetrics {
 		unsigned int pagerEvictFail;
 		unsigned int btreeLeafPreload;
 		unsigned int btreeLeafPreloadExt;
-		eventReasonsArray eventReasons;
 	};
 
 	RedwoodMetrics() { 
@@ -1441,14 +1453,13 @@ struct RedwoodMetrics {
 	}
 
 	void clear() {
-		unsigned int levelCounter = 1;
+		unsigned int levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
 			level.Clear(levelCounter);
 			++levelCounter;
 		}
 		level(100).Clear();
 		metric = {};
-		metric.eventReasons.clear();
 
 		kvSizeWritten->clear();
 		kvSizeReadByGet->clear();
@@ -1456,8 +1467,8 @@ struct RedwoodMetrics {
 
 		startTime = g_network ? now() : 0;
 	}
-
-	Level levels[btreeLevels];
+	// btree levels and one extra level for non btree level.
+	Level levels[btreeLevels+1];
 	metrics metric;
 	Reference<Histogram> kvSizeWritten;
 	Reference<Histogram> kvSizeReadByGet;
@@ -1472,15 +1483,15 @@ struct RedwoodMetrics {
 
 	Level& level(unsigned int level) {
 		static Level outOfBound;
-		if (level <= 0 || level > btreeLevels) {
+		if (level <= 0 || level > btreeLevels+1) {
 			return outOfBound;
 		}
-		return levels[level - 1];
+		return levels[level];
 	}
 
 	void updateMaxRecordCount(int maxRecordCount){
 		this->maxRecordCount = maxRecordCount;
-		for (int i = 0; i < btreeLevels; ++i) {
+		for (int i = 0; i < btreeLevels+1; ++i) {
 			auto& level = levels[i];
 			level.buildItemCountSketch->updateUpperBound(maxRecordCount);
 			level.modifyItemCountSketch->updateUpperBound(maxRecordCount);
@@ -1517,7 +1528,6 @@ struct RedwoodMetrics {
 			                                               { "PagerRemapCopy", metric.pagerRemapCopy },
 			                                               { "PagerRemapSkip", metric.pagerRemapSkip } };
 		GetHistogramRegistry().logReport();
-		;
 
 		double elapsed = now() - startTime;
 
@@ -1528,7 +1538,6 @@ struct RedwoodMetrics {
 					e->detail(m.first, m.second);
 				}
 			}
-			metric.eventReasons.reportTrace(e, -1);
 		}
 
 		if (s != nullptr) {
@@ -1540,10 +1549,9 @@ struct RedwoodMetrics {
 				}
 			}
 			*s += "\n";
-			*s += metric.eventReasons.ouputSummary(0);
 		}
 
-		for (int i = 0; i < btreeLevels; ++i) {
+		for (int i = 0; i < btreeLevels+1; ++i) {
 			auto& level = levels[i];
 
 			std::pair<const char*, unsigned int> metrics[] = {
@@ -1594,7 +1602,7 @@ struct RedwoodMetrics {
 					}
 				}
 				*s += '\n';
-				*s += level.metric.eventReasons.ouputSummary(i+1);
+				*s += level.metric.eventReasons.ouputSummary(i);
 			}
 		}
 	}
@@ -1663,23 +1671,13 @@ public:
 		if (i != cache.end()) {
 			++i->second.hits;
 			++g_redwoodMetrics.metric.pagerProbeHit;
-			if (l == 0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
-			else{
-				auto& metrics = g_redwoodMetrics.level(l);
-				metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
+			auto& metrics = g_redwoodMetrics.level(l);
+			metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 			return &i->second.item;
 		}
 		++g_redwoodMetrics.metric.pagerProbeMiss;
-		if (l == 0 ){
-			g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-		}
-		else{
-			auto& metrics = g_redwoodMetrics.level(l);
-			metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-		}
+		auto& metrics = g_redwoodMetrics.level(l);
+		metrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 		return nullptr;
 	}
 
@@ -2336,13 +2334,8 @@ public:
 		             page->begin());
 
 		++g_redwoodMetrics.metric.pagerDiskWrite;
-		if (l == 0){ 
-			g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerWrite, r);
-		}
-		else{
-			auto& metrics = g_redwoodMetrics.level(l);
-			metrics.metric.eventReasons.addEventReason(PagerEvents::pagerWrite, r);
-		}
+		auto& metrics = g_redwoodMetrics.level(l);
+		metrics.metric.eventReasons.addEventReason(PagerEvents::pagerWrite, r);
 
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		page->updateChecksum(pageID);
@@ -2631,29 +2624,16 @@ public:
 			cacheEntry.writeFuture = Void();
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
-			if(l==0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
-				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
-			else{
-				auto metrics = g_redwoodMetrics.level(l).metric;
-				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
-				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
+			auto metrics = g_redwoodMetrics.level(l).metric;
+			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
+			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 		}
 		else{
 			++g_redwoodMetrics.metric.pagerCacheHit;
-			if(l==0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
-				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
-			else{
-				auto metrics = g_redwoodMetrics.level(l).metric;
-				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
-				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
+			auto metrics = g_redwoodMetrics.level(l).metric;
+			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
+			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 		}
-
 		return cacheEntry.readFuture;
 	}
 
@@ -2806,27 +2786,15 @@ public:
 			             toString(pageID).c_str());
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
-			if(l==0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
-				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
-			else{
-				auto metrics = g_redwoodMetrics.level(l).metric;
-				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
-				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
+			auto metrics = g_redwoodMetrics.level(l).metric;
+			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
+			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 		}
 		else{
 			++g_redwoodMetrics.metric.pagerCacheHit;
-			if(l==0){
-				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
-				g_redwoodMetrics.metric.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
-			else{
-				auto metrics = g_redwoodMetrics.level(l).metric;
-				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
-				metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-			}
+			auto metrics = g_redwoodMetrics.level(l).metric;
+			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
+			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
 		}
 		return cacheEntry.readFuture;
 	}
