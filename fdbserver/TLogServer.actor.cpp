@@ -329,7 +329,7 @@ struct TLogData : NonCopyable {
 	AsyncVar<bool>
 	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
 
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	Database cx;
 
 	NotifiedVersion queueCommitEnd;
@@ -372,7 +372,7 @@ struct TLogData : NonCopyable {
 	         UID workerID,
 	         IKeyValueStore* persistentData,
 	         IDiskQueue* persistentQueue,
-	         Reference<AsyncVar<ServerDBInfo>> dbInfo,
+	         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	         Reference<AsyncVar<bool>> degraded,
 	         std::string folder)
 	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
@@ -3280,7 +3280,7 @@ ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Referen
 // New tLog (if !recoverFrom.size()) or restore from network
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
                         UID tlogId,
