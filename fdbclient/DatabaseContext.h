@@ -32,13 +32,13 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/VersionVector.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbclient/VersionVector.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -329,6 +329,9 @@ public:
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 
+	// map from ssid -> ss tag
+	std::unordered_map<UID, Tag> ssidTagMapping;
+
 	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
 
@@ -433,14 +436,23 @@ public:
 	// Cache of the latest commit versions of storage servers.
 	VersionVector ssVersionVectorCache;
 
-        // Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
-        // Requests to the storage server will be duplicated to the TSS.
+	// Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
+	// Requests to the storage server will be duplicated to the TSS.
 	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
 
 	// Removes the storage server and its TSS pair from the TSS mapping (if present).
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
 
+	// Adds or updates the specified (UID, Tag) pair in the tag mapping.
+	void addSSIdTagMapping(const UID& uid, const Tag& tag);
+
+	// Returns the latest commit versions that mutated the specified storage servers
+	/// @note returns the latest commit version for a storage server only if the latest
+	// commit version of that storage server is below the specified "readVersion".
+	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
+	                             Version readVersion,
+	                             VersionVector& latestCommitVersions);
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 };

@@ -1235,7 +1235,12 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 
 		state Optional<Value> v;
-		state Version version = wait(waitForVersion(data, req.version, req.spanContext));
+		// If the client specified the latest commit version (that mutated the shard(s) being served
+		// by this storage server) then return the value that corresponds to that version.
+		Version readVersion = req.ssLatestCommitVersions.hasVersion(data->tag)
+		                          ? req.ssLatestCommitVersions.getVersion(data->tag)
+		                          : req.version;
+		state Version version = wait(waitForVersion(data, readVersion, req.spanContext));
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.debugID.get().first(),
@@ -1363,7 +1368,8 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent
 			state Version latest = data->version.get();
 			TEST(latest >= minVersion &&
 			     latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
-			GetValueRequest getReq(span.context, metadata->key, latest, metadata->tags, metadata->debugID);
+			GetValueRequest getReq(
+			    span.context, metadata->key, latest, metadata->tags, metadata->debugID, VersionVector());
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -1933,7 +1939,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	try {
 		if (req.debugID.present())
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
-		state Version version = wait(waitForVersion(data, req.version, span.context));
+		Version readVersion = req.ssLatestCommitVersions.hasVersion(data->tag)
+		                          ? req.ssLatestCommitVersions.getVersion(data->tag)
+		                          : req.version;
+		state Version version = wait(waitForVersion(data, readVersion, span.context));
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 		//		try {
@@ -2099,7 +2108,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		if (req.debugID.present())
 			g_traceBatch.addEvent(
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.Before");
-		state Version version = wait(waitForVersion(data, req.version, span.context));
+		Version readVersion = req.ssLatestCommitVersions.hasVersion(data->tag)
+		                          ? req.ssLatestCommitVersions.getVersion(data->tag)
+		                          : req.version;
+		state Version version = wait(waitForVersion(data, readVersion, span.context));
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 		//		try {
@@ -2110,13 +2122,13 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
-		//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
+		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
 		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
 			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
-			//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
-			//shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -2193,10 +2205,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				}
 
 				/*for( int i = 0; i < r.data.size(); i++ ) {
-					StorageMetrics m;
-					m.bytesPerKSecond = r.data[i].expectedSize();
-					m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
-					data->metrics.notify(r.data[i].key, m);
+				    StorageMetrics m;
+				    m.bytesPerKSecond = r.data[i].expectedSize();
+				    m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an
+				int data->metrics.notify(r.data[i].key, m);
 				}*/
 
 				// For performance concerns, the cost of a range read is billed to the start key and end key of the
@@ -2268,7 +2280,10 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	wait(data->getQueryDelay());
 
 	try {
-		state Version version = wait(waitForVersion(data, req.version, req.spanContext));
+		Version readVersion = req.ssLatestCommitVersions.hasVersion(data->tag)
+		                          ? req.ssLatestCommitVersions.getVersion(data->tag)
+		                          : req.version;
+		state Version version = wait(waitForVersion(data, readVersion, req.spanContext));
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 		state KeyRange shard = getShardKeyRange(data, req.sel);
@@ -4870,7 +4885,8 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 			loop {
 				try {
 					state Version latest = self->version.get();
-					GetValueRequest getReq(span.context, metadata->key, latest, metadata->tags, metadata->debugID);
+					GetValueRequest getReq(
+					    span.context, metadata->key, latest, metadata->tags, metadata->debugID, VersionVector());
 					state Future<Void> getValue = getValueQ(self, getReq);
 					GetValueReply reply = wait(getReq.reply.getFuture());
 					metadata = self->getWatchMetadata(req.key.contents());

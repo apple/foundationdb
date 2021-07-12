@@ -294,9 +294,13 @@ struct GetKeyServerLocationsReply {
 	// if any storage servers in results have a TSS pair, that mapping is in here
 	std::vector<std::pair<UID, StorageServerInterface>> resultsTssMapping;
 
+	// maps storage server interfaces (captured in "results") to the tags of
+	// their corresponding storage servers
+	std::vector<std::pair<UID, Tag>> resultsTagMapping;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, resultsTssMapping, arena);
+		serializer(ar, results, resultsTssMapping, arena, resultsTagMapping);
 	}
 };
 
