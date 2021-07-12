@@ -333,7 +333,7 @@ struct TraceableStringImpl : std::true_type {
 				result.push_back(base16Char(byte));
 			}
 		}
-		ASSERT(result.size() == result.capacity());
+        ASSERT_WE_THINK(result.size() == result.capacity());
 		return result;
 	}
 };
