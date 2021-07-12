@@ -502,15 +502,15 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 
 // Register the worker interf to cluster controller (cc) and
 // re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
-ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                       WorkerInterface interf,
                                       Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                       ProcessClass initialClass,
-                                      Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
-                                      Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
-                                      Reference<AsyncVar<bool>> degraded,
+                                      Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
+                                      Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                      Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
-                                      Reference<AsyncVar<std::set<std::string>>> issues) {
+                                      Reference<AsyncVar<std::set<std::string>> const> issues) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
