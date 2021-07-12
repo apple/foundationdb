@@ -1521,7 +1521,8 @@ struct RedwoodMetrics {
 
 	Level& level(unsigned int level) {
 		static Level outOfBound;
-		if (level <= 0 || level > btreeLevels + 1) {
+		// Valid levels are from 0 - btreeLevels
+		if (level < 0 || level > btreeLevels) {
 			return outOfBound;
 		}
 		return levels[level];
