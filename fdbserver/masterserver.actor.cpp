@@ -1266,6 +1266,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			         waitNext(self->myInterface.getTLogPrevCommitVersion.getFuture())) {
 				GetTLogPrevCommitVersionReply reply;
 				for (uint16_t tLog : req.writtenTLogs) {
+					// TODO the reply needs to be ordered by commit version.
 					reply.tpcvMap[tLog] = self->tpcvVector[tLog]; // TODO (placeholder)
 				}
 				req.reply.send(reply);
