@@ -6573,7 +6573,7 @@ public:
 							// If there is a page link, preload it.
 							if (c.get().value.present()) {
 								BTreePageIDRef childPage = c.get().getChildPage();
-								preLoadPage(self->pager.getPtr(), self->getHeight()-1, childPage);
+								preLoadPage(self->pager.getPtr(), self->getHeight()+1, childPage);
 								prefetchBytes -= self->btree->m_blockSize * childPage.size();
 							}
 						}
@@ -6667,7 +6667,7 @@ public:
 					ASSERT(entry.cursor.get().value.present());
 				}
 				int currLevel = entry.btPage()->height;
-				wait(self->pushPage(PagerEventReasons::metaData, currLevel-1, entry.cursor));
+				wait(self->pushPage(PagerEventReasons::metaData, currLevel+1, entry.cursor));
 				auto& newEntry = self->path.back();
 				ASSERT(forward ? newEntry.cursor.moveFirst() : newEntry.cursor.moveLast());
 			}
