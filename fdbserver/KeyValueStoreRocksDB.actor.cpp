@@ -220,6 +220,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	struct Reader : IThreadPoolReceiver {
 		DB& db;
+		std::unique_ptr<rocksdb::Iterator> cursor;
 
 		explicit Reader(DB& db) : db(db) {}
 
@@ -305,16 +306,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				a.result.send(result);
 			}
+
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
-			auto options = getReadOptions();
+			if (cursor == nullptr) {
+				auto options = getReadOptions();
+				options.total_order_seek = true;
+				cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+			} else {
+				cursor->Refresh();
+			}
+
 			// When using a prefix extractor, ensure that keys are returned in order even if they cross
 			// a prefix boundary.
-			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
+			// options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 			if (a.rowLimit >= 0) {
 				auto endSlice = toSlice(a.keys.end);
-				options.iterate_upper_bound = &endSlice;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				// options.iterate_upper_bound = &endSlice;
 				cursor->Seek(toSlice(a.keys.begin));
 				while (cursor->Valid() && toStringRef(cursor->key()) < a.keys.end) {
 					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
@@ -329,8 +337,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				s = cursor->status();
 			} else {
 				auto beginSlice = toSlice(a.keys.begin);
-				options.iterate_lower_bound = &beginSlice;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				// options.iterate_lower_bound = &beginSlice;
+				// auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
 				cursor->SeekForPrev(toSlice(a.keys.end));
 				if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
 					cursor->Prev();
