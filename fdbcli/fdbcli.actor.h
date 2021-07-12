@@ -24,6 +24,7 @@
 // version of this file.  In intellisense use the source version.
 #include "flow/FastRef.h"
 #include "flow/flow.h"
+#include <vector>
 #if defined(NO_INTELLISENSE) && !defined(FDBCLI_FDBCLI_ACTOR_G_H)
 #define FDBCLI_FDBCLI_ACTOR_G_H
 #include "fdbcli/fdbcli.actor.g.h"
@@ -92,14 +93,17 @@ ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vect
 // cache_range command
 ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
-ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens);
+ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
+                                                std::vector<StringRef> tokens,
+                                                bool intrans);
 // datadistribution command
 ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // expensive_data_check command
-ACTOR Future<bool> expensiveDataCheckCommandActor(Reference<IDatabase> db,
-                                    Reference<ITransaction> tr,
-                                    std::vector<StringRef> tokens,
-                                    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+ACTOR Future<bool> expensiveDataCheckCommandActor(
+    Reference<IDatabase> db,
+    Reference<ITransaction> tr,
+    std::vector<StringRef> tokens,
+    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // kill command
@@ -113,15 +117,17 @@ ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
                                     bool printWarning = false,
                                     bool clearSSFailureZoneString = false);
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// profile command
+ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans);
 // setclass command
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
 ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // suspend command
 ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
-                                    Reference<ITransaction> tr,
-                                    std::vector<StringRef> tokens,
-                                    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+                                       Reference<ITransaction> tr,
+                                       std::vector<StringRef> tokens,
+                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 
 } // namespace fdb_cli
 
