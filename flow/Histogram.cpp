@@ -124,10 +124,10 @@ void Histogram::writeToLog() {
 				e.detail(format("LessThan%u", value), buckets[i]);
 				break;
 			case Unit::percentage:
-				e.detail(format("LessThan%f", (i+1)*0.04), buckets[i]);
+				e.detail(format("LessThan%f", (i + 1) * 0.04), buckets[i]);
 				break;
 			case Unit::record_counter:
-				e.detail(format("LessThan%f", (i+1)*((upperBound-lowerBound)/31.0)), buckets[i]);
+				e.detail(format("LessThan%f", (i + 1) * ((upperBound - lowerBound) / 31.0)), buckets[i]);
 				break;
 			default:
 				ASSERT(false);
@@ -136,7 +136,7 @@ void Histogram::writeToLog() {
 	}
 }
 
-std::string Histogram::drawHistogram(){
+std::string Histogram::drawHistogram() {
 
 	std::stringstream result;
 
@@ -154,44 +154,50 @@ std::string Histogram::drawHistogram(){
 	uint32_t total = 0;
 	double maxPct = 0;
 
-    for (int i = 0; i < 32; i++){
+	for (int i = 0; i < 32; i++) {
 		total += buckets[i];
 	}
-	for (int i = 0; i < 32; i++){
-		maxPct = std::max(maxPct, (100.0*buckets[i])/total);
+	for (int i = 0; i < 32; i++) {
+		maxPct = std::max(maxPct, (100.0 * buckets[i]) / total);
 	}
 
-	double intervalSize = (maxPct<(max_lines - 3)) ? 1 : maxPct / (max_lines - 3);
+	double intervalSize = (maxPct < (max_lines - 3)) ? 1 : maxPct / (max_lines - 3);
 	unsigned int lines = (maxPct < (max_lines - 3)) ? (unsigned int)maxPct : (max_lines - 3);
 
-	result<<"Total Inputs: "<<total<<std::fixed<<"\n";
-	result<<"Percent"<<"\n";
-	for (int l = 0; l < lines; l++){
+	result << "Total Inputs: " << total << std::fixed << "\n";
+	result << "Percent"
+	       << "\n";
+	for (int l = 0; l < lines; l++) {
 		double currHeight = (lines - l) * intervalSize;
 		double halfFullHeight = currHeight - intervalSize / 4;
-		result<<std::setw(6)<<std::setprecision(2)<<currHeight<<" "<< verticalLine;
-		for (int i =0; i<32; i++){
+		result << std::setw(6) << std::setprecision(2) << currHeight << " " << verticalLine;
+		for (int i = 0; i < 32; i++) {
 			double pct = (100.0 * buckets[i]) / total;
-			if(pct > currHeight) result<<fullCell;
-			else if (pct > halfFullHeight) result<<halfCell;
-			else result<<emptyCell;
+			if (pct > currHeight)
+				result << fullCell;
+			else if (pct > halfFullHeight)
+				result << halfCell;
+			else
+				result << emptyCell;
 		}
-		result<<lineEnd<<"\n";
+		result << lineEnd << "\n";
 	}
 
-	result<<"  0.00 "<<origin;
-	for (int i =0; i<32; i++){
+	result << "  0.00 " << origin;
+	for (int i = 0; i < 32; i++) {
 		double pct = (100.0 * buckets[i]) / total;
-		if (pct > intervalSize/4) result<<xFull;
-		else result<<xEmpty;
+		if (pct > intervalSize / 4)
+			result << xFull;
+		else
+			result << xEmpty;
 	}
-	result<<lineEnd<<"\n";
+	result << lineEnd << "\n";
 
-	result<<std::string(9, ' ');
-	for (int i = 0; i<32; i++){
-		result<<std::left<<std::setw(width)<<"  B"+std::to_string(i);
+	result << std::string(9, ' ');
+	for (int i = 0; i < 32; i++) {
+		result << std::left << std::setw(width) << "  B" + std::to_string(i);
 	}
-	result<<"\n";
+	result << "\n";
 	return result.str();
 }
 

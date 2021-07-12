@@ -469,7 +469,8 @@ public:
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
-			nextPageReader = waitOrError(queue->pager->readPage(PagerEventReasons::metaData, 0, nextPageID, true), queue->pagerError);
+			nextPageReader = waitOrError(queue->pager->readPage(PagerEventReasons::metaData, 0, nextPageID, true),
+			                             queue->pagerError);
 		}
 
 		Future<Void> loadExtent() {
@@ -829,11 +830,11 @@ public:
 				page.clear();
 				debug_printf("FIFOQueue::Cursor(%s) readNext page exhausted, moved to new page\n", toString().c_str());
 				if (mode == POP) {
-					if(!queue->usesExtents) {
+					if (!queue->usesExtents) {
 						// Freeing the old page must happen after advancing the cursor and clearing the page reference
 						// because freePage() could cause a push onto a queue that causes a newPageID() call which could
-						// pop() from this very same queue. Queue pages are freed at version 0 because they can be reused
-						// after the next commit.
+						// pop() from this very same queue. Queue pages are freed at version 0 because they can be
+						// reused after the next commit.
 						queue->pager->freePage(oldPageID, 0);
 					} else if (extentCurPageID == extentEndPageID) {
 						// Figure out the beginning of the extent
@@ -1291,89 +1292,108 @@ struct RedwoodMetrics {
 	static constexpr int btreeLevels = 5;
 	static int maxRecordCount;
 
-	struct EventReasonsArray{
+	struct EventReasonsArray {
 		unsigned int eventReasons[(size_t)PagerEvents::MAXEVENTS][(size_t)PagerEventReasons::MAXEVENTREASONS];
 
-		EventReasonsArray(){clear();}
-		void clear(){
-			for(size_t i = 0; i<(size_t)PagerEvents::MAXEVENTS; i++){
-				for(size_t j = 0; j<(size_t)PagerEventReasons::MAXEVENTREASONS; j++){
+		EventReasonsArray() { clear(); }
+		void clear() {
+			for (size_t i = 0; i < (size_t)PagerEvents::MAXEVENTS; i++) {
+				for (size_t j = 0; j < (size_t)PagerEventReasons::MAXEVENTREASONS; j++) {
 					eventReasons[i][j] = 0;
 				}
 			}
 		}
-		void addEventReason(PagerEvents e, PagerEventReasons r){
-			eventReasons[(size_t)e][(size_t)r] += 1;
-		}
-		const unsigned int& getEventReason(PagerEvents e, PagerEventReasons r){
+		void addEventReason(PagerEvents e, PagerEventReasons r) { eventReasons[(size_t)e][(size_t)r] += 1; }
+		const unsigned int& getEventReason(PagerEvents e, PagerEventReasons r) {
 			return eventReasons[(size_t)e][(size_t)r];
 		}
 
-		std::string ouputSummary(int currLevel){
+		std::string ouputSummary(int currLevel) {
 			std::string result = "";
-			static const std::pair<PagerEvents, const char *> allEvents[] = {{PagerEvents::pagerCacheLookup, "pagerCacheLookup"}, {PagerEvents::pagerCacheHit, "pagerCacheHit"}, {PagerEvents::pagerCacheMiss, "pagerCacheMiss"}, {PagerEvents::pagerWrite, "pagerWrite"}};
-			static const std::pair<PagerEventReasons, const char *> allReasons[] = {{PagerEventReasons::pointRead, "pointRead"}, {PagerEventReasons::rangeRead, "rangeRead"}, {PagerEventReasons::rangePrefetch, "rangePrefetch"}, {PagerEventReasons::commit, "commit"}, {PagerEventReasons::lazyClear, "lazyClear"}, {PagerEventReasons::metaData, "metaData"}};
-			for(auto &e : allEvents){
+			static const std::pair<PagerEvents, const char*> allEvents[] = {
+				{ PagerEvents::pagerCacheLookup, "pagerCacheLookup" },
+				{ PagerEvents::pagerCacheHit, "pagerCacheHit" },
+				{ PagerEvents::pagerCacheMiss, "pagerCacheMiss" },
+				{ PagerEvents::pagerWrite, "pagerWrite" }
+			};
+			static const std::pair<PagerEventReasons, const char*> allReasons[] = {
+				{ PagerEventReasons::pointRead, "pointRead" },         { PagerEventReasons::rangeRead, "rangeRead" },
+				{ PagerEventReasons::rangePrefetch, "rangePrefetch" }, { PagerEventReasons::commit, "commit" },
+				{ PagerEventReasons::lazyClear, "lazyClear" },         { PagerEventReasons::metaData, "metaData" }
+			};
+			for (auto& e : allEvents) {
 				result += e.second;
 				result += "\n\t";
-				for(auto &r : allReasons){
+				for (auto& r : allReasons) {
 					std::string num = std::to_string(eventReasons[(size_t)e.first][(size_t)r.first]);
-					result += r.second; 
+					result += r.second;
 					result.append(16 - strlen(r.second), ' ');
 					result.append(8 - num.length(), ' ');
 					result += num;
 					result.append(13, ' ');
 				}
-				result +="\n";
+				result += "\n";
 			}
 			return result;
 		}
-		void reportTrace(TraceEvent* t, int h){
-			static const std::pair<PagerEvents,PagerEventReasons> possibleEventReasonPairs[] = {
-				{PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead},{PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead},
-				{PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch},{PagerEvents::pagerCacheLookup, PagerEventReasons::commit},
-				{PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear},{PagerEvents::pagerCacheLookup, PagerEventReasons::metaData},
+		void reportTrace(TraceEvent* t, int h) {
+			static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
+				{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
+				{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
+				{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
+				{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
+				{ PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear },
+				{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
 
-				{PagerEvents::pagerCacheHit, PagerEventReasons::pointRead},{PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead},
-				{PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch},
-				{PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear},{PagerEvents::pagerCacheHit, PagerEventReasons::metaData},
+				{ PagerEvents::pagerCacheHit, PagerEventReasons::pointRead },
+				{ PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead },
+				{ PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch },
+				{ PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear },
+				{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
 
-				{PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead},{PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead},
-				{PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch},
-				{PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear},{PagerEvents::pagerCacheMiss, PagerEventReasons::metaData},
+				{ PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead },
+				{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead },
+				{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch },
+				{ PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear },
+				{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
 
-				{PagerEvents::pagerWrite, PagerEventReasons::commit},
-				{PagerEvents::pagerWrite, PagerEventReasons::lazyClear},{PagerEvents::pagerWrite, PagerEventReasons::metaData},
+				{ PagerEvents::pagerWrite, PagerEventReasons::commit },
+				{ PagerEvents::pagerWrite, PagerEventReasons::lazyClear },
+				{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
 			};
-			static const std::pair<PagerEvents,PagerEventReasons> L0PossibleEventReasonPairs[] = {
-				{PagerEvents::pagerCacheLookup, PagerEventReasons::commit}, {PagerEvents::pagerCacheLookup, PagerEventReasons::metaData},
-				{PagerEvents::pagerCacheHit, PagerEventReasons::metaData}, {PagerEvents::pagerCacheMiss, PagerEventReasons::metaData},
-				{PagerEvents::pagerWrite, PagerEventReasons::commit}, {PagerEvents::pagerWrite, PagerEventReasons::metaData},
+			static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
+				{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
+				{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
+				{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
+				{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
+				{ PagerEvents::pagerWrite, PagerEventReasons::commit },
+				{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
 			};
-			if(h==0){
-				for ( const auto &ER : L0PossibleEventReasonPairs ){
-					t->detail(format("L%d%s", 
-									h, 
-									(PagerEventsCodes[(size_t)ER.first]+PagerEventReasonsCodes[(size_t)ER.second]).c_str()), 
-									eventReasons[(size_t)ER.first][(size_t)ER.second]
-									);
+			if (h == 0) {
+				for (const auto& ER : L0PossibleEventReasonPairs) {
+					t->detail(
+					    format(
+					        "L%d%s",
+					        h,
+					        (PagerEventsCodes[(size_t)ER.first] + PagerEventReasonsCodes[(size_t)ER.second]).c_str()),
+					    eventReasons[(size_t)ER.first][(size_t)ER.second]);
 				}
-			}
-			else{
-				for ( const auto &ER : possibleEventReasonPairs ){
-					t->detail(format("L%d%s", 
-									h, 
-									(PagerEventsCodes[(size_t)ER.first]+PagerEventReasonsCodes[(size_t)ER.second]).c_str()), 
-									eventReasons[(size_t)ER.first][(size_t)ER.second]
-									);
+			} else {
+				for (const auto& ER : possibleEventReasonPairs) {
+					t->detail(
+					    format(
+					        "L%d%s",
+					        h,
+					        (PagerEventsCodes[(size_t)ER.first] + PagerEventReasonsCodes[(size_t)ER.second]).c_str()),
+					    eventReasons[(size_t)ER.first][(size_t)ER.second]);
 				}
 			}
 		}
 	};
 
-	// Page levle events 
+	// Page levle events
 	struct Level {
-		struct Counters{
+		struct Counters {
 			unsigned int pageRead;
 			unsigned int pageReadExt;
 			unsigned int pageBuild;
@@ -1397,19 +1417,34 @@ struct RedwoodMetrics {
 		Reference<Histogram> buildItemCountSketch;
 		Reference<Histogram> modifyItemCountSketch;
 
-		Level() {
-			Clear(); 
-		}
+		Level() { Clear(); }
 
-		void Clear(int levelCounter = -1){
+		void Clear(int levelCounter = -1) {
 			metric = {};
-			if(!buildFillPctSketch.isValid() || buildFillPctSketch->name() != ("buildFillPct:" + std::to_string(levelCounter))){
-				buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-				modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-				buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-				modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::percentage);
-				buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
-				modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"), LiteralStringRef(std::to_string(levelCounter).c_str()), Histogram::Unit::record_counter, 0, maxRecordCount);
+			if (!buildFillPctSketch.isValid() ||
+			    buildFillPctSketch->name() != ("buildFillPct:" + std::to_string(levelCounter))) {
+				buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"),
+				                                             LiteralStringRef(std::to_string(levelCounter).c_str()),
+				                                             Histogram::Unit::percentage);
+				modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"),
+				                                              LiteralStringRef(std::to_string(levelCounter).c_str()),
+				                                              Histogram::Unit::percentage);
+				buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"),
+				                                               LiteralStringRef(std::to_string(levelCounter).c_str()),
+				                                               Histogram::Unit::percentage);
+				modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"),
+				                                                LiteralStringRef(std::to_string(levelCounter).c_str()),
+				                                                Histogram::Unit::percentage);
+				buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"),
+				                                               LiteralStringRef(std::to_string(levelCounter).c_str()),
+				                                               Histogram::Unit::record_counter,
+				                                               0,
+				                                               maxRecordCount);
+				modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"),
+				                                                LiteralStringRef(std::to_string(levelCounter).c_str()),
+				                                                Histogram::Unit::record_counter,
+				                                                0,
+				                                                maxRecordCount);
 			}
 			metric.eventReasons.clear();
 			buildFillPctSketch->clear();
@@ -1421,7 +1456,7 @@ struct RedwoodMetrics {
 		}
 	};
 
-	struct metrics{
+	struct metrics {
 		unsigned int opSet;
 		unsigned int opSetKeyBytes;
 		unsigned int opSetValueBytes;
@@ -1445,11 +1480,14 @@ struct RedwoodMetrics {
 		unsigned int btreeLeafPreloadExt;
 	};
 
-	RedwoodMetrics() { 
-		kvSizeWritten = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes);
-		kvSizeReadByGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet "), Histogram::Unit::bytes);
-		kvSizeReadByRangeGet = Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByRangeGet"), Histogram::Unit::bytes);
-		clear(); 
+	RedwoodMetrics() {
+		kvSizeWritten =
+		    Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes);
+		kvSizeReadByGet =
+		    Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet "), Histogram::Unit::bytes);
+		kvSizeReadByRangeGet = Histogram::getHistogram(
+		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByRangeGet"), Histogram::Unit::bytes);
+		clear();
 	}
 
 	void clear() {
@@ -1468,7 +1506,7 @@ struct RedwoodMetrics {
 		startTime = g_network ? now() : 0;
 	}
 	// btree levels and one extra level for non btree level.
-	Level levels[btreeLevels+1];
+	Level levels[btreeLevels + 1];
 	metrics metric;
 	Reference<Histogram> kvSizeWritten;
 	Reference<Histogram> kvSizeReadByGet;
@@ -1483,15 +1521,15 @@ struct RedwoodMetrics {
 
 	Level& level(unsigned int level) {
 		static Level outOfBound;
-		if (level <= 0 || level > btreeLevels+1) {
+		if (level <= 0 || level > btreeLevels + 1) {
 			return outOfBound;
 		}
 		return levels[level];
 	}
 
-	void updateMaxRecordCount(int maxRecordCount){
+	void updateMaxRecordCount(int maxRecordCount) {
 		this->maxRecordCount = maxRecordCount;
-		for (int i = 0; i < btreeLevels+1; ++i) {
+		for (int i = 0; i < btreeLevels + 1; ++i) {
 			auto& level = levels[i];
 			level.buildItemCountSketch->updateUpperBound(maxRecordCount);
 			level.modifyItemCountSketch->updateUpperBound(maxRecordCount);
@@ -1551,7 +1589,7 @@ struct RedwoodMetrics {
 			*s += "\n";
 		}
 
-		for (int i = 0; i < btreeLevels+1; ++i) {
+		for (int i = 0; i < btreeLevels + 1; ++i) {
 			auto& level = levels[i];
 
 			std::pair<const char*, unsigned int> metrics[] = {
@@ -1921,7 +1959,7 @@ public:
 	}
 
 	void setPageSize(int size) {
-		if(g_redwoodMetrics.maxRecordCount != 315 * size / 4096){
+		if (g_redwoodMetrics.maxRecordCount != 315 * size / 4096) {
 			g_redwoodMetrics.updateMaxRecordCount(315 * size / 4096);
 		}
 		logicalPageSize = size;
@@ -2320,7 +2358,11 @@ public:
 
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
-	Future<Void> writePhysicalPage(PagerEventReasons r, unsigned int l, PhysicalPageID pageID, Reference<ArenaPage> page, bool header = false) {
+	Future<Void> writePhysicalPage(PagerEventReasons r,
+	                               unsigned int l,
+	                               PhysicalPageID pageID,
+	                               Reference<ArenaPage> page,
+	                               bool header = false) {
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysical"),
@@ -2367,7 +2409,7 @@ public:
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
 		// this metaData reason will not be accounted since its not a cache hit or cache miss
-		PageCacheEntry& cacheEntry = pageCache.get(pageID, true); 
+		PageCacheEntry& cacheEntry = pageCache.get(pageID, true);
 		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n",
 		             filename.c_str(),
 		             toString(pageID).c_str(),
@@ -2406,7 +2448,10 @@ public:
 		cacheEntry.readFuture = data;
 	}
 
-	Future<LogicalPageID> atomicUpdatePage(unsigned int l, LogicalPageID pageID, Reference<ArenaPage> data, Version v) override {
+	Future<LogicalPageID> atomicUpdatePage(unsigned int l,
+	                                       LogicalPageID pageID,
+	                                       Reference<ArenaPage> data,
+	                                       Version v) override {
 		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageID).c_str(), v);
 		Future<LogicalPageID> f = map(newPageID(), [=](LogicalPageID newPageID) {
 			updatePage(PagerEventReasons::commit, l, newPageID, data);
@@ -2587,7 +2632,11 @@ public:
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
-	Future<Reference<ArenaPage>> readPage(PagerEventReasons r, unsigned int l, LogicalPageID pageID, bool cacheable, bool noHit = false) override {
+	Future<Reference<ArenaPage>> readPage(PagerEventReasons r,
+	                                      unsigned int l,
+	                                      LogicalPageID pageID,
+	                                      bool cacheable,
+	                                      bool noHit = false) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		if (!cacheable) {
@@ -2624,8 +2673,7 @@ public:
 			auto metrics = g_redwoodMetrics.level(l).metric;
 			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
 			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-		}
-		else{
+		} else {
 			++g_redwoodMetrics.metric.pagerCacheHit;
 			auto metrics = g_redwoodMetrics.level(l).metric;
 			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
@@ -2663,7 +2711,12 @@ public:
 		return (PhysicalPageID)pageID;
 	}
 
-	Future<Reference<ArenaPage>> readPageAtVersion(PagerEventReasons r, unsigned int l, LogicalPageID logicalID, Version v, bool cacheable, bool noHit) {
+	Future<Reference<ArenaPage>> readPageAtVersion(PagerEventReasons r,
+	                                               unsigned int l,
+	                                               LogicalPageID logicalID,
+	                                               Version v,
+	                                               bool cacheable,
+	                                               bool noHit) {
 		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
 		return readPage(r, l, physicalID, cacheable, noHit);
 	}
@@ -2791,8 +2844,7 @@ public:
 			auto metrics = g_redwoodMetrics.level(l).metric;
 			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheMiss, r);
 			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheLookup, r);
-		}
-		else{
+		} else {
 			++g_redwoodMetrics.metric.pagerCacheHit;
 			auto metrics = g_redwoodMetrics.level(l).metric;
 			metrics.eventReasons.addEventReason(PagerEvents::pagerCacheHit, r);
@@ -3382,7 +3434,11 @@ public:
 	  : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {}
 	~DWALPagerSnapshot() override {}
 
-	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons r, unsigned int l, LogicalPageID pageID, bool cacheable, bool noHit) override {
+	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons r,
+	                                                   unsigned int l,
+	                                                   LogicalPageID pageID,
+	                                                   bool cacheable,
+	                                                   bool noHit) override {
 		if (expired.isError()) {
 			throw expired.getError();
 		}
@@ -4162,7 +4218,9 @@ public:
 			return bytesNeeded();
 		}
 
-		int bytesNeeded() const { return sizeof(uint8_t) + sizeof(Version) + 1 + (pageID.size() * sizeof(LogicalPageID)); }
+		int bytesNeeded() const {
+			return sizeof(uint8_t) + sizeof(Version) + 1 + (pageID.size() * sizeof(LogicalPageID));
+		}
 
 		int writeToBytes(uint8_t* dst) const {
 			*(uint8_t*)dst = height;
@@ -4230,7 +4288,6 @@ public:
 			              ::toString(root.get()).c_str(),
 			              lazyDeleteQueue.toString().c_str());
 		}
-
 	};
 #pragma pack(pop)
 
@@ -4330,7 +4387,10 @@ public:
 				}
 				// Start reading the page, without caching
 
-				entries.push_back(std::make_pair(q.get(), self->readPage(PagerEventReasons::lazyClear, q.get().height, snapshot, q.get().pageID, true, false)));
+				entries.push_back(std::make_pair(
+				    q.get(),
+				    self->readPage(
+				        PagerEventReasons::lazyClear, q.get().height, snapshot, q.get().pageID, true, false)));
 
 				--toPop;
 			}
@@ -5165,8 +5225,8 @@ private:
 	}
 
 	ACTOR static Future<Reference<const ArenaPage>> readPage(PagerEventReasons r,
-															 unsigned int l, 
-															 Reference<IPagerSnapshot> snapshot,
+	                                                         unsigned int l,
+	                                                         Reference<IPagerSnapshot> snapshot,
 	                                                         BTreePageIDRef id,
 	                                                         bool forLazyClear = false,
 	                                                         bool cacheable = true) {
@@ -5236,7 +5296,8 @@ private:
 		g_redwoodMetrics.metric.btreeLeafPreloadExt += (id.size() - 1);
 
 		for (auto pageID : id) {
-			snapshot->getPhysicalPage(PagerEventReasons::rangePrefetch, l, pageID, true, true); // prefetch btree leaf node
+			snapshot->getPhysicalPage(
+			    PagerEventReasons::rangePrefetch, l, pageID, true, true); // prefetch btree leaf node
 		}
 	}
 
@@ -5615,7 +5676,7 @@ private:
 	};
 
 	ACTOR static Future<Void> commitSubtree(
-		unsigned int l,
+	    unsigned int l,
 	    VersionedBTree* self,
 	    Reference<IPagerSnapshot> snapshot,
 	    MutationBuffer* mutationBuffer,
@@ -5646,7 +5707,8 @@ private:
 			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
-		state Reference<const ArenaPage> page = wait(readPage(PagerEventReasons::commit, l, snapshot, rootID, false, false));
+		state Reference<const ArenaPage> page =
+		    wait(readPage(PagerEventReasons::commit, l, snapshot, rootID, false, false));
 		state Version writeVersion = self->getLastCommittedVersion() + 1;
 
 		// If the page exists in the cache, it must be copied before modification.
@@ -6130,8 +6192,8 @@ private:
 				}
 
 				// If this page has height of 2 then its children are leaf nodes
-				recursions.push_back(
-				    self->commitSubtree(btPage->height, self, snapshot, mutationBuffer, pageID, btPage->height == 2, mBegin, mEnd, &u));
+				recursions.push_back(self->commitSubtree(
+				    btPage->height, self, snapshot, mutationBuffer, pageID, btPage->height == 2, mBegin, mEnd, &u));
 			}
 
 			debug_printf(
@@ -6363,7 +6425,7 @@ private:
 		--mBegin;
 		MutationBuffer::const_iterator mEnd = mutations->lower_bound(all.subtreeUpperBound.key);
 		wait(commitSubtree(0,
-						   self,
+		                   self,
 		                   self->m_pager->getReadSnapshot(latestVersion),
 		                   mutations,
 		                   rootPageID,
@@ -6455,8 +6517,9 @@ public:
 		bool intialized() const { return pager.isValid(); }
 		bool isValid() const { return valid; }
 
-		int getHeight(){ 
-			if(!path.empty() && path.back().btPage() != nullptr) return path.back().btPage()->height; 
+		int getHeight() {
+			if (!path.empty() && path.back().btPage() != nullptr)
+				return path.back().btPage()->height;
 			return 0;
 		}
 		std::string toString() const {
@@ -6501,7 +6564,7 @@ public:
 			});
 		}
 
-		Future<Void> pushPage(PagerEventReasons r, unsigned int l,  BTreePageIDRef id) {
+		Future<Void> pushPage(PagerEventReasons r, unsigned int l, BTreePageIDRef id) {
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
 			return map(readPage(r, l, pager, id), [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
@@ -6612,15 +6675,14 @@ public:
 				if (directionForward) {
 					// If there is no right sibling or its lower boundary is greater
 					// or equal to than the range end then stop.
-					if(!c.moveNext() || c.get().key >= rangeEnd) {
+					if (!c.moveNext() || c.get().key >= rangeEnd) {
 						break;
 					}
-				}
-				else {
+				} else {
 					// Prefetching left siblings
 					// If the current leaf lower boundary is less than or equal to the range end
 					// or there is no left sibling then stop
-					if(c.get().key <= rangeEnd || !c.movePrev()) {
+					if (c.get().key <= rangeEnd || !c.movePrev()) {
 						break;
 					}
 				}
@@ -6628,7 +6690,7 @@ public:
 				// Prefetch the sibling if the link is not null
 				if (c.get().value.present()) {
 					BTreePageIDRef childPage = c.get().getChildPage();
-					preLoadPage(pager.getPtr(), path[path.size() - 2].btPage()->height-1, childPage);
+					preLoadPage(pager.getPtr(), path[path.size() - 2].btPage()->height - 1, childPage);
 					recordsRead += estRecordsPerPage;
 					// Use sibling node capacity as an estimate of bytes read.
 					bytesRead += childPage.size() * this->btree->m_blockSize;
@@ -6695,7 +6757,7 @@ public:
 					ASSERT(entry.cursor.get().value.present());
 				}
 				int currLevel = entry.btPage()->height;
-				wait(self->pushPage(PagerEventReasons::metaData, currLevel-1, entry.cursor));
+				wait(self->pushPage(PagerEventReasons::metaData, currLevel - 1, entry.cursor));
 				auto& newEntry = self->path.back();
 				ASSERT(forward ? newEntry.cursor.moveFirst() : newEntry.cursor.moveLast());
 			}
@@ -7379,7 +7441,7 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree) {
 			}
 
 			state KeyValue kv = randomKV(10, 0);
-			wait(cur.seekGTE(PagerEventReasons::pointRead,kv.key));
+			wait(cur.seekGTE(PagerEventReasons::pointRead, kv.key));
 			state int c = deterministicRandom()->randomInt(0, 100);
 			state bool direction = deterministicRandom()->coinflip();
 			while (cur.isValid() && c-- > 0) {
@@ -8959,7 +9021,7 @@ ACTOR Future<Void> randomSeeks(VersionedBTree* btree, int count, char firstChar,
 	wait(btree->initBTreeCursor(&cur, readVer));
 	while (c < count) {
 		state Key k = randomString(20, firstChar, lastChar);
-		wait(cur.seekGTE(PagerEventReasons::pointRead,k));
+		wait(cur.seekGTE(PagerEventReasons::pointRead, k));
 		++c;
 	}
 	double elapsed = timer() - readStart;
@@ -8982,7 +9044,7 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 	state int totalScanBytes = 0;
 	while (c++ < count) {
 		state Key k = randomString(20, firstChar, lastChar);
-		wait(cur.seekGTE(PagerEventReasons::pointRead,k));
+		wait(cur.seekGTE(PagerEventReasons::pointRead, k));
 		state int w = width;
 		state bool directionFwd = deterministicRandom()->coinflip();
 
@@ -9877,73 +9939,71 @@ TEST_CASE("!/redwood/performance/randomRangeScans") {
 	return Void();
 }
 
-
 TEST_CASE(":/redwood/performance/histogramThroughput") {
 	std::default_random_engine generator;
-	std::uniform_int_distribution<uint32_t> distribution(0,UINT32_MAX);
+	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
 	state vector<uint32_t> uniform;
-	for(int i=0; i<inputSize; i++){
+	for (int i = 0; i < inputSize; i++) {
 		uniform.push_back(distribution(generator));
 	}
-	std::cout<<"size of input: "<<uniform.size()<<std::endl;
+	std::cout << "size of input: " << uniform.size() << std::endl;
 	{
-		std::cout<<"Histogram Unit bytes"<<std::endl;
+		std::cout << "Histogram Unit bytes" << std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
-		Reference<Histogram> h =
-		    Histogram::getHistogram(LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+		Reference<Histogram> h = Histogram::getHistogram(
+		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
 		ASSERT(uniform.size() == inputSize);
-		for(size_t i=0; i<uniform.size(); i++){
+		for (size_t i = 0; i < uniform.size(); i++) {
 			h->sample(uniform[i]);
 		}
 		auto t_end = std::chrono::high_resolution_clock::now();
-		std::cout<<h->drawHistogram();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end-t_start).count();
-		std::cout<<"Time in millisecond: "<<elapsed_time_ms <<std::endl;
+		std::cout << h->drawHistogram();
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
 
-		Reference<Histogram> hCopy =
-		    Histogram::getHistogram(LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
-		std::cout<<hCopy->drawHistogram();
+		Reference<Histogram> hCopy = Histogram::getHistogram(
+		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+		std::cout << hCopy->drawHistogram();
 		GetHistogramRegistry().logReport();
 	}
 	{
-		std::cout<<"Histogram Unit percentage: "<<std::endl;
+		std::cout << "Histogram Unit percentage: " << std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
-		Reference<Histogram> h =
-		    Histogram::getHistogram(LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentage);
+		Reference<Histogram> h = Histogram::getHistogram(
+		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentage);
 		ASSERT(uniform.size() == inputSize);
-		for(size_t i=0; i<uniform.size(); i++){
-			h->samplePercentage((double)uniform[i]/UINT32_MAX);
+		for (size_t i = 0; i < uniform.size(); i++) {
+			h->samplePercentage((double)uniform[i] / UINT32_MAX);
 		}
 		auto t_end = std::chrono::high_resolution_clock::now();
-		std::cout<<h->drawHistogram();
+		std::cout << h->drawHistogram();
 		GetHistogramRegistry().logReport();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end-t_start).count();
-		std::cout<<"Time in millisecond: "<<elapsed_time_ms <<std::endl;
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
 	}
 	return Void();
 }
 TEST_CASE(":/redwood/performance/continuousSmapleThroughput") {
 	std::default_random_engine generator;
-	std::uniform_int_distribution<uint32_t> distribution(0,UINT32_MAX);
+	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
 	state vector<uint32_t> uniform;
-	for(int i=0; i<inputSize; i++){
+	for (int i = 0; i < inputSize; i++) {
 		uniform.push_back(distribution(generator));
 	}
-	
+
 	{
-		ContinuousSample<uint32_t> s = ContinuousSample<uint32_t>(pow(10,3));
+		ContinuousSample<uint32_t> s = ContinuousSample<uint32_t>(pow(10, 3));
 		auto t_start = std::chrono::high_resolution_clock::now();
 		ASSERT(uniform.size() == inputSize);
-		for(size_t i=0; i<uniform.size(); i++){
+		for (size_t i = 0; i < uniform.size(); i++) {
 			s.addSample(uniform[i]);
 		}
 		auto t_end = std::chrono::high_resolution_clock::now();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end-t_start).count();
-		std::cout<<"size of input: "<<uniform.size()<<std::endl;
-		std::cout<<"Time in millisecond: "<<elapsed_time_ms <<std::endl;
-
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+		std::cout << "size of input: " << uniform.size() << std::endl;
+		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
 	}
 	return Void();
 }
