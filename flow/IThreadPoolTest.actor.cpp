@@ -35,7 +35,9 @@ struct ThreadNameReceiver : IThreadPoolReceiver {
 	}
 };
 
-TEST_CASE("noSim/IThreadPool/NamedThread") {
+TEST_CASE("/flow/IThreadPool/NamedThread") {
+	noUnseed = true;
+
 	state Reference<IThreadPool> pool = createGenericThreadPool();
 	pool->addThread(new ThreadNameReceiver(), "thread-foo");
 

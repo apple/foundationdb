@@ -31,8 +31,6 @@
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
-extern bool noUnseed;
-
 template <typename Container>
 class KeyValueStoreMemory final : public IKeyValueStore, NonCopyable {
 public:
