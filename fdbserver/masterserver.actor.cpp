@@ -250,6 +250,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	// Captures the latest commit version targeted for each storage server in the cluster.
 	VersionVector ssVersionVector;
 
+	// The previous commit versions per tlog
+	std::vector<Version> tpcvVector;
 	CounterCollection cc;
 	Counter changeCoordinatorsRequests;
 	Counter getCommitVersionRequests;
@@ -299,8 +301,8 @@ ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfi
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
 		TraceEvent("CommitProxyReplies", self->dbgid)
-			.detail("WorkerID", recr.commitProxies[i].id())
-			.detail("FirstProxy", req.firstProxy ? "True" : "False");
+		    .detail("WorkerID", recr.commitProxies[i].id())
+		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -960,9 +962,9 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 	}
 	wait(waitForAll(txnReplies));
 	TraceEvent("RecoveryInternal", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::recovery_transaction)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.detail("Step", "SentTxnStateStoreToCommitProxies");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "SentTxnStateStoreToCommitProxies");
 
 	vector<Future<ResolveTransactionBatchReply>> replies;
 	for (auto& r : self->resolvers) {
@@ -976,9 +978,9 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 
 	wait(waitForAll(replies));
 	TraceEvent("RecoveryInternal", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::recovery_transaction)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.detail("Step", "InitializedAllResolvers");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "InitializedAllResolvers");
 	return Void();
 }
 
@@ -1243,6 +1245,13 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			when(ReportRawCommittedVersionRequest req =
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
 				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
+					// NB: this if-condition is not needed after wait-for-prev is ported to this branch
+					if (req.version > self->ssVersionVector.maxVersion) {
+						// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
+						self->ssVersionVector.setVersions(req.writtenTags.get(), req.version);
+					}
+				}
 				if (req.version > self->liveCommittedVersion) {
 					self->liveCommittedVersion = req.version;
 					self->databaseLocked = req.locked;
@@ -1250,6 +1259,15 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				}
 				++self->reportLiveCommittedVersionRequests;
 				req.reply.send(Void());
+			}
+			when(GetTLogPrevCommitVersionRequest req =
+			         waitNext(self->myInterface.getTLogPrevCommitVersion.getFuture())) {
+				GetTLogPrevCommitVersionReply reply;
+				for (uint16_t tLog : req.writtenTLogs) {
+					// TODO the reply needs to be ordered by commit version.
+					reply.tpcvMap[tLog] = self->tpcvVector[tLog]; // TODO (placeholder)
+				}
+				req.reply.send(reply);
 			}
 		}
 	}
@@ -1887,6 +1905,10 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
 	                                                     // window of the resolver(s)
 
+	// resize the previous commit version vector to the number of tlogs.
+	int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
+	self->tpcvVector.resize(1 + numLogs, invalidVersion);
+
 	TraceEvent("MasterRecoveryCommit", self->dbgid);
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
@@ -2026,6 +2048,9 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 						wait(delay(5));
 					throw worker_removed();
 				}
+				// resize the previous commit version vector to the number of tlogs.
+				int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
+				self->tpcvVector.resize(1 + numLogs, invalidVersion);
 			}
 			when(BackupWorkerDoneRequest req = waitNext(mi.notifyBackupWorkerDone.getFuture())) {
 				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {

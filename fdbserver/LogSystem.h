@@ -995,6 +995,16 @@ struct LogPushData : NonCopyable {
 		writtenLocations.clear();
 	}
 
+	// copy next_message_tags into given set
+	void saveTags(std::set<Tag>& writtenTags) {
+		writtenTags.insert(next_message_tags.begin(), next_message_tags.end());
+	}
+
+	// store tlogs as represented by index
+	void saveLocations(std::set<uint16_t>& writtenTLogs) {
+		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
+	}
+
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations) {
 		if (!usePreviousLocations) {
 			prev_tags.clear();
