@@ -169,6 +169,34 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	}
 }
 
+void DatabaseContext::addSSIdTagMapping(const UID& uid, const Tag& tag) {
+	ssidTagMapping[uid] = tag;
+}
+
+void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
+                                              Version readVersion,
+                                              VersionVector& latestCommitVersions) {
+	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
+	for (int i = 0; i < locationInfo->locations()->size(); i++) {
+		UID uid = locationInfo->locations()->getId(i);
+		if (ssidTagMapping.find(uid) != ssidTagMapping.end()) {
+			Tag tag = ssidTagMapping[uid];
+			if (ssVersionVectorCache.hasVersion(tag)) {
+				Version commitVersion = ssVersionVectorCache.getVersion(tag); // latest commit version
+				if (commitVersion < readVersion) {
+					versionMap[commitVersion].insert(tag);
+				}
+			}
+		}
+	}
+
+	// insert the commit versions in the version vector.
+	latestCommitVersions.clear();
+	for (auto& iter : versionMap) {
+		latestCommitVersions.setVersion(iter.second, iter.first);
+	}
+}
+
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
@@ -2224,6 +2252,12 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 	}
 }
 
+void updateTagMappings(Database cx, const GetKeyServerLocationsReply& reply) {
+	for (const auto& mapping : reply.resultsTagMapping) {
+		cx->addSSIdTagMapping(mapping.first, mapping.second);
+	}
+}
+
 // If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key).
 // Otherwise returns the shard containing key
 ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Database cx,
@@ -2257,6 +2291,7 @@ ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Da
 
 				auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
 				updateTssMappings(cx, rep);
+				updateTagMappings(cx, rep);
 				return std::make_pair(KeyRange(rep.results[0].first, rep.arena), locationInfo);
 			}
 		}
@@ -2321,6 +2356,7 @@ ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocatio
 					wait(yield());
 				}
 				updateTssMappings(cx, rep);
+				updateTagMappings(cx, rep);
 
 				return results;
 			}
@@ -2425,6 +2461,8 @@ ACTOR Future<Optional<Value>> getValue(Future<Version> version,
 		state Optional<UID> getValueID = Optional<UID>();
 		state uint64_t startTime;
 		state double startTimeD;
+		state VersionVector ssLatestCommitVersions;
+		cx->getLatestCommitVersions(ssi.second, ver, ssLatestCommitVersions);
 		try {
 			if (info.debugID.present()) {
 				getValueID = nondeterministicRandom()->randomUniqueID();
@@ -2452,15 +2490,19 @@ ACTOR Future<Optional<Value>> getValue(Future<Version> version,
 				}
 				choose {
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-					when(GetValueReply _reply = wait(loadBalance(
-					         cx.getPtr(),
-					         ssi.second,
-					         &StorageServerInterface::getValue,
-					         GetValueRequest(
-					             span.context, key, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), getValueID),
-					         TaskPriority::DefaultPromiseEndpoint,
-					         false,
-					         cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
+					when(GetValueReply _reply =
+					         wait(loadBalance(cx.getPtr(),
+					                          ssi.second,
+					                          &StorageServerInterface::getValue,
+					                          GetValueRequest(span.context,
+					                                          key,
+					                                          ver,
+					                                          cx->sampleReadTags() ? tags : Optional<TagSet>(),
+					                                          getValueID,
+					                                          ssLatestCommitVersions),
+					                          TaskPriority::DefaultPromiseEndpoint,
+					                          false,
+					                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
 					}
 				}
@@ -2548,6 +2590,9 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 		state pair<KeyRange, Reference<LocationInfo>> ssi =
 		    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, k.isBackward()));
 
+		state VersionVector ssLatestCommitVersions;
+		cx->getLatestCommitVersions(ssi.second, version.get(), ssLatestCommitVersions);
+
 		try {
 			if (info.debugID.present())
 				g_traceBatch.addEvent(
@@ -2557,8 +2602,12 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 				                                // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++cx->transactionPhysicalReads;
 
-			GetKeyRequest req(
-			    span.context, k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), getKeyID);
+			GetKeyRequest req(span.context,
+			                  k,
+			                  version.get(),
+			                  cx->sampleReadTags() ? tags : Optional<TagSet>(),
+			                  getKeyID,
+			                  ssLatestCommitVersions);
 			req.arena.dependsOn(k.arena());
 
 			state GetKeyReply reply;
@@ -2929,6 +2978,7 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
 			req.spanContext = span.context;
+			cx->getLatestCommitVersions(locations[shard].second, version, req.ssLatestCommitVersions);
 
 			// keep shard's arena around in case of async tss comparison
 			req.arena.dependsOn(locations[shard].first.arena());
@@ -3515,6 +3565,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
+			cx->getLatestCommitVersions(locations[shard].second, version, req.ssLatestCommitVersions);
 
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 

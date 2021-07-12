@@ -43,7 +43,7 @@ struct VersionVector {
 		maxVersion = version;
 	}
 
-	void setVersions(const std::set<Tag>& tags, Version version) {
+	void setVersion(const std::set<Tag>& tags, Version version) {
 		ASSERT(version > maxVersion);
 		for (auto& tag : tags) {
 			ASSERT(tag != invalidTag);
@@ -62,6 +62,11 @@ struct VersionVector {
 		auto iter = versions.find(tag);
 		ASSERT(iter != versions.end());
 		return iter->second;
+	}
+
+	void clear() {
+		versions.clear();
+		maxVersion = invalidVersion;
 	}
 
 	bool operator==(const VersionVector& vv) const { return maxVersion == vv.maxVersion; }

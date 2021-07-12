@@ -1470,6 +1470,17 @@ void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
 	}
 }
 
+void addTagMapping(GetKeyServerLocationsReply& reply, ProxyCommitData* commitData) {
+	for (const auto& [_, shard] : reply.results) {
+		for (auto& ssi : shard) {
+			auto iter = commitData->storageCache.find(ssi.id());
+			if (iter != commitData->storageCache.end()) {
+				reply.resultsTagMapping.emplace_back(ssi.id(), iter->second->tag);
+			}
+		}
+	}
+}
+
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
@@ -1519,6 +1530,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			--r;
 		}
 	}
+	addTagMapping(rep, commitData);
 	req.reply.send(rep);
 	++commitData->stats.keyServerLocationOut;
 	return Void();

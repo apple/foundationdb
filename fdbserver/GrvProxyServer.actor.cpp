@@ -23,10 +23,10 @@
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/VersionVector.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/flow.h"
-#include "fdbclient/VersionVector.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct GrvProxyStats {
