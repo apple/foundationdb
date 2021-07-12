@@ -890,7 +890,7 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      std::string whitelistBinPaths);
 ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
                                   InitializeGrvProxyRequest req,
-                                  Reference<AsyncVar<ServerDBInfo>> db);
+                                  Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db,
