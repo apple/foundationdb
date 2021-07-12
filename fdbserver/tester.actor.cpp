@@ -1048,8 +1048,7 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeTypes", ""); } },
 	{ "maxTLogVersion",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } },
-	{ "disableTss",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } }
+	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1176,6 +1175,11 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      if (value == "true")
 		      spec->phases = TestWorkload::CHECK;
+	  } },
+	{ "restorePerpetualWiggleSetting",
+	  [](const std::string& value, TestSpec* spec) {
+	      if (value == "false")
+		      spec->restorePerpetualWiggleSetting = false;
 	  } },
 };
 
