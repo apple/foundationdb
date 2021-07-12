@@ -868,12 +868,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Tag seedTag,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo>> db,
+                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
-    Reference<AsyncVar<ServerDBInfo>> db,
+    Reference<AsyncVar<ServerDBInfo> const> db,
     std::string folder,
     Promise<Void> recovered,
     Reference<ClusterConnectionFile>
