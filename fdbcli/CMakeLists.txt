@@ -14,6 +14,7 @@ set(FDBCLI_SRCS
   ProfileCommand.actor.cpp
   SetClassCommand.actor.cpp
   SnapshotCommand.actor.cpp
+  StatusCommand.actor.cpp
   SuspendCommand.actor.cpp
   Util.cpp
   linenoise/linenoise.h)

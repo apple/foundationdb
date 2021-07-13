@@ -33,6 +33,7 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IClientApi.h"
+#include "fdbclient/StatusClient.h"
 #include "flow/Arena.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -86,6 +87,11 @@ ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegIn
 bool tokencmp(StringRef token, const char* command);
 // print the usage of the specified command
 void printUsage(StringRef command);
+// print cluster status info
+void printStatus(StatusObjectReader statusObj,
+                 StatusClient::StatusLevel level,
+                 bool displayDatabaseAvailable = true,
+                 bool hideErrorMessages = false);
 
 // All fdbcli commands (alphabetically)
 // advanceversion command
@@ -123,6 +129,8 @@ ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<S
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
 ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// status command
+ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, bool isExecMode = false);
 // suspend command
 ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        Reference<ITransaction> tr,
