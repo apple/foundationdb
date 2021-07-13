@@ -94,12 +94,16 @@ struct SetFailureInjection {
 	constexpr static FileIdentifier file_identifier = 15439864;
 	ReplyPromise<Void> reply;
 	struct ThrottleDiskCommand {
-		double time;
-		Optional<NetworkAddress> address; // TODO: NEELAM: how do we identify the machine
+		// how often should the delay be inserted (0 meaning once, 10 meaning every 10 secs)
+		double delayFrequency;
+		// min delay to be inserted
+		double delayMin;
+		//max delay to be inserted
+		double delayMax;
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			serializer(ar, time, address);
+			serializer(ar, delayFrequency, delayMin, delayMax);
 		}
 	};
 	Optional<ThrottleDiskCommand> throttleDisk;

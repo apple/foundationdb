@@ -34,6 +34,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
+#include "fdbrpc/AsyncFileDelayed.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
@@ -1953,13 +1954,6 @@ public:
 	void clogPair(const IPAddress& from, const IPAddress& to, double seconds) override {
 		g_clogging.clogPairFor(from, to, seconds);
 	}
-	void throttleDisk(ProcessInfo* machine, double seconds) override {
-		machine->throttleDiskFor = seconds;
-		TraceEvent("ThrottleDisk").detail("Delay", seconds).
-			detail("Roles", getRoles(machine->address)).
-			detail("Address", machine->address).
-			detail("StartingClass", machine->startingClass.toString());
-	}
 	std::vector<ProcessInfo*> getAllProcesses() const override {
 		std::vector<ProcessInfo*> processes;
 		for (auto& c : machines) {
@@ -2401,19 +2395,11 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	diskParameters->nextOperation += (1.0 / diskParameters->iops) + (size / diskParameters->bandwidth);
 
 	double randomLatency;
-	if (g_simulator.getCurrentProcess()->throttleDiskFor) {
-		randomLatency = g_simulator.getCurrentProcess()->throttleDiskFor;
-		TraceEvent("WaitUntilDiskReadyThrottling")
-		    .detail("Delay", randomLatency);
-	} else if (sync) {
+	if (sync) {
 		randomLatency = .005 + deterministicRandom()->random01() * (BUGGIFY ? 1.0 : .010);
 	} else
 		randomLatency = 10 * deterministicRandom()->random01() / diskParameters->iops;
 
-	TraceEvent("WaitUntilDiskReady").detail("Delay", randomLatency).
-		detail("Roles", g_simulator.getRoles(g_simulator.getCurrentProcess()->address)).
-		detail("Address", g_simulator.getCurrentProcess()->address).
-		detail("ThrottleDiskFor", g_simulator.getCurrentProcess()->throttleDiskFor);
 	return delayUntil(diskParameters->nextOperation + randomLatency);
 }
 
@@ -2492,6 +2478,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
+			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileDelayed(r)); });
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);

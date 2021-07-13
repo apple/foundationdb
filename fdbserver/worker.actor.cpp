@@ -1539,8 +1539,14 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			when(SetFailureInjection req = waitNext(interf.clientInterface.setFailureInjection.getFuture())) {
 				if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 					if (req.throttleDisk.present()) {
-						TraceEvent("DiskThrottleRequest").detail("Delay", req.throttleDisk.get().time);
-						DiskFailureInjector::injector()->throttleFor(req.throttleDisk.get().time);
+						TraceEvent("DiskThrottleRequest").detail("DelayFrequency",req.throttleDisk.get().delayFrequency).
+						detail("DelayMin", req.throttleDisk.get().delayMin).
+						detail("DelayMax", req.throttleDisk.get().delayMax);
+						auto diskFailureInjector = DiskFailureInjector::injector();
+						//DiskFailureInjector::injector()->throttleFor(req.throttleDisk.get());
+						diskFailureInjector->throttleFor(req.throttleDisk.get().delayFrequency,
+														 req.throttleDisk.get().delayMin,
+														 req.throttleDisk.get().delayMax);
 					}
 					req.reply.send(Void());
 				} else {

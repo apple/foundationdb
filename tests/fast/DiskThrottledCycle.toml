@@ -10,4 +10,5 @@ testTitle = 'DiskThrottledCycle'
     [[test.workload]]
     testName = 'DiskThrottling'
     testDuration = 30.0
+    throttleFrequency = 10.0
 

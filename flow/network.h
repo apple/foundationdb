@@ -652,6 +652,44 @@ public:
 	// Returns the interface that should be used to make and accept socket connections
 };
 
+struct DelayGenerator : FastAllocated<DelayGenerator> {
+
+	void setDelay(double frequency, double min, double max) {
+		delayFrequency = frequency;
+		delayMin = min;
+		delayMax = max;
+		delayFor = (delayMin == delayMax) ? delayMin : deterministicRandom()->randomInt(delayMin, delayMax);
+		delayUntil = std::max(delayUntil, timer_monotonic() + delayFor);
+		TraceEvent("DelayGeneratorSetDelay").detail("DelayFrequency", frequency).detail("DelayMin", min).
+			detail("DelayMax", max).detail("DelayFor", delayFor).detail("DelayUntil", delayUntil);
+	}
+	
+	double getDelay() {
+		// If a delayFrequency was specified, this logic determins the delay to be inserted at any point in time
+		if (delayFrequency) {
+			auto timeElapsed =  fmod(timer_monotonic(), delayFrequency);
+			TraceEvent("DelayGeneratorGetDelay").detail("DelayFrequency", delayFrequency).
+				detail("TimeElapsed", timeElapsed).detail("DelayFor", delayFor);
+			return std::max(0.0, delayFor - timeElapsed);
+		}
+		TraceEvent("DelayGeneratorGetDelay").detail("DelayFrequency", delayFrequency).
+			detail("CurTime", timer_monotonic()).detail("DelayUntil", delayUntil);
+		return std::max(0.0, delayUntil - timer_monotonic());
+	}
+
+private: //members
+	double delayFrequency = 0.0; // how often should the delay be inserted (0 meaning once, 10 meaning every 10 secs)
+	double delayMin; // min delay to be inserted
+	double delayMax; // max delay to be inserted
+	double delayFor = 0.0; // randomly chosen delay between min and max
+	double delayUntil = 0.0; // used when the delayFrequency is 0
+
+public: // construction
+	DelayGenerator() = default;
+	DelayGenerator(DelayGenerator const&) = delete;
+
+};
+
 struct DiskFailureInjector : FastAllocated<DiskFailureInjector> {
 	static DiskFailureInjector* injector() {
 		auto res = g_network->global(INetwork::enFailureInjector);
@@ -662,25 +700,19 @@ struct DiskFailureInjector : FastAllocated<DiskFailureInjector> {
 		return static_cast<DiskFailureInjector*>(res);
 	}
 
-	//virtual void throttleFor(double time) = 0;
-	//virtual double getDiskDelay() = 0;
-
-	void throttleFor(double time) {
-		TraceEvent("DiskFailureInjectorBefore").detail("ThrottleUntil", throttleUntil);
-		throttleUntil = std::max(throttleUntil, timer_monotonic() + time);
-		TraceEvent("DiskFailureInjectorAfter").detail("ThrottleUntil", throttleUntil);
+	void throttleFor(double frequency, double delayMin, double delayMax) {
+		delayGenerator.setDelay(frequency, delayMin, delayMax);
 	}
 
 	double getDiskDelay() {
 		if (!FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 			return 0.0;
 		}
-		return std::max(0.0, throttleUntil - timer_monotonic());
+		return delayGenerator.getDelay();
 	}
 
 private: // members
-	double throttleUntil = 0.0;
-	std::unordered_map<NetworkAddress, double> throttleDisk;
+	DelayGenerator delayGenerator;
 
 private: // construction
 	DiskFailureInjector() = default;

@@ -10,12 +10,18 @@
 struct DiskThrottlingWorkload : TestWorkload {
     bool enabled;
     double testDuration;
-    double throttleFor;
+    double throttleFrequency;
+    double throttleMin;
+    double throttleMax;
     DiskThrottlingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
         enabled = !clientId; // only do this on the "first" client
         testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-        throttleFor = getOption(options, LiteralStringRef("throttleDelay"), 2.0);
-        TraceEvent("DiskThrottlingWorkload").detail("TestDuration", testDuration).detail("For", throttleFor);
+        throttleFrequency = getOption(options, LiteralStringRef("throttleFrequency"), 0.0);
+        throttleMin = getOption(options, LiteralStringRef("throttleMin"), 2.0);
+        throttleMax = getOption(options, LiteralStringRef("throttleMax"), 2.0);
+        TraceEvent("DiskThrottlingWorkload")
+            .detail("TestDuration", testDuration).detail("Frequency", throttleFrequency)
+            .detail("Min", throttleMin).detail("Max", throttleMax);
     }
 
     std::string description() const override {
@@ -28,12 +34,6 @@ struct DiskThrottlingWorkload : TestWorkload {
     Future<Void> setup(Database const& cx) override { return Void(); }
 
     Future<Void> start(Database const& cx) override {
-        //if (&g_simulator == g_network && enabled) {
-        //  TraceEvent("DiskThrottlingStart").detail("For", throttleFor);
-        //  return timeout(reportErrors(throttleDiskClient<ISimulator::ProcessInfo*>(cx, this), "DiskThrottlingError"),
-        //                 testDuration,
-        //                 Void());
-        //} else
         if (enabled) {
             return timeout(reportErrors(throttleDiskClient<WorkerInterface>(cx, this), "DiskThrottlingError"),
                            testDuration,
@@ -45,13 +45,6 @@ struct DiskThrottlingWorkload : TestWorkload {
     Future<bool> check(Database const& cx) override { return true; }
 
     void getMetrics(vector<PerfMetric>& m) override {}
-
-    ACTOR void doThrottle_unused(ISimulator::ProcessInfo* machine, double t, double delay = 0.0) {
-        wait(::delay(delay));
-        TraceEvent("ThrottleDisk").detail("For", t);
-        g_simulator.throttleDisk(machine, t);
-        TraceEvent("ThrottleDiskSet").detail("For", t);
-    }
 
     static void checkDiskThrottleResult(Future<Void> res, WorkerInterface worker) {
         if (res.isError()) {
@@ -67,34 +60,18 @@ struct DiskThrottlingWorkload : TestWorkload {
         }
     }
 
-    ACTOR void doThrottle(WorkerInterface worker, double t, double delay = 0.0) {
+    ACTOR void doThrottle(WorkerInterface worker, double frequency, double minDelay, double maxDelay, double startDelay = 0.0) {
         state Future<Void> res;
-        wait(::delay(delay));
+        wait(::delay(startDelay));
         SetFailureInjection::ThrottleDiskCommand throttleDisk;
-        throttleDisk.time = t;
+        throttleDisk.delayFrequency = frequency;
+        throttleDisk.delayMin = minDelay;
+        throttleDisk.delayMax = maxDelay;
         SetFailureInjection req;
         req.throttleDisk = throttleDisk;
-        TraceEvent("ThrottleDisk").detail("For", t);
         res = worker.clientInterface.setFailureInjection.getReply(req);
         wait(ready(res));
         checkDiskThrottleResult(res, worker);
-    }
-
-    static Future<Void> getAllWorkers_unused(DiskThrottlingWorkload* self, std::vector<ISimulator::ProcessInfo*>* result) {
-        result->clear();
-        *result = g_simulator.getAllProcesses();
-        return Void();
-    }
-
-    static Future<Void> getAllStorageWorkers_unused(Database cx, DiskThrottlingWorkload* self, std::vector<ISimulator::ProcessInfo*>* result) {
-        vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
-        for (int i = 0; i < all.size(); i++)
-            if (!all[i]->failed &&
-                all[i]->name == std::string("Server") &&
-                ((all[i]->startingClass == ProcessClass::StorageClass) ||
-                 (all[i]->startingClass == ProcessClass::UnsetClass)))
-                result->emplace_back(all[i]);
-        return Void();
     }
 
     ACTOR static Future<Void> getAllWorkers(DiskThrottlingWorkload* self, std::vector<WorkerInterface>* result) {
@@ -125,8 +102,7 @@ struct DiskThrottlingWorkload : TestWorkload {
             wait(poisson(&lastTime, 1));
             wait(DiskThrottlingWorkload::getAllStorageWorkers(cx, self, &machines));
             auto machine = deterministicRandom()->randomChoice(machines);
-            TraceEvent("DoThrottleDisk").detail("For", self->throttleFor);
-            self->doThrottle(machine, self->throttleFor);
+            self->doThrottle(machine, self->throttleFrequency, self->throttleMin, self->throttleMax);
         }
     }
 };
