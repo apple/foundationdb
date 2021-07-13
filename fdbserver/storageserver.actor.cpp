@@ -1178,8 +1178,8 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 // of the storage server.
 Version getRealReadVersion(VersionVector& ssLatestCommitVersions, Tag& tag, Version specifiedReadVersion)
 {
-	Version realReadVersion = ssLatestcommitVersions.hasVersion(tag) ? ssLatestCommitVersions.getVersion(tag) : readVersion;
-	ASSERT(readlReadVersion <= specifiedReadVersion);
+	Version realReadVersion = ssLatestCommitVersions.hasVersion(tag) ? ssLatestCommitVersions.getVersion(tag) : specifiedReadVersion;
+	ASSERT(realReadVersion <= specifiedReadVersion);
 	return realReadVersion;
 }
 
