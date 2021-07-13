@@ -5087,14 +5087,11 @@ private:
 		                                     ((BTreePage*)page->begin())->tree());
 	}
 
-	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef id) {
+	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef ids) {
 		g_redwoodMetrics.btreeLeafPreload += 1;
-		g_redwoodMetrics.btreeLeafPreloadExt += (id.size() - 1);
+		g_redwoodMetrics.btreeLeafPreloadExt += (ids.size() - 1);
 
-		/*for (auto pageID : id) {
-			snapshot->getPhysicalPage(pageID, true, true);
-		}*/
-		snapshot->getPhysicalPage(id, true, true);
+		snapshot->getPhysicalPage(ids, true, true);
 	}
 
 	void freeBTreePage(BTreePageIDRef btPageID, Version v) {
