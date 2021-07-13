@@ -2287,28 +2287,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					// database
 					warn = timeWarning(7.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n");
 
-					// state StatusClient::StatusLevel level;
-					// if (tokens.size() == 1)
-					// 	level = StatusClient::NORMAL;
-					// else if (tokens.size() == 2 && tokencmp(tokens[1], "details"))
-					// 	level = StatusClient::DETAILED;
-					// else if (tokens.size() == 2 && tokencmp(tokens[1], "minimal"))
-					// 	level = StatusClient::MINIMAL;
-					// else if (tokens.size() == 2 && tokencmp(tokens[1], "json"))
-					// 	level = StatusClient::JSON;
-					// else {
-					// 	printUsage(tokens[0]);
-					// 	is_error = true;
-					// 	continue;
-					// }
-
-					// StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(db)));
-
-					// if (!opt.exec.present())
-					// 	printf("\n");
-					// printStatus(s, level);
-					// if (!opt.exec.present())
-					// 	printf("\n");
 					bool _result = wait(makeInterruptable(statusCommandActor(db2, tokens, opt.exec.present())));
 					if (!_result)
 						is_error = true;
