@@ -593,15 +593,6 @@ void initHelp() {
 	                "view and control throttled tags",
 	                "Use `on' and `off' to manually throttle or unthrottle tags. Use `enable auto' or `disable auto' "
 	                "to enable or disable automatic tag throttling. Use `list' to print the list of throttled tags.\n");
-	helpMap["lock"] = CommandHelp(
-	    "lock",
-	    "lock the database with a randomly generated lockUID",
-	    "Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
-	helpMap["unlock"] =
-	    CommandHelp("unlock <UID>",
-	                "unlock the database with the provided lockUID",
-	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
-	                "user will be asked to enter a passphrase to confirm their intent.");
 	helpMap["triggerddteaminfolog"] =
 	    CommandHelp("triggerddteaminfolog",
 	                "trigger the data distributor teams logging",
@@ -2420,15 +2411,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "lock")) {
-					if (tokens.size() != 1) {
-						printUsage(tokens[0]);
+					bool _result = wait(lockCommandActor(db2, tokens));
+					if (!_result)
 						is_error = true;
-					} else {
-						state UID lockUID = deterministicRandom()->randomUniqueID();
-						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
-						wait(makeInterruptable(lockDatabase(db, lockUID)));
-						printf("Database locked.\n");
-					}
 					continue;
 				}
 
@@ -2449,7 +2434,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
 							try {
-								wait(makeInterruptable(unlockDatabase(db, unlockUID)));
+								wait(makeInterruptable(unlockDatabaseActor(db2, unlockUID)));
 								printf("Database unlocked.\n");
 							} catch (Error& e) {
 								if (e.code() == error_code_database_locked) {

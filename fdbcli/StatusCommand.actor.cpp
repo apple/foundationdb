@@ -29,7 +29,6 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <cstdio>
 
 namespace {
 
