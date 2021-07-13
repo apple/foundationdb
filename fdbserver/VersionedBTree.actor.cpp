@@ -1295,35 +1295,8 @@ struct RedwoodMetrics {
 	struct EventReasonsArray {
 		unsigned int eventReasons[(size_t)PagerEvents::MAXEVENTS][(size_t)PagerEventReasons::MAXEVENTREASONS];
 
-		static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
-			{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
-			{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
-			{ PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear },
-			{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
-			{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
-			{ PagerEvents::pagerCacheHit, PagerEventReasons::pointRead },
-			{ PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead },
-			{ PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear },
-			{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
-			{ PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead },
-			{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead },
-			{ PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear },
-			{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
-			{ PagerEvents::pagerWrite, PagerEventReasons::commit },
-			{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
-			{ PagerEvents::pagerWrite, PagerEventReasons::lazyClear },
-		};
-		static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
-			{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
-			{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
-			{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
-			{ PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch },
-			{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
-			{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch },
-			{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
-			{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
-			{ PagerEvents::pagerWrite, PagerEventReasons::commit },
-		};
+		static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[];
+		static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[];
 
 		EventReasonsArray() { clear(); }
 		void clear() {
@@ -1396,7 +1369,35 @@ struct RedwoodMetrics {
 			}
 		}
 	};
-
+	const std::pair<PagerEvents, PagerEventReasons> EventReasonsArray::L0PossibleEventReasonPairs[] = {
+		{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
+		{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
+		{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
+		{ PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch },
+		{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
+		{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch },
+		{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
+		{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
+		{ PagerEvents::pagerWrite, PagerEventReasons::commit },
+	};
+	const std::pair<PagerEvents, PagerEventReasons> EventReasonsArray::possibleEventReasonPairs[] = {
+		{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
+		{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
+		{ PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear },
+		{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
+		{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
+		{ PagerEvents::pagerCacheHit, PagerEventReasons::pointRead },
+		{ PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead },
+		{ PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear },
+		{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
+		{ PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead },
+		{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead },
+		{ PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear },
+		{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
+		{ PagerEvents::pagerWrite, PagerEventReasons::commit },
+		{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
+		{ PagerEvents::pagerWrite, PagerEventReasons::lazyClear },
+	};
 	// Page levle events
 	struct Level {
 		struct Counters {
