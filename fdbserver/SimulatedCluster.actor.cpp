@@ -1291,6 +1291,8 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		set_config("ssd-rocksdb-experimental");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
+		TraceEvent(SevWarn, "RocksDBNonDeterminism")
+		    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
 		noUnseed = true;
 		break;
 	}
