@@ -196,7 +196,7 @@ public:
 	Reference<CommitProxyInfo> getCommitProxies(bool useProvisionalProxies);
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
-	Future<Void> onProxiesChanged();
+	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Returns the protocol version reported by the coordinator this client is connected to
@@ -255,7 +255,7 @@ public:
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-	                         Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+	                         Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
 	                         Future<Void> clientInfoMonitor,
 	                         TaskPriority taskID,
 	                         LocalityData const& clientLocality,
@@ -307,7 +307,7 @@ public:
 	// trust that the read version (possibly set manually by the application) is actually from the correct cluster.
 	// Updated everytime we get a GRV response
 	Version minAcceptableReadVersion = std::numeric_limits<Version>::max();
-	void validateVersion(Version);
+	void validateVersion(Version) const;
 
 	// Client status updater
 	struct ClientStatusUpdater {
@@ -399,7 +399,7 @@ public:
 	Future<Void> connected;
 
 	// An AsyncVar that reports the coordinator this DatabaseContext is interacting with
-	Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator;
+	Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator;
 
 	Reference<AsyncVar<Optional<ClusterInterface>>> statusClusterInterface;
 	Future<Void> statusLeaderMon;
@@ -428,7 +428,6 @@ public:
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
-	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 
 	// Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
 	// Requests to the storage server will be duplicated to the TSS.
@@ -437,6 +436,9 @@ public:
 	// Removes the storage server and its TSS pair from the TSS mapping (if present).
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
+
+private:
+	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 };
 
 #endif
