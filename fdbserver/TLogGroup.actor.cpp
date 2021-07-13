@@ -27,6 +27,7 @@
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/IClientApi.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"

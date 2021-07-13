@@ -97,8 +97,13 @@ public:
 
 	// Start monitoring storage teams by reading \xff keyspace.
 	// TODO: Get notifications from DD.
-	void initializeOrRecoverStorageTeamAssignments(Database cx);
-	ACTOR Future<Void> initializeOrRecoverStorageTeamAssignmentActor(TLogGroupCollection* self, Database cx);
+	Future<Void> recoverStorageTeamAssignments(Arena& arena,
+	                                           CommitTransactionRef& tr,
+	                                           vector<StorageServerInterface> servers);
+	ACTOR Future<Void> recoverStorageTeamAssignmentActor(TLogGroupCollection* self,
+	                                                     Arena* arena,
+	                                                     CommitTransactionRef* tr,
+	                                                     vector<StorageServerInterface> servers);
 
 	// Called by the master server to write the very first transaction to the database establishing
 	// the first storage team to tLogGroup mapping. TLogGroups should be created by the time this is

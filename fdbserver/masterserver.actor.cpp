@@ -50,6 +50,7 @@
 #include "flow/Trace.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/serialize.h"
 
 using std::max;
 using std::min;
@@ -200,6 +201,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Reference<ILogSystem> logSystem;
 	Reference<TLogGroupCollection> tLogGroupCollection;
 	Optional<Standalone<RangeResultRef>> tLogGroupRecoveredState;
+	std::unordered_map<ptxn::StorageTeamID, UID>
+	    storageTeamIdToGroupId; // temp store to keep assignment during recovery.
 
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
@@ -778,6 +781,15 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get());
 	self->tLogGroupCollection->recruitEverything();
 
+	// Restore storage team to TLogGroup assignments. This will make sure that
+	// across recovery, we don't assign a different TLogGroup to a team. It
+	// reads the state from `storageTeamIdToTLogGroupRange` range
+	for (const auto& [teamId, groupId] : self->storageTeamIdToGroupId) {
+		auto group = self->tLogGroupCollection->getGroup(groupId);
+		ASSERT(group.isValid()); // TODO: Should tolerate this.
+		self->tLogGroupCollection->assignStorageTeam(teamId, group);
+	}
+
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
@@ -915,6 +927,13 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	                                                               SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
 	                                                               self->configuration.tLogReplicationFactor);
 	self->tLogGroupRecoveredState = tLogGroupState;
+
+	// Load SS team to TLogGroup assignments. Actually, put into TLogGroup data structures in recruitEverything.
+	RangeResult ssTeamToTLogGroup = wait(self->txnStateStore->readRange(storageTeamIdToTLogGroupRange));
+	for (auto& r : ssTeamToTLogGroup) {
+		auto teamId = decodeStorageTeamIdToTLogGroupKey(r.key);
+		self->storageTeamIdToGroupId[teamId] = BinaryReader::fromStringRef<UID>(r.value, Unversioned());
+	}
 
 	// auto kvs = self->txnStateStore->readRange( systemKeys );
 	// for( auto & kv : kvs.get() )
@@ -1990,10 +2009,6 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 
 	TraceEvent(recoveryInterval.end(), self->dbgid)
 	    .detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
-
-	// TODO: Need to update the recovery duration?
-	// TODO: This may slow up the recovery?
-	// wait(self->tLogGroupCollection->initializeOrRecoverStorageTeamAssignments(cx));
 
 	self->recoveryState = RecoveryState::ACCEPTING_COMMITS;
 	double recoveryDuration = now() - recoverStartTime;
