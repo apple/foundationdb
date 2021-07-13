@@ -1843,14 +1843,15 @@ ACTOR Future<Void> triggerDDTeamInfoLog(Reference<IDatabase> db) {
 	}
 }
 
-ACTOR Future<Void> tssQuarantineList(Database db) {
-	state ReadYourWritesTransaction tr(db);
+ACTOR Future<Void> tssQuarantineList(Reference<IDatabase> db) {
+	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			RangeResult result = wait(tr.getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY));
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			// Hold the reference to the standalone's memory
+			state ThreadFuture<RangeResult> resultFuture = tr->getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY);
+			RangeResult result = wait(safeThreadFutureToFuture(resultFuture));
 			// shouldn't have many quarantined TSSes
 			ASSERT(!result.more);
 			printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");
@@ -1859,13 +1860,13 @@ ACTOR Future<Void> tssQuarantineList(Database db) {
 			}
 			return Void();
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
 }
 
-ACTOR Future<bool> tssQuarantine(Database db, bool enable, UID tssId) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId) {
+	state Reference<ITransaction> tr = db->createTransaction();
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 
 	loop {
@@ -1874,7 +1875,7 @@ ACTOR Future<bool> tssQuarantine(Database db, bool enable, UID tssId) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			// Do some validation first to make sure the command is valid
-			Optional<Value> serverListValue = wait(tr->get(serverListKeyFor(tssId)));
+			Optional<Value> serverListValue = wait(safeThreadFutureToFuture(tr->get(serverListKeyFor(tssId))));
 			if (!serverListValue.present()) {
 				printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
 				return false;
@@ -1885,7 +1886,8 @@ ACTOR Future<bool> tssQuarantine(Database db, bool enable, UID tssId) {
 				return false;
 			}
 
-			Optional<Value> currentQuarantineValue = wait(tr->get(tssQuarantineKeyFor(tssId)));
+			Optional<Value> currentQuarantineValue =
+			    wait(safeThreadFutureToFuture(tr->get(tssQuarantineKeyFor(tssId))));
 			if (enable && currentQuarantineValue.present()) {
 				printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
 				return false;
@@ -1902,10 +1904,10 @@ ACTOR Future<bool> tssQuarantine(Database db, bool enable, UID tssId) {
 				tr->clear(tssQuarantineKeyFor(tssId));
 			}
 
-			wait(tr->commit());
+			wait(safeThreadFutureToFuture(tr->commit()));
 			break;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
 	printf("Successfully %s TSS %s\n", enable ? "quarantined" : "removed", tssId.toString().c_str());
@@ -3472,7 +3474,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printUsage(tokens[0]);
 							is_error = true;
 						} else {
-							wait(tssQuarantineList(db));
+							wait(tssQuarantineList(db2));
 						}
 					}
 					if (tokens.size() == 3) {
@@ -3483,7 +3485,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						} else {
 							bool enable = tokens[1] == LiteralStringRef("start");
 							UID tssId = UID::fromString(tokens[2].toString());
-							bool err = wait(tssQuarantine(db, enable, tssId));
+							bool err = wait(tssQuarantine(db2, enable, tssId));
 							if (err)
 								is_error = true;
 						}
