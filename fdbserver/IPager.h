@@ -47,6 +47,37 @@ static const std::string PagerEventsCodes[] = { "Lookup", "Hit", "Miss", "Write"
 enum class PagerEventReasons { pointRead = 0, rangeRead, rangePrefetch, commit, lazyClear, metaData, MAXEVENTREASONS };
 static const std::string PagerEventReasonsCodes[] = { "Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta" };
 
+static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
+	{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
+	{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
+	{ PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear },
+	{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
+	{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
+	{ PagerEvents::pagerCacheHit, PagerEventReasons::pointRead },
+	{ PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead },
+	{ PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear },
+	{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
+	{ PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead },
+	{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead },
+	{ PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear },
+	{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
+	{ PagerEvents::pagerWrite, PagerEventReasons::commit },
+	{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
+	{ PagerEvents::pagerWrite, PagerEventReasons::lazyClear },
+};
+
+static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
+	{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
+	{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
+	{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
+	{ PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch },
+	{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
+	{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch },
+	{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
+	{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
+	{ PagerEvents::pagerWrite, PagerEventReasons::commit },
+};
+
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
 public:
