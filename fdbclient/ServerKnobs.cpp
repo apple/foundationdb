@@ -26,9 +26,7 @@ ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimula
 	initialize(randomize, clientKnobs, isSimulated);
 }
 
-void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsSimulated _isSimulated) {
-	bool const randomize = _randomize == Randomize::YES;
-	bool const isSimulated = _isSimulated == IsSimulated::YES;
+void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	// clang-format off
 	// Versions
 	init( VERSIONS_PER_SECOND,                                   1e6 );
@@ -102,8 +100,8 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( PUSH_STATS_SLOW_AMOUNT,                                  2 );
 	init( PUSH_STATS_SLOW_RATIO,                                 0.5 );
 	init( TLOG_POP_BATCH_SIZE,                                  1000 ); if ( randomize && BUGGIFY ) TLOG_POP_BATCH_SIZE = 10;
-	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     100e6 );
-	init( ENABLE_DETAILED_TLOG_POP_TRACE,                          1 );
+	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     250e6 );
+	init( ENABLE_DETAILED_TLOG_POP_TRACE,                       true );
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );
@@ -257,6 +255,7 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( DD_TEAMS_INFO_PRINT_YIELD_COUNT,                       100 ); if( randomize && BUGGIFY ) DD_TEAMS_INFO_PRINT_YIELD_COUNT = deterministicRandom()->random01() * 1000 + 1;
 	init( DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY,                    120 ); if( randomize && BUGGIFY ) DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY = 5;
 	init( DD_STORAGE_WIGGLE_PAUSE_THRESHOLD,                       1 ); if( randomize && BUGGIFY ) DD_STORAGE_WIGGLE_PAUSE_THRESHOLD = 10;
+	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      50 );
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -464,7 +463,15 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( REPLACE_INTERFACE_CHECK_DELAY,                         5.0 );
 	init( COORDINATOR_REGISTER_INTERVAL,                         5.0 );
 	init( CLIENT_REGISTER_INTERVAL,                            600.0 );
-	init( CLUSTER_CONTROLLER_ENABLE_WORKER_HEALTH_MONITOR,     false );
+	init( CC_ENABLE_WORKER_HEALTH_MONITOR,                     false );
+	init( CC_WORKER_HEALTH_CHECKING_INTERVAL,                   60.0 );
+	init( CC_DEGRADED_LINK_EXPIRATION_INTERVAL,                300.0 );
+	init( CC_MIN_DEGRADATION_INTERVAL,                         120.0 );
+	init( CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE,                      3 );
+	init( CC_MAX_EXCLUSION_DUE_TO_HEALTH,                          2 );
+	init( CC_HEALTH_TRIGGER_RECOVERY,                          false );
+	init( CC_TRACKING_HEALTH_RECOVERY_INTERVAL,               3600.0 );
+	init( CC_MAX_HEALTH_RECOVERY_COUNT,                            2 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );

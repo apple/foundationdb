@@ -394,6 +394,7 @@ function(package_bindingtester)
   add_dependencies(bindingtester copy_bindingtester_binaries)
 endfunction()
 
+# Creates a single cluster before running the specified command (usually a ctest test)
 function(add_fdbclient_test)
   set(options DISABLED ENABLED)
   set(oneValueArgs NAME)
@@ -417,7 +418,37 @@ function(add_fdbclient_test)
             --build-dir ${CMAKE_BINARY_DIR}
             --
             ${T_COMMAND})
-  set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60) 
+  set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+endfunction()
+
+# Creates 3 distinct clusters before running the specified command.
+# This is useful for testing features that require multiple clusters (like the
+# multi-cluster FDB client)
+function(add_multi_fdbclient_test)
+  set(options DISABLED ENABLED)
+  set(oneValueArgs NAME)
+  set(multiValueArgs COMMAND)
+  cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  if(OPEN_FOR_IDE)
+    return()
+  endif()
+  if(NOT T_ENABLED AND T_DISABLED)
+    return()
+  endif()
+  if(NOT T_NAME)
+    message(FATAL_ERROR "NAME is a required argument for add_multi_fdbclient_test")
+  endif()
+  if(NOT T_COMMAND)
+    message(FATAL_ERROR "COMMAND is a required argument for add_multi_fdbclient_test")
+  endif()
+  message(STATUS "Adding Client test ${T_NAME}")
+  add_test(NAME "${T_NAME}"
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --clusters 3
+            --
+            ${T_COMMAND})
+  set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
 endfunction()
 
 function(add_java_test)

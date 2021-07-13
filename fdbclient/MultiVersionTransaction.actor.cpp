@@ -1884,8 +1884,6 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 }
 
 // UNIT TESTS
-extern bool noUnseed;
-
 TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing") {
 	auto vals = parseOptionValues("a");
 	ASSERT(vals.size() == 1 && vals[0] == "a");

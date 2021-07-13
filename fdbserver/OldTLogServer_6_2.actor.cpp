@@ -375,7 +375,7 @@ struct TLogData : NonCopyable {
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopRequest(false),
 	    ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped() {
-		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
+		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
 	}
 };
 
@@ -1441,7 +1441,8 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 		}
 
 		uint64_t PoppedVersionLag = logData->persistentDataDurableVersion - logData->queuePoppedVersion;
-		if ( SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE && //trace is open
+		if ( SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
+			(logData->queuePoppedVersion > 0) && //avoid generating massive events at beginning 
 			(tagData->unpoppedRecovered || PoppedVersionLag >= SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { //when recovery or long lag
 			TraceEvent("TLogPopDetails", logData->logId)
 				.detail("Tag", tagData->tag.toString())
@@ -1756,7 +1757,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 			state std::vector<Future<Standalone<StringRef>>> messageReads;
 			messageReads.reserve(commitLocations.size());
 			for (const auto& pair : commitLocations) {
-				messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::YES));
+				messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::TRUE));
 			}
 			commitLocations.clear();
 			wait(waitForAll(messageReads));

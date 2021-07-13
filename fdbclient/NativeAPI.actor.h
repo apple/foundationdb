@@ -27,10 +27,12 @@
 #elif !defined(FDBCLIENT_NATIVEAPI_ACTOR_H)
 #define FDBCLIENT_NATIVEAPI_ACTOR_H
 
+#include "flow/BooleanParam.h"
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
@@ -51,7 +53,8 @@ void addref(DatabaseContext* ptr);
 template <>
 void delref(DatabaseContext* ptr);
 
-void validateOptionValue(Optional<StringRef> value, bool shouldBePresent);
+void validateOptionValuePresent(Optional<StringRef> value);
+void validateOptionValueNotPresent(Optional<StringRef> value);
 
 void enableClientInfoLogging();
 
@@ -81,13 +84,13 @@ public:
 	// on another thread
 	static Database createDatabase(Reference<ClusterConnectionFile> connFile,
 	                               int apiVersion,
-	                               bool internal = true,
+	                               IsInternal internal = IsInternal::TRUE,
 	                               LocalityData const& clientLocality = LocalityData(),
 	                               DatabaseContext* preallocatedDb = nullptr);
 
 	static Database createDatabase(std::string connFileName,
 	                               int apiVersion,
-	                               bool internal = true,
+	                               IsInternal internal = IsInternal::TRUE,
 	                               LocalityData const& clientLocality = LocalityData());
 
 	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
@@ -112,7 +115,7 @@ private:
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
 // Configures the global networking machinery
-void setupNetwork(uint64_t transportId = 0, bool useMetrics = false);
+void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::FALSE);
 
 // This call blocks while the network is running.  To use the API in a single-threaded
 //  environment, the calling program must have ACTORs already launched that are waiting
@@ -248,24 +251,24 @@ public:
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
-	[[nodiscard]] Future<Optional<Value>> get(const Key& key, bool snapshot = false);
+	[[nodiscard]] Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::FALSE);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
-	[[nodiscard]] Future<Key> getKey(const KeySelector& key, bool snapshot = false);
+	[[nodiscard]] Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::FALSE);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
 	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
 	                                           const KeySelector& end,
 	                                           int limit,
-	                                           bool snapshot = false,
-	                                           bool reverse = false);
+	                                           Snapshot = Snapshot::FALSE,
+	                                           Reverse = Reverse::FALSE);
 	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
 	                                           const KeySelector& end,
 	                                           GetRangeLimits limits,
-	                                           bool snapshot = false,
-	                                           bool reverse = false);
+	                                           Snapshot = Snapshot::FALSE,
+	                                           Reverse = Reverse::FALSE);
 	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
 	                                           int limit,
-	                                           bool snapshot = false,
-	                                           bool reverse = false) {
+	                                           Snapshot snapshot = Snapshot::FALSE,
+	                                           Reverse reverse = Reverse::FALSE) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limit,
@@ -274,8 +277,8 @@ public:
 	}
 	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
 	                                           GetRangeLimits limits,
-	                                           bool snapshot = false,
-	                                           bool reverse = false) {
+	                                           Snapshot snapshot = Snapshot::FALSE,
+	                                           Reverse reverse = Reverse::FALSE) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limits,
@@ -289,19 +292,19 @@ public:
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          int limit,
-	                                          bool snapshot = false,
-	                                          bool reverse = false);
+	                                          Snapshot = Snapshot::FALSE,
+	                                          Reverse = Reverse::FALSE);
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          GetRangeLimits limits,
-	                                          bool snapshot = false,
-	                                          bool reverse = false);
+	                                          Snapshot = Snapshot::FALSE,
+	                                          Reverse = Reverse::FALSE);
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeyRange& keys,
 	                                          int limit,
-	                                          bool snapshot = false,
-	                                          bool reverse = false) {
+	                                          Snapshot snapshot = Snapshot::FALSE,
+	                                          Reverse reverse = Reverse::FALSE) {
 		return getRangeStream(results,
 		                      KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                      KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
@@ -312,8 +315,8 @@ public:
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeyRange& keys,
 	                                          GetRangeLimits limits,
-	                                          bool snapshot = false,
-	                                          bool reverse = false) {
+	                                          Snapshot snapshot = Snapshot::FALSE,
+	                                          Reverse reverse = Reverse::FALSE) {
 		return getRangeStream(results,
 		                      KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                      KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
@@ -348,13 +351,13 @@ public:
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
-	void set(const KeyRef& key, const ValueRef& value, bool addConflictRange = true);
+	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::TRUE);
 	void atomicOp(const KeyRef& key,
 	              const ValueRef& value,
 	              MutationRef::Type operationType,
-	              bool addConflictRange = true);
-	void clear(const KeyRangeRef& range, bool addConflictRange = true);
-	void clear(const KeyRef& key, bool addConflictRange = true);
+	              AddConflictRange = AddConflictRange::TRUE);
+	void clear(const KeyRangeRef& range, AddConflictRange = AddConflictRange::TRUE);
+	void clear(const KeyRef& key, AddConflictRange = AddConflictRange::TRUE);
 	[[nodiscard]] Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
@@ -451,7 +454,7 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
 // will be 1. Otherwise, the value will be 0.
-ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, bool lock_aware = false);
+ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::FALSE);
 
 #include "flow/unactorcompiler.h"
 #endif

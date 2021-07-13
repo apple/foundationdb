@@ -57,10 +57,10 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 			wait(backupAgent.submitBackup(self->extraDB,
 			                              BackupAgentBase::getDefaultTag(),
 			                              self->backupRanges,
-			                              false,
+			                              StopWhenDone::FALSE,
 			                              StringRef(),
 			                              StringRef(),
-			                              true));
+			                              LockDB::TRUE));
 			TraceEvent("AS_Submit2");
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_duplicate)
@@ -168,21 +168,21 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		state DatabaseBackupAgent restoreTool(self->extraDB);
 
 		TraceEvent("AS_Wait1");
-		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false)));
+		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::FALSE)));
 		TraceEvent("AS_Ready1");
 		wait(delay(deterministicRandom()->random01() * self->switch1delay));
 		TraceEvent("AS_Switch1");
 		wait(backupAgent.atomicSwitchover(
 		    self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 		TraceEvent("AS_Wait2");
-		wait(success(restoreTool.waitBackup(cx, BackupAgentBase::getDefaultTag(), false)));
+		wait(success(restoreTool.waitBackup(cx, BackupAgentBase::getDefaultTag(), StopWhenDone::FALSE)));
 		TraceEvent("AS_Ready2");
 		wait(delay(deterministicRandom()->random01() * self->switch2delay));
 		TraceEvent("AS_Switch2");
 		wait(restoreTool.atomicSwitchover(
 		    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 		TraceEvent("AS_Wait3");
-		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false)));
+		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::FALSE)));
 		TraceEvent("AS_Ready3");
 		wait(delay(deterministicRandom()->random01() * self->stopDelay));
 		TraceEvent("AS_Abort");
