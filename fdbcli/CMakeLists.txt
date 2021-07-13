@@ -13,6 +13,7 @@ set(FDBCLI_SRCS
   ForceRecoveryWithDataLossCommand.actor.cpp
   IncludeCommand.actor.cpp
   KillCommand.actor.cpp
+  LockCommand.actor.cpp
   MaintenanceCommand.actor.cpp
   ProfileCommand.actor.cpp
   SetClassCommand.actor.cpp
