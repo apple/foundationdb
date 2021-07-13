@@ -88,7 +88,6 @@ public:
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
 		bool failedDisk;
-		double throttleDiskFor;
 
 		UID uid;
 
@@ -104,7 +103,7 @@ public:
 		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
 		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
 		    failed(false), excluded(false), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-		    fault_injection_r(0), machine(0), cleared(false), failedDisk(false), throttleDiskFor(0) {
+		    fault_injection_r(0), machine(0), cleared(false), failedDisk(false) {
 			uid = deterministicRandom()->randomUniqueID();
 		}
 
@@ -376,7 +375,6 @@ public:
 
 	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) = 0;
 	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
-	virtual void throttleDisk(ProcessInfo* machine, double seconds) = 0;
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
@@ -465,9 +463,8 @@ struct DiskParameters : ReferenceCounted<DiskParameters> {
 	double nextOperation;
 	int64_t iops;
 	int64_t bandwidth;
-	double throttleFor;
 
-	DiskParameters(int64_t iops, int64_t bandwidth) : nextOperation(0), iops(iops), bandwidth(bandwidth), throttleFor(0) {}
+	DiskParameters(int64_t iops, int64_t bandwidth) : nextOperation(0), iops(iops), bandwidth(bandwidth) {}
 };
 
 // Simulates delays for performing operations on disk

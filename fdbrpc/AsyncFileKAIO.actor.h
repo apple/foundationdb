@@ -212,9 +212,6 @@ public:
 		enqueue(io, "read", this);
 		Future<int> result = io->result.getFuture();
 
-		// throttleDisk if enabled
-		throttleDisk(diskFailureInjector->getDiskDelay());
-
 #if KAIO_LOGGING
 		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
 #endif
@@ -239,9 +236,6 @@ public:
 
 		enqueue(io, "write", this);
 		Future<int> result = io->result.getFuture();
-
-		// throttleDisk if enabled
-		throttleDisk(diskFailureInjector->getDiskDelay());
 
 #if KAIO_LOGGING
 		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
@@ -754,9 +748,6 @@ private:
 			}
 		}
 	}
-
-public:
-		DiskFailureInjector* diskFailureInjector;
 };
 
 #if KAIO_LOGGING
