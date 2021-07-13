@@ -1340,23 +1340,17 @@ struct RedwoodMetrics {
 			static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
 				{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
 				{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
-				{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
 				{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
 				{ PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear },
 				{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
-
 				{ PagerEvents::pagerCacheHit, PagerEventReasons::pointRead },
 				{ PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead },
-				{ PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch },
 				{ PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear },
 				{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
-
 				{ PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead },
 				{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead },
-				{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch },
 				{ PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear },
 				{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
-
 				{ PagerEvents::pagerWrite, PagerEventReasons::commit },
 				{ PagerEvents::pagerWrite, PagerEventReasons::lazyClear },
 				{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
@@ -1364,10 +1358,13 @@ struct RedwoodMetrics {
 			static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
 				{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
 				{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
+				{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
 				{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
+				{ PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch },
 				{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
 				{ PagerEvents::pagerWrite, PagerEventReasons::commit },
 				{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
+				{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch },
 			};
 			if (h == 0) {
 				for (const auto& ER : L0PossibleEventReasonPairs) {
@@ -5298,7 +5295,7 @@ private:
 
 		for (auto pageID : id) {
 			snapshot->getPhysicalPage(
-			    PagerEventReasons::rangePrefetch, l, pageID, true, true); // prefetch btree leaf node
+			    PagerEventReasons::rangePrefetch, 0, pageID, true, true); // prefetch btree leaf node
 		}
 	}
 
