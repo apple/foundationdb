@@ -16448,7 +16448,7 @@ static int os2Delete(
 }
 
 /*
-** Check the existance and status of a file.
+** Check the existence and status of a file.
 */
 static int os2Access(
   sqlite3_vfs *pVfs,        /* Not used on os2 */
@@ -18731,7 +18731,7 @@ static int nolockClose(sqlite3_file *id) {
 /******************************************************************************
 ************************* Begin dot-file Locking ******************************
 **
-** The dotfile locking implementation uses the existance of separate lock
+** The dotfile locking implementation uses the existence of separate lock
 ** files in order to control access to the database.  This works on just
 ** about every filesystem imaginable.  But there are serious downsides:
 **
@@ -18746,7 +18746,7 @@ static int nolockClose(sqlite3_file *id) {
 **
 ** Dotfile locking works by creating a file in the same directory as the
 ** database and with the same name but with a ".lock" extension added.
-** The existance of a lock file implies an EXCLUSIVE lock.  All other lock
+** The existence of a lock file implies an EXCLUSIVE lock.  All other lock
 ** types (SHARED, RESERVED, PENDING) are mapped into EXCLUSIVE.
 */
 
@@ -22040,7 +22040,7 @@ static int unixDelete(
 }
 
 /*
-** Test the existance of or access permissions of file zPath. The
+** Test the existence of or access permissions of file zPath. The
 ** test performed depends on the value of flags:
 **
 **     SQLITE_ACCESS_EXISTS: Return 1 if the file exists
@@ -26132,7 +26132,7 @@ static int winDelete(
 }
 
 /*
-** Check the existance and status of a file.
+** Check the existence and status of a file.
 */
 static int winAccess(
   sqlite3_vfs *pVfs,         /* Not used on win32 */
@@ -26681,7 +26681,7 @@ SQLITE_API int sqlite3_os_end(void){
 /*
 ** A bitmap is an instance of the following structure.
 **
-** This bitmap records the existance of zero or more bits
+** This bitmap records the existence of zero or more bits
 ** with values between 1 and iSize, inclusive.
 **
 ** There are three possible representations of the bitmap.
@@ -43143,7 +43143,7 @@ SQLITE_PRIVATE void sqlite3VdbeMakeReady(
         p->pFree = sqlite3DbMallocZero(db, nByte);
       }
       zCsr = p->pFree;
-      zEnd = &zCsr[nByte];
+      zEnd = zCsr ? &zCsr[nByte] : NULL;
     }while( nByte && !db->mallocFailed );
 
     p->nCursor = (u16)nCursor;

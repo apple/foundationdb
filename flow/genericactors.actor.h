@@ -697,6 +697,16 @@ private:
 	AsyncVar<Void> v;
 };
 
+// Binds an AsyncTrigger object to an AsyncVar, so when the AsyncVar changes
+// the AsyncTrigger is triggered.
+ACTOR template <class T>
+void forward(Reference<AsyncVar<T>> from, AsyncTrigger* to) {
+	loop {
+		wait(from->onChange());
+		to->trigger();
+	}
+}
+
 class Debouncer : NonCopyable {
 public:
 	explicit Debouncer(double delay) { worker = debounceWorker(this, delay); }
@@ -1261,6 +1271,51 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	}
 }
 
+// A low-overhead FIFO mutex made with no internal queue structure (no list, deque, vector, etc)
+// The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
+// called Lock.
+//
+// Usage:
+//   Lock lock = wait(mutex.take());
+//   lock.release();  // Next waiter will get the lock, OR
+//   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise
+//   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
+struct FlowMutex {
+	FlowMutex() { lastPromise.send(Void()); }
+
+	bool available() { return lastPromise.isSet(); }
+
+	struct Lock {
+		void release() { promise.send(Void()); }
+
+		void error(Error e = broken_promise()) { promise.sendError(e); }
+
+		// This is exposed in case the caller wants to use/copy it directly
+		Promise<Void> promise;
+	};
+
+	Future<Lock> take() {
+		Lock newLock;
+		Future<Lock> f = lastPromise.isSet() ? newLock : tag(lastPromise.getFuture(), newLock);
+		lastPromise = newLock.promise;
+		return f;
+	}
+
+private:
+	Promise<Void> lastPromise;
+};
+
+ACTOR template <class T, class V>
+Future<T> forwardErrors(Future<T> f, PromiseStream<V> output) {
+	try {
+		T val = wait(f);
+		return val;
+	} catch (Error& e) {
+		output.sendError(e);
+		throw;
+	}
+}
+
 struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	// FlowLock implements a nonblocking critical section: there can be only a limited number of clients executing code
 	// between wait(take()) and release(). Not thread safe. take() returns only when the number of holders of the lock
@@ -1338,7 +1393,9 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	// Only works if broken_on_destruct.canBeSet()
 	void kill(Error e = broken_promise()) {
 		if (broken_on_destruct.canBeSet()) {
-			broken_on_destruct.sendError(e);
+			auto local = broken_on_destruct;
+			// It could be the case that calling broken_on_destruct destroys this FlowLock
+			local.sendError(e);
 		}
 	}
 
@@ -1889,15 +1946,114 @@ Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
 	return res;
 }
 
-template <class T, class Res>
-Future<Res> operator>>=(Future<T> lhs, std::function<Future<Res>(T const&)> rhs) {
-	return runAfter(lhs, rhs);
+template <class T, class Fun>
+auto operator>>=(Future<T> lhs, Fun&& rhs) -> Future<decltype(rhs(std::declval<T>()))> {
+	return runAfter(lhs, std::forward<Fun>(rhs));
 }
 
 template <class T, class U>
 Future<U> operator>>(Future<T> const& lhs, Future<U> const& rhs) {
 	return runAfter(lhs, rhs);
 }
+
+/*
+ * IDependentAsyncVar is similar to AsyncVar, but it decouples the input and output, so the translation unit
+ * responsible for handling the output does not need to have knowledge of how the output is generated
+ */
+template <class Output>
+class IDependentAsyncVar : public ReferenceCounted<IDependentAsyncVar<Output>> {
+public:
+	virtual ~IDependentAsyncVar() = default;
+	virtual Output const& get() const = 0;
+	virtual Future<Void> onChange() const = 0;
+	template <class Input, class F>
+	static Reference<IDependentAsyncVar> create(Reference<AsyncVar<Input>> const& input, F const& f);
+	static Reference<IDependentAsyncVar> create(Reference<AsyncVar<Output>> const& output);
+};
+
+template <class Input, class Output, class F>
+class DependentAsyncVar final : public IDependentAsyncVar<Output> {
+	Reference<AsyncVar<Output>> output;
+	Future<Void> monitorActor;
+	ACTOR static Future<Void> monitor(Reference<AsyncVar<Input>> input, Reference<AsyncVar<Output>> output, F f) {
+		loop {
+			wait(input->onChange());
+			output->set(f(input->get()));
+		}
+	}
+
+public:
+	DependentAsyncVar(Reference<AsyncVar<Input>> const& input, F const& f)
+	  : output(makeReference<AsyncVar<Output>>(f(input->get()))), monitorActor(monitor(input, output, f)) {}
+	Output const& get() const override { return output->get(); }
+	Future<Void> onChange() const override { return output->onChange(); }
+};
+
+template <class Output>
+template <class Input, class F>
+Reference<IDependentAsyncVar<Output>> IDependentAsyncVar<Output>::create(Reference<AsyncVar<Input>> const& input,
+                                                                         F const& f) {
+	return makeReference<DependentAsyncVar<Input, Output, F>>(input, f);
+}
+
+template <class Output>
+Reference<IDependentAsyncVar<Output>> IDependentAsyncVar<Output>::create(Reference<AsyncVar<Output>> const& input) {
+	auto identity = [](const auto& x) { return x; };
+	return makeReference<DependentAsyncVar<Output, Output, decltype(identity)>>(input, identity);
+}
+
+// A weak reference type to wrap a future Reference<T> object.
+// Once the future is complete, this object holds a pointer to the referenced object but does
+// not contribute to its reference count.
+//
+// WARNING: this class will not be aware when the underlying object is destroyed. It is up to the
+// user to make sure that an UnsafeWeakFutureReference is discarded at the same time the object is.
+template <class T>
+class UnsafeWeakFutureReference {
+public:
+	UnsafeWeakFutureReference() {}
+	UnsafeWeakFutureReference(Future<Reference<T>> future) : data(new UnsafeWeakFutureReferenceData(future)) {}
+
+	// Returns a future to obtain a normal reference handle
+	// If the future is ready, this creates a Reference<T> to wrap the object
+	Future<Reference<T>> get() {
+		if (!data) {
+			return Reference<T>();
+		} else if (data->ptr.present()) {
+			return Reference<T>::addRef(data->ptr.get());
+		} else {
+			return data->future;
+		}
+	}
+
+	// Returns the raw pointer, if the object is ready
+	// Note: this should be used with care, as this pointer is not counted as a reference to the object and
+	// it could be deleted if all normal references are destroyed.
+	Optional<T*> getPtrIfReady() { return data->ptr; }
+
+private:
+	// A class to hold the state for an UnsafeWeakFutureReference
+	struct UnsafeWeakFutureReferenceData : public ReferenceCounted<UnsafeWeakFutureReferenceData>, NonCopyable {
+		Optional<T*> ptr;
+		Future<Reference<T>> future;
+		Future<Void> moveResultFuture;
+
+		UnsafeWeakFutureReferenceData(Future<Reference<T>> future) : future(future) {
+			moveResultFuture = moveResult(this);
+		}
+
+		// Waits for the future to complete and then stores the pointer in local storage
+		// When this completes, we will no longer be counted toward the reference count of the object
+		ACTOR Future<Void> moveResult(UnsafeWeakFutureReferenceData* self) {
+			Reference<T> result = wait(self->future);
+			self->ptr = result.getPtr();
+			self->future = Future<Reference<T>>();
+			return Void();
+		}
+	};
+
+	Reference<UnsafeWeakFutureReferenceData> data;
+};
 
 #include "flow/unactorcompiler.h"
 

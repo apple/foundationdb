@@ -148,7 +148,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	ACTOR Future<Void> getKeyAndCompare(ReadYourWritesTransaction* tr,
 	                                    KeySelector key,
-	                                    bool snapshot,
+	                                    Snapshot snapshot,
 	                                    bool readYourWritesDisabled,
 	                                    bool snapshotRYWDisabled,
 	                                    WriteDuringReadWorkload* self,
@@ -193,7 +193,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	                                                  KeySelector begin,
 	                                                  KeySelector end,
 	                                                  GetRangeLimits limit,
-	                                                  bool reverse) {
+	                                                  Reverse reverse) {
 		Key beginKey = memoryGetKey(db, begin);
 		Key endKey = memoryGetKey(db, end);
 		//TraceEvent("WDRGetRange").detail("Begin", printable(beginKey)).detail("End", printable(endKey));
@@ -223,8 +223,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 	                                      KeySelector begin,
 	                                      KeySelector end,
 	                                      GetRangeLimits limit,
-	                                      bool snapshot,
-	                                      bool reverse,
+	                                      Snapshot snapshot,
+	                                      Reverse reverse,
 	                                      bool readYourWritesDisabled,
 	                                      bool snapshotRYWDisabled,
 	                                      WriteDuringReadWorkload* self,
@@ -390,7 +390,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	ACTOR Future<Void> getAndCompare(ReadYourWritesTransaction* tr,
 	                                 Key key,
-	                                 bool snapshot,
+	                                 Snapshot snapshot,
 	                                 bool readYourWritesDisabled,
 	                                 bool snapshotRYWDisabled,
 	                                 WriteDuringReadWorkload* self,
@@ -734,7 +734,9 @@ ACTOR Future<Void> randomTransaction(Database cx, WriteDuringReadWorkload* self,
 	state bool readAheadDisabled = deterministicRandom()->random01() < 0.5;
 	state bool snapshotRYWDisabled = deterministicRandom()->random01() < 0.5;
 	state bool useBatchPriority = deterministicRandom()->random01() < 0.5;
-	state int64_t timebomb = deterministicRandom()->random01() < 0.01 ? deterministicRandom()->randomInt64(1, 6000) : 0;
+	state int64_t timebomb = (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0.0 && deterministicRandom()->random01() < 0.01)
+	                             ? deterministicRandom()->randomInt64(1, 6000)
+	                             : 0; // timebomb check can fail incorrectly if simulation injects delay longer than the timebomb
 	state std::vector<Future<Void>> operations;
 	state ActorCollection commits(false);
 	state std::vector<Future<Void>> watches;
@@ -796,7 +798,7 @@ ACTOR Future<Void> randomTransaction(Database cx, WriteDuringReadWorkload* self,
 						if (operationType == 0 && !disableGetKey) {
 							operations.push_back(self->getKeyAndCompare(&tr,
 							                                            self->getRandomKeySelector(),
-							                                            deterministicRandom()->random01() < 0.5,
+							                                            Snapshot{ deterministicRandom()->coinflip() },
 							                                            readYourWritesDisabled,
 							                                            snapshotRYWDisabled,
 							                                            self,
@@ -807,8 +809,8 @@ ACTOR Future<Void> randomTransaction(Database cx, WriteDuringReadWorkload* self,
 							                                              self->getRandomKeySelector(),
 							                                              self->getRandomKeySelector(),
 							                                              self->getRandomLimits(),
-							                                              deterministicRandom()->random01() < 0.5,
-							                                              deterministicRandom()->random01() < 0.5,
+							                                              Snapshot{ deterministicRandom()->coinflip() },
+							                                              Reverse{ deterministicRandom()->coinflip() },
 							                                              readYourWritesDisabled,
 							                                              snapshotRYWDisabled,
 							                                              self,
@@ -817,7 +819,7 @@ ACTOR Future<Void> randomTransaction(Database cx, WriteDuringReadWorkload* self,
 						} else if (operationType == 2 && !disableGet) {
 							operations.push_back(self->getAndCompare(&tr,
 							                                         self->getRandomKey(),
-							                                         deterministicRandom()->random01() > 0.5,
+							                                         Snapshot{ deterministicRandom()->coinflip() },
 							                                         readYourWritesDisabled,
 							                                         snapshotRYWDisabled,
 							                                         self,

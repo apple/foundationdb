@@ -41,7 +41,7 @@ public:
 	  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1),
 	    isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
 	    allSwapsDisabled(false), backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType),
-	    extraDB(nullptr), allowLogSetKills(true), usableRegions(1) {}
+	    extraDB(nullptr), allowLogSetKills(true), usableRegions(1), tssMode(TSSMode::Disabled) {}
 
 	// Order matters!
 	enum KillType {
@@ -54,6 +54,9 @@ public:
 		RebootProcess,
 		None
 	};
+
+	// Order matters! all modes >= 2 are fault injection modes
+	enum TSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
 
 	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 
@@ -188,10 +191,14 @@ public:
 		Promise<KillType> shutdownSignal;
 	};
 
+	// A set of data associated with a simulated machine
 	struct MachineInfo {
 		ProcessInfo* machineProcess;
 		std::vector<ProcessInfo*> processes;
-		std::map<std::string, Future<Reference<IAsyncFile>>> openFiles;
+
+		// A map from filename to file handle for all open files on a machine
+		std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> openFiles;
+
 		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>> machineId;
@@ -401,6 +408,7 @@ public:
 	int32_t satelliteTLogWriteAntiQuorumFallback;
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
+	TSSMode tssMode;
 
 	// Used by workloads that perform reconfigurations
 	int testerCount;

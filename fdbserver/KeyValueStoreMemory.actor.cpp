@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DeltaTree.h"
@@ -29,8 +30,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
-
-extern bool noUnseed;
 
 template <typename Container>
 class KeyValueStoreMemory final : public IKeyValueStore, NonCopyable {
@@ -401,7 +400,7 @@ private:
 			if (o->op == OpSet) {
 				if (sequential) {
 					KeyValueMapPair pair(o->p1, o->p2);
-					dataSets.push_back(std::make_pair(pair, pair.arena.getSize() + data.getElementBytes()));
+					dataSets.emplace_back(pair, pair.arena.getSize() + data.getElementBytes());
 				} else {
 					data.insert(o->p1, o->p2);
 				}

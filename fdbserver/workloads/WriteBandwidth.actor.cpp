@@ -122,7 +122,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 					                keyAfter(self->keyForIndex(startIdx + self->keysPerTransaction - 1, false))));
 
 					for (int i = 0; i < self->keysPerTransaction; i++)
-						tr.set(self->keyForIndex(startIdx + i, false), self->randomValue(), false);
+						tr.set(self->keyForIndex(startIdx + i, false), self->randomValue(), AddConflictRange::FALSE);
 
 					start = now();
 					wait(tr.commit());

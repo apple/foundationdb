@@ -31,6 +31,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ResolverInterface.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -151,16 +152,18 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct RegisterMasterRequest> registerMaster;
 	RequestStream<struct GetServerDBInfoRequest>
 	    getServerDBInfo; // only used by testers; the cluster controller will send the serverDBInfo to workers
+	RequestStream<struct UpdateWorkerHealthRequest> updateWorkerHealth;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterControllerFullInterface const& r) const { return id() != r.id(); }
 
-	bool hasMessage() {
+	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
-		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady();
+		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
+		       updateWorkerHealth.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -172,6 +175,7 @@ struct ClusterControllerFullInterface {
 		getWorkers.getEndpoint(TaskPriority::ClusterController);
 		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
 		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
+		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -187,7 +191,8 @@ struct ClusterControllerFullInterface {
 		           registerWorker,
 		           getWorkers,
 		           registerMaster,
-		           getServerDBInfo);
+		           getServerDBInfo,
+		           updateWorkerHealth);
 	}
 };
 
@@ -418,6 +423,20 @@ struct GetWorkersRequest {
 	}
 };
 
+struct UpdateWorkerHealthRequest {
+	constexpr static FileIdentifier file_identifier = 5789927;
+	NetworkAddress address;
+	std::vector<NetworkAddress> degradedPeers;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, address, degradedPeers);
+	}
+};
+
 struct InitializeTLogRequest {
 	constexpr static FileIdentifier file_identifier = 15604392;
 	UID recruitmentID;
@@ -614,11 +633,13 @@ struct InitializeStorageRequest {
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
+	Optional<std::pair<UID, Version>>
+	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion);
 	}
 };
 
@@ -770,6 +791,7 @@ struct DiskStoreRequest {
 struct Role {
 	static const Role WORKER;
 	static const Role STORAGE_SERVER;
+	static const Role TESTING_STORAGE_SERVER;
 	static const Role TRANSACTION_LOG;
 	static const Role SHARED_TRANSACTION_LOG;
 	static const Role COMMIT_PROXY;
@@ -811,8 +833,8 @@ struct ServerDBInfo;
 
 class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
-                              bool enableLocalityLoadBalance = true,
-                              bool lockAware = false);
+                              LockAware = LockAware::FALSE,
+                              EnableLocalityLoadBalance = EnableLocalityLoadBalance::TRUE);
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 
@@ -825,13 +847,17 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         std::string metricsConnFile,
                         std::string metricsPrefix,
                         int64_t memoryProfilingThreshold,
-                        std::string whitelistBinPaths);
+                        std::string whitelistBinPaths,
+                        std::string configPath,
+                        std::map<std::string, std::string> manualKnobOverrides,
+                        UseConfigDB useConfigDB);
 
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
-                                     LocalityData locality);
+                                     LocalityData locality,
+                                     UseConfigDB useConfigDB);
 
 // These servers are started by workerServer
 class IKeyValueStore;
@@ -840,6 +866,7 @@ class IDiskQueue;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
+                                 Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo>> db,
                                  std::string folder);

@@ -27,6 +27,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRandom.h"
@@ -125,13 +126,14 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> getRangeCallActor(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		state double lastTime = now();
+		state Reverse reverse = Reverse::FALSE;
 		loop {
 			wait(poisson(&lastTime, 1.0 / self->transactionsPerSecond));
-			state bool reverse = deterministicRandom()->coinflip();
+			reverse.set(deterministicRandom()->coinflip());
 			state GetRangeLimits limit = self->randomLimits();
 			state KeySelector begin = self->randomKeySelector();
 			state KeySelector end = self->randomKeySelector();
-			auto correctResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
+			auto correctResultFuture = self->ryw->getRange(begin, end, limit, Snapshot::FALSE, reverse);
 			ASSERT(correctResultFuture.isReady());
 			auto correctResult = correctResultFuture.getValue();
 			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw.getPtr(), begin, end, limit, reverse);
@@ -172,7 +174,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				self->ryw->clear(rkr);
 			}
 			// use the same key selectors again to test consistency of ryw
-			auto correctRywResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
+			auto correctRywResultFuture = self->ryw->getRange(begin, end, limit, Snapshot::FALSE, reverse);
 			ASSERT(correctRywResultFuture.isReady());
 			auto correctRywResult = correctRywResultFuture.getValue();
 			auto testRywResultFuture = cx->specialKeySpace->getRange(self->ryw.getPtr(), begin, end, limit, reverse);
@@ -546,13 +548,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				if (begin.getKey() < end.getKey())
 					break;
 			}
-			bool reverse = deterministicRandom()->coinflip();
+			Reverse reverse{ deterministicRandom()->coinflip() };
 
-			auto correctResultFuture = referenceTx->getRange(begin, end, limit, false, reverse);
+			auto correctResultFuture = referenceTx->getRange(begin, end, limit, Snapshot::FALSE, reverse);
 			ASSERT(correctResultFuture.isReady());
 			begin.setKey(begin.getKey().withPrefix(prefix, begin.arena()));
 			end.setKey(end.getKey().withPrefix(prefix, begin.arena()));
-			auto testResultFuture = tx->getRange(begin, end, limit, false, reverse);
+			auto testResultFuture = tx->getRange(begin, end, limit, Snapshot::FALSE, reverse);
 			ASSERT(testResultFuture.isReady());
 			auto correct_iter = correctResultFuture.get().begin();
 			auto test_iter = testResultFuture.get().begin();
@@ -624,16 +626,16 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> managementApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		// All management api related tests
-		Database cx = cx_->clone();
+		state Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
 		// test ordered option keys
 		{
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (const std::string& option : SpecialKeySpace::getManagementApiOptionsSet()) {
-				tx->set(LiteralStringRef("options/")
-				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-				            .withSuffix(option),
-				        ValueRef());
+				tx->set(
+				    "options/"_sr.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
+				        .withSuffix(option),
+				    ValueRef());
 			}
 			RangeResult result = wait(tx->getRange(
 			    KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
@@ -936,7 +938,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// test change coordinators and cluster description
 		// we randomly pick one process(not coordinator) and add it, in this case, it should always succeed
 		{
-			state std::string new_cluster_description = deterministicRandom()->randomAlphaNumeric(8);
+			// choose a new description if configuration allows transactions across differently named clusters
+			state std::string new_cluster_description = SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT
+			                                                ? deterministicRandom()->randomAlphaNumeric(8)
+			                                                : cs.clusterKeyName().toString();
 			state std::string new_coordinator_process;
 			state std::vector<std::string> old_coordinators_processes;
 			state bool possible_to_add_coordinator;
@@ -1423,6 +1428,40 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					wait(tx->onError(e));
+				}
+			}
+		}
+		// make sure when we change dd related special keys, we grab the two system keys,
+		// i.e. moveKeysLockOwnerKey and moveKeysLockWriteKey
+		{
+			state Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
+			state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
+			loop {
+				try {
+					Version readVersion = wait(tr1->getReadVersion());
+					tr2->setVersion(readVersion);
+					tr1->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tr2->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+					tr1->set(LiteralStringRef("mode").withPrefix(ddPrefix), LiteralStringRef("1"));
+					wait(tr1->commit());
+					// randomly read the moveKeysLockOwnerKey/moveKeysLockWriteKey
+					// both of them should be grabbed when changing dd mode
+					wait(success(
+					    tr2->get(deterministicRandom()->coinflip() ? moveKeysLockOwnerKey : moveKeysLockWriteKey)));
+					// tr2 shoulde never succeed, just write to a key to make it not a read-only transaction
+					tr2->set(LiteralStringRef("unused_key"), LiteralStringRef(""));
+					wait(tr2->commit());
+					ASSERT(false); // commit should always fail due to conflict
+				} catch (Error& e) {
+					if (e.code() != error_code_not_committed) {
+						// when buggify is enabled, it's possible we get other retriable errors
+						wait(tr2->onError(e));
+						tr1->reset();
+					} else {
+						// loop until we get conflict error
+						break;
+					}
 				}
 			}
 		}

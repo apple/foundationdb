@@ -595,7 +595,7 @@ Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 
 void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {
 	MutexHolder holder(lock);
-	threadCompletionHooks.push_back(std::make_pair(hook, hookParameter));
+	threadCompletionHooks.emplace_back(hook, hookParameter);
 }
 
 // MultiVersionTransaction
@@ -947,7 +947,7 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 		                                             value.castTo<Standalone<StringRef>>());
 	}
 
-	dbState->options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
+	dbState->options.emplace_back(option, value.castTo<Standalone<StringRef>>());
 
 	if (dbState->db) {
 		dbState->db->setOption(option, value);
@@ -1559,7 +1559,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 				runOnExternalClientsAllThreads(
 				    [option, value](Reference<ClientInfo> client) { client->api->setNetworkOption(option, value); });
 			} else {
-				options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
+				options.emplace_back(option, value.castTo<Standalone<StringRef>>());
 			}
 		}
 	}
@@ -1884,8 +1884,6 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 }
 
 // UNIT TESTS
-extern bool noUnseed;
-
 TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing") {
 	auto vals = parseOptionValues("a");
 	ASSERT(vals.size() == 1 && vals[0] == "a");

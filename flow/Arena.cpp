@@ -241,10 +241,11 @@ void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
 	r->aligned4kBuffer = allocateFast4kAligned(size);
 	// printf("Arena::aligned4kBuffer alloc size=%u ptr=%p\n", size, r->aligned4kBuffer);
 	r->nextBlockOffset = nextBlockOffset;
+	auto result = r->aligned4kBuffer;
 	makeNoAccess(r, sizeof(ArenaBlockRef));
 	nextBlockOffset = bigUsed;
 	bigUsed += sizeof(ArenaBlockRef);
-	return r->aligned4kBuffer;
+	return result;
 }
 
 void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {

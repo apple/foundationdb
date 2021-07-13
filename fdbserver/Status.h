@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
+#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
@@ -42,6 +43,7 @@ Future<StatusReply> clusterGetStatus(
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus,
     ServerCoordinators const& coordinators,
     std::vector<NetworkAddress> const& incompatibleConnections,
-    Version const& datacenterVersionDifference);
+    Version const& datacenterVersionDifference,
+    ConfigBroadcaster const* const& conifgBroadcaster);
 
 #endif

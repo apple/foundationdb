@@ -64,9 +64,11 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
+
+The ``tss`` option, if present, changes the Testing Storage Server (TSS) configuration for a cluster. When used for the first time, both a count and a storage engine must be specified. For more details, see :ref:`testing-storage-server`.
 
 redundancy mode
 ^^^^^^^^^^^^^^^
@@ -107,6 +109,11 @@ Set the process using ``configure [grv_proxies|commit_proxies|resolvers|logs]=<N
 
 For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
 
+perpetual storage wiggle
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Set the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle. For more details, see :ref:`perpetual-storage-wiggle`.
+
 consistencycheck
 ----------------
 
@@ -132,9 +139,9 @@ For more information on setting the cluster description, see :ref:`configuration
 exclude
 -------
 
-The ``exclude`` command excludes servers from the database or marks them as failed. Its syntax is ``exclude [failed] <ADDRESS...>``. If no addresses are specified, the command provides the set of excluded and failed servers.
+The ``exclude`` command excludes servers from the database or marks them as failed. Its syntax is ``exclude [failed] [<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality``. If no addresses are specified, the command provides the set of excluded and failed servers and localities.
 
-For each IP address or IP:port pair in ``<ADDRESS...>``, the command adds the address to the set of excluded servers. It then waits until all database state has been safely moved off the specified servers.
+For each IP address or IP:port pair in ``<ADDRESS...>`` or locality (which include anything set on LocalityData like dcid, zoneid, machineid, processid), the command adds the address/locality to the set of excluded servers and localities. It then waits until all database state has been safely moved off the specified servers.
 
 If the ``failed`` keyword is specified, the address is marked as failed and added to the set of failed servers. It will not wait for the database state to move off the specified servers.
 
@@ -239,15 +246,15 @@ The following options are available for use with the ``option`` command:
 include
 -------
 
-The ``include`` command permits previously excluded or failed servers to rejoin the database. Its syntax is ``include [failed] all|<ADDRESS...>``.
+The ``include`` command permits previously excluded or failed servers/localities to rejoin the database. Its syntax is ``include [failed] all|[<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality``.
 
 The ``failed`` keyword is required if the servers were previously marked as failed rather than excluded.
 
-If ``all`` is specified, the excluded servers list is cleared. This will not clear the failed servers list.
+If ``all`` is specified, the excluded servers and localities list is cleared. This will not clear the failed servers and localities list.
 
-If ``failed all`` or ``all failed`` is specified, the failed servers list is cleared. This will not clear the excluded servers list.
+If ``failed all`` or ``all failed`` is specified, the failed servers and localities list is cleared. This will not clear the excluded servers and localities list.
 
-For each IP address or IP:port pair in ``<ADDRESS...>``, the command removes any matching exclusions from the excluded servers list. (A specified IP will match all ``IP:*`` exclusion entries).
+For each IP address or IP:port pair in ``<ADDRESS...>`` or locality, the command removes any matching exclusions from the excluded servers/localities list. (A specified IP will match all ``IP:*`` exclusion entries).
 
 For information on adding machines to a cluster, see :ref:`adding-machines-to-a-cluster`.
 
@@ -496,3 +503,21 @@ Disables writing from ``fdbcli`` (the default). In this mode, attempting to set 
 ``writemode on``
 
 Enables writing from ``fdbcli``.
+
+tssq
+----
+
+Utility commands for handling quarantining Testing Storage Servers. For more information on this, see :ref:`testing-storage-server`.
+
+``tssq start <StorageUID>``
+
+Manually quarantines a TSS process, if it is not already quarantined.
+
+``tssq stop <StorageUID>``
+
+Removes a TSS process from quarantine, disposing of the TSS and allowing Data Distribution to recruit a new storage process on the worker.
+
+``tssq list``:
+
+Lists the storage UIDs of all TSS processes currently in quarantine.
+

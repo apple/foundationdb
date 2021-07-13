@@ -33,8 +33,6 @@
 #include <vector>
 #include <cstring>
 #include <array>
-#include <typeinfo>
-#include <typeindex>
 #include <unordered_map>
 #include <deque>
 #include "flow/FileIdentifier.h"

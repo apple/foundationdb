@@ -28,6 +28,7 @@
 // either we pull g_simulator into flow, or flow (and the I/O path) will be unable to log performance
 // metrics.
 #include <fdbrpc/simulator.h>
+#include <limits>
 
 // pull in some global pointers too:  These types are implemented in fdbrpc/sim2.actor.cpp, which is not available here.
 // Yuck. If you're not using the simulator, these will remain null, and all should be well.
@@ -76,7 +77,7 @@ void HistogramRegistry::unregisterHistogram(Histogram* h) {
 	ASSERT(count == 1);
 }
 
-Histogram* HistogramRegistry::lookupHistogram(std::string name) {
+Histogram* HistogramRegistry::lookupHistogram(std::string const& name) {
 	auto h = histograms.find(name);
 	if (h == histograms.end()) {
 		return nullptr;
@@ -117,7 +118,7 @@ void Histogram::writeToLog() {
 	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper.at(unit));
 
 	for (uint32_t i = 0; i < 32; i++) {
-		uint32_t value = ((uint32_t)1) << (i + 1);
+		uint64_t value = uint64_t(1) << (i + 1);
 
 		if (buckets[i]) {
 			switch (unit) {

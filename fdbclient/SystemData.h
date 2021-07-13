@@ -26,7 +26,6 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/RestoreWorkerInterface.actor.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -115,6 +114,20 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
 
+// "\xff/tss/[[serverId]]" := "[[tssId]]"
+extern const KeyRangeRef tssMappingKeys;
+
+// "\xff/tssQ/[[serverId]]" := ""
+// For quarantining a misbehaving TSS.
+extern const KeyRangeRef tssQuarantineKeys;
+
+const Key tssQuarantineKeyFor(UID serverID);
+UID decodeTssQuarantineKey(KeyRef const&);
+
+// \xff/tssMismatch/[[Tuple<TSSStorageUID, timestamp, mismatchUID>]] := [[TraceEventString]]
+// For recording tss mismatch details in the system keyspace
+extern const KeyRangeRef tssMismatchKeys;
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
 //	storage server's corresponding TLog in order to apply mutations.
@@ -196,6 +209,8 @@ UID decodeProcessClassKeyOld(KeyRef const& key);
 extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
+extern const KeyRef perpetualStorageWiggleKey;
+extern const KeyRef wigglingStorageServerKey;
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
 
@@ -213,8 +228,15 @@ extern const KeyRef excludedServersPrefix;
 extern const KeyRangeRef excludedServersKeys;
 extern const KeyRef excludedServersVersionKey; // The value of this key shall be changed by any transaction that
                                                // modifies the excluded servers list
-const AddressExclusion decodeExcludedServersKey(KeyRef const& key); // where key.startsWith(excludedServersPrefix)
+AddressExclusion decodeExcludedServersKey(KeyRef const& key); // where key.startsWith(excludedServersPrefix)
 std::string encodeExcludedServersKey(AddressExclusion const&);
+
+extern const KeyRef excludedLocalityPrefix;
+extern const KeyRangeRef excludedLocalityKeys;
+extern const KeyRef excludedLocalityVersionKey; // The value of this key shall be changed by any transaction that
+                                                // modifies the excluded localities list
+std::string decodeExcludedLocalityKey(KeyRef const& key); // where key.startsWith(excludedLocalityPrefix)
+std::string encodeExcludedLocalityKey(std::string const&);
 
 //   "\xff/conf/failed/1.2.3.4" := ""
 //   "\xff/conf/failed/1.2.3.4:4000" := ""
@@ -227,8 +249,15 @@ extern const KeyRef failedServersPrefix;
 extern const KeyRangeRef failedServersKeys;
 extern const KeyRef failedServersVersionKey; // The value of this key shall be changed by any transaction that modifies
                                              // the failed servers list
-const AddressExclusion decodeFailedServersKey(KeyRef const& key); // where key.startsWith(failedServersPrefix)
+AddressExclusion decodeFailedServersKey(KeyRef const& key); // where key.startsWith(failedServersPrefix)
 std::string encodeFailedServersKey(AddressExclusion const&);
+
+extern const KeyRef failedLocalityPrefix;
+extern const KeyRangeRef failedLocalityKeys;
+extern const KeyRef failedLocalityVersionKey; // The value of this key shall be changed by any transaction that modifies
+                                              // the failed localities list
+std::string decodeFailedLocalityKey(KeyRef const& key); // where key.startsWith(failedLocalityPrefix)
+std::string encodeFailedLocalityKey(std::string const&);
 
 //   "\xff/globalConfig/[[option]]" := "value"
 //	 An umbrella prefix for global configuration data synchronized to all nodes.
@@ -442,31 +471,6 @@ extern const KeyRef mustContainSystemMutationsKey;
 // Key range reserved for storing changes to monitor conf files
 extern const KeyRangeRef monitorConfKeys;
 
-// Fast restore
-extern const KeyRef restoreLeaderKey;
-extern const KeyRangeRef restoreWorkersKeys;
-extern const KeyRef restoreStatusKey; // To be used when we measure fast restore performance
-extern const KeyRef restoreRequestTriggerKey;
-extern const KeyRef restoreRequestDoneKey;
-extern const KeyRangeRef restoreRequestKeys;
-extern const KeyRangeRef restoreApplierKeys;
-extern const KeyRef restoreApplierTxnValue;
-
-const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version);
-std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key);
-const Key restoreWorkerKeyFor(UID const& workerID);
-const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
-RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
-const Value restoreRequestTriggerValue(UID randomUID, int const numRequests);
-int decodeRestoreRequestTriggerValue(ValueRef const& value);
-const Value restoreRequestDoneVersionValue(Version readVersion);
-Version decodeRestoreRequestDoneVersionValue(ValueRef const& value);
-const Key restoreRequestKeyFor(int const& index);
-const Value restoreRequestValue(RestoreRequest const& server);
-RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
-const Key restoreStatusKeyFor(StringRef statusType);
-const Value restoreStatusValue(double val);
-
 extern const KeyRef healthyZoneKey;
 extern const StringRef ignoreSSFailuresZoneString;
 extern const KeyRef rebalanceDDIgnoreKey;
@@ -496,6 +500,12 @@ const Value rangeFeedValue(KeyRangeRef const& range);
 KeyRange decodeRangeFeedValue(ValueRef const& value);
 extern const KeyRef rangeFeedPrefix;
 extern const KeyRef rangeFeedPrivatePrefix;
+
+// Configuration database special keys
+extern const KeyRef configTransactionDescriptionKey;
+extern const KeyRange globalConfigKnobKeys;
+extern const KeyRangeRef configKnobKeys;
+extern const KeyRangeRef configClassKeys;
 
 #pragma clang diagnostic pop
 

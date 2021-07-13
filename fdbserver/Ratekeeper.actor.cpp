@@ -719,9 +719,11 @@ ACTOR Future<Void> trackEachStorageServer(
 		when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 			wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
 			if (change.second.present()) {
-				auto& a = actors[change.first];
-				a = Future<Void>();
-				a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
+				if (!change.second.get().isTss()) {
+					auto& a = actors[change.first];
+					a = Future<Void>();
+					a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
+				}
 			} else
 				actors.erase(change.first);
 		}
@@ -1392,9 +1394,10 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 
 				self->configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
 
-				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) ||
-				                                 tr.watch(excludedServersVersionKey) ||
-				                                 tr.watch(failedServersVersionKey);
+				state Future<Void> watchFuture =
+				    tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) ||
+				    tr.watch(failedServersVersionKey) || tr.watch(excludedLocalityVersionKey) ||
+				    tr.watch(failedLocalityVersionKey);
 				wait(tr.commit());
 				wait(watchFuture);
 				break;
@@ -1406,7 +1409,7 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true));
+	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE));
 	state Future<Void> timeout = Void();
 	state std::vector<Future<Void>> tlogTrackers;
 	state std::vector<TLogInterface> tlogInterfs;

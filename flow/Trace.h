@@ -320,11 +320,11 @@ struct TraceableStringImpl : std::true_type {
 		std::string result;
 		result.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
 		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
-			if (isPrintable(*iter)) {
+			if (*iter == '\\') {
+				result.push_back('\\');
+				result.push_back('\\');
+			} else if (isPrintable(*iter)) {
 				result.push_back(*iter);
-			} else if (*iter == '\\') {
-				result.push_back('\\');
-				result.push_back('\\');
 			} else {
 				const uint8_t byte = *iter;
 				result.push_back('\\');
@@ -431,6 +431,7 @@ private:
 	void setField(const char* key, int64_t value);
 	void setField(const char* key, double value);
 	void setField(const char* key, const std::string& value);
+	void setThreadId();
 
 	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
@@ -463,11 +464,13 @@ public:
 
 	bool isEnabled() const { return enabled; }
 
-	TraceEvent &setErrorKind(ErrorKind errorKind);
+	TraceEvent& setErrorKind(ErrorKind errorKind);
 
 	explicit operator bool() const { return enabled; }
 
 	void log();
+
+	void disable() { enabled = false; } // Disables the trace event so it doesn't get
 
 	~TraceEvent(); // Actually logs the event
 
@@ -475,6 +478,8 @@ public:
 	static unsigned long CountEventsLoggedAt(Severity);
 
 	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This just just a place to store fields
+
+	const TraceEventFields& getFields() const { return fields; }
 
 private:
 	bool initialized;
@@ -491,7 +496,7 @@ private:
 	int maxFieldLength;
 	int maxEventLength;
 	int timeIndex;
-	int errorKindIndex { -1 };
+	int errorKindIndex{ -1 };
 
 	void setSizeLimits();
 
@@ -519,11 +524,11 @@ struct TraceInterval {
 struct LatestEventCache {
 public:
 	void set(std::string tag, const TraceEventFields& fields);
-	TraceEventFields get(std::string tag);
+	TraceEventFields get(std::string const& tag);
 	std::vector<TraceEventFields> getAll();
 	std::vector<TraceEventFields> getAllUnsafe();
 
-	void clear(std::string prefix);
+	void clear(std::string const& prefix);
 	void clear();
 
 	// Latest error tracking only tracks errors when called from the main thread. Other errors are silently ignored.
@@ -577,8 +582,8 @@ bool selectTraceClockSource(std::string source);
 // Returns true iff source is recognized.
 bool validateTraceClockSource(std::string source);
 
-void addTraceRole(std::string role);
-void removeTraceRole(std::string role);
+void addTraceRole(std::string const& role);
+void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 template <class T>

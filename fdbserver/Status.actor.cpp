@@ -31,6 +31,7 @@
 #include "flow/UnitTest.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -357,8 +358,15 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 			// FIXME: this will not catch if the secondary address of the process was excluded
 			NetworkAddressList tempList;
 			tempList.address = it->first;
-			if (configuration.present() && !configuration.get().isExcludedServer(tempList))
-				notExcludedMap[machineId] = false;
+			bool excludedServer = false;
+			bool excludedLocality = false;
+			if (configuration.present() && configuration.get().isExcludedServer(tempList))
+				excludedServer = true;
+			if (locality.count(it->first) && configuration.present() &&
+			    configuration.get().isMachineExcluded(locality[it->first]))
+				excludedLocality = true;
+
+			notExcludedMap[machineId] = excludedServer || excludedLocality;
 			workerContribMap[machineId]++;
 		} catch (Error&) {
 			++failed;
@@ -630,7 +638,7 @@ struct RolesInfo {
 			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
 			if (commitLatencyBands.size()) {
 				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
-			} 
+			}
 
 			TraceEventFields const& commitBatchingWindowSize = metrics.at("CommitBatchingWindowSize");
 			if (commitBatchingWindowSize.size()) {
@@ -1011,7 +1019,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			statusObj["roles"] = roles.getStatusForAddress(address);
 
 			if (configuration.present()) {
-				statusObj["excluded"] = configuration.get().isExcludedServer(workerItr->interf.addresses());
+				statusObj["excluded"] = configuration.get().isExcludedServer(workerItr->interf.addresses()) ||
+				                        configuration.get().isExcludedLocality(workerItr->interf.locality);
 			}
 
 			statusObj["class_type"] = workerItr->processClass.toString();
@@ -1604,6 +1613,12 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 				statusObj["address"] = it->toString();
 				excludedServersArr.push_back(statusObj);
 			}
+			std::set<std::string> excludedLocalities = configuration.getExcludedLocalities();
+			for (const auto& it : excludedLocalities) {
+				JsonBuilderObject statusObj;
+				statusObj["locality"] = it;
+				excludedServersArr.push_back(statusObj);
+			}
 			statusObj["excluded_servers"] = excludedServersArr;
 		}
 		vector<ClientLeaderRegInterface> coordinatorLeaderServers = coordinators.clientLeaderServers;
@@ -1806,7 +1821,7 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(
 			++futureItr;
 		}
 
-		results.push_back(std::make_pair(servers[i], serverResults));
+		results.emplace_back(servers[i], serverResults);
 	}
 
 	return results;
@@ -1869,10 +1884,10 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<CommitProxyInterface, EventMap>> results =
-	    wait(getServerMetrics(db->get().client.commitProxies,
-	                          address_workers,
-	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize"}));
+	vector<std::pair<CommitProxyInterface, EventMap>> results = wait(getServerMetrics(
+	    db->get().client.commitProxies,
+	    address_workers,
+	    std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" }));
 
 	return results;
 }
@@ -1880,10 +1895,10 @@ ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommit
 ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<GrvProxyInterface, EventMap>> results =
-	    wait(getServerMetrics(db->get().client.grvProxies,
-	                          address_workers,
-	                          std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
+	vector<std::pair<GrvProxyInterface, EventMap>> results = wait(
+	    getServerMetrics(db->get().client.grvProxies,
+	                     address_workers,
+	                     std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
 	return results;
 }
 
@@ -2590,10 +2605,9 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
                                                     std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 
-	state Database cx = openDBOnServer(db,
-	                                   TaskPriority::DefaultEndpoint,
-	                                   true,
-	                                   false); // Open a new database connection that isn't lock-aware
+	state Database cx =
+	    openDBOnServer(db,
+	                   TaskPriority::DefaultEndpoint); // Open a new database connection that isn't lock-aware
 	state Transaction tr(cx);
 	state int timeoutSeconds = 5;
 	state Future<Void> getTimeout = delay(timeoutSeconds);
@@ -2674,7 +2688,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> incompatibleConnections,
-    Version datacenterVersionDifference) {
+    Version datacenterVersionDifference,
+    ConfigBroadcaster const* configBroadcaster) {
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;
@@ -2906,6 +2921,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["workload"] = workerStatuses[1];
 
 			statusObj["layers"] = workerStatuses[2];
+			if (configBroadcaster) {
+				// TODO: Read from coordinators for more up-to-date config database status?
+				statusObj["configuration_database"] = configBroadcaster->getStatus();
+			}
 
 			// Add qos section if it was populated
 			if (!qos.empty())
@@ -3004,6 +3023,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
+
+		int activeTSSCount = 0;
+		for (auto& it : storageServers) {
+			if (it.first.isTss()) {
+				activeTSSCount++;
+			}
+		}
+		statusObj["active_tss_count"] = activeTSSCount;
 
 		int totalDegraded = 0;
 		for (auto& it : workers) {
