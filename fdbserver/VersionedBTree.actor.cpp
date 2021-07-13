@@ -1295,6 +1295,36 @@ struct RedwoodMetrics {
 	struct EventReasonsArray {
 		unsigned int eventReasons[(size_t)PagerEvents::MAXEVENTS][(size_t)PagerEventReasons::MAXEVENTREASONS];
 
+		static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
+			{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
+			{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
+			{ PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear },
+			{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
+			{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
+			{ PagerEvents::pagerCacheHit, PagerEventReasons::pointRead },
+			{ PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead },
+			{ PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear },
+			{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
+			{ PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead },
+			{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead },
+			{ PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear },
+			{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
+			{ PagerEvents::pagerWrite, PagerEventReasons::commit },
+			{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
+			{ PagerEvents::pagerWrite, PagerEventReasons::lazyClear },
+		};
+		static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
+			{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
+			{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
+			{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
+			{ PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch },
+			{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
+			{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch },
+			{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
+			{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
+			{ PagerEvents::pagerWrite, PagerEventReasons::commit },
+		};
+
 		EventReasonsArray() { clear(); }
 		void clear() {
 			for (size_t i = 0; i < (size_t)PagerEvents::MAXEVENTS; i++) {
@@ -1310,62 +1340,41 @@ struct RedwoodMetrics {
 
 		std::string ouputSummary(int currLevel) {
 			std::string result = "";
-			static const std::pair<PagerEvents, const char*> allEvents[] = {
-				{ PagerEvents::pagerCacheLookup, "pagerCacheLookup" },
-				{ PagerEvents::pagerCacheHit, "pagerCacheHit" },
-				{ PagerEvents::pagerCacheMiss, "pagerCacheMiss" },
-				{ PagerEvents::pagerWrite, "pagerWrite" }
-			};
-			static const std::pair<PagerEventReasons, const char*> allReasons[] = {
-				{ PagerEventReasons::pointRead, "pointRead" },         { PagerEventReasons::rangeRead, "rangeRead" },
-				{ PagerEventReasons::rangePrefetch, "rangePrefetch" }, { PagerEventReasons::commit, "commit" },
-				{ PagerEventReasons::lazyClear, "lazyClear" },         { PagerEventReasons::metaData, "metaData" }
-			};
-			for (auto& e : allEvents) {
-				result += e.second;
-				result += "\n\t";
-				for (auto& r : allReasons) {
-					std::string num = std::to_string(eventReasons[(size_t)e.first][(size_t)r.first]);
-					result += r.second;
-					result.append(16 - strlen(r.second), ' ');
+			PagerEvents prevEvent = PagerEvents::MAXEVENTS;
+			if (currLevel == 0) {
+				for (const auto& ER : L0PossibleEventReasonPairs) {
+					if (prevEvent != ER.first) {
+						result += "\n";
+						result += PagerEventsCodes[(size_t)ER.first];
+						result += "\n\t";
+						prevEvent = ER.first;
+					}
+					std::string num = std::to_string(eventReasons[(size_t)ER.first][(size_t)ER.second]);
+					result += PagerEventReasonsCodes[(size_t)ER.second];
+					result.append(16 - PagerEventReasonsCodes[(size_t)ER.second].length(), ' ');
 					result.append(8 - num.length(), ' ');
 					result += num;
 					result.append(13, ' ');
 				}
-				result += "\n";
+			} else {
+				for (const auto& ER : possibleEventReasonPairs) {
+					if (prevEvent != ER.first) {
+						result += "\n";
+						result += PagerEventsCodes[(size_t)ER.first];
+						result += "\n\t";
+						prevEvent = ER.first;
+					}
+					std::string num = std::to_string(eventReasons[(size_t)ER.first][(size_t)ER.second]);
+					result += PagerEventReasonsCodes[(size_t)ER.second];
+					result.append(16 - PagerEventReasonsCodes[(size_t)ER.second].length(), ' ');
+					result.append(8 - num.length(), ' ');
+					result += num;
+					result.append(13, ' ');
+				}
 			}
 			return result;
 		}
 		void reportTrace(TraceEvent* t, int h) {
-			static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
-				{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
-				{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
-				{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
-				{ PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear },
-				{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
-				{ PagerEvents::pagerCacheHit, PagerEventReasons::pointRead },
-				{ PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead },
-				{ PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear },
-				{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
-				{ PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead },
-				{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead },
-				{ PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear },
-				{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
-				{ PagerEvents::pagerWrite, PagerEventReasons::commit },
-				{ PagerEvents::pagerWrite, PagerEventReasons::lazyClear },
-				{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
-			};
-			static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
-				{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
-				{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
-				{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
-				{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
-				{ PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch },
-				{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
-				{ PagerEvents::pagerWrite, PagerEventReasons::commit },
-				{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
-				{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch },
-			};
 			if (h == 0) {
 				for (const auto& ER : L0PossibleEventReasonPairs) {
 					t->detail(
