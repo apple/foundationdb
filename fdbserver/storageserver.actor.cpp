@@ -1173,6 +1173,16 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 	}
 }
 
+// If the latest commit version that mutated the shard(s) being served by the specified storage
+// server is below the client specified read version then do a read at the latest commit version
+// of the storage server.
+Version getRealReadVersion(VersionVector& ssLatestCommitVersions, Tag& tag, Version specifiedReadVersion)
+{
+	Version realReadVersion = ssLatestcommitVersions.hasVersion(tag) ? ssLatestCommitVersions.getVersion(tag) : readVersion;
+	ASSERT(readlReadVersion <= specifiedReadVersion);
+	return realReadVersion;
+}
+
 Future<Version> waitForVersion(StorageServer* data, Version version, SpanID spanContext) {
 	if (version == latestVersion) {
 		version = std::max(Version(1), data->version.get());
@@ -1237,9 +1247,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		state Optional<Value> v;
 		// If the client specified the latest commit version (that mutated the shard(s) being served
 		// by this storage server) then return the value that corresponds to that version.
-		Version readVersion = req.ssLatestCommitVersions.hasVersion(data->tag)
-		                          ? req.ssLatestCommitVersions.getVersion(data->tag)
-		                          : req.version;
+		Version readVersion = getRealReadVersion(req.ssLatestCommitVersions, data->tag, req.version);
 		state Version version = wait(waitForVersion(data, readVersion, req.spanContext));
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
@@ -1939,9 +1947,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	try {
 		if (req.debugID.present())
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
-		Version readVersion = req.ssLatestCommitVersions.hasVersion(data->tag)
-		                          ? req.ssLatestCommitVersions.getVersion(data->tag)
-		                          : req.version;
+		Version readVersion = getRealReadVersion(req.ssLatestCommitVersions, data->tag, req.version);
 		state Version version = wait(waitForVersion(data, readVersion, span.context));
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -2108,9 +2114,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		if (req.debugID.present())
 			g_traceBatch.addEvent(
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.Before");
-		Version readVersion = req.ssLatestCommitVersions.hasVersion(data->tag)
-		                          ? req.ssLatestCommitVersions.getVersion(data->tag)
-		                          : req.version;
+		Version readVersion = getRealReadVersion(req.ssLatestCommitVersions, data->tag, req.version);
 		state Version version = wait(waitForVersion(data, readVersion, span.context));
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -2280,9 +2284,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	wait(data->getQueryDelay());
 
 	try {
-		Version readVersion = req.ssLatestCommitVersions.hasVersion(data->tag)
-		                          ? req.ssLatestCommitVersions.getVersion(data->tag)
-		                          : req.version;
+		Version readVersion = getRealReadVersion(req.ssLatestCommitVersions, data->tag, req.version);
 		state Version version = wait(waitForVersion(data, readVersion, req.spanContext));
 
 		state uint64_t changeCounter = data->shardChangeCounter;

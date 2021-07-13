@@ -330,6 +330,9 @@ public:
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 
 	// map from ssid -> ss tag
+	// @note this map allows the client to identify the latest commit versions
+	// of storage servers (note that "ssVersionVectorCache" identifies storage
+	// servers by their tags).
 	std::unordered_map<UID, Tag> ssidTagMapping;
 
 	UID dbId;

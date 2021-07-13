@@ -296,6 +296,9 @@ struct GetKeyServerLocationsReply {
 
 	// maps storage server interfaces (captured in "results") to the tags of
 	// their corresponding storage servers
+	// @note this map allows the client to identify the latest commit versions
+	// of storage servers (the version vector, which captures the latest commit
+	// versions of storage servers, identifies storage servers by their tags).
 	std::vector<std::pair<UID, Tag>> resultsTagMapping;
 
 	template <class Ar>
