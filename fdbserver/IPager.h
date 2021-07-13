@@ -238,7 +238,7 @@ public:
 	                                              LogicalPageID pageID,
 	                                              bool cacheable = true,
 	                                              bool noHit = false) = 0;
-	virtual Future<Reference<ArenaPage>> readExtent(PagerEventReasons r, unsigned int l, LogicalPageID pageID) = 0;
+	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 
 	// Temporary methods for testing
