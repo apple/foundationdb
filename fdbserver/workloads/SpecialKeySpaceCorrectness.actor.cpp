@@ -940,10 +940,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// test change coordinators and cluster description
 		// we randomly pick one process(not coordinator) and add it, in this case, it should always succeed
 		{
-			// choose a new description if configuration allows transactions across differently named clusters
-			state std::string new_cluster_description = SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT
-			                                                ? deterministicRandom()->randomAlphaNumeric(8)
-			                                                : cs.clusterKeyName().toString();
+			state std::string new_cluster_description;
 			state std::string new_coordinator_process;
 			state std::vector<std::string> old_coordinators_processes;
 			state bool possible_to_add_coordinator;
@@ -952,6 +949,14 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			        .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"));
 			loop {
 				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					Optional<Value> ccStrValue = wait(tx->get(coordinatorsKey));
+					ASSERT(ccStrValue.present()); // Otherwise, database is in a bad state
+					ClusterConnectionString ccStr(ccStrValue.get().toString());
+					// choose a new description if configuration allows transactions across differently named clusters
+					new_cluster_description = SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT
+			                                                ? deterministicRandom()->randomAlphaNumeric(8)
+			                                                : ccStr.clusterKeyName().toString();
 					// get current coordinators
 					Optional<Value> processes_key =
 					    wait(tx->get(LiteralStringRef("processes")

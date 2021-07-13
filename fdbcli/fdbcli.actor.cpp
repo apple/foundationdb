@@ -587,15 +587,6 @@ void initHelp() {
 	helpMap["writemode"] = CommandHelp("writemode <on|off>",
 	                                   "enables or disables sets and clears",
 	                                   "Setting or clearing keys from the CLI is not recommended.");
-	helpMap["lock"] = CommandHelp(
-	    "lock",
-	    "lock the database with a randomly generated lockUID",
-	    "Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
-	helpMap["unlock"] =
-	    CommandHelp("unlock <UID>",
-	                "unlock the database with the provided lockUID",
-	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
-	                "user will be asked to enter a passphrase to confirm their intent.");
 }
 
 void printVersion() {
@@ -2262,15 +2253,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "lock")) {
-					if (tokens.size() != 1) {
-						printUsage(tokens[0]);
+					bool _result = wait(lockCommandActor(db, tokens));
+					if (!_result)
 						is_error = true;
-					} else {
-						state UID lockUID = deterministicRandom()->randomUniqueID();
-						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
-						wait(makeInterruptable(lockDatabase(localDb, lockUID)));
-						printf("Database locked.\n");
-					}
 					continue;
 				}
 
@@ -2292,7 +2277,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
 							try {
-								wait(makeInterruptable(unlockDatabase(localDb, unlockUID)));
+								wait(makeInterruptable(unlockDatabaseActor(db, unlockUID)));
 								printf("Database unlocked.\n");
 							} catch (Error& e) {
 								if (e.code() == error_code_database_locked) {
