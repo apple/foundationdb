@@ -1366,7 +1366,7 @@ struct RedwoodMetrics {
 			}
 		}
 	};
-	// Page levle events
+	// Metrics by level
 	struct Level {
 		struct Counters {
 			unsigned int pageRead;
