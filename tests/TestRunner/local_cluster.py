@@ -98,7 +98,7 @@ logdir = {logdir}
                     # By default, the cluster only has one process
                     for index, _ in enumerate(range(process_number)):
                         f.write('[fdbserver.{server_port}]\n'.format(server_port=self.port))
-                        self.port = get_free_port() if port is None else port + index
+                        self.port = get_free_port() if port is None else str(int(port) + index)
 
     def __enter__(self):
         assert not self.running, "Can't start a server that is already running"

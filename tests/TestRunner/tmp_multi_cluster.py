@@ -54,7 +54,7 @@ if __name__ == '__main__':
 	clusters = []
 	for c in range(1,num_clusters+1):
 		# now start the cluster up
-		local_c = TempCluster(args.build_dir, 1, port="{}501".format(c))
+		local_c = TempCluster(args.build_dir, port="{}501".format(c))
 
 		local_c.__enter__()
 		clusters.append(local_c) 
