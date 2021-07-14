@@ -2202,7 +2202,7 @@ public:
 
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
-	Future<Void> writePhysicalPage(VectorRef<PhysicalPageID> pageIDs, Reference<ArenaPage> page, bool header = false) {
+	Future<Void> writePhysicalPage(Standalone<VectorRef<PhysicalPageID>> pageIDs, Reference<ArenaPage> page, bool header = false) {
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysical"),
@@ -2248,10 +2248,12 @@ public:
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
-		return writePhysicalPage(VectorRef<LogicalPageID>(&pageID, 1), page, true);
+		Standalone<VectorRef<PhysicalPageID>> pageIDs;
+		pageIDs.push_back(pageIDs.arena(), pageID);
+		return writePhysicalPage(pageIDs, page, true);
 	}
 
-	void updatePage(VectorRef<LogicalPageID> pageIDs, Reference<ArenaPage> data) override {
+	void updatePage(Standalone<VectorRef<LogicalPageID>> pageIDs, Reference<ArenaPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), true, true);
@@ -2416,7 +2418,7 @@ public:
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPages(DWALPager* self,
-	                                                           VectorRef<PhysicalPageID> pageIDs,
+	                                                           Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                                                           bool header = false) {
 		ASSERT(!self->memoryOnly);
 		++g_redwoodMetrics.pagerDiskRead;
@@ -2426,7 +2428,7 @@ public:
 		}
 
 		state Reference<ArenaPage> page =
-		    header ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock * pageIDs.size(), smallestPhysicalBlock * pageIDs.size()))
+		    (pageIDs.size()!=1) ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock * pageIDs.size(), smallestPhysicalBlock * pageIDs.size()))
 		           : self->newPageBuffer();
 		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p\n",
 		             self->filename.c_str(),
@@ -2436,9 +2438,10 @@ public:
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
 		state size_t i =0;
+
 		for(; i<pageIDs.size(); i++){
 			int readBytes = wait(self->pageFile->read(page->mutate() + i*blockSize, blockSize, (int64_t)pageIDs[i] * blockSize));
-				debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
+			debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
 		         self->filename.c_str(),
 		         toString(pageIDs[i]).c_str(),
 		         page->begin() + i*blockSize,
@@ -2453,7 +2456,8 @@ public:
 				TraceEvent(SevError, "RedwoodChecksumFailed")
 				    .detail("Filename", self->filename.c_str())
 				    .detail("PageID", pageIDs.front())
-				    .detail("PageSize", self->physicalPageSize)
+					.detail("NumOfPID", pageIDs.size())
+				    .detail("PageSize", self->physicalPageSize * pageIDs.size())
 				    .detail("Offset", pageIDs.front() * self->physicalPageSize)
 				    .detail("CalculatedChecksum", page->calculateChecksum(pageIDs.front()))
 				    .detail("ChecksumInPage", page->getChecksum())
@@ -2466,7 +2470,9 @@ public:
 	}
 
 	static Future<Reference<ArenaPage>> readHeaderPage(DWALPager* self, PhysicalPageID pageID) {
-		return readPhysicalPages(self, VectorRef<LogicalPageID>(&pageID, 1), true);
+		Standalone<VectorRef<LogicalPageID>> pageIDVec;
+		pageIDVec.push_back(pageIDVec.arena(), pageID);
+		return readPhysicalPages(self, pageIDVec, true);
 	}
 
 	bool tryEvictPage(LogicalPageID logicalID, Version v) {
@@ -2476,7 +2482,7 @@ public:
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
-	Future<Reference<ArenaPage>> readPage( VectorRef<PhysicalPageID> pageIDs, bool cacheable, bool noHit = false) override {
+	Future<Reference<ArenaPage>> readPage(Standalone<VectorRef<PhysicalPageID>> pageIDs, bool cacheable, bool noHit = false) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		if (!cacheable) {
@@ -2547,7 +2553,7 @@ public:
 	}
 
 	Future<Reference<ArenaPage>> readPageAtVersion(VectorRef<LogicalPageID> logicalIDs, Version v, bool cacheable, bool noHit) {
-		VectorRef<PhysicalPageID> physicalIDs = getPhysicalPageIDs(logicalIDs, v);
+		Standalone<VectorRef<PhysicalPageID>> physicalIDs = getPhysicalPageIDs(logicalIDs, v);
 		return readPage(physicalIDs, cacheable, noHit);
 	}
 
@@ -2776,10 +2782,14 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data = wait(self->readPage(VectorRef<LogicalPageID>(&p.newPageID,1), false, true));
+			Standalone<VectorRef<LogicalPageID>> pageIDVec;
+			pageIDVec.push_back(pageIDVec.arena(), p.newPageID);
+			Reference<ArenaPage> data = wait(self->readPage(pageIDVec, false, true));
 
 			// Write the data to the original page so it can be read using its original pageID
-			self->updatePage(VectorRef<LogicalPageID>(&p.originalPageID,1), data);
+			Standalone<VectorRef<LogicalPageID>> pageIDVec;
+			pageIDVec.push_back(pageIDVec.arena(), p.originalPageID);
+			self->updatePage(pageIDVec, data);
 			++g_redwoodMetrics.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
 			++g_redwoodMetrics.pagerRemapSkip;
@@ -3889,7 +3899,9 @@ struct BTreePage {
 		return (uint8_t*)t - (uint8_t*)this + t->size();
 	}
 
-	bool isLeaf() const { return height == 1; }
+	bool isLeaf() const { 
+		return height == 1; 
+	}
 
 	BinaryTree* tree() { return (BinaryTree*)(this + 1); }
 
@@ -5045,6 +5057,7 @@ private:
 			// TODO:  Cache reconstituted super pages somehow, perhaps with help from the Pager.
 			page = ArenaPage::concatPages(pages);
 		}*/
+		
 		Reference<const ArenaPage> p = wait(snapshot->getPhysicalPage(id, cacheable, false));
 		page = std::move(p);
 
@@ -5472,7 +5485,6 @@ private:
 			}
 			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
-
 		state Reference<const ArenaPage> page = wait(readPage(snapshot, rootID, false, false));
 		state Version writeVersion = self->getLastCommittedVersion() + 1;
 
@@ -6553,8 +6565,8 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID)
-	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS),
-	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS) {
+	    //,prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;

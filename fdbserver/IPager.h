@@ -165,9 +165,11 @@ public:
 	// Replace the contents of a page with new data across *all* versions.
 	// Existing holders of a page reference for pageID, read from any version,
 	// may see the effects of this write.
-	virtual void updatePage(VectorRef<LogicalPageID> pageIDs, Reference<ArenaPage> data) = 0;
+	virtual void updatePage(Standalone<VectorRef<LogicalPageID>> pageIDs, Reference<ArenaPage> data) = 0;
 	void updatePage(LogicalPageID pageID, Reference<ArenaPage> data){
-		updatePage(VectorRef<LogicalPageID>(&pageID, 1), data);
+		Standalone<VectorRef<LogicalPageID>> pageIDVec;
+		pageIDVec.push_back(pageIDVec.arena(), pageID);
+		updatePage(pageIDVec, data);
 	}
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
@@ -190,9 +192,11 @@ public:
 	// Cacheable indicates that the page should be added to the page cache (if applicable?) as a result of this read.
 	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
 	// considered likely to be needed soon.
-	virtual Future<Reference<ArenaPage>> readPage(VectorRef<PhysicalPageID> pageIDs, bool cacheable = true, bool noHit = false) = 0;
+	virtual Future<Reference<ArenaPage>> readPage(Standalone<VectorRef<PhysicalPageID>> pageIDs, bool cacheable = true, bool noHit = false) = 0;
 	Future<Reference<ArenaPage>> readPage(PhysicalPageID pageID, bool cacheable = true, bool noHit = false){
-		return readPage(VectorRef<LogicalPageID>(&pageID, 1),cacheable, noHit);
+		Standalone<VectorRef<LogicalPageID>> pageIDVec;
+		pageIDVec.push_back(pageIDVec.arena(), pageID);
+		return readPage(pageIDVec,cacheable, noHit);
 	}
 
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
