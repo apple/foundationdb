@@ -139,7 +139,7 @@ public:
 
 	~PriorityMultiLock() { prioritylock_printf("destruct"); }
 
-	Future<Lock> lock(int priority) {
+	Future<Lock> lock(int priority = 0) {
 		prioritylock_printf("lock begin %s\n", toString().c_str());
 
 		// This shortcut may enable a waiter to jump the line when the releaser loop yields
@@ -358,6 +358,10 @@ template <typename F, typename S>
 std::string toString(const std::pair<F, S>& o) {
 	return format("{%s, %s}", toString(o.first).c_str(), toString(o.second).c_str());
 }
+
+static constexpr int ioMinPriority = 0;
+static constexpr int ioLeafPriority = 1;
+static constexpr int ioMaxPriority = 2;
 
 // A FIFO queue of T stored as a linked list of pages.
 // Main operations are pop(), pushBack(), pushFront(), and flush().
@@ -619,7 +623,7 @@ public:
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
-			nextPageReader = queue->pager->readPage(nextPageID, 0, true, false);
+			nextPageReader = queue->pager->readPage(nextPageID, ioMaxPriority, true, false);
 		}
 
 		Future<Void> loadExtent() {
@@ -2339,44 +2343,53 @@ public:
 
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
-	Future<Void> writePhysicalPage(PhysicalPageID pageID, Reference<ArenaPage> page, bool header = false) {
+	ACTOR static Future<Void> writePhysicalPage_impl(DWALPager* self,
+	                                                 PhysicalPageID pageID,
+	                                                 Reference<ArenaPage> page,
+	                                                 bool header = false) {
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
-		             filename.c_str(),
+		             self->filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysical"),
 		             toString(pageID).c_str(),
 		             page->begin());
 
-		++g_redwoodMetrics.pagerDiskWrite;
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		page->updateChecksum(pageID);
 		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
-		             filename.c_str(),
+		             self->filename.c_str(),
 		             toString(pageID).c_str(),
 		             page->calculateChecksum(pageID),
 		             page->getChecksum());
 
-		if (memoryOnly) {
+		if (self->memoryOnly) {
 			return Void();
 		}
 
+		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(ioMinPriority));
+		++g_redwoodMetrics.pagerDiskWrite;
+
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
-		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
-		Future<Void> f =
-		    holdWhile(page, map(pageFile->write(page->begin(), blockSize, (int64_t)pageID * blockSize), [=](Void) {
-			              debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
-			                           filename.c_str(),
-			                           (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
-			                           toString(pageID).c_str(),
-			                           page->begin(),
-			                           (pageID * blockSize));
-			              return Void();
-		              }));
+		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
+		wait(self->pageFile->write(page->begin(), blockSize, (int64_t)pageID * blockSize));
+
+		debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
+		             self->filename.c_str(),
+		             (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
+		             toString(pageID).c_str(),
+		             page->begin(),
+		             (pageID * blockSize));
+
+		return Void();
+	}
+
+	Future<Void> writePhysicalPage(PhysicalPageID pageID, Reference<ArenaPage> page, bool header = false) {
+		Future<Void> f = writePhysicalPage_impl(this, pageID, page, header);
 		operations.add(f);
 		return f;
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
-		return writePhysicalPage(pageID, page, true);
+		return writePhysicalPage_impl(this, pageID, page, true);
 	}
 
 	void updatePage(LogicalPageID pageID, Reference<ArenaPage> data) override {
@@ -2548,9 +2561,6 @@ public:
 	                                                           int priority,
 	                                                           bool header) {
 		ASSERT(!self->memoryOnly);
-		++g_redwoodMetrics.pagerDiskRead;
-
-		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
 
 		// if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
 		// 	wait(delay(0, TaskPriority::DiskRead));
@@ -2564,8 +2574,11 @@ public:
 		             toString(pageID).c_str(),
 		             page->begin());
 
-		int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
+		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
+		++g_redwoodMetrics.pagerDiskRead;
+
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
+		int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		int readBytes = wait(self->pageFile->read(page->mutate(), blockSize, (int64_t)pageID * blockSize));
 		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
@@ -2689,8 +2702,6 @@ public:
 		wait(self->concurrentExtentReads->take());
 
 		ASSERT(!self->memoryOnly);
-		++g_redwoodMetrics.pagerDiskRead;
-
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
 			wait(delay(0, TaskPriority::DiskRead));
 		}
@@ -2725,6 +2736,7 @@ public:
 		for (i = 0; i < parallelReads; i++) {
 			currentOffset = i * physicalReadSize;
 			debug_printf("DWALPager(%s) current offset %d\n", self->filename.c_str(), currentOffset);
+			++g_redwoodMetrics.pagerDiskRead;
 			reads.push_back(
 			    self->pageFile->read(extent->mutate() + currentOffset, physicalReadSize, startOffset + currentOffset));
 		}
@@ -2737,6 +2749,7 @@ public:
 			             i,
 			             currentOffset,
 			             lastReadSize);
+			++g_redwoodMetrics.pagerDiskRead;
 			reads.push_back(
 			    self->pageFile->read(extent->mutate() + currentOffset, lastReadSize, startOffset + currentOffset));
 		}
@@ -2903,7 +2916,7 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data = wait(self->readPage(p.newPageID, 0, false, true));
+			Reference<ArenaPage> data = wait(self->readPage(p.newPageID, ioLeafPriority, false, true));
 
 			// Write the data to the original page so it can be read using its original pageID
 			self->updatePage(p.originalPageID, data);
@@ -3306,9 +3319,6 @@ private:
 	// Extents are multi-page blocks used by the FIFO queues
 	int physicalExtentSize;
 	int pagesPerExtent;
-
-public:
-	static constexpr int ioMaxPriority = 2;
 
 private:
 	PriorityMultiLock ioLock;
@@ -4326,7 +4336,8 @@ public:
 					break;
 				}
 				// Start reading the page, without caching
-				entries.push_back(std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, 1, true, false)));
+				entries.push_back(
+				    std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, ioLeafPriority, true, false)));
 
 				--toPop;
 			}
@@ -6472,7 +6483,7 @@ public:
 
 		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
-			return map(readPage(pager, link.get().getChildPage(), DWALPager::ioMaxPriority, false, true),
+			return map(readPage(pager, link.get().getChildPage(), ioMaxPriority, false, true),
 			           [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
 				           path.push_back({ p, getCursor(p, link), link.get().getChildPage() });
@@ -6486,7 +6497,7 @@ public:
 		Future<Void> pushPage(BTreePageIDRef id) {
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
 
-			return map(readPage(pager, id, DWALPager::ioMaxPriority, false, true), [=](Reference<const ArenaPage> p) {
+			return map(readPage(pager, id, ioMaxPriority, false, true), [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
 				path.push_back({ p, getCursor(p, dbBegin, dbEnd), id });
 #else
@@ -6609,7 +6620,7 @@ public:
 				// Prefetch the sibling if the link is not null
 				if (c.get().value.present()) {
 					BTreePageIDRef childPage = c.get().getChildPage();
-					preLoadPage(pager.getPtr(), childPage, 0);
+					preLoadPage(pager.getPtr(), childPage, ioLeafPriority);
 					recordsRead += estRecordsPerPage;
 					// Use sibling node capacity as an estimate of bytes read.
 					bytesRead += childPage.size() * this->btree->m_blockSize;
@@ -6809,7 +6820,7 @@ public:
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
 		ASSERT(!self->m_error.isSet());
-		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock(0));
+		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
 		++g_redwoodMetrics.opGetRange;
 
 		state RangeResult result;
@@ -6930,7 +6941,7 @@ public:
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
-		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock(0));
+		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
 		++g_redwoodMetrics.opGet;
 
 		wait(cur.seekGTE(key));
@@ -9005,7 +9016,7 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 	pager->updatePage(id, p);
 	pager->setMetaKey(LiteralStringRef("asdfasdf"));
 	wait(pager->commit());
-	Reference<ArenaPage> p2 = wait(pager->readPage(id, 0, true, false));
+	Reference<ArenaPage> p2 = wait(pager->readPage(id, ioMinPriority, true, false));
 	printf("%s\n", StringRef(p2->begin(), p2->size()).toHexString().c_str());
 
 	// TODO: Verify reads, do more writes and reads to make this a real pager validator
