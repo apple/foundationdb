@@ -144,7 +144,7 @@ public:
 class IPager2 : public IClosable {
 public:
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.
-	virtual Reference<ArenaPage> newPageBuffer() = 0;
+	virtual Reference<ArenaPage> newPageBuffer(size_t size = 1) = 0;
 
 	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
 	// For a given pager instance, separate calls to this function must return the same value.
@@ -167,9 +167,7 @@ public:
 	// may see the effects of this write.
 	virtual void updatePage(Standalone<VectorRef<LogicalPageID>> pageIDs, Reference<ArenaPage> data) = 0;
 	void updatePage(LogicalPageID pageID, Reference<ArenaPage> data){
-		Standalone<VectorRef<LogicalPageID>> pageIDVec;
-		pageIDVec.push_back(pageIDVec.arena(), pageID);
-		updatePage(pageIDVec, data);
+		updatePage(VectorRef<LogicalPageID>(&pageID, 1), data);
 	}
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
@@ -194,9 +192,7 @@ public:
 	// considered likely to be needed soon.
 	virtual Future<Reference<ArenaPage>> readPage(Standalone<VectorRef<PhysicalPageID>> pageIDs, bool cacheable = true, bool noHit = false) = 0;
 	Future<Reference<ArenaPage>> readPage(PhysicalPageID pageID, bool cacheable = true, bool noHit = false){
-		Standalone<VectorRef<LogicalPageID>> pageIDVec;
-		pageIDVec.push_back(pageIDVec.arena(), pageID);
-		return readPage(pageIDVec,cacheable, noHit);
+		return readPage(VectorRef<LogicalPageID>(&pageID, 1),cacheable, noHit);
 	}
 
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
