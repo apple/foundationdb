@@ -24,6 +24,7 @@
 #elif !defined(FDBSERVER_VERSION_INDEXER_INTERFACE_ACTOR_H)
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/FDBTypes.h"
 
 struct VersionIndexerInterface {
 	constexpr static FileIdentifier file_identifier = 6865162;

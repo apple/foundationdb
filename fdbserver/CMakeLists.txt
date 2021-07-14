@@ -127,6 +127,7 @@ set(FDBSERVER_SRCS
   VersionedBTree.actor.cpp
   VersionIndexer.actor.cpp
   VersionIndexerInterface.actor.h
+  VersionIndexerInterface.actor.cpp
   VFSAsync.h
   VFSAsync.cpp
   WaitFailure.actor.cpp
