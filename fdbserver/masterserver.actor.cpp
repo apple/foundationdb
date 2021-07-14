@@ -183,7 +183,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    recoveryTransactionVersion; // The first version in this epoch
 	double lastCommitTime;
 
-	Version liveCommittedVersion; // The largest live committed version reported by commit proxies.
+	NotifiedVersion liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
 	Version minKnownCommittedVersion;
@@ -1223,6 +1223,31 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
+void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
+	if (req.version > self->liveCommittedVersion.get()) {
+		self->databaseLocked = req.locked;
+		self->proxyMetadataVersion = req.metadataVersion;
+		// Note the set call switches context to any waiters on liveCommittedVersion before continuing.
+		self->liveCommittedVersion.set(req.version);
+	}
+	++self->reportLiveCommittedVersionRequests;
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
+		// NB: this if-condition is not needed after wait-for-prev is ported to this branch
+		if (req.version > self->ssVersionVector.maxVersion) {
+			// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
+			self->ssVersionVector.setVersions(req.writtenTags.get(), req.version);
+		}
+	}
+}
+
+ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
+	updateLiveCommittedVersion(self, req);
+	req.reply.send(Void());
+	return Void();
+}
+
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
@@ -1232,12 +1257,12 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 					                      req.debugID.get().first(),
 					                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
 
-				if (self->liveCommittedVersion == invalidVersion) {
-					self->liveCommittedVersion = self->recoveryTransactionVersion;
+				if (self->liveCommittedVersion.get() == invalidVersion) {
+					self->liveCommittedVersion.set(self->recoveryTransactionVersion);
 				}
 				++self->getLiveCommittedVersionRequests;
 				GetRawCommittedVersionReply reply;
-				reply.version = self->liveCommittedVersion;
+				reply.version = self->liveCommittedVersion.get();
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
@@ -1246,21 +1271,14 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(ReportRawCommittedVersionRequest req =
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
-					// NB: this if-condition is not needed after wait-for-prev is ported to this branch
-					if (req.version > self->ssVersionVector.maxVersion) {
-						// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-						self->ssVersionVector.setVersions(req.writtenTags.get(), req.version);
-					}
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
+				    (self->liveCommittedVersion.get() != invalidVersion) &&
+				    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
+					self->addActor.send(waitForPrev(self, req));
+				} else {
+					updateLiveCommittedVersion(self, req);
+					req.reply.send(Void());
 				}
-				if (req.version > self->liveCommittedVersion) {
-					self->liveCommittedVersion = req.version;
-					self->databaseLocked = req.locked;
-					self->proxyMetadataVersion = req.metadataVersion;
-				}
-				++self->reportLiveCommittedVersionRequests;
-				req.reply.send(Void());
 			}
 			when(GetTLogPrevCommitVersionRequest req =
 			         waitNext(self->myInterface.getTLogPrevCommitVersion.getFuture())) {
