@@ -183,6 +183,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    recoveryTransactionVersion; // The first version in this epoch
 	double lastCommitTime;
 
+	NotifiedVersion prevTLogVersion; // Order of transactions to tlogs
+
 	NotifiedVersion liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
@@ -268,6 +270,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	           Standalone<StringRef> const& dbId,
 	           PromiseStream<Future<Void>> const& addActor,
 	           bool forceRecovery)
+<<<<<<< HEAD
 
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    lastCommitTime(0), liveCommittedVersion(invalidVersion), databaseLocked(false),
@@ -278,6 +281,16 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
 	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
 	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+=======
+	  : dbgid(myInterface.id()), myInterface(myInterface), dbInfo(dbInfo), cstate(coordinators, addActor, dbgid),
+	    coordinators(coordinators), clusterController(clusterController), dbId(dbId), forceRecovery(forceRecovery),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), neverCreated(false),
+	    lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), prevTLogVersion(invalidVersion), databaseLocked(false),
+	    minKnownCommittedVersion(invalidVersion), recoveryTransactionVersion(invalidVersion), lastCommitTime(0),
+	    registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9),
+	    addActor(addActor), hasConfiguration(false), recruitmentStalled(makeReference<AsyncVar<bool>>(false)),
+	    cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+>>>>>>> wait for prev per tlog
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
@@ -1248,6 +1261,24 @@ ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVer
 	return Void();
 }
 
+ACTOR Future<Void> waitForTLogPrev(Reference<MasterData> self, GetTLogPrevCommitVersionRequest req) {
+	// TraceEvent("WaitForTLogPrev").detail("Prev",req.prev).detail("CommitVersion",req.commitVersion).detail("PrevTLogVersion",self->prevTLogVersion.get());
+	if (req.prev) {
+		wait(self->prevTLogVersion.whenAtLeast(req.prev));
+	}
+
+	GetTLogPrevCommitVersionReply reply;
+	for (uint16_t tLog : req.writtenTLogs) {
+		reply.tpcvMap[tLog] = self->tpcvVector[tLog];
+		self->tpcvVector[tLog] = req.commitVersion;
+	}
+	if (req.commitVersion > self->prevTLogVersion.get()) {
+		self->prevTLogVersion.set(req.commitVersion);
+	}
+	req.reply.send(reply);
+	return Void();
+}
+
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
@@ -1282,14 +1313,9 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(GetTLogPrevCommitVersionRequest req =
 			         waitNext(self->myInterface.getTLogPrevCommitVersion.getFuture())) {
-				GetTLogPrevCommitVersionReply reply;
-				for (uint16_t tLog : req.writtenTLogs) {
-					// TODO the reply needs to be ordered by commit version.
-					reply.tpcvMap[tLog] = self->tpcvVector[tLog]; // TODO (placeholder)
-				}
-				req.reply.send(reply);
+				self->addActor.send(waitForTLogPrev(self, req));
 			}
-		}
+                }
 	}
 }
 
@@ -1929,7 +1955,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	TraceEvent("MasterRecoveryCommit", self->dbgid).log();
 	// resize the previous commit version vector to the number of tlogs.
 	int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
-	self->tpcvVector.resize(1 + numLogs, invalidVersion);
+	self->tpcvVector.resize(1 + numLogs, 0);
 
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
@@ -2071,7 +2097,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 				}
 				// resize the previous commit version vector to the number of tlogs.
 				int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
-				self->tpcvVector.resize(1 + numLogs, invalidVersion);
+				self->tpcvVector.resize(1 + numLogs, 0);
 			}
 			when(BackupWorkerDoneRequest req = waitNext(mi.notifyBackupWorkerDone.getFuture())) {
 				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {
