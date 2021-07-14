@@ -256,7 +256,7 @@ public:
 	    m_concurrentUploads(bstore->knobs.concurrent_writes_per_file) {
 
 		// Add first part
-		m_parts.push_back(Reference<Part>(new Part(1, m_bstore->knobs.multipart_min_part_size)));
+		m_parts.push_back(makeReference<Part>(1, m_bstore->knobs.multipart_min_part_size));
 	}
 };
 

@@ -410,7 +410,7 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> connFile,
                                  LocalityData locality,
                                  std::string coordFolder) {
 	try {
-		Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST, true, locality);
+		Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST, IsInternal::TRUE, locality);
 		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
 	} catch (Error& e) {
 		TraceEvent("FastRestoreWorker").detail("Error", e.what());

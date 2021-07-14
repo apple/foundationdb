@@ -47,17 +47,17 @@ public:
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
-	Future<Optional<Value>> get(Key const& key, bool snapshot = false) override;
+	Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(KeySelector const& begin,
 	                                            KeySelector const& end,
 	                                            int limit,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
+	                                            Snapshot = Snapshot::FALSE,
+	                                            Reverse = Reverse::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
 	                                            KeySelector end,
 	                                            GetRangeLimits limits,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
+	                                            Snapshot = Snapshot::FALSE,
+	                                            Reverse = Reverse::FALSE) override;
 	Future<Void> commit() override;
 	Version getCommittedVersion() const override;
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;

@@ -56,17 +56,17 @@ KnobValue IKnobCollection::parseKnobValue(std::string const& knobName, std::stri
 	static std::unique_ptr<IKnobCollection> clientKnobCollection, serverKnobCollection, testKnobCollection;
 	if (type == Type::CLIENT) {
 		if (!clientKnobCollection) {
-			clientKnobCollection = create(type, Randomize::NO, IsSimulated::NO);
+			clientKnobCollection = create(type, Randomize::FALSE, IsSimulated::FALSE);
 		}
 		return clientKnobCollection->parseKnobValue(knobName, knobValue);
 	} else if (type == Type::SERVER) {
 		if (!serverKnobCollection) {
-			serverKnobCollection = create(type, Randomize::NO, IsSimulated::NO);
+			serverKnobCollection = create(type, Randomize::FALSE, IsSimulated::FALSE);
 		}
 		return serverKnobCollection->parseKnobValue(knobName, knobValue);
 	} else if (type == Type::TEST) {
 		if (!testKnobCollection) {
-			testKnobCollection = create(type, Randomize::NO, IsSimulated::NO);
+			testKnobCollection = create(type, Randomize::FALSE, IsSimulated::FALSE);
 		}
 		return testKnobCollection->parseKnobValue(knobName, knobValue);
 	}
@@ -74,7 +74,7 @@ KnobValue IKnobCollection::parseKnobValue(std::string const& knobName, std::stri
 }
 
 std::unique_ptr<IKnobCollection> IKnobCollection::globalKnobCollection =
-    IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
+    IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::FALSE, IsSimulated::FALSE);
 
 void IKnobCollection::setGlobalKnobCollection(Type type, Randomize randomize, IsSimulated isSimulated) {
 	globalKnobCollection = create(type, randomize, isSimulated);
