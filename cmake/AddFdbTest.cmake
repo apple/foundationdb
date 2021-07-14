@@ -396,7 +396,7 @@ endfunction()
 
 function(add_fdbclient_test)
   set(options DISABLED ENABLED)
-  set(oneValueArgs NAME)
+  set(oneValueArgs NAME PROCESS_NUMBER)
   set(multiValueArgs COMMAND)
   cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   if(OPEN_FOR_IDE)
@@ -412,11 +412,22 @@ function(add_fdbclient_test)
     message(FATAL_ERROR "COMMAND is a required argument for add_fdbclient_test")
   endif()
   message(STATUS "Adding Client test ${T_NAME}")
-  add_test(NAME "${T_NAME}"
+  if (T_PROCESS_NUMBER)
+    add_test(NAME "${T_NAME}"
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --process-number ${T_PROCESS_NUMBER}
+            --
+            ${T_COMMAND})
+  else()
+    message(STATUS "Use one process cluster for testing")
+    add_test(NAME "${T_NAME}"
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --
             ${T_COMMAND})
+  endif()
+  
   set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60) 
 endfunction()
 
