@@ -532,7 +532,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	++grvProxyData->stats.txnStartBatch;
 	state Future<GetRawCommittedVersionReply> replyFromMasterFuture;
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
-	    GetRawCommittedVersionRequest(span.context, debugID), TaskPriority::GetLiveCommittedVersionReply);
+	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
+	    TaskPriority::GetLiveCommittedVersionReply);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		wait(updateLastCommit(grvProxyData, debugID));
@@ -549,7 +550,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
-	grvProxyData->ssVersionVectorCache = repFromMaster.ssVersionVector;
+	grvProxyData->ssVersionVectorCache.applyDelta(repFromMaster.ssVersionVectorDelta);
 
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
@@ -562,7 +563,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	rep.processBusyTime += FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION *
 	                       (g_network->isSimulated() ? deterministicRandom()->random01()
 	                                                 : g_network->networkInfo.metrics.lastRunLoopBusyness);
-	rep.ssVersionVector = grvProxyData->ssVersionVectorCache;
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
@@ -582,6 +582,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 // Update GRV statistics according to the request's priority.
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
                                   std::vector<GetReadVersionRequest> requests,
+                                  GrvProxyData* grvProxyData,
                                   GrvProxyStats* stats,
                                   Version minKnownCommittedVersion,
                                   PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags,
@@ -613,6 +614,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 		reply.midShardSize = midShardSize;
 		reply.tagThrottleInfo.clear();
+		grvProxyData->ssVersionVectorCache.getDelta(request.maxVersion, reply.ssVersionVectorDelta);
 
 		if (!request.tags.empty()) {
 			auto& priorityThrottledTags = throttledTags[request.priority];
@@ -882,6 +884,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				                                                                       batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply,
 				                             start[i],
+				                             grvProxyData,
 				                             &grvProxyData->stats,
 				                             grvProxyData->minKnownCommittedVersion,
 				                             throttledTags,

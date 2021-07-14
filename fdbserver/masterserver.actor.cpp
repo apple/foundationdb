@@ -250,7 +250,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
 	// Captures the latest commit version targeted for each storage server in the cluster.
-	// @todo We need to ensure that the latest commit versions of storage servers stay 
+	// @todo We need to ensure that the latest commit versions of storage servers stay
 	// up-to-date in the presence of key range splits/merges.
 	VersionVector ssVersionVector;
 
@@ -1295,7 +1295,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-				reply.ssVersionVector = self->ssVersionVector;
+				self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req =

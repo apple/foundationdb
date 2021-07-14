@@ -199,7 +199,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
-	VersionVector ssVersionVector;
+	VersionVector ssVersionVectorDelta;
 
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
@@ -212,7 +212,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           metadataVersion,
 		           tagThrottleInfo,
 		           midShardSize,
-		           ssVersionVector);
+		           ssVersionVectorDelta);
 	}
 };
 
@@ -241,15 +241,18 @@ struct GetReadVersionRequest : TimedRequest {
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	GetReadVersionRequest() : transactionCount(1), flags(0) {}
+	Version maxVersion; // max version in the client's version vector cache
+
+	GetReadVersionRequest() : transactionCount(1), flags(0), maxVersion(invalidVersion) {}
 	GetReadVersionRequest(SpanID spanContext,
 	                      uint32_t transactionCount,
 	                      TransactionPriority priority,
+	                      Version maxVersion,
 	                      uint32_t flags = 0,
 	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
 	                      Optional<UID> debugID = Optional<UID>())
 	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
-	    debugID(debugID) {
+	    debugID(debugID), maxVersion(maxVersion) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
@@ -270,7 +273,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext);
+		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, maxVersion);
 
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
@@ -339,7 +342,7 @@ struct GetRawCommittedVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
-	VersionVector ssVersionVector;
+	VersionVector ssVersionVectorDelta;
 
 	GetRawCommittedVersionReply()
 	  : debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()),
@@ -347,7 +350,7 @@ struct GetRawCommittedVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion, ssVersionVector);
+		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion, ssVersionVectorDelta);
 	}
 };
 
@@ -356,14 +359,17 @@ struct GetRawCommittedVersionRequest {
 	SpanID spanContext;
 	Optional<UID> debugID;
 	ReplyPromise<GetRawCommittedVersionReply> reply;
+	Version maxVersion; // max version in the grv proxy's version vector cache
 
-	explicit GetRawCommittedVersionRequest(SpanID spanContext, Optional<UID> const& debugID = Optional<UID>())
-	  : spanContext(spanContext), debugID(debugID) {}
-	explicit GetRawCommittedVersionRequest() : spanContext(), debugID() {}
+	explicit GetRawCommittedVersionRequest(SpanID spanContext,
+	                                       Optional<UID> const& debugID = Optional<UID>(),
+	                                       Version maxVersion = invalidVersion)
+	  : spanContext(spanContext), debugID(debugID), maxVersion(maxVersion) {}
+	explicit GetRawCommittedVersionRequest() : spanContext(), debugID(), maxVersion(invalidVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, debugID, reply, spanContext);
+		serializer(ar, debugID, reply, spanContext, maxVersion);
 	}
 };
 
