@@ -11,7 +11,7 @@ from random import choice
 from pathlib import Path
 
 class TempCluster:
-    def __init__(self, build_dir: str, process_number: int):
+    def __init__(self, build_dir: str, process_number: int, port: str = None):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
@@ -23,7 +23,8 @@ class TempCluster:
                                     self.build_dir.joinpath('bin', 'fdbserver'),
                                     self.build_dir.joinpath('bin', 'fdbmonitor'),
                                     self.build_dir.joinpath('bin', 'fdbcli'),
-                                    process_number)
+                                    process_number,
+                                    port = port)
         self.log = self.cluster.log
         self.etc = self.cluster.etc
         self.data = self.cluster.data
@@ -36,6 +37,10 @@ class TempCluster:
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.cluster.__exit__(xc_type, exc_value, traceback)
+        shutil.rmtree(self.tmp_dir)
+
+    def close(self):
+        self.cluster.__exit__(None,None,None)
         shutil.rmtree(self.tmp_dir)
 
 

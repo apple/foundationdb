@@ -34,13 +34,13 @@ struct RestoreBackupWorkload final : TestWorkload {
 	Standalone<StringRef> backupDir;
 	Standalone<StringRef> tag;
 	double delayFor;
-	bool stopWhenDone;
+	StopWhenDone stopWhenDone{ false };
 
 	RestoreBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
 		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
 		delayFor = getOption(options, LiteralStringRef("delayFor"), 10.0);
-		stopWhenDone = getOption(options, LiteralStringRef("stopWhenDone"), false);
+		stopWhenDone.set(getOption(options, LiteralStringRef("stopWhenDone"), false));
 	}
 
 	static constexpr const char* DESCRIPTION = "RestoreBackup";
@@ -110,8 +110,13 @@ struct RestoreBackupWorkload final : TestWorkload {
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
-		wait(success(self->backupAgent.restore(
-		    cx, cx, self->tag, Key(self->backupContainer->getURL()), true, ::invalidVersion, true)));
+		wait(success(self->backupAgent.restore(cx,
+		                                       cx,
+		                                       self->tag,
+		                                       Key(self->backupContainer->getURL()),
+		                                       WaitForComplete::TRUE,
+		                                       ::invalidVersion,
+		                                       Verbose::TRUE)));
 		return Void();
 	}
 

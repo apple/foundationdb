@@ -836,7 +836,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 
 	for (auto i : id_pid) {
 		if (!loadedConf || ini.GetSectionSize(id_command[i.first]->ssection.c_str()) == -1) {
-			/* Server on this port no longer configured; deconfigure it and kill it if required */
+			/* Process no longer configured; deconfigure it and kill it if required */
 			log_msg(SevInfo, "Deconfigured %s\n", id_command[i.first]->ssection.c_str());
 
 			id_command[i.first]->deconfigured = true;
