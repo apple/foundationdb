@@ -332,22 +332,34 @@ def transaction(logger):
     output7 = run_fdbcli_command('get', 'key')
     assert output7 == "`key': not found"
 
+@enable_logging(logging.DEBUG)
+def coordinator(logger):
+    output1 = run_fdbcli_command('coordinators')
+    logger.debug(output1)
+    output2 = run_fdbcli_command('status', 'details')
+    logger.debug(output2)
 
 if __name__ == '__main__':
-    # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file>
-    assert len(sys.argv) == 3, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file>"
+    # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>
+    assert len(sys.argv) == 4, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <is_multi_process_cluster>"
     # shell command template
     command_template = [sys.argv[1], '-C', sys.argv[2], '--exec']
     # tests for fdbcli commands
     # assertions will fail if fdbcli does not work as expected
-    advanceversion()
-    cache_range()
-    consistencycheck()
-    datadistribution()
-    kill()
-    lockAndUnlock()
-    maintenance()
-    setclass()
-    suspend()
-    transaction()
+    process_number = int(sys.argv[3])
+    if process_number == 1:
+        advanceversion()
+        cache_range()
+        consistencycheck()
+        datadistribution()
+        kill()
+        lockAndUnlock()
+        maintenance()
+        setclass()
+        suspend()
+        transaction()
+    else:
+        assert process_number > 1, "Process number should be positive"
+
+
     
