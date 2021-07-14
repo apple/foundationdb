@@ -1916,7 +1916,8 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			req.reply.send(reply);
 			begin = reply.rep.end;
 			onlySpilled = reply.rep.onlySpilled;
-			// return Void();
+
+			wait(delay(.05, g_network->getCurrentTask()));
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {
 				req.reply.sendError(e);

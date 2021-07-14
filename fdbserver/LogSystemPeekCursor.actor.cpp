@@ -35,6 +35,7 @@ void tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
 	}
 	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(TLogPeekStreamRequest(
 	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max()));
+	TraceEvent(SevDebug, "StreamCreated");
 }
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
@@ -329,10 +330,15 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 					self->peekReplyStream.reset();
 					tryEstablishPeekStream(self);
 				}
-				when(TLogPeekStreamReply res = wait(self->peekReplyStream.present()
+				when(TLogPeekStreamReply res =
+				         wait(self->peekReplyStream.present()
 				                  ? brokenPromiseToNever(waitAndForward(self->peekReplyStream.get().getFuture()))
 				                  : Never())) {
 					updateCursorWithReply(self, res.rep);
+					TraceEvent("SPC_GetMoreB", self->randomID)
+					    .detail("Has", self->hasMessage())
+					    .detail("End", res.rep.end)
+					    .detail("Popped", res.rep.popped.present() ? res.rep.popped.get() : 0);
 					return Void();
 				}
 			}
@@ -389,12 +395,12 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 		if (usePeekStream && taskID == TaskPriority::TLogPeekReply) {
 			more = serverPeekStreamGetMore(this, taskID);
 		}
-//        if (parallelGetMore || onlySpilled || futureResults.size()) {
-//            more = serverPeekParallelGetMore(this, taskID);
-//        }
+		//        if (parallelGetMore || onlySpilled || futureResults.size()) {
+		//            more = serverPeekParallelGetMore(this, taskID);
+		//        }
 		else {
-            more = serverPeekGetMore(this, taskID);
-        }
+			more = serverPeekGetMore(this, taskID);
+		}
 	}
 	return more;
 }
@@ -405,6 +411,12 @@ ACTOR Future<Void> serverPeekOnFailed(ILogSystem::ServerPeekCursor* self) {
 			when(wait(self->interf->get().present()
 			              ? IFailureMonitor::failureMonitor().onStateEqual(
 			                    self->interf->get().interf().peekMessages.getEndpoint(), FailureStatus())
+			              : Never())) {
+				return Void();
+			}
+			when(wait(self->interf->get().present()
+			              ? IFailureMonitor::failureMonitor().onStateEqual(
+			                    self->interf->get().interf().peekStreamMessages.getEndpoint(), FailureStatus())
 			              : Never())) {
 				return Void();
 			}
@@ -422,7 +434,12 @@ bool ILogSystem::ServerPeekCursor::isActive() const {
 		return false;
 	if (isExhausted())
 		return false;
-	return IFailureMonitor::failureMonitor().getState(interf->get().interf().peekMessages.getEndpoint()).isAvailable();
+	return IFailureMonitor::failureMonitor()
+	           .getState(interf->get().interf().peekMessages.getEndpoint())
+	           .isAvailable() &&
+	       IFailureMonitor::failureMonitor()
+	           .getState(interf->get().interf().peekStreamMessages.getEndpoint())
+	           .isAvailable();
 }
 
 bool ILogSystem::ServerPeekCursor::isExhausted() const {
