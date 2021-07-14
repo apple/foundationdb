@@ -47,6 +47,9 @@ static const std::string PagerEventsCodes[] = { "Lookup", "Hit", "Miss", "Write"
 enum class PagerEventReasons { pointRead = 0, rangeRead, rangePrefetch, commit, lazyClear, metaData, MAXEVENTREASONS };
 static const std::string PagerEventReasonsCodes[] = { "Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta" };
 
+static const int nonBtreeLevel = 0;
+static const int rootLevel = 1;
+
 static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
@@ -65,7 +68,6 @@ static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[
 	{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
 	{ PagerEvents::pagerWrite, PagerEventReasons::lazyClear },
 };
-
 static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },

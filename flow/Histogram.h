@@ -59,29 +59,19 @@ HistogramRegistry& GetHistogramRegistry();
  */
 class Histogram final : public ReferenceCounted<Histogram> {
 public:
-	enum class Unit { microseconds, bytes, bytes_per_second, percentage, record_counter };
-
+	enum class Unit { microseconds = 0, bytes, bytes_per_second, percentage, record_counter, MAXHISTOGRAMUNIT };
+	static const char * const UnitToStringMapper[];
 private:
-	// static const std::unordered_map<Unit, std::string> UnitToStringMapper;
-	const std::unordered_map<Unit, std::string> UnitToStringMapper;
-
 	Histogram(std::string const& group,
 	          std::string const& op,
 	          Unit unit,
 	          HistogramRegistry& registry,
 	          uint32_t lower,
 	          uint32_t upper)
-	  : UnitToStringMapper({
-	        { Histogram::Unit::microseconds, "microseconds" },
-	        { Histogram::Unit::bytes, "bytes" },
-	        { Histogram::Unit::bytes_per_second, "bytes_per_second" },
-	        { Histogram::Unit::percentage, "percentage" },
-	        { Histogram::Unit::record_counter, "record_counter" },
-	    }),
-	    group(group), op(op), unit(unit), registry(registry), lowerBound(lower),
+	  : group(group), op(op), unit(unit), registry(registry), lowerBound(lower),
 	    upperBound(upper), ReferenceCounted<Histogram>() {
 
-		ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
+		ASSERT(unit < Unit::MAXHISTOGRAMUNIT);
 
 		ASSERT(upperBound >= lowerBound);
 

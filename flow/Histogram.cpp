@@ -96,6 +96,8 @@ void HistogramRegistry::logReport() {
 
 #pragma region Histogram
 
+const char * const Histogram::UnitToStringMapper[] = { "microseconds", "bytes", "bytes_per_second", "percentage", "record_counter" };
+
 void Histogram::writeToLog() {
 	bool active = false;
 	for (uint32_t i = 0; i < 32; i++) {
@@ -109,7 +111,7 @@ void Histogram::writeToLog() {
 	}
 
 	TraceEvent e(SevInfo, "Histogram");
-	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper.at(unit));
+	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper[(size_t)unit]);
 
 	for (uint32_t i = 0; i < 32; i++) {
 		uint64_t value = uint64_t(1) << (i + 1);
