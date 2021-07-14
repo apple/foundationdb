@@ -183,6 +183,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    recoveryTransactionVersion; // The first version in this epoch
 	double lastCommitTime;
 
+	NotifiedVersion prevTLogVersion; // Order of transactions to tlogs
+
 	NotifiedVersion liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
@@ -268,7 +270,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	           Standalone<StringRef> const& dbId,
 	           PromiseStream<Future<Void>> const& addActor,
 	           bool forceRecovery)
-
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    lastCommitTime(0), liveCommittedVersion(invalidVersion), databaseLocked(false),
 	    minKnownCommittedVersion(invalidVersion), hasConfiguration(false), coordinators(coordinators),
@@ -1248,6 +1249,24 @@ ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVer
 	return Void();
 }
 
+ACTOR Future<Void> waitForTLogPrev(Reference<MasterData> self, GetTLogPrevCommitVersionRequest req) {
+	// TraceEvent("WaitForTLogPrev").detail("Prev",req.prev).detail("CommitVersion",req.commitVersion).detail("PrevTLogVersion",self->prevTLogVersion.get());
+	if (req.prev) {
+		wait(self->prevTLogVersion.whenAtLeast(req.prev));
+	}
+
+	GetTLogPrevCommitVersionReply reply;
+	for (uint16_t tLog : req.writtenTLogs) {
+		reply.tpcvMap[tLog] = self->tpcvVector[tLog];
+		self->tpcvVector[tLog] = req.commitVersion;
+	}
+	if (req.commitVersion > self->prevTLogVersion.get()) {
+		self->prevTLogVersion.set(req.commitVersion);
+	}
+	req.reply.send(reply);
+	return Void();
+}
+
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
@@ -1282,14 +1301,9 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(GetTLogPrevCommitVersionRequest req =
 			         waitNext(self->myInterface.getTLogPrevCommitVersion.getFuture())) {
-				GetTLogPrevCommitVersionReply reply;
-				for (uint16_t tLog : req.writtenTLogs) {
-					// TODO the reply needs to be ordered by commit version.
-					reply.tpcvMap[tLog] = self->tpcvVector[tLog]; // TODO (placeholder)
-				}
-				req.reply.send(reply);
+				self->addActor.send(waitForTLogPrev(self, req));
 			}
-		}
+                }
 	}
 }
 
@@ -1929,7 +1943,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 
 	// resize the previous commit version vector to the number of tlogs.
 	int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
-	self->tpcvVector.resize(1 + numLogs, invalidVersion);
+	self->tpcvVector.resize(1 + numLogs, 0);
 
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
@@ -2071,7 +2085,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 				}
 				// resize the previous commit version vector to the number of tlogs.
 				int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
-				self->tpcvVector.resize(1 + numLogs, invalidVersion);
+				self->tpcvVector.resize(1 + numLogs, 0);
 			}
 			when(BackupWorkerDoneRequest req = waitNext(mi.notifyBackupWorkerDone.getFuture())) {
 				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {

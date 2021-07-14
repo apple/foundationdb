@@ -550,7 +550,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
 	                     SpanID const& spanContext,
-	                     Optional<UID> debugID) final {
+	                     Optional<UID> debugID,
+	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final {
 		// FIXME: Randomize request order as in LegacyLogSystem?
 		vector<Future<Void>> quorumResults;
 		vector<Future<TLogCommitReply>> allReplies;
@@ -565,6 +566,15 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 				}
 				vector<Future<Void>> tLogCommitResults;
 				for (int loc = 0; loc < it->logServers.size(); loc++) {
+					if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+						if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
+							prevVersion = tpcvMap.get()[location];
+						} else {
+							// Do not send empty commit to tLog if its not a destination of the transaction
+							location++;
+							continue;
+						}
+					}
 					Standalone<StringRef> msg = data.getMessages(location);
 					data.recordEmptyMessage(location, msg);
 					allReplies.push_back(recordPushMetrics(

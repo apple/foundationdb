@@ -480,6 +480,7 @@ struct CommitBatchContext {
 
 	double commitStartTime;
 
+	std::unordered_map<uint16_t, Version> tpcvMap; // obtained from sequencer
 	std::set<uint16_t> writtenTLogs; // the set of tlog locations written to in the mutation.
 	std::set<Tag> writtenTags; // the set of tags written to in the mutation.
 
@@ -879,8 +880,9 @@ ACTOR Future<Void> getTPCV(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	GetTLogPrevCommitVersionReply rep =
 	    wait(brokenPromiseToNever(pProxyCommitData->master.getTLogPrevCommitVersion.getReply(
-	        GetTLogPrevCommitVersionRequest(self->writtenTLogs))));
+	        GetTLogPrevCommitVersionRequest(self->writtenTLogs, self->commitVersion, self->prevVersion))));
 	// TraceEvent("GetTLogPrevCommitVersionRequest");
+	self->tpcvMap = rep.tpcvMap;
 	return Void();
 }
 
@@ -1200,13 +1202,18 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
+	std::unordered_map<uint16_t, Version> tpcvMap;
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		tpcvMap = self->tpcvMap;
+	}
 	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
 	                                                          self->commitVersion,
 	                                                          pProxyCommitData->committedVersion.get(),
 	                                                          pProxyCommitData->minKnownCommittedVersion,
 	                                                          self->toCommit,
 	                                                          span.context,
-	                                                          self->debugID);
+	                                                          self->debugID,
+	                                                          self->tpcvMap);
 
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
