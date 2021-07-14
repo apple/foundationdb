@@ -148,6 +148,7 @@ CSimpleOpt::SOption const rgRestoreOptions[] = {
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent_snapshot_only", SO_NONE },
+	{ OPT_ENCRYPTION_KEY_FILE, "--encryption_key_file", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -182,10 +183,10 @@ void RestoreDriverState::processArg(std::string const& programName, CSimpleOpt c
 		tagName = args.OptionArg();
 		break;
 	case OPT_INCREMENTALONLY:
-		onlyApplyMutationLogs = true;
+		onlyApplyMutationLogs.set(true);
 		break;
 	case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY:
-		inconsistentSnapshotOnly = true;
+		inconsistentSnapshotOnly.set(true);
 		break;
 	case OPT_RESTORE_BEGIN_VERSION: {
 		const char* a = args.OptionArg();
@@ -198,6 +199,9 @@ void RestoreDriverState::processArg(std::string const& programName, CSimpleOpt c
 		beginVersion = ver;
 		break;
 	}
+	case OPT_ENCRYPTION_KEY_FILE:
+		encryptionKeyFile = args.OptionArg();
+		break;
 	default:
 		break;
 	}

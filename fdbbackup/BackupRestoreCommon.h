@@ -62,6 +62,7 @@ enum {
 	OPT_WAITFORDONE,
 	OPT_BACKUPKEYS_FILTER,
 	OPT_INCREMENTALONLY,
+	OPT_ENCRYPTION_KEY_FILE,
 
 	// Backup Modify options
 	OPT_MOD_ACTIVE_INTERVAL,
@@ -113,7 +114,9 @@ void handleArgsError(CSimpleOpt const& args, const char* programName);
 
 void printHelpTeaser(std::string const& programName);
 
-Reference<IBackupContainer> openBackupContainer(const char* name, std::string const& destinationContainer);
+Reference<IBackupContainer> openBackupContainer(const char* name,
+                                                std::string const &destinationContainer,
+                                                Optional<std::string> const& encryptionKeyFile = {});
 
 void printVersion();
 void printBuildInformation();
@@ -249,7 +252,7 @@ int commonMain(int argc, char** argv) {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
+		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::FALSE, IsSimulated::FALSE);
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		for (const auto& [knobName, knobValueString] : driver.getKnobOverrides()) {
 			try {
@@ -276,7 +279,7 @@ int commonMain(int argc, char** argv) {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::NO, IsSimulated::NO);
+		g_knobs.initialize(Randomize::FALSE, IsSimulated::FALSE);
 
 		if (driver.traceEnabled()) {
 			if (!driver.getTraceLogGroup().empty()) {
@@ -306,7 +309,7 @@ int commonMain(int argc, char** argv) {
 		setMemoryQuota(driver.getMemLimit());
 
 		try {
-			setupNetwork(0, true);
+			setupNetwork(0, UseMetrics::TRUE);
 		} catch (Error& e) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
 			return FDB_EXIT_ERROR;

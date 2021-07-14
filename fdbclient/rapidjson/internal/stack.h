@@ -17,6 +17,7 @@
 
 #include "../allocators.h"
 #include "swap.h"
+#include <cstddef>
 
 #if defined(__clang__)
 RAPIDJSON_DIAG_PUSH
@@ -106,7 +107,7 @@ public:
 	template <typename T>
 	RAPIDJSON_FORCEINLINE void Reserve(size_t count = 1) {
 		// Expand the stack if needed
-		if (RAPIDJSON_UNLIKELY(stackTop_ + sizeof(T) * count > stackEnd_))
+		if (RAPIDJSON_UNLIKELY(static_cast<std::ptrdiff_t>(sizeof(T) * count) > (stackEnd_ - stackTop_)))
 			Expand<T>(count);
 	}
 
@@ -118,7 +119,7 @@ public:
 
 	template <typename T>
 	RAPIDJSON_FORCEINLINE T* PushUnsafe(size_t count = 1) {
-		RAPIDJSON_ASSERT(stackTop_ + sizeof(T) * count <= stackEnd_);
+		RAPIDJSON_ASSERT(static_cast<std::ptrdiff_t>(sizeof(T) * count) <= (stackEnd_ - stackTop_));
 		T* ret = reinterpret_cast<T*>(stackTop_);
 		stackTop_ += sizeof(T) * count;
 		return ret;

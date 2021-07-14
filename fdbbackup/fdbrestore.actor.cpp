@@ -33,7 +33,7 @@ namespace {
 class RestoreDriver : public Driver<RestoreDriver> {
 	// Submit the restore request to the database if "performRestore" is true. Otherwise,
 	// check if the restore can be performed.
-	ACTOR static Future<Void> runRestore(RestoreDriverState const* driverState, bool verbose) {
+	ACTOR static Future<Void> runRestore(RestoreDriverState const* driverState, Verbose verbose) {
 		state Version restoreVersion = driverState->getTargetVersion();
 
 		if (driverState->getTargetVersion() != ::invalidVersion && !driverState->getTargetTimestamp().empty()) {
@@ -69,7 +69,7 @@ class RestoreDriver : public Driver<RestoreDriver> {
 			state FileBackupAgent backupAgent;
 
 			state Reference<IBackupContainer> bc =
-			    openBackupContainer(getProgramName().c_str(), driverState->getRestoreContainer());
+			    openBackupContainer(getProgramName().c_str(), driverState->getRestoreContainer(), driverState->getEncryptionKeyFile());
 
 			// If targetVersion is unset then use the maximum restorable version from the backup description
 			if (driverState->getTargetVersion() == ::invalidVersion) {
@@ -104,7 +104,7 @@ class RestoreDriver : public Driver<RestoreDriver> {
 				                                                   verbose,
 				                                                   KeyRef(driverState->getAddPrefix()),
 				                                                   KeyRef(driverState->getRemovePrefix()),
-				                                                   true,
+				                                                   LockDB::TRUE,
 				                                                   driverState->shouldOnlyApplyMutationLogs(),
 				                                                   driverState->restoreInconsistentSnapshotOnly(),
 				                                                   driverState->getBeginVersion()));
@@ -185,9 +185,9 @@ public:
 
 		switch (driverState.getRestoreType()) {
 		case RestoreType::START:
-			return runRestore(&driverState, !quietDisplay);
+			return runRestore(&driverState, Verbose{!quietDisplay});
 		case RestoreType::WAIT:
-			return success(ba.waitRestore(driverState.getDatabase(), KeyRef(driverState.getTagName()), true));
+			return success(ba.waitRestore(driverState.getDatabase(), KeyRef(driverState.getTagName()), Verbose::TRUE));
 
 		case RestoreType::ABORT:
 			return map(ba.abortRestore(driverState.getDatabase(), KeyRef(driverState.getTagName())),

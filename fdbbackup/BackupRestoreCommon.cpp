@@ -59,7 +59,8 @@ void handleArgsError(CSimpleOpt const& args, const char* programName) {
 	throw invalid_command_line_arguments();
 }
 
-Reference<IBackupContainer> openBackupContainer(const char* name, std::string const& destinationContainer) {
+Reference<IBackupContainer> openBackupContainer(const char* name, std::string const& destinationContainer,
+												Optional<std::string> const &encryptionKeyFile) {
 	// Error, if no dest container was specified
 	if (destinationContainer.empty()) {
 		fprintf(stderr, "ERROR: No backup destination was specified.\n");
@@ -69,7 +70,7 @@ Reference<IBackupContainer> openBackupContainer(const char* name, std::string co
 
 	Reference<IBackupContainer> c;
 	try {
-		c = IBackupContainer::openContainer(destinationContainer);
+		c = IBackupContainer::openContainer(destinationContainer, encryptionKeyFile);
 	} catch (Error& e) {
 		std::string msg = format("ERROR: '%s' on URL '%s'", e.what(), destinationContainer.c_str());
 		if (e.code() == error_code_backup_invalid_url && !IBackupContainer::lastOpenError.empty()) {

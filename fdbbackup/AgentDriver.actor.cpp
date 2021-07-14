@@ -33,7 +33,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
                                          std::string id,
                                          AgentType agentType,
                                          Database dest,
-                                         bool snapshot = false) {
+                                         Snapshot snapshot = Snapshot::FALSE) {
 	// This process will write a document that looks like this:
 	// { backup : { $expires : {<subdoc>}, version: <version from approximately 30 seconds from now> }
 	// so that the value under 'backup' will eventually expire to null and thus be ignored by
@@ -235,7 +235,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
                                  std::string name,
                                  std::string id,
                                  int limit = 1) {
-	state RangeResult docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
+	state RangeResult docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::TRUE));
 	state bool readMore = false;
 	state int i;
 	for (i = 0; i < docs.size(); ++i) {
@@ -264,7 +264,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 		}
 		if (readMore) {
 			limit = 10000;
-			RangeResult docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
+			RangeResult docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::TRUE));
 			docs = std::move(docs2);
 			readMore = false;
 		}
@@ -275,7 +275,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 
 // Read layer status for this layer and get the total count of agent processes (instances) then adjust the poll delay
 // based on that and BACKUP_AGGREGATE_POLL_RATE
-ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::string name, double* pollDelay) {
+ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::string name, std::shared_ptr<double> pollDelay) {
 	loop {
 		try {
 			json_spirit::mObject status = wait(getLayerStatus(src, rootKey));
@@ -297,7 +297,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 ACTOR Future<Void> _statusUpdateActor(Database statusUpdateDest,
                                       std::string name,
                                       AgentType agentType,
-                                      double* pollDelay,
+                                      std::shared_ptr<double> pollDelay,
                                       Database taskDest,
                                       std::string id) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
@@ -327,7 +327,7 @@ ACTOR Future<Void> _statusUpdateActor(Database statusUpdateDest,
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					state Future<std::string> futureStatusDoc = getLayerStatus(tr, name, id, agentType, taskDest, true);
+					state Future<std::string> futureStatusDoc = getLayerStatus(tr, name, id, agentType, taskDest, Snapshot::TRUE);
 					wait(cleanupStatus(tr, rootKey, name, id));
 					std::string statusdoc = wait(futureStatusDoc);
 					tr->set(instanceKey, statusdoc);
@@ -344,7 +344,7 @@ ACTOR Future<Void> _statusUpdateActor(Database statusUpdateDest,
 
 			// Now that status was written at least once by this process (and hopefully others), start the poll rate
 			// control updater if it wasn't started yet
-			if (!pollRateUpdater.isValid() && pollDelay != nullptr)
+			if (!pollRateUpdater.isValid())
 				pollRateUpdater = updateAgentPollRate(statusUpdateDest, rootKey, name, pollDelay);
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnableToWriteStatus").error(e);
@@ -358,10 +358,10 @@ ACTOR Future<Void> _statusUpdateActor(Database statusUpdateDest,
 Future<Void> statusUpdateActor(Database statusUpdateDest,
                                std::string const& name,
                                AgentType agentType,
-                               double& pollDelay,
+                               std::shared_ptr<double> pollDelay,
                                Database taskDest,
                                std::string const& id) {
-	return _statusUpdateActor(statusUpdateDest, name, agentType, &pollDelay, taskDest, id);
+	return _statusUpdateActor(statusUpdateDest, name, agentType, pollDelay, taskDest, id);
 }
 
 Optional<Database> initCluster(std::string const& clusterFile, LocalityData const& localities, bool quiet) {
@@ -378,7 +378,7 @@ Optional<Database> initCluster(std::string const& clusterFile, LocalityData cons
 	}
 
 	try {
-		db = Database::createDatabase(ccf, -1, true, localities);
+		db = Database::createDatabase(ccf, -1, IsInternal::TRUE, localities);
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());

@@ -35,7 +35,7 @@ enum class AgentType {
 Future<Void> statusUpdateActor(Database statusUpdateDest,
                                std::string const& name,
                                AgentType,
-                               double& pollDelay,
+                               std::shared_ptr<double> pollDelay,
                                Database taskDest = Database(),
                                std::string const& id = nondeterministicRandom()->randomUniqueID().toString());
 

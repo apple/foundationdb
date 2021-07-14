@@ -68,7 +68,7 @@ class FastRestoreDriver : public Driver<FastRestoreDriver> {
 				    driverState->getBackupKeys(),
 				    KeyRef(driverState->getRestoreContainer()),
 				    driverState->getTargetVersion(), // FIXME: Shouldn't actual version be used here?
-				    true,
+				    LockDB::TRUE,
 				    randomUID,
 				    ""_sr,
 				    ""_sr));

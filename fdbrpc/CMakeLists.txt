@@ -33,6 +33,13 @@ set(FDBRPC_SRCS
   TraceFileIO.cpp
   TSSComparison.h)
 
+if(WITH_TLS AND NOT WIN32)
+  set(FDBRPC_SRCS
+    ${FDBRPC_SRCS}
+    AsyncFileEncrypted.h
+    AsyncFileEncrypted.actor.cpp)
+endif()
+
 set(COMPILE_EIO OFF)
 
 if(NOT WIN32)

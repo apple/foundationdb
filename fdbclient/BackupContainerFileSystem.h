@@ -153,6 +153,13 @@ public:
 	                                                  bool logsOnly,
 	                                                  Version beginVersion) final;
 
+	static Future<Void> createTestEncryptionKeyFile(std::string const& filename);
+
+protected:
+	bool usesEncryption() const;
+	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
+	Future<Void> encryptionSetupComplete() const;
+
 private:
 	struct VersionProperty {
 		VersionProperty(Reference<BackupContainerFileSystem> bc, const std::string& name)
@@ -186,6 +193,8 @@ private:
 	Future<std::vector<RangeFile>> old_listRangeFiles(Version beginVersion, Version endVersion);
 
 	friend class BackupContainerFileSystemImpl;
+
+	Future<Void> encryptionSetupFuture;
 };
 
 #endif

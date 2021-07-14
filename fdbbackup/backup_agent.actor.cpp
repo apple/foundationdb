@@ -28,14 +28,14 @@ extern const char* getSourceVersion();
 namespace {
 
 ACTOR Future<Void> runAgent(Database db) {
-	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
+	state std::shared_ptr<double> pollDelay = std::make_shared<double>(1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE);
 	state Future<Void> status = statusUpdateActor(db, "backup", AgentType::FILE, pollDelay);
 
 	state FileBackupAgent backupAgent;
 
 	loop {
 		try {
-			wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(db, pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled)

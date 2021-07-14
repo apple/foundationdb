@@ -26,7 +26,7 @@
 namespace {
 
 ACTOR Future<Void> runDBAgent(Database src, Database dest) {
-	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
+	state std::shared_ptr<double> pollDelay = std::make_shared<double>(1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE);
 	std::string id = nondeterministicRandom()->randomUniqueID().toString();
 	state Future<Void> status = statusUpdateActor(src, "dr_backup", AgentType::DB, pollDelay, dest, id);
 	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", AgentType::DB, pollDelay, dest, id);
@@ -35,7 +35,7 @@ ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 
 	loop {
 		try {
-			wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(dest, pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled)

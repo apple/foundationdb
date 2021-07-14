@@ -31,7 +31,7 @@ RestoreType getRestoreType(std::string const& name);
 extern CSimpleOpt::SOption const rgRestoreOptions[];
 
 class RestoreDriverState {
-	bool waitForDone{ false };
+	WaitForComplete waitForDone{ false };
 	std::string restoreClusterFileOrig;
 	std::string restoreClusterFileDest;
 	bool dryRun{ false };
@@ -43,10 +43,11 @@ class RestoreDriverState {
 	std::string restoreContainer;
 	std::string addPrefix;
 	std::string removePrefix;
-	bool onlyApplyMutationLogs{ false };
-	bool inconsistentSnapshotOnly{ false };
+	OnlyApplyMutationLogs onlyApplyMutationLogs{ false };
+	InconsistentSnapshotOnly inconsistentSnapshotOnly{ false };
 	Database db;
 	Standalone<VectorRef<KeyRangeRef>> backupKeys;
+	Optional<std::string> encryptionKeyFile;
 
 	void createDatabase() { db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST); }
 	void initializeBackupKeys() {
@@ -57,7 +58,7 @@ class RestoreDriverState {
 
 public:
 	void processArg(std::string const& programName, CSimpleOpt const& args);
-	bool shouldWaitForDone() const { return waitForDone; }
+	WaitForComplete shouldWaitForDone() const { return waitForDone; }
 	std::string const& getOrigClusterFile() const { return restoreClusterFileOrig; }
 	std::string const& getDestClusterFile() const { return restoreClusterFileDest; }
 	bool isDryRun() const { return dryRun; }
@@ -70,8 +71,9 @@ public:
 	std::string const& getRestoreContainer() const { return restoreContainer; }
 	std::string const& getAddPrefix() const { return addPrefix; }
 	std::string const& getRemovePrefix() const { return removePrefix; }
-	bool shouldOnlyApplyMutationLogs() const { return onlyApplyMutationLogs; }
-	bool restoreInconsistentSnapshotOnly() const { return inconsistentSnapshotOnly; }
+	OnlyApplyMutationLogs shouldOnlyApplyMutationLogs() const { return onlyApplyMutationLogs; }
+	InconsistentSnapshotOnly restoreInconsistentSnapshotOnly() const { return inconsistentSnapshotOnly; }
+	Optional<std::string> const &getEncryptionKeyFile() const { return encryptionKeyFile; }
 	Database const& getDatabase() const { return db; }
 	Standalone<VectorRef<KeyRangeRef>> const& getBackupKeys() const { return backupKeys; }
 	bool setup();
