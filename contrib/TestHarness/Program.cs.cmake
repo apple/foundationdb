@@ -523,7 +523,7 @@ namespace SummarizeTest
                     consoleThread.Join();
 
                     var traceFiles = Directory.GetFiles(tempPath, "trace*.*").Where(s => s.EndsWith(".xml") || s.EndsWith(".json")).ToArray();
-		    // if no traces caused by the process failed then the result will include its stderr
+                    // if no traces caused by the process failed then the result will include its stderr
                     if (process.ExitCode == 0 && traceFiles.Length == 0)
                     {
                         if (!traceToStdout)
