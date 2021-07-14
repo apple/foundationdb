@@ -1154,7 +1154,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 				}
 				when(wait(pProxyCommitData->cx->onProxiesChanged())) {}
 				when(GetRawCommittedVersionReply v = wait(pProxyCommitData->master.getLiveCommittedVersion.getReply(
-				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID),
+				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID, invalidVersion),
 				         TaskPriority::GetLiveCommittedVersionReply))) {
 					if (v.version > pProxyCommitData->committedVersion.get()) {
 						pProxyCommitData->locked = v.locked;
@@ -1490,9 +1490,8 @@ void addTagMapping(GetKeyServerLocationsReply& reply, ProxyCommitData* commitDat
 	for (const auto& [_, shard] : reply.results) {
 		for (auto& ssi : shard) {
 			auto iter = commitData->storageCache.find(ssi.id());
-			if (iter != commitData->storageCache.end()) {
-				reply.resultsTagMapping.emplace_back(ssi.id(), iter->second->tag);
-			}
+			ASSERT_WE_THINK(iter != commitData->storageCache.end());
+			reply.resultsTagMapping.emplace_back(ssi.id(), iter->second->tag);
 		}
 	}
 }
