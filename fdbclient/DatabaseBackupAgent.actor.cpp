@@ -47,8 +47,11 @@ DatabaseBackupAgent::DatabaseBackupAgent()
   : subspace(Subspace(databaseBackupPrefixRange.begin)), tagNames(subspace.get(BackupAgentBase::keyTagName)),
     states(subspace.get(BackupAgentBase::keyStates)), config(subspace.get(BackupAgentBase::keyConfig)),
     errors(subspace.get(BackupAgentBase::keyErrors)), ranges(subspace.get(BackupAgentBase::keyRanges)),
-    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, true)),
-    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, true)),
+    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks),
+                              AccessSystemKeys::TRUE,
+                              PriorityBatch::FALSE,
+                              LockAware::TRUE)),
+    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::TRUE, LockAware::TRUE)),
     sourceStates(subspace.get(BackupAgentBase::keySourceStates)),
     sourceTagNames(subspace.get(BackupAgentBase::keyTagName)) {}
 
@@ -56,8 +59,11 @@ DatabaseBackupAgent::DatabaseBackupAgent(Database src)
   : subspace(Subspace(databaseBackupPrefixRange.begin)), tagNames(subspace.get(BackupAgentBase::keyTagName)),
     states(subspace.get(BackupAgentBase::keyStates)), config(subspace.get(BackupAgentBase::keyConfig)),
     errors(subspace.get(BackupAgentBase::keyErrors)), ranges(subspace.get(BackupAgentBase::keyRanges)),
-    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, true)),
-    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, true)),
+    taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks),
+                              AccessSystemKeys::TRUE,
+                              PriorityBatch::FALSE,
+                              LockAware::TRUE)),
+    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::TRUE, LockAware::TRUE)),
     sourceStates(subspace.get(BackupAgentBase::keySourceStates)),
     sourceTagNames(subspace.get(BackupAgentBase::keyTagName)) {
 	taskBucket->src = src;
@@ -234,7 +240,8 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		// retrieve kvData
 		state PromiseStream<RangeResultWithVersion> results;
 
-		state Future<Void> rc = readCommitted(taskBucket->src, results, lock, range, true, true, true);
+		state Future<Void> rc = readCommitted(
+		    taskBucket->src, results, lock, range, Terminator::TRUE, AccessSystemKeys::TRUE, LockAware::TRUE);
 		state Key rangeBegin = range.begin;
 		state Key rangeEnd;
 		state bool endOfStream = false;
@@ -316,16 +323,20 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					    applyMutationsKeyVersionCountRange.begin);
 					state Future<RangeResult> backupVersions =
 					    krmGetRanges(tr, prefix, KeyRangeRef(rangeBegin, rangeEnd), BUGGIFY ? 2 : 2000, 1e5);
-					state Future<Optional<Value>> logVersionValue = tr->get(
-					    task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin), true);
-					state Future<Optional<Value>> rangeCountValue = tr->get(rangeCountKey, true);
-					state Future<RangeResult> prevRange = tr->getRange(
-					    firstGreaterOrEqual(prefix), lastLessOrEqual(rangeBegin.withPrefix(prefix)), 1, true, true);
+					state Future<Optional<Value>> logVersionValue =
+					    tr->get(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin),
+					            Snapshot::TRUE);
+					state Future<Optional<Value>> rangeCountValue = tr->get(rangeCountKey, Snapshot::TRUE);
+					state Future<RangeResult> prevRange = tr->getRange(firstGreaterOrEqual(prefix),
+					                                                   lastLessOrEqual(rangeBegin.withPrefix(prefix)),
+					                                                   1,
+					                                                   Snapshot::TRUE,
+					                                                   Reverse::TRUE);
 					state Future<RangeResult> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
 					                                                   firstGreaterOrEqual(strinc(prefix)),
 					                                                   1,
-					                                                   true,
-					                                                   false);
+					                                                   Snapshot::TRUE,
+					                                                   Reverse::FALSE);
 					state Future<Void> verified = taskBucket->keepRunning(tr, task);
 
 					wait(checkDatabaseLock(tr,
@@ -363,7 +374,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					Version logVersion =
 					    logVersionValue.get().present()
 					        ? BinaryReader::fromStringRef<Version>(logVersionValue.get().get(), Unversioned())
-					        : -1;
+					        : ::invalidVersion;
 					if (logVersion >= values.second) {
 						task->params[BackupRangeTaskFunc::keyBackupRangeBeginKey] = rangeBegin;
 						return Void();
@@ -633,7 +644,7 @@ struct EraseLogRangeTaskFunc : TaskFuncBase {
 				    task->params[BackupAgentBase::keyConfigLogUid],
 				    task->params[BackupAgentBase::destUid],
 				    Optional<Version>(endVersion),
-				    true,
+				    CheckBackupUID::TRUE,
 				    BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned())));
 				wait(tr->commit());
 				return Void();
@@ -886,9 +897,9 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 				                           locks[j],
 				                           ranges[j],
 				                           decodeBKMutationLogKey,
-				                           true,
-				                           true,
-				                           true));
+				                           Terminator::TRUE,
+				                           AccessSystemKeys::TRUE,
+				                           LockAware::TRUE));
 			}
 
 			// copy the range
@@ -1191,7 +1202,7 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 				                           task->params[DatabaseBackupAgent::keyFolderId], Unversioned()))
 					return Void();
 
-				wait(eraseLogData(tr, logUidValue, destUidValue, Optional<Version>(), true, backupUid));
+				wait(eraseLogData(tr, logUidValue, destUidValue, Optional<Version>(), CheckBackupUID::TRUE, backupUid));
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
@@ -1320,6 +1331,10 @@ struct CopyDiffLogsTaskFunc : TaskFuncBase {
 			    .detail("EndVersion", endVersion)
 			    .detail("LogUID", task->params[BackupAgentBase::keyConfigLogUid]);
 		}
+
+		// set the log version to the state
+		tr->set(StringRef(states.pack(DatabaseBackupAgent::keyStateLogBeginVersion)),
+		        BinaryWriter::toValue(beginVersion, Unversioned()));
 
 		if (!stopWhenDone.present()) {
 			state Reference<TaskFuture> allPartsDone = futureBucket->future(tr);
@@ -1592,9 +1607,9 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 			                           lock,
 			                           ranges[i],
 			                           decodeBKMutationLogKey,
-			                           true,
-			                           true,
-			                           true));
+			                           Terminator::TRUE,
+			                           AccessSystemKeys::TRUE,
+			                           LockAware::TRUE));
 			dump.push_back(dumpData(cx, task, results[i], lock.getPtr(), taskBucket));
 		}
 
@@ -1701,7 +1716,7 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 		}
 
 		TraceEvent("DBA_AbortOldBackup").detail("TagName", tagNameKey.printable());
-		wait(srcDrAgent.abortBackup(cx, tagNameKey, false, true));
+		wait(srcDrAgent.abortBackup(cx, tagNameKey, PartialBackup::FALSE, AbortOldBackup::TRUE));
 
 		return Void();
 	}
@@ -2445,7 +2460,7 @@ public:
 	ACTOR static Future<EBackupState> waitBackup(DatabaseBackupAgent* backupAgent,
 	                                             Database cx,
 	                                             Key tagName,
-	                                             bool stopWhenDone) {
+	                                             StopWhenDone stopWhenDone) {
 		state std::string backTrace;
 		state UID logUid = wait(backupAgent->getLogUid(cx, tagName));
 		state Key statusKey = backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
@@ -2510,10 +2525,10 @@ public:
 	                                       Reference<ReadYourWritesTransaction> tr,
 	                                       Key tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                       bool stopWhenDone,
+	                                       StopWhenDone stopWhenDone,
 	                                       Key addPrefix,
 	                                       Key removePrefix,
-	                                       bool lockDB,
+	                                       LockDB lockDB,
 	                                       DatabaseBackupAgent::PreBackupAction backupAction) {
 		state UID logUid = deterministicRandom()->randomUniqueID();
 		state Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
@@ -2667,7 +2682,7 @@ public:
 	                                           Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                           Key addPrefix,
 	                                           Key removePrefix,
-	                                           bool forceAction) {
+	                                           ForceAction forceAction) {
 		state DatabaseBackupAgent drAgent(dest);
 		state UID destlogUid = wait(backupAgent->getLogUid(dest, tagName));
 		state EBackupState status = wait(backupAgent->getStateValue(dest, destlogUid));
@@ -2751,7 +2766,7 @@ public:
 				throw;
 		}
 
-		wait(success(backupAgent->waitBackup(dest, tagName, true)));
+		wait(success(backupAgent->waitBackup(dest, tagName, StopWhenDone::TRUE)));
 
 		TraceEvent("DBA_SwitchoverStopped");
 
@@ -2780,10 +2795,10 @@ public:
 			wait(drAgent.submitBackup(backupAgent->taskBucket->src,
 			                          tagName,
 			                          backupRanges,
-			                          false,
+			                          StopWhenDone::FALSE,
 			                          addPrefix,
 			                          removePrefix,
-			                          true,
+			                          LockDB::TRUE,
 			                          DatabaseBackupAgent::PreBackupAction::NONE));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_duplicate)
@@ -2835,10 +2850,10 @@ public:
 	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent,
 	                                      Database cx,
 	                                      Key tagName,
-	                                      bool partial,
-	                                      bool abortOldBackup,
-	                                      bool dstOnly,
-	                                      bool waitForDestUID) {
+	                                      PartialBackup partial,
+	                                      AbortOldBackup abortOldBackup,
+	                                      DstOnly dstOnly,
+	                                      WaitForDestUID waitForDestUID) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Key logUidValue, destUidValue;
 		state UID logUid, destUid;
@@ -3063,8 +3078,8 @@ public:
 				    errorLimit > 0
 				        ? tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(logUid, Unversioned())).range(),
 				                       errorLimit,
-				                       false,
-				                       true)
+				                       Snapshot::FALSE,
+				                       Reverse::TRUE)
 				        : Future<RangeResult>();
 				state Future<Optional<Value>> fBackupUid =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
@@ -3080,6 +3095,9 @@ public:
 				state Future<Optional<Key>> fBackupKeysPacked =
 				    tr->get(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(BackupAgentBase::keyConfigBackupRanges));
+				state Future<Optional<Value>> flogVersionKey = 
+				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
+				                .pack(BackupAgentBase::keyStateLogBeginVersion));
 
 				state EBackupState backupState = wait(backupAgent->getStateValue(tr, logUid));
 
@@ -3095,7 +3113,14 @@ public:
 					}
 
 					state Optional<Value> stopVersionKey = wait(fStopVersionKey);
-
+					Optional<Value> logVersionKey = wait(flogVersionKey);
+					state std::string logVersionText
+					    = ". Last log version is " 
+					      + (
+						logVersionKey.present()
+					        ? format("%lld", BinaryReader::fromStringRef<Version>(logVersionKey.get(), Unversioned()))
+					        : "unset"
+					      );
 					Optional<Key> backupKeysPacked = wait(fBackupKeysPacked);
 
 					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -3115,7 +3140,7 @@ public:
 						break;
 					case EBackupState::STATE_RUNNING_DIFFERENTIAL:
 						statusText +=
-						    "The DR on tag `" + tagNameDisplay + "' is a complete copy of the primary database.\n";
+						    "The DR on tag `" + tagNameDisplay + "' is a complete copy of the primary database" + logVersionText + ".\n";
 						break;
 					case EBackupState::STATE_COMPLETED: {
 						Version stopVersion =
@@ -3127,13 +3152,13 @@ public:
 					} break;
 					case EBackupState::STATE_PARTIALLY_ABORTED: {
 						statusText += "The previous DR on tag `" + tagNameDisplay + "' " +
-						              BackupAgentBase::getStateText(backupState) + ".\n";
+						              BackupAgentBase::getStateText(backupState) + logVersionText + ".\n";
 						statusText += "Abort the DR with --cleanup before starting a new DR.\n";
 						break;
 					}
 					default:
 						statusText += "The previous DR on tag `" + tagNameDisplay + "' " +
-						              BackupAgentBase::getStateText(backupState) + ".\n";
+						              BackupAgentBase::getStateText(backupState) + logVersionText + ".\n";
 						break;
 					}
 				}
@@ -3191,7 +3216,7 @@ public:
 	ACTOR static Future<EBackupState> getStateValue(DatabaseBackupAgent* backupAgent,
 	                                                Reference<ReadYourWritesTransaction> tr,
 	                                                UID logUid,
-	                                                bool snapshot) {
+	                                                Snapshot snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Key statusKey = backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
@@ -3204,7 +3229,7 @@ public:
 	ACTOR static Future<UID> getDestUid(DatabaseBackupAgent* backupAgent,
 	                                    Reference<ReadYourWritesTransaction> tr,
 	                                    UID logUid,
-	                                    bool snapshot) {
+	                                    Snapshot snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Key destUidKey =
@@ -3217,7 +3242,7 @@ public:
 	ACTOR static Future<UID> getLogUid(DatabaseBackupAgent* backupAgent,
 	                                   Reference<ReadYourWritesTransaction> tr,
 	                                   Key tagName,
-	                                   bool snapshot) {
+	                                   Snapshot snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Optional<Value> logUid = wait(tr->get(backupAgent->tagNames.pack(tagName), snapshot));
@@ -3235,7 +3260,7 @@ Future<Void> DatabaseBackupAgent::atomicSwitchover(Database dest,
                                                    Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                                    Key addPrefix,
                                                    Key removePrefix,
-                                                   bool forceAction) {
+                                                   ForceAction forceAction) {
 	return DatabaseBackupAgentImpl::atomicSwitchover(
 	    this, dest, tagName, backupRanges, addPrefix, removePrefix, forceAction);
 }
@@ -3243,10 +3268,10 @@ Future<Void> DatabaseBackupAgent::atomicSwitchover(Database dest,
 Future<Void> DatabaseBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr,
                                                Key tagName,
                                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                               bool stopWhenDone,
+                                               StopWhenDone stopWhenDone,
                                                Key addPrefix,
                                                Key removePrefix,
-                                               bool lockDatabase,
+                                               LockDB lockDatabase,
                                                PreBackupAction backupAction) {
 	return DatabaseBackupAgentImpl::submitBackup(
 	    this, tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase, backupAction);
@@ -3258,10 +3283,10 @@ Future<Void> DatabaseBackupAgent::discontinueBackup(Reference<ReadYourWritesTran
 
 Future<Void> DatabaseBackupAgent::abortBackup(Database cx,
                                               Key tagName,
-                                              bool partial,
-                                              bool abortOldBackup,
-                                              bool dstOnly,
-                                              bool waitForDestUID) {
+                                              PartialBackup partial,
+                                              AbortOldBackup abortOldBackup,
+                                              DstOnly dstOnly,
+                                              WaitForDestUID waitForDestUID) {
 	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup, dstOnly, waitForDestUID);
 }
 
@@ -3271,15 +3296,15 @@ Future<std::string> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, 
 
 Future<EBackupState> DatabaseBackupAgent::getStateValue(Reference<ReadYourWritesTransaction> tr,
                                                         UID logUid,
-                                                        bool snapshot) {
+                                                        Snapshot snapshot) {
 	return DatabaseBackupAgentImpl::getStateValue(this, tr, logUid, snapshot);
 }
 
-Future<UID> DatabaseBackupAgent::getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot) {
+Future<UID> DatabaseBackupAgent::getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot snapshot) {
 	return DatabaseBackupAgentImpl::getDestUid(this, tr, logUid, snapshot);
 }
 
-Future<UID> DatabaseBackupAgent::getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot) {
+Future<UID> DatabaseBackupAgent::getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, Snapshot snapshot) {
 	return DatabaseBackupAgentImpl::getLogUid(this, tr, tagName, snapshot);
 }
 
@@ -3287,7 +3312,7 @@ Future<Void> DatabaseBackupAgent::waitUpgradeToLatestDrVersion(Database cx, Key 
 	return DatabaseBackupAgentImpl::waitUpgradeToLatestDrVersion(this, cx, tagName);
 }
 
-Future<EBackupState> DatabaseBackupAgent::waitBackup(Database cx, Key tagName, bool stopWhenDone) {
+Future<EBackupState> DatabaseBackupAgent::waitBackup(Database cx, Key tagName, StopWhenDone stopWhenDone) {
 	return DatabaseBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone);
 }
 
@@ -3297,12 +3322,12 @@ Future<EBackupState> DatabaseBackupAgent::waitSubmitted(Database cx, Key tagName
 
 Future<int64_t> DatabaseBackupAgent::getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr,
                                                           UID logUid,
-                                                          bool snapshot) {
+                                                          Snapshot snapshot) {
 	return DRConfig(logUid).rangeBytesWritten().getD(tr, snapshot);
 }
 
 Future<int64_t> DatabaseBackupAgent::getLogBytesWritten(Reference<ReadYourWritesTransaction> tr,
                                                         UID logUid,
-                                                        bool snapshot) {
+                                                        Snapshot snapshot) {
 	return DRConfig(logUid).logBytesWritten().getD(tr, snapshot);
 }

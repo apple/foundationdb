@@ -941,8 +941,6 @@ struct DDQueueData {
 	}
 };
 
-extern bool noUnseed;
-
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd, const DDEnabledState* ddEnabledState) {
@@ -1662,6 +1660,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
 					    .detail("PriorityRebalanceOverutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
+					    .detail("PriorityStorageWiggle",
+					            self.priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
 					    .detail("PriorityTeamHealthy", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
 					    .detail("PriorityTeamContainsUndesiredServer",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])

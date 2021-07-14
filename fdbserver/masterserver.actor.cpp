@@ -577,7 +577,7 @@ Future<Void> sendMasterRegistration(MasterData* self,
 }
 
 ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILogSystem> logSystem) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
 	state Future<Void> trigger = self->registrationTrigger.onTrigger();
 	state Future<Void> updateLogsKey;
 
@@ -1537,9 +1537,10 @@ ACTOR Future<Void> configurationMonitor(Reference<MasterData> self, Database cx)
 					self->registrationTrigger.trigger();
 				}
 
-				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) ||
-				                                 tr.watch(excludedServersVersionKey) ||
-				                                 tr.watch(failedServersVersionKey);
+				state Future<Void> watchFuture =
+				    tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) ||
+				    tr.watch(failedServersVersionKey) || tr.watch(excludedLocalityVersionKey) ||
+				    tr.watch(failedLocalityVersionKey);
 				wait(tr.commit());
 				wait(watchFuture);
 				break;
@@ -1964,7 +1965,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		self->addActor.send(resolutionBalancing(self));
 
 	self->addActor.send(changeCoordinators(self));
-	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
+	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {
 		self->addActor.send(recruitBackupWorkers(self, cx));

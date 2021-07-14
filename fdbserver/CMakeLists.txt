@@ -70,7 +70,6 @@ set(FDBSERVER_SRCS
   OldTLogServer_6_2.actor.cpp
   OnDemandStore.actor.cpp
   OnDemandStore.h
-  Orderer.actor.h
   PaxosConfigConsumer.actor.cpp
   PaxosConfigConsumer.h
   PaxosConfigDatabaseNode.actor.cpp
@@ -147,7 +146,7 @@ set(FDBSERVER_SRCS
   workloads/BackgroundSelectors.actor.cpp
   workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
-  workloads/ParallelRestore.actor.cpp
+  workloads/ClogSingleConnection.actor.cpp
   workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
@@ -198,6 +197,7 @@ set(FDBSERVER_SRCS
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
+  workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
   workloads/PopulateTPCC.actor.cpp

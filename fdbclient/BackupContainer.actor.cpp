@@ -58,6 +58,7 @@ ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalon
 	wait(file->append(s.begin(), s.size()));
 	return Void();
 }
+
 } // namespace IBackupFile_impl
 
 Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
@@ -253,7 +254,8 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 }
 
 // Get an IBackupContainer based on a container URL string
-Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url) {
+Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url,
+                                                            Optional<std::string> const& encryptionKeyFileName) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
 	Reference<IBackupContainer>& r = m_cache[url];
@@ -262,9 +264,9 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 	try {
 		StringRef u(url);
-		if (u.startsWith(LiteralStringRef("file://"))) {
-			r = Reference<IBackupContainer>(new BackupContainerLocalDirectory(url));
-		} else if (u.startsWith(LiteralStringRef("blobstore://"))) {
+		if (u.startsWith("file://"_sr)) {
+			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
+		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
@@ -277,15 +279,16 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			for (auto c : resource)
 				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
 					throw backup_invalid_url();
-			r = Reference<IBackupContainer>(new BackupContainerS3BlobStore(bstore, resource, backupParams));
+			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName);
 		}
 #ifdef BUILD_AZURE_BACKUP
-		else if (u.startsWith(LiteralStringRef("azure://"))) {
-			u.eat(LiteralStringRef("azure://"));
-			auto address = NetworkAddress::parse(u.eat(LiteralStringRef("/")).toString());
-			auto containerName = u.eat(LiteralStringRef("/")).toString();
-			auto accountName = u.eat(LiteralStringRef("/")).toString();
-			r = Reference<IBackupContainer>(new BackupContainerAzureBlobStore(address, containerName, accountName));
+		else if (u.startsWith("azure://"_sr)) {
+			u.eat("azure://"_sr);
+			auto address = NetworkAddress::parse(u.eat("/"_sr).toString());
+			auto containerName = u.eat("/"_sr).toString();
+			auto accountName = u.eat("/"_sr).toString();
+			r = makeReference<BackupContainerAzureBlobStore>(
+			    address, containerName, accountName, encryptionKeyFileName);
 		}
 #endif
 		else {
@@ -315,10 +318,10 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) {
 	try {
 		StringRef u(baseURL);
-		if (u.startsWith(LiteralStringRef("file://"))) {
+		if (u.startsWith("file://"_sr)) {
 			std::vector<std::string> results = wait(BackupContainerLocalDirectory::listURLs(baseURL));
 			return results;
-		} else if (u.startsWith(LiteralStringRef("blobstore://"))) {
+		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 
 			S3BlobStoreEndpoint::ParametersT backupParams;
@@ -333,14 +336,14 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 			}
 
 			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
-			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams);
+			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams, {});
 
 			std::vector<std::string> results = wait(BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket()));
 			return results;
 		}
 		// TODO: Enable this when Azure backups are ready
 		/*
-		else if (u.startsWith(LiteralStringRef("azure://"))) {
+		else if (u.startsWith("azure://"_sr)) {
 		    std::vector<std::string> results = wait(BackupContainerAzureBlobStore::listURLs(baseURL));
 		    return results;
 		}
@@ -386,7 +389,7 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			state std::vector<std::pair<int64_t, Version>> results =
-			    wait(versionMap.getRange(tr, 0, time, 1, false, true));
+			    wait(versionMap.getRange(tr, 0, time, 1, Snapshot::FALSE, Reverse::TRUE));
 			if (results.size() != 1) {
 				// No key less than time was found in the database
 				// Look for a key >= time.
@@ -425,7 +428,7 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 
 		// Find the highest time < mid
 		state std::vector<std::pair<int64_t, Version>> results =
-		    wait(versionMap.getRange(tr, min, mid, 1, false, true));
+		    wait(versionMap.getRange(tr, min, mid, 1, Snapshot::FALSE, Reverse::TRUE));
 
 		if (results.size() != 1) {
 			if (mid == min) {

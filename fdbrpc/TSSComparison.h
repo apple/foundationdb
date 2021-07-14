@@ -29,9 +29,19 @@
 #include "fdbrpc/Stats.h"
 
 // refcounted + noncopyable because both DatabaseContext and individual endpoints share ownership
+struct DetailedTSSMismatch {
+	UID mismatchId;
+	double timestamp;
+	std::string traceString;
+
+	DetailedTSSMismatch(UID mismatchId, double timestamp, std::string traceString)
+	  : mismatchId(mismatchId), timestamp(timestamp), traceString(traceString) {}
+};
+
 struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	CounterCollection cc;
 	Counter requests;
+	Counter streamComparisons;
 	Counter ssErrors;
 	Counter tssErrors;
 	Counter tssTimeouts;
@@ -49,6 +59,8 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	std::unordered_map<int, uint64_t> ssErrorsByCode;
 	std::unordered_map<int, uint64_t> tssErrorsByCode;
 
+	std::vector<DetailedTSSMismatch> detailedMismatches;
+
 	void ssError(int code) {
 		++ssErrors;
 		ssErrorsByCode[code]++;
@@ -62,6 +74,16 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	template <class Req>
 	void recordLatency(const Req& req, double ssLatency, double tssLatency);
 
+	// only record a small number of the detailed mismatches per client per metrics window
+	bool shouldRecordDetailedMismatch() {
+		++mismatches;
+		return (mismatches.getIntervalDelta() < 5);
+	}
+
+	void recordDetailedMismatchData(UID mismatchUID, std::string traceString) {
+		detailedMismatches.push_back(DetailedTSSMismatch(mismatchUID, now(), traceString));
+	}
+
 	void clear() {
 		SSgetValueLatency.clear();
 		SSgetKeyLatency.clear();
@@ -73,17 +95,24 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 
 		tssErrorsByCode.clear();
 		ssErrorsByCode.clear();
+
+		detailedMismatches.clear();
 	}
 
 	TSSMetrics()
-	  : cc("TSSClientMetrics"), requests("Requests", cc), ssErrors("SSErrors", cc), tssErrors("TSSErrors", cc),
-	    tssTimeouts("TSSTimeouts", cc), mismatches("Mismatches", cc), SSgetValueLatency(1000), SSgetKeyLatency(1000),
-	    SSgetKeyValuesLatency(1000), TSSgetValueLatency(1000), TSSgetKeyLatency(1000), TSSgetKeyValuesLatency(1000) {}
+	  : cc("TSSClientMetrics"), requests("Requests", cc), streamComparisons("StreamComparisons", cc),
+	    ssErrors("SSErrors", cc), tssErrors("TSSErrors", cc), tssTimeouts("TSSTimeouts", cc),
+	    mismatches("Mismatches", cc), SSgetValueLatency(1000), SSgetKeyLatency(1000), SSgetKeyValuesLatency(1000),
+	    TSSgetValueLatency(1000), TSSgetKeyLatency(1000), TSSgetKeyValuesLatency(1000) {}
 };
 
-// part of the contract of this function is that if there is a mismatch, the implementation needs to record a trace
-// event with the specified severity and tssId in the event.
+template <class Rep>
+bool TSS_doCompare(const Rep& src, const Rep& tss);
+
+template <class Req>
+const char* TSS_mismatchTraceName(const Req& req);
+
 template <class Req, class Rep>
-bool TSS_doCompare(const Req& req, const Rep& src, const Rep& tss, Severity traceSeverity, UID tssId);
+void TSS_traceMismatch(TraceEvent& event, const Req& req, const Rep& src, const Rep& tss);
 
 #endif

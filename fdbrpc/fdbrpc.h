@@ -296,7 +296,9 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 			if (!ready.isValid()) {
 				ready = Promise<Void>();
 			}
-			ready.sendError(message.getError());
+			// Sending the error can lead to the destruction of the acknowledgementReceiver so we keep a local copy
+			Promise<Void> hold = ready;
+			hold.sendError(message.getError());
 		} else {
 			ASSERT(message.get().bytes > bytesAcknowledged);
 			bytesAcknowledged = message.get().bytes;
@@ -530,6 +532,8 @@ public:
 			rhs.errors = 0;
 		}
 	}
+
+	void reset() { *this = ReplyPromiseStream<T>(); }
 
 private:
 	NetNotifiedQueueWithAcknowledgements<T>* queue;

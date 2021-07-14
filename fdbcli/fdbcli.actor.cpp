@@ -546,27 +546,33 @@ void initHelp() {
 	    "10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in "
 	    "the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
 	helpMap["exclude"] = CommandHelp(
-	    "exclude [FORCE] [failed] [no_wait] <ADDRESS...>",
-	    "exclude servers from the database",
-	    "If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or "
-	    "IP:port pair in <ADDRESS...>, adds the address to the set of excluded servers then waits until all "
-	    "database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
+	    "exclude [FORCE] [failed] [no_wait] [<ADDRESS...>] [locality_dcid:<excludedcid>] "
+	    "[locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] "
+	    "[locality_processid:<excludeprocessid>] or any locality data",
+	    "exclude servers from the database either with IP address match or locality match",
+	    "If no addresses or locaities are specified, lists the set of excluded addresses and localities."
+	    "\n\nFor each IP address or IP:port pair in <ADDRESS...> or any LocalityData attributes (like dcid, zoneid, "
+	    "machineid, processid), adds the address/locality to the set of excluded servers and localities then waits "
+	    "until all database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
 	    "command returns \nimmediately without checking if the exclusions have completed successfully.\n"
 	    "If 'FORCE' is set, the command does not perform safety checks before excluding.\n"
 	    "If 'failed' is set, the transaction log queue is dropped pre-emptively before waiting\n"
 	    "for data movement to finish and the server cannot be included again.");
-	helpMap["include"] =
-	    CommandHelp("include all|<ADDRESS...>",
-	                "permit previously-excluded servers to rejoin the database",
-	                "If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port "
-	                "pair in <ADDRESS...>, removes any matching exclusions from the excluded servers list. (A "
-	                "specified IP will match all IP:* exclusion entries)");
+	helpMap["include"] = CommandHelp(
+	    "include all|[<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] "
+	    "[locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality data",
+	    "permit previously-excluded servers and localities to rejoin the database",
+	    "If `all' is specified, the excluded servers and localities list is cleared.\n\nFor each IP address or IP:port "
+	    "pair in <ADDRESS...> or any LocalityData (like dcid, zoneid, machineid, processid), removes any "
+	    "matching exclusions from the excluded servers and localities list. "
+	    "(A specified IP will match all IP:* exclusion entries)");
 	helpMap["setclass"] =
 	    CommandHelp("setclass [<ADDRESS> <CLASS>]",
 	                "change the class of a process",
 	                "If no address and class are specified, lists the classes of all servers.\n\nSetting the class to "
 	                "`default' resets the process class to the class specified on the command line. The available "
-	                "classes are `unset', `storage', `transaction', `resolution', `proxy', `master', `test', `unset', "
+	                "classes are `unset', `storage', `transaction', `resolution', `commit_proxy', `grv_proxy', "
+	                "`master', `test', "
 	                "`stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', "
 	                "`coordinator', `ratekeeper', `storage_cache', `backup', and `default'.");
 	helpMap["status"] =
@@ -2387,19 +2393,26 @@ ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool
 	return err;
 }
 
+// Includes the servers that could be IP addresses or localities back to the cluster.
 ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 	std::vector<AddressExclusion> addresses;
-	bool failed = false;
-	bool all = false;
+	state std::vector<std::string> localities;
+	state bool failed = false;
+	state bool all = false;
 	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 		if (*t == LiteralStringRef("all")) {
 			all = true;
 		} else if (*t == LiteralStringRef("failed")) {
 			failed = true;
+		} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
+			// if the token starts with 'locality_' prefix.
+			localities.push_back(t->toString());
 		} else {
 			auto a = AddressExclusion::parse(*t);
 			if (!a.isValid()) {
-				fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+				fprintf(stderr,
+				        "ERROR: '%s' is neither a valid network endpoint address nor a locality\n",
+				        t->toString().c_str());
 				if (t->toString().find(":tls") != std::string::npos)
 					printf("        Do not include the `:tls' suffix when naming a process\n");
 				return true;
@@ -2411,8 +2424,15 @@ ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 		std::vector<AddressExclusion> includeAll;
 		includeAll.push_back(AddressExclusion());
 		wait(makeInterruptable(includeServers(db, includeAll, failed)));
+		wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
 	} else {
-		wait(makeInterruptable(includeServers(db, addresses, failed)));
+		if (!addresses.empty()) {
+			wait(makeInterruptable(includeServers(db, addresses, failed)));
+		}
+		if (!localities.empty()) {
+			// includes the servers that belong to given localities.
+			wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
+		}
 	}
 	return false;
 };
@@ -2422,16 +2442,25 @@ ACTOR Future<bool> exclude(Database db,
                            Reference<ClusterConnectionFile> ccf,
                            Future<Void> warn) {
 	if (tokens.size() <= 1) {
-		vector<AddressExclusion> excl = wait(makeInterruptable(getExcludedServers(db)));
-		if (!excl.size()) {
-			printf("There are currently no servers excluded from the database.\n"
+		state Future<vector<AddressExclusion>> fexclAddresses = makeInterruptable(getExcludedServers(db));
+		state Future<vector<std::string>> fexclLocalities = makeInterruptable(getExcludedLocalities(db));
+
+		wait(success(fexclAddresses) && success(fexclLocalities));
+		vector<AddressExclusion> exclAddresses = fexclAddresses.get();
+		vector<std::string> exclLocalities = fexclLocalities.get();
+
+		if (!exclAddresses.size() && !exclLocalities.size()) {
+			printf("There are currently no servers or localities excluded from the database.\n"
 			       "To learn how to exclude a server, type `help exclude'.\n");
 			return false;
 		}
 
-		printf("There are currently %zu servers or processes being excluded from the database:\n", excl.size());
-		for (const auto& e : excl)
+		printf("There are currently %zu servers or localities being excluded from the database:\n",
+		       exclAddresses.size() + exclLocalities.size());
+		for (const auto& e : exclAddresses)
 			printf("  %s\n", e.toString().c_str());
+		for (const auto& e : exclLocalities)
+			printf("  %s\n", e.c_str());
 
 		printf("To find out whether it is safe to remove one or more of these\n"
 		       "servers from the cluster, type `exclude <addresses>'.\n"
@@ -2441,9 +2470,13 @@ ACTOR Future<bool> exclude(Database db,
 	} else {
 		state std::vector<AddressExclusion> exclusionVector;
 		state std::set<AddressExclusion> exclusionSet;
-		bool force = false;
+		state std::vector<AddressExclusion> exclusionAddresses;
+		state std::unordered_set<std::string> exclusionLocalities;
+		state std::vector<std::string> noMatchLocalities;
+		state bool force = false;
 		state bool waitForAllExcluded = true;
 		state bool markFailed = false;
+		state std::vector<ProcessData> workers = wait(makeInterruptable(getWorkers(db)));
 		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 			if (*t == LiteralStringRef("FORCE")) {
 				force = true;
@@ -2451,17 +2484,36 @@ ACTOR Future<bool> exclude(Database db,
 				waitForAllExcluded = false;
 			} else if (*t == LiteralStringRef("failed")) {
 				markFailed = true;
+			} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) &&
+			           t->toString().find(':') != std::string::npos) {
+				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, t->toString());
+				if (localityAddresses.empty()) {
+					noMatchLocalities.push_back(t->toString());
+				} else {
+					// add all the server ipaddresses that belong to the given localities to the exclusionSet.
+					exclusionVector.insert(exclusionVector.end(), localityAddresses.begin(), localityAddresses.end());
+					exclusionSet.insert(localityAddresses.begin(), localityAddresses.end());
+				}
+				exclusionLocalities.insert(t->toString());
 			} else {
 				auto a = AddressExclusion::parse(*t);
 				if (!a.isValid()) {
-					fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+					fprintf(stderr,
+					        "ERROR: '%s' is neither a valid network endpoint address nor a locality\n",
+					        t->toString().c_str());
 					if (t->toString().find(":tls") != std::string::npos)
 						printf("        Do not include the `:tls' suffix when naming a process\n");
 					return true;
 				}
 				exclusionVector.push_back(a);
 				exclusionSet.insert(a);
+				exclusionAddresses.push_back(a);
 			}
+		}
+
+		if (exclusionAddresses.empty() && exclusionLocalities.empty()) {
+			fprintf(stderr, "ERROR: At least one valid network endpoint address or a locality is not provided\n");
+			return true;
 		}
 
 		if (!force) {
@@ -2575,7 +2627,12 @@ ACTOR Future<bool> exclude(Database db,
 			}
 		}
 
-		wait(makeInterruptable(excludeServers(db, exclusionVector, markFailed)));
+		if (!exclusionAddresses.empty()) {
+			wait(makeInterruptable(excludeServers(db, exclusionAddresses, markFailed)));
+		}
+		if (!exclusionLocalities.empty()) {
+			wait(makeInterruptable(excludeLocalities(db, exclusionLocalities, markFailed)));
+		}
 
 		if (waitForAllExcluded) {
 			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
@@ -2587,7 +2644,6 @@ ACTOR Future<bool> exclude(Database db,
 
 		state std::set<NetworkAddress> notExcludedServers =
 		    wait(makeInterruptable(checkForExcludingServers(db, exclusionVector, waitForAllExcluded)));
-		std::vector<ProcessData> workers = wait(makeInterruptable(getWorkers(db)));
 		std::map<IPAddress, std::set<uint16_t>> workerPorts;
 		for (auto addr : workers)
 			workerPorts[addr.address.ip].insert(addr.address.port);
@@ -2640,6 +2696,14 @@ ACTOR Future<bool> exclude(Database db,
 					    exclusion.toString().c_str());
 				}
 			}
+		}
+
+		for (const auto& locality : noMatchLocalities) {
+			fprintf(
+			    stderr,
+			    "  %s  ---- WARNING: Currently no servers found with this locality match! Be sure that you excluded "
+			    "the correct locality.\n",
+			    locality.c_str());
 		}
 
 		bool foundCoordinator = false;
@@ -3087,7 +3151,7 @@ struct CLIOptions {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::NO, IsSimulated::NO);
+		g_knobs.initialize(Randomize::FALSE, IsSimulated::FALSE);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -3258,7 +3322,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		db = Database::createDatabase(ccf, -1, false);
+		db = Database::createDatabase(ccf, -1, IsInternal::FALSE);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
@@ -3604,9 +3668,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						state std::string passPhrase = deterministicRandom()->randomAlphaNumeric(10);
 						warn.cancel(); // don't warn while waiting on user input
 						printf("Unlocking the database is a potentially dangerous operation.\n");
-						Optional<std::string> input = wait(linenoise.read(
-						    format("Repeat the following passphrase if you would like to proceed (%s) : ",
-						           passPhrase.c_str())));
+						printf("%s\n", passPhrase.c_str());
+						fflush(stdout);
+						Optional<std::string> input =
+						    wait(linenoise.read(format("Repeat the above passphrase if you would like to proceed:")));
 						warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db);
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
@@ -4859,7 +4924,7 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::NO, IsSimulated::NO);
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::FALSE, IsSimulated::FALSE);
 
 #ifdef __unixish__
 	struct sigaction act;
