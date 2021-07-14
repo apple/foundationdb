@@ -2660,11 +2660,12 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 		loop {
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
-				when(GetReadVersionReply v =
-				         wait(basicLoadBalance(cx->getGrvProxies(false),
-				                               &GrvProxyInterface::getConsistentReadVersion,
-				                               GetReadVersionRequest(span.context, 0, TransactionPriority::IMMEDIATE),
-				                               cx->taskID))) {
+				when(GetReadVersionReply v = wait(basicLoadBalance(
+				         cx->getGrvProxies(false),
+				         &GrvProxyInterface::getConsistentReadVersion,
+				         GetReadVersionRequest(
+				             span.context, 0, TransactionPriority::IMMEDIATE, cx->ssVersionVectorCache.getMaxVersion()),
+				         cx->taskID))) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (v.midShardSize > 0)
 						cx->smoothMidShardSize.setTotal(v.midShardSize);
@@ -2687,11 +2688,12 @@ ACTOR Future<Version> getRawVersion(Database cx, SpanID spanContext) {
 	loop {
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
-			when(GetReadVersionReply v =
-			         wait(basicLoadBalance(cx->getGrvProxies(false),
-			                               &GrvProxyInterface::getConsistentReadVersion,
-			                               GetReadVersionRequest(spanContext, 0, TransactionPriority::IMMEDIATE),
-			                               cx->taskID))) {
+			when(GetReadVersionReply v = wait(basicLoadBalance(
+			         cx->getGrvProxies(false),
+			         &GrvProxyInterface::getConsistentReadVersion,
+			         GetReadVersionRequest(
+			             spanContext, 0, TransactionPriority::IMMEDIATE, cx->ssVersionVectorCache.getMaxVersion()),
+			         cx->taskID))) {
 				return v.version;
 			}
 		}
@@ -5285,7 +5287,13 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan,
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
 	loop {
 		try {
-			state GetReadVersionRequest req(span.context, transactionCount, priority, flags, tags, debugID);
+			state GetReadVersionRequest req(span.context,
+			                                transactionCount,
+			                                priority,
+			                                cx->ssVersionVectorCache.getMaxVersion(),
+			                                flags,
+			                                tags,
+			                                debugID);
 
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
@@ -5466,7 +5474,7 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	}
 
 	metadataVersion.send(rep.metadataVersion);
-	cx->ssVersionVectorCache = rep.ssVersionVector;
+	cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
 	return rep.version;
 }
 

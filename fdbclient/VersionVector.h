@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <map>
+#include <set>
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
@@ -35,6 +37,8 @@ struct VersionVector {
 
 	VersionVector() : maxVersion(invalidVersion) {}
 	VersionVector(Version version) : maxVersion(version) {}
+
+	Version getMaxVersion() const { return maxVersion; }
 
 	void setVersion(const Tag& tag, Version version) {
 		ASSERT(tag != invalidTag);
@@ -67,6 +71,46 @@ struct VersionVector {
 	void clear() {
 		versions.clear();
 		maxVersion = invalidVersion;
+	}
+
+	void getDelta(Version version, VersionVector& delta) const {
+		ASSERT(version <= maxVersion);
+
+		delta.clear();
+
+		if (version == maxVersion) {
+			return; // rerurn an invalid version vector
+		}
+
+		std::map<Version, std::set<Tag>> versionMap;
+		for (auto& iter : versions) {
+			if (iter.second > version) {
+				versionMap[iter.second].insert(iter.first);
+			}
+		}
+
+		for (auto& iter : versionMap) {
+			delta.setVersion(iter.second, iter.first);
+		}
+	}
+
+	void applyDelta(const VersionVector& delta) {
+		if (delta.maxVersion == invalidVersion) {
+			return;
+		}
+
+		ASSERT(maxVersion < delta.maxVersion);
+
+		std::map<Version, std::set<Tag>> versionMap; // order the versions
+		for (auto& iter : delta.versions) {
+			// @todo remove this assert later
+			ASSERT(iter.second > maxVersion);
+			versionMap[iter.second].insert(iter.first);
+		}
+
+		for (auto& iter : versionMap) {
+			setVersion(iter.second, iter.first);
+		}
 	}
 
 	bool operator==(const VersionVector& vv) const { return maxVersion == vv.maxVersion; }
