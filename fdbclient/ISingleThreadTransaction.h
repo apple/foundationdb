@@ -45,7 +45,7 @@ public:
 	};
 
 	static ISingleThreadTransaction* allocateOnForeignThread(Type type);
-	static void create(ISingleThreadTransaction* tr, Type type, Database db);
+	virtual void setDatabase(Database const&) = 0;
 
 	virtual void setVersion(Version v) = 0;
 	virtual Future<Version> getReadVersion() = 0;

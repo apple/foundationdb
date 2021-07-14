@@ -136,6 +136,7 @@ function(add_fdb_test)
     ${VALGRIND_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+  set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
   get_filename_component(test_dir_full ${first_file} DIRECTORY)
   if(NOT ${test_dir_full} STREQUAL "")
     get_filename_component(test_dir ${test_dir_full} NAME)
@@ -419,6 +420,7 @@ function(add_fdbclient_test)
             --
             ${T_COMMAND})
   set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
 endfunction()
 
 # Creates 3 distinct clusters before running the specified command.

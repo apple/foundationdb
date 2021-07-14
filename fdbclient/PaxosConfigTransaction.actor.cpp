@@ -122,9 +122,14 @@ void PaxosConfigTransaction::checkDeferredError() const {
 	ASSERT(false);
 }
 
-PaxosConfigTransaction::PaxosConfigTransaction(Database const& cx) {
+PaxosConfigTransaction::PaxosConfigTransaction() {
 	// TODO: Implement
 	ASSERT(false);
 }
 
 PaxosConfigTransaction::~PaxosConfigTransaction() = default;
+
+void PaxosConfigTransaction::setDatabase(Database const& cx) {
+	// TODO: Implement
+	ASSERT(false);
+}
