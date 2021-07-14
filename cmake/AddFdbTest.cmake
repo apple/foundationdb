@@ -422,7 +422,6 @@ function(add_fdbclient_test)
             --
             ${T_COMMAND})
   else()
-    message(STATUS "Use one process cluster for testing")
     add_test(NAME "${T_NAME}"
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
