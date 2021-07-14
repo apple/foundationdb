@@ -877,8 +877,9 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 // Message the sequencer to obtain the previous commit version for each storage server's tag
 ACTOR Future<Void> getTPCV(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	GetTLogPrevCommitVersionReply rep = wait(brokenPromiseToNever(
-	    pProxyCommitData->master.getTLogPrevCommitVersion.getReply(GetTLogPrevCommitVersionRequest(self->writtenTLogs))));
+	GetTLogPrevCommitVersionReply rep =
+	    wait(brokenPromiseToNever(pProxyCommitData->master.getTLogPrevCommitVersion.getReply(
+	        GetTLogPrevCommitVersionRequest(self->writtenTLogs))));
 	// TraceEvent("GetTLogPrevCommitVersionRequest");
 	return Void();
 }
@@ -1187,9 +1188,12 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion); //< Is this valid?
 
-	//TraceEvent("ProxyPush", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion)
-	//	.detail("TransactionsSubmitted", trs.size()).detail("TransactionsCommitted", commitCount).detail("TxsPopTo",
-	// msg.popTo);
+	// TraceEvent("ProxyPush", pProxyCommitData->dbgid)
+	//     .detail("PrevVersion", self->prevVersion)
+	//     .detail("Version", self->commitVersion)
+	//     .detail("TransactionsSubmitted", trs.size())
+	//     .detail("TransactionsCommitted", self->commitCount)
+	//     .detail("TxsPopTo", self->msg.popTo);
 
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion);
@@ -1282,7 +1286,9 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
 
-	//TraceEvent("ProxyPushed", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion);
+	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
+	//     .detail("PrevVersion", self->prevVersion)
+	//     .detail("Version", self->commitVersion);
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterLogPush");
 
@@ -1308,6 +1314,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		                                     self->lockedAfter,
 		                                     self->metadataVersionAfter,
 		                                     pProxyCommitData->minKnownCommittedVersion,
+		                                     self->prevVersion,
 		                                     writtenTags),
 		    TaskPriority::ProxyMasterVersionReply));
 	}
