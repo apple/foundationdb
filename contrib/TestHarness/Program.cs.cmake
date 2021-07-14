@@ -536,7 +536,7 @@ namespace SummarizeTest
                     consoleThread.Join();
 
                     var traceFiles = Directory.GetFiles(tempPath, "trace*.*").Where(s => s.EndsWith(".xml") || s.EndsWith(".json")).ToArray();
-                    if (traceFiles.Length == 0)
+                    if (process.ExitCode == 0 && traceFiles.Length == 0)
                     {
                         if (!traceToStdout)
                         {
