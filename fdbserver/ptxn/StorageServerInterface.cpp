@@ -23,7 +23,11 @@
 namespace ptxn {
 
 void StorageServerInterfaceBase::initEndpointsImpl(std::vector<ReceiverPriorityPair>&& receivers) {
-	FlowTransport::transport().addEndpoints(receivers);
+	// FIXME addEndpoints MUST accept at least one receiver, however at this stage PassivelyReceive interface has no
+	// receivers.
+	if (!receivers.empty()) {
+		FlowTransport::transport().addEndpoints(receivers);
+	}
 }
 
 void StorageServerInterface_ActivelyPull::initEndpoints() {

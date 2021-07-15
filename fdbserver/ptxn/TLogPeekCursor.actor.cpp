@@ -75,10 +75,11 @@ struct PeekRemoteContext {
 	                  const std::vector<TLogInterfaceBase*>& pInterfaces_,
 	                  SubsequencedMessageDeserializer* pDeserializer_,
 	                  SubsequencedMessageDeserializer::iterator* pDeserializerIterator_,
-					  Arena* pWorkArena_,
+	                  Arena* pWorkArena_,
 	                  Arena* pAttachArena_ = nullptr)
 	  : debugID(debugID_), storageTeamID(storageTeamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
-	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pWorkArena(pWorkArena_), pAttachArena(pAttachArena_) {
+	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pWorkArena(pWorkArena_),
+	    pAttachArena(pAttachArena_) {
 
 		for (const auto pTLogInterface : pTLogInterfaces) {
 			ASSERT(pTLogInterface != nullptr);
@@ -209,7 +210,7 @@ Future<bool> StorageTeamPeekCursor::remoteMoreAvailableImpl() {
 	                          pTLogInterfaces,
 	                          &deserializer,
 	                          &deserializerIter,
-							  &workArena,
+	                          &workArena,
 	                          pAttachArena);
 
 	return peekRemote(context);
@@ -227,6 +228,10 @@ bool StorageTeamPeekCursor::hasRemainingImpl() const {
 	return deserializerIter != deserializer.end();
 }
 
+//////////////////////////////////////////////////////////////////////////////////
+// ServerPeekCursor used for demo
+//////////////////////////////////////////////////////////////////////////////////
+
 ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> const& interf,
                                    Tag tag,
                                    StorageTeamID storageTeamId,
@@ -238,6 +243,7 @@ ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInte
     rd(results.arena, results.data, Unversioned()), randomID(deterministicRandom()->randomUniqueID()), poppedVersion(0),
     returnIfBlocked(returnIfBlocked), sequence(0), onlySpilled(false), parallelGetMore(parallelGetMore), lastReset(0),
     slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void()) {
+
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	//TraceEvent("SPC_Starting", randomID).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).backtrace();
@@ -256,6 +262,7 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
     randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false),
     sequence(0), onlySpilled(false), parallelGetMore(false), lastReset(0), slowReplies(0), fastReplies(0),
     unknownReplies(0), resetCheck(Void()) {
+
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
@@ -295,32 +302,38 @@ void ServerPeekCursor::nextMessage() {
 		hasMsg = false;
 		return;
 	}
-	if (*(int32_t*)rd.peekBytes(4) == VERSION_HEADER) {
-		// A version
-		int32_t dummy;
-		Version ver;
-		rd >> dummy >> ver;
-
-		//TraceEvent("SPC_ProcessSeq", randomID).detail("MessageVersion", messageVersion.toString()).detail("Ver", ver).detail("Tag", tag.toString());
-		// ASSERT( ver >= messageVersion.version );
-
-		messageVersion.reset(ver);
-
-		if (messageVersion >= end) {
-			messageVersion = end;
+	if (messageIndexInCurrentVersion >= numMessagesInCurrentVersion) {
+		// Read the version header
+		details::SubsequencedItemsHeader sih;
+		rd >> sih;
+		if (sih.version >= end.version) {
+			messageVersion.reset(sih.version);
 			hasMsg = false;
+			numMessagesInCurrentVersion = 0;
+			messageIndexInCurrentVersion = 0;
 			return;
 		}
-		ASSERT(!rd.empty());
+		messageVersion.reset(sih.version);
+		hasMsg = sih.numItems > 0;
+		numMessagesInCurrentVersion = sih.numItems;
+		messageIndexInCurrentVersion = 0;
+		if (!hasMsg) {
+			// Move to next section
+			nextMessage();
+		}
 	}
 
-	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
-	DEBUG_TAGS_AND_MESSAGE("ServerPeekCursor", messageVersion.version, messageAndTags.getRawMessage())
-	    .detail("CursorID", this->randomID);
-	// Rewind and consume the header so that reader() starts from the message.
-	rd.rewind();
-	rd.readBytes(messageAndTags.getHeaderSize());
+	Subsequence subsequence;
+	rd >> subsequence;
+	messageVersion.sub = subsequence;
 	hasMsg = true;
+	++messageIndexInCurrentVersion;
+
+	std::cout << "Extract version: " << messageVersion.toString() << " (" << messageIndexInCurrentVersion << "/"
+	          << numMessagesInCurrentVersion << ")" << std::endl;
+
+	// StorageServer.actor.cpp will directly read message from ArenaReader.
+
 	//TraceEvent("SPC_NextMessageB", randomID).detail("MessageVersion", messageVersion.toString());
 }
 
@@ -332,6 +345,7 @@ StringRef ServerPeekCursor::getMessage() {
 }
 
 StringRef ServerPeekCursor::getMessageWithTags() {
+	ASSERT(false);
 	StringRef rawMessage = messageAndTags.getRawMessage();
 	rd.readBytes(rawMessage.size() - messageAndTags.getHeaderSize()); // Consumes the message.
 	return rawMessage;
@@ -612,5 +626,9 @@ Optional<UID> ServerPeekCursor::getCurrentPeekLocation() const {
 Version ServerPeekCursor::popped() const {
 	return poppedVersion;
 }
+
+//////////////////////////////////////////////////////////////////////////////////
+// ServerPeekCursor used for demo -- end
+//////////////////////////////////////////////////////////////////////////////////
 
 } // namespace ptxn

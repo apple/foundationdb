@@ -127,9 +127,9 @@ class StorageTeamPeekCursor : public PeekCursorBase {
 	SubsequencedMessageDeserializer deserializer;
 	SubsequencedMessageDeserializer::iterator deserializerIter;
 
-	// When the cursor checks remoteMoreAvailable, it depends on an ACTOR which accepts TLogPeekReply. TLogPeekReply will
-	// include an Arena and a StringRef, representing serialized data. We need to add a reference to the Arena so it will
-	// not be GCed after the ACTOR terminates.
+	// When the cursor checks remoteMoreAvailable, it depends on an ACTOR which accepts TLogPeekReply. TLogPeekReply
+	// will include an Arena and a StringRef, representing serialized data. We need to add a reference to the Arena so
+	// it will not be GCed after the ACTOR terminates.
 	Arena workArena;
 
 	// Returns the begin verion for the cursor. The cursor will start from the begin version.
@@ -170,12 +170,16 @@ protected:
 	virtual bool hasRemainingImpl() const override;
 };
 
+//////////////////////////////////////////////////////////////////////////////////
+// ServerPeekCursor used for demo
+//////////////////////////////////////////////////////////////////////////////////
+
 struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<ServerPeekCursor> {
 	Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> interf;
 	const Tag tag;
 	const StorageTeamID storageTeamId;
 
-	TLogPeekReply results;
+	ptxn::TLogPeekReply results;
 	ArenaReader rd;
 	LogMessageVersion messageVersion, end;
 	Version poppedVersion;
@@ -185,10 +189,13 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	UID randomID; // TODO: figure out what's this
 	bool returnIfBlocked;
 
+	int numMessagesInCurrentVersion = 0;
+	int messageIndexInCurrentVersion = 0;
+
 	bool onlySpilled;
 	bool parallelGetMore;
 	int sequence;
-	Deque<Future<TLogPeekReply>> futureResults;
+	Deque<Future<ptxn::TLogPeekReply>> futureResults;
 	Future<Void> interfaceChanged;
 
 	double lastReset;
@@ -239,6 +246,10 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 
 	Version getMaxKnownVersion() const override { return results.maxKnownVersion; }
 };
+
+//////////////////////////////////////////////////////////////////////////////////
+// ServerPeekCursor used for demo -- end
+//////////////////////////////////////////////////////////////////////////////////
 
 } // namespace ptxn
 
