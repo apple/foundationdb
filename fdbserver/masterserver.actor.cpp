@@ -273,11 +273,12 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	  : dbgid(myInterface.id()), myInterface(myInterface), dbInfo(dbInfo), cstate(coordinators, addActor, dbgid),
 	    coordinators(coordinators), clusterController(clusterController), dbId(dbId), forceRecovery(forceRecovery),
 	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), neverCreated(false),
-	    lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), prevTLogVersion(invalidVersion), databaseLocked(false),
-	    minKnownCommittedVersion(invalidVersion), recoveryTransactionVersion(invalidVersion), lastCommitTime(0),
-	    registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9),
-	    addActor(addActor), hasConfiguration(false), recruitmentStalled(makeReference<AsyncVar<bool>>(false)),
-	    cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+	    lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), prevTLogVersion(invalidVersion),
+	    databaseLocked(false), minKnownCommittedVersion(invalidVersion), recoveryTransactionVersion(invalidVersion),
+	    lastCommitTime(0), registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr),
+	    memoryLimit(2e9), addActor(addActor), hasConfiguration(false),
+	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), cc("Master", dbgid.toString()),
+	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
@@ -1225,6 +1226,10 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
+		// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
+		self->ssVersionVector.setVersions(req.writtenTags.get(), req.version);
+	}
 	if (req.version > self->liveCommittedVersion.get()) {
 		self->databaseLocked = req.locked;
 		self->proxyMetadataVersion = req.metadataVersion;
@@ -1232,13 +1237,6 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 		self->liveCommittedVersion.set(req.version);
 	}
 	++self->reportLiveCommittedVersionRequests;
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
-		// NB: this if-condition is not needed after wait-for-prev is ported to this branch
-		if (req.version > self->ssVersionVector.maxVersion) {
-			// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-			self->ssVersionVector.setVersions(req.writtenTags.get(), req.version);
-		}
-	}
 }
 
 ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
@@ -1250,7 +1248,7 @@ ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVer
 
 ACTOR Future<Void> waitForTLogPrev(Reference<MasterData> self, GetTLogPrevCommitVersionRequest req) {
 	// TraceEvent("WaitForTLogPrev").detail("Prev",req.prev).detail("CommitVersion",req.commitVersion).detail("PrevTLogVersion",self->prevTLogVersion.get());
-	if (req.prev) {
+	if (self->prevTLogVersion.get() != -1) {
 		wait(self->prevTLogVersion.whenAtLeast(req.prev));
 	}
 
@@ -1302,7 +1300,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			         waitNext(self->myInterface.getTLogPrevCommitVersion.getFuture())) {
 				self->addActor.send(waitForTLogPrev(self, req));
 			}
-                }
+		}
 	}
 }
 
@@ -1938,7 +1936,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
 	                                                     // window of the resolver(s)
 
-	// resize the previous commit version vector to the number of tlogs.
+	// resize the TPCV vector to the number of tlogs and initialize to first transaction
 	int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
 	self->tpcvVector.resize(1 + numLogs, 0);
 
@@ -2081,7 +2079,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 						wait(delay(5));
 					throw worker_removed();
 				}
-				// resize the previous commit version vector to the number of tlogs.
+				// resize the TPCV vector to the number of tlogs and initialize to first transaction
 				int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
 				self->tpcvVector.resize(1 + numLogs, 0);
 			}
