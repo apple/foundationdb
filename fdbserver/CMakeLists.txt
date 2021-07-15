@@ -139,6 +139,8 @@ set(FDBSERVER_SRCS
   ptxn/TLogPeekCursor.actor.h
   ptxn/TLogServer.actor.cpp
 
+  ptxn/test/CommitUtils.cpp
+  ptxn/test/CommitUtils.h
   ptxn/test/Driver.actor.cpp
   ptxn/test/Driver.h
   ptxn/test/FakeProxy.actor.cpp
@@ -157,6 +159,7 @@ set(FDBSERVER_SRCS
   ptxn/test/TestSerialization.cpp
   ptxn/test/TestTLogPeek.actor.cpp
   ptxn/test/TestTLogPeek.h
+  ptxn/test/TestTLogServer.actor.cpp
   ptxn/test/Utils.cpp
   ptxn/test/Utils.h
 

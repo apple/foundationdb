@@ -40,7 +40,39 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/run_tlog_server'
+    testsMatching = '/fdbserver/ptxn/test/peek_tlog_server'
+
+    numProxies = 5
+    numTLogs = 2
+    numStorageTeams = 40
+    numTLogGroups = 7
+    skipCommitValidation = 1
+    numCommits = 50
+
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 4: Multiple Commit and Peek'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/commit_peek'
+
+    numTLogs = 1
+    numStorageTeams = 40
+    numTLogGroups = 7
+    numCommits = 50
+
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 5: Run storage server'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/run_storage_server'
 
     numProxies = 5
     numTLogs = 2

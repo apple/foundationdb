@@ -120,6 +120,7 @@ Reference<ILogSystem::IPeekCursor> MockLogSystem::peek(UID dbgid,
 Reference<ILogSystem::IPeekCursor> MockLogSystem::peekSingle(UID dbgid,
                                                              Version begin,
                                                              Tag tag,
+                                                             Optional<ptxn::StorageTeamID> storageTeam,
                                                              std::vector<std::pair<Version, Tag>> history) {
 	logMethodName(__func__);
 	return cursor;

@@ -60,6 +60,7 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	Reference<IPeekCursor> peekSingle(UID dbgid,
 	                                  Version begin,
 	                                  Tag tag,
+	                                  Optional<ptxn::StorageTeamID> storageTeam,
 	                                  std::vector<std::pair<Version, Tag>> history) final;
 	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) final;
 	Reference<IPeekCursor> peekTxs(UID dbgid,

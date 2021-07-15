@@ -768,6 +768,7 @@ struct ILogSystem {
 	    UID dbgid,
 	    Version begin,
 	    Tag tag,
+	    Optional<ptxn::StorageTeamID> storageTeam = Optional<ptxn::StorageTeamID>(),
 	    std::vector<std::pair<Version, Tag>> history = std::vector<std::pair<Version, Tag>>()) = 0;
 	// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is
 	// correspondingly less expensive)

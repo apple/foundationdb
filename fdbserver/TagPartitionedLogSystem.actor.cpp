@@ -30,6 +30,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include <fdbserver/ptxn/TLogPeekCursor.actor.h>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<TLogCommitReply>> replies) {
@@ -1192,7 +1193,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Reference<IPeekCursor> peekSingle(UID dbgid,
 	                                  Version begin,
 	                                  Tag tag,
+	                                  Optional<ptxn::StorageTeamID> storageTeam,
 	                                  std::vector<std::pair<Version, Tag>> history) final {
+		// TODO: look up tlog interface by storage team id, supported by ss team - tlog mapping
+		if (storageTeam.present()) {
+			return makeReference<ptxn::ServerPeekCursor>(
+			    Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(),
+			    tag,
+			    storageTeam.get(),
+			    begin,
+			    invalidVersion,
+			    false,
+			    false);
+		}
+
 		while (history.size() && begin >= history.back().first) {
 			history.pop_back();
 		}
