@@ -102,13 +102,12 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	context->numTLogGroups = options.numTLogGroups;
 	for (int i = 0; i < context->numTLogGroups; ++i) {
 		context->tLogGroups.push_back(TLogGroup(randomUID()));
-		context->tLogGroupLeaders[context->tLogGroups.back().logGroupId] =
-		    context->tLogInterfaces[deterministicRandom()->randomInt(0, context->numTLogs)];
+		context->tLogGroupLeaders[context->tLogGroups.back().logGroupId] = randomlyPick(context->tLogInterfaces);
 	}
 
 	// Prepare StorageServerInterfaces
 	context->numStorageServers = options.numStorageServers;
-	for (int i = 0; i < context->numTLogs; ++i) {
+	for (int i = 0; i < context->numStorageServers; ++i) {
 		context->storageServerInterfaces.push_back(getNewStorageServerInterface(context->messageTransferModel));
 		context->storageServerInterfaces.back()->initEndpoints();
 	}
