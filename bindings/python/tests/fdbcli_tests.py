@@ -332,33 +332,63 @@ def transaction(logger):
     output7 = run_fdbcli_command('get', 'key')
     assert output7 == "`key': not found"
 
-@enable_logging(logging.DEBUG)
-def coordinator(logger):
-    output1 = run_fdbcli_command('coordinators')
-    logger.debug(output1)
-    output2 = run_fdbcli_command('status', 'details')
-    logger.debug(output2)
+def get_fdb_process_addresses():
+    # get all processes' network addresses
+    output = run_fdbcli_command('kill')
+    # except the first line, each line is one process
+    addresses = output.split('\n')[1:]
+    assert len(addresses) == process_number
+    return addresses
 
-@enable_logging(logging.DEBUG)
+@enable_logging()
+def coordinators(logger):
+    # we should only have one coordinator for now
+    output1 = run_fdbcli_command('coordinators')
+    assert len(output1.split('\n')) > 2
+    cluster_description = output1.split('\n')[0].split(': ')[-1]
+    logger.debug("Cluster description: {}".format(cluster_description))
+    coordinators = output1.split('\n')[1].split(': ')[-1]
+    # verify the coordinator
+    coordinator_list = get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')
+    assert len(coordinator_list) == 1
+    assert coordinator_list[0]['address'] == coordinators
+    # verify the cluster description
+    assert get_value_from_status_json(True, 'cluster', 'connection_string').startswith('{}:'.format(cluster_description))
+    addresses = get_fdb_process_addresses()
+    # set all 5 processes as coordinators and update the cluster description
+    new_cluster_description = 'a_simple_description'
+    run_fdbcli_command('coordinators', *addresses, 'description={}'.format(new_cluster_description))
+    # verify now we have 5 coordinators and the description is updated
+    output2 = run_fdbcli_command('coordinators')
+    assert output2.split('\n')[0].split(': ')[-1] == new_cluster_description
+    assert output2.split('\n')[1] == 'Cluster coordinators ({}): {}'.format(5, ','.join(addresses))
+    # auto change should go back to 1 coordinator
+    run_fdbcli_command('coordinators', 'auto')
+    assert len(get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')) == 1
+
+@enable_logging()
 def exclude(logger):
     # get all processes' network addresses
-    output1 = run_fdbcli_command('kill')
-    # except the first line, each line is one process
-    addresses = output1.split('\n')[1:]
-    assert len(addresses) == process_number
+    addresses = get_fdb_process_addresses()
     logger.debug("Cluster processes: {}".format(' '.join(addresses)))
     # There should be no excluded process for now
     no_excluded_process_output = 'There are currently no servers or localities excluded from the database.'
-    output2 = run_fdbcli_command('exclude')
-    assert no_excluded_process_output in output2
+    output1 = run_fdbcli_command('exclude')
+    assert no_excluded_process_output in output1
     # randomly pick one and exclude the process
     excluded_address = random.choice(addresses)
-    logger.debug("Excluding process: {}".format(excluded_address))
-    temp = run_fdbcli_command('exclude', excluded_address)
-    output3 = run_fdbcli_command('exclude')
+    # sometimes we need to retry the exclude
+    while True:
+        logger.debug("Excluding process: {}".format(excluded_address))
+        error_message = run_fdbcli_command_and_get_error('exclude', excluded_address)
+        if not error_message:
+            break
+        logger.debug("Retry exclude after 1 second")
+        time.sleep(1)
+    output2 = run_fdbcli_command('exclude')
     # logger.debug(output3)
-    assert 'There are currently 1 servers or localities being excluded from the database' in output3
-    assert excluded_address in output3
+    assert 'There are currently 1 servers or localities being excluded from the database' in output2
+    assert excluded_address in output2
     run_fdbcli_command('include', excluded_address)
     # check the include is successful
     output4 = run_fdbcli_command('exclude')
@@ -385,8 +415,7 @@ if __name__ == '__main__':
         transaction()
     else:
         assert process_number > 1, "Process number should be positive"
-        # wait for cluster to be ready
-        time.sleep(5)
+        coordinators()
         exclude()
 
     
