@@ -232,6 +232,7 @@ public:
 	//	1 = "memory"
 	//	2 = "memory-radixtree-beta"
 	//	3 = "ssd-redwood-experimental"
+	//	4 = "ssd-rocksdb-experimental"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
 	// Set the maximum TLog version that can be selected for a test
@@ -347,8 +348,8 @@ ACTOR Future<Void> runBackup(Reference<ClusterConnectionFile> connFile) {
 		Database cx = Database::createDatabase(connFile, -1);
 
 		state FileBackupAgent fileAgent;
-		state double backupPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-		agentFutures.push_back(fileAgent.run(cx, &backupPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
+		agentFutures.push_back(fileAgent.run(
+		    cx, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
 		while (g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) {
 			wait(delay(1.0));
@@ -383,11 +384,10 @@ ACTOR Future<Void> runDr(Reference<ClusterConnectionFile> connFile) {
 		state DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
 		state DatabaseBackupAgent extraAgent = DatabaseBackupAgent(extraDB);
 
-		state double dr1PollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-		state double dr2PollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
+		auto drPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
 
-		agentFutures.push_back(extraAgent.run(cx, &dr1PollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
-		agentFutures.push_back(dbAgent.run(extraDB, &dr2PollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
+		agentFutures.push_back(extraAgent.run(cx, drPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
+		agentFutures.push_back(dbAgent.run(extraDB, drPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
 		while (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
 			wait(delay(1.0));
@@ -1253,7 +1253,7 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 
 // Sets storage engine based on testConfig details
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
-	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	int storage_engine_type = deterministicRandom()->randomInt(0, 5);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
@@ -1261,7 +1261,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		while (std::find(testConfig.storageEngineExcludeTypes.begin(),
 		                 testConfig.storageEngineExcludeTypes.end(),
 		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
-			storage_engine_type = deterministicRandom()->randomInt(0, 4);
+			storage_engine_type = deterministicRandom()->randomInt(0, 5);
 		}
 	}
 
@@ -1284,6 +1284,16 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	case 3: {
 		TEST(true); // Simulated cluster using redwood storage engine
 		set_config("ssd-redwood-experimental");
+		break;
+	}
+	case 4: {
+		TEST(true); // Simulated cluster using RocksDB storage engine
+		set_config("ssd-rocksdb-experimental");
+		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
+		// background threads.
+		TraceEvent(SevWarn, "RocksDBNonDeterminism")
+		    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
+		noUnseed = true;
 		break;
 	}
 	default:

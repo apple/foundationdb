@@ -157,11 +157,11 @@ public:
 	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	                       Future<Void> clientInfoMonitor,
 	                       LocalityData clientLocality,
-	                       bool enableLocalityLoadBalance,
+	                       EnableLocalityLoadBalance,
 	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
-	                       bool lockAware = false,
+	                       LockAware = LockAware::FALSE,
 	                       int apiVersion = Database::API_VERSION_LATEST,
-	                       bool switchable = false);
+	                       IsSwitchable = IsSwitchable::FALSE);
 
 	~DatabaseContext();
 
@@ -180,13 +180,13 @@ public:
 		                                    switchable));
 	}
 
-	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, bool isBackward = false);
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::FALSE);
 	bool getCachedLocations(const KeyRangeRef&,
 	                        vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
 	                        int limit,
-	                        bool reverse);
+	                        Reverse reverse);
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
-	void invalidateCache(const KeyRef&, bool isBackward = false);
+	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::FALSE);
 	void invalidateCache(const KeyRangeRef&);
 
 	bool sampleReadTags() const;
@@ -217,7 +217,7 @@ public:
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
 	Error deferredError;
-	bool lockAware;
+	LockAware lockAware{ LockAware::FALSE };
 
 	bool isError() const { return deferredError.code() != invalid_error_code; }
 
@@ -242,7 +242,7 @@ public:
 	// new cluster.
 	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
 	Future<Void> connectionFileChanged();
-	bool switchable = false;
+	IsSwitchable switchable{ false };
 
 	// Management API, Attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
@@ -259,11 +259,11 @@ public:
 	                         Future<Void> clientInfoMonitor,
 	                         TaskPriority taskID,
 	                         LocalityData const& clientLocality,
-	                         bool enableLocalityLoadBalance,
-	                         bool lockAware,
-	                         bool internal = true,
+	                         EnableLocalityLoadBalance,
+	                         LockAware,
+	                         IsInternal = IsInternal::TRUE,
 	                         int apiVersion = Database::API_VERSION_LATEST,
-	                         bool switchable = false);
+	                         IsSwitchable = IsSwitchable::FALSE);
 
 	explicit DatabaseContext(const Error& err);
 
@@ -282,7 +282,7 @@ public:
 	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
-	bool enableLocalityLoadBalance;
+	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::FALSE };
 
 	struct VersionRequest {
 		SpanID spanContext;
@@ -329,7 +329,7 @@ public:
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 
 	UID dbId;
-	bool internal; // Only contexts created through the C client and fdbcli are non-internal
+	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
 
 	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
 

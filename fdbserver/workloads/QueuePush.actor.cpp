@@ -115,12 +115,12 @@ struct QueuePushWorkload : TestWorkload {
 					state Key lastKey;
 
 					if (self->forward) {
-						Key _lastKey = wait(tr.getKey(lastLessThan(self->endingKey), true));
+						Key _lastKey = wait(tr.getKey(lastLessThan(self->endingKey), Snapshot::TRUE));
 						lastKey = _lastKey;
 						if (lastKey == StringRef())
 							lastKey = self->startingKey;
 					} else {
-						Key _lastKey = wait(tr.getKey(firstGreaterThan(self->startingKey), true));
+						Key _lastKey = wait(tr.getKey(firstGreaterThan(self->startingKey), Snapshot::TRUE));
 						lastKey = _lastKey;
 						if (!normalKeys.contains(lastKey))
 							lastKey = self->endingKey;

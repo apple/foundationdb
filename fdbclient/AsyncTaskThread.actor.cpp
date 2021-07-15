@@ -83,6 +83,6 @@ TEST_CASE("/asynctaskthread/add") {
 		clients.push_back(asyncTaskThreadClient(&asyncTaskThread, &sum, 100));
 	}
 	wait(waitForAll(clients));
-	ASSERT(sum == 1000);
+	ASSERT_EQ(sum, 1000);
 	return Void();
 }
