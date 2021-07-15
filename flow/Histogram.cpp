@@ -100,7 +100,7 @@ const char* const Histogram::UnitToStringMapper[] = { "microseconds",
 	                                                  "bytes",
 	                                                  "bytes_per_second",
 	                                                  "percentage",
-	                                                  "record_counter" };
+	                                                  "count" };
 
 void Histogram::writeToLog() {
 	bool active = false;
@@ -132,7 +132,7 @@ void Histogram::writeToLog() {
 			case Unit::percentage:
 				e.detail(format("LessThan%f", (i + 1) * 0.04), buckets[i]);
 				break;
-			case Unit::record_counter:
+			case Unit::count:
 				e.detail(format("LessThan%f", (i + 1) * ((upperBound - lowerBound) / 31.0)), buckets[i]);
 				break;
 			default:

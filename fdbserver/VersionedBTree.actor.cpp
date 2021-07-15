@@ -1413,12 +1413,12 @@ struct RedwoodMetrics {
 				                                                Histogram::Unit::percentage);
 				buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"),
 				                                               LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                               Histogram::Unit::record_counter,
+				                                               Histogram::Unit::count,
 				                                               0,
 				                                               maxRecordCount);
 				modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"),
 				                                                LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                                Histogram::Unit::record_counter,
+				                                                Histogram::Unit::count,
 				                                                0,
 				                                                maxRecordCount);
 			}

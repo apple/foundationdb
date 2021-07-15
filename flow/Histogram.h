@@ -59,7 +59,7 @@ HistogramRegistry& GetHistogramRegistry();
  */
 class Histogram final : public ReferenceCounted<Histogram> {
 public:
-	enum class Unit { microseconds = 0, bytes, bytes_per_second, percentage, record_counter, MAXHISTOGRAMUNIT };
+	enum class Unit { microseconds = 0, bytes, bytes_per_second, percentage, count, MAXHISTOGRAMUNIT };
 	static const char* const UnitToStringMapper[];
 
 private:
