@@ -1,8 +1,7 @@
 [configuration]
 logAntiQuorum = 0
-storageEngineExcludeTypes = [4]
 
-[[test]]
+[[test]] 
 testTitle = 'SubmitBackup'
 simBackupAgents = 'BackupToFile'
 clearAfterTest = false
