@@ -252,9 +252,10 @@ public:
 	// Waits for a restore tag to reach a final (stable) state.
 	Future<ERestoreState> waitRestore(Database cx, Key tagName, Verbose);
 
-	// Get a string describing the status of a tag
-	Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName);
-	Future<std::string> restoreStatus(Database cx, Key tagName) {
+	// Get a string describing the status of a tag.
+	// An empty tag name indicates all tags should be described
+	Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Optional<Key> tagName);
+	Future<std::string> restoreStatus(Database cx, Optional<Key> tagName) {
 		return runRYWTransaction(cx,
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return restoreStatus(tr, tagName); });
 	}

@@ -3953,17 +3953,17 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 StringRef RestoreDispatchTaskFunc::name = LiteralStringRef("restore_dispatch");
 REGISTER_TASKFUNC(RestoreDispatchTaskFunc);
 
-ACTOR Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName) {
+ACTOR Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Optional<Key> tagName) {
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state std::vector<KeyBackedTag> tags;
-	if (tagName.size() == 0) {
+	if (!tagName.present()) {
 		std::vector<KeyBackedTag> t = wait(getAllRestoreTags(tr));
 		tags = t;
 	} else
-		tags.push_back(makeRestoreTag(tagName.toString()));
+		tags.push_back(makeRestoreTag(tagName.get().toString()));
 
 	state std::string result;
 	state int i = 0;
@@ -5648,7 +5648,7 @@ Future<ERestoreState> FileBackupAgent::abortRestore(Database cx, Key tagName) {
 	return fileBackup::abortRestore(cx, tagName);
 }
 
-Future<std::string> FileBackupAgent::restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName) {
+Future<std::string> FileBackupAgent::restoreStatus(Reference<ReadYourWritesTransaction> tr, Optional<Key> tagName) {
 	return fileBackup::restoreStatus(tr, tagName);
 }
 
