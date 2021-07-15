@@ -45,7 +45,7 @@ static HistogramRegistry* globalHistograms = nullptr;
 #pragma region HistogramRegistry
 
 HistogramRegistry& GetHistogramRegistry() {
-	ISimulator::ProcessInfo* info = g_simulator.getCurrentProcess();
+	ISimulator::ProcessInfo* info = g_network && g_network->isSimulated() ? g_simulator.getCurrentProcess() : nullptr;
 
 	if (info) {
 		// in simulator; scope histograms to simulated process

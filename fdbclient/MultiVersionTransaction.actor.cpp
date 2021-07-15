@@ -113,7 +113,7 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
 	                                                 end.offset,
 	                                                 limits.rows,
 	                                                 limits.bytes,
-	                                                 FDBStreamingModes::EXACT,
+	                                                 FDB_STREAMING_MODE_EXACT,
 	                                                 0,
 	                                                 snapshot,
 	                                                 reverse);
@@ -207,12 +207,12 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
 
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	throwIfError(api->transactionAddConflictRange(
-	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDBConflictRangeTypes::READ));
+	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ));
 }
 
 void DLTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
 	api->transactionAtomicOp(
-	    tr, key.begin(), key.size(), value.begin(), value.size(), (FDBMutationTypes::Option)operationType);
+	    tr, key.begin(), key.size(), value.begin(), value.size(), static_cast<FDBMutationType>(operationType));
 }
 
 void DLTransaction::set(const KeyRef& key, const ValueRef& value) {
@@ -239,7 +239,7 @@ ThreadFuture<Void> DLTransaction::watch(const KeyRef& key) {
 
 void DLTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
 	throwIfError(api->transactionAddConflictRange(
-	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDBConflictRangeTypes::WRITE));
+	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_WRITE));
 }
 
 ThreadFuture<Void> DLTransaction::commit() {
@@ -269,8 +269,10 @@ ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 }
 
 void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->transactionSetOption(
-	    tr, option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
+	throwIfError(api->transactionSetOption(tr,
+	                                       static_cast<FDBTransactionOption>(option),
+	                                       value.present() ? value.get().begin() : nullptr,
+	                                       value.present() ? value.get().size() : 0));
 }
 
 ThreadFuture<Void> DLTransaction::onError(Error const& e) {
@@ -309,8 +311,10 @@ Reference<ITransaction> DLDatabase::createTransaction() {
 }
 
 void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->databaseSetOption(
-	    db, option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
+	throwIfError(api->databaseSetOption(db,
+	                                    static_cast<FDBDatabaseOption>(option),
+	                                    value.present() ? value.get().begin() : nullptr,
+	                                    value.present() ? value.get().size() : 0));
 }
 
 ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
@@ -504,7 +508,7 @@ void DLApi::selectApiVersion(int apiVersion) {
 
 	init();
 	throwIfError(api->selectApiVersion(apiVersion, headerVersion));
-	throwIfError(api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT, nullptr, 0));
+	throwIfError(api->setNetworkOption(static_cast<FDBNetworkOption>(FDBNetworkOptions::EXTERNAL_CLIENT), nullptr, 0));
 }
 
 const char* DLApi::getClientVersion() {
@@ -516,8 +520,9 @@ const char* DLApi::getClientVersion() {
 }
 
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->setNetworkOption(
-	    option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
+	throwIfError(api->setNetworkOption(static_cast<FDBNetworkOption>(option),
+	                                   value.present() ? value.get().begin() : nullptr,
+	                                   value.present() ? value.get().size() : 0));
 }
 
 void DLApi::setupNetwork() {

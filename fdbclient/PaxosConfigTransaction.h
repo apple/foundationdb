@@ -33,8 +33,9 @@ class PaxosConfigTransaction final : public IConfigTransaction, public FastAlloc
 	PaxosConfigTransactionImpl& impl() { return *_impl; }
 
 public:
-	PaxosConfigTransaction(Database const&);
+	PaxosConfigTransaction();
 	~PaxosConfigTransaction();
+	void setDatabase(Database const&) override;
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
