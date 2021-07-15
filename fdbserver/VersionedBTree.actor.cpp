@@ -5641,7 +5641,7 @@ private:
 			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
-		state Reference<const ArenaPage> page = wait(readPage(snapshot, rootID, height - 1, false, false));
+		state Reference<const ArenaPage> page = wait(readPage(snapshot, rootID, height - 1, false, true));
 		state Version writeVersion = self->getLastCommittedVersion() + 1;
 
 		// If the page exists in the cache, it must be copied before modification.
