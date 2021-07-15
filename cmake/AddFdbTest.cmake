@@ -398,7 +398,7 @@ endfunction()
 # Creates a single cluster before running the specified command (usually a ctest test)
 function(add_fdbclient_test)
   set(options DISABLED ENABLED)
-  set(oneValueArgs NAME PROCESS_NUMBER)
+  set(oneValueArgs NAME PROCESS_NUMBER TEST_TIMEOUT)
   set(multiValueArgs COMMAND)
   cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   if(OPEN_FOR_IDE)
@@ -428,8 +428,12 @@ function(add_fdbclient_test)
             --
             ${T_COMMAND})
   endif()
-  
-  set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+  if (T_TEST_TIMEOUT)
+    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
+  else()
+    # default timeout
+    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+  endif()
   set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
 endfunction()
 
