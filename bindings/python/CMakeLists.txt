@@ -86,6 +86,7 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   add_fdbclient_test(
     NAME multi_process_fdbcli_tests
     PROCESS_NUMBER 5
+    TEST_TIMEOUT 120
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
             ${CMAKE_BINARY_DIR}/bin/fdbcli
             @CLUSTER_FILE@

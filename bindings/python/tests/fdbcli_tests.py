@@ -339,6 +339,31 @@ def coordinator(logger):
     output2 = run_fdbcli_command('status', 'details')
     logger.debug(output2)
 
+@enable_logging(logging.DEBUG)
+def exclude(logger):
+    # get all processes' network addresses
+    output1 = run_fdbcli_command('kill')
+    # except the first line, each line is one process
+    addresses = output1.split('\n')[1:]
+    assert len(addresses) == process_number
+    logger.debug("Cluster processes: {}".format(' '.join(addresses)))
+    # There should be no excluded process for now
+    no_excluded_process_output = 'There are currently no servers or localities excluded from the database.'
+    output2 = run_fdbcli_command('exclude')
+    assert no_excluded_process_output in output2
+    # randomly pick one and exclude the process
+    excluded_address = random.choice(addresses)
+    logger.debug("Excluding process: {}".format(excluded_address))
+    temp = run_fdbcli_command('exclude', excluded_address)
+    output3 = run_fdbcli_command('exclude')
+    # logger.debug(output3)
+    assert 'There are currently 1 servers or localities being excluded from the database' in output3
+    assert excluded_address in output3
+    run_fdbcli_command('include', excluded_address)
+    # check the include is successful
+    output4 = run_fdbcli_command('exclude')
+    assert no_excluded_process_output in output4
+
 if __name__ == '__main__':
     # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>
     assert len(sys.argv) == 4, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <is_multi_process_cluster>"
@@ -360,6 +385,8 @@ if __name__ == '__main__':
         transaction()
     else:
         assert process_number > 1, "Process number should be positive"
-
+        # wait for cluster to be ready
+        time.sleep(5)
+        exclude()
 
     
