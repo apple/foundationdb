@@ -96,7 +96,11 @@ void HistogramRegistry::logReport() {
 
 #pragma region Histogram
 
-const char * const Histogram::UnitToStringMapper[] = { "microseconds", "bytes", "bytes_per_second", "percentage", "record_counter" };
+const char* const Histogram::UnitToStringMapper[] = { "microseconds",
+	                                                  "bytes",
+	                                                  "bytes_per_second",
+	                                                  "percentage",
+	                                                  "record_counter" };
 
 void Histogram::writeToLog() {
 	bool active = false;
@@ -206,7 +210,6 @@ std::string Histogram::drawHistogram() {
 #pragma endregion // Histogram
 
 TEST_CASE("/flow/histogram/smoke_test") {
-
 	{
 		Reference<Histogram> h =
 		    Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);

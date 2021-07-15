@@ -469,8 +469,9 @@ public:
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
-			nextPageReader = waitOrError(queue->pager->readPage(PagerEventReasons::metaData, nonBtreeLevel, nextPageID, true),
-			                             queue->pagerError);
+			nextPageReader =
+			    waitOrError(queue->pager->readPage(PagerEventReasons::metaData, nonBtreeLevel, nextPageID, true),
+			                queue->pagerError);
 		}
 
 		Future<Void> loadExtent() {
@@ -2932,7 +2933,8 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data = wait(self->readPage(PagerEventReasons::metaData, nonBtreeLevel, p.newPageID, false, true));
+			Reference<ArenaPage> data =
+			    wait(self->readPage(PagerEventReasons::metaData, nonBtreeLevel, p.newPageID, false, true));
 
 			// Write the data to the original page so it can be read using its original pageID
 			self->updatePage(PagerEventReasons::metaData, nonBtreeLevel, p.originalPageID, data);
@@ -5323,7 +5325,8 @@ private:
 			state int i = 0;
 			for (; i < pages.size(); ++i) {
 				BTreePage* btPage = (BTreePage*)page->begin();
-				LogicalPageID id = wait(self->m_pager->atomicUpdatePage(btPage->height, oldID[i], pages[i], writeVersion));
+				LogicalPageID id =
+				    wait(self->m_pager->atomicUpdatePage(btPage->height, oldID[i], pages[i], writeVersion));
 				newID[i] = id;
 			}
 		}
@@ -9903,7 +9906,6 @@ TEST_CASE("!/redwood/performance/randomRangeScans") {
 	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000));
 	wait(closeKVS(redwood));
 	printf("\n");
-
 	return Void();
 }
 

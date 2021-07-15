@@ -49,7 +49,6 @@ static const std::string PagerEventReasonsCodes[] = { "Get", "GetR", "GetRPF", "
 
 static const int nonBtreeLevel = 0;
 static const int rootLevel = 1;
-
 static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
