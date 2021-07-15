@@ -1251,7 +1251,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 					// NB: this if-condition is not needed after wait-for-prev is ported to this branch
 					if (req.version > self->ssVersionVector.maxVersion) {
 						// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-						self->ssVersionVector.setVersions(req.writtenTags.get(), req.version);
+						self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
 					}
 				}
 				if (req.version > self->liveCommittedVersion) {
