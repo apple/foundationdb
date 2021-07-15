@@ -53,6 +53,7 @@ struct VersionVector {
 			ASSERT(tag != invalidTag);
 			versions[tag] = version;
 		}
+		maxVersion = version;
 	}
 
 	bool hasVersion(const Tag& tag) const {
@@ -73,24 +74,24 @@ struct VersionVector {
 		maxVersion = invalidVersion;
 	}
 
-	void getDelta(Version version, VersionVector& delta) const {
-		ASSERT(version <= maxVersion);
+	void getDelta(Version refVersion, VersionVector& delta) const {
+		ASSERT(refVersion <= maxVersion);
 
 		delta.clear();
 
-		if (version == maxVersion) {
+		if (refVersion == maxVersion) {
 			return; // rerurn an invalid version vector
 		}
 
-		std::map<Version, std::set<Tag>> versionMap;
-		for (auto& iter : versions) {
-			if (iter.second > version) {
-				versionMap[iter.second].insert(iter.first);
+		std::map<Version, std::set<Tag>> versionMap; // order versions
+		for (const auto& [tag, version] : versions) {
+			if (version > refVersion) {
+				versionMap[version].insert(tag);
 			}
 		}
 
-		for (auto& iter : versionMap) {
-			delta.setVersion(iter.second, iter.first);
+		for (auto& [version, tags] : versionMap) {
+			delta.setVersion(tags, version);
 		}
 	}
 
@@ -101,15 +102,15 @@ struct VersionVector {
 
 		ASSERT(maxVersion < delta.maxVersion);
 
-		std::map<Version, std::set<Tag>> versionMap; // order the versions
-		for (auto& iter : delta.versions) {
+		std::map<Version, std::set<Tag>> versionMap; // order versions
+		for (const auto& [tag, version] : delta.versions) {
 			// @todo remove this assert later
-			ASSERT(iter.second > maxVersion);
-			versionMap[iter.second].insert(iter.first);
+			ASSERT(version > maxVersion);
+			versionMap[version].insert(tag);
 		}
 
-		for (auto& iter : versionMap) {
-			setVersion(iter.second, iter.first);
+		for (auto& [version, tags] : versionMap) {
+			setVersion(tags, version);
 		}
 	}
 

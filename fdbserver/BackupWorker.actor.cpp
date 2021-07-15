@@ -431,6 +431,7 @@ struct BackupData {
 			GetReadVersionRequest request(span.context,
 			                              0,
 			                              TransactionPriority::DEFAULT,
+			                              invalidVersion,
 			                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onProxiesChanged())) {}
