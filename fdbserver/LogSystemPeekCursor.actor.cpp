@@ -35,7 +35,7 @@ void tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
 	}
 	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(TLogPeekStreamRequest(
 	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max()));
-	TraceEvent(SevDebug, "StreamCreated");
+	TraceEvent(SevDebug, "SPC_StreamCreated", self->randomID);
 }
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
@@ -51,7 +51,11 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterf
     resetCheck(Void()), usePeekStream(SERVER_KNOBS->PEEK_USEING_STREAMING) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
-	//TraceEvent("SPC_Starting", randomID).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).backtrace();
+	TraceEvent("SPC_Starting", randomID)
+	    .detail("Tag", tag.toString())
+	    .detail("Begin", begin)
+	    .detail("End", end)
+	    .backtrace();
 }
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
@@ -316,29 +320,34 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 
 ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, TaskPriority taskID) {
 	if (!self->interf || self->isExhausted()) {
+		self->peekReplyStream.reset();
 		if (self->hasMessage())
 			return Void();
 		return Never();
 	}
 
-	tryEstablishPeekStream(self);
 	loop {
 		try {
+			tryEstablishPeekStream(self);
+			state Future<TLogPeekReply> fPeekReply = self->peekReplyStream.present()
+			                                             ? map(waitAndForward(self->peekReplyStream.get().getFuture()),
+			                                                   [](const TLogPeekStreamReply& r) { return r.rep; })
+			                                             : Never();
 			choose {
 				when(wait(self->interf->onChange())) {
 					self->onlySpilled = false;
 					self->peekReplyStream.reset();
-					tryEstablishPeekStream(self);
 				}
-				when(TLogPeekStreamReply res =
+				when(TLogPeekReply res =
 				         wait(self->peekReplyStream.present()
-				                  ? brokenPromiseToNever(waitAndForward(self->peekReplyStream.get().getFuture()))
+				                  ? recordRequestMetrics(
+				                        self, self->peekReplyStream.get().getEndpoint().getPrimaryAddress(), fPeekReply)
 				                  : Never())) {
-					updateCursorWithReply(self, res.rep);
+					updateCursorWithReply(self, res);
 					TraceEvent("SPC_GetMoreB", self->randomID)
 					    .detail("Has", self->hasMessage())
-					    .detail("End", res.rep.end)
-					    .detail("Popped", res.rep.popped.present() ? res.rep.popped.get() : 0);
+					    .detail("End", res.end)
+					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
 			}
@@ -388,19 +397,24 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 }
 
 Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
-	//TraceEvent("SPC_GetMore", randomID).detail("HasMessage", hasMessage()).detail("More", !more.isValid() || more.isReady()).detail("MessageVersion", messageVersion.toString()).detail("End", end.toString());
+	TraceEvent("SPC_GetMore", randomID)
+	    .detail("HasMessage", hasMessage())
+	    .detail("More", !more.isValid() || more.isReady())
+	    .detail("MessageVersion", messageVersion.toString())
+	    .detail("End", end.toString());
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		if (usePeekStream && taskID == TaskPriority::TLogPeekReply) {
-			more = serverPeekStreamGetMore(this, taskID);
-		}
-		//        if (parallelGetMore || onlySpilled || futureResults.size()) {
-		//            more = serverPeekParallelGetMore(this, taskID);
-		//        }
-		else {
-			more = serverPeekGetMore(this, taskID);
-		}
+		more = serverPeekStreamGetMore(this, taskID);
+//		if (usePeekStream && taskID == TaskPriority::TLogPeekReply) {
+//			more = serverPeekStreamGetMore(this, taskID);
+//		}
+//      if (parallelGetMore || onlySpilled || futureResults.size()) {
+//          more = serverPeekParallelGetMore(this, taskID);
+//      }
+//		else {
+//			more = serverPeekGetMore(this, taskID);
+//		}
 	}
 	return more;
 }

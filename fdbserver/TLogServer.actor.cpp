@@ -557,6 +557,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	TLogData* tLogData;
 	Promise<Void> recoveryComplete, committingQueue;
 	Version unrecoveredBefore, recoveredAt;
+	int activePeekStreams = 0;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>>
@@ -668,6 +669,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PeekMemoryReserved", [tLogData]() { return tLogData->peekMemoryLimiter.activePermits(); });
 		specialCounter(cc, "PeekMemoryRequestsStalled", [tLogData]() { return tLogData->peekMemoryLimiter.waiters(); });
 		specialCounter(cc, "Generation", [this]() { return this->recoveryCount; });
+		specialCounter(cc, "ActivePeekStreams", [this]() { return this->activePeekStreams; });
 	}
 
 	~LogData() {
@@ -1167,17 +1169,19 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 		}
 
 		uint64_t PoppedVersionLag = logData->persistentDataDurableVersion - logData->queuePoppedVersion;
-		if ( SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
-			(logData->queuePoppedVersion > 0) && //avoid generating massive events at beginning 
-			(tagData->unpoppedRecovered || PoppedVersionLag >= SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { //when recovery or long lag
+		if (SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
+		    (logData->queuePoppedVersion > 0) && // avoid generating massive events at beginning
+		    (tagData->unpoppedRecovered ||
+		     PoppedVersionLag >=
+		         SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { // when recovery or long lag
 			TraceEvent("TLogPopDetails", logData->logId)
-				.detail("Tag", tagData->tag.toString())
-				.detail("UpTo", upTo)
-				.detail("PoppedVersionLag", PoppedVersionLag)
-				.detail("MinPoppedTag", logData->minPoppedTag.toString())
-				.detail("QueuePoppedVersion", logData->queuePoppedVersion)
-				.detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
-				.detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
+			    .detail("Tag", tagData->tag.toString())
+			    .detail("UpTo", upTo)
+			    .detail("PoppedVersionLag", PoppedVersionLag)
+			    .detail("MinPoppedTag", logData->minPoppedTag.toString())
+			    .detail("QueuePoppedVersion", logData->queuePoppedVersion)
+			    .detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
+			    .detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
 		}
 		if (upTo > logData->persistentDataDurableVersion)
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
@@ -1915,6 +1919,7 @@ ACTOR Future<TLogPeekReply> peekTLog(TLogData* self,
 
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
+	logData->activePeekStreams ++;
 	state Version begin = req.begin;
 	state bool onlySpilled = false;
 	if (req.tag.locality == tagLocalityTxs && req.tag.id >= logData->txsTags && logData->txsTags > 0) {
@@ -1929,18 +1934,17 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			req.reply.send(reply);
 			begin = reply.rep.end;
 			onlySpilled = reply.rep.onlySpilled;
-
-			wait(delay(.05, g_network->getCurrentTask()));
+			wait(delay(0, g_network->getCurrentTask()));
 		} catch (Error& e) {
+			logData->activePeekStreams --;
 			if (e.code() == error_code_end_of_stream) {
 				req.reply.sendError(e);
 				return Void();
-			}
-			else if (e.code() == error_code_operation_obsolete) {
+			} else if (e.code() == error_code_operation_obsolete) {
 				// reply stream is cancelled on the client
-			    return Void();
+				return Void();
 			} else {
-					throw;
+				throw;
 			}
 		}
 	}

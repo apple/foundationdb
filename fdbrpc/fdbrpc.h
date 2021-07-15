@@ -277,9 +277,9 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 	using FastAllocated<AcknowledgementReceiver>::operator new;
 	using FastAllocated<AcknowledgementReceiver>::operator delete;
 
-	int64_t bytesSent;
-	int64_t bytesAcknowledged;
-	int64_t bytesLimit;
+	uint64_t bytesSent;
+	uint64_t bytesAcknowledged;
+	uint64_t bytesLimit;
 	Promise<Void> ready;
 	Future<Void> failures;
 
@@ -358,11 +358,19 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 				// send an ack immediately
 				if (acknowledgements.getRawEndpoint().isValid()) {
 					acknowledgements.bytesAcknowledged += message.get().asUnderlyingType().expectedSize();
-					FlowTransport::transport().sendUnreliable(
-					    SerializeSource<ErrorOr<AcknowledgementReply>>(
-					        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
-					    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
-					    false);
+					// int64_t overflow: we need to reset this stream
+					if (acknowledgements.bytesAcknowledged > std::numeric_limits<int64_t>::max()) {
+						FlowTransport::transport().sendUnreliable(
+						    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
+						    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
+						    false);
+					} else {
+						FlowTransport::transport().sendUnreliable(
+						    SerializeSource<ErrorOr<AcknowledgementReply>>(
+						        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
+						    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
+						    false);
+					}
 				}
 			}
 
@@ -376,10 +384,17 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 		// A reply that has been queued up is being consumed, so send an ack to the server
 		if (acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += res.expectedSize();
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(
-			                                              AcknowledgementReply(acknowledgements.bytesAcknowledged)),
-			                                          acknowledgements.getEndpoint(TaskPriority::ReadSocket),
-			                                          false);
+			if (acknowledgements.bytesAcknowledged > std::numeric_limits<int64_t>::max()) {
+				FlowTransport::transport().sendUnreliable(
+				    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
+				    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
+				    false);
+			} else {
+				FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(
+				                                              AcknowledgementReply(acknowledgements.bytesAcknowledged)),
+				                                          acknowledgements.getEndpoint(TaskPriority::ReadSocket),
+				                                          false);
+			}
 		}
 		return res;
 	}
@@ -406,7 +421,6 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 template <class T>
 class ReplyPromiseStream {
 public:
-
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
@@ -475,8 +489,8 @@ public:
 			errors->delPromiseRef();
 	}
 
-    // The endpoints of a ReplyPromiseStream must be initialized at Task::ReadSocket, because with lower priorities a
-    // delay(0) in FlowTransport deliver can cause out of order delivery.
+	// The endpoints of a ReplyPromiseStream must be initialized at Task::ReadSocket, because with lower priorities a
+	// delay(0) in FlowTransport deliver can cause out of order delivery.
 	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::ReadSocket); }
 
 	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
