@@ -26,6 +26,7 @@
 
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
+#include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/MutationTracking.h"
@@ -866,7 +867,8 @@ struct ILogSystem {
 	    int8_t primaryLocality,
 	    int8_t remoteLocality,
 	    std::vector<Tag> const& allTags,
-	    Reference<AsyncVar<bool>> const& recruitmentStalled) = 0;
+	    Reference<AsyncVar<bool>> const& recruitmentStalled,
+		TLogGroupCollection tLogGroupCollection) = 0;
 	// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 	// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional
 	// until the caller updates the coordinated DBCoreState

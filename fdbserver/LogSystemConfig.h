@@ -26,6 +26,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbserver/TLogGroup.actor.h"
 
 template <class Interface>
 struct OptionalInterface {
@@ -254,6 +255,7 @@ struct LogSystemConfig {
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
+	TLogGroupCollection tlogGroupCollection;
 
 	LogSystemConfig(LogEpoch e = 0)
 	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),
