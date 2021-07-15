@@ -2426,11 +2426,12 @@ public:
 		ASSERT(!self->memoryOnly);
 		++g_redwoodMetrics.pagerDiskRead;
 
+		std::cout<<"in readPhysicalPages, before any reads, pageIDs.front(): "<<pageIDs.front()<<", and pageSize is: "<<pageIDs.size()<<std::endl;
+
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
 			wait(delay(0, TaskPriority::DiskRead));
 		}
 
-		std::cout<<"in readPhysicalPages, before any reads, pageIDs.front(): "<<pageIDs.front()<<", and pageSize is: "<<pageIDs.size()<<std::endl;
 		state Reference<ArenaPage> page = 
 			header ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock, smallestPhysicalBlock))
 		           : self->newPageBuffer(pageIDs.size());
