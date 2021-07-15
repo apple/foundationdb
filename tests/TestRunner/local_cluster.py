@@ -99,6 +99,7 @@ logdir = {logdir}
                     # If a port number is given and process_number > 1, we will use subsequent numbers
                     # E.g., port = 4000, process_number = 5
                     # Then 4000,4001,4002,4003,4004 will be used as ports
+                    # If port number is not given, we will randomly pick free ports
                     for index, _ in enumerate(range(process_number)):
                         f.write('[fdbserver.{server_port}]\n'.format(server_port=self.port))
                         self.port = get_free_port() if port is None else str(int(self.port) + 1)
