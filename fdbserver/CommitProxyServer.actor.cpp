@@ -875,7 +875,8 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	return Void();
 }
 
-// Message the sequencer to obtain the previous commit version for each storage server's tag
+// Message the sequencer to obtain the previous commit version for each tlog to which we are going to send
+// the commit version/ mutations to
 ACTOR Future<Void> getTPCV(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	GetTLogPrevCommitVersionReply rep =
@@ -1202,7 +1203,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
-	std::unordered_map<uint16_t, Version> tpcvMap;
+	Optional<std::unordered_map<uint16_t, Version>> tpcvMap = Optional<std::unordered_map<uint16_t, Version>>();
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 		tpcvMap = self->tpcvMap;
 	}
@@ -1213,7 +1214,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	                                                          self->toCommit,
 	                                                          span.context,
 	                                                          self->debugID,
-	                                                          self->tpcvMap);
+	                                                          tpcvMap);
 
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);

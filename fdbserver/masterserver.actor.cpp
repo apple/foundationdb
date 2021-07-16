@@ -1259,8 +1259,10 @@ ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVer
 
 ACTOR Future<Void> waitForTLogPrev(Reference<MasterData> self, GetTLogPrevCommitVersionRequest req) {
 	// TraceEvent("WaitForTLogPrev").detail("Prev",req.prev).detail("CommitVersion",req.commitVersion).detail("PrevTLogVersion",self->prevTLogVersion.get());
-	if (self->prevTLogVersion.get() != -1) {
+	if (self->prevTLogVersion.get() != invalidVersion) {
 		wait(self->prevTLogVersion.whenAtLeast(req.prev));
+	} else {
+		std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), self->lastEpochEnd);
 	}
 
 	GetTLogPrevCommitVersionReply reply;
@@ -1268,9 +1270,7 @@ ACTOR Future<Void> waitForTLogPrev(Reference<MasterData> self, GetTLogPrevCommit
 		reply.tpcvMap[tLog] = self->tpcvVector[tLog];
 		self->tpcvVector[tLog] = req.commitVersion;
 	}
-	if (req.commitVersion > self->prevTLogVersion.get()) {
-		self->prevTLogVersion.set(req.commitVersion);
-	}
+	self->prevTLogVersion.set(req.commitVersion);
 	req.reply.send(reply);
 	return Void();
 }
