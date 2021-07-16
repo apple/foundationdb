@@ -166,6 +166,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
 	const LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
+    std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds;
+    std::unordered_map<UID, std::vector<ptxn::TLogInterface_PassivelyPull>> tLogGroupIdToInterfaces;
 
 	// new members
 	std::map<Tag, Version> pseudoLocalityPopVersion;
@@ -1643,7 +1645,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                       int8_t primaryLocality,
 	                                       int8_t remoteLocality,
 	                                       std::vector<Tag> const& allTags,
-	                                       Reference<AsyncVar<bool>> const& recruitmentStalled) final {
+	                                       Reference<AsyncVar<bool>> const& recruitmentStalled,
+                                           std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
+										   std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) final {
 		return newEpoch(Reference<TagPartitionedLogSystem>::addRef(this),
 		                recr,
 		                fRemoteWorkers,
@@ -1652,7 +1656,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		                primaryLocality,
 		                remoteLocality,
 		                allTags,
-		                recruitmentStalled);
+		                recruitmentStalled,
+                        tLogGroupIdToServerIds,
+						tlogServerIdToTlogGroups);
 	}
 
 	LogSystemConfig getLogSystemConfig() const final {
@@ -1666,6 +1672,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystemConfig.recoveredAt = recoveredAt;
 		logSystemConfig.pseudoLocalities = pseudoLocalities;
 		logSystemConfig.oldestBackupEpoch = oldestBackupEpoch;
+        logSystemConfig.tLogGroupIdToServerIds = tLogGroupIdToServerIds;
+		logSystemConfig.tLogGroupIdToInterfaces = tLogGroupIdToInterfaces;
 		for (const Reference<LogSet>& logSet : tLogs) {
 			if (logSet->isLocal || remoteLogsWrittenToCoreState) {
 				logSystemConfig.tLogs.emplace_back(*logSet);
@@ -2685,7 +2693,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                                    int8_t primaryLocality,
 	                                                    int8_t remoteLocality,
 	                                                    std::vector<Tag> allTags,
-	                                                    Reference<AsyncVar<bool>> recruitmentStalled) {
+	                                                    Reference<AsyncVar<bool>> recruitmentStalled,
+                                                        std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
+														std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) {
 		state double startTime = now();
 		state Reference<TagPartitionedLogSystem> logSystem(
 		    new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality, recoveryCount));
@@ -2696,6 +2706,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->repopulateRegionAntiQuorum = configuration.repopulateRegionAntiQuorum;
 		logSystem->recruitmentID = deterministicRandom()->randomUniqueID();
 		logSystem->txsTags = configuration.tLogVersion >= TLogVersion::V4 ? recr.tLogs.size() : 0;
+        logSystem->tLogGroupIdToServerIds = tLogGroupIdToServerIds;
 		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 
 		if (configuration.usableRegions > 1) {
@@ -2848,11 +2859,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state LogSystemConfig oldLogSystemConfig = oldLogSystem->getLogSystemConfig();
 
 		state vector<Future<TLogInterface>> initializationReplies;
-		vector<InitializeTLogRequest> reqs(recr.tLogs.size());
+		state vector<InitializeTLogRequest> reqs = vector<InitializeTLogRequest>(recr.tLogs.size());
 
 		logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
 		logSystem->tLogs[0]->logServers.resize(
 		    recr.tLogs.size()); // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
+		// assuming tLogs[0] is primary?
+		logSystem->tLogs[0]->logServersNew.resize(recr.tLogs.size());
 		logSystem->tLogs[0]->updateLocalitySet(localities);
 
 		std::vector<int> locations;
@@ -2902,6 +2915,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.startVersion = logSystem->tLogs[0]->startVersion;
 			req.logRouterTags = logSystem->logRouterTags;
 			req.txsTags = logSystem->txsTags;
+
+			// Add TLogGroup here
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				UID serverId = recr.tLogs[i].id();
+				std::vector<ptxn::TLogGroup> groups;
+				for (TLogGroupRef tlogGroup : tlogServerIdToTlogGroups[serverId]) {
+					// question: if we add ptxn:TLogGroup here, we only have an id, but do not have the actual servers
+					// I do not think we can reconstruct the servers since this is the truth of source.
+					groups.push_back(ptxn::TLogGroup(tlogGroup -> id()));
+				}
+				req.tlogGroups = groups;
+			}
 		}
 
 		initializationReplies.reserve(recr.tLogs.size());
@@ -2996,11 +3021,33 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		wait(waitForAll(initializationReplies) || oldRouterRecruitment);
 
-		for (int i = 0; i < initializationReplies.size(); i++) {
-			logSystem->tLogs[0]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
-			    OptionalInterface<TLogInterface>(initializationReplies[i].get()));
-			logSystem->tLogs[0]->tLogLocalities[i] = recr.tLogs[i].locality;
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			state std::unordered_map<UID, ptxn::TLogInterface_PassivelyPull > id2Interface;
+			state int i = 0;
+			for (i = 0; i < reqs.size(); i++) {
+				ASSERT(reqs[i].isPrimary);
+				// wait for interfaces being built from TLogServer, then construct id -> interface mapping
+				// cannot use more standard `getReplyUnlessFailedFor`, because it is waiting on `reply` field, here we have ptxn.reply
+				state ptxn::TLogInterface_PassivelyPull serverNew = wait(reqs[i].ptxnReply.getFuture());
+				logSystem->tLogs[0]->logServersNew[i] = serverNew;
+				id2Interface[recr.tLogs[i].id()] = serverNew;
+			}
+
+			for (auto it : tLogGroupIdToServerIds) {
+				for (UID serverId : it.second) {
+					UID groupId = it.first;
+					// from group_id -> list of server_id, to group_id -> list of interfaces
+					logSystem->tLogGroupIdToInterfaces[groupId].push_back(id2Interface[serverId]);
+				}
+			}			
+		} else {
+			for (int i = 0; i < initializationReplies.size(); i++) {
+				logSystem->tLogs[0]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+					OptionalInterface<TLogInterface>(initializationReplies[i].get()));
+				logSystem->tLogs[0]->tLogLocalities[i] = recr.tLogs[i].locality;
+			}
 		}
+		
 		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);
 
 		// Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running
@@ -3011,6 +3058,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for (int i = 0; i < logSystem->tLogs[0]->logServers.size(); i++)
 			recoveryComplete.push_back(transformErrors(
 			    throwErrorOr(
+					// question: below here, there are usages of `logServers` and its unique field, e.g. recoveryFinished, what should we do about new interface?
 			        logSystem->tLogs[0]->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor(
 			            TLogRecoveryFinishedRequest(),
 			            SERVER_KNOBS->TLOG_TIMEOUT,

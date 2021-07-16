@@ -23,6 +23,7 @@
 
 #include <set>
 #include <vector>
+#include <unordered_map>
 
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
@@ -36,6 +37,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
+#include "fdbserver/TLogGroup.actor.h"
 
 struct DBCoreState;
 struct TLogSet;
@@ -54,6 +56,8 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
+	// question: why above we use reference -> asyncvar -> optionalinterface? Can I skip them here?
+	std::vector<ptxn::TLogInterface_PassivelyPull> logServersNew;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
@@ -237,9 +241,10 @@ public:
 		}
 
 		// the following logic supports upgrades from 5.X
+		int size = SERVER_KNOBS->TLOG_NEW_INTERFACE ? logServersNew.size() : logServers.size();
 		if (tag == txsTag)
-			return txsTagOld % logServers.size();
-		return tag.id % logServers.size();
+			return txsTagOld % size;
+		return tag.id % size;
 	}
 
 	void updateLocalitySet(std::vector<LocalityData> const& localities) {
@@ -292,7 +297,8 @@ public:
 		if (allLocations) {
 			// special handling for allLocations
 			TraceEvent("AllLocationsSet");
-			for (int i = 0; i < logServers.size(); i++) {
+			int size =  SERVER_KNOBS->TLOG_NEW_INTERFACE ? logServersNew.size() : logServers.size();
+			for (int i = 0; i < size; i++) {
 				newLocations.push_back(i);
 			}
 		} else {
@@ -866,7 +872,9 @@ struct ILogSystem {
 	    int8_t primaryLocality,
 	    int8_t remoteLocality,
 	    std::vector<Tag> const& allTags,
-	    Reference<AsyncVar<bool>> const& recruitmentStalled) = 0;
+	    Reference<AsyncVar<bool>> const& recruitmentStalled,
+	    std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
+		std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) = 0;
 	// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 	// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional
 	// until the caller updates the coordinated DBCoreState
@@ -1091,9 +1099,7 @@ struct LogPushData : NonCopyable {
 		next_message_tags.clear();
 	}
 
-	Standalone<StringRef> getMessages(int loc) {
-		return messagesWriter[loc].toValue();
-	}
+	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
 
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.

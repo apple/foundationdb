@@ -19,6 +19,7 @@
  */
 
 #include <iterator>
+#include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -300,8 +301,8 @@ ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfi
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
 		TraceEvent("CommitProxyReplies", self->dbgid)
-			.detail("WorkerID", recr.commitProxies[i].id())
-			.detail("FirstProxy", req.firstProxy ? "True" : "False");
+		    .detail("WorkerID", recr.commitProxies[i].id())
+		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -351,6 +352,28 @@ ACTOR Future<Void> newResolvers(Reference<MasterData> self, RecruitFromConfigura
 	self->resolvers = newRecruits;
 
 	return Void();
+}
+
+std::unordered_map<UID, std::vector<UID>> getTlogGroupIdToTlogServerIds(Reference<MasterData> self) {
+	std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds;
+	std::vector<TLogGroupRef> groups = self->tLogGroupCollection->groups();
+	for (const TLogGroupRef group : groups) {
+		UID groupId = group->id();
+		tLogGroupIdToServerIds[groupId] = group->serverIds();
+	}
+	return tLogGroupIdToServerIds;
+}
+
+std::unordered_map<UID, std::vector<TLogGroupRef>> gettlogServerIdToTlogGroups(Reference<MasterData> self) {
+	std::unordered_map<UID, std::vector<TLogGroupRef>> tLogServerIdtoTLogGroups;
+	std::vector<TLogGroupRef> groups = self->tLogGroupCollection->groups();
+	for (const TLogGroupRef group : groups) {
+		std::vector<UID> ids = group->serverIds();
+		for (UID id : ids) {
+			tLogServerIdtoTLogGroups[id].push_back(group);
+		}
+	}
+	return tLogServerIdtoTLogGroups;
 }
 
 ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
@@ -403,7 +426,9 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
-		                                                                 self->recruitmentStalled));
+		                                                                 self->recruitmentStalled,
+		                                                                 getTlogGroupIdToTlogServerIds(self),
+																		 gettlogServerIdToTlogGroups(self)));
 		self->logSystem = newLogSystem;
 	} else {
 		self->primaryLocality = tagLocalitySpecial;
@@ -415,7 +440,9 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
-		                                                                 self->recruitmentStalled));
+		                                                                 self->recruitmentStalled,
+		                                                                 getTlogGroupIdToTlogServerIds(self),
+																		 gettlogServerIdToTlogGroups(self)));
 		self->logSystem = newLogSystem;
 	}
 	return Void();
@@ -773,6 +800,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .trackLatest("MasterRecoveryState");
 
 	// Recruit TLog groups
+	// Question: Where is the KNOB to choose whether to use TLog groups at all, if this code path is run anyways? I need to RE-USE the KNOB..
 	ASSERT(self->tLogGroupRecoveredState.present());
 	self->tLogGroupCollection->addWorkers(recruits.tLogs);
 	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get());
@@ -979,9 +1007,9 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 	}
 	wait(waitForAll(txnReplies));
 	TraceEvent("RecoveryInternal", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::recovery_transaction)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.detail("Step", "SentTxnStateStoreToCommitProxies");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "SentTxnStateStoreToCommitProxies");
 
 	// To avoid race of recovery transaction with the above broadcast,
 	// resolvers are initialized after the broadcast is done. This ensures
@@ -999,9 +1027,9 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 
 	wait(waitForAll(replies));
 	TraceEvent("RecoveryInternal", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::recovery_transaction)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.detail("Step", "InitializedAllResolvers");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "InitializedAllResolvers");
 	return Void();
 }
 
