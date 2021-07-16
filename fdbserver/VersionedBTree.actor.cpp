@@ -463,7 +463,6 @@ public:
 		}
 
 		void startNextPageLoad(LogicalPageID id) {
-			//std::cout<<"startNextPageLoad, id: "<<(int) id<<std::endl;
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
@@ -1532,7 +1531,6 @@ public:
 	ObjectType* getIfExists(const IndexType& index) {
 		auto i = cache.find(index);
 		if (i != cache.end()) {
-			//std::cout<<"getIfExists found"<<(int)index<<std::endl;
 			++i->second.hits;
 			++g_redwoodMetrics.pagerProbeHit;
 			return &i->second.item;
@@ -2210,12 +2208,18 @@ public:
 		             (header ? "writePhysicalHeader" : "writePhysical"),
 		             toString(pageID).c_str(),
 		             page->begin());
-		//<<"In writePhysicalPage, before any write, pageIDs.front(): "<<pageIDs.front()<<", number of pages:"<<pageIDs.size()<<std::endl;
 		++g_redwoodMetrics.pagerDiskWrite;
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		page->updateChecksum(pageIDs.front());
-		//std::cout<<"in writePhysicalPage, page size is: "<<(int)page->size()<<std::endl;
-		//std::cout<<"PID: "<<pageIDs.front()<<", checksum after update should be: "<<page->getChecksum()<<", and it is: "<< page->calculateChecksum(pageIDs.front())<<std::endl;
+		const int beforeUpdateChecksum = page->getChecksum();
+		/*std::cout<<"in writePhysicalPage, page size is: "<<(int)page->size()<<std::endl;
+		std::cout<<"PID: "<<pageIDs.front()<<", checksum after update should be: "<<page->getChecksum()<<", and it is: "<< page->calculateChecksum(pageIDs.front())<<std::endl;
+		if(pageIDs.size() > 1){
+			for(auto id : pageIDs){
+				std::cout<<id<<" - ";
+			}
+			std::cout<<std::endl;
+		}*/
 		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
 		             filename.c_str(),
 		             toString(pageIDs.front()).c_str(),
@@ -2228,10 +2232,15 @@ public:
 
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
+		//ASSERT(page->size()+4 == pageIDs.size()*blockSize);
+		/*if(page->size()+4 != pageIDs.size()*blockSize) {
+			std::cout<<"page size not equal to pageIDs.size() * blocksize \n";
+			std::cout<<page->size()+4<<" v.s. "<<pageIDs.size()*blockSize<<std::endl;
+		}*/
 		std::vector<Future<Void>> writers;
 		// for each page id
 		for(size_t i = 0; i<pageIDs.size(); i++){
-			Future<Void> p = pageFile->write(page->begin() + i*blockSize, blockSize, (int64_t)pageIDs[i] * blockSize);
+			Future<Void> p = pageFile->write(page->mutate() + i*blockSize, blockSize, (int64_t)pageIDs[i] * blockSize);
 			if(REDWOOD_DEBUG) {
 				Standalone<VectorRef<PhysicalPageID>> pageIDsCopy = pageIDs;
 				p = map(p, [=](Void) {
@@ -2246,22 +2255,20 @@ public:
 			}
 			writers.push_back(p);
 		}
-		//std::cout<<"In writePhysicalPage, after soem write, pageIDs.front(): "<<pageIDs.front()<<", pageSize is: "<<pageIDs.size()<<std::endl;
 		Future<Void> f = holdWhile(page, waitForAll(writers));
+		ASSERT(beforeUpdateChecksum == page->getChecksum());
 		operations.add(f);
 		return f;
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
-		Standalone<VectorRef<PhysicalPageID>> pageIDs;
-		pageIDs.push_back(pageIDs.arena(), pageID);
-		return writePhysicalPage(pageIDs, page, true);
+		return writePhysicalPage(VectorRef<PhysicalPageID>(&pageID, 1), page, true);
 	}
 
 	void updatePage(Standalone<VectorRef<LogicalPageID>> pageIDs, Reference<ArenaPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
-		//std::cout<<"updatePage 2264, pageIDs front: "<<pageIDs.front()<<std::endl;
+		//std::cout<<"updatePage 2265, pageIDs front: "<<pageIDs.front()<<std::endl;
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), true, true);
 		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n",
 		             filename.c_str(),
@@ -2277,6 +2284,7 @@ public:
 		// at the original page ID, could have a pending read when that version is expired (after which
 		// future reads of the version are not allowed) and the write of the next newest version over top
 		// of the original page begins.
+		//std::cout<<"updatePage, pageIDs.size(): "<<pageIDs.size()<<", and data page size: "<<data->size()<<std::endl;
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = writePhysicalPage(pageIDs, data);
 		} else if (cacheEntry.reading()) {
@@ -2304,20 +2312,23 @@ public:
 	Future<VectorRef<LogicalPageID>> atomicUpdatePage(VectorRef<LogicalPageID> pageIDs, Reference<ArenaPage> data, Version v) override {
 		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageID).c_str(), v);
 		Future<VectorRef<LogicalPageID>> f = map(newPageIDs(pageIDs.size()), [=](Standalone<VectorRef<LogicalPageID>> newIDs) {
-			//std::cout<<"in atomic, map pageIDs to newIDs: "<<pageIDs.front()<<"->"<<newIDs.front()<<std::endl;
+			//std::cout<<"in atomicUpdatePage, map pageIDs to newIDs: "<<pageIDs.front()<<"->"<<newIDs.front()<<std::endl;
 			updatePage(newIDs, data);
 			// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
-			RemappedPage r{ v, pageIDs.front(), newIDs.front()};
-			remapQueue.pushBack(r);
-			auto& versionedMap = remappedPages[pageIDs.front()];
+			for(size_t i = 0; i<pageIDs.size(); i++){
+				RemappedPage r{ v, pageIDs[i], newIDs[i]};
+				remapQueue.pushBack(r);
+				auto& versionedMap = remappedPages[pageIDs[i]];
 
-			// An update page is unlikely to have its old version read again soon, so prioritize its cache eviction
-			// If the versioned map is empty for this page then the prior version of the page is at stored at the
-			// PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered map.
-			pageCache.prioritizeEviction(versionedMap.empty() ? pageIDs.front() : versionedMap.rbegin()->second);
-			versionedMap[v] = newIDs.front();
+				// An update page is unlikely to have its old version read again soon, so prioritize its cache eviction
+				// If the versioned map is empty for this page then the prior version of the page is at stored at the
+				// PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered map.
+				pageCache.prioritizeEviction(versionedMap.empty() ? pageIDs[i] : versionedMap.rbegin()->second);
+				//versionedMap[v] = newIDs.front();
+				versionedMap[v] = newIDs[i];
 
-			debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
+				debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
+			}
 			return pageIDs;
 		});
 
@@ -2430,12 +2441,16 @@ public:
 		ASSERT(!self->memoryOnly);
 		++g_redwoodMetrics.pagerDiskRead;
 
-		//std::cout<<"in readPhysicalPages, before any reads, pageIDs.front(): "<<pageIDs.front()<<", and pageSize is: "<<pageIDs.size()<<std::endl;
-
+		/*<<"in readPhysicalPages, before any reads, pageIDs.front(): "<<pageIDs.front()<<", and pageSize is: "<<pageIDs.size()<<std::endl;
+		if(pageIDs.size()>1){
+			for(auto id : pageIDs){
+				std::cout<<id<<" - ";
+			}
+			std::cout<<std::endl;
+		}*/
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
 			wait(delay(0, TaskPriority::DiskRead));
 		}
-
 		state Reference<ArenaPage> page = 
 			header ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock, smallestPhysicalBlock))
 		           : self->newPageBuffer(pageIDs.size());
@@ -2455,7 +2470,6 @@ public:
 		         page->begin() + i*blockSize,
 		         readBytes);
 		}
-		//<<"in readPhysicalPages, after some reads, pageIDs.front(): "<<pageIDs.front()<<", and pageSize is: "<<pageIDs.size()<<std::endl;
 		// Header reads are checked explicitly during recovery
 		if (!header) {
 			if (!page->verifyChecksum(pageIDs.front())) {
@@ -2466,7 +2480,8 @@ public:
 				    .detail("Filename", self->filename.c_str())
 				    .detail("PageID", pageIDs.front())
 					.detail("NumOfPID", pageIDs.size())
-				    .detail("PageSize", self->physicalPageSize * pageIDs.size())
+				    .detail("Calculated PageSize", self->physicalPageSize * pageIDs.size())
+					.detail("True page's size()", page->size())
 				    .detail("Offset", pageIDs.front() * self->physicalPageSize)
 				    .detail("CalculatedChecksum", page->calculateChecksum(pageIDs.front()))
 				    .detail("ChecksumInPage", page->getChecksum())
@@ -2492,7 +2507,7 @@ public:
 	Future<Reference<ArenaPage>> readPage(Standalone<VectorRef<PhysicalPageID>> pageIDs, bool cacheable, bool noHit = false) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
-		//std::cout<<"in readpage line 2487: "<<pageIDs.front()<<std::endl;
+		//std::cout<<"in readpage line 2496: "<<pageIDs.front()<<std::endl;
 		if (!cacheable) {
 			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
 			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageIDs.front());
@@ -2557,7 +2572,6 @@ public:
 		for(auto& id : logicalIDs){
 			physicalIDs.push_back(physicalIDs.arena(), getPhysicalPageID(id, v));
 		}
-		//std::cout<<"in getPhysicalPageIDs, logicalIds front to physicalIDs front is: "<<logicalIDs.front()<<"->"<<physicalIDs.front()<<std::endl;
 		return physicalIDs;
 	}
 
@@ -2586,7 +2600,6 @@ public:
 		// readSize may not be equal to the physical extent size (for the first and last extents)
 		if (!readSize)
 			readSize = self->physicalExtentSize;
-
 		state Reference<ArenaPage> extent = Reference<ArenaPage>(new ArenaPage(self->logicalPageSize, readSize));
 
 		// physicalReadSize is the size of disk read we intend to issue
@@ -4897,7 +4910,6 @@ private:
 			}
 
 			state Reference<ArenaPage> pages = self->m_pager->newPageBuffer(p.blockCount);
-			//Reference<ArenaPage>(new ArenaPage(p.blockSize * p.blockCount, p.blockSize * p.blockCount));
 			BTreePage* btPage;
 
 			if (p.blockCount == 1) {
@@ -4949,7 +4961,6 @@ private:
 					memcpy(pages->mutate() + b*p.blockSize, rptr, p.blockSize);
 					rptr += p.blockSize;
 				}
-				//std::cout<<"in create chunked page line 4956, p.blockCount: "<<(int)p.blockCount<<", pages size: "<<pages->size()<<std::endl;
 				delete[](uint8_t*) btPage;
 			}
 
@@ -4959,7 +4970,6 @@ private:
 
 			// If we are only writing 1 page and it has the same BTreePageID size as the original then try to reuse the
 			// LogicalPageIDs in previousID and try to update them atomically.
-			//std::cout<<"atomic update page\n";
 			if (pagesToBuild.size() == 1 && previousID.size() == p.blockCount) {
 				VectorRef<LogicalPageID> childPages = wait(self->m_pager->atomicUpdatePage(previousID, pages, v));
 				for(const LogicalPageID& id : childPages){
@@ -4974,7 +4984,6 @@ private:
 					self->freeBTreePage(previousID, v);
 				}
 				Standalone<VectorRef<LogicalPageID>> emptyPages = wait(self->m_pager->newPageIDs(p.blockCount));
-				//std::cout<<"writePages, emptyPages front are: "<<emptyPages.front()<<std::endl;
 				self->m_pager->updatePage(emptyPages, pages);
 				//std::cout<<"writePages, emptyPages front are: "<<emptyPages.front()<<std::endl;
 				for(const LogicalPageID& id : emptyPages){
@@ -5055,7 +5064,6 @@ private:
 		             snapshot->getVersion());
 
 		state Reference<const ArenaPage> page;
-		//std::cout<<"line 5045 readpage, "<<id.front()<<std::endl;
 		Reference<const ArenaPage> p = wait(snapshot->getPhysicalPage(id, cacheable, false));
 		page = std::move(p);
 
@@ -5121,7 +5129,7 @@ private:
 	                                                    Version writeVersion) {
 		state BTreePageIDRef newID;
 		newID.resize(*arena, oldID.size());
-
+		//std::cout<<"in updateBTreePage, and page size is: "<<page->size()<<std::endl;
 		if (REDWOOD_DEBUG) {
 			BTreePage* btPage = (BTreePage*)page->begin();
 			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
@@ -5133,9 +5141,10 @@ private:
 			        ? "<noDecodeCache>"
 			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
 		}
-		
+		state size_t i =0;
 		auto f = map(self->m_pager->atomicUpdatePage(oldID, page, writeVersion), [=](VectorRef<LogicalPageID> ids) {
-			for(size_t i =0; i<ids.size(); i++){
+			ASSERT(ids.size() == oldID.size());
+			for(; i<ids.size(); i++){
 				newID[i] = ids[i];
 			}
 			return Void();
@@ -5483,7 +5492,6 @@ private:
 			}
 			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
-		//std::cout<<"commitSubtree line 5473, rootID front: "<<rootID.front()<<std::endl;
 		state Reference<const ArenaPage> page = wait(readPage(snapshot, rootID, false, false));
 		state Version writeVersion = self->getLastCommittedVersion() + 1;
 
@@ -6325,7 +6333,6 @@ public:
 		void popPath() { path.pop_back(); }
 
 		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
-			//std::cout<<"in push page 6315\n";
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
 			return map(readPage(pager, link.get().getChildPage()), [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
@@ -6338,7 +6345,6 @@ public:
 		}
 
 		Future<Void> pushPage(BTreePageIDRef id) {
-			//std::cout<<"in push page 6328, and id front is: "<<id.front()<<std::endl;
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
 			return map(readPage(pager, id), [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
@@ -6566,8 +6572,8 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID)
-	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS),
-	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS) {
+	    //,prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
