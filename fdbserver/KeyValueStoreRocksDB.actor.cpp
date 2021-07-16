@@ -426,6 +426,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
 			auto options = getReadOptions();
+			std::chrono::seconds readRangeTimeout(SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(
+			                       std::chrono::system_clock::now().time_since_epoch()) +
+			                   std::chrono::duration_cast<std::chrono::microseconds>(readRangeTimeout);
 			// When using a prefix extractor, ensure that keys are returned in order even if they cross
 			// a prefix boundary.
 			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
@@ -441,6 +445,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
 					if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
+					}
+					if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT) {
+						TraceEvent(SevWarn, "RocksDBError")
+						    .detail("Error", "Read range request timedout")
+						    .detail("Method", "ReadRangeAction")
+						    .detail("Timeout value", SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT);
+						a.result.sendError(transaction_too_old());
+						return;
 					}
 					cursor->Next();
 				}
@@ -460,6 +472,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
 					if (result.size() >= -a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
+					}
+					if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT) {
+						TraceEvent(SevWarn, "RocksDBError")
+						    .detail("Error", "Read range request timedout")
+						    .detail("Method", "ReadRangeAction")
+						    .detail("Timeout value", SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT);
+						a.result.sendError(transaction_too_old());
+						return;
 					}
 					cursor->Prev();
 				}
