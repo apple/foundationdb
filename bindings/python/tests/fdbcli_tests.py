@@ -416,6 +416,11 @@ def profile(logger):
     run_fdbcli_command('profile', 'client', 'set', 'default', 'default')
     assert run_fdbcli_command('profile', 'client', 'get') == default_profile_client_get_output
 
+@enable_logging()
+def triggerddteaminfolog(logger):
+    # this command is straightforward and only has one code path
+    output = run_fdbcli_command('triggerddteaminfolog')
+    assert output == 'Triggered team info logging in data distribution.'
 
 if __name__ == '__main__':
     # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>
@@ -437,6 +442,7 @@ if __name__ == '__main__':
         setclass()
         suspend()
         transaction()
+        triggerddteaminfolog()
     else:
         assert process_number > 1, "Process number should be positive"
         coordinators()
