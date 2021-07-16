@@ -1304,9 +1304,9 @@ struct RedwoodMetrics {
 				}
 			}
 		}
-		void addEventReason(PagerEvents e, PagerEventReasons r) { eventReasons[(size_t)e][(size_t)r] += 1; }
-		const unsigned int& getEventReason(PagerEvents e, PagerEventReasons r) {
-			return eventReasons[(size_t)e][(size_t)r];
+		void addEventReason(PagerEvents event, PagerEventReasons reason) { eventReasons[(size_t)event][(size_t)reason] += 1; }
+		const unsigned int& getEventReason(PagerEvents event, PagerEventReasons reason) {
+			return eventReasons[(size_t)event][(size_t)reason];
 		}
 
 		std::string ouputSummary(int currLevel) {
