@@ -2382,7 +2382,10 @@ public:
 		return writePhysicalPage(PagerEventReasons::metaData, nonBtreeLevel, pageID, page, true);
 	}
 
-	void updatePage(PagerEventReasons reason, unsigned int level, LogicalPageID pageID, Reference<ArenaPage> data) override {
+	void updatePage(PagerEventReasons reason,
+	                unsigned int level,
+	                LogicalPageID pageID,
+	                Reference<ArenaPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
 		// this metaData reason will not be accounted since its not a cache hit or cache miss
@@ -2426,7 +2429,7 @@ public:
 	}
 
 	Future<LogicalPageID> atomicUpdatePage(PagerEventReasons reason,
-										   unsigned int level,
+	                                       unsigned int level,
 	                                       LogicalPageID pageID,
 	                                       Reference<ArenaPage> data,
 	                                       Version v) override {
@@ -4981,7 +4984,7 @@ private:
 
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their ArenaPage(s)
 	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(VersionedBTree* self,
-																			PagerEventReasons reason,
+	                                                                        PagerEventReasons reason,
 	                                                                        const RedwoodRecordRef* lowerBound,
 	                                                                        const RedwoodRecordRef* upperBound,
 	                                                                        VectorRef<RedwoodRecordRef> entries,
@@ -5116,7 +5119,8 @@ private:
 			// LogicalPageIDs in previousID and try to update them atomically.
 			if (pagesToBuild.size() == 1 && previousID.size() == pages.size()) {
 				for (k = 0; k < pages.size(); ++k) {
-					LogicalPageID id = wait(self->m_pager->atomicUpdatePage(reason, currLevel, previousID[k], pages[k], v));
+					LogicalPageID id =
+					    wait(self->m_pager->atomicUpdatePage(reason, currLevel, previousID[k], pages[k], v));
 					childPageID.push_back(records.arena(), id);
 				}
 			} else {
@@ -5173,8 +5177,8 @@ private:
 		// While there are multiple child pages for this version we must write new tree levels.
 		while (records.size() > 1) {
 			self->m_pHeader->height = ++height;
-			Standalone<VectorRef<RedwoodRecordRef>> newRecords =
-			    wait(writePages(self, PagerEventReasons::metaData, &dbBegin, &dbEnd, records, height, version, BTreePageIDRef()));
+			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(writePages(
+			    self, PagerEventReasons::metaData, &dbBegin, &dbEnd, records, height, version, BTreePageIDRef()));
 			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %lu pages\n",
 			             version,
 			             height,
@@ -5282,7 +5286,7 @@ private:
 
 	// Write new version of pageID at version v using page as its data.
 	// Attempts to reuse original id(s) in btPageID, returns BTreePageID.
-	// UpdateBtreePage is only called from commitSubTree funciton 
+	// UpdateBtreePage is only called from commitSubTree funciton
 	ACTOR static Future<BTreePageIDRef> updateBTreePage(VersionedBTree* self,
 	                                                    BTreePageIDRef oldID,
 	                                                    Arena* arena,
@@ -5305,7 +5309,8 @@ private:
 
 		if (oldID.size() == 1) {
 			BTreePage* btPage = (BTreePage*)page->begin();
-			LogicalPageID id = wait(self->m_pager->atomicUpdatePage(PagerEventReasons::commit, btPage->height, oldID.front(), page, writeVersion));
+			LogicalPageID id = wait(self->m_pager->atomicUpdatePage(
+			    PagerEventReasons::commit, btPage->height, oldID.front(), page, writeVersion));
 			newID.front() = id;
 		} else {
 			state std::vector<Reference<ArenaPage>> pages;
@@ -5325,8 +5330,8 @@ private:
 			state int i = 0;
 			for (; i < pages.size(); ++i) {
 				BTreePage* btPage = (BTreePage*)page->begin();
-				LogicalPageID id =
-				    wait(self->m_pager->atomicUpdatePage(PagerEventReasons::commit, btPage->height, oldID[i], pages[i], writeVersion));
+				LogicalPageID id = wait(self->m_pager->atomicUpdatePage(
+				    PagerEventReasons::commit, btPage->height, oldID[i], pages[i], writeVersion));
 				newID[i] = id;
 			}
 		}
@@ -5653,7 +5658,7 @@ private:
 	    MutationBuffer* mutationBuffer,
 	    BTreePageIDRef rootID,
 	    bool isLeaf,
-		unsigned int l,
+	    unsigned int l,
 	    MutationBuffer::const_iterator mBegin, // greatest mutation boundary <= subtreeLowerBound->key
 	    MutationBuffer::const_iterator mEnd, // least boundary >= subtreeUpperBound->key
 	    InternalPageSliceUpdate* update) {
@@ -5989,7 +5994,7 @@ private:
 
 			// Rebuild new page(s).
 			state Standalone<VectorRef<RedwoodRecordRef>> entries = wait(writePages(self,
-																				    PagerEventReasons::metaData,
+			                                                                        PagerEventReasons::metaData,
 			                                                                        &update->subtreeLowerBound,
 			                                                                        &update->subtreeUpperBound,
 			                                                                        merged,
@@ -6337,7 +6342,7 @@ private:
 
 						Standalone<VectorRef<RedwoodRecordRef>> newChildEntries =
 						    wait(writePages(self,
-											PagerEventReasons::metaData,
+						                    PagerEventReasons::metaData,
 						                    &update->subtreeLowerBound,
 						                    &update->subtreeUpperBound,
 						                    modifier.rebuild,
@@ -6403,7 +6408,7 @@ private:
 		                   mutations,
 		                   rootPageID,
 		                   self->m_pHeader->height == 1,
-						   self->m_pHeader->height,
+		                   self->m_pHeader->height,
 		                   mBegin,
 		                   mEnd,
 		                   &all));
@@ -6528,14 +6533,15 @@ public:
 
 		Future<Void> pushPage(PagerEventReasons reason, const BTreePage::BinaryTree::Cursor& link) {
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
-			return map(readPage(reason, path.back().btPage()->height - 1, pager, link.get().getChildPage()), [=](Reference<const ArenaPage> p) {
+			return map(readPage(reason, path.back().btPage()->height - 1, pager, link.get().getChildPage()),
+			           [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
-				path.push_back({ p, getCursor(p, link), link.get().getChildPage() });
+				           path.push_back({ p, getCursor(p, link), link.get().getChildPage() });
 #else
 				path.push_back({ p, getCursor(p, link) });
 #endif
-				return Void();
-			});
+				           return Void();
+			           });
 		}
 
 		Future<Void> pushPage(PagerEventReasons reason, BTreePageIDRef id) {
@@ -6616,7 +6622,9 @@ public:
 			return Void();
 		}
 
-		Future<Void> seekGTE(RedwoodRecordRef query, PagerEventReasons reason) { return seekGTE_impl(this, query, reason); }
+		Future<Void> seekGTE(RedwoodRecordRef query, PagerEventReasons reason) {
+			return seekGTE_impl(this, query, reason);
+		}
 
 		// Start fetching sibling nodes in the forward or backward direction, stopping after recordLimit or byteLimit
 		void prefetch(KeyRef rangeEnd, bool directionForward, int recordLimit, int byteLimit) {
@@ -6681,7 +6689,9 @@ public:
 			return Void();
 		}
 
-		Future<Void> seekLT(RedwoodRecordRef query, PagerEventReasons reason) { return seekLT_impl(this, query, reason); }
+		Future<Void> seekLT(RedwoodRecordRef query, PagerEventReasons reason) {
+			return seekLT_impl(this, query, reason);
+		}
 
 		ACTOR Future<Void> move_impl(BTreeCursor* self, bool forward) {
 			// Try to the move cursor at the end of the path in the correct direction

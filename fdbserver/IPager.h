@@ -204,14 +204,17 @@ public:
 	// Replace the contents of a page with new data across *all* versions.
 	// Existing holders of a page reference for pageID, read from any version,
 	// may see the effects of this write.
-	virtual void updatePage(PagerEventReasons reason, unsigned int level, LogicalPageID pageID, Reference<ArenaPage> data) = 0;
+	virtual void updatePage(PagerEventReasons reason,
+	                        unsigned int level,
+	                        LogicalPageID pageID,
+	                        Reference<ArenaPage> data) = 0;
 
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
 	// instead and return the new page ID to the caller.  Otherwise the original pageID argument will be returned.
 	// If a new page ID is returned, the old page ID will be freed as of version v
 	virtual Future<LogicalPageID> atomicUpdatePage(PagerEventReasons reason,
-												   unsigned int level,
+	                                               unsigned int level,
 	                                               LogicalPageID pageID,
 	                                               Reference<ArenaPage> data,
 	                                               Version v) = 0;
