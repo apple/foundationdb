@@ -48,35 +48,32 @@ enum class PagerEventReasons { pointRead = 0, rangeRead, rangePrefetch, commit, 
 static const std::string PagerEventReasonsCodes[] = { "Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta" };
 
 static const int nonBtreeLevel = 0;
-static const int rootLevel = 1;
 static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::pointRead },
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangeRead },
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::lazyClear },
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
-	{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
 	{ PagerEvents::pagerCacheHit, PagerEventReasons::pointRead },
 	{ PagerEvents::pagerCacheHit, PagerEventReasons::rangeRead },
 	{ PagerEvents::pagerCacheHit, PagerEventReasons::lazyClear },
 	{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
+	{ PagerEvents::pagerCacheHit, PagerEventReasons::commit },
 	{ PagerEvents::pagerCacheMiss, PagerEventReasons::pointRead },
 	{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangeRead },
 	{ PagerEvents::pagerCacheMiss, PagerEventReasons::lazyClear },
 	{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
-	{ PagerEvents::pagerWrite, PagerEventReasons::commit },
+	{ PagerEvents::pagerCacheMiss, PagerEventReasons::commit },
 	{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
 	{ PagerEvents::pagerWrite, PagerEventReasons::lazyClear },
 };
 static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::rangePrefetch },
 	{ PagerEvents::pagerCacheLookup, PagerEventReasons::metaData },
-	{ PagerEvents::pagerCacheLookup, PagerEventReasons::commit },
 	{ PagerEvents::pagerCacheHit, PagerEventReasons::rangePrefetch },
 	{ PagerEvents::pagerCacheHit, PagerEventReasons::metaData },
 	{ PagerEvents::pagerCacheMiss, PagerEventReasons::rangePrefetch },
 	{ PagerEvents::pagerCacheMiss, PagerEventReasons::metaData },
 	{ PagerEvents::pagerWrite, PagerEventReasons::metaData },
-	{ PagerEvents::pagerWrite, PagerEventReasons::commit },
 };
 
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
@@ -167,8 +164,8 @@ public:
 
 class IPagerSnapshot {
 public:
-	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons r,
-	                                                           unsigned int l,
+	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
+	                                                           unsigned int level,
 	                                                           LogicalPageID pageID,
 	                                                           bool cacheable,
 	                                                           bool nohit) = 0;
@@ -207,13 +204,14 @@ public:
 	// Replace the contents of a page with new data across *all* versions.
 	// Existing holders of a page reference for pageID, read from any version,
 	// may see the effects of this write.
-	virtual void updatePage(PagerEventReasons r, unsigned int l, LogicalPageID pageID, Reference<ArenaPage> data) = 0;
+	virtual void updatePage(PagerEventReasons reason, unsigned int level, LogicalPageID pageID, Reference<ArenaPage> data) = 0;
 
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
 	// instead and return the new page ID to the caller.  Otherwise the original pageID argument will be returned.
 	// If a new page ID is returned, the old page ID will be freed as of version v
-	virtual Future<LogicalPageID> atomicUpdatePage(unsigned int l,
+	virtual Future<LogicalPageID> atomicUpdatePage(PagerEventReasons reason,
+												   unsigned int level,
 	                                               LogicalPageID pageID,
 	                                               Reference<ArenaPage> data,
 	                                               Version v) = 0;
@@ -234,8 +232,8 @@ public:
 	// Cacheable indicates that the page should be added to the page cache (if applicable?) as a result of this read.
 	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
 	// considered likely to be needed soon.
-	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons r,
-	                                              unsigned int l,
+	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
+	                                              unsigned int level,
 	                                              LogicalPageID pageID,
 	                                              bool cacheable = true,
 	                                              bool noHit = false) = 0;
