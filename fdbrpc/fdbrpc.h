@@ -404,13 +404,13 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			// Notify the server that a client is not using this ReplyPromiseStream anymore
 			FlowTransport::transport().sendUnreliable(
 			    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
-			    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
+			    acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay),
 			    false);
 		}
 		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
 			// The ReplyPromiseStream was cancelled before sending an error, so the storage server must have died
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(broken_promise()),
-			                                          getEndpoint(TaskPriority::ReadSocket),
+			                                          getEndpoint(TaskPriority::NoDeliverDelay),
 			                                          false);
 		}
 	}
@@ -421,6 +421,9 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 template <class T>
 class ReplyPromiseStream {
 public:
+	// The endpoints of a ReplyPromiseStream must be initialized at Task::NoDeliverDelay, because a
+	// delay(0) in FlowTransport deliver can cause out of order delivery.
+
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
@@ -428,7 +431,7 @@ public:
 	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
 			if (!queue->acknowledgements.getRawEndpoint().isValid()) {
-				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::ReadSocket).token;
+				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay).token;
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
 			FlowTransport::transport().sendUnreliable(
@@ -489,9 +492,9 @@ public:
 			errors->delPromiseRef();
 	}
 
-	// The endpoints of a ReplyPromiseStream must be initialized at Task::ReadSocket, because with lower priorities a
+	// The endpoints of a ReplyPromiseStream must be initialized at Task::NoDeliverDelay, because with lower priorities a
 	// delay(0) in FlowTransport deliver can cause out of order delivery.
-	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::ReadSocket); }
+	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::NoDeliverDelay); }
 
 	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }

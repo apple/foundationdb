@@ -43,6 +43,8 @@ class SimpleConfigTransaction final : public IConfigTransaction, public FastAllo
 public:
 	SimpleConfigTransaction(ConfigTransactionInterface const&);
 	SimpleConfigTransaction(Database const&);
+	SimpleConfigTransaction();
+	void setDatabase(Database const&) override;
 	~SimpleConfigTransaction();
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;

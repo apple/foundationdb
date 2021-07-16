@@ -1293,6 +1293,10 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
 	applyPersistentOptions();
 }
 
+void ReadYourWritesTransaction::setDatabase(Database const& cx) {
+	*this = ReadYourWritesTransaction(cx);
+}
+
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
 	while (now() < endTime) {
 		wait(delayUntil(std::min(endTime + 0.0001, now() + CLIENT_KNOBS->TRANSACTION_TIMEOUT_DELAY_INTERVAL)));
@@ -1733,10 +1737,6 @@ void ReadYourWritesTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {
 	if (inConflictRange) {
 		result->insert(KeyRangeRef(conflictBegin.toArenaOrRef(arena), getMaxWriteKey()), true);
 	}
-}
-
-void ReadYourWritesTransaction::preinitializeOnForeignThread() {
-	tr.preinitializeOnForeignThread();
 }
 
 void ReadYourWritesTransaction::setTransactionID(uint64_t id) {
