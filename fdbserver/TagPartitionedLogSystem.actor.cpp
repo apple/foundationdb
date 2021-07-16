@@ -1643,7 +1643,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                       int8_t primaryLocality,
 	                                       int8_t remoteLocality,
 	                                       std::vector<Tag> const& allTags,
-	                                       Reference<AsyncVar<bool>> const& recruitmentStalled) final {
+	                                       Reference<AsyncVar<bool>> const& recruitmentStalled,
+										   Reference<TLogGroupCollection> tLogGroupCollection) final {
 		return newEpoch(Reference<TagPartitionedLogSystem>::addRef(this),
 		                recr,
 		                fRemoteWorkers,
@@ -1652,7 +1653,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		                primaryLocality,
 		                remoteLocality,
 		                allTags,
-		                recruitmentStalled);
+		                recruitmentStalled,
+						tLogGroupCollection);
 	}
 
 	LogSystemConfig getLogSystemConfig() const final {
@@ -2685,7 +2687,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                                    int8_t primaryLocality,
 	                                                    int8_t remoteLocality,
 	                                                    std::vector<Tag> allTags,
-	                                                    Reference<AsyncVar<bool>> recruitmentStalled) {
+	                                                    Reference<AsyncVar<bool>> recruitmentStalled,
+														Reference<TLogGroupCollection> tLogGroupCollection) {
 		state double startTime = now();
 		state Reference<TagPartitionedLogSystem> logSystem(
 		    new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality, recoveryCount));
