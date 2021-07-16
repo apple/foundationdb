@@ -46,8 +46,26 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+// TODO: Initialize with right params.
+TLogGroupCollection::TLogGroupCollection() : policy(nullptr), targetNumGroups(0), GROUP_SIZE(0) {}
+
 TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize)
   : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {}
+
+TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy,
+                                         int numGroups,
+                                         int groupSize,
+                                         Reference<AsyncVar<ServerDBInfo>> dbInfo)
+  : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {
+
+	ASSERT(dbInfo.isValid());
+	for (auto logSet : dbInfo->get().logSystemConfig.tLogs) {
+		if (logSet.isLocal && logSet.locality != tagLocalitySatellite) {
+			// TODO (Vishesh): Support satellite + remote TLogs
+			addWorkers(logSet.tLogs);
+		}
+	}
+}
 
 const std::vector<TLogGroupRef>& TLogGroupCollection::groups() const {
 	return recruitedGroups;
@@ -69,6 +87,12 @@ TLogGroupRef TLogGroupCollection::getGroup(UID groupId) const {
 		}
 	}
 	return Reference<TLogGroup>();
+}
+
+void TLogGroupCollection::addWorkers(const std::vector<OptionalInterface<TLogInterface>>& logWorkers) {
+	for (const auto& worker : logWorkers) {
+		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
+	}
 }
 
 void TLogGroupCollection::addWorkers(const std::vector<WorkerInterface>& logWorkers) {
@@ -115,8 +139,34 @@ LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::uno
 	return localityMap;
 }
 
+void TLogGroupCollection::addTLogGroup(TLogGroupRef group) {
+	TraceEvent("TLogGroupLoad")
+	    .detail("GroupID", group->id())
+	    .detail("Size", group->size())
+	    .detail("Group", group->toString());
+	recruitedGroups.push_back(group);
+}
+
 TLogGroupRef TLogGroupCollection::selectFreeGroup() {
 	return deterministicRandom()->randomChoice(recruitedGroups);
+}
+
+void TLogGroupCollection::addStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers) {
+	// TODO:
+	if (storageTeams.find(teamId) == storageTeams.end()) {
+		return;
+	}
+	storageTeams[teamId] = servers;
+	// TODO: (Vishesh) Initiate assignment commit?
+}
+
+bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId) {
+	ASSERT(storageTeamToTLogGroupMap.find(teamId) == storageTeamToTLogGroupMap.end());
+	auto group = getGroup(groupId);
+	ASSERT(group.isValid());
+	storageTeamToTLogGroupMap[teamId] = group;
+	group->assignStorageTeam(teamId);
+	return true;
 }
 
 bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group) {
@@ -171,7 +221,7 @@ void TLogGroupCollection::seedTLogGroupAssignment(Arena& arena,
 
 	// Step 2: Map from SS to teamID.
 	for (const auto& ss : serverSrcUID) {
-		Key teamIdKey = storageServerToTeamIdKey(ss).withSuffix(BinaryWriter::toValue(teamId, Unversioned()));
+		Key teamIdKey = storageServerToTeamIdKey(ss);
 		BinaryWriter wr(Unversioned());
 		wr << 1;
 		wr << teamId;
@@ -185,138 +235,20 @@ void TLogGroupCollection::seedTLogGroupAssignment(Arena& arena,
 	storageTeams[teamId] = serverSrcUID;
 }
 
-void TLogGroupCollection::initializeOrRecoverStorageTeamAssignments(Database cx) {
-	initializeOrReocverStorageTeamAssignments = initializeOrRecoverStorageTeamAssignmentActor(this, cx);
-}
-
 // Returns a map from StorageTeamID that uniquely identifies a team, to the
 // list of storage servers in that storage team.
-ACTOR Future<std::map<ptxn::StorageTeamID, std::vector<UID>>> fetchStorageTeams(Database cx) {
-	state Transaction tr(cx);
+ACTOR Future<std::map<ptxn::StorageTeamID, std::vector<UID>>> fetchStorageTeams(IKeyValueStore* store) {
 	state std::map<ptxn::StorageTeamID, vector<UID>> teams;
 
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	RangeResult results = wait(store->readRange(storageTeamIdKeyRange));
 
-			GetRangeLimits limits;
-			RangeResult results = wait(tr.getRange(storageTeamIdKeyRange, limits));
-			ASSERT(!results.more);
-
-			for (auto team : results) {
-				const UID teamId = storageTeamIdKeyDecode(team.key);
-				const std::vector<UID> servers = decodeStorageTeams(team.value);
-				teams[teamId] = servers;
-			}
-
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-			TraceEvent(SevWarn, "TLogGroupFetchTeamError");
-			wait(tr.onError(e));
-		}
+	for (auto team : results) {
+		const UID teamId = storageTeamIdKeyDecode(team.key);
+		const std::vector<UID> servers = decodeStorageTeams(team.value);
+		teams[teamId] = servers;
 	}
 
 	return teams;
-}
-
-// Restore storage team to TLogGroup assignments. This will make sure that across recovery, we don't assign
-// a different TLogGroup to a team. It reads the state from `storageTeamIdToTLogGroupRange` range.
-//
-// TODO (tLogGroup): Reads the existing assignments from recoveryCommit. This can't be a normal transaction as proxy
-// isn't accepting commits yet.
-ACTOR Future<Void> restoreStorageTeamToGroupAssignment(TLogGroupCollection* self, Database cx) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult results = wait(tr.getRange(storageTeamIdToTLogGroupRange, GetRangeLimits()));
-			for (auto& r : results) {
-				auto teamId = decodeStorageTeamIdToTLogGroupKey(r.key);
-				auto group = self->getGroup(decodeTLogGroupKey(r.value));
-				ASSERT(group.isValid());
-				self->assignStorageTeam(teamId, group);
-			}
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
-}
-
-// TODO (tLogGroup): Set new assignments in recoveryCommitReq. This needs to be refactored accordingly.
-ACTOR Future<Void> TLogGroupCollection::initializeOrRecoverStorageTeamAssignmentActor(TLogGroupCollection* self,
-                                                                                      Database cx) {
-	wait(restoreStorageTeamToGroupAssignment(self, cx));
-
-	loop {
-		try {
-			state std::map<UID, std::vector<UID>> teams = wait(fetchStorageTeams(cx));
-			state std::map<UID, std::vector<UID>>::iterator it;
-			for (it = teams.begin(); it != teams.end(); ++it) {
-				state ptxn::StorageTeamID teamId = it->first;
-
-				if (self->storageTeams.find(teamId) != self->storageTeams.end()) {
-					continue;
-				}
-
-				// Save assignment state to \xff keyspace
-				state TLogGroupRef group = self->selectFreeGroup();
-				state Transaction tr(cx);
-
-				loop {
-					try {
-						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						tr.set(storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(group->id(), Unversioned()));
-						wait(tr.commit());
-						break;
-					} catch (Error& e) {
-						if (e.code() == error_code_actor_cancelled) {
-							throw;
-						}
-
-						TraceEvent(SevWarn, "TLogGroupMonitorAddStorageError")
-						    .detail("TeamId", teamId)
-						    .detail("GroupId", group->id());
-						wait(tr.onError(e));
-					}
-				}
-
-				// Once \xff key-space is updated, update our internal state.
-
-				// Check if this is already assigned. Possible when we recovered. Check
-				// `restoreStorageTramGroupAssignment()`.
-				if (self->storageTeamToTLogGroupMap.find(teamId) == self->storageTeamToTLogGroupMap.end()) {
-
-					self->assignStorageTeam(teamId, group);
-				}
-
-				self->storageTeams[teamId] = it->second;
-			}
-
-			// All teams successfully assigned.
-			break;
-
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-			TraceEvent(SevWarn, "TLogGroupMonitorError");
-		}
-	}
-
-	return Void();
 }
 
 void TLogGroup::addServer(const TLogWorkerDataRef& workerData) {

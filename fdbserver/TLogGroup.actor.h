@@ -22,6 +22,8 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of
 // this file. In intellisense use the source version.
+#include "fdbserver/TesterInterface.actor.h"
+#include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TLOGROUP_ACTOR_G_H)
 #define FDBSERVER_TLOGROUP_ACTOR_G_H
 #include "fdbserver/TLogGroup.actor.g.h"
@@ -57,9 +59,18 @@ typedef Reference<TLogGroupCollection> TLogGroupCollectionRef;
 // TODO: TLogGroupCollection for HA (satellite and remote), either same class or separate.
 class TLogGroupCollection : public ReferenceCounted<TLogGroupCollection> {
 public:
+	explicit TLogGroupCollection();
+
 	// Construct a TLogGroupCollection, where each group has 'groupSize' servers and satifies
 	// the contraints set by ReplicaitonPolicy 'policy'
 	explicit TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize);
+
+	// Construct a TLogGroupCollection, where each group has 'groupSize' servers and satifies
+	// the contraints set by ReplicaitonPolicy 'policy'
+	explicit TLogGroupCollection(const Reference<IReplicationPolicy>& policy,
+	                             int numGroups,
+	                             int groupSize,
+	                             Reference<AsyncVar<ServerDBInfo>> serverDbInfo);
 
 	// Returns list of groups recruited by this collection.
 	const std::vector<TLogGroupRef>& groups() const;
@@ -77,13 +88,23 @@ public:
 
 	// Add 'logWorkers' to current collection of workers that can be recruited into a TLogGroup.
 	void addWorkers(const std::vector<WorkerInterface>& logWorkers);
+	void addWorkers(const std::vector<OptionalInterface<TLogInterface>>& logWorkers);
 
 	// Build a collection of groups and recruit workers into each group as per the ReplicationPolicy
 	// and group size set in the parent class.
 	void recruitEverything();
 
+	// Add a TLogGroup
+	void addTLogGroup(TLogGroupRef group);
+
 	// Find a TLogGroup for assigning a storage team.
 	TLogGroupRef selectFreeGroup();
+
+	// Add storage team ID to lists of storage servers in that team.
+	void addStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers);
+
+	// Assigns a storage team to given group
+	bool assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId);
 
 	// Assigns a storage team to given group
 	bool assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group);
@@ -100,10 +121,6 @@ public:
 	Future<Void> recoverStorageTeamAssignments(Arena& arena,
 	                                           CommitTransactionRef& tr,
 	                                           vector<StorageServerInterface> servers);
-	ACTOR Future<Void> recoverStorageTeamAssignmentActor(TLogGroupCollection* self,
-	                                                     Arena* arena,
-	                                                     CommitTransactionRef* tr,
-	                                                     vector<StorageServerInterface> servers);
 
 	// Called by the master server to write the very first transaction to the database establishing
 	// the first storage team to tLogGroup mapping. TLogGroups should be created by the time this is
@@ -192,15 +209,26 @@ struct TLogWorkerData : public ReferenceCounted<TLogWorkerData> {
 	const UID id;
 
 	// Locality associated with the current worker.
-	const LocalityData locality;
-	const NetworkAddress address;
+	LocalityData locality;
+	NetworkAddress address;
 
+	TLogWorkerData(const UID& id) : id(id) {}
 	TLogWorkerData(const UID& id, const NetworkAddress& addr, const LocalityData& locality)
 	  : id(id), address(addr), locality(locality) {}
 
 	// Converts a WorkerInterface to TLogWorkerData.
 	static TLogWorkerDataRef fromInterface(const WorkerInterface& interf) {
 		return makeReference<TLogWorkerData>(interf.id(), interf.address(), interf.locality);
+	}
+	// Converts a WorkerInterface to TLogWorkerData.
+	static TLogWorkerDataRef fromInterface(const OptionalInterface<TLogInterface>& interf) {
+		if (interf.present()) {
+			auto inf = interf.interf();
+			return makeReference<TLogWorkerData>(inf.id(), inf.address(), inf.filteredLocality);
+		} else {
+			// TODO (Vishesh) Figure out how to find out locality later?
+			return makeReference<TLogWorkerData>(interf.id());
+		}
 	}
 
 	// Returns user-readable string representation of this object.
