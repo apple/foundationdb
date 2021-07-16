@@ -403,7 +403,8 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
-		                                                                 self->recruitmentStalled));
+		                                                                 self->recruitmentStalled,
+																		 Reference<TLogGroupCollection>()));
 		self->logSystem = newLogSystem;
 	} else {
 		self->primaryLocality = tagLocalitySpecial;
@@ -415,7 +416,8 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
-		                                                                 self->recruitmentStalled));
+		                                                                 self->recruitmentStalled,
+																		 Reference<TLogGroupCollection>()));
 		self->logSystem = newLogSystem;
 	}
 	return Void();
