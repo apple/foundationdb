@@ -509,15 +509,6 @@ void initHelp() {
 	    "the configuration of an existing one. Load a JSON document from the provided file, and change the database "
 	    "configuration to match the contents of the JSON document. The format should be the same as the value of the "
 	    "\"configuration\" entry in status JSON without \"excluded_servers\" or \"coordinators_count\".");
-	helpMap["coordinators"] = CommandHelp(
-	    "coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
-	    "change cluster coordinators or description",
-	    "If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured "
-	    "redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, "
-	    "nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by "
-	    "<ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators "
-	    "10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in "
-	    "the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
 	helpMap["exclude"] = CommandHelp(
 	    "exclude [FORCE] [failed] [no_wait] [<ADDRESS...>] [locality_dcid:<excludedcid>] "
 	    "[locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] "
@@ -531,14 +522,6 @@ void initHelp() {
 	    "If 'FORCE' is set, the command does not perform safety checks before excluding.\n"
 	    "If 'failed' is set, the transaction log queue is dropped pre-emptively before waiting\n"
 	    "for data movement to finish and the server cannot be included again.");
-	helpMap["include"] = CommandHelp(
-	    "include all|[<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] "
-	    "[locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality data",
-	    "permit previously-excluded servers and localities to rejoin the database",
-	    "If `all' is specified, the excluded servers and localities list is cleared.\n\nFor each IP address or IP:port "
-	    "pair in <ADDRESS...> or any LocalityData (like dcid, zoneid, machineid, processid), removes any "
-	    "matching exclusions from the excluded servers and localities list. "
-	    "(A specified IP will match all IP:* exclusion entries)");
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
@@ -1024,137 +1007,6 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	};
 	return ret;
 }
-
-// FIXME: Factor address parsing from coordinators, include, exclude
-
-ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool isClusterTLS) {
-	state StringRef setName;
-	StringRef nameTokenBegin = LiteralStringRef("description=");
-	for (auto tok = tokens.begin() + 1; tok != tokens.end(); ++tok)
-		if (tok->startsWith(nameTokenBegin)) {
-			setName = tok->substr(nameTokenBegin.size());
-			std::copy(tok + 1, tokens.end(), tok);
-			tokens.resize(tokens.size() - 1);
-			break;
-		}
-
-	bool automatic = tokens.size() == 2 && tokens[1] == LiteralStringRef("auto");
-
-	state Reference<IQuorumChange> change;
-	if (tokens.size() == 1 && setName.size()) {
-		change = noQuorumChange();
-	} else if (automatic) {
-		// Automatic quorum change
-		change = autoQuorumChange();
-	} else {
-		state std::set<NetworkAddress> addresses;
-		state std::vector<StringRef>::iterator t;
-		for (t = tokens.begin() + 1; t != tokens.end(); ++t) {
-			try {
-				// SOMEDAY: Check for keywords
-				auto const& addr = NetworkAddress::parse(t->toString());
-				if (addresses.count(addr)) {
-					fprintf(stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
-					return true;
-				}
-				addresses.insert(addr);
-			} catch (Error& e) {
-				if (e.code() == error_code_connection_string_invalid) {
-					fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
-					return true;
-				}
-				throw;
-			}
-		}
-
-		std::vector<NetworkAddress> addressesVec(addresses.begin(), addresses.end());
-		change = specifiedQuorumChange(addressesVec);
-	}
-	if (setName.size())
-		change = nameQuorumChange(setName.toString(), change);
-
-	CoordinatorsResult r = wait(makeInterruptable(changeQuorum(db, change)));
-
-	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
-	// there are various results specific to changeConfig() that we need to report:
-	bool err = true;
-	switch (r) {
-	case CoordinatorsResult::INVALID_NETWORK_ADDRESSES:
-		fprintf(stderr, "ERROR: The specified network addresses are invalid\n");
-		break;
-	case CoordinatorsResult::SAME_NETWORK_ADDRESSES:
-		printf("No change (existing configuration satisfies request)\n");
-		err = false;
-		break;
-	case CoordinatorsResult::NOT_COORDINATORS:
-		fprintf(stderr, "ERROR: Coordination servers are not running on the specified network addresses\n");
-		break;
-	case CoordinatorsResult::DATABASE_UNREACHABLE:
-		fprintf(stderr, "ERROR: Database unreachable\n");
-		break;
-	case CoordinatorsResult::BAD_DATABASE_STATE:
-		fprintf(stderr,
-		        "ERROR: The database is in an unexpected state from which changing coordinators might be unsafe\n");
-		break;
-	case CoordinatorsResult::COORDINATOR_UNREACHABLE:
-		fprintf(stderr, "ERROR: One of the specified coordinators is unreachable\n");
-		break;
-	case CoordinatorsResult::SUCCESS:
-		printf("Coordination state changed\n");
-		err = false;
-		break;
-	case CoordinatorsResult::NOT_ENOUGH_MACHINES:
-		fprintf(stderr, "ERROR: Too few fdbserver machines to provide coordination at the current redundancy level\n");
-		break;
-	default:
-		ASSERT(false);
-	};
-	return err;
-}
-
-// Includes the servers that could be IP addresses or localities back to the cluster.
-ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
-	std::vector<AddressExclusion> addresses;
-	state std::vector<std::string> localities;
-	state bool failed = false;
-	state bool all = false;
-	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
-		if (*t == LiteralStringRef("all")) {
-			all = true;
-		} else if (*t == LiteralStringRef("failed")) {
-			failed = true;
-		} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
-			// if the token starts with 'locality_' prefix.
-			localities.push_back(t->toString());
-		} else {
-			auto a = AddressExclusion::parse(*t);
-			if (!a.isValid()) {
-				fprintf(stderr,
-				        "ERROR: '%s' is neither a valid network endpoint address nor a locality\n",
-				        t->toString().c_str());
-				if (t->toString().find(":tls") != std::string::npos)
-					printf("        Do not include the `:tls' suffix when naming a process\n");
-				return true;
-			}
-			addresses.push_back(a);
-		}
-	}
-	if (all) {
-		std::vector<AddressExclusion> includeAll;
-		includeAll.push_back(AddressExclusion());
-		wait(makeInterruptable(includeServers(db, includeAll, failed)));
-		wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
-	} else {
-		if (!addresses.empty()) {
-			wait(makeInterruptable(includeServers(db, addresses, failed)));
-		}
-		if (!localities.empty()) {
-			// includes the servers that belong to given localities.
-			wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
-		}
-	}
-	return false;
-};
 
 ACTOR Future<bool> exclude(Database db,
                            std::vector<StringRef> tokens,
@@ -2211,18 +2063,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "coordinators")) {
-					auto cs = ClusterConnectionFile(localDb->getConnectionFile()->getFilename()).getConnectionString();
-					if (tokens.size() < 2) {
-						printf("Cluster description: %s\n", cs.clusterKeyName().toString().c_str());
-						printf("Cluster coordinators (%zu): %s\n",
-						       cs.coordinators().size(),
-						       describe(cs.coordinators()).c_str());
-						printf("Type `help coordinators' to learn how to change this information.\n");
-					} else {
-						bool err = wait(coordinators(localDb, tokens, cs.coordinators()[0].isTLS()));
-						if (err)
-							is_error = true;
-					}
+					bool _result = wait(makeInterruptable(coordinatorsCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
@@ -2234,14 +2077,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "include")) {
-					if (tokens.size() < 2) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(includeCommandActor(db, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						bool err = wait(include(localDb, tokens));
-						if (err)
-							is_error = true;
-					}
 					continue;
 				}
 
