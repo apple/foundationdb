@@ -70,8 +70,8 @@ struct MemoryLifetime : KVWorkload {
 	ACTOR Future<Void> _start(Database cx, MemoryLifetime* self) {
 		state double startTime = now();
 		state ReadYourWritesTransaction tr(cx);
-		state Reverse reverse = Reverse::FALSE;
-		state Snapshot snapshot = Snapshot::FALSE;
+		state Reverse reverse = Reverse::False;
+		state Snapshot snapshot = Snapshot::False;
 		loop {
 			try {
 				int op = deterministicRandom()->randomInt(0, 4);

@@ -296,8 +296,8 @@ struct UnreadableWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, UnreadableWorkload* self) {
 		state int testCount = 0;
-		state Reverse reverse = Reverse::FALSE;
-		state Snapshot snapshot = Snapshot::FALSE;
+		state Reverse reverse = Reverse::False;
+		state Snapshot snapshot = Snapshot::False;
 		for (; testCount < 100; testCount++) {
 			//TraceEvent("RYWT_Start").detail("TestCount", testCount);
 			state ReadYourWritesTransaction tr(cx);

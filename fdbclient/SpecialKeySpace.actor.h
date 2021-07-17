@@ -168,7 +168,7 @@ public:
 	                             KeySelector begin,
 	                             KeySelector end,
 	                             GetRangeLimits limits,
-	                             Reverse = Reverse::FALSE);
+	                             Reverse = Reverse::False);
 
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value);
 
