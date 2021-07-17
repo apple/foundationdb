@@ -66,9 +66,18 @@ struct CommandFactory {
 extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
+// coordinators
+extern const KeyRef clusterDescriptionSpecialKey;
+extern const KeyRef coordinatorsAutoSpecialKey;
+extern const KeyRef coordinatorsProcessSpecialKey;
 // datadistribution
 extern const KeyRef ddModeSpecialKey;
 extern const KeyRef ddIgnoreRebalanceSpecialKey;
+// exclude/include
+extern const KeyRangeRef excludedServersSpecialKeyRange;
+extern const KeyRangeRef failedServersSpecialKeyRange;
+extern const KeyRangeRef excludedLocalitySpecialKeyRange;
+extern const KeyRangeRef failedLocalitySpecialKeyRange;
 // lock/unlock
 extern const KeyRef lockSpecialKey;
 // maintenance
@@ -104,8 +113,12 @@ ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<S
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,
                                                 bool intrans);
+// coordinators command
+ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // datadistribution command
 ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// exclude command
+ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // expensive_data_check command
 ACTOR Future<bool> expensiveDataCheckCommandActor(
     Reference<IDatabase> db,
@@ -114,6 +127,8 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// include command
+ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // kill command
 ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     Reference<ITransaction> tr,
