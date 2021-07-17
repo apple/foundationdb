@@ -1758,7 +1758,9 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 		// we could get not_enough_machines if we happen to see the database while the cluster controller is updating
 		// the worker list, so make sure it happens twice before returning a failure
 		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
-		    true, "auto_coordinators", "The auto change attempt did not get enough machines, please try again"));
+		    true,
+		    "auto_coordinators",
+		    "Too few fdbserver machines to provide coordination at the current redundancy level"));
 		throw special_keys_api_failure();
 	}
 
