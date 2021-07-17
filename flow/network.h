@@ -45,6 +45,7 @@ enum class TaskPriority {
 	WriteSocket = 10000,
 	PollEIO = 9900,
 	DiskIOComplete = 9150,
+	NoDeliverDelay = 9100,
 	LoadBalancedEndpoint = 9000,
 	ReadSocket = 9000,
 	AcceptSocket = 8950,

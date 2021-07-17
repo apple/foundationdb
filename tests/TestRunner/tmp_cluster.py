@@ -11,7 +11,7 @@ from random import choice
 from pathlib import Path
 
 class TempCluster:
-    def __init__(self, build_dir: str,port: str = None):
+    def __init__(self, build_dir: str, process_number: int = 1, port: str = None):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
@@ -23,6 +23,7 @@ class TempCluster:
                                     self.build_dir.joinpath('bin', 'fdbserver'),
                                     self.build_dir.joinpath('bin', 'fdbmonitor'),
                                     self.build_dir.joinpath('bin', 'fdbcli'),
+                                    process_number,
                                     port = port)
         self.log = self.cluster.log
         self.etc = self.cluster.etc
@@ -63,9 +64,10 @@ if __name__ == '__main__':
     """)
     parser.add_argument('--build-dir', '-b', metavar='BUILD_DIRECTORY', help='FDB build directory', required=True)
     parser.add_argument('cmd', metavar="COMMAND", nargs="+", help="The command to run")
+    parser.add_argument('--process-number', '-p', help="Number of fdb processes running", type=int, default=1)
     args = parser.parse_args()
     errcode = 1
-    with TempCluster(args.build_dir) as cluster:
+    with TempCluster(args.build_dir, args.process_number) as cluster:
         print("log-dir: {}".format(cluster.log))
         print("etc-dir: {}".format(cluster.etc))
         print("data-dir: {}".format(cluster.data))
