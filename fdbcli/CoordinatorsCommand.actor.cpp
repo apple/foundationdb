@@ -113,10 +113,10 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 				std::string new_addresses_str = boost::algorithm::join(newAddresslist, ", ");
 				tr->set(fdb_cli::coordinatorsProcessSpecialKey, new_addresses_str);
 			}
-            wait(safeThreadFutureToFuture(tr->commit()));
-            // commit should always fail here
-            // if coordinators are changed, we should get commit_unknown() error
-            ASSERT(false);
+			wait(safeThreadFutureToFuture(tr->commit()));
+			// commit should always fail here
+			// if coordinators are changed, we should get commit_unknown() error
+			ASSERT(false);
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
@@ -139,10 +139,10 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 						printf("Coordination state changed\n");
 					else
 						printf("No change (existing configuration satisfies request)\n");
-                    return true;
+					return true;
 				} else {
 					fprintf(stderr, "ERROR: %s\n", msg.c_str());
-                    return false;
+					return false;
 				}
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));
