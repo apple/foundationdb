@@ -133,9 +133,9 @@ public:
 		    serverInfo(new AsyncVar<ServerDBInfo>()), db(DatabaseContext::create(clientInfo,
 		                                                                         Future<Void>(),
 		                                                                         LocalityData(),
-		                                                                         EnableLocalityLoadBalance::TRUE,
+		                                                                         EnableLocalityLoadBalance::True,
 		                                                                         TaskPriority::DefaultEndpoint,
-		                                                                         LockAware::TRUE)) // SOMEDAY: Locality!
+		                                                                         LockAware::True)) // SOMEDAY: Locality!
 		{}
 
 		void setDistributor(const DataDistributorInterface& interf) {
@@ -3078,7 +3078,7 @@ public:
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
 		db.serverInfo->set(serverInfo);
-		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
+		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 
 	~ClusterControllerData() {
