@@ -116,7 +116,7 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 		{ "GetHitL1", rocksdb::GET_HIT_L1, 0 },
 		{ "GetHitL2AndUp", rocksdb::GET_HIT_L2_AND_UP, 0 },
 		{ "CountKeysWritten", rocksdb::NUMBER_KEYS_WRITTEN, 0 },
-		{ "CountKeysWritten", rocksdb::NUMBER_KEYS_READ, 0 },
+		{ "CountKeysRead", rocksdb::NUMBER_KEYS_READ, 0 },
 		{ "CountDBSeek", rocksdb::NUMBER_DB_SEEK, 0 },
 		{ "CountDBNext", rocksdb::NUMBER_DB_NEXT, 0 },
 		{ "CountDBPrev", rocksdb::NUMBER_DB_PREV, 0 },
