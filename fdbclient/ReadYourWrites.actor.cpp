@@ -99,7 +99,7 @@ public:
 		} else if (it->is_empty_range()) {
 			return Optional<Value>();
 		} else {
-			Optional<Value> res = wait(ryw->tr.get(read.key, Snapshot::TRUE));
+			Optional<Value> res = wait(ryw->tr.get(read.key, Snapshot::True));
 			KeyRef k(ryw->arena, read.key);
 
 			if (res.present()) {
@@ -188,7 +188,7 @@ public:
 		}
 
 		RangeResult v = wait(
-		    ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, backwards ? Reverse::TRUE : Reverse::FALSE));
+		    ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
 		KeyRef maxKey = ryw->getMaxReadKey();
 		if (v.size() > 0) {
 			if (!backwards && v[v.size() - 1].key >= maxKey) {
@@ -694,7 +694,7 @@ public:
 
 				additionalRows = 0;
 				RangeResult snapshot_read =
-				    wait(ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::TRUE, Reverse::FALSE));
+				    wait(ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::True, Reverse::False));
 				KeyRangeRef range = getKnownKeyRange(snapshot_read, read_begin, read_end, ryw->arena);
 
 				//TraceEvent("RYWCacheInsert", randomID).detail("Range", range).detail("ExpectedSize", snapshot_read.expectedSize()).detail("Rows", snapshot_read.size()).detail("Results", snapshot_read).detail("More", snapshot_read.more).detail("ReadToBegin", snapshot_read.readToBegin).detail("ReadThroughEnd", snapshot_read.readThroughEnd).detail("ReadThrough", snapshot_read.readThrough);
@@ -998,7 +998,7 @@ public:
 
 				additionalRows = 0;
 				RangeResult snapshot_read =
-				    wait(ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::TRUE, Reverse::TRUE));
+				    wait(ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::True, Reverse::True));
 				KeyRangeRef range = getKnownKeyRangeBack(snapshot_read, read_begin, read_end, ryw->arena);
 
 				//TraceEvent("RYWCacheInsert", randomID).detail("Range", range).detail("ExpectedSize", snapshot_read.expectedSize()).detail("Rows", snapshot_read.size()).detail("Results", snapshot_read).detail("More", snapshot_read.more).detail("ReadToBegin", snapshot_read.readToBegin).detail("ReadThroughEnd", snapshot_read.readThroughEnd).detail("ReadThrough", snapshot_read.readThrough);
@@ -1115,7 +1115,7 @@ public:
 
 		if (!ryw->options.readYourWritesDisabled) {
 			ryw->watchMap[key].push_back(watch);
-			val = readWithConflictRange(ryw, GetValueReq(key), Snapshot::FALSE);
+			val = readWithConflictRange(ryw, GetValueReq(key), Snapshot::False);
 		} else {
 			ryw->approximateSize += 2 * key.expectedSize() + 1;
 			val = ryw->tr.get(key);
@@ -1637,13 +1637,13 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const&
 			inClearRange = true;
 		} else if (!it.is_cleared_range() && inClearRange) {
 			tr.clear(KeyRangeRef(clearBegin.toArenaOrRef(arena), it.beginKey().toArenaOrRef(arena)),
-			         AddConflictRange::FALSE);
+			         AddConflictRange::False);
 			inClearRange = false;
 		}
 	}
 
 	if (inClearRange) {
-		tr.clear(KeyRangeRef(clearBegin.toArenaOrRef(arena), keys.end), AddConflictRange::FALSE);
+		tr.clear(KeyRangeRef(clearBegin.toArenaOrRef(arena), keys.end), AddConflictRange::False);
 	}
 
 	it.skip(keys.begin);
@@ -1667,9 +1667,9 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const&
 				switch (op[i].type) {
 				case MutationRef::SetValue:
 					if (op[i].value.present()) {
-						tr.set(it.beginKey().assertRef(), op[i].value.get(), AddConflictRange::FALSE);
+						tr.set(it.beginKey().assertRef(), op[i].value.get(), AddConflictRange::False);
 					} else {
-						tr.clear(it.beginKey().assertRef(), AddConflictRange::FALSE);
+						tr.clear(it.beginKey().assertRef(), AddConflictRange::False);
 					}
 					break;
 				case MutationRef::AddValue:
@@ -1686,7 +1686,7 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const&
 				case MutationRef::MinV2:
 				case MutationRef::AndV2:
 				case MutationRef::CompareAndClear:
-					tr.atomicOp(it.beginKey().assertRef(), op[i].value.get(), op[i].type, AddConflictRange::FALSE);
+					tr.atomicOp(it.beginKey().assertRef(), op[i].value.get(), op[i].type, AddConflictRange::False);
 					break;
 				default:
 					break;
@@ -1899,7 +1899,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		versionStampKeys.push_back(arena, k);
-		addWriteConflict = AddConflictRange::FALSE;
+		addWriteConflict = AddConflictRange::False;
 		if (!options.readYourWritesDisabled) {
 			writeRangeToNativeTransaction(range);
 			writes.addUnmodifiedAndUnreadableRange(range);
