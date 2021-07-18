@@ -86,3 +86,17 @@ TEST_CASE("/asynctaskthread/add") {
 	ASSERT_EQ(sum, 1000);
 	return Void();
 }
+
+TEST_CASE("/asynctaskthread/error") {
+	state AsyncTaskThread asyncTaskThread;
+	try {
+		wait(asyncTaskThread.execAsync([]{
+			throw operation_failed();
+			return Void();
+		}));
+		ASSERT(false);
+	} catch (Error &e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+	}
+	return Void();
+}
