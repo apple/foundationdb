@@ -1088,31 +1088,6 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	return ret;
 }
 
-ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
-	state Standalone<StringRef> snapCmd;
-	state UID snapUID = deterministicRandom()->randomUniqueID();
-	for (int i = 1; i < tokens.size(); i++) {
-		snapCmd = snapCmd.withSuffix(tokens[i]);
-		if (i != tokens.size() - 1) {
-			snapCmd = snapCmd.withSuffix(LiteralStringRef(" "));
-		}
-	}
-	try {
-		wait(makeInterruptable(mgmtSnapCreate(db, snapCmd, snapUID)));
-		printf("Snapshot command succeeded with UID %s\n", snapUID.toString().c_str());
-	} catch (Error& e) {
-		fprintf(stderr,
-		        "Snapshot command failed %d (%s)."
-		        " Please cleanup any instance level snapshots created with UID %s.\n",
-		        e.code(),
-		        e.what(),
-		        snapUID.toString().c_str());
-		return true;
-	}
-	return false;
-}
-
-// TODO: Update the function to get rid of the Database after refactoring
 Reference<ITransaction> getTransaction(Reference<IDatabase> db,
                                        Reference<ITransaction>& tr,
                                        FdbOptions* options,
