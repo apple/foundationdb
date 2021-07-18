@@ -1623,7 +1623,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	state int index;
 	state bool parse_error = false;
 
-	// check update for cluster_description
+	// check update for coordinators
 	Key processes_key = LiteralStringRef("processes").withPrefix(kr.begin);
 	auto processes_entry = ryw->getSpecialKeySpaceWriteMap()[processes_key];
 	if (processes_entry.first) {
