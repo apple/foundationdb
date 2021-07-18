@@ -75,6 +75,11 @@ extern const KeyRangeRef excludedServersSpecialKeyRange;
 extern const KeyRangeRef failedServersSpecialKeyRange;
 extern const KeyRangeRef excludedLocalitySpecialKeyRange;
 extern const KeyRangeRef failedLocalitySpecialKeyRange;
+extern const KeyRef excludedForceOptionSpecialKey;
+extern const KeyRef failedForceOptionSpecialKey;
+extern const KeyRef excludedLocalityForceOptionSpecialKey;
+extern const KeyRef failedLocalityForceOptionSpecialKey;
+extern const KeyRangeRef exclusionInProgressSpecialKeyRange;
 // lock/unlock
 extern const KeyRef lockSpecialKey;
 // maintenance
@@ -90,6 +95,8 @@ inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_messag
 ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
                                 Reference<FlowLock> connectLock,
                                 KeyValue kv);
+// get all workers' info
+ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 
 // compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
@@ -125,7 +132,7 @@ ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector
 // datadistribution command
 ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // exclude command
-ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn);
 // expensive_data_check command
 ACTOR Future<bool> expensiveDataCheckCommandActor(
     Reference<IDatabase> db,
