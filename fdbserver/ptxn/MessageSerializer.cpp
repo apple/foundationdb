@@ -180,6 +180,10 @@ const Version& ProxySubsequencedMessageSerializer::getVersion() const {
 	return version;
 }
 
+void ProxySubsequencedMessageSerializer::setVersion(const Version& version) {
+	this->version = version;
+}
+
 void ProxySubsequencedMessageSerializer::prepareWriteMessage(const StorageTeamID& storageTeamID) {
 	// If the storage team ID is unseen, create a serializer for it.
 	if (serializers.find(storageTeamID) == serializers.end()) {

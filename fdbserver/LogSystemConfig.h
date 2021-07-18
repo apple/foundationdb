@@ -86,6 +86,7 @@ struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
 
+	// std::vector<ptxn::TLogGroupID> tLogGroups;
 	std::unordered_map<ptxn::TLogGroupID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>> ptxnTLogGroups;
 
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
