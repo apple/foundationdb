@@ -6,6 +6,7 @@ set(FDBCLI_SRCS
   ConsistencyCheckCommand.actor.cpp
   CoordinatorsCommand.actor.cpp
   DataDistributionCommand.actor.cpp
+  ExcludeCommand.actor.cpp
   ExpensiveDataCheckCommand.actor.cpp
   FlowLineNoise.actor.cpp
   FlowLineNoise.h
