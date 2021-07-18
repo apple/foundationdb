@@ -30,39 +30,40 @@
 
 class SimpleConfigTransactionImpl {
 	ConfigTransactionCommitRequest toCommit;
-	Future<Version> getVersionFuture;
+	Future<ConfigGeneration> getGenerationFuture;
 	ConfigTransactionInterface cti;
 	int numRetries{ 0 };
 	bool committed{ false };
 	Optional<UID> dID;
 	Database cx;
 
-	ACTOR static Future<Version> getReadVersion(SimpleConfigTransactionImpl* self) {
+	ACTOR static Future<ConfigGeneration> getGeneration(SimpleConfigTransactionImpl* self) {
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGettingReadVersion", self->dID.get());
 		}
-		ConfigTransactionGetVersionRequest req;
-		ConfigTransactionGetVersionReply reply =
-		    wait(self->cti.getVersion.getReply(ConfigTransactionGetVersionRequest{}));
+		ConfigTransactionGetGenerationRequest req;
+		ConfigTransactionGetGenerationReply reply =
+		    wait(self->cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{}));
 		if (self->dID.present()) {
-			TraceEvent("SimpleConfigTransactionGotReadVersion", self->dID.get()).detail("Version", reply.version);
+			TraceEvent("SimpleConfigTransactionGotReadVersion", self->dID.get())
+			    .detail("Version", reply.generation.liveVersion);
 		}
-		return reply.version;
+		return reply.generation;
 	}
 
 	ACTOR static Future<Optional<Value>> get(SimpleConfigTransactionImpl* self, KeyRef key) {
-		if (!self->getVersionFuture.isValid()) {
-			self->getVersionFuture = getReadVersion(self);
+		if (!self->getGenerationFuture.isValid()) {
+			self->getGenerationFuture = getGeneration(self);
 		}
 		state ConfigKey configKey = ConfigKey::decodeKey(key);
-		Version version = wait(self->getVersionFuture);
+		ConfigGeneration generation = wait(self->getGenerationFuture);
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGettingValue", self->dID.get())
 			    .detail("ConfigClass", configKey.configClass)
 			    .detail("KnobName", configKey.knobName);
 		}
 		ConfigTransactionGetReply reply =
-		    wait(self->cti.get.getReply(ConfigTransactionGetRequest{ version, configKey }));
+		    wait(self->cti.get.getReply(ConfigTransactionGetRequest{ generation, configKey }));
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGotValue", self->dID.get())
 			    .detail("Value", reply.value.get().toString());
@@ -75,12 +76,12 @@ class SimpleConfigTransactionImpl {
 	}
 
 	ACTOR static Future<Standalone<RangeResultRef>> getConfigClasses(SimpleConfigTransactionImpl* self) {
-		if (!self->getVersionFuture.isValid()) {
-			self->getVersionFuture = getReadVersion(self);
+		if (!self->getGenerationFuture.isValid()) {
+			self->getGenerationFuture = getGeneration(self);
 		}
-		Version version = wait(self->getVersionFuture);
+		ConfigGeneration generation = wait(self->getGenerationFuture);
 		ConfigTransactionGetConfigClassesReply reply =
-		    wait(self->cti.getClasses.getReply(ConfigTransactionGetConfigClassesRequest{ version }));
+		    wait(self->cti.getClasses.getReply(ConfigTransactionGetConfigClassesRequest{ generation }));
 		Standalone<RangeResultRef> result;
 		for (const auto& configClass : reply.configClasses) {
 			result.push_back_deep(result.arena(), KeyValueRef(configClass, ""_sr));
@@ -90,12 +91,12 @@ class SimpleConfigTransactionImpl {
 
 	ACTOR static Future<Standalone<RangeResultRef>> getKnobs(SimpleConfigTransactionImpl* self,
 	                                                         Optional<Key> configClass) {
-		if (!self->getVersionFuture.isValid()) {
-			self->getVersionFuture = getReadVersion(self);
+		if (!self->getGenerationFuture.isValid()) {
+			self->getGenerationFuture = getGeneration(self);
 		}
-		Version version = wait(self->getVersionFuture);
+		ConfigGeneration generation = wait(self->getGenerationFuture);
 		ConfigTransactionGetKnobsReply reply =
-		    wait(self->cti.getKnobs.getReply(ConfigTransactionGetKnobsRequest{ version, configClass }));
+		    wait(self->cti.getKnobs.getReply(ConfigTransactionGetKnobsRequest{ generation, configClass }));
 		Standalone<RangeResultRef> result;
 		for (const auto& knobName : reply.knobNames) {
 			result.push_back_deep(result.arena(), KeyValueRef(knobName, ""_sr));
@@ -104,10 +105,10 @@ class SimpleConfigTransactionImpl {
 	}
 
 	ACTOR static Future<Void> commit(SimpleConfigTransactionImpl* self) {
-		if (!self->getVersionFuture.isValid()) {
-			self->getVersionFuture = getReadVersion(self);
+		if (!self->getGenerationFuture.isValid()) {
+			self->getGenerationFuture = getGeneration(self);
 		}
-		wait(store(self->toCommit.version, self->getVersionFuture));
+		wait(store(self->toCommit.generation, self->getGenerationFuture));
 		self->toCommit.annotation.timestamp = now();
 		wait(self->cti.commit.getReply(self->toCommit));
 		self->committed = true;
@@ -170,23 +171,23 @@ public:
 	}
 
 	Future<Version> getReadVersion() {
-		if (!getVersionFuture.isValid())
-			getVersionFuture = getReadVersion(this);
-		return getVersionFuture;
+		if (!getGenerationFuture.isValid())
+			getGenerationFuture = getGeneration(this);
+		return map(getGenerationFuture, [](auto const& gen) { return gen.committedVersion; });
 	}
 
 	Optional<Version> getCachedReadVersion() const {
-		if (getVersionFuture.isValid() && getVersionFuture.isReady() && !getVersionFuture.isError()) {
-			return getVersionFuture.get();
+		if (getGenerationFuture.isValid() && getGenerationFuture.isReady() && !getGenerationFuture.isError()) {
+			return getGenerationFuture.get().liveVersion;
 		} else {
 			return {};
 		}
 	}
 
-	Version getCommittedVersion() const { return committed ? getVersionFuture.get() : ::invalidVersion; }
+	Version getCommittedVersion() const { return committed ? getGenerationFuture.get().liveVersion : ::invalidVersion; }
 
 	void reset() {
-		getVersionFuture = Future<Version>{};
+		getGenerationFuture = Future<ConfigGeneration>{};
 		toCommit = {};
 		committed = false;
 	}

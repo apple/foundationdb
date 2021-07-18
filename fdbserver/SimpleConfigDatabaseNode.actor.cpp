@@ -33,8 +33,7 @@
 namespace {
 
 const KeyRef lastCompactedVersionKey = "lastCompactedVersion"_sr;
-const KeyRef liveTransactionVersionKey = "liveTransactionVersion"_sr;
-const KeyRef committedVersionKey = "committedVersion"_sr;
+const KeyRef currentGenerationKey = "currentGeneration"_sr;
 const KeyRangeRef kvKeys = KeyRangeRef("kv/"_sr, "kv0"_sr);
 const KeyRangeRef mutationKeys = KeyRangeRef("mutation/"_sr, "mutation0"_sr);
 const KeyRangeRef annotationKeys = KeyRangeRef("annotation/"_sr, "annotation0"_sr);
@@ -114,28 +113,16 @@ class SimpleConfigDatabaseNodeImpl {
 	Counter newVersionRequests;
 	Future<Void> logger;
 
-	ACTOR static Future<Version> getLiveTransactionVersion(SimpleConfigDatabaseNodeImpl *self) {
-		Optional<Value> value = wait(self->kvStore->readValue(liveTransactionVersionKey));
-		state Version liveTransactionVersion = 0;
+	ACTOR static Future<ConfigGeneration> getGeneration(SimpleConfigDatabaseNodeImpl* self) {
+		state ConfigGeneration generation;
+		Optional<Value> value = wait(self->kvStore->readValue(currentGenerationKey));
 		if (value.present()) {
-			liveTransactionVersion = BinaryReader::fromStringRef<Version>(value.get(), IncludeVersion());
+			generation = BinaryReader::fromStringRef<ConfigGeneration>(value.get(), IncludeVersion());
 		} else {
-			self->kvStore->set(KeyValueRef(liveTransactionVersionKey, BinaryWriter::toValue(liveTransactionVersion, IncludeVersion())));
+			self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
 			wait(self->kvStore->commit());
 		}
-		return liveTransactionVersion;
-	}
-
-	ACTOR static Future<Version> getCommittedVersion(SimpleConfigDatabaseNodeImpl *self) {
-		Optional<Value> value = wait(self->kvStore->readValue(committedVersionKey));
-		state Version committedVersion = 0;
-		if (value.present()) {
-			committedVersion = BinaryReader::fromStringRef<Version>(value.get(), IncludeVersion());
-		} else {
-			self->kvStore->set(KeyValueRef(committedVersionKey, BinaryWriter::toValue(committedVersion, IncludeVersion())));
-			wait(self->kvStore->commit());
-		}
-		return committedVersion;
+		return generation;
 	}
 
 	ACTOR static Future<Version> getLastCompactedVersion(SimpleConfigDatabaseNodeImpl* self) {
@@ -192,7 +179,8 @@ class SimpleConfigDatabaseNodeImpl {
 			req.reply.sendError(version_already_compacted());
 			return Void();
 		}
-		state Version committedVersion = wait(getCommittedVersion(self));
+		state Version committedVersion =
+		    wait(map(getGeneration(self), [](auto const& gen) { return gen.committedVersion; }));
 		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
@@ -209,17 +197,20 @@ class SimpleConfigDatabaseNodeImpl {
 
 	// New transactions increment the database's current live version. This effectively serves as a lock, providing
 	// serializability
-	ACTOR static Future<Void> getNewVersion(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetVersionRequest req) {
-		state Version currentVersion = wait(getLiveTransactionVersion(self));
-		self->kvStore->set(KeyValueRef(liveTransactionVersionKey, BinaryWriter::toValue(++currentVersion, IncludeVersion())));
+	ACTOR static Future<Void> getNewGeneration(SimpleConfigDatabaseNodeImpl* self,
+	                                           ConfigTransactionGetGenerationRequest req) {
+		state ConfigGeneration generation = wait(getGeneration(self));
+		++generation.liveVersion;
+		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
 		wait(self->kvStore->commit());
-		req.reply.send(ConfigTransactionGetVersionReply(currentVersion));
+		req.reply.send(ConfigTransactionGetGenerationReply{ generation });
 		return Void();
 	}
 
 	ACTOR static Future<Void> get(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetRequest req) {
-		Version currentVersion = wait(getLiveTransactionVersion(self));
-		if (req.version != currentVersion) {
+		ConfigGeneration currentGeneration = wait(getGeneration(self));
+		if (req.generation != currentGeneration) {
+			// TODO: Also send information about highest seen version
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
@@ -229,7 +220,8 @@ class SimpleConfigDatabaseNodeImpl {
 		if (serializedValue.present()) {
 			value = ObjectReader::fromStringRef<KnobValue>(serializedValue.get(), IncludeVersion());
 		}
-		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
+		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
+		    wait(getMutations(self, 0, req.generation.committedVersion));
 		for (const auto &versionedMutation : versionedMutations) {
 			const auto &mutation = versionedMutation.mutation;
 			if (mutation.getKey() == req.key) {
@@ -249,8 +241,8 @@ class SimpleConfigDatabaseNodeImpl {
 	// may want to fix this to clean up the contract
 	ACTOR static Future<Void> getConfigClasses(SimpleConfigDatabaseNodeImpl* self,
 	                                           ConfigTransactionGetConfigClassesRequest req) {
-		Version currentVersion = wait(getLiveTransactionVersion(self));
-		if (req.version != currentVersion) {
+		ConfigGeneration currentGeneration = wait(getGeneration(self));
+		if (req.generation != currentGeneration) {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
@@ -265,7 +257,7 @@ class SimpleConfigDatabaseNodeImpl {
 		}
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		state Standalone<VectorRef<VersionedConfigMutationRef>> mutations =
-		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
+		    wait(getMutations(self, lastCompactedVersion + 1, req.generation.committedVersion));
 		for (const auto& versionedMutation : mutations) {
 			auto configClass = versionedMutation.mutation.getConfigClass();
 			if (configClass.present()) {
@@ -282,8 +274,8 @@ class SimpleConfigDatabaseNodeImpl {
 
 	// Retrieve all knobs explicitly defined for the specified configuration class
 	ACTOR static Future<Void> getKnobs(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
-		Version currentVersion = wait(getLiveTransactionVersion(self));
-		if (req.version != currentVersion) {
+		ConfigGeneration currentGeneration = wait(getGeneration(self));
+		if (req.generation != currentGeneration) {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
@@ -299,7 +291,7 @@ class SimpleConfigDatabaseNodeImpl {
 		}
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		state Standalone<VectorRef<VersionedConfigMutationRef>> mutations =
-		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
+		    wait(getMutations(self, lastCompactedVersion + 1, req.generation.committedVersion));
 		for (const auto& versionedMutation : mutations) {
 			if (versionedMutation.mutation.getConfigClass().template castTo<Key>() == req.configClass) {
 				if (versionedMutation.mutation.isSet()) {
@@ -318,31 +310,32 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> commit(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionCommitRequest req) {
-		Version currentVersion = wait(getLiveTransactionVersion(self));
-		if (req.version != currentVersion) {
+		ConfigGeneration currentGeneration = wait(getGeneration(self));
+		if (req.generation != currentGeneration) {
 			++self->failedCommits;
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
 		int index = 0;
 		for (const auto &mutation : req.mutations) {
-			Key key = versionedMutationKey(req.version, index++);
+			Key key = versionedMutationKey(req.generation.liveVersion, index++);
 			Value value = ObjectWriter::toValue(mutation, IncludeVersion());
 			if (mutation.isSet()) {
 				TraceEvent("SimpleConfigDatabaseNodeSetting")
 				    .detail("ConfigClass", mutation.getConfigClass())
 				    .detail("KnobName", mutation.getKnobName())
 				    .detail("Value", mutation.getValue().toString())
-				    .detail("Version", req.version);
+				    .detail("Version", req.generation.liveVersion);
 				++self->setMutations;
 			} else {
 				++self->clearMutations;
 			}
 			self->kvStore->set(KeyValueRef(key, value));
 		}
-		self->kvStore->set(
-		    KeyValueRef(versionedAnnotationKey(req.version), BinaryWriter::toValue(req.annotation, IncludeVersion())));
-		self->kvStore->set(KeyValueRef(committedVersionKey, BinaryWriter::toValue(req.version, IncludeVersion())));
+		self->kvStore->set(KeyValueRef(versionedAnnotationKey(req.generation.liveVersion),
+		                               BinaryWriter::toValue(req.annotation, IncludeVersion())));
+		ConfigGeneration newGeneration = { req.generation.liveVersion, req.generation.liveVersion };
+		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(newGeneration, IncludeVersion())));
 		wait(self->kvStore->commit());
 		++self->successfulCommits;
 		req.reply.send(Void());
@@ -352,9 +345,9 @@ class SimpleConfigDatabaseNodeImpl {
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface const* cti) {
 		loop {
 			choose {
-				when(ConfigTransactionGetVersionRequest req = waitNext(cti->getVersion.getFuture())) {
+				when(ConfigTransactionGetGenerationRequest req = waitNext(cti->getGeneration.getFuture())) {
 					++self->newVersionRequests;
-					wait(getNewVersion(self, req));
+					wait(getNewGeneration(self, req));
 				}
 				when(ConfigTransactionGetRequest req = waitNext(cti->get.getFuture())) {
 					++self->getValueRequests;
@@ -384,7 +377,8 @@ class SimpleConfigDatabaseNodeImpl {
 			    ObjectReader::fromStringRef<KnobValue>(kv.value, IncludeVersion());
 		}
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
-		wait(store(reply.changesVersion, getCommittedVersion(self)));
+		wait(store(reply.changesVersion,
+		           map(getGeneration(self), [](auto const& gen) { return gen.committedVersion; })));
 		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, reply.changesVersion)));
 		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, reply.changesVersion)));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingSnapshot", self->id)
