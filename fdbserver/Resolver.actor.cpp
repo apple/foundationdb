@@ -25,7 +25,7 @@
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
-#include "fdbserver/ptxn/TeamVersionTracker.h"
+#include "fdbserver/ptxn/TLogGroupVersionTracker.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/StorageMetrics.h"
@@ -48,7 +48,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	int commitProxyCount, resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
-	ptxn::TeamVersionTracker versionTracker; // tracks per team commit version
+	ptxn::TLogGroupVersionTracker versionTracker; // tracks per group commit version
 
 	Map<Version, Standalone<VectorRef<StateTransactionRef>>> recentStateTransactions;
 	Deque<std::pair<Version, int64_t>> recentStateTransactionSizes;
@@ -111,8 +111,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 	    req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
 	state ProxyRequestsInfo& proxyInfo = self->proxyInfoMap[proxyAddress];
 
-	self->versionTracker.addTeams(req.newTeams, req.version);
-	self->versionTracker.removeTeams(req.staleTeams);
+	self->versionTracker.addGroups(req.newGroups, req.version);
+	self->versionTracker.removeGroups(req.staleGroups);
 
 	++self->resolveBatchIn;
 
@@ -181,9 +181,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		std::vector<int> commitList;
 		std::vector<int> tooOldList;
 
-		// Update team versions
+		// Update group versions
 		if (req.prevVersion >= 0) { // Not first request
-			reply.previousCommitVersions = self->versionTracker.updateTeams(req.updatedTeams, req.version);
+			reply.previousCommitVersions = self->versionTracker.updateGroups(req.updatedGroups, req.version);
 		}
 
 		// Detect conflicts

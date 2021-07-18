@@ -74,6 +74,11 @@ using StorageTeamID = UID;
 // Transaction subsystem state (txnState) team.
 const StorageTeamID txsTeam = UID(1, 1);
 
+// Map from storage team id to a TLog group
+TLogGroupID tLogGroupByStorageTeamID(std::vector<TLogGroupID> tLogGroups, StorageTeamID storageTeamID) {
+	return tLogGroups[std::hash<StorageTeamID>{}(storageTeamID) % tLogGroups.size()];
+}
+
 } // namespace ptxn
 
 #pragma pack(push, 1)

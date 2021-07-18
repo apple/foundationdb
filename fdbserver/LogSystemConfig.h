@@ -89,6 +89,8 @@ struct TLogSet {
 	// TODO: figure out a way to represent TLog group information needed for a ss to find the corresponding TLog
 	//  interface.
 	// TODO: change other function below to reflect TLogSet
+	// Same order as in the recruitment, will only be set when 'isLocal' is true.
+	std::vector<ptxn::TLogGroupID> tLogGroups;
 	std::unordered_map<ptxn::TLogGroupID, std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>
 	    ptxnTLogGroups;
 	std::vector<OptionalInterface<TLogInterface>> logRouters;

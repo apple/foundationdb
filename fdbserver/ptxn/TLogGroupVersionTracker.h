@@ -1,5 +1,5 @@
 /*
- * TeamVersionTracker.h
+ * TLogGroupVersionTracker.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -31,37 +31,38 @@
 namespace ptxn {
 
 // Tracks the previous commit version (PCV) and commit version (CV) for each
-// team so that teams can progress at different rate, while down stream
+// group so that groups can progress at different rate, while down stream
 // components, e.g., TLogs or Storage Servers, can have ordered mutation
 // streams.
-class TeamVersionTracker {
+class TLogGroupVersionTracker {
 public:
-	TeamVersionTracker();
+	TLogGroupVersionTracker();
 
-	// Adds "teams" to the tracker with their "beginVersion", i.e., first PCV.
-	void addTeams(const std::vector<StorageTeamID>& teams, Version beginVersion);
+	// Adds "groups" to the tracker with their "beginVersion", i.e., first PCV.
+	void addGroups(const std::vector<TLogGroupID>& groups, Version beginVersion);
 
-	// Removes stale "teams" from this tracker.
-	void removeTeams(const std::vector<StorageTeamID>& teams);
+	// TODO: remove this function as TLog groups only gets updated at the beginning of an epoch
+	// Removes stale "groups" from this tracker.
+	void removeGroups(const std::vector<TLogGroupID>& groups);
 
-	// Updates "teams" with new commitVersion. Returns each team's PCV in a map.
-	std::map<StorageTeamID, Version> updateTeams(const std::vector<StorageTeamID>& teams, Version commitVersion);
+	// Updates "groups" with new commitVersion. Returns each group's PCV in a map.
+	std::map<TLogGroupID, Version> updateGroups(const std::vector<TLogGroupID>& groups, Version commitVersion);
 
-	// Returns the most lagging team and its CV.
-	std::pair<StorageTeamID, Version> mostLaggingTeam() const;
+	// Returns the most lagging group and its CV.
+	std::pair<TLogGroupID, Version> mostLaggingGroup() const;
 
-	// Returns the maximum commit version of all teams
+	// Returns the maximum commit version of all groups
 	Version getMaxCommitVersion() const { return maxCV; }
 
-	// Returns the CV of a team, or invalidVersion if not found.
-	Version getCommitVersion(StorageTeamID tid) const {
+	// Returns the CV of a group, or invalidVersion if not found.
+	Version getCommitVersion(TLogGroupID tid) const {
 		auto it = versions.find(tid);
 		return it == versions.end() ? invalidVersion : it->second;
 	}
 
 private:
-	std::map<StorageTeamID, Version> versions; // a map of StorageTeamID -> CV
-	Version maxCV = invalidVersion; // the maximum commit version of all teams
+	std::map<TLogGroupID, Version> versions; // a map of TLogGroupID -> CV
+	Version maxCV = invalidVersion; // the maximum commit version of all groups
 };
 
 } // namespace ptxn

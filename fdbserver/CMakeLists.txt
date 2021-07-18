@@ -131,8 +131,8 @@ set(FDBSERVER_SRCS
   ptxn/Serializer.h
   ptxn/StorageServerInterface.cpp
   ptxn/StorageServerInterface.h
-  ptxn/TeamVersionTracker.actor.cpp
-  ptxn/TeamVersionTracker.h
+  ptxn/TLogGroupVersionTracker.actor.cpp
+  ptxn/TLogGroupVersionTracker.h
   ptxn/TLogInterface.cpp
   ptxn/TLogInterface.h
   ptxn/TLogPeekCursor.actor.cpp

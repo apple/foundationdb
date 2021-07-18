@@ -1,5 +1,5 @@
 /*
- * TeamVersionTracker.actor.cpp
+ * TLogGroupVersionTracker.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,40 +18,40 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ptxn/TeamVersionTracker.h"
+#include "fdbserver/ptxn/TLogGroupVersionTracker.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/UnitTest.h"
 
 namespace ptxn {
 
-TeamVersionTracker::TeamVersionTracker() {}
+TLogGroupVersionTracker::TLogGroupVersionTracker() {}
 
-void TeamVersionTracker::addTeams(const std::vector<StorageTeamID>& teams, Version beginVersion) {
+void TLogGroupVersionTracker::addGroups(const std::vector<TLogGroupID>& groups, Version beginVersion) {
 	if (beginVersion > maxCV) {
 		maxCV = beginVersion;
 	}
 
-	for (const auto& team : teams) {
-		versions[team] = beginVersion;
+	for (const auto& group : groups) {
+		versions[group] = beginVersion;
 	}
 }
 
-void TeamVersionTracker::removeTeams(const std::vector<StorageTeamID>& teams) {
-	for (const auto& team : teams) {
-		versions.erase(team);
+void TLogGroupVersionTracker::removeGroups(const std::vector<TLogGroupID>& groups) {
+	for (const auto& group : groups) {
+		versions.erase(group);
 	}
 }
 
-std::map<StorageTeamID, Version> TeamVersionTracker::updateTeams(const std::vector<StorageTeamID>& teams,
-                                                                 Version commitVersion) {
+std::map<TLogGroupID, Version> TLogGroupVersionTracker::updateGroups(const std::vector<TLogGroupID>& groups,
+                                                                     Version commitVersion) {
 	if (commitVersion > maxCV) {
 		maxCV = commitVersion;
 	}
 
-	std::map<StorageTeamID, Version> results;
-	for (const auto& team : teams) {
-		auto it = versions.find(team);
+	std::map<TLogGroupID, Version> results;
+	for (const auto& group : groups) {
+		auto it = versions.find(group);
 		ASSERT_WE_THINK(it != versions.end() && it->second < commitVersion);
 		auto pair = results.emplace(it->first, it->second);
 		ASSERT_WE_THINK(pair.second); // insertion happens
@@ -61,17 +61,17 @@ std::map<StorageTeamID, Version> TeamVersionTracker::updateTeams(const std::vect
 }
 
 // TODO: reduce O(N) to O(1).
-std::pair<StorageTeamID, Version> TeamVersionTracker::mostLaggingTeam() const {
+std::pair<TLogGroupID, Version> TLogGroupVersionTracker::mostLaggingGroup() const {
 	Version v = invalidVersion;
-	StorageTeamID team;
+	TLogGroupID group;
 
 	for (const auto& [tid, cv] : versions) {
 		if (v == invalidVersion || v > cv) {
 			v = cv;
-			team = tid;
+			group = tid;
 		}
 	}
-	return { team, v };
+	return { group, v };
 }
 
 } // namespace ptxn
@@ -84,50 +84,50 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 	for (auto beginVersion : beginVersions) {
 		std::cout << "beginVersion: " << beginVersion << "\n";
 
-		ptxn::TeamVersionTracker tracker;
-		std::vector<ptxn::StorageTeamID> teams;
+		ptxn::TLogGroupVersionTracker tracker;
+		std::vector<ptxn::TLogGroupID> groups;
 		for (int i = 0; i < 5; i++) {
-			teams.emplace_back(0, i);
+			groups.emplace_back(0, i);
 		}
-		tracker.addTeams(teams, beginVersion);
+		tracker.addGroups(groups, beginVersion);
 
-		ptxn::StorageTeamID a(0, 0), b(0, 1), c(0, 2), d(0, 3), e(0, 4);
-		teams.clear();
-		teams.push_back(a);
+		ptxn::TLogGroupID a(0, 0), b(0, 1), c(0, 2), d(0, 3), e(0, 4);
+		groups.clear();
+		groups.push_back(a);
 		const Version cv1 = 10;
-		auto results = tracker.updateTeams(teams, cv1);
+		auto results = tracker.updateGroups(groups, cv1);
 		ASSERT(results.size() == 1 && results[a] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(a), cv1);
 		ASSERT_EQ(tracker.getMaxCommitVersion(), cv1);
 
-		teams.clear();
-		teams.push_back(b);
-		teams.push_back(c);
+		groups.clear();
+		groups.push_back(b);
+		groups.push_back(c);
 		const Version cv2 = 20;
-		results = tracker.updateTeams(teams, cv2);
+		results = tracker.updateGroups(groups, cv2);
 		ASSERT(results.size() == 2);
 		ASSERT(results[b] == beginVersion && results[c] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(b), cv2);
 		ASSERT_EQ(tracker.getCommitVersion(c), cv2);
 		ASSERT_EQ(tracker.getMaxCommitVersion(), cv2);
 
-		teams.clear();
-		teams.push_back(b);
-		teams.push_back(d);
-		teams.push_back(e);
+		groups.clear();
+		groups.push_back(b);
+		groups.push_back(d);
+		groups.push_back(e);
 		const Version cv3 = 30;
-		results = tracker.updateTeams(teams, cv3);
+		results = tracker.updateGroups(groups, cv3);
 		ASSERT(results.size() == 3);
 		ASSERT(results[b] == cv2 && results[d] == beginVersion && results[e] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(b), cv3);
 		ASSERT_EQ(tracker.getCommitVersion(c), cv2);
 		ASSERT_EQ(tracker.getCommitVersion(d), cv3);
 		ASSERT_EQ(tracker.getMaxCommitVersion(), cv3);
-		auto teamVersion = tracker.mostLaggingTeam();
-		ASSERT(teamVersion.first == a && teamVersion.second == cv1);
+		auto groupVersion = tracker.mostLaggingGroup();
+		ASSERT(groupVersion.first == a && groupVersion.second == cv1);
 
-		// Non-existent team CV == -1
-		ASSERT_EQ(tracker.getCommitVersion(ptxn::StorageTeamID(1, 0)), invalidVersion);
+		// Non-existent group CV == -1
+		ASSERT_EQ(tracker.getCommitVersion(ptxn::TLogGroupID(1, 0)), invalidVersion);
 	}
 
 	return Void();
