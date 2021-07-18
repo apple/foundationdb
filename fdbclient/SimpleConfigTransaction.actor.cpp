@@ -215,6 +215,9 @@ Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector
                                                                      int limit,
                                                                      Snapshot snapshot,
                                                                      Reverse reverse) {
+	if (reverse) {
+		throw client_invalid_operation();
+	}
 	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
@@ -223,6 +226,9 @@ Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector
                                                                      GetRangeLimits limits,
                                                                      Snapshot snapshot,
                                                                      Reverse reverse) {
+	if (reverse) {
+		throw client_invalid_operation();
+	}
 	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 

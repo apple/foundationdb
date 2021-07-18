@@ -58,6 +58,39 @@ class PaxosConfigTransactionImpl {
 		}
 	}
 
+	ACTOR static Future<RangeResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
+		if (!self->getGenerationFuture.isValid()) {
+			self->getGenerationFuture = getGeneration(self);
+		}
+		ConfigGeneration generation = wait(self->getGenerationFuture);
+		// TODO: Load balance
+		ConfigTransactionGetConfigClassesReply reply =
+		    wait(self->ctis[0].getClasses.getReply(ConfigTransactionGetConfigClassesRequest{ generation }));
+		RangeResult result;
+		result.reserve(result.arena(), reply.configClasses.size());
+		for (const auto& configClass : reply.configClasses) {
+			result.push_back_deep(result.arena(), KeyValueRef(configClass, ""_sr));
+		}
+		return result;
+	}
+
+	ACTOR static Future<Standalone<RangeResultRef>> getKnobs(PaxosConfigTransactionImpl* self,
+	                                                         Optional<Key> configClass) {
+		if (!self->getGenerationFuture.isValid()) {
+			self->getGenerationFuture = getGeneration(self);
+		}
+		ConfigGeneration generation = wait(self->getGenerationFuture);
+		// TODO: Load balance
+		ConfigTransactionGetKnobsReply reply =
+		    wait(self->ctis[0].getKnobs.getReply(ConfigTransactionGetKnobsRequest{ generation, configClass }));
+		RangeResult result;
+		result.reserve(result.arena(), reply.knobNames.size());
+		for (const auto& knobName : reply.knobNames) {
+			result.push_back_deep(result.arena(), KeyValueRef(knobName, ""_sr));
+		}
+		return result;
+	}
+
 public:
 	Future<Version> getReadVersion() {
 		if (!getGenerationFuture.isValid()) {
@@ -83,6 +116,19 @@ public:
 	void clear(KeyRef key) { toCommit.clear(key); }
 
 	Future<Optional<Value>> get(Key const& key) { return get(this, key); }
+
+	Future<RangeResult> getRange(KeyRangeRef keys) {
+		if (keys == configClassKeys) {
+			return getConfigClasses(this);
+		} else if (keys == globalConfigKnobKeys) {
+			return getKnobs(this, {});
+		} else if (configKnobKeys.contains(keys) && keys.singleKeyRange()) {
+			const auto configClass = keys.begin.removePrefix(configKnobKeys.begin);
+			return getKnobs(this, configClass);
+		} else {
+			throw invalid_config_db_range_read();
+		}
+	}
 
 	Future<Void> onError(Error const& e) {
 		// TODO: Improve this:
@@ -139,14 +185,15 @@ Future<Optional<Value>> PaxosConfigTransaction::get(Key const& key, Snapshot) {
 	return impl().get(key);
 }
 
-Future<Standalone<RangeResultRef>> PaxosConfigTransaction::getRange(KeySelector const& begin,
-                                                                    KeySelector const& end,
-                                                                    int limit,
-                                                                    Snapshot snapshot,
-                                                                    Reverse reverse) {
-	// TODO: Implement
-	ASSERT(false);
-	return Standalone<RangeResultRef>{};
+Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
+                                                     KeySelector const& end,
+                                                     int limit,
+                                                     Snapshot snapshot,
+                                                     Reverse reverse) {
+	if (reverse) {
+		throw client_invalid_operation();
+	}
+	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
 Future<Standalone<RangeResultRef>> PaxosConfigTransaction::getRange(KeySelector begin,
@@ -154,9 +201,10 @@ Future<Standalone<RangeResultRef>> PaxosConfigTransaction::getRange(KeySelector 
                                                                     GetRangeLimits limits,
                                                                     Snapshot snapshot,
                                                                     Reverse reverse) {
-	// TODO: Implement
-	ASSERT(false);
-	return Standalone<RangeResultRef>{};
+	if (reverse) {
+		throw client_invalid_operation();
+	}
+	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
 void PaxosConfigTransaction::set(KeyRef const& key, ValueRef const& value) {
