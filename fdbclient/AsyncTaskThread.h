@@ -88,6 +88,7 @@ public:
 				auto funcResult = func();
 				onMainThreadVoid([promise, funcResult] { promise.send(funcResult); }, nullptr, priority);
 			} catch (Error& e) {
+				TraceEvent("ErrorExecutingAsyncTask").error(e);
 				onMainThreadVoid([promise, e] { promise.sendError(e); }, nullptr, priority);
 			}
 		});
