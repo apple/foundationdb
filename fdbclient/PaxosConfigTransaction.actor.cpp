@@ -74,8 +74,7 @@ class PaxosConfigTransactionImpl {
 		return result;
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> getKnobs(PaxosConfigTransactionImpl* self,
-	                                                         Optional<Key> configClass) {
+	ACTOR static Future<RangeResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
 		if (!self->getGenerationFuture.isValid()) {
 			self->getGenerationFuture = getGeneration(self);
 		}
@@ -196,11 +195,11 @@ Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
 	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
-Future<Standalone<RangeResultRef>> PaxosConfigTransaction::getRange(KeySelector begin,
-                                                                    KeySelector end,
-                                                                    GetRangeLimits limits,
-                                                                    Snapshot snapshot,
-                                                                    Reverse reverse) {
+Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector begin,
+                                                     KeySelector end,
+                                                     GetRangeLimits limits,
+                                                     Snapshot snapshot,
+                                                     Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}

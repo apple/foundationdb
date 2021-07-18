@@ -52,16 +52,16 @@ public:
 	virtual Optional<Version> getCachedReadVersion() const = 0;
 	virtual Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False) = 0;
 	virtual Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False) = 0;
-	virtual Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
-	                                                    const KeySelector& end,
-	                                                    int limit,
-	                                                    Snapshot = Snapshot::False,
-	                                                    Reverse = Reverse::False) = 0;
-	virtual Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
-	                                                    KeySelector end,
-	                                                    GetRangeLimits limits,
-	                                                    Snapshot = Snapshot::False,
-	                                                    Reverse = Reverse::False) = 0;
+	virtual Future<RangeResult> getRange(const KeySelector& begin,
+	                                     const KeySelector& end,
+	                                     int limit,
+	                                     Snapshot = Snapshot::False,
+	                                     Reverse = Reverse::False) = 0;
+	virtual Future<RangeResult> getRange(KeySelector begin,
+	                                     KeySelector end,
+	                                     GetRangeLimits limits,
+	                                     Snapshot = Snapshot::False,
+	                                     Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
 	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
 	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;

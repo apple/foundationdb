@@ -144,7 +144,7 @@ class SimpleConfigDatabaseNodeImpl {
 		Key startKey = versionedAnnotationKey(startVersion);
 		Key endKey = versionedAnnotationKey(endVersion + 1);
 		state KeyRangeRef keys(startKey, endKey);
-		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(keys));
+		RangeResult range = wait(self->kvStore->readRange(keys));
 		Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> result;
 		for (const auto& kv : range) {
 			auto version = getVersionFromVersionedAnnotationKey(kv.key);
@@ -161,7 +161,7 @@ class SimpleConfigDatabaseNodeImpl {
 		Key startKey = versionedMutationKey(startVersion, 0);
 		Key endKey = versionedMutationKey(endVersion + 1, 0);
 		state KeyRangeRef keys(startKey, endKey);
-		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(keys));
+		RangeResult range = wait(self->kvStore->readRange(keys));
 		Standalone<VectorRef<VersionedConfigMutationRef>> result;
 		for (const auto &kv : range) {
 			auto version = getVersionFromVersionedMutationKey(kv.key);
@@ -246,7 +246,7 @@ class SimpleConfigDatabaseNodeImpl {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
-		state Standalone<RangeResultRef> snapshot = wait(self->kvStore->readRange(kvKeys));
+		state RangeResult snapshot = wait(self->kvStore->readRange(kvKeys));
 		state std::set<Key> configClassesSet;
 		for (const auto& kv : snapshot) {
 			auto configKey =
@@ -280,7 +280,7 @@ class SimpleConfigDatabaseNodeImpl {
 			return Void();
 		}
 		// FIXME: Filtering after reading from disk is very inefficient
-		state Standalone<RangeResultRef> snapshot = wait(self->kvStore->readRange(kvKeys));
+		state RangeResult snapshot = wait(self->kvStore->readRange(kvKeys));
 		state std::set<Key> knobSet;
 		for (const auto& kv : snapshot) {
 			auto configKey =
@@ -370,7 +370,7 @@ class SimpleConfigDatabaseNodeImpl {
 	ACTOR static Future<Void> getSnapshotAndChanges(SimpleConfigDatabaseNodeImpl* self,
 	                                                ConfigFollowerGetSnapshotAndChangesRequest req) {
 		state ConfigFollowerGetSnapshotAndChangesReply reply;
-		Standalone<RangeResultRef> data = wait(self->kvStore->readRange(kvKeys));
+		RangeResult data = wait(self->kvStore->readRange(kvKeys));
 		for (const auto& kv : data) {
 			reply
 			    .snapshot[BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(kvKeys.begin), IncludeVersion())] =

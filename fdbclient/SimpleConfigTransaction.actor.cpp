@@ -75,29 +75,28 @@ class SimpleConfigTransactionImpl {
 		}
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> getConfigClasses(SimpleConfigTransactionImpl* self) {
+	ACTOR static Future<RangeResult> getConfigClasses(SimpleConfigTransactionImpl* self) {
 		if (!self->getGenerationFuture.isValid()) {
 			self->getGenerationFuture = getGeneration(self);
 		}
 		ConfigGeneration generation = wait(self->getGenerationFuture);
 		ConfigTransactionGetConfigClassesReply reply =
 		    wait(self->cti.getClasses.getReply(ConfigTransactionGetConfigClassesRequest{ generation }));
-		Standalone<RangeResultRef> result;
+		RangeResult result;
 		for (const auto& configClass : reply.configClasses) {
 			result.push_back_deep(result.arena(), KeyValueRef(configClass, ""_sr));
 		}
 		return result;
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> getKnobs(SimpleConfigTransactionImpl* self,
-	                                                         Optional<Key> configClass) {
+	ACTOR static Future<RangeResult> getKnobs(SimpleConfigTransactionImpl* self, Optional<Key> configClass) {
 		if (!self->getGenerationFuture.isValid()) {
 			self->getGenerationFuture = getGeneration(self);
 		}
 		ConfigGeneration generation = wait(self->getGenerationFuture);
 		ConfigTransactionGetKnobsReply reply =
 		    wait(self->cti.getKnobs.getReply(ConfigTransactionGetKnobsRequest{ generation, configClass }));
-		Standalone<RangeResultRef> result;
+		RangeResult result;
 		for (const auto& knobName : reply.knobNames) {
 			result.push_back_deep(result.arena(), KeyValueRef(knobName, ""_sr));
 		}
@@ -130,7 +129,7 @@ public:
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
 
-	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef keys) {
+	Future<RangeResult> getRange(KeyRangeRef keys) {
 		if (keys == configClassKeys) {
 			return getConfigClasses(this);
 		} else if (keys == globalConfigKnobKeys) {
@@ -210,22 +209,22 @@ Future<Optional<Value>> SimpleConfigTransaction::get(Key const& key, Snapshot sn
 	return impl().get(key);
 }
 
-Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector const& begin,
-                                                                     KeySelector const& end,
-                                                                     int limit,
-                                                                     Snapshot snapshot,
-                                                                     Reverse reverse) {
+Future<RangeResult> SimpleConfigTransaction::getRange(KeySelector const& begin,
+                                                      KeySelector const& end,
+                                                      int limit,
+                                                      Snapshot snapshot,
+                                                      Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}
 	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
-Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector begin,
-                                                                     KeySelector end,
-                                                                     GetRangeLimits limits,
-                                                                     Snapshot snapshot,
-                                                                     Reverse reverse) {
+Future<RangeResult> SimpleConfigTransaction::getRange(KeySelector begin,
+                                                      KeySelector end,
+                                                      GetRangeLimits limits,
+                                                      Snapshot snapshot,
+                                                      Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}

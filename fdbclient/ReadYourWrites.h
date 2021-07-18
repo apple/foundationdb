@@ -74,20 +74,20 @@ public:
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
 	Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False) override;
 	Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False) override;
-	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
-	                                            const KeySelector& end,
-	                                            int limit,
-	                                            Snapshot = Snapshot::False,
-	                                            Reverse = Reverse::False) override;
-	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
-	                                            KeySelector end,
-	                                            GetRangeLimits limits,
-	                                            Snapshot = Snapshot::False,
-	                                            Reverse = Reverse::False) override;
-	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
-	                                            int limit,
-	                                            Snapshot snapshot = Snapshot::False,
-	                                            Reverse reverse = Reverse::False) {
+	Future<RangeResult> getRange(const KeySelector& begin,
+	                             const KeySelector& end,
+	                             int limit,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
+	Future<RangeResult> getRange(KeySelector begin,
+	                             KeySelector end,
+	                             GetRangeLimits limits,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
+	Future<RangeResult> getRange(const KeyRange& keys,
+	                             int limit,
+	                             Snapshot snapshot = Snapshot::False,
+	                             Reverse reverse = Reverse::False) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limit,
