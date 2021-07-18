@@ -579,7 +579,7 @@ int main(int argc, char** argv) {
 		Error::init();
 
 		StringRef url(param.container_url);
-		setupNetwork(0, true);
+		setupNetwork(0, UseMetrics::True);
 
 		TraceEvent::setNetworkThread();
 		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "decode", param.trace_log_group);

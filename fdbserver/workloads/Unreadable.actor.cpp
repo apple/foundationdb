@@ -132,7 +132,7 @@ struct UnreadableWorkload : TestWorkload {
 	                               KeySelectorRef const& _end,
 	                               bool isUnreadable,
 	                               int limit,
-	                               bool reverse) {
+	                               Reverse reverse) {
 
 		/*
 		for (auto it : setMap) {
@@ -296,6 +296,8 @@ struct UnreadableWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, UnreadableWorkload* self) {
 		state int testCount = 0;
+		state Reverse reverse = Reverse::False;
+		state Snapshot snapshot = Snapshot::False;
 		for (; testCount < 100; testCount++) {
 			//TraceEvent("RYWT_Start").detail("TestCount", testCount);
 			state ReadYourWritesTransaction tr(cx);
@@ -308,9 +310,7 @@ struct UnreadableWorkload : TestWorkload {
 			state KeyRangeRef range;
 			state KeyRef key;
 			state ValueRef value;
-			state bool reverse;
 			state int limit;
-			state bool snapshot;
 			state KeySelectorRef begin;
 			state KeySelectorRef end;
 			state bool bypassUnreadable = deterministicRandom()->coinflip();
@@ -358,8 +358,8 @@ struct UnreadableWorkload : TestWorkload {
 					//TraceEvent("RYWT_SetVersionstampKey").detail("Range", printable(range));
 				} else if (r == 16) {
 					range = RandomTestImpl::getRandomRange(arena);
-					snapshot = deterministicRandom()->random01() < 0.05;
-					reverse = deterministicRandom()->random01() < 0.5;
+					snapshot.set(deterministicRandom()->random01() < 0.05);
+					reverse.set(deterministicRandom()->coinflip());
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
@@ -393,8 +393,8 @@ struct UnreadableWorkload : TestWorkload {
 					begin = RandomTestImpl::getRandomKeySelector(arena);
 					end = RandomTestImpl::getRandomKeySelector(arena);
 					limit = deterministicRandom()->randomInt(1, 100); // maximum number of results to return from the db
-					snapshot = deterministicRandom()->random01() < 0.05;
-					reverse = deterministicRandom()->random01() < 0.5;
+					snapshot.set(deterministicRandom()->random01() < 0.05);
+					reverse.set(deterministicRandom()->coinflip());
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
@@ -438,7 +438,7 @@ struct UnreadableWorkload : TestWorkload {
 					}
 				} else if (r == 18) {
 					key = RandomTestImpl::getRandomKey(arena);
-					snapshot = deterministicRandom()->random01() < 0.05;
+					snapshot.set(deterministicRandom()->random01() < 0.05);
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);

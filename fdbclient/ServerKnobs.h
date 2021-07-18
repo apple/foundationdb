@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -64,6 +65,8 @@ public:
 	                                              // message (measured in 1/1024ths, e.g. a value of 2048 yields a
 	                                              // factor of 2).
 	int64_t VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
+	int64_t TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE;
+	bool ENABLE_DETAILED_TLOG_POP_TRACE;
 	double TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	int64_t TLOG_MESSAGE_BLOCK_BYTES;
 	int64_t MAX_MESSAGE_SIZE;
@@ -205,6 +208,7 @@ public:
 	int DD_TEAMS_INFO_PRINT_YIELD_COUNT;
 	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
 	int DD_STORAGE_WIGGLE_PAUSE_THRESHOLD; // How many unhealthy relocations are ongoing will pause storage wiggle
+	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -385,7 +389,23 @@ public:
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
 	double CLIENT_REGISTER_INTERVAL;
-	bool CLUSTER_CONTROLLER_ENABLE_WORKER_HEALTH_MONITOR;
+	bool CC_ENABLE_WORKER_HEALTH_MONITOR;
+	double CC_WORKER_HEALTH_CHECKING_INTERVAL; // The interval of refreshing the degraded server list.
+	double CC_DEGRADED_LINK_EXPIRATION_INTERVAL; // The time period from the last degradation report after which a
+	                                             // degraded server is considered healthy.
+	double CC_MIN_DEGRADATION_INTERVAL; // The minimum interval that a server is reported as degraded to be considered
+	                                    // as degraded by Cluster Controller.
+	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE; // The maximum number of degraded peers when excluding a server. When the
+	                                        // number of degraded peers is more than this value, we will not exclude
+	                                        // this server since it may because of server overload.
+	int CC_MAX_EXCLUSION_DUE_TO_HEALTH; // The max number of degraded servers to exclude by Cluster Controller due to
+	                                    // degraded health.
+	bool CC_HEALTH_TRIGGER_RECOVERY; // If true, cluster controller will kill the master to trigger recovery when
+	                                 // detecting degraded servers. If false, cluster controller only prints a warning.
+	double CC_TRACKING_HEALTH_RECOVERY_INTERVAL; // The number of recovery count should not exceed
+	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
+	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
+	int CC_MAX_HEALTH_RECOVERY_COUNT;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)

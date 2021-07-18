@@ -29,8 +29,7 @@ ClientKnobs::ClientKnobs(Randomize randomize) {
 	initialize(randomize);
 }
 
-void ClientKnobs::initialize(Randomize _randomize) {
-	bool const randomize = (_randomize == Randomize::YES);
+void ClientKnobs::initialize(Randomize randomize) {
 	// clang-format off
 
 	init( TOO_MANY,                            1000000 );
@@ -253,13 +252,13 @@ void ClientKnobs::initialize(Randomize _randomize) {
 
 TEST_CASE("/fdbclient/knobs/initialize") {
 	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
-	ClientKnobs clientKnobs(Randomize::NO);
+	ClientKnobs clientKnobs(Randomize::False);
 	int64_t initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
 	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
 	clientKnobs.setKnob("core_versionspersecond", initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions);
-	clientKnobs.initialize(Randomize::NO);
+	clientKnobs.initialize(Randomize::False);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions * 2);
 	return Void();
