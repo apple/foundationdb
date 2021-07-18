@@ -90,6 +90,23 @@ class PaxosConfigTransactionImpl {
 		return result;
 	}
 
+	ACTOR static Future<Void> commit(PaxosConfigTransactionImpl* self) {
+		if (!self->getGenerationFuture.isValid()) {
+			self->getGenerationFuture = getGeneration(self);
+		}
+		wait(store(self->toCommit.generation, self->getGenerationFuture));
+		self->toCommit.annotation.timestamp = now();
+		std::vector<Future<Void>> commitFutures;
+		commitFutures.reserve(self->ctis.size());
+		for (const auto& cti : self->ctis) {
+			commitFutures.push_back(cti.commit.getReply(self->toCommit));
+		}
+		// FIXME: Must tolerate failures and disagreement
+		wait(quorum(commitFutures, commitFutures.size() / 2 + 1));
+		self->committed = true;
+		return Void();
+	}
+
 public:
 	Future<Version> getReadVersion() {
 		if (!getGenerationFuture.isValid()) {
@@ -161,6 +178,8 @@ public:
 		}
 	}
 
+	Future<Void> commit() { return commit(this); }
+
 	PaxosConfigTransactionImpl(Database const& cx) : cx(cx) {
 		auto coordinators = cx->getConnectionFile()->getConnectionString().coordinators();
 		ctis.reserve(coordinators.size());
@@ -215,9 +234,7 @@ void PaxosConfigTransaction::clear(KeyRef const& key) {
 }
 
 Future<Void> PaxosConfigTransaction::commit() {
-	// TODO: Implememnt
-	ASSERT(false);
-	return Void();
+	return impl().commit();
 }
 
 Version PaxosConfigTransaction::getCommittedVersion() const {
