@@ -1817,7 +1817,7 @@ int main(int argc, char* argv[]) {
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
 			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests" };
 
-			for (auto& dir : directories) {
+			for (const auto& dir : directories) {
 				if (dir.size() != 32 && allowedDirectories.count(dir) == 0 && dir.find("snap") == std::string::npos) {
 
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
