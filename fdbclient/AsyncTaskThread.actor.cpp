@@ -51,7 +51,7 @@ AsyncTaskThread::~AsyncTaskThread() {
 	bool wakeUp = false;
 	{
 		std::lock_guard<std::mutex> g(m);
-		wakeUp = queue.push(std::make_shared<TerminateTask>());
+		wakeUp = queue.push(std::make_unique<TerminateTask>());
 	}
 	if (wakeUp) {
 		cv.notify_one();
@@ -61,7 +61,7 @@ AsyncTaskThread::~AsyncTaskThread() {
 
 void AsyncTaskThread::run(AsyncTaskThread* self) {
 	while (true) {
-		std::shared_ptr<IAsyncTask> task;
+		std::unique_ptr<IAsyncTask> task;
 		{
 			std::unique_lock<std::mutex> lk(self->m);
 			self->cv.wait(lk, [self] { return !self->queue.canSleep(); });

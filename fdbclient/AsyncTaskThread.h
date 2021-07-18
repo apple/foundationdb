@@ -48,7 +48,7 @@ public:
 };
 
 class AsyncTaskThread {
-	ThreadSafeQueue<std::shared_ptr<IAsyncTask>> queue;
+	ThreadSafeQueue<std::unique_ptr<IAsyncTask>> queue;
 	std::condition_variable cv;
 	std::mutex m;
 	std::thread thread;
@@ -60,7 +60,7 @@ class AsyncTaskThread {
 		bool wakeUp = false;
 		{
 			std::lock_guard<std::mutex> g(m);
-			wakeUp = queue.push(std::make_shared<AsyncTask<F>>(func));
+			wakeUp = queue.push(std::make_unique<AsyncTask<F>>(func));
 		}
 		if (wakeUp) {
 			cv.notify_one();
