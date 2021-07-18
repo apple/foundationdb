@@ -191,7 +191,7 @@ private:
 
 			if (++sinceYield == 1000) {
 				sinceYield = 0;
-				wait(yield());
+				wait(delay(0));
 			}
 
 			// While there are available slots and there are waiters, launch tasks
@@ -841,7 +841,7 @@ public:
 				static int sinceYield = 0;
 				if (++sinceYield == 1000) {
 					sinceYield = 0;
-					wait(yield());
+					wait(delay(0));
 				}
 
 				lock.release();
@@ -891,7 +891,7 @@ public:
 				static int sinceYield = 0;
 				if (++sinceYield == 1000) {
 					sinceYield = 0;
-					wait(yield());
+					wait(delay(0));
 				}
 
 				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext unlocking mutex\n", self->toString().c_str());
@@ -1508,19 +1508,19 @@ struct RedwoodMetrics {
 			if (h == 0) {
 				for (const auto& ER : L0PossibleEventReasonPairs) {
 					t->detail(
-					    format(
-					        "L%d%s",
-					        h,
-					        (PagerEventsStrings[(size_t)ER.first] + PagerEventReasonsStrings[(size_t)ER.second]).c_str()),
+					    format("L%d%s",
+					           h,
+					           (PagerEventsStrings[(size_t)ER.first] + PagerEventReasonsStrings[(size_t)ER.second])
+					               .c_str()),
 					    eventReasons[(size_t)ER.first][(size_t)ER.second]);
 				}
 			} else {
 				for (const auto& ER : possibleEventReasonPairs) {
 					t->detail(
-					    format(
-					        "L%d%s",
-					        h,
-					        (PagerEventsStrings[(size_t)ER.first] + PagerEventReasonsStrings[(size_t)ER.second]).c_str()),
+					    format("L%d%s",
+					           h,
+					           (PagerEventsStrings[(size_t)ER.first] + PagerEventReasonsStrings[(size_t)ER.second])
+					               .c_str()),
 					    eventReasons[(size_t)ER.first][(size_t)ER.second]);
 				}
 			}
@@ -4558,12 +4558,12 @@ public:
 				const LazyClearQueueEntry& entry = entries[i].first;
 				const BTreePage& btPage = *(BTreePage*)p->begin();
 				ASSERT(btPage.height == entry.height);
-				auto& metrics = g_redwoodMetrics.level(btPage.height).metrics;
+				auto& metrics = g_redwoodMetrics.level(entry.height).metrics;
 
 				debug_printf("LazyClear: processing %s\n", toString(entry).c_str());
 
 				// Level 1 (leaf) nodes should never be in the lazy delete queue
-				ASSERT(btPage.height > 1);
+				ASSERT(entry.height > 1);
 
 				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
 				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
@@ -4575,7 +4575,7 @@ public:
 					if (c.get().value.present()) {
 						BTreePageIDRef btChildPageID = c.get().getChildPage();
 						// If this page is height 2, then the children are leaves so free them directly
-						if (btPage.height == 2) {
+						if (entry.height == 2) {
 							debug_printf("LazyClear: freeing child %s\n", toString(btChildPageID).c_str());
 							self->freeBTreePage(btChildPageID, v);
 							freedPages += btChildPageID.size();
@@ -4584,7 +4584,8 @@ public:
 						} else {
 							// Otherwise, queue them for lazy delete.
 							debug_printf("LazyClear: queuing child %s\n", toString(btChildPageID).c_str());
-							self->m_lazyClearQueue.pushFront(LazyClearQueueEntry{ btPage.height, v, btChildPageID });
+							self->m_lazyClearQueue.pushFront(
+							    LazyClearQueueEntry{ (uint8_t)(entry.height - 1), v, btChildPageID });
 							metrics.lazyClearRequeue += 1;
 							metrics.lazyClearRequeueExt += (btChildPageID.size() - 1);
 						}
@@ -6327,8 +6328,8 @@ private:
 										debug_printf("%s: queuing subtree deletion cleared subtree range: %s\n",
 										             context.c_str(),
 										             ::toString(rec.getChildPage()).c_str());
-										self->m_lazyClearQueue.pushFront(
-										    LazyClearQueueEntry{ (uint8_t)height, writeVersion, rec.getChildPage() });
+										self->m_lazyClearQueue.pushBack(LazyClearQueueEntry{
+										    (uint8_t)(height - 1), writeVersion, rec.getChildPage() });
 									}
 								}
 								c.moveNext();
