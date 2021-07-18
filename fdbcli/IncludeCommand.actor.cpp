@@ -153,15 +153,6 @@ ACTOR Future<bool> include(Reference<IDatabase> db, std::vector<StringRef> token
 
 namespace fdb_cli {
 
-const KeyRangeRef excludedServersSpecialKeyRange(LiteralStringRef("\xff\xff/management/excluded/"),
-                                                 LiteralStringRef("\xff\xff/management/excluded0"));
-const KeyRangeRef failedServersSpecialKeyRange(LiteralStringRef("\xff\xff/management/failed/"),
-                                               LiteralStringRef("\xff\xff/management/failed0"));
-const KeyRangeRef excludedLocalitySpecialKeyRange(LiteralStringRef("\xff\xff/management/excluded_locality/"),
-                                                  LiteralStringRef("\xff\xff/management/excluded_locality0"));
-extern const KeyRangeRef failedLocalitySpecialKeyRange(LiteralStringRef("\xff\xff/management/failed_locality/"),
-                                                       LiteralStringRef("\xff\xff/management/failed_locality0"));
-
 ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2) {
 		printUsage(tokens[0]);
