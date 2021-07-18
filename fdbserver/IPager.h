@@ -42,10 +42,10 @@ typedef uint32_t QueueID;
 
 // Pager Events
 enum class PagerEvents { CacheLookup = 0, CacheHit, CacheMiss, PageWrite, MAXEVENTS };
-static const std::string PagerEventsCodes[] = { "Lookup", "Hit", "Miss", "Write" };
+static const std::string PagerEventsStrings[] = { "Lookup", "Hit", "Miss", "Write", "Unknown" };
 // Reasons for page level events.
 enum class PagerEventReasons { PointRead = 0, RangeRead, RangePrefetch, Commit, LazyClear, MetaData, MAXEVENTREASONS };
-static const std::string PagerEventReasonsCodes[] = { "Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta" };
+static const std::string PagerEventReasonsStrings[] = { "Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta", "Unknown" };
 
 static const int nonBtreeLevel = 0;
 static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {

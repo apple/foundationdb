@@ -1475,13 +1475,13 @@ struct RedwoodMetrics {
 				for (const auto& ER : L0PossibleEventReasonPairs) {
 					if (prevEvent != ER.first) {
 						result += "\n";
-						result += PagerEventsCodes[(size_t)ER.first];
+						result += PagerEventsStrings[(size_t)ER.first];
 						result += "\n\t";
 						prevEvent = ER.first;
 					}
 					std::string num = std::to_string(eventReasons[(size_t)ER.first][(size_t)ER.second]);
-					result += PagerEventReasonsCodes[(size_t)ER.second];
-					result.append(16 - PagerEventReasonsCodes[(size_t)ER.second].length(), ' ');
+					result += PagerEventReasonsStrings[(size_t)ER.second];
+					result.append(16 - PagerEventReasonsStrings[(size_t)ER.second].length(), ' ');
 					result.append(8 - num.length(), ' ');
 					result += num;
 					result.append(13, ' ');
@@ -1490,13 +1490,13 @@ struct RedwoodMetrics {
 				for (const auto& ER : possibleEventReasonPairs) {
 					if (prevEvent != ER.first) {
 						result += "\n";
-						result += PagerEventsCodes[(size_t)ER.first];
+						result += PagerEventsStrings[(size_t)ER.first];
 						result += "\n\t";
 						prevEvent = ER.first;
 					}
 					std::string num = std::to_string(eventReasons[(size_t)ER.first][(size_t)ER.second]);
-					result += PagerEventReasonsCodes[(size_t)ER.second];
-					result.append(16 - PagerEventReasonsCodes[(size_t)ER.second].length(), ' ');
+					result += PagerEventReasonsStrings[(size_t)ER.second];
+					result.append(16 - PagerEventReasonsStrings[(size_t)ER.second].length(), ' ');
 					result.append(8 - num.length(), ' ');
 					result += num;
 					result.append(13, ' ');
@@ -1511,7 +1511,7 @@ struct RedwoodMetrics {
 					    format(
 					        "L%d%s",
 					        h,
-					        (PagerEventsCodes[(size_t)ER.first] + PagerEventReasonsCodes[(size_t)ER.second]).c_str()),
+					        (PagerEventsStrings[(size_t)ER.first] + PagerEventReasonsStrings[(size_t)ER.second]).c_str()),
 					    eventReasons[(size_t)ER.first][(size_t)ER.second]);
 				}
 			} else {
@@ -1520,7 +1520,7 @@ struct RedwoodMetrics {
 					    format(
 					        "L%d%s",
 					        h,
-					        (PagerEventsCodes[(size_t)ER.first] + PagerEventReasonsCodes[(size_t)ER.second]).c_str()),
+					        (PagerEventsStrings[(size_t)ER.first] + PagerEventReasonsStrings[(size_t)ER.second]).c_str()),
 					    eventReasons[(size_t)ER.first][(size_t)ER.second]);
 				}
 			}
@@ -1664,7 +1664,7 @@ struct RedwoodMetrics {
 	}
 
 	void updateMaxRecordCount(int maxRecords) {
-		if(maxRecordCount != maxRecords) {
+		if (maxRecordCount != maxRecords) {
 			maxRecordCount = maxRecordCount;
 			for (int i = 0; i < btreeLevels + 1; ++i) {
 				auto& level = levels[i];
@@ -5458,12 +5458,7 @@ private:
 
 		for (auto pageID : id) {
 			// Prefetches are always at the Leaf level currently so it isn't part of the per-level metrics set
-			snapshot->getPhysicalPage(PagerEventReasons::RangePrefetch,
-			                          nonBtreeLevel,
-			                          pageID,
-			                          priority,
-			                          true,
-			                          true);
+			snapshot->getPhysicalPage(PagerEventReasons::RangePrefetch, nonBtreeLevel, pageID, priority, true, true);
 		}
 	}
 
@@ -5499,8 +5494,8 @@ private:
 
 		state int height = ((BTreePage*)page->begin())->height;
 		if (oldID.size() == 1) {
-			LogicalPageID id = wait(self->m_pager->atomicUpdatePage(
-			    PagerEventReasons::Commit, height, oldID.front(), page, writeVersion));
+			LogicalPageID id = wait(
+			    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, oldID.front(), page, writeVersion));
 			newID.front() = id;
 		} else {
 			state std::vector<Reference<ArenaPage>> pages;
@@ -6666,19 +6661,23 @@ public:
 		};
 
 	private:
+		PagerEventReasons reason;
 		VersionedBTree* btree;
 		Reference<IPagerSnapshot> pager;
 		bool valid;
 		std::vector<PathEntry> path;
 
 	public:
-		BTreeCursor() {}
+		BTreeCursor() : reason(PagerEventReasons::MAXEVENTREASONS) {}
 
 		bool intialized() const { return pager.isValid(); }
 		bool isValid() const { return valid; }
 
 		std::string toString() const {
-			std::string r = format("{ptr=%p %s ", this, ::toString(pager->getVersion()).c_str());
+			std::string r = format("{ptr=%p reason=%s %s ",
+			                       this,
+			                       PagerEventsStrings[(int)reason].c_str(),
+			                       ::toString(pager->getVersion()).c_str());
 			for (int i = 0; i < path.size(); ++i) {
 				std::string id = "<debugOnly>";
 #if REDWOOD_DEBUG
@@ -6707,7 +6706,7 @@ public:
 		PathEntry& back() { return path.back(); }
 		void popPath() { path.pop_back(); }
 
-		Future<Void> pushPage(PagerEventReasons reason, const BTreePage::BinaryTree::Cursor& link) {
+		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
 			return map(readPage(reason,
 			                    path.back().btPage()->height - 1,
@@ -6726,7 +6725,7 @@ public:
 			           });
 		}
 
-		Future<Void> pushPage(PagerEventReasons reason, BTreePageIDRef id) {
+		Future<Void> pushPage(BTreePageIDRef id) {
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
 			return map(readPage(reason, btree->m_pHeader->height, pager, id, ioMaxPriority, false, true),
 			           [=](Reference<const ArenaPage> p) {
@@ -6740,13 +6739,17 @@ public:
 		}
 
 		// Initialize or reinitialize cursor
-		Future<Void> init(VersionedBTree* btree_in, Reference<IPagerSnapshot> pager_in, BTreePageIDRef root) {
+		Future<Void> init(VersionedBTree* btree_in,
+		                  PagerEventReasons reason,
+		                  Reference<IPagerSnapshot> pager_in,
+		                  BTreePageIDRef root) {
 			btree = btree_in;
+			reason = reason;
 			pager = pager_in;
 			path.clear();
 			path.reserve(6);
 			valid = false;
-			return pushPage(PagerEventReasons::PointRead, root);
+			return pushPage(root);
 		}
 
 		// Seeks cursor to query if it exists, the record before or after it, or an undefined and invalid
@@ -6759,7 +6762,7 @@ public:
 		// If non-zero is returned then the cursor is valid and the return value is logically equivalent
 		// to query.compare(cursor.get())
 
-		ACTOR Future<int> seek_impl(BTreeCursor* self, RedwoodRecordRef query, PagerEventReasons reason) {
+		ACTOR Future<int> seek_impl(BTreeCursor* self, RedwoodRecordRef query) {
 			state RedwoodRecordRef internalPageQuery = query.withMaxPageID();
 			self->path.resize(1);
 			debug_printf("seek(%s) start cursor = %s\n", query.toString().c_str(), self->toString().c_str());
@@ -6783,7 +6786,7 @@ public:
 				if (entry.cursor.seekLessThan(internalPageQuery) && entry.cursor.get().value.present()) {
 					debug_printf(
 					    "seek(%s) loop seek success cursor=%s\n", query.toString().c_str(), self->toString().c_str());
-					Future<Void> f = self->pushPage(reason, entry.cursor);
+					Future<Void> f = self->pushPage(entry.cursor);
 					wait(f);
 				} else {
 					self->valid = false;
@@ -6794,20 +6797,18 @@ public:
 			}
 		}
 
-		Future<int> seek(RedwoodRecordRef query, PagerEventReasons reason) { return seek_impl(this, query, reason); }
+		Future<int> seek(RedwoodRecordRef query) { return seek_impl(this, query); }
 
-		ACTOR Future<Void> seekGTE_impl(BTreeCursor* self, RedwoodRecordRef query, PagerEventReasons reason) {
+		ACTOR Future<Void> seekGTE_impl(BTreeCursor* self, RedwoodRecordRef query) {
 			debug_printf("seekGTE(%s) start\n", query.toString().c_str());
-			int cmp = wait(self->seek(query, reason));
+			int cmp = wait(self->seek(query));
 			if (cmp > 0 || (cmp == 0 && !self->isValid())) {
 				wait(self->moveNext());
 			}
 			return Void();
 		}
 
-		Future<Void> seekGTE(RedwoodRecordRef query, PagerEventReasons reason) {
-			return seekGTE_impl(this, query, reason);
-		}
+		Future<Void> seekGTE(RedwoodRecordRef query) { return seekGTE_impl(this, query); }
 
 		// Start fetching sibling nodes in the forward or backward direction, stopping after recordLimit or byteLimit
 		void prefetch(KeyRef rangeEnd, bool directionForward, int recordLimit, int byteLimit) {
@@ -6866,18 +6867,16 @@ public:
 			}
 		}
 
-		ACTOR Future<Void> seekLT_impl(BTreeCursor* self, RedwoodRecordRef query, PagerEventReasons reason) {
+		ACTOR Future<Void> seekLT_impl(BTreeCursor* self, RedwoodRecordRef query) {
 			debug_printf("seekLT(%s) start\n", query.toString().c_str());
-			int cmp = wait(self->seek(query, reason));
+			int cmp = wait(self->seek(query));
 			if (cmp <= 0) {
 				wait(self->movePrev());
 			}
 			return Void();
 		}
 
-		Future<Void> seekLT(RedwoodRecordRef query, PagerEventReasons reason) {
-			return seekLT_impl(this, query, reason);
-		}
+		Future<Void> seekLT(RedwoodRecordRef query) { return seekLT_impl(this, query); }
 
 		ACTOR Future<Void> move_impl(BTreeCursor* self, bool forward) {
 			// Try to the move cursor at the end of the path in the correct direction
@@ -6927,7 +6926,7 @@ public:
 					ASSERT(entry.cursor.get().value.present());
 				}
 
-				wait(self->pushPage(PagerEventReasons::MetaData, entry.cursor));
+				wait(self->pushPage(entry.cursor));
 				auto& newEntry = self->path.back();
 				ASSERT(forward ? newEntry.cursor.moveFirst() : newEntry.cursor.moveLast());
 			}
@@ -6942,7 +6941,7 @@ public:
 		Future<Void> movePrev() { return move_impl(this, false); }
 	};
 
-	Future<Void> initBTreeCursor(BTreeCursor* cursor, Version snapshotVersion) {
+	Future<Void> initBTreeCursor(BTreeCursor* cursor, Version snapshotVersion, PagerEventReasons reason) {
 		// Only committed versions can be read.
 		ASSERT(snapshotVersion <= m_lastCommittedVersion);
 		Reference<IPagerSnapshot> snapshot = m_pager->getReadSnapshot(snapshotVersion);
@@ -6950,7 +6949,7 @@ public:
 		// This is a ref because snapshot will continue to hold the metakey value memory
 		KeyRef m = snapshot->getMetaKey();
 
-		return cursor->init(this, snapshot, ((MetaKey*)m.begin())->root.get());
+		return cursor->init(this, reason, snapshot, ((MetaKey*)m.begin())->root.get());
 	}
 };
 
@@ -7057,7 +7056,8 @@ public:
 	                                                int rowLimit,
 	                                                int byteLimit) {
 		state VersionedBTree::BTreeCursor cur;
-		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
+		wait(
+		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
 
 		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
 		++g_redwoodMetrics.metric.opGetRange;
@@ -7071,12 +7071,12 @@ public:
 		}
 
 		if (rowLimit > 0) {
-			wait(cur.seekGTE(keys.begin, PagerEventReasons::RangeRead));
+			wait(cur.seekGTE(keys.begin));
 
 			if (self->prefetch) {
 				cur.prefetch(keys.end, true, rowLimit, byteLimit);
 			}
-			
+
 			while (cur.isValid()) {
 				// Read page contents without using waits
 				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
@@ -7118,7 +7118,7 @@ public:
 				wait(cur.moveNext());
 			}
 		} else {
-			wait(cur.seekLT(keys.end, PagerEventReasons::RangeRead));
+			wait(cur.seekLT(keys.end));
 
 			if (self->prefetch) {
 				cur.prefetch(keys.begin, false, -rowLimit, byteLimit);
@@ -7179,12 +7179,13 @@ public:
 	                                                    Key key,
 	                                                    Optional<UID> debugID) {
 		state VersionedBTree::BTreeCursor cur;
-		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
+		wait(
+		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead));
 
 		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
 		++g_redwoodMetrics.metric.opGet;
 
-		wait(cur.seekGTE(key, PagerEventReasons::PointRead));
+		wait(cur.seekGTE(key));
 		if (cur.isValid() && cur.get().key == key) {
 			// Return a Value whose arena depends on the source page arena
 			Value v;
@@ -7291,7 +7292,7 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
 	state VersionedBTree::BTreeCursor cur;
-	wait(btree->initBTreeCursor(&cur, v));
+	wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Start\n", v, start.printable().c_str(), end.printable().c_str());
 
 	// Randomly use the cursor for something else first.
@@ -7302,13 +7303,13 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 		             start.printable().c_str(),
 		             end.printable().c_str(),
 		             randomKey.toString().c_str());
-		wait(success(cur.seek(randomKey, PagerEventReasons::RangeRead)));
+		wait(success(cur.seek(randomKey)));
 	}
 
 	debug_printf(
 	    "VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.printable().c_str(), end.printable().c_str());
 
-	wait(cur.seekGTE(start, PagerEventReasons::RangeRead));
+	wait(cur.seekGTE(start));
 
 	state Standalone<VectorRef<KeyValueRef>> results;
 
@@ -7404,11 +7405,11 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	// opening new cursors
 	if (v >= btree->getOldestVersion() && deterministicRandom()->coinflip()) {
 		cur = VersionedBTree::BTreeCursor();
-		wait(btree->initBTreeCursor(&cur, v));
+		wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 	}
 
 	// Now read the range from the tree in reverse order and compare to the saved results
-	wait(cur.seekLT(end, PagerEventReasons::RangeRead));
+	wait(cur.seekLT(end));
 
 	state std::reverse_iterator<const KeyValueRef*> r = results.rbegin();
 
@@ -7476,7 +7477,7 @@ ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree,
 	state int errors = 0;
 	state VersionedBTree::BTreeCursor cur;
 
-	wait(btree->initBTreeCursor(&cur, v));
+	wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 
 	while (i != iEnd) {
 		state std::string key = i->first.first;
@@ -7485,7 +7486,7 @@ ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree,
 			state Optional<std::string> val = i->second;
 			debug_printf("Verifying @%" PRId64 " '%s'\n", ver, key.c_str());
 			state Arena arena;
-			wait(cur.seekGTE(RedwoodRecordRef(KeyRef(arena, key)), PagerEventReasons::RangeRead));
+			wait(cur.seekGTE(RedwoodRecordRef(KeyRef(arena, key))));
 			bool foundKey = cur.isValid() && cur.get().key == key;
 			bool hasValue = foundKey && cur.get().value.present();
 
@@ -7558,7 +7559,7 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 
 			// Get a cursor at v so that v doesn't get expired between the possibly serial steps below.
 			state VersionedBTree::BTreeCursor cur;
-			wait(btree->initBTreeCursor(&cur, v));
+			wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
 			state Future<int> fRangeAll = verifyRangeBTreeCursor(
@@ -7606,11 +7607,11 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree) {
 		loop {
 			wait(yield());
 			if (!cur.intialized() || deterministicRandom()->random01() > .01) {
-				wait(btree->initBTreeCursor(&cur, btree->getLastCommittedVersion()));
+				wait(btree->initBTreeCursor(&cur, btree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
 			}
 
 			state KeyValue kv = randomKV(10, 0);
-			wait(cur.seekGTE(kv.key, PagerEventReasons::RangeRead));
+			wait(cur.seekGTE(kv.key));
 			state int c = deterministicRandom()->randomInt(0, 100);
 			state bool direction = deterministicRandom()->coinflip();
 			while (cur.isValid() && c-- > 0) {
@@ -9187,10 +9188,10 @@ ACTOR Future<Void> randomSeeks(VersionedBTree* btree, int count, char firstChar,
 	state int c = 0;
 	state double readStart = timer();
 	state VersionedBTree::BTreeCursor cur;
-	wait(btree->initBTreeCursor(&cur, readVer));
+	wait(btree->initBTreeCursor(&cur, readVer, PagerEventReasons::PointRead));
 	while (c < count) {
 		state Key k = randomString(20, firstChar, lastChar);
-		wait(cur.seekGTE(k, PagerEventReasons::PointRead));
+		wait(cur.seekGTE(k));
 		++c;
 	}
 	double elapsed = timer() - readStart;
@@ -9208,12 +9209,12 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 	state int c = 0;
 	state double readStart = timer();
 	state VersionedBTree::BTreeCursor cur;
-	wait(btree->initBTreeCursor(&cur, readVer));
+	wait(btree->initBTreeCursor(&cur, readVer, PagerEventReasons::RangeRead));
 
 	state int totalScanBytes = 0;
 	while (c++ < count) {
 		state Key k = randomString(20, firstChar, lastChar);
-		wait(cur.seekGTE(k, PagerEventReasons::PointRead));
+		wait(cur.seekGTE(k));
 		state int w = width;
 		state bool directionFwd = deterministicRandom()->coinflip();
 
