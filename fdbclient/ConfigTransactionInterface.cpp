@@ -20,6 +20,7 @@
 
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/SystemData.h"
 #include "flow/IRandom.h"
 
 ConfigTransactionInterface::ConfigTransactionInterface() : _id(deterministicRandom()->randomUniqueID()) {}
@@ -52,4 +53,23 @@ bool ConfigGeneration::operator==(ConfigGeneration const& rhs) const {
 
 bool ConfigGeneration::operator!=(ConfigGeneration const& rhs) const {
 	return !(*this == rhs);
+}
+
+void ConfigTransactionCommitRequest::set(KeyRef key, ValueRef value) {
+	if (key == configTransactionDescriptionKey) {
+		annotation.description = KeyRef(arena, value);
+	} else {
+		ConfigKey configKey = ConfigKeyRef::decodeKey(key);
+		auto knobValue = IKnobCollection::parseKnobValue(
+		    configKey.knobName.toString(), value.toString(), IKnobCollection::Type::TEST);
+		mutations.emplace_back_deep(arena, configKey, knobValue.contents());
+	}
+}
+
+void ConfigTransactionCommitRequest::clear(KeyRef key) {
+	if (key == configTransactionDescriptionKey) {
+		annotation.description = ""_sr;
+	} else {
+		mutations.emplace_back_deep(arena, ConfigKeyRef::decodeKey(key), Optional<KnobValueRef>{});
+	}
 }

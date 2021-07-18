@@ -33,6 +33,7 @@ class PaxosConfigTransaction final : public IConfigTransaction, public FastAlloc
 	PaxosConfigTransactionImpl& impl() { return *_impl; }
 
 public:
+	PaxosConfigTransaction(std::vector<ConfigTransactionInterface> const&);
 	PaxosConfigTransaction();
 	~PaxosConfigTransaction();
 	void setDatabase(Database const&) override;

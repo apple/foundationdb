@@ -124,25 +124,9 @@ public:
 
 	SimpleConfigTransactionImpl(ConfigTransactionInterface const& cti) : cti(cti) {}
 
-	void set(KeyRef key, ValueRef value) {
-		if (key == configTransactionDescriptionKey) {
-			toCommit.annotation.description = KeyRef(toCommit.arena, value);
-		} else {
-			ConfigKey configKey = ConfigKeyRef::decodeKey(key);
-			auto knobValue = IKnobCollection::parseKnobValue(
-			    configKey.knobName.toString(), value.toString(), IKnobCollection::Type::TEST);
-			toCommit.mutations.emplace_back_deep(toCommit.arena, configKey, knobValue.contents());
-		}
-	}
+	void set(KeyRef key, ValueRef value) { toCommit.set(key, value); }
 
-	void clear(KeyRef key) {
-		if (key == configTransactionDescriptionKey) {
-			toCommit.annotation.description = ""_sr;
-		} else {
-			toCommit.mutations.emplace_back_deep(
-			    toCommit.arena, ConfigKeyRef::decodeKey(key), Optional<KnobValueRef>{});
-		}
-	}
+	void clear(KeyRef key) { toCommit.clear(key); }
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
 
