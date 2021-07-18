@@ -7,6 +7,7 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/table.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
+#include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
 
@@ -219,6 +220,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	struct Reader : IThreadPoolReceiver {
 		DB& db;
+		std::unique_ptr<rocksdb::Iterator> cursor;
 
 		explicit Reader(DB& db) : db(db) {}
 
@@ -283,7 +285,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                              std::min(value.size(), size_t(a.maxLength)))));
 			} else {
 				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix");
+					TraceEvent(SevError, "RocksDBError")
+					    .detail("Error", s.ToString())
+					    .detail("Method", "ReadValuePrefix");
 				}
 				a.result.send(Optional<Value>());
 			}
@@ -302,16 +306,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				a.result.send(result);
 			}
+
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
-			auto options = getReadOptions();
+			if (cursor == nullptr) {
+				auto options = getReadOptions();
+				options.total_order_seek = true;
+				cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+			} else {
+				cursor->Refresh();
+			}
+
 			// When using a prefix extractor, ensure that keys are returned in order even if they cross
 			// a prefix boundary.
-			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
+			// options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 			if (a.rowLimit >= 0) {
 				auto endSlice = toSlice(a.keys.end);
-				options.iterate_upper_bound = &endSlice;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				// options.iterate_upper_bound = &endSlice;
 				cursor->Seek(toSlice(a.keys.begin));
 				while (cursor->Valid() && toStringRef(cursor->key()) < a.keys.end) {
 					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
@@ -326,8 +337,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				s = cursor->status();
 			} else {
 				auto beginSlice = toSlice(a.keys.begin);
-				options.iterate_lower_bound = &beginSlice;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				// options.iterate_lower_bound = &beginSlice;
+				// auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
 				cursor->SeekForPrev(toSlice(a.keys.end));
 				if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
 					cursor->Prev();
@@ -367,8 +378,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
-		writeThread = createGenericThreadPool();
-		readThreads = createGenericThreadPool();
+		if (g_network->isSimulated()) {
+			writeThread = CoroThreadPool::createThreadPool();
+			readThreads = CoroThreadPool::createThreadPool();
+		} else {
+			writeThread = createGenericThreadPool();
+			readThreads = createGenericThreadPool();
+		}
 		writeThread->addThread(new Writer(db, id), "fdb-rocksdb-wr");
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
