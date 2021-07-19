@@ -74,6 +74,9 @@ struct VersionVector {
 		maxVersion = invalidVersion;
 	}
 
+	// @note this method, together with method applyDelta(), helps minimize
+	// the number of version vector entries that get sent from sequencer to
+	// grv proxy (and from grv proxy to client) on the read path.
 	void getDelta(Version refVersion, VersionVector& delta) const {
 		ASSERT(refVersion <= maxVersion);
 
@@ -83,33 +86,38 @@ struct VersionVector {
 			return; // rerurn an invalid version vector
 		}
 
-		std::map<Version, std::set<Tag>> versionMap; // order versions
+		std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
 		for (const auto& [tag, version] : versions) {
 			if (version > refVersion) {
-				versionMap[version].insert(tag);
+				tmpVersionMap[version].insert(tag);
 			}
 		}
 
-		for (auto& [version, tags] : versionMap) {
+		for (auto& [version, tags] : tmpVersionMap) {
 			delta.setVersion(tags, version);
 		}
 	}
 
+	// @note this method, together with method getDelta(), helps minimize
+	// the number of version vector entries that get sent from sequencer to
+	// grv proxy (and from grv proxy to client) on the read path.
 	void applyDelta(const VersionVector& delta) {
 		if (delta.maxVersion == invalidVersion) {
 			return;
 		}
 
-		ASSERT(maxVersion < delta.maxVersion);
-
-		std::map<Version, std::set<Tag>> versionMap; // order versions
-		for (const auto& [tag, version] : delta.versions) {
-			// @todo remove this assert later
-			ASSERT(version > maxVersion);
-			versionMap[version].insert(tag);
+		if (maxVersion == delta.maxVersion) {
+			return;
 		}
 
-		for (auto& [version, tags] : versionMap) {
+		std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
+		for (const auto& [tag, version] : delta.versions) {
+			if (version > maxVersion) {
+				tmpVersionMap[version].insert(tag);
+			}
+		}
+
+		for (auto& [version, tags] : tmpVersionMap) {
 			setVersion(tags, version);
 		}
 	}
