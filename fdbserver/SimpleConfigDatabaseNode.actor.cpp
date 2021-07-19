@@ -377,13 +377,10 @@ class SimpleConfigDatabaseNodeImpl {
 			    ObjectReader::fromStringRef<KnobValue>(kv.value, IncludeVersion());
 		}
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
-		wait(store(reply.changesVersion,
-		           map(getGeneration(self), [](auto const& gen) { return gen.committedVersion; })));
-		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, reply.changesVersion)));
-		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, reply.changesVersion)));
+		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
+		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingSnapshot", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)
-		    .detail("ChangesVersion", reply.changesVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
 		    .detail("ChangesSize", reply.changes.size())
 		    .detail("AnnotationsSize", reply.annotations.size());
