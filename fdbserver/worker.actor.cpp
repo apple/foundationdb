@@ -1543,10 +1543,16 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 						detail("DelayMin", req.throttleDisk.get().delayMin).
 						detail("DelayMax", req.throttleDisk.get().delayMax);
 						auto diskFailureInjector = DiskFailureInjector::injector();
-						//DiskFailureInjector::injector()->throttleFor(req.throttleDisk.get());
 						diskFailureInjector->throttleFor(req.throttleDisk.get().delayFrequency,
 														 req.throttleDisk.get().delayMin,
 														 req.throttleDisk.get().delayMax);
+					} else if (req.flipBits.present()) {
+						TraceEvent("FlipBitsRequest").
+						detail("Percent", req.flipBits.get().percentBitFlips);
+						//detail("File",req.flipBits.get().file).
+						auto bitFlipper = BitFlipper::flipper();
+						bitFlipper->setPercentBitFlips(req.flipBits.get().percentBitFlips);
+						//flipBits(req.flipBits.get().file, req.flipBits.get().percent);
 					}
 					req.reply.send(Void());
 				} else {

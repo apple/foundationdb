@@ -106,11 +106,25 @@ struct SetFailureInjection {
 			serializer(ar, delayFrequency, delayMin, delayMax);
 		}
 	};
+
+	struct FlipBitsCommand {
+		// File that the bit flips are requested for
+		//Reference<IAsyncFile> filename;
+		// percent of bits to flip in the given file
+		double percentBitFlips;
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, percentBitFlips);
+		}
+	};
+
 	Optional<ThrottleDiskCommand> throttleDisk;
+	Optional<FlipBitsCommand> flipBits;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply, throttleDisk);
+		serializer(ar, reply, throttleDisk, flipBits);
 	}
 };
 #endif

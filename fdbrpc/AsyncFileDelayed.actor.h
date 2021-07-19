@@ -37,22 +37,52 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileDelayed>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileDelayed>::delref(); }
 
+	uint8_t toggleNthBit(uint8_t b, uint8_t n) {
+		auto singleBitMask = uint8_t(1) << (n);
+		return b ^ singleBitMask;
+	}
+
+	void flipBits(void* data, int length, double percentBitFlips) {
+		auto toFlip = int(float(length*8) * percentBitFlips / 100);
+		TraceEvent("AsyncFileFlipBits").detail("ToFlip", toFlip);
+		for (auto i = 0; i < toFlip; i++) {
+			auto byteOffset = deterministicRandom()->randomInt64(0, length);
+			auto bitOffset = uint8_t(deterministicRandom()->randomInt(0, 8));
+			((uint8_t *)data)[byteOffset] = toggleNthBit(((uint8_t *)data)[byteOffset], bitOffset);
+		}
+	}
+
 	Future<int> read(void* data, int length, int64_t offset) override {
 		double delay = 0.0;
 		auto res = g_network->global(INetwork::enFailureInjector);
 		if (res)
 			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
 		TraceEvent("AsyncFileDelayedRead").detail("ThrottleDelay", delay);
-        return delayed(file->read(data, length, offset), delay);
+		return delayed(file->read(data, length, offset), delay);
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
 		double delay = 0.0;
-		auto res = g_network->global(INetwork::enFailureInjector);
+		char* pdata = nullptr;
+		auto res = g_network->global(INetwork::enBitFlipper);
+		if (res) {
+			auto percentBitFlips = static_cast<BitFlipper*>(res)->getPercentBitFlips();
+			if (percentBitFlips > 0.0) {
+				TraceEvent("AsyncFileCorruptWrite").detail("PercentBitFlips", percentBitFlips);
+				pdata = new char[length];
+				memcpy(pdata, data, length);
+				flipBits(pdata, length, percentBitFlips);
+				auto diff = memcmp(pdata, data, length);
+				if (diff)
+					TraceEvent("AsyncFileCorruptWriteDiff").detail("Diff", diff);
+			}
+		}
+
+		res = g_network->global(INetwork::enFailureInjector);
 		if (res)
 			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
 		TraceEvent("AsyncFileDelayedWrite").detail("ThrottleDelay", delay);
-		return delayed(file->write(data, length, offset), delay);
+		return delayed(file->write((pdata != nullptr) ? pdata : data, length, offset), delay);
 	}
 
 	Future<Void> truncate(int64_t size) override {

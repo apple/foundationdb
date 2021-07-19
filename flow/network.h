@@ -488,7 +488,8 @@ public:
 		enClientFailureMonitor = 12,
 		enSQLiteInjectedError = 13,
 		enGlobalConfig = 14,
-		enFailureInjector = 15
+		enFailureInjector = 15,
+		enBitFlipper = 16
 	};
 
 	virtual void longTaskCheck(const char* name) {}
@@ -719,4 +720,56 @@ private: // construction
 	DiskFailureInjector(DiskFailureInjector const&) = delete;
 };
 
+struct BitFlipper : FastAllocated<BitFlipper> {
+	static BitFlipper* flipper() {
+		auto res = g_network->global(INetwork::enBitFlipper);
+		if (!res) {
+			res = new BitFlipper();
+			g_network->setGlobal(INetwork::enBitFlipper, res);
+		}
+		return static_cast<BitFlipper*>(res);
+	}
+
+	//uint8_t toggleNthBit(uint8_t b, uint8_t n) {
+	//	auto singleBitMask = uint8(1) << (n);
+	//	return b ^ singleBitMask;
+	//}
+
+	//void flipBitAtOffset(int64_t byteOffset, uint8_t bitOffset) {
+		//auto oneByte = make([]byte, 1);
+	//	uint8_t oneByte[1];
+	//	int readBytes = wait(file->Read(oneByte, 1, byteOffset));
+
+	//	oneByte[0] = toggleNthBit(oneByte[0], bitOffset);
+	//	file->write(oneByte, 1, byteOffset);
+	//}
+
+	//void flipBits(Reference<IAsyncFile> fileName, double percent) {
+	//	file = fileName;
+	//	auto toFlip = int(float64(file->size()*8) * percent / 100);
+	//	for (auto i = 0; i < toFlip; i++) {
+	//		auto byteOffset = deterministicRandom()->randomInt64(0, file->size());
+	//		auto bitOffset = uint8_t(deterministicRandom()->randomInt(0, 8));
+	//		flipBitAtOffset(byteOffset, bitOffset);
+	//	}
+	//}
+
+	double getPercentBitFlips() {
+		TraceEvent("BitFlipperGetPercentBitFlips").detail("PercentBitFlips", percentBitFlips);
+		return percentBitFlips;
+	}
+
+	void setPercentBitFlips(double percentFlips) {
+		percentBitFlips = percentFlips;
+		TraceEvent("BitFlipperSetPercentBitFlips").detail("PercentBitFlips", percentBitFlips);
+	}
+
+private: // members
+	double percentBitFlips = 0.0;
+	//Reference<IAsyncFile> file;
+
+private: // construction
+	BitFlipper() = default;
+	BitFlipper(BitFlipper const&) = delete;
+};
 #endif
