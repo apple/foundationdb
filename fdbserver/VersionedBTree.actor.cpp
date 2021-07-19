@@ -109,7 +109,7 @@ void writePrefixedLines(FILE* fout, std::string prefix, std::string msg) {
 // The interface is similar to FlowMutex except that lock holders can drop the lock to release it.
 //
 // Usage:
-//   Lock lock = wait(prioritylock.take(priorityLevel));
+//   Lock lock = wait(prioritylock.lock(priorityLevel));
 //   lock.release();  // Explicit release, or
 //   // let lock and all copies of lock go out of scope to release
 class PriorityMultiLock {
