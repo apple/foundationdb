@@ -77,7 +77,7 @@ add_dependencies(packages python_package)
 
 if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   add_fdbclient_test(
-    NAME fdbcli_tests
+    NAME single_process_fdbcli_tests
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
             ${CMAKE_BINARY_DIR}/bin/fdbcli
             @CLUSTER_FILE@

@@ -1267,7 +1267,8 @@ ACTOR Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyR
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
 	RangeResult result;
 	if (val.present()) {
-		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, val.get()));
+		UID uid = UID::fromString(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString());
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, Value(uid.toString())));
 	}
 	return result;
 }
@@ -1290,11 +1291,10 @@ Future<RangeResult> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw, K
 	}
 }
 
-ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
+ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw, UID uid) {
 	state Optional<std::string> msg;
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
-	UID uid = deterministicRandom()->randomUniqueID();
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
 		// check database not locked
@@ -1325,7 +1325,15 @@ ACTOR Future<Optional<std::string>> unlockDatabaseCommitActor(ReadYourWritesTran
 Future<Optional<std::string>> LockDatabaseImpl::commit(ReadYourWritesTransaction* ryw) {
 	auto lockId = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("lock")].second;
 	if (lockId.present()) {
-		return lockDatabaseCommitActor(ryw);
+		std::string uidStr = lockId.get().toString();
+		UID uid;
+		try {
+			uid = UID::fromString(uidStr);
+		} catch (Error& e) {
+			return Optional<std::string>(
+			    ManagementAPIError::toJsonString(false, "lock", "Invalid UID string: " + uidStr));
+		}
+		return lockDatabaseCommitActor(ryw, uid);
 	} else {
 		return unlockDatabaseCommitActor(ryw);
 	}
@@ -1592,7 +1600,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	state int index;
 	state bool parse_error = false;
 
-	// check update for cluster_description
+	// check update for coordinators
 	Key processes_key = LiteralStringRef("processes").withPrefix(kr.begin);
 	auto processes_entry = ryw->getSpecialKeySpaceWriteMap()[processes_key];
 	if (processes_entry.first) {
@@ -1727,7 +1735,9 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 		// we could get not_enough_machines if we happen to see the database while the cluster controller is updating
 		// the worker list, so make sure it happens twice before returning a failure
 		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
-		    true, "auto_coordinators", "The auto change attempt did not get enough machines, please try again"));
+		    true,
+		    "auto_coordinators",
+		    "Too few fdbserver machines to provide coordination at the current redundancy level"));
 		throw special_keys_api_failure();
 	}
 

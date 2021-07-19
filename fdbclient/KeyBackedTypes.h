@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/IClientApi.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Subspace.h"
 #include "flow/genericactors.actor.h"
@@ -319,6 +320,10 @@ public:
 	}
 
 	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const& key) {
+		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
+	}
+
+	void erase(Reference<ITransaction> tr, KeyType const& key) {
 		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
 	}
 
