@@ -219,6 +219,7 @@ public:
 
 	template <class U>
 	Optional(const U& t) : impl(std::in_place, t) {}
+	Optional(T&& t) : impl(std::in_place, std::move(t)) {}
 
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be
 	converted to Optional<Optional<int>> in the wrong way (a non-present Optional<int> converts to a non-present

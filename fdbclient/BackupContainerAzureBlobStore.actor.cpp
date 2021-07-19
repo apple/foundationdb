@@ -42,7 +42,7 @@ public:
 
 		void addref() override { ReferenceCounted<ReadFile>::addref(); }
 		void delref() override { ReferenceCounted<ReadFile>::delref(); }
-		Future<int> read(void* data, int length, int64_t offset) {
+		Future<int> read(void* data, int length, int64_t offset) override {
 			return asyncTaskThread.execAsync([client = this->client,
 			                                  containerName = this->containerName,
 			                                  blobName = this->blobName,
@@ -171,7 +171,7 @@ public:
 		Reference<IAsyncFile> f =
 		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
 		if (self->usesEncryption()) {
-			f = makeReference<AsyncFileEncrypted>(f, false);
+			f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
 		}
 		return f;
 	}
@@ -182,9 +182,10 @@ public:
 			    auto outcome = client->create_append_blob(containerName, fileName).get();
 			    return Void();
 		    }));
-		auto f = makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+		Reference<IAsyncFile> f =
+		    makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
 		if (self->usesEncryption()) {
-			f = makeReference<AsyncFileEncrypted>(f, true);
+			f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 		}
 		return makeReference<BackupFile>(fileName, f);
 	}
@@ -220,15 +221,6 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> create(BackupContainerAzureBlobStore* self) {
-		state Future<Void> f1 =
-		    self->asyncTaskThread.execAsync([containerName = self->containerName, client = self->client.get()] {
-			    client->create_container(containerName).wait();
-			    return Void();
-		    });
-		state Future<Void> f2 = self->usesEncryption() ? self->encryptionSetupComplete() : Void();
-		return f1 && f2;
-	}
 };
 
 Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileName) {
@@ -261,7 +253,13 @@ void BackupContainerAzureBlobStore::delref() {
 }
 
 Future<Void> BackupContainerAzureBlobStore::create() {
-	return BackupContainerAzureBlobStoreImpl::create(this);
+	Future<Void> createContainerFuture =
+	    asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
+		    client->create_container(containerName).wait();
+		    return Void();
+	    });
+	Future<Void> encryptionSetupFuture = usesEncryption() ? encryptionSetupComplete() : Void();
+	return createContainerFuture && encryptionSetupFuture;
 }
 Future<bool> BackupContainerAzureBlobStore::exists() {
 	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
