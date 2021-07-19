@@ -91,7 +91,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(request_tries, rt);
 	TRY_PARAM(request_timeout_min, rtom);
 	// TODO: For backward compatibility because request_timeout was renamed to request_timeout_min
-	if (name == LiteralStringRef("request_timeout") || name == LiteralStringRef("rto")) {
+	if (name == "request_timeout"_sr || name == "rto"_sr) {
 		request_timeout_min = value;
 		return true;
 	}
@@ -162,7 +162,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 	try {
 		StringRef t(url);
 		StringRef prefix = t.eat("://");
-		if (prefix != LiteralStringRef("blobstore"))
+		if (prefix != "blobstore"_sr)
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
 
 		Optional<StringRef> cred;
@@ -193,7 +193,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 			StringRef value = t.eat("&");
 
 			// Special case for header
-			if (name == LiteralStringRef("header")) {
+			if (name == "header"_sr) {
 				StringRef originalValue = value;
 				StringRef headerFieldName = value.eat(":");
 				StringRef headerFieldValue = value;
@@ -1114,7 +1114,7 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	msg.append("\n");
 	for (auto h : headers) {
 		StringRef name = h.first;
-		if (name.startsWith(LiteralStringRef("x-amz")) || name.startsWith(LiteralStringRef("x-icloud"))) {
+		if (name.startsWith("x-amz"_sr) || name.startsWith("x-icloud"_sr)) {
 			msg.append(h.first);
 			msg.append(":");
 			msg.append(h.second);

@@ -3394,7 +3394,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 			    .detail("Fitness", ddFitness)
 			    .detail("BestFitness", bestFitnessForDD)
 			    .detail("CurrentRateKeeperProcessId",
-			            currentRKProcessId.present() ? currentRKProcessId.get() : LiteralStringRef("None"))
+			            currentRKProcessId.present() ? currentRKProcessId.get() : "None"_sr)
 			    .detail("CurrentDDProcessId", currentDDProcessId)
 			    .detail("MasterProcessID", self->masterProcessId)
 			    .detail("NewRKWorkers", newRKWorker.interf.locality.processId())
@@ -3889,7 +3889,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 	}
 }
 
-#define TIME_KEEPER_VERSION LiteralStringRef("1")
+#define TIME_KEEPER_VERSION "1"_sr
 
 ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);

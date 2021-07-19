@@ -1014,7 +1014,7 @@ void updateConfigForForcedRecovery(Reference<MasterData> self,
 	Standalone<CommitTransactionRef> regionCommit;
 	regionCommit.mutations.push_back_deep(
 	    regionCommit.arena(),
-	    MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "usable_regions", LiteralStringRef("1")));
+	    MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "usable_regions", "1"_sr));
 	self->configuration.applyMutation(regionCommit.mutations.back());
 	if (regionsChanged) {
 		std::sort(
@@ -1997,8 +1997,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self(new MasterData(
-	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));
+	state Reference<MasterData> self(
+	    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	self->addActor.send(traceRole(Role::MASTER, mi.id()));
 

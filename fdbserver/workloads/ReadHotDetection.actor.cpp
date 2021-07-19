@@ -37,10 +37,10 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	bool passed;
 
 	ReadHotDetectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 1000.0) / clientCount;
-		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5);
-		keyCount = getOption(options, LiteralStringRef("keyCount"), 100);
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 1000.0) / clientCount;
+		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
+		keyCount = getOption(options, "keyCount"_sr, 100);
 		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
 	}
 
@@ -89,7 +89,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-		self->wholeRange = KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff"));
+		self->wholeRange = KeyRangeRef(""_sr, "\xff"_sr);
 		// TraceEvent("RHDLog").detail("Phase", "DoneSetup");
 		return Void();
 	}

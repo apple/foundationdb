@@ -35,7 +35,7 @@ struct KillRegionWorkload : TestWorkload {
 	KillRegionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		g_simulator.usableRegions = 1;
 	}
 
@@ -59,7 +59,7 @@ struct KillRegionWorkload : TestWorkload {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin");
 		wait(success(changeConfig(cx, g_simulator.disablePrimary, true)));
 		TraceEvent("ForceRecovery_WaitForRemote");
-		wait(waitForPrimaryDC(cx, LiteralStringRef("1")));
+		wait(waitForPrimaryDC(cx, "1"_sr));
 		TraceEvent("ForceRecovery_DisablePrimaryComplete");
 		return Void();
 	}
@@ -77,29 +77,29 @@ struct KillRegionWorkload : TestWorkload {
 			TraceEvent("ForceRecovery_DisableRemoteBegin");
 			wait(success(changeConfig(cx, g_simulator.disableRemote, true)));
 			TraceEvent("ForceRecovery_WaitForPrimary");
-			wait(waitForPrimaryDC(cx, LiteralStringRef("0")));
+			wait(waitForPrimaryDC(cx, "0"_sr));
 			TraceEvent("ForceRecovery_DisableRemoteComplete");
 			wait(success(changeConfig(cx, g_simulator.originalRegions, true)));
 		}
 		TraceEvent("ForceRecovery_Wait");
 		wait(delay(deterministicRandom()->random01() * self->testDuration));
 
-		g_simulator.killDataCenter(LiteralStringRef("0"),
+		g_simulator.killDataCenter("0"_sr,
 		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
 		                                                                   : ISimulator::RebootAndDelete,
 		                           true);
-		g_simulator.killDataCenter(LiteralStringRef("2"),
+		g_simulator.killDataCenter("2"_sr,
 		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
 		                                                                   : ISimulator::RebootAndDelete,
 		                           true);
-		g_simulator.killDataCenter(LiteralStringRef("4"),
+		g_simulator.killDataCenter("4"_sr,
 		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
 		                                                                   : ISimulator::RebootAndDelete,
 		                           true);
 
 		TraceEvent("ForceRecovery_Begin");
 
-		wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
+		wait(forceRecovery(cx->getConnectionFile(), "1"_sr));
 
 		TraceEvent("ForceRecovery_UsableRegions");
 

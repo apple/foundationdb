@@ -38,13 +38,13 @@ struct BulkLoadWorkload : TestWorkload {
 	BulkLoadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), clientCount(wcx.clientCount), transactions("Transactions"), retries("Retries"),
 	    latencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 20);
-		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 10);
-		valueBytes = std::max(getOption(options, LiteralStringRef("valueBytes"), 96), 16);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		actorCount = getOption(options, "actorCount"_sr, 20);
+		writesPerTransaction = getOption(options, "writesPerTransaction"_sr, 10);
+		valueBytes = std::max(getOption(options, "valueBytes"_sr, 96), 16);
 		value = Value(std::string(valueBytes, '.'));
-		targetBytes = getOption(options, LiteralStringRef("targetBytes"), std::numeric_limits<uint64_t>::max());
-		keyPrefix = getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef(""));
+		targetBytes = getOption(options, "targetBytes"_sr, std::numeric_limits<uint64_t>::max());
+		keyPrefix = getOption(options, "keyPrefix"_sr, ""_sr);
 		keyPrefix = unprintable(keyPrefix.toString());
 	}
 

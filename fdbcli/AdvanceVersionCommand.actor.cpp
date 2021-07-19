@@ -31,7 +31,7 @@
 
 namespace fdb_cli {
 
-const KeyRef advanceVersionSpecialKey = LiteralStringRef("\xff\xff/management/min_required_commit_version");
+const KeyRef advanceVersionSpecialKey = "\xff\xff/management/min_required_commit_version"_sr;
 
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 2) {

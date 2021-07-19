@@ -445,7 +445,7 @@ private:
 		log->push(StringRef((const uint8_t*)&h, sizeof(h)));
 		log->push(v1);
 		log->push(v2);
-		return log->push(LiteralStringRef("\x01")); // Changes here should be reflected in OP_DISK_OVERHEAD
+		return log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
 
 	ACTOR static Future<Void> recover(KeyValueStoreMemory* self, bool exactRecovery) {
@@ -723,7 +723,7 @@ private:
 
 					auto thisSnapshotEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
 					//TraceEvent("SnapshotEnd", self->id)
-					//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
+					//	.detail("LastKey", lastKey.present() ? lastKey.get() : "<none>"_sr)
 					//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
 					//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
 					//	.detail("ThisSnapshotEnd", thisSnapshotEnd)

@@ -348,12 +348,10 @@ void testSerializationSpeed() {
 				CommitTransactionRef& tr = batch[t];
 				tr.read_snapshot = 0;
 				for (int i = 0; i < 2; i++)
-					tr.mutations.push_back_deep(
-					    batchArena,
-					    MutationRef(MutationRef::SetValue, LiteralStringRef("KeyABCDE"), LiteralStringRef("SomeValu")));
-				tr.mutations.push_back_deep(
-				    batchArena,
-				    MutationRef(MutationRef::ClearRange, LiteralStringRef("BeginKey"), LiteralStringRef("EndKeyAB")));
+					tr.mutations.push_back_deep(batchArena,
+					                            MutationRef(MutationRef::SetValue, "KeyABCDE"_sr, "SomeValu"_sr));
+				tr.mutations.push_back_deep(batchArena,
+				                            MutationRef(MutationRef::ClearRange, "BeginKey"_sr, "EndKeyAB"_sr));
 			}
 
 			build += timer() - tstart;
@@ -812,7 +810,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
-		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
+		bool autoPublicAddress = StringRef(publicAddressStr).startsWith("auto:"_sr);
 		NetworkAddress currentPublicAddress;
 		if (autoPublicAddress) {
 			try {
@@ -1051,7 +1049,7 @@ private:
 				break;
 			case OPT_KNOB: {
 				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+				if (!StringRef(syn).startsWith("--knob_"_sr)) {
 					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1062,7 +1060,7 @@ private:
 			}
 			case OPT_UNITTESTPARAM: {
 				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--test_"))) {
+				if (!StringRef(syn).startsWith("--test_"_sr)) {
 					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1071,7 +1069,7 @@ private:
 			}
 			case OPT_LOCALITY: {
 				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
+				if (!StringRef(syn).startsWith("--locality_"_sr)) {
 					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1491,7 +1489,7 @@ private:
 
 		bool autoPublicAddress =
 		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(), [](const std::string& addr) {
-			    return StringRef(addr).startsWith(LiteralStringRef("auto:"));
+			    return StringRef(addr).startsWith("auto:"_sr);
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
 		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
@@ -2133,19 +2131,19 @@ int main(int argc, char* argv[]) {
 				char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 				if (demangled) {
 					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+					if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+						s = s.substr("(anonymous namespace)::"_sr.size());
 					free(demangled);
 				} else
 					s = i->first;
 #else
 				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
+				if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+					s = s.substr("class `anonymous namespace'::"_sr.size());
+				else if (StringRef(s).startsWith("class "_sr))
+					s = s.substr("class "_sr.size());
+				else if (StringRef(s).startsWith("struct "_sr))
+					s = s.substr("struct "_sr.size());
 #endif
 
 				typeNames.emplace_back(s, i->first);

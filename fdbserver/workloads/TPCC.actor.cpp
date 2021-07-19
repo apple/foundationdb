@@ -118,11 +118,11 @@ struct TPCC : TestWorkload {
 
 	TPCC(WorkloadContext const& ctx) : TestWorkload(ctx) {
 		std::string workloadName = DESCRIPTION;
-		warehousesPerClient = getOption(options, LiteralStringRef("warehousesPerClient"), 100);
-		expectedTransactionsPerMinute = getOption(options, LiteralStringRef("expectedTransactionsPerMinute"), 1000);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600);
-		warmupTime = getOption(options, LiteralStringRef("warmupTime"), 30);
-		getOption(options, LiteralStringRef("clientsUsed"), 40);
+		warehousesPerClient = getOption(options, "warehousesPerClient"_sr, 100);
+		expectedTransactionsPerMinute = getOption(options, "expectedTransactionsPerMinute"_sr, 1000);
+		testDuration = getOption(options, "testDuration"_sr, 600);
+		warmupTime = getOption(options, "warmupTime"_sr, 30);
+		getOption(options, "clientsUsed"_sr, 40);
 	}
 
 	int NURand(int C, int A, int x, int y) {
@@ -416,7 +416,7 @@ struct TPCC : TestWorkload {
 			customer.c_balance -= history.h_amount;
 			customer.c_ytd_payment += history.h_amount;
 			customer.c_payment_cnt += 1;
-			if (customer.c_credit == LiteralStringRef("BC")) {
+			if (customer.c_credit == "BC"_sr) {
 				// we must update c_data
 				std::stringstream ss;
 				ss << customer.c_id << "," << customer.c_d_id << "," << customer.c_w_id << "," << district.d_id << ","
@@ -447,7 +447,7 @@ struct TPCC : TestWorkload {
 				UID k = deterministicRandom()->randomUniqueID();
 				BinaryWriter kW(Unversioned());
 				serializer(kW, k);
-				auto key = kW.toValue().withPrefix(LiteralStringRef("History/"));
+				auto key = kW.toValue().withPrefix("History/"_sr);
 				tr.set(key, w.toValue());
 			}
 			wait(tr.commit());

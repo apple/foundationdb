@@ -39,13 +39,13 @@ struct SubmitBackupWorkload final : TestWorkload {
 	IncrementalBackupOnly incremental{ false };
 
 	SubmitBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
-		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
-		delayFor = getOption(options, LiteralStringRef("delayFor"), 10.0);
-		initSnapshotInterval = getOption(options, LiteralStringRef("initSnapshotInterval"), 0);
-		snapshotInterval = getOption(options, LiteralStringRef("snapshotInterval"), 1e8);
-		stopWhenDone.set(getOption(options, LiteralStringRef("stopWhenDone"), true));
-		incremental.set(getOption(options, LiteralStringRef("incremental"), false));
+		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
+		tag = getOption(options, "tag"_sr, "default"_sr);
+		delayFor = getOption(options, "delayFor"_sr, 10.0);
+		initSnapshotInterval = getOption(options, "initSnapshotInterval"_sr, 0);
+		snapshotInterval = getOption(options, "snapshotInterval"_sr, 1e8);
+		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, true));
+		incremental.set(getOption(options, "incremental"_sr, false));
 	}
 
 	static constexpr const char* DESCRIPTION = "SubmitBackup";

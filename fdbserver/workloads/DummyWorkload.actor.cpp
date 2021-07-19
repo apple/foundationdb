@@ -27,8 +27,8 @@ struct DummyWorkload : TestWorkload {
 	double displayDelay;
 
 	DummyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		displayWorkers = getOption(options, LiteralStringRef("displayWorkers"), true);
-		displayDelay = getOption(options, LiteralStringRef("displayDelay"), 0.0);
+		displayWorkers = getOption(options, "displayWorkers"_sr, true);
+		displayDelay = getOption(options, "displayDelay"_sr, 0.0);
 	}
 
 	std::string description() const override { return "DummyWorkload"; }

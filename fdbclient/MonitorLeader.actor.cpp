@@ -303,7 +303,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 		auto c = connectionString.begin();
 		while (c != connectionString.end()) {
 			if (deterministicRandom()->random01() < 0.1) // Add whitespace character
-				output += deterministicRandom()->randomChoice(LiteralStringRef(" \t\n\r"));
+				output += deterministicRandom()->randomChoice(" \t\n\r"_sr);
 			if (deterministicRandom()->random01() < 0.5) { // Add one of the input characters
 				output += *c;
 				++c;
@@ -312,9 +312,9 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 				output += "#";
 				int charCount = deterministicRandom()->randomInt(0, 20);
 				for (int i = 0; i < charCount; i++) {
-					output += deterministicRandom()->randomChoice(LiteralStringRef("asdfzxcv123345:!@#$#$&()<\"\' \t"));
+					output += deterministicRandom()->randomChoice("asdfzxcv123345:!@#$#$&()<\"\' \t"_sr);
 				}
-				output += deterministicRandom()->randomChoice(LiteralStringRef("\n\r"));
+				output += deterministicRandom()->randomChoice("\n\r"_sr);
 			}
 		}
 
@@ -791,7 +791,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
-			req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+			req.issues.push_back_deep(req.issues.arena(), "incorrect_cluster_file_contents"_sr);
 			std::string connectionString = connFile->getConnectionString().toString();
 			if (!incorrectTime.present()) {
 				incorrectTime = now();

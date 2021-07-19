@@ -53,9 +53,9 @@ struct PopulateTPCC : TestWorkload {
 
 	PopulateTPCC(WorkloadContext const& ctx) : TestWorkload(ctx) {
 		std::string workloadName = DESCRIPTION;
-		actorsPerClient = getOption(options, LiteralStringRef("actorsPerClient"), 10);
-		warehousesPerActor = getOption(options, LiteralStringRef("warehousesPerActor"), 30);
-		clientsUsed = getOption(options, LiteralStringRef("clientsUsed"), 2);
+		actorsPerClient = getOption(options, "actorsPerClient"_sr, 10);
+		warehousesPerActor = getOption(options, "warehousesPerActor"_sr, 30);
+		clientsUsed = getOption(options, "clientsUsed"_sr, 2);
 	}
 
 	int NURand(int C, int A, int x, int y) {
@@ -209,7 +209,7 @@ struct PopulateTPCC : TestWorkload {
 					} else {
 						c.c_last = self->genCLast(c.arena, self->NURand(self->gState.CLoad, 255, 0, 999));
 					}
-					c.c_middle = LiteralStringRef("OE");
+					c.c_middle = "OE"_sr;
 					c.c_first = self->aString(c.arena, 8, 16);
 					c.c_street_1 = self->aString(c.arena, 10, 20);
 					c.c_street_2 = self->aString(c.arena, 10, 20);
@@ -219,9 +219,9 @@ struct PopulateTPCC : TestWorkload {
 					c.c_phone = self->nString(c.arena, 16, 16);
 					c.c_since = g_network->now();
 					if (deterministicRandom()->random01() < 0.1) {
-						c.c_credit = LiteralStringRef("BC");
+						c.c_credit = "BC"_sr;
 					} else {
-						c.c_credit = LiteralStringRef("GC");
+						c.c_credit = "GC"_sr;
 					}
 					c.c_credit_lim = 50000;
 					c.c_discount = deterministicRandom()->random01() / 2.0;
@@ -254,7 +254,7 @@ struct PopulateTPCC : TestWorkload {
 						UID k = deterministicRandom()->randomUniqueID();
 						BinaryWriter kW(Unversioned());
 						serializer(kW, k);
-						auto key = kW.toValue().withPrefix(LiteralStringRef("History/"));
+						auto key = kW.toValue().withPrefix("History/"_sr);
 						tr.set(key, w.toValue(), AddConflictRange::False);
 					}
 				}

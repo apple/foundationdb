@@ -89,7 +89,7 @@ Key keyForFeedWatcher(uint64_t feed, uint64_t inbox) {
 	return StringRef(format("f/%016llx/watchers/%016llx", feed, inbox));
 }
 
-Standalone<StringRef> messagePrefix(LiteralStringRef("m/"));
+Standalone<StringRef> messagePrefix("m/"_sr);
 
 Key keyForMessage(uint64_t message) {
 	return StringRef(format("m/%016llx", message));

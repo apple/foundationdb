@@ -37,10 +37,10 @@ struct RestoreBackupWorkload final : TestWorkload {
 	StopWhenDone stopWhenDone{ false };
 
 	RestoreBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
-		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
-		delayFor = getOption(options, LiteralStringRef("delayFor"), 10.0);
-		stopWhenDone.set(getOption(options, LiteralStringRef("stopWhenDone"), false));
+		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
+		tag = getOption(options, "tag"_sr, "default"_sr);
+		delayFor = getOption(options, "delayFor"_sr, 10.0);
+		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
 	}
 
 	static constexpr const char* DESCRIPTION = "RestoreBackup";

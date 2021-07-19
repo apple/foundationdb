@@ -28,11 +28,11 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("config/fdb_client_info/client_txn_sample_rate");
-const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_info/client_txn_size_limit");
+const KeyRef fdbClientInfoTxnSampleRate = "config/fdb_client_info/client_txn_sample_rate"_sr;
+const KeyRef fdbClientInfoTxnSizeLimit = "config/fdb_client_info/client_txn_size_limit"_sr;
 
-const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag_sample_rate");
-const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
+const KeyRef transactionTagSampleRate = "config/transaction_tag_sample_rate"_sr;
+const KeyRef transactionTagSampleCost = "config/transaction_tag_sample_cost"_sr;
 
 GlobalConfig::GlobalConfig(Database& cx) : cx(cx), lastUpdate(0) {}
 

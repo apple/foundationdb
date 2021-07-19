@@ -33,7 +33,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 	constexpr static const char* NAME = "TagThrottleApi";
 
 	TagThrottleApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		autoThrottleEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 	}
 

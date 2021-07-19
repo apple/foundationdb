@@ -248,7 +248,7 @@ struct ProxyCommitData {
 	    lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),
 	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), firstProxy(firstProxy),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
-	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),
+	    singleKeyMutationEvent("SingleKeyMutation"_sr), commitBatchesMemBytesCount(0), lastTxsPop(0),
 	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
 	    lastMasterReset(now()), lastResolverReset(now()) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);

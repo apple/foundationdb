@@ -39,10 +39,10 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		ASSERT(g_simulator.extraDB != nullptr);
 		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 100.0);
-		switchAfter = getOption(options, LiteralStringRef("switchAfter"), 50.0);
-		keyToRead = getOption(options, LiteralStringRef("keyToRead"), LiteralStringRef("someKey"));
-		keyToWatch = getOption(options, LiteralStringRef("keyToWatch"), LiteralStringRef("anotherKey"));
+		testDuration = getOption(options, "testDuration"_sr, 100.0);
+		switchAfter = getOption(options, "switchAfter"_sr, 50.0);
+		keyToRead = getOption(options, "keyToRead"_sr, "someKey"_sr);
+		keyToWatch = getOption(options, "keyToWatch"_sr, "anotherKey"_sr);
 	}
 
 	std::string description() const override { return "DifferentClustersSameRV"; }
@@ -162,7 +162,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		wait(unlockDatabase(self->extraDB, lockUid));
 		TraceEvent("DifferentClusters_UnlockedExtraDB");
 		ASSERT(!watchFuture.isReady() || watchFuture.isError());
-		wait(doWrite(self->extraDB, self->keyToWatch, Optional<Value>{ LiteralStringRef("") }));
+		wait(doWrite(self->extraDB, self->keyToWatch, Optional<Value>{ ""_sr }));
 		TraceEvent("DifferentClusters_WaitingForWatch");
 		try {
 			wait(timeoutError(watchFuture, (self->testDuration - self->switchAfter) / 2));

@@ -36,9 +36,9 @@ struct MoveKeysWorkload : TestWorkload {
 
 	MoveKeysWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
-		meanDelay = getOption(options, LiteralStringRef("meanDelay"), 0.05);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		maxKeyspace = getOption(options, LiteralStringRef("maxKeyspace"), 0.1);
+		meanDelay = getOption(options, "meanDelay"_sr, 0.05);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		maxKeyspace = getOption(options, "maxKeyspace"_sr, 0.1);
 	}
 
 	std::string description() const override { return "MoveKeysWorkload"; }

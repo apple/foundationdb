@@ -269,7 +269,7 @@ template <class T>
 static T parseIntegral(std::string const& value) {
 	T v;
 	int n = 0;
-	if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
+	if (StringRef(value).startsWith("0x"_sr)) {
 		if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
 			throw invalid_option_value();
 	} else {

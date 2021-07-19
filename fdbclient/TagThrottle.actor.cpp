@@ -120,9 +120,9 @@ ACTOR Future<bool> getValidAutoEnabled(Transaction* tr, Database db) {
 			tr->reset();
 			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
 			continue;
-		} else if (value.get() == LiteralStringRef("1")) {
+		} else if (value.get() == "1"_sr) {
 			result = true;
-		} else if (value.get() == LiteralStringRef("0")) {
+		} else if (value.get() == "0"_sr) {
 			result = false;
 		} else {
 			TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue", db->dbId).detail("Value", value.get());
@@ -135,8 +135,7 @@ ACTOR Future<bool> getValidAutoEnabled(Transaction* tr, Database db) {
 }
 
 void signalThrottleChange(Transaction& tr) {
-	tr.atomicOp(
-	    tagThrottleSignalKey, LiteralStringRef("XXXXXXXXXX\x00\x00\x00\x00"), MutationRef::SetVersionstampedValue);
+	tr.atomicOp(tagThrottleSignalKey, "XXXXXXXXXX\x00\x00\x00\x00"_sr, MutationRef::SetVersionstampedValue);
 }
 
 ACTOR Future<Void> updateThrottleCount(Transaction* tr, int64_t delta) {
@@ -412,9 +411,8 @@ ACTOR Future<Void> enableAuto(Database db, bool enabled) {
 	loop {
 		try {
 			Optional<Value> value = wait(tr.get(tagThrottleAutoEnabledKey));
-			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
-			    (!enabled && value.get() != LiteralStringRef("0"))) {
-				tr.set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
+			if (!value.present() || (enabled && value.get() != "1"_sr) || (!enabled && value.get() != "0"_sr)) {
+				tr.set(tagThrottleAutoEnabledKey, enabled ? "1"_sr : "0"_sr);
 				signalThrottleChange(tr);
 
 				wait(tr.commit());

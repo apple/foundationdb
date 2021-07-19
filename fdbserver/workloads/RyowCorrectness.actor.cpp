@@ -29,7 +29,7 @@
 #define TRACE_TRANSACTION 0
 
 #if TRACE_TRANSACTION
-StringRef debugKey = LiteralStringRef("0000000000uldlamzpspf");
+StringRef debugKey = "0000000000uldlamzpspf"_sr;
 #endif
 
 // A struct representing an operation to be performed on a transaction
@@ -62,8 +62,8 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	int opsPerTransaction;
 
 	RyowCorrectnessWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx, 1) {
-		duration = getOption(options, LiteralStringRef("duration"), 60);
-		opsPerTransaction = getOption(options, LiteralStringRef("opsPerTransaction"), 50);
+		duration = getOption(options, "duration"_sr, 60);
+		opsPerTransaction = getOption(options, "opsPerTransaction"_sr, 50);
 	}
 
 	std::string description() const override { return "RyowCorrectness"; }
@@ -142,7 +142,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	void pushKVPair(std::vector<RangeResult>& results, Key const& key, Optional<Value> const& value) {
 		RangeResult result;
 		if (!value.present())
-			result.push_back_deep(result.arena(), KeyValueRef(key, LiteralStringRef("VALUE_NOT_PRESENT")));
+			result.push_back_deep(result.arena(), KeyValueRef(key, "VALUE_NOT_PRESENT"_sr));
 		else
 			result.push_back_deep(result.arena(), KeyValueRef(key, value.get()));
 

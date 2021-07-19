@@ -30,8 +30,8 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 	PerfIntCounter lockCount{ "LockCount" };
 
 	LockDatabaseFrequentlyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		delayBetweenLocks = getOption(options, LiteralStringRef("delayBetweenLocks"), 0.1);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 60);
+		delayBetweenLocks = getOption(options, "delayBetweenLocks"_sr, 0.1);
+		testDuration = getOption(options, "testDuration"_sr, 60);
 	}
 
 	std::string description() const override { return "LockDatabaseFrequently"; }
