@@ -31,7 +31,7 @@
 #define FILESYSTEM_IMPL 1
 
 #include "fdbrpc/AsyncFileCached.actor.h"
-#include "fdbrpc/AsyncFileDelayed.actor.h"
+#include "fdbrpc/AsyncFileChaos.actor.h"
 #include "fdbrpc/AsyncFileEIO.actor.h"
 #include "fdbrpc/AsyncFileWinASIO.actor.h"
 #include "fdbrpc/AsyncFileKAIO.actor.h"
@@ -78,7 +78,7 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
-		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileDelayed(r)); });
+		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
 	return f;
 }
 

@@ -1549,10 +1549,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					} else if (req.flipBits.present()) {
 						TraceEvent("FlipBitsRequest").
 						detail("Percent", req.flipBits.get().percentBitFlips);
-						//detail("File",req.flipBits.get().file).
 						auto bitFlipper = BitFlipper::flipper();
 						bitFlipper->setPercentBitFlips(req.flipBits.get().percentBitFlips);
-						//flipBits(req.flipBits.get().file, req.flipBits.get().percent);
 					}
 					req.reply.send(Void());
 				} else {
