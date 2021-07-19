@@ -879,8 +879,9 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 // Message the sequencer to obtain the previous commit version for each storage server's tag
 ACTOR Future<Void> getTPCV(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	GetTLogPrevCommitVersionReply rep = wait(brokenPromiseToNever(
-	    pProxyCommitData->master.getTLogPrevCommitVersion.getReply(GetTLogPrevCommitVersionRequest(self->writtenTLogs))));
+	GetTLogPrevCommitVersionReply rep =
+	    wait(brokenPromiseToNever(pProxyCommitData->master.getTLogPrevCommitVersion.getReply(
+	        GetTLogPrevCommitVersionRequest(self->writtenTLogs))));
 	// TraceEvent("GetTLogPrevCommitVersionRequest");
 	return Void();
 }
@@ -1151,8 +1152,11 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 					break;
 				}
 				when(wait(pProxyCommitData->cx->onProxiesChanged())) {}
+				// @todo probably there is no need to get the (entire) version vector from the sequencer
+				// in this case, and if so, consider adding a flag to the request to tell the sequencer
+				// to not send the version vector information.
 				when(GetRawCommittedVersionReply v = wait(pProxyCommitData->master.getLiveCommittedVersion.getReply(
-				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID),
+				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID, invalidVersion),
 				         TaskPriority::GetLiveCommittedVersionReply))) {
 					if (v.version > pProxyCommitData->committedVersion.get()) {
 						pProxyCommitData->locked = v.locked;
@@ -1296,7 +1300,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// self->committedVersion by reporting commit version first before updating self->committedVersion. Otherwise, a
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
-	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // A later version was reported committed first
+	TEST(pProxyCommitData->committedVersion.get() >
+	     self->commitVersion); // A later version was reported committed first
 	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
 		state Optional<std::set<Tag>> writtenTags;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
@@ -1470,6 +1475,16 @@ void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
 	}
 }
 
+void addTagMapping(GetKeyServerLocationsReply& reply, ProxyCommitData* commitData) {
+	for (const auto& [_, shard] : reply.results) {
+		for (auto& ssi : shard) {
+			auto iter = commitData->storageCache.find(ssi.id());
+			ASSERT_WE_THINK(iter != commitData->storageCache.end());
+			reply.resultsTagMapping.emplace_back(ssi.id(), iter->second->tag);
+		}
+	}
+}
+
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
@@ -1519,6 +1534,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			--r;
 		}
 	}
+	addTagMapping(rep, commitData);
 	req.reply.send(rep);
 	++commitData->stats.keyServerLocationOut;
 	return Void();
