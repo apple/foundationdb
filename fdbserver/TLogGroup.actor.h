@@ -80,7 +80,7 @@ public:
 
 	// Return the group with given 'id'. Returns an null reference if the group
 	// with given ID doesn't exists.
-	TLogGroupRef getGroup(UID groupId) const;
+	TLogGroupRef getGroup(UID groupId, bool create = false);
 
 	// Returns the number of TLogGroups we want to keep in collection. May be not be
 	// equal to number of groups currently recruited/active.

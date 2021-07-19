@@ -79,13 +79,19 @@ int TLogGroupCollection::targetGroupSize() const {
 	return targetNumGroups;
 }
 
-TLogGroupRef TLogGroupCollection::getGroup(UID groupId) const {
+TLogGroupRef TLogGroupCollection::getGroup(UID groupId, bool create) {
 	// TODO: Change the vector of groups to a map for faster lookup.
 	for (auto& g : recruitedGroups) {
 		if (g->id() == groupId) {
 			return g;
 		}
 	}
+
+	if (create) {
+		recruitedGroups.push_back(makeReference<TLogGroup>(groupId));
+		return recruitedGroups.back();
+	}
+
 	return Reference<TLogGroup>();
 }
 
@@ -161,8 +167,8 @@ void TLogGroupCollection::addStorageTeam(ptxn::StorageTeamID teamId, vector<UID>
 }
 
 bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId) {
-	ASSERT(storageTeamToTLogGroupMap.find(teamId) == storageTeamToTLogGroupMap.end());
-	auto group = getGroup(groupId);
+	// ASSERT(storageTeamToTLogGroupMap.find(teamId) == storageTeamToTLogGroupMap.end());
+	auto group = getGroup(groupId, true);
 	ASSERT(group.isValid());
 	storageTeamToTLogGroupMap[teamId] = group;
 	group->assignStorageTeam(teamId);
@@ -170,7 +176,6 @@ bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, UID grou
 }
 
 bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group) {
-	ASSERT(storageTeamToTLogGroupMap.find(teamId) == storageTeamToTLogGroupMap.end());
 	storageTeamToTLogGroupMap[teamId] = group;
 	group->assignStorageTeam(teamId);
 	return true;
