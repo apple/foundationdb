@@ -202,12 +202,14 @@ struct GetTLogPrevCommitVersionReply {
 struct GetTLogPrevCommitVersionRequest {
 	constexpr static FileIdentifier file_identifier = 16683184;
 	std::set<uint16_t> writtenTLogs;
+	Version commitVersion;
+	Version prev;
 	ReplyPromise<GetTLogPrevCommitVersionReply> reply;
 	GetTLogPrevCommitVersionRequest() {}
-	GetTLogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs) : writtenTLogs(writtenTLogs) {}
+	GetTLogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs, Version commitVersion, Version prev) : writtenTLogs(writtenTLogs), commitVersion(commitVersion), prev(prev) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, writtenTLogs, reply);
+		serializer(ar, writtenTLogs, commitVersion, prev, reply);
 	}
 };
 
@@ -217,6 +219,7 @@ struct ReportRawCommittedVersionRequest {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
+	Optional<Version> prevVersion; // if present, wait for prevVersion to be committed before replying
 	Optional<std::set<Tag>> writtenTags;
 	ReplyPromise<Void> reply;
 
@@ -225,13 +228,14 @@ struct ReportRawCommittedVersionRequest {
 	                                 bool locked,
 	                                 Optional<Value> metadataVersion,
 	                                 Version minKnownCommittedVersion,
+	                                 Optional<Version> prevVersion,
 	                                 Optional<std::set<Tag>> writtenTags = Optional<std::set<Tag>>())
 	  : version(version), locked(locked), metadataVersion(metadataVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion), writtenTags(writtenTags) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion), writtenTags(writtenTags), prevVersion(prevVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, writtenTags, reply);
+		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, prevVersion, writtenTags, reply);
 	}
 };
 
