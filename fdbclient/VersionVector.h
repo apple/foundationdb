@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <map>
+#include <set>
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
@@ -36,6 +38,8 @@ struct VersionVector {
 	VersionVector() : maxVersion(invalidVersion) {}
 	VersionVector(Version version) : maxVersion(version) {}
 
+	Version getMaxVersion() const { return maxVersion; }
+
 	void setVersion(const Tag& tag, Version version) {
 		ASSERT(tag != invalidTag);
 		ASSERT(version > maxVersion);
@@ -43,12 +47,13 @@ struct VersionVector {
 		maxVersion = version;
 	}
 
-	void setVersions(const std::set<Tag>& tags, Version version) {
+	void setVersion(const std::set<Tag>& tags, Version version) {
 		ASSERT(version > maxVersion);
 		for (auto& tag : tags) {
 			ASSERT(tag != invalidTag);
 			versions[tag] = version;
 		}
+		maxVersion = version;
 	}
 
 	bool hasVersion(const Tag& tag) const {
@@ -62,6 +67,59 @@ struct VersionVector {
 		auto iter = versions.find(tag);
 		ASSERT(iter != versions.end());
 		return iter->second;
+	}
+
+	void clear() {
+		versions.clear();
+		maxVersion = invalidVersion;
+	}
+
+	// @note this method, together with method applyDelta(), helps minimize
+	// the number of version vector entries that get sent from sequencer to
+	// grv proxy (and from grv proxy to client) on the read path.
+	void getDelta(Version refVersion, VersionVector& delta) const {
+		ASSERT(refVersion <= maxVersion);
+
+		delta.clear();
+
+		if (refVersion == maxVersion) {
+			return; // rerurn an invalid version vector
+		}
+
+		std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
+		for (const auto& [tag, version] : versions) {
+			if (version > refVersion) {
+				tmpVersionMap[version].insert(tag);
+			}
+		}
+
+		for (auto& [version, tags] : tmpVersionMap) {
+			delta.setVersion(tags, version);
+		}
+	}
+
+	// @note this method, together with method getDelta(), helps minimize
+	// the number of version vector entries that get sent from sequencer to
+	// grv proxy (and from grv proxy to client) on the read path.
+	void applyDelta(const VersionVector& delta) {
+		if (delta.maxVersion == invalidVersion) {
+			return;
+		}
+
+		if (maxVersion == delta.maxVersion) {
+			return;
+		}
+
+		std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
+		for (const auto& [tag, version] : delta.versions) {
+			if (version > maxVersion) {
+				tmpVersionMap[version].insert(tag);
+			}
+		}
+
+		for (auto& [version, tags] : tmpVersionMap) {
+			setVersion(tags, version);
+		}
 	}
 
 	bool operator==(const VersionVector& vv) const { return maxVersion == vv.maxVersion; }
