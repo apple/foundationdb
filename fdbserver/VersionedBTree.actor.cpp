@@ -1665,7 +1665,7 @@ struct RedwoodMetrics {
 
 	void updateMaxRecordCount(int maxRecords) {
 		if (maxRecordCount != maxRecords) {
-			maxRecordCount = maxRecordCount;
+			maxRecordCount = maxRecords;
 			for (int i = 0; i < btreeLevels + 1; ++i) {
 				auto& level = levels[i];
 				level.buildItemCountSketch->updateUpperBound(maxRecordCount);
