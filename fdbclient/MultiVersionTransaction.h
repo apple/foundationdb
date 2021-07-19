@@ -503,10 +503,9 @@ public:
 		// this will be a specially created local db.
 		Reference<IDatabase> versionMonitorDb;
 
+		bool closed;
+
 		ThreadFuture<Void> changed;
-
-		bool cancelled;
-
 		ThreadFuture<Void> dbReady;
 		ThreadFuture<Void> protocolVersionMonitor;
 
