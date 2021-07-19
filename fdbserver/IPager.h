@@ -166,7 +166,7 @@ class IPagerSnapshot {
 public:
 	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
 	                                                           unsigned int level,
-	                                                          VectorRef<LogicalPageID> pageIDs,
+	                                                           VectorRef<LogicalPageID> pageIDs,
 	                                                           bool cacheable,
 	                                                           bool nohit) = 0;
 	virtual bool tryEvictPage(LogicalPageID id) = 0;
@@ -211,10 +211,7 @@ public:
 	                        Standalone<VectorRef<LogicalPageID>> pageIDs,
 	                        Reference<ArenaPage> data) = 0;
 
-	void updatePage(PagerEventReasons reason,
-	                unsigned int level,
-					LogicalPageID pageID, 
-					Reference<ArenaPage> data){
+	void updatePage(PagerEventReasons reason, unsigned int level, LogicalPageID pageID, Reference<ArenaPage> data) {
 		updatePage(reason, level, VectorRef<LogicalPageID>(&pageID, 1), data);
 	}
 	// Try to atomically update the contents of a page as of version v in the next commit.
@@ -223,10 +220,10 @@ public:
 	// If a new page ID is returned, the old page ID will be freed as of version v
 
 	virtual Future<VectorRef<LogicalPageID>> atomicUpdatePage(PagerEventReasons reason,
-	                                               unsigned int level,
-	                                               VectorRef<LogicalPageID> pageIDs,
-	                                               Reference<ArenaPage> data,
-	                                               Version v) = 0;
+	                                                          unsigned int level,
+	                                                          VectorRef<LogicalPageID> pageIDs,
+	                                                          Reference<ArenaPage> data,
+	                                                          Version v) = 0;
 
 	// Free pageID to be used again after the commit that moves oldestVersion past v
 	virtual void freePage(LogicalPageID pageID, Version v) = 0;
@@ -249,11 +246,11 @@ public:
 	                                              Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                                              bool cacheable = true,
 	                                              bool noHit = false) = 0;
-	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason, 
-										  unsigned int level,
-										  PhysicalPageID pageID, 
-										  bool cacheable = true, 
-										  bool noHit = false){
+	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
+	                                      unsigned int level,
+	                                      PhysicalPageID pageID,
+	                                      bool cacheable = true,
+	                                      bool noHit = false) {
 		return readPage(reason, level, VectorRef<LogicalPageID>(&pageID, 1), cacheable, noHit);
 	}
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;

@@ -2255,7 +2255,7 @@ public:
 		return id;
 	}
 
-	Reference<ArenaPage> newPageBuffer(size_t size=1) override {
+	Reference<ArenaPage> newPageBuffer(size_t size = 1) override {
 		return Reference<ArenaPage>(new ArenaPage(logicalPageSize * size, physicalPageSize * size));
 	}
 
@@ -2308,11 +2308,13 @@ public:
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
 
-	Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs(size_t size) override { return newPageIDs_impl(this, size); }
-	ACTOR static Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs_impl(DWALPager* self, size_t size) { 
+	Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs(size_t size) override {
+		return newPageIDs_impl(this, size);
+	}
+	ACTOR static Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs_impl(DWALPager* self, size_t size) {
 		state Standalone<VectorRef<LogicalPageID>> newPages;
 		state size_t i = 0;
-		for(; i<size; ++i){
+		for (; i < size; ++i) {
 			LogicalPageID id = wait(self->newPageID());
 			newPages.push_back(newPages.arena(), id);
 		}
@@ -2373,12 +2375,11 @@ public:
 		page->updateChecksum(pageIDs.front());
 		const int beforeUpdateChecksum = page->getChecksum();
 		/*std::cout<<"in writePhysicalPage, page size is: "<<(int)page->size()<<std::endl;
-		std::cout<<"PID: "<<pageIDs.front()<<", checksum after update should be: "<<page->getChecksum()<<", and it is: "<< page->calculateChecksum(pageIDs.front())<<std::endl;
-		if(pageIDs.size() > 1){
-			for(auto id : pageIDs){
-				std::cout<<id<<" - ";
-			}
-			std::cout<<std::endl;
+		std::cout<<"PID: "<<pageIDs.front()<<", checksum after update should be: "<<page->getChecksum()<<", and it is:
+		"<< page->calculateChecksum(pageIDs.front())<<std::endl; if(pageIDs.size() > 1){ for(auto id : pageIDs){
+		        std::cout<<id<<" - ";
+		    }
+		    std::cout<<std::endl;
 		}*/
 		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
 		             filename.c_str(),
@@ -2392,26 +2393,27 @@ public:
 
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
-		//ASSERT(page->size()+4 == pageIDs.size()*blockSize);
+		// ASSERT(page->size()+4 == pageIDs.size()*blockSize);
 		/*if(page->size()+4 != pageIDs.size()*blockSize) {
-			std::cout<<"page size not equal to pageIDs.size() * blocksize \n";
-			std::cout<<page->size()+4<<" v.s. "<<pageIDs.size()*blockSize<<std::endl;
+		    std::cout<<"page size not equal to pageIDs.size() * blocksize \n";
+		    std::cout<<page->size()+4<<" v.s. "<<pageIDs.size()*blockSize<<std::endl;
 		}*/
 		std::vector<Future<Void>> writers;
 		// for each page id
-		for(size_t i = 0; i<pageIDs.size(); i++){
-			Future<Void> p = pageFile->write(page->mutate() + i*blockSize, blockSize, (int64_t)pageIDs[i] * blockSize);
-			if(REDWOOD_DEBUG) {
+		for (size_t i = 0; i < pageIDs.size(); i++) {
+			Future<Void> p =
+			    pageFile->write(page->mutate() + i * blockSize, blockSize, (int64_t)pageIDs[i] * blockSize);
+			if (REDWOOD_DEBUG) {
 				Standalone<VectorRef<PhysicalPageID>> pageIDsCopy = pageIDs;
 				p = map(p, [=](Void) {
-			              debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
-			                           filename.c_str(),
-			                           (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
-			                           toString(pageIDsCopy.front()).c_str(),
-			                           page->begin(),
-			                           (pageIDsCopy.front() * blockSize));
-			              return Void();
-						  });
+					debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
+					             filename.c_str(),
+					             (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
+					             toString(pageIDsCopy.front()).c_str(),
+					             page->begin(),
+					             (pageIDsCopy.front() * blockSize));
+					return Void();
+				});
 			}
 			writers.push_back(p);
 		}
@@ -2422,7 +2424,8 @@ public:
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
-		return writePhysicalPage(PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page, true);
+		return writePhysicalPage(
+		    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page, true);
 	}
 
 	void updatePage(PagerEventReasons reason,
@@ -2447,7 +2450,7 @@ public:
 		// at the original page ID, could have a pending read when that version is expired (after which
 		// future reads of the version are not allowed) and the write of the next newest version over top
 		// of the original page begins.
-		//std::cout<<"updatePage, pageIDs.size(): "<<pageIDs.size()<<", and data page size: "<<data->size()<<std::endl;
+		// std::cout<<"updatePage, pageIDs.size(): "<<pageIDs.size()<<", and data page size: "<<data->size()<<std::endl;
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = writePhysicalPage(reason, level, pageIDs, data);
 		} else if (cacheEntry.reading()) {
@@ -2473,29 +2476,32 @@ public:
 	}
 
 	Future<VectorRef<LogicalPageID>> atomicUpdatePage(PagerEventReasons reason,
-	                                       unsigned int level,
-	                                       VectorRef<LogicalPageID> pageIDs,
-	                                       Reference<ArenaPage> data,
-	                                       Version v) override {
-		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageIDs.front()).c_str(), v);
-		Future<VectorRef<LogicalPageID>> f = map(newPageIDs(pageIDs.size()), [=](Standalone<VectorRef<LogicalPageID>> newIDs) {
-			updatePage(reason, level, newIDs, data);
-			// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
-			for(size_t i = 0; i<pageIDs.size(); i++){
-				RemappedPage r{ v, pageIDs[i], newIDs[i]};
-				remapQueue.pushBack(r);
-				auto& versionedMap = remappedPages[pageIDs[i]];
+	                                                  unsigned int level,
+	                                                  VectorRef<LogicalPageID> pageIDs,
+	                                                  Reference<ArenaPage> data,
+	                                                  Version v) override {
+		debug_printf(
+		    "DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageIDs.front()).c_str(), v);
+		Future<VectorRef<LogicalPageID>> f =
+		    map(newPageIDs(pageIDs.size()), [=](Standalone<VectorRef<LogicalPageID>> newIDs) {
+			    updatePage(reason, level, newIDs, data);
+			    // TODO:  Possibly limit size of remap queue since it must be recovered on cold start
+			    for (size_t i = 0; i < pageIDs.size(); i++) {
+				    RemappedPage r{ v, pageIDs[i], newIDs[i] };
+				    remapQueue.pushBack(r);
+				    auto& versionedMap = remappedPages[pageIDs[i]];
 
-				// An update page is unlikely to have its old version read again soon, so prioritize its cache eviction
-				// If the versioned map is empty for this page then the prior version of the page is at stored at the
-				// PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered map.
-				pageCache.prioritizeEviction(versionedMap.empty() ? pageIDs[i] : versionedMap.rbegin()->second);
-				versionedMap[v] = newIDs[i];
+				    // An update page is unlikely to have its old version read again soon, so prioritize its cache
+				    // eviction If the versioned map is empty for this page then the prior version of the page is at
+				    // stored at the PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered
+				    // map.
+				    pageCache.prioritizeEviction(versionedMap.empty() ? pageIDs[i] : versionedMap.rbegin()->second);
+				    versionedMap[v] = newIDs[i];
 
-				debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
-			}
-			return pageIDs;
-		});
+				    debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
+			    }
+			    return pageIDs;
+		    });
 
 		// No need for forwardError here because newPageID() is already wrapped in forwardError
 		return f;
@@ -2601,23 +2607,21 @@ public:
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPages(DWALPager* self,
-	                                                           Standalone<VectorRef<PhysicalPageID>> pageIDs,
-	                                                           bool header = false) {
+	                                                            Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                                            bool header = false) {
 		ASSERT(!self->memoryOnly);
 		++g_redwoodMetrics.metric.pagerDiskRead;
 
-		/*<<"in readPhysicalPages, before any reads, pageIDs.front(): "<<pageIDs.front()<<", and pageSize is: "<<pageIDs.size()<<std::endl;
-		if(pageIDs.size()>1){
-			for(auto id : pageIDs){
-				std::cout<<id<<" - ";
-			}
-			std::cout<<std::endl;
+		/*<<"in readPhysicalPages, before any reads, pageIDs.front(): "<<pageIDs.front()<<", and pageSize is:
+		"<<pageIDs.size()<<std::endl; if(pageIDs.size()>1){ for(auto id : pageIDs){ std::cout<<id<<" - ";
+		    }
+		    std::cout<<std::endl;
 		}*/
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
 			wait(delay(0, TaskPriority::DiskRead));
 		}
-		state Reference<ArenaPage> page = 
-			header ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock, smallestPhysicalBlock))
+		state Reference<ArenaPage> page =
+		    header ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock, smallestPhysicalBlock))
 		           : self->newPageBuffer(pageIDs.size());
 		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p\n",
 		             self->filename.c_str(),
@@ -2626,14 +2630,15 @@ public:
 
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
-		state size_t i = 0; 
-		for(; i<pageIDs.size(); i++){
-			int readBytes = wait(self->pageFile->read(page->mutate() + i*blockSize, blockSize, (int64_t)pageIDs[i] * blockSize));
+		state size_t i = 0;
+		for (; i < pageIDs.size(); i++) {
+			int readBytes =
+			    wait(self->pageFile->read(page->mutate() + i * blockSize, blockSize, (int64_t)pageIDs[i] * blockSize));
 			debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
-		         self->filename.c_str(),
-		         toString(pageIDs[i]).c_str(),
-		         page->begin() + i*blockSize,
-		         readBytes);
+			             self->filename.c_str(),
+			             toString(pageIDs[i]).c_str(),
+			             page->begin() + i * blockSize,
+			             readBytes);
 		}
 		// Header reads are checked explicitly during recovery
 		if (!header) {
@@ -2644,9 +2649,9 @@ public:
 				TraceEvent(SevError, "RedwoodChecksumFailed")
 				    .detail("Filename", self->filename.c_str())
 				    .detail("PageID", pageIDs.front())
-					.detail("NumOfPID", pageIDs.size())
+				    .detail("NumOfPID", pageIDs.size())
 				    .detail("Calculated PageSize", self->physicalPageSize * pageIDs.size())
-					.detail("True page's size()", page->size())
+				    .detail("True page's size()", page->size())
 				    .detail("Offset", pageIDs.front() * self->physicalPageSize)
 				    .detail("CalculatedChecksum", page->calculateChecksum(pageIDs.front()))
 				    .detail("ChecksumInPage", page->getChecksum())
@@ -2743,7 +2748,7 @@ public:
 	}
 	Standalone<VectorRef<PhysicalPageID>> getPhysicalPageIDs(VectorRef<LogicalPageID> logicalIDs, Version v) {
 		Standalone<VectorRef<PhysicalPageID>> physicalIDs;
-		for(auto& id : logicalIDs){
+		for (auto& id : logicalIDs) {
 			physicalIDs.push_back(physicalIDs.arena(), getPhysicalPageID(id, v));
 		}
 		return physicalIDs;
@@ -3001,11 +3006,12 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data =
-			    wait(self->readPage(PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&p.newPageID, 1), false, true));
+			Reference<ArenaPage> data = wait(self->readPage(
+			    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&p.newPageID, 1), false, true));
 
 			// Write the data to the original page so it can be read using its original pageID
-			self->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&p.newPageID, 1), data);
+			self->updatePage(
+			    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&p.newPageID, 1), data);
 			++g_redwoodMetrics.metric.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
 			++g_redwoodMetrics.metric.pagerRemapSkip;
@@ -5168,7 +5174,7 @@ private:
 				VALGRIND_MAKE_MEM_DEFINED(((uint8_t*)btPage) + written, (p.blockCount * p.blockSize) - written);
 				const uint8_t* rptr = (const uint8_t*)btPage;
 				for (int b = 0; b < p.blockCount; ++b) {
-					memcpy(pages->mutate() + b*p.blockSize, rptr, p.blockSize);
+					memcpy(pages->mutate() + b * p.blockSize, rptr, p.blockSize);
 					rptr += p.blockSize;
 				}
 				delete[](uint8_t*) btPage;
@@ -5181,9 +5187,9 @@ private:
 			// If we are only writing 1 page and it has the same BTreePageID size as the original then try to reuse the
 			// LogicalPageIDs in previousID and try to update them atomically.
 			if (pagesToBuild.size() == 1 && previousID.size() == p.blockCount) {
-				VectorRef<LogicalPageID> ids = wait(
-					self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID, pages, v));
-				for(const LogicalPageID& id : ids){
+				VectorRef<LogicalPageID> ids =
+				    wait(self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID, pages, v));
+				for (const LogicalPageID& id : ids) {
 					childPageID.push_back(records.arena(), id);
 				}
 			} else {
@@ -5196,8 +5202,8 @@ private:
 				}
 				Standalone<VectorRef<LogicalPageID>> emptyPages = wait(self->m_pager->newPageIDs(p.blockCount));
 				self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages, pages);
-				//std::cout<<"writePages, emptyPages front are: "<<emptyPages.front()<<std::endl;
-				for(const LogicalPageID& id : emptyPages){
+				// std::cout<<"writePages, emptyPages front are: "<<emptyPages.front()<<std::endl;
+				for (const LogicalPageID& id : emptyPages) {
 					childPageID.push_back(records.arena(), id);
 				}
 			}
@@ -5324,8 +5330,7 @@ private:
 		g_redwoodMetrics.metric.btreeLeafPreloadExt += (ids.size() - 1);
 
 		snapshot->getPhysicalPage(
-			PagerEventReasons::RangePrefetch, nonBtreeLevel, ids, true, true); // prefetch btree leaf node
-
+		    PagerEventReasons::RangePrefetch, nonBtreeLevel, ids, true, true); // prefetch btree leaf node
 	}
 
 	void freeBTreePage(BTreePageIDRef btPageID, Version v) {
@@ -5345,7 +5350,7 @@ private:
 	                                                    Version writeVersion) {
 		state BTreePageIDRef newID;
 		newID.resize(*arena, oldID.size());
-		//std::cout<<"in updateBTreePage, and page size is: "<<page->size()<<std::endl;
+		// std::cout<<"in updateBTreePage, and page size is: "<<page->size()<<std::endl;
 		if (REDWOOD_DEBUG) {
 			BTreePage* btPage = (BTreePage*)page->begin();
 			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
@@ -5357,15 +5362,17 @@ private:
 			        ? "<noDecodeCache>"
 			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
 		}
-		state size_t i =0;
+		state size_t i = 0;
 		state BTreePage* btPage = (BTreePage*)page->begin();
-		auto f = map(self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, btPage->height, oldID, page, writeVersion), [=](VectorRef<LogicalPageID> ids) {
-			ASSERT(ids.size() == oldID.size());
-			for(; i<ids.size(); i++){
-				newID[i] = ids[i];
-			}
-			return Void();
-		});
+		auto f =
+		    map(self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, btPage->height, oldID, page, writeVersion),
+		        [=](VectorRef<LogicalPageID> ids) {
+			        ASSERT(ids.size() == oldID.size());
+			        for (; i < ids.size(); i++) {
+				        newID[i] = ids[i];
+			        }
+			        return Void();
+		        });
 		return newID;
 	}
 
