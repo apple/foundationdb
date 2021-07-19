@@ -662,6 +662,8 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
 };
 
+// DEPRECATED: We still need this in a few places (like macros) but the usage of this is discouraged.
+// Whenever possible use the string literal _sr instead
 #define LiteralStringRef(str) StringRef((const uint8_t*)(str), sizeof((str)) - 1)
 inline StringRef operator"" _sr(const char* str, size_t size) {
 	return StringRef(reinterpret_cast<const uint8_t*>(str), size);

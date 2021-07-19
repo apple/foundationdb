@@ -36,8 +36,8 @@ struct CommitBugWorkload : TestWorkload {
 
 	ACTOR Future<Void> bug1(Database cx, CommitBugWorkload* self) {
 		state Key key = StringRef(format("B1Key%d", self->clientId));
-		state Value val1 = LiteralStringRef("Value1");
-		state Value val2 = LiteralStringRef("Value2");
+		state Value val1 = "Value1"_sr;
+		state Value val2 = "Value2"_sr;
 
 		loop {
 			state Transaction tr(cx);

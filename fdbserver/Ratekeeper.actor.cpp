@@ -575,9 +575,8 @@ struct RatekeeperData {
 	RatekeeperData(UID id, Database db)
 	  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-	    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
-	    throttledTagChangeId(0), lastBusiestCommitTagPick(0),
+	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), actualTpsMetric("Ratekeeper.ActualTPS"_sr),
+	    lastWarning(0), lastSSListFetchedTimestamp(now()), throttledTagChangeId(0), lastBusiestCommitTagPick(0),
 	    normalLimits(TransactionPriority::DEFAULT,
 	                 "",
 	                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
@@ -797,15 +796,13 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData* self) {
 
 				wait(success(throttledTagKeys) && success(autoThrottlingEnabled));
 
-				if (autoThrottlingEnabled.get().present() &&
-				    autoThrottlingEnabled.get().get() == LiteralStringRef("0")) {
+				if (autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == "0"_sr) {
 					TEST(true); // Auto-throttling disabled
 					if (self->autoThrottlingEnabled) {
 						TraceEvent("AutoTagThrottlingDisabled", self->id);
 					}
 					self->autoThrottlingEnabled = false;
-				} else if (autoThrottlingEnabled.get().present() &&
-				           autoThrottlingEnabled.get().get() == LiteralStringRef("1")) {
+				} else if (autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == "1"_sr) {
 					TEST(true); // Auto-throttling enabled
 					if (!self->autoThrottlingEnabled) {
 						TraceEvent("AutoTagThrottlingEnabled", self->id);

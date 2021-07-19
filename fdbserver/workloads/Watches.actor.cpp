@@ -36,10 +36,10 @@ struct WatchesWorkload : TestWorkload {
 	std::vector<int> nodeOrder;
 
 	WatchesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), cycles("Cycles"), cycleLatencies(sampleSize) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		nodes = getOption(options, LiteralStringRef("nodeCount"), 100);
-		extraPerNode = getOption(options, LiteralStringRef("extraPerNode"), 1000);
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		nodes = getOption(options, "nodeCount"_sr, 100);
+		extraPerNode = getOption(options, "extraPerNode"_sr, 1000);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 
 		for (int i = 0; i < nodes + 1; i++)
 			nodeOrder.push_back(i);

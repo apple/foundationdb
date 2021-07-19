@@ -59,8 +59,8 @@ struct SidebandWorkload : TestWorkload {
 	SidebandWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), messages("Messages"), consistencyErrors("Causal Consistency Errors"),
 	    keysUnexpectedlyPresent("KeysUnexpectedlyPresent") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		operationsPerSecond = getOption(options, LiteralStringRef("operationsPerSecond"), 50.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		operationsPerSecond = getOption(options, "operationsPerSecond"_sr, 50.0);
 	}
 
 	std::string description() const override { return "SidebandWorkload"; }
@@ -151,7 +151,7 @@ struct SidebandWorkload : TestWorkload {
 						++self->keysUnexpectedlyPresent;
 						break;
 					}
-					tr.set(messageKey, LiteralStringRef("deadbeef"));
+					tr.set(messageKey, "deadbeef"_sr);
 					wait(tr.commit());
 					commitVersion = tr.getCommittedVersion();
 					break;

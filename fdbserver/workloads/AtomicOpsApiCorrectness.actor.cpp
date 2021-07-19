@@ -40,7 +40,7 @@ private:
 
 public:
 	AtomicOpsApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		opType = getOption(options, LiteralStringRef("opType"), -1);
+		opType = getOption(options, "opType"_sr, -1);
 	}
 
 	std::string description() const override { return "AtomicOpsApiCorrectness"; }

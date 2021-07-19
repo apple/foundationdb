@@ -21,13 +21,13 @@
 #include "fdbrpc/Locality.h"
 
 const UID LocalityData::UNSET_ID = UID(0x0ccb4e0feddb5583, 0x010f6b77d9d10ece);
-const StringRef LocalityData::keyProcessId = LiteralStringRef("processid");
-const StringRef LocalityData::keyZoneId = LiteralStringRef("zoneid");
-const StringRef LocalityData::keyDcId = LiteralStringRef("dcid");
-const StringRef LocalityData::keyMachineId = LiteralStringRef("machineid");
-const StringRef LocalityData::keyDataHallId = LiteralStringRef("data_hall");
-const StringRef LocalityData::ExcludeLocalityKeyMachineIdPrefix = LiteralStringRef("locality_machineid:");
-const StringRef LocalityData::ExcludeLocalityPrefix = LiteralStringRef("locality_");
+const StringRef LocalityData::keyProcessId = "processid"_sr;
+const StringRef LocalityData::keyZoneId = "zoneid"_sr;
+const StringRef LocalityData::keyDcId = "dcid"_sr;
+const StringRef LocalityData::keyMachineId = "machineid"_sr;
+const StringRef LocalityData::keyDataHallId = "data_hall"_sr;
+const StringRef LocalityData::ExcludeLocalityKeyMachineIdPrefix = "locality_machineid:"_sr;
+const StringRef LocalityData::ExcludeLocalityPrefix = "locality_"_sr;
 
 ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const {
 	switch (role) {

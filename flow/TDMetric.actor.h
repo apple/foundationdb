@@ -358,7 +358,7 @@ struct Descriptor {
 	using fields = std::tuple<>;
 	typedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;
 
-	static StringRef typeName() { return LiteralStringRef(""); }
+	static StringRef typeName() { return ""_sr; }
 #endif
 };
 
@@ -430,9 +430,7 @@ struct FieldValueBlockEncoding<double> {
 
 template <>
 struct FieldValueBlockEncoding<bool> {
-	inline void write(BinaryWriter& w, bool v) {
-		w.serializeBytes(v ? LiteralStringRef("\x01") : LiteralStringRef("\x00"));
-	}
+	inline void write(BinaryWriter& w, bool v) { w.serializeBytes(v ? "\x01"_sr : "\x00"_sr); }
 	bool read(BinaryReader& r) {
 		uint8_t* v = (uint8_t*)r.readBytes(sizeof(uint8_t));
 		return *v != 0;
@@ -716,7 +714,7 @@ struct MakeEventField {
 };
 
 struct TimeDescriptor {
-	static StringRef name() { return LiteralStringRef("Time"); }
+	static StringRef name() { return "Time"_sr; }
 };
 
 struct BaseMetric {

@@ -42,12 +42,9 @@ KeyRef keyBetween(const KeyRangeRef& keys) {
 void KeySelectorRef::setKey(KeyRef const& key) {
 	// There are no keys in the database with size greater than KEY_SIZE_LIMIT, so if this key selector has a key
 	// which is large, then we can translate it to an equivalent key selector with a smaller key
-	if (key.size() >
-	    (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		this->key = key.substr(0,
-		                       (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-		                                                                 : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		                           1);
+	if (key.size() > (key.startsWith("\xff"_sr) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+		this->key = key.substr(
+		    0, (key.startsWith("\xff"_sr) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) + 1);
 	else
 		this->key = key;
 }

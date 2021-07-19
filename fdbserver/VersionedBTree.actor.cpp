@@ -1401,24 +1401,24 @@ struct RedwoodMetrics {
 			metrics = {};
 			if (!buildFillPctSketch.isValid() ||
 			    buildFillPctSketch->name() != ("buildFillPct:" + std::to_string(levelCounter))) {
-				buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"),
+				buildFillPctSketch = Histogram::getHistogram("buildFillPct"_sr,
 				                                             LiteralStringRef(std::to_string(levelCounter).c_str()),
 				                                             Histogram::Unit::percentage);
-				modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"),
+				modifyFillPctSketch = Histogram::getHistogram("modifyFillPct"_sr,
 				                                              LiteralStringRef(std::to_string(levelCounter).c_str()),
 				                                              Histogram::Unit::percentage);
-				buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"),
+				buildStoredPctSketch = Histogram::getHistogram("buildStoredPct"_sr,
 				                                               LiteralStringRef(std::to_string(levelCounter).c_str()),
 				                                               Histogram::Unit::percentage);
-				modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"),
+				modifyStoredPctSketch = Histogram::getHistogram("modifyStoredPct"_sr,
 				                                                LiteralStringRef(std::to_string(levelCounter).c_str()),
 				                                                Histogram::Unit::percentage);
-				buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"),
+				buildItemCountSketch = Histogram::getHistogram("buildItemCount"_sr,
 				                                               LiteralStringRef(std::to_string(levelCounter).c_str()),
 				                                               Histogram::Unit::count,
 				                                               0,
 				                                               maxRecordCount);
-				modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"),
+				modifyItemCountSketch = Histogram::getHistogram("modifyItemCount"_sr,
 				                                                LiteralStringRef(std::to_string(levelCounter).c_str()),
 				                                                Histogram::Unit::count,
 				                                                0,
@@ -1459,12 +1459,9 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() {
-		kvSizeWritten =
-		    Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes);
-		kvSizeReadByGet =
-		    Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet "), Histogram::Unit::bytes);
-		kvSizeReadByRangeGet = Histogram::getHistogram(
-		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByRangeGet"), Histogram::Unit::bytes);
+		kvSizeWritten = Histogram::getHistogram("kvSize"_sr, "Written"_sr, Histogram::Unit::bytes);
+		kvSizeReadByGet = Histogram::getHistogram("kvSize"_sr, "ReadByGet "_sr, Histogram::Unit::bytes);
+		kvSizeReadByRangeGet = Histogram::getHistogram("kvSize"_sr, "ReadByRangeGet"_sr, Histogram::Unit::bytes);
 		clear();
 	}
 
@@ -6767,8 +6764,8 @@ public:
 
 #include "fdbserver/art_impl.h"
 
-RedwoodRecordRef VersionedBTree::dbBegin(LiteralStringRef(""));
-RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"));
+RedwoodRecordRef VersionedBTree::dbBegin(""_sr);
+RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
@@ -7373,8 +7370,7 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			wait(btree->initBTreeCursor(&cur, v));
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
-			state Future<int> fRangeAll = verifyRangeBTreeCursor(
-			    btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written, pErrorCount);
+			state Future<int> fRangeAll = verifyRangeBTreeCursor(btree, ""_sr, "\xff\xff"_sr, v, written, pErrorCount);
 			if (serial) {
 				wait(success(fRangeAll));
 			}
@@ -7582,35 +7578,26 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		ASSERT(r2.getChildPage().begin() != id.begin());
 	}
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abc"_sr, ""_sr), RedwoodRecordRef("abc"_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abc"_sr, ""_sr), RedwoodRecordRef("abcd"_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abcd"_sr, ""_sr), RedwoodRecordRef("abc"_sr, ""_sr));
 
 	deltaTest(RedwoodRecordRef(std::string(300, 'k'), std::string(1e6, 'v')),
-	          RedwoodRecordRef(std::string(300, 'k'), LiteralStringRef("")));
+	          RedwoodRecordRef(std::string(300, 'k'), ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
 	Arena mem;
 	double start;
@@ -7647,8 +7634,8 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	RedwoodRecordRef rec1;
 	RedwoodRecordRef rec2;
 
-	rec1.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1");
-	rec2.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234");
+	rec1.key = "alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1"_sr;
+	rec2.key = "alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234"_sr;
 
 	start = timer();
 	total = 0;
@@ -7714,7 +7701,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
-	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
 
 	Arena arena;
 	std::set<RedwoodRecordRef> uniqueItems;
@@ -7891,7 +7878,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
-	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
 
 	Arena arena;
 	std::set<RedwoodRecordRef> uniqueItems;
@@ -9068,7 +9055,7 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 	Reference<ArenaPage> p = pager->newPageBuffer();
 	memset(p->mutate(), (char)id, p->size());
 	pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, id, p);
-	pager->setMetaKey(LiteralStringRef("asdfasdf"));
+	pager->setMetaKey("asdfasdf"_sr);
 	wait(pager->commit());
 	Reference<ArenaPage> p2 = wait(pager->readPage(PagerEventReasons::PointRead, nonBtreeLevel, id, true));
 	printf("%s\n", StringRef(p2->begin(), p2->size()).toHexString().c_str());
@@ -9689,7 +9676,7 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	if (clearAfter) {
 		printf("Clearing all keys\n");
 		intervalStart = timer();
-		kvs->clear(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")));
+		kvs->clear(KeyRangeRef(""_sr, "\xff"_sr));
 		state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
 		printf("Cleared all keys in %.2f seconds, final storageByte: %s\n",
 		       timer() - intervalStart,
@@ -9931,8 +9918,7 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 	{
 		std::cout << "Histogram Unit bytes" << std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
-		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+		Reference<Histogram> h = Histogram::getHistogram("histogramTest"_sr, "counts"_sr, Histogram::Unit::bytes);
 		ASSERT(uniform.size() == inputSize);
 		for (size_t i = 0; i < uniform.size(); i++) {
 			h->sample(uniform[i]);
@@ -9942,16 +9928,14 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
 
-		Reference<Histogram> hCopy = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+		Reference<Histogram> hCopy = Histogram::getHistogram("histogramTest"_sr, "counts"_sr, Histogram::Unit::bytes);
 		std::cout << hCopy->drawHistogram();
 		GetHistogramRegistry().logReport();
 	}
 	{
 		std::cout << "Histogram Unit percentage: " << std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
-		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentage);
+		Reference<Histogram> h = Histogram::getHistogram("histogramTest"_sr, "counts"_sr, Histogram::Unit::percentage);
 		ASSERT(uniform.size() == inputSize);
 		for (size_t i = 0; i < uniform.size(); i++) {
 			h->samplePercentage((double)uniform[i] / UINT32_MAX);

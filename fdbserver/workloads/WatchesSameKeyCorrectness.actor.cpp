@@ -31,17 +31,17 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	std::vector<Future<Void>> cases;
 
 	WatchesSameKeyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		numWatches = getOption(options, LiteralStringRef("numWatches"), 3);
+		numWatches = getOption(options, "numWatches"_sr, 3);
 	}
 
 	std::string description() const override { return "WatchesSameKeyCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
-		cases.push_back(case1(cx, LiteralStringRef("foo1"), this));
-		cases.push_back(case2(cx, LiteralStringRef("foo2"), this));
-		cases.push_back(case3(cx, LiteralStringRef("foo3"), this));
-		cases.push_back(case4(cx, LiteralStringRef("foo4"), this));
-		cases.push_back(case5(cx, LiteralStringRef("foo5"), this));
+		cases.push_back(case1(cx, "foo1"_sr, this));
+		cases.push_back(case2(cx, "foo2"_sr, this));
+		cases.push_back(case3(cx, "foo3"_sr, this));
+		cases.push_back(case4(cx, "foo4"_sr, this));
+		cases.push_back(case5(cx, "foo5"_sr, this));
 		return Void();
 	}
 

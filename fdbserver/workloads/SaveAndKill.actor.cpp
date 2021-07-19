@@ -37,11 +37,9 @@ struct SaveAndKillWorkload : TestWorkload {
 	int isRestoring;
 
 	SaveAndKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		restartInfo =
-		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
-		        .toString();
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		isRestoring = getOption(options, LiteralStringRef("isRestoring"), 0);
+		restartInfo = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		isRestoring = getOption(options, "isRestoring"_sr, 0);
 	}
 
 	std::string description() const override { return "SaveAndKillWorkload"; }

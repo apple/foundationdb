@@ -3934,7 +3934,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			Optional<Value> value = wait(tr.get(wigglingStorageServerKey));
 			if (teamCollection->pid2server_info.empty()) {
-				writeValue = LiteralStringRef("");
+				writeValue = ""_sr;
 			} else {
 				Value pid = teamCollection->pid2server_info.begin()->first;
 				if (value.present()) {
@@ -4098,7 +4098,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 			when(wait(moveFinishFuture)) {
 				ASSERT(self->wigglingPid.present());
 				StringRef pid = self->wigglingPid.get();
-				TEST(pid != LiteralStringRef("")); // finish wiggling this process
+				TEST(pid != ""_sr); // finish wiggling this process
 
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
@@ -6166,10 +6166,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> storageSnapReqs;
 		storageSnapReqs.reserve(storageWorkers.size());
 		for (const auto& worker : storageWorkers) {
-			storageSnapReqs.push_back(
-			    transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(
-			                        snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage")))),
-			                    snap_storage_failed()));
+			storageSnapReqs.push_back(transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(
+			                                              snapReq.snapPayload, snapReq.snapUID, "storage"_sr))),
+			                                          snap_storage_failed()));
 		}
 		wait(waitForAll(storageSnapReqs));
 
@@ -6180,10 +6179,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> tLogSnapReqs;
 		tLogSnapReqs.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
-			tLogSnapReqs.push_back(
-			    transformErrors(throwErrorOr(tlog.snapRequest.tryGetReply(
-			                        TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog")))),
-			                    snap_tlog_failed()));
+			tLogSnapReqs.push_back(transformErrors(throwErrorOr(tlog.snapRequest.tryGetReply(TLogSnapRequest(
+			                                           snapReq.snapPayload, snapReq.snapUID, "tlog"_sr))),
+			                                       snap_tlog_failed()));
 		}
 		wait(waitForAll(tLogSnapReqs));
 
@@ -6211,10 +6209,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> coordSnapReqs;
 		coordSnapReqs.reserve(coordWorkers.size());
 		for (const auto& worker : coordWorkers) {
-			coordSnapReqs.push_back(
-			    transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(
-			                        snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord")))),
-			                    snap_coord_failed()));
+			coordSnapReqs.push_back(transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(
+			                                            snapReq.snapPayload, snapReq.snapUID, "coord"_sr))),
+			                                        snap_coord_failed()));
 		}
 		wait(waitForAll(coordSnapReqs));
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")
@@ -6542,9 +6539,9 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 		UID uid(id, 0);
 		StorageServerInterface interface;
 		interface.uniqueID = uid;
-		interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(id)));
-		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
-		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
+		interface.locality.set("machineid"_sr, Standalone<StringRef>(std::to_string(id)));
+		interface.locality.set("zoneid"_sr, Standalone<StringRef>(std::to_string(id % 5)));
+		interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(id % 3)));
 		collection->server_info[uid] = makeReference<TCServerInfo>(
 		    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 		collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
@@ -6596,11 +6593,11 @@ std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
 		       zone_id,
 		       machine_id,
 		       interface.address().toString().c_str());
-		interface.locality.set(LiteralStringRef("processid"), Standalone<StringRef>(std::to_string(process_id)));
-		interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(machine_id)));
-		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
-		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
-		interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
+		interface.locality.set("processid"_sr, Standalone<StringRef>(std::to_string(process_id)));
+		interface.locality.set("machineid"_sr, Standalone<StringRef>(std::to_string(machine_id)));
+		interface.locality.set("zoneid"_sr, Standalone<StringRef>(std::to_string(zone_id)));
+		interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(data_hall_id)));
+		interface.locality.set("dcid"_sr, Standalone<StringRef>(std::to_string(dc_id)));
 		collection->server_info[uid] = makeReference<TCServerInfo>(
 		    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 

@@ -71,7 +71,7 @@ struct FlowTesterStack {
 
 	void pushError(int errorCode) {
 		FDB::Tuple t;
-		t.append(LiteralStringRef("ERROR"));
+		t.append("ERROR"_sr);
 		t.append(format("%d", errorCode));
 		// pack above as error string into another tuple
 		pushTuple(t.pack().toString());

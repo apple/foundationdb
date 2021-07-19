@@ -1927,7 +1927,7 @@ ACTOR Future<bool> tssQuarantine(Database db, bool enable, UID tssId) {
 			}
 
 			if (enable) {
-				tr->set(tssQuarantineKeyFor(tssId), LiteralStringRef(""));
+				tr->set(tssQuarantineKeyFor(tssId), ""_sr);
 				// remove server from TSS mapping when quarantine is enabled
 				tssMapDB.erase(tr, ssi.tssPairID.get());
 			} else {
@@ -1993,13 +1993,13 @@ ACTOR Future<bool> configure(Database db,
 	if (tokens.size() < 2)
 		result = ConfigurationResult::NO_OPTIONS_PROVIDED;
 	else {
-		if (tokens[startToken] == LiteralStringRef("FORCE")) {
+		if (tokens[startToken] == "FORCE"_sr) {
 			force = true;
 			startToken = 2;
 		}
 
 		state Optional<ConfigureAutoResult> conf;
-		if (tokens[startToken] == LiteralStringRef("auto")) {
+		if (tokens[startToken] == "auto"_sr) {
 			StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(db)));
 			if (warn.isValid())
 				warn.cancel();
@@ -2099,7 +2099,7 @@ ACTOR Future<bool> configure(Database db,
 	case ConfigurationResult::CONFLICTING_OPTIONS:
 	case ConfigurationResult::UNKNOWN_OPTION:
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		printUsage(LiteralStringRef("configure"));
+		printUsage("configure"_sr);
 		ret = true;
 		break;
 	case ConfigurationResult::INVALID_CONFIGURATION:
@@ -2214,7 +2214,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 			    name + "=" +
 			    json_spirit::write_string(json_spirit::mValue(value.get_array()), json_spirit::Output_options::none);
 		} else {
-			printUsage(LiteralStringRef("fileconfigure"));
+			printUsage("fileconfigure"_sr);
 			return true;
 		}
 	}
@@ -2310,7 +2310,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 
 ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool isClusterTLS) {
 	state StringRef setName;
-	StringRef nameTokenBegin = LiteralStringRef("description=");
+	StringRef nameTokenBegin = "description="_sr;
 	for (auto tok = tokens.begin() + 1; tok != tokens.end(); ++tok)
 		if (tok->startsWith(nameTokenBegin)) {
 			setName = tok->substr(nameTokenBegin.size());
@@ -2319,7 +2319,7 @@ ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool
 			break;
 		}
 
-	bool automatic = tokens.size() == 2 && tokens[1] == LiteralStringRef("auto");
+	bool automatic = tokens.size() == 2 && tokens[1] == "auto"_sr;
 
 	state Reference<IQuorumChange> change;
 	if (tokens.size() == 1 && setName.size()) {
@@ -2400,9 +2400,9 @@ ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 	state bool failed = false;
 	state bool all = false;
 	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
-		if (*t == LiteralStringRef("all")) {
+		if (*t == "all"_sr) {
 			all = true;
-		} else if (*t == LiteralStringRef("failed")) {
+		} else if (*t == "failed"_sr) {
 			failed = true;
 		} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
 			// if the token starts with 'locality_' prefix.
@@ -2478,11 +2478,11 @@ ACTOR Future<bool> exclude(Database db,
 		state bool markFailed = false;
 		state std::vector<ProcessData> workers = wait(makeInterruptable(getWorkers(db)));
 		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
-			if (*t == LiteralStringRef("FORCE")) {
+			if (*t == "FORCE"_sr) {
 				force = true;
-			} else if (*t == LiteralStringRef("no_wait")) {
+			} else if (*t == "no_wait"_sr) {
 				waitForAllExcluded = false;
-			} else if (*t == LiteralStringRef("failed")) {
+			} else if (*t == "failed"_sr) {
 				markFailed = true;
 			} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) &&
 			           t->toString().find(':') != std::string::npos) {
@@ -2729,7 +2729,7 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	for (int i = 1; i < tokens.size(); i++) {
 		snapCmd = snapCmd.withSuffix(tokens[i]);
 		if (i != tokens.size() - 1) {
-			snapCmd = snapCmd.withSuffix(LiteralStringRef(" "));
+			snapCmd = snapCmd.withSuffix(" "_sr);
 		}
 	}
 	try {
@@ -2777,7 +2777,7 @@ ACTOR Future<bool> setClass(Database db, std::vector<StringRef> tokens) {
 	}
 
 	ProcessClass processClass(tokens[2].toString(), ProcessClass::DBSource);
-	if (processClass.classType() == ProcessClass::InvalidClass && tokens[2] != LiteralStringRef("default")) {
+	if (processClass.classType() == ProcessClass::InvalidClass && tokens[2] != "default"_sr) {
 		fprintf(stderr, "ERROR: '%s' is not a valid process class\n", tokens[2].toString().c_str());
 		return true;
 	}
@@ -3222,7 +3222,7 @@ struct CLIOptions {
 			break;
 		case OPT_KNOB: {
 			std::string syn = args.OptionSyntax();
-			if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+			if (!StringRef(syn).startsWith("--knob_"_sr)) {
 				fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
 				return FDB_EXIT_ERROR;
 			}
@@ -3267,17 +3267,15 @@ ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegIn
 	choose {
 		when(Optional<LeaderInfo> rep =
 		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
-			StringRef ip_port =
-			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
-			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+			StringRef ip_port = (kv.key.endsWith(":tls"_sr) ? kv.key.removeSuffix(":tls"_sr) : kv.key)
+			                        .removePrefix("\xff\xff/worker_interfaces/"_sr);
 			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
 
 			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
 				Key full_ip_port2 =
 				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
-				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
-				                         : full_ip_port2;
+				StringRef ip_port2 =
+				    full_ip_port2.endsWith(":tls"_sr) ? full_ip_port2.removeSuffix(":tls"_sr) : full_ip_port2;
 				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
 			}
 		}
@@ -3558,7 +3556,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "tssq")) {
 					if (tokens.size() == 2) {
-						if (tokens[1] != LiteralStringRef("list")) {
+						if (tokens[1] != "list"_sr) {
 							printUsage(tokens[0]);
 							is_error = true;
 						} else {
@@ -3566,12 +3564,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 					}
 					if (tokens.size() == 3) {
-						if ((tokens[1] != LiteralStringRef("start") && tokens[1] != LiteralStringRef("stop")) ||
-						    (tokens[2].size() != 32) || !std::all_of(tokens[2].begin(), tokens[2].end(), &isxdigit)) {
+						if ((tokens[1] != "start"_sr && tokens[1] != "stop"_sr) || (tokens[2].size() != 32) ||
+						    !std::all_of(tokens[2].begin(), tokens[2].end(), &isxdigit)) {
 							printUsage(tokens[0]);
 							is_error = true;
 						} else {
-							bool enable = tokens[1] == LiteralStringRef("start");
+							bool enable = tokens[1] == "start"_sr;
 							UID tssId = UID::fromString(tokens[2].toString());
 							bool err = wait(tssQuarantine(db, enable, tssId));
 							if (err)
@@ -3589,12 +3587,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "fileconfigure")) {
-					if (tokens.size() == 2 || (tokens.size() == 3 && (tokens[1] == LiteralStringRef("new") ||
-					                                                  tokens[1] == LiteralStringRef("FORCE")))) {
-						bool err = wait(fileConfigure(db,
-						                              tokens.back().toString(),
-						                              tokens[1] == LiteralStringRef("new"),
-						                              tokens[1] == LiteralStringRef("FORCE")));
+					if (tokens.size() == 2 ||
+					    (tokens.size() == 3 && (tokens[1] == "new"_sr || tokens[1] == "FORCE"_sr))) {
+						bool err = wait(fileConfigure(
+						    db, tokens.back().toString(), tokens[1] == "new"_sr, tokens[1] == "FORCE"_sr));
 						if (err)
 							is_error = true;
 					} else {
@@ -3807,10 +3803,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						RangeResult kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-						                                   CLIENT_KNOBS->TOO_MANY)));
+						RangeResult kvs = wait(makeInterruptable(tr->getRange(
+						    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+						    CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
 						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 						std::vector<Future<Void>> addInterfs;
@@ -3867,10 +3862,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "suspend")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						RangeResult kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-						                                   CLIENT_KNOBS->TOO_MANY)));
+						RangeResult kvs = wait(makeInterruptable(tr->getRange(
+						    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+						    CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
 						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 						std::vector<Future<Void>> addInterfs;
@@ -4035,16 +4029,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						RangeResult kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-						                                   CLIENT_KNOBS->TOO_MANY)));
+						RangeResult kvs = wait(makeInterruptable(tr->getRange(
+						    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+						    CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
 						for (const auto& pair : kvs) {
-							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
-							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
-							                    : pair.key)
-							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+							auto ip_port = (pair.key.endsWith(":tls"_sr) ? pair.key.removeSuffix(":tls"_sr) : pair.key)
+							                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
 							printf("%s\n", printable(ip_port).c_str());
 						}
 						continue;
@@ -4064,10 +4055,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								continue;
 							}
 							getTransaction(db, tr, options, intrans);
-							RangeResult kvs = wait(makeInterruptable(
-							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-							                             LiteralStringRef("\xff\xff/worker_interfaces0")),
-							                 CLIENT_KNOBS->TOO_MANY)));
+							RangeResult kvs = wait(makeInterruptable(tr->getRange(
+							    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+							    CLIENT_KNOBS->TOO_MANY)));
 							ASSERT(!kvs.more);
 							char* duration_end;
 							int duration = std::strtol((const char*)tokens[3].begin(), &duration_end, 10);
@@ -4081,10 +4071,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							state std::vector<Key> all_profiler_addresses;
 							state std::vector<Future<ErrorOr<Void>>> all_profiler_responses;
 							for (const auto& pair : kvs) {
-								auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
-								                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
-								                    : pair.key)
-								                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+								auto ip_port =
+								    (pair.key.endsWith(":tls"_sr) ? pair.key.removeSuffix(":tls"_sr) : pair.key)
+								        .removePrefix("\xff\xff/worker_interfaces/"_sr);
 								interfaces.emplace(
 								    ip_port,
 								    BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
@@ -4143,17 +4132,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						RangeResult kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-						                                   CLIENT_KNOBS->TOO_MANY)));
+						RangeResult kvs = wait(makeInterruptable(tr->getRange(
+						    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+						    CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
 						std::map<Key, ClientWorkerInterface> interfaces;
 						for (const auto& pair : kvs) {
-							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
-							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
-							                    : pair.key)
-							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+							auto ip_port = (pair.key.endsWith(":tls"_sr) ? pair.key.removeSuffix(":tls"_sr) : pair.key)
+							                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
 							interfaces.emplace(
 							    ip_port,
 							    BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
@@ -4166,7 +4152,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						ProfilerRequest profileRequest(
 						    ProfilerRequest::Type::GPROF_HEAP, ProfilerRequest::Action::RUN, 0);
-						profileRequest.outputFile = LiteralStringRef("heapz");
+						profileRequest.outputFile = "heapz"_sr;
 						ErrorOr<Void> response = wait(interfaces[ip_port].profiler.tryGetReply(profileRequest));
 						if (response.isError()) {
 							fprintf(stderr,
@@ -4185,10 +4171,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "expensive_data_check")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						RangeResult kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-						                                   CLIENT_KNOBS->TOO_MANY)));
+						RangeResult kvs = wait(makeInterruptable(tr->getRange(
+						    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+						    CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
 						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 						std::vector<Future<Void>> addInterfs;
@@ -4633,11 +4618,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						}
 						if (tokens.size() == 7) {
-							if (tokens[6] == LiteralStringRef("default")) {
+							if (tokens[6] == "default"_sr) {
 								priority = TransactionPriority::DEFAULT;
-							} else if (tokens[6] == LiteralStringRef("immediate")) {
+							} else if (tokens[6] == "immediate"_sr) {
 								priority = TransactionPriority::IMMEDIATE;
-							} else if (tokens[6] == LiteralStringRef("batch")) {
+							} else if (tokens[6] == "batch"_sr) {
 								priority = TransactionPriority::BATCH;
 							} else {
 								fprintf(stderr,

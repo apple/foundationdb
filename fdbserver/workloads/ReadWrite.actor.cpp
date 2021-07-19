@@ -125,62 +125,59 @@ struct ReadWriteWorkload : KVWorkload {
 	    commitLatencies(sampleSize), GRVLatencies(sampleSize), readLatencyTotal(0), readLatencyCount(0), loadTime(0.0),
 	    dependentReads(false), adjacentReads(false), adjacentWrites(false), clientBegin(0),
 	    aTransactions("A Transactions"), bTransactions("B Transactions"), retries("Retries"),
-	    totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
-	    totalRetriesMetric(LiteralStringRef("RWWorkload.TotalRetries")) {
-		transactionSuccessMetric.init(LiteralStringRef("RWWorkload.SuccessfulTransaction"));
-		transactionFailureMetric.init(LiteralStringRef("RWWorkload.FailedTransaction"));
-		readMetric.init(LiteralStringRef("RWWorkload.Read"));
+	    totalReadsMetric("RWWorkload.TotalReads"_sr), totalRetriesMetric("RWWorkload.TotalRetries"_sr) {
+		transactionSuccessMetric.init("RWWorkload.SuccessfulTransaction"_sr);
+		transactionFailureMetric.init("RWWorkload.FailedTransaction"_sr);
+		readMetric.init("RWWorkload.Read"_sr);
 
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
-		double allowedLatency = getOption(options, LiteralStringRef("allowedLatency"), 0.250);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
+		double allowedLatency = getOption(options, "allowedLatency"_sr, 0.250);
 		actorCount = ceil(transactionsPerSecond * allowedLatency);
-		actorCount = getOption(options, LiteralStringRef("actorCountPerTester"), actorCount);
+		actorCount = getOption(options, "actorCountPerTester"_sr, actorCount);
 
-		readsPerTransactionA = getOption(options, LiteralStringRef("readsPerTransactionA"), 10);
-		writesPerTransactionA = getOption(options, LiteralStringRef("writesPerTransactionA"), 0);
-		readsPerTransactionB = getOption(options, LiteralStringRef("readsPerTransactionB"), 1);
-		writesPerTransactionB = getOption(options, LiteralStringRef("writesPerTransactionB"), 9);
-		alpha = getOption(options, LiteralStringRef("alpha"), 0.1);
+		readsPerTransactionA = getOption(options, "readsPerTransactionA"_sr, 10);
+		writesPerTransactionA = getOption(options, "writesPerTransactionA"_sr, 0);
+		readsPerTransactionB = getOption(options, "readsPerTransactionB"_sr, 1);
+		writesPerTransactionB = getOption(options, "writesPerTransactionB"_sr, 9);
+		alpha = getOption(options, "alpha"_sr, 0.1);
 
-		extraReadConflictRangesPerTransaction =
-		    getOption(options, LiteralStringRef("extraReadConflictRangesPerTransaction"), 0);
-		extraWriteConflictRangesPerTransaction =
-		    getOption(options, LiteralStringRef("extraWriteConflictRangesPerTransaction"), 0);
+		extraReadConflictRangesPerTransaction = getOption(options, "extraReadConflictRangesPerTransaction"_sr, 0);
+		extraWriteConflictRangesPerTransaction = getOption(options, "extraWriteConflictRangesPerTransaction"_sr, 0);
 
 		valueString = std::string(maxValueBytes, '.');
 		if (nodePrefix > 0) {
 			keyBytes += 16;
 		}
 
-		metricsStart = getOption(options, LiteralStringRef("metricsStart"), 0.0);
-		metricsDuration = getOption(options, LiteralStringRef("metricsDuration"), testDuration);
-		if (getOption(options, LiteralStringRef("discardEdgeMeasurements"), true)) {
+		metricsStart = getOption(options, "metricsStart"_sr, 0.0);
+		metricsDuration = getOption(options, "metricsDuration"_sr, testDuration);
+		if (getOption(options, "discardEdgeMeasurements"_sr, true)) {
 			// discardEdgeMeasurements keeps the metrics from the middle 3/4 of the test
 			metricsStart += testDuration * 0.125;
 			metricsDuration *= 0.75;
 		}
 
-		dependentReads = getOption(options, LiteralStringRef("dependentReads"), false);
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
-		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
-		debugInterval = getOption(options, LiteralStringRef("debugInterval"), 0.0);
-		debugTime = getOption(options, LiteralStringRef("debugTime"), 0.0);
-		enableReadLatencyLogging = getOption(options, LiteralStringRef("enableReadLatencyLogging"), false);
-		periodicLoggingInterval = getOption(options, LiteralStringRef("periodicLoggingInterval"), 5.0);
-		cancelWorkersAtDuration = getOption(options, LiteralStringRef("cancelWorkersAtDuration"), true);
-		inconsistentReads = getOption(options, LiteralStringRef("inconsistentReads"), false);
-		adjacentReads = getOption(options, LiteralStringRef("adjacentReads"), false);
-		adjacentWrites = getOption(options, LiteralStringRef("adjacentWrites"), false);
-		rampUpLoad = getOption(options, LiteralStringRef("rampUpLoad"), false);
-		useRYW = getOption(options, LiteralStringRef("useRYW"), false);
-		rampSweepCount = getOption(options, LiteralStringRef("rampSweepCount"), 1);
-		rangeReads = getOption(options, LiteralStringRef("rangeReads"), false);
-		rampTransactionType = getOption(options, LiteralStringRef("rampTransactionType"), false);
-		rampUpConcurrency = getOption(options, LiteralStringRef("rampUpConcurrency"), false);
-		doSetup = getOption(options, LiteralStringRef("setup"), true);
-		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
-		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
+		dependentReads = getOption(options, "dependentReads"_sr, false);
+		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
+		maxInsertRate = getOption(options, "maxInsertRate"_sr, 1e12);
+		debugInterval = getOption(options, "debugInterval"_sr, 0.0);
+		debugTime = getOption(options, "debugTime"_sr, 0.0);
+		enableReadLatencyLogging = getOption(options, "enableReadLatencyLogging"_sr, false);
+		periodicLoggingInterval = getOption(options, "periodicLoggingInterval"_sr, 5.0);
+		cancelWorkersAtDuration = getOption(options, "cancelWorkersAtDuration"_sr, true);
+		inconsistentReads = getOption(options, "inconsistentReads"_sr, false);
+		adjacentReads = getOption(options, "adjacentReads"_sr, false);
+		adjacentWrites = getOption(options, "adjacentWrites"_sr, false);
+		rampUpLoad = getOption(options, "rampUpLoad"_sr, false);
+		useRYW = getOption(options, "useRYW"_sr, false);
+		rampSweepCount = getOption(options, "rampSweepCount"_sr, 1);
+		rangeReads = getOption(options, "rangeReads"_sr, false);
+		rampTransactionType = getOption(options, "rampTransactionType"_sr, false);
+		rampUpConcurrency = getOption(options, "rampUpConcurrency"_sr, false);
+		doSetup = getOption(options, "setup"_sr, true);
+		batchPriority = getOption(options, "batchPriority"_sr, false);
+		descriptionString = getOption(options, "description"_sr, "ReadWrite"_sr);
 
 		if (rampUpConcurrency)
 			ASSERT(rampSweepCount == 2); // Implementation is hard coded to ramp up and down
@@ -197,7 +194,7 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 
 		std::vector<std::string> insertionCountsToMeasureString =
-		    getOption(options, LiteralStringRef("insertionCountsToMeasure"), std::vector<std::string>());
+		    getOption(options, "insertionCountsToMeasure"_sr, std::vector<std::string>());
 		for (int i = 0; i < insertionCountsToMeasureString.size(); i++) {
 			try {
 				uint64_t count = boost::lexical_cast<uint64_t>(insertionCountsToMeasureString[i]);
@@ -209,8 +206,8 @@ struct ReadWriteWorkload : KVWorkload {
 		{
 			// with P(hotTrafficFraction) an access is directed to one of a fraction
 			//   of hot keys, else it is directed to a disjoint set of cold keys
-			hotKeyFraction = getOption(options, LiteralStringRef("hotKeyFraction"), 0.0);
-			double hotTrafficFraction = getOption(options, LiteralStringRef("hotTrafficFraction"), 0.0);
+			hotKeyFraction = getOption(options, "hotKeyFraction"_sr, 0.0);
+			double hotTrafficFraction = getOption(options, "hotTrafficFraction"_sr, 0.0);
 			ASSERT(hotKeyFraction >= 0 && hotTrafficFraction <= 1);
 			ASSERT(hotKeyFraction <= hotTrafficFraction); // hot keys should be actually hot!
 			// p(Cold key) = (1-FHP) * (1-hkf)

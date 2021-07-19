@@ -126,12 +126,12 @@ uint64_t MemoryKeyValueStore::size() const {
 
 // The first key in the database; returned by key selectors that choose a key off the front
 Key MemoryKeyValueStore::startKey() const {
-	return LiteralStringRef("");
+	return ""_sr;
 }
 
 // The last key in the database; returned by key selectors that choose a key off the back
 Key MemoryKeyValueStore::endKey() const {
-	return LiteralStringRef("\xff");
+	return "\xff"_sr;
 }
 
 // Debugging function that prints all key-value pairs

@@ -31,7 +31,7 @@ typedef Standalone<KeyRef> Key;
 typedef Standalone<ValueRef> Value;
 
 inline Key keyAfter(const KeyRef& key) {
-	if (key == LiteralStringRef("\xff\xff"))
+	if (key == "\xff\xff"_sr)
 		return key;
 
 	Standalone<StringRef> r;
@@ -43,7 +43,7 @@ inline Key keyAfter(const KeyRef& key) {
 }
 
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
-	if (key == LiteralStringRef("\xff\xff"))
+	if (key == "\xff\xff"_sr)
 		return key;
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
 	memcpy(t, key.begin(), key.size());

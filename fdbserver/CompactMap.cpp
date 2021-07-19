@@ -473,7 +473,7 @@ void compactMapTests(std::vector<std::string> testData,
 	t2 = timer_monotonic();
 	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1) / nBuild * 1e6, nBuild / (t2 - t1) / 1e6);
 
-	t->lastLessOrEqual(LiteralStringRef("8f9fad2e5e2af980a"));
+	t->lastLessOrEqual("8f9fad2e5e2af980a"_sr);
 
 	{
 		std::string s, s1;

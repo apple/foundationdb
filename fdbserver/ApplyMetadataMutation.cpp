@@ -219,7 +219,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 						auto t = txnStateStore->readValue(m.param1).get();
 						TraceEvent("MutationRequiresRestart", dbgid)
 						    .detail("M", m.toString())
-						    .detail("PrevValue", t.present() ? t.get() : LiteralStringRef("(none)"))
+						    .detail("PrevValue", t.present() ? t.get() : "(none)"_sr)
 						    .detail("ToCommit", toCommit != nullptr);
 						confChange = true;
 					}

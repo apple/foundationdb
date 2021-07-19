@@ -31,9 +31,9 @@ struct DowngradeWorkload : TestWorkload {
 	int numObjects;
 
 	DowngradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		oldKey = getOption(options, LiteralStringRef("oldKey"), LiteralStringRef("oldKey"));
-		newKey = getOption(options, LiteralStringRef("newKey"), LiteralStringRef("newKey"));
-		numObjects = getOption(options, LiteralStringRef("numOptions"), deterministicRandom()->randomInt(0, 100));
+		oldKey = getOption(options, "oldKey"_sr, "oldKey"_sr);
+		newKey = getOption(options, "newKey"_sr, "newKey"_sr);
+		numObjects = getOption(options, "numOptions"_sr, deterministicRandom()->randomInt(0, 100));
 	}
 
 	struct _Struct {

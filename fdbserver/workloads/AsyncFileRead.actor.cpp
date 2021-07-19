@@ -173,15 +173,14 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 
 	AsyncFileReadWorkload(WorkloadContext const& wcx) : AsyncFileWorkload(wcx), bytesRead("Bytes Read"), ioLog(0) {
 		// Only run on one client
-		numParallelReads = getOption(options, LiteralStringRef("numParallelReads"), 0);
-		readSize = getOption(options, LiteralStringRef("readSize"), _PAGE_SIZE);
-		fileSize =
-		    getOption(options, LiteralStringRef("fileSize"), (int64_t)0); // 0 = use existing, else, change file size
-		unbatched = getOption(options, LiteralStringRef("unbatched"), false);
-		sequential = getOption(options, LiteralStringRef("sequential"), true);
-		writeFraction = getOption(options, LiteralStringRef("writeFraction"), 0.0);
-		randomData = getOption(options, LiteralStringRef("randomData"), true);
-		fixedRate = getOption(options, LiteralStringRef("fixedRate"), 0.0);
+		numParallelReads = getOption(options, "numParallelReads"_sr, 0);
+		readSize = getOption(options, "readSize"_sr, _PAGE_SIZE);
+		fileSize = getOption(options, "fileSize"_sr, (int64_t)0); // 0 = use existing, else, change file size
+		unbatched = getOption(options, "unbatched"_sr, false);
+		sequential = getOption(options, "sequential"_sr, true);
+		writeFraction = getOption(options, "writeFraction"_sr, 0.0);
+		randomData = getOption(options, "randomData"_sr, true);
+		fixedRate = getOption(options, "fixedRate"_sr, 0.0);
 	}
 
 	~AsyncFileReadWorkload() override {}

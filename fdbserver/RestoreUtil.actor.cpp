@@ -29,7 +29,7 @@ int numRoles = RestoreRoleStr.size();
 
 // Similar to debugMutation(), we use debugFRMutation to track mutations for fast restore systems only.
 #if CENABLED(0, NOT_IN_CLEAN)
-StringRef debugFRKey = LiteralStringRef("\xff\xff\xff\xff");
+StringRef debugFRKey = "\xff\xff\xff\xff"_sr;
 
 // Track any mutation in fast restore that has overlap with debugFRKey
 bool debugFRMutation(const char* context, Version version, MutationRef const& mutation) {

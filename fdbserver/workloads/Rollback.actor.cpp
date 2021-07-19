@@ -37,11 +37,11 @@ struct RollbackWorkload : TestWorkload {
 
 	RollbackWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		meanDelay = getOption(options, LiteralStringRef("meanDelay"), 20.0); // Only matters if multiple==true
-		clogDuration = getOption(options, LiteralStringRef("clogDuration"), 3.0);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		enableFailures = getOption(options, LiteralStringRef("enableFailures"), false);
-		multiple = getOption(options, LiteralStringRef("multiple"), true);
+		meanDelay = getOption(options, "meanDelay"_sr, 20.0); // Only matters if multiple==true
+		clogDuration = getOption(options, "clogDuration"_sr, 3.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		enableFailures = getOption(options, "enableFailures"_sr, false);
+		multiple = getOption(options, "multiple"_sr, true);
 	}
 
 	std::string description() const override { return "RollbackWorkload"; }

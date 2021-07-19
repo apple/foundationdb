@@ -36,12 +36,12 @@ struct WatchAndWaitWorkload : TestWorkload {
 	PerfIntCounter triggers, retries;
 
 	WatchAndWaitWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), triggers("Triggers"), retries("Retries") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		watchCount = getOption(options, LiteralStringRef("watchCount"), (uint64_t)10000);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), (uint64_t)100000);
-		nodePrefix = getOption(options, LiteralStringRef("nodePrefix"), (int64_t)-1);
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 4);
-		triggerWatches = getOption(options, LiteralStringRef("triggerWatches"), false);
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		watchCount = getOption(options, "watchCount"_sr, (uint64_t)10000);
+		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
+		nodePrefix = getOption(options, "nodePrefix"_sr, (int64_t)-1);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 4);
+		triggerWatches = getOption(options, "triggerWatches"_sr, false);
 
 		if (watchCount > nodeCount) {
 			watchCount = nodeCount;

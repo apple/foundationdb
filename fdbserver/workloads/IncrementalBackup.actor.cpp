@@ -44,15 +44,15 @@ struct IncrementalBackupWorkload : TestWorkload {
 	bool clearBackupAgentKeys;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
-		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
-		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
-		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
-		waitForBackup = getOption(options, LiteralStringRef("waitForBackup"), false);
-		waitRetries = getOption(options, LiteralStringRef("waitRetries"), -1);
-		stopBackup = getOption(options, LiteralStringRef("stopBackup"), false);
-		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
-		clearBackupAgentKeys = getOption(options, LiteralStringRef("clearBackupAgentKeys"), false);
+		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
+		tag = getOption(options, "tag"_sr, "default"_sr);
+		submitOnly = getOption(options, "submitOnly"_sr, false);
+		restoreOnly = getOption(options, "restoreOnly"_sr, false);
+		waitForBackup = getOption(options, "waitForBackup"_sr, false);
+		waitRetries = getOption(options, "waitRetries"_sr, -1);
+		stopBackup = getOption(options, "stopBackup"_sr, false);
+		checkBeginVersion = getOption(options, "checkBeginVersion"_sr, false);
+		clearBackupAgentKeys = getOption(options, "clearBackupAgentKeys"_sr, false);
 	}
 
 	std::string description() const override { return "IncrementalBackup"; }

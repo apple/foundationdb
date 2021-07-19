@@ -32,10 +32,10 @@ struct RandomCloggingWorkload : TestWorkload {
 
 	RandomCloggingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		scale = getOption(options, LiteralStringRef("scale"), 1.0);
-		clogginess = getOption(options, LiteralStringRef("clogginess"), 1.0);
-		swizzleClog = getOption(options, LiteralStringRef("swizzle"), 0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		scale = getOption(options, "scale"_sr, 1.0);
+		clogginess = getOption(options, "clogginess"_sr, 1.0);
+		swizzleClog = getOption(options, "swizzle"_sr, 0);
 	}
 
 	std::string description() const override {

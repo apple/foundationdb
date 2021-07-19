@@ -30,7 +30,7 @@ struct DDMetricsWorkload : TestWorkload {
 	double startDelay, ddDone;
 
 	DDMetricsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ddDone(0.0) {
-		startDelay = getOption(options, LiteralStringRef("beginPoll"), 10.0);
+		startDelay = getOption(options, "beginPoll"_sr, 10.0);
 	}
 
 	std::string description() const override { return "Data Distribution Metrics"; }
@@ -39,8 +39,8 @@ struct DDMetricsWorkload : TestWorkload {
 		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
 
 		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Stage", "ContactingMaster");
-		TraceEventFields md = wait(
-		    timeoutError(masterWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
+		TraceEventFields md =
+		    wait(timeoutError(masterWorker.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0));
 		int relocations;
 		sscanf(md.getValue("UnhealthyRelocations").c_str(), "%d", &relocations);
 		return relocations;

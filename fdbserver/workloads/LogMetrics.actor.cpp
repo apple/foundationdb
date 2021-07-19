@@ -35,10 +35,10 @@ struct LogMetricsWorkload : TestWorkload {
 	double logAt, logDuration, logsPerSecond;
 
 	LogMetricsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		logAt = getOption(options, LiteralStringRef("logAt"), 0.0);
-		logDuration = getOption(options, LiteralStringRef("logDuration"), 30.0);
-		logsPerSecond = getOption(options, LiteralStringRef("logsPerSecond"), 20);
-		dataFolder = getOption(options, LiteralStringRef("dataFolder"), LiteralStringRef("")).toString();
+		logAt = getOption(options, "logAt"_sr, 0.0);
+		logDuration = getOption(options, "logDuration"_sr, 30.0);
+		logsPerSecond = getOption(options, "logsPerSecond"_sr, 20);
+		dataFolder = getOption(options, "dataFolder"_sr, ""_sr).toString();
 	}
 
 	std::string description() const override { return "LogMetricsWorkload"; }

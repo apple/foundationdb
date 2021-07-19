@@ -51,13 +51,13 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	WriteDuringReadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), success(true) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
-		slowModeStart = getOption(options, LiteralStringRef("slowModeStart"), 1000.0);
-		numOps = getOption(options, LiteralStringRef("numOps"), 21);
-		rarelyCommit = getOption(options, LiteralStringRef("rarelyCommit"), false);
-		maximumTotalData = getOption(options, LiteralStringRef("maximumTotalData"), 3e6);
-		minNode = getOption(options, LiteralStringRef("minNode"), 0);
-		useSystemKeys = getOption(options, LiteralStringRef("useSystemKeys"), deterministicRandom()->random01() < 0.5);
+		testDuration = getOption(options, "testDuration"_sr, 60.0);
+		slowModeStart = getOption(options, "slowModeStart"_sr, 1000.0);
+		numOps = getOption(options, "numOps"_sr, 21);
+		rarelyCommit = getOption(options, "rarelyCommit"_sr, false);
+		maximumTotalData = getOption(options, "maximumTotalData"_sr, 3e6);
+		minNode = getOption(options, "minNode"_sr, 0);
+		useSystemKeys = getOption(options, "useSystemKeys"_sr, deterministicRandom()->random01() < 0.5);
 		adjacentKeys = deterministicRandom()->random01() < 0.5;
 		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first
 		                                                       // transaction (and after an unknown result)
@@ -93,7 +93,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		}
 
 		maxClearSize = 1 << deterministicRandom()->randomInt(0, 20);
-		conflictRange = KeyRangeRef(LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00"));
+		conflictRange = KeyRangeRef("\xfe"_sr, "\xfe\x00"_sr);
 		if (clientId == 0)
 			TraceEvent("RYWConfiguration")
 			    .detail("Nodes", nodes)

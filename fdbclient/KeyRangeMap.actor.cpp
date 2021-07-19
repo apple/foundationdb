@@ -186,7 +186,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	// Determine how far to extend this range at the beginning
 	auto beginRange = keys[0].get();
 	bool hasBegin = beginRange.size() > 0 && beginRange[0].key.startsWith(mapPrefix);
-	Value beginValue = hasBegin ? beginRange[0].value : LiteralStringRef("");
+	Value beginValue = hasBegin ? beginRange[0].value : ""_sr;
 
 	state Key beginKey = withPrefix.begin;
 	if (beginValue == value) {
@@ -199,7 +199,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	bool hasEnd = endRange.size() >= 1 && endRange[0].key.startsWith(mapPrefix) && endRange[0].key <= withPrefix.end;
 	bool hasNext = (endRange.size() == 2 && endRange[1].key.startsWith(mapPrefix)) ||
 	               (endRange.size() == 1 && withPrefix.end < endRange[0].key && endRange[0].key.startsWith(mapPrefix));
-	Value existingValue = hasEnd ? endRange[0].value : LiteralStringRef("");
+	Value existingValue = hasEnd ? endRange[0].value : ""_sr;
 	bool valueMatches = value == existingValue;
 
 	KeyRange conflictRange = KeyRangeRef(hasBegin ? beginRange[0].key : mapPrefix, withPrefix.begin);

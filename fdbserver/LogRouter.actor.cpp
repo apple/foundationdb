@@ -141,9 +141,7 @@ struct LogRouterData {
 	    allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc),
-	    peekLatencyDist(Histogram::getHistogram(LiteralStringRef("LogRouter"),
-	                                            LiteralStringRef("PeekTLogLatency"),
-	                                            Histogram::Unit::microseconds)) {
+	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::microseconds)) {
 		// setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;

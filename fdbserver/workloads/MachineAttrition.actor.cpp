@@ -80,26 +80,24 @@ struct MachineAttritionWorkload : TestWorkload {
 	MachineAttritionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
-		machinesToKill = getOption(options, LiteralStringRef("machinesToKill"), 2);
-		machinesToLeave = getOption(options, LiteralStringRef("machinesToLeave"), 1);
-		workersToKill = getOption(options, LiteralStringRef("workersToKill"), 2);
-		workersToLeave = getOption(options, LiteralStringRef("workersToLeave"), 1);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		suspendDuration = getOption(options, LiteralStringRef("suspendDuration"), 1.0);
-		liveDuration = getOption(options, LiteralStringRef("liveDuration"), 5.0);
-		reboot = getOption(options, LiteralStringRef("reboot"), false);
-		killDc = getOption(
-		    options, LiteralStringRef("killDc"), g_network->isSimulated() && deterministicRandom()->random01() < 0.25);
-		killMachine = getOption(options, LiteralStringRef("killMachine"), false);
-		killDatahall = getOption(options, LiteralStringRef("killDatahall"), false);
-		killProcess = getOption(options, LiteralStringRef("killProcess"), false);
-		killZone = getOption(options, LiteralStringRef("killZone"), false);
-		killSelf = getOption(options, LiteralStringRef("killSelf"), false);
-		targetIds = getOption(options, LiteralStringRef("targetIds"), std::vector<std::string>());
-		replacement =
-		    getOption(options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5);
-		waitForVersion = getOption(options, LiteralStringRef("waitForVersion"), false);
-		allowFaultInjection = getOption(options, LiteralStringRef("allowFaultInjection"), true);
+		machinesToKill = getOption(options, "machinesToKill"_sr, 2);
+		machinesToLeave = getOption(options, "machinesToLeave"_sr, 1);
+		workersToKill = getOption(options, "workersToKill"_sr, 2);
+		workersToLeave = getOption(options, "workersToLeave"_sr, 1);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		suspendDuration = getOption(options, "suspendDuration"_sr, 1.0);
+		liveDuration = getOption(options, "liveDuration"_sr, 5.0);
+		reboot = getOption(options, "reboot"_sr, false);
+		killDc = getOption(options, "killDc"_sr, g_network->isSimulated() && deterministicRandom()->random01() < 0.25);
+		killMachine = getOption(options, "killMachine"_sr, false);
+		killDatahall = getOption(options, "killDatahall"_sr, false);
+		killProcess = getOption(options, "killProcess"_sr, false);
+		killZone = getOption(options, "killZone"_sr, false);
+		killSelf = getOption(options, "killSelf"_sr, false);
+		targetIds = getOption(options, "targetIds"_sr, std::vector<std::string>());
+		replacement = getOption(options, "replacement"_sr, reboot && deterministicRandom()->random01() < 0.5);
+		waitForVersion = getOption(options, "waitForVersion"_sr, false);
+		allowFaultInjection = getOption(options, "allowFaultInjection"_sr, true);
 		ignoreSSFailures = true;
 	}
 

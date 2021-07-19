@@ -99,21 +99,21 @@ public:
 
 	ApiCorrectnessWorkload(WorkloadContext const& wcx)
 	  : ApiWorkload(wcx), numRandomOperations("Num Random Operations") {
-		numGets = getOption(options, LiteralStringRef("numGets"), 1000);
-		numGetRanges = getOption(options, LiteralStringRef("numGetRanges"), 100);
-		numGetRangeSelectors = getOption(options, LiteralStringRef("numGetRangeSelectors"), 100);
-		numGetKeys = getOption(options, LiteralStringRef("numGetKeys"), 100);
-		numClears = getOption(options, LiteralStringRef("numClears"), 100);
-		numClearRanges = getOption(options, LiteralStringRef("numClearRanges"), 100);
-		minSizeAfterClear = getOption(options, LiteralStringRef("minSizeAfterClear"), (int)(0.1 * numKeys));
+		numGets = getOption(options, "numGets"_sr, 1000);
+		numGetRanges = getOption(options, "numGetRanges"_sr, 100);
+		numGetRangeSelectors = getOption(options, "numGetRangeSelectors"_sr, 100);
+		numGetKeys = getOption(options, "numGetKeys"_sr, 100);
+		numClears = getOption(options, "numClears"_sr, 100);
+		numClearRanges = getOption(options, "numClearRanges"_sr, 100);
+		minSizeAfterClear = getOption(options, "minSizeAfterClear"_sr, (int)(0.1 * numKeys));
 
-		maxRandomTestKeys = getOption(options, LiteralStringRef("maxRandomTestKeys"), numKeys);
-		randomTestDuration = getOption(options, LiteralStringRef("randomTestDuration"), 60.0);
+		maxRandomTestKeys = getOption(options, "maxRandomTestKeys"_sr, numKeys);
+		randomTestDuration = getOption(options, "randomTestDuration"_sr, 60.0);
 
-		int maxTransactionBytes = getOption(options, LiteralStringRef("maxTransactionBytes"), 500000);
+		int maxTransactionBytes = getOption(options, "maxTransactionBytes"_sr, 500000);
 		maxKeysPerTransaction = std::max(1, maxTransactionBytes / (maxValueLength + maxLongKeyLength));
 
-		resetDBTimeout = getOption(options, LiteralStringRef("resetDBTimeout"), 1800.0);
+		resetDBTimeout = getOption(options, "resetDBTimeout"_sr, 1800.0);
 
 		if (maxTransactionBytes > 500000) {
 			TraceEvent("RemapEventSeverity")
@@ -502,7 +502,7 @@ public:
 
 				if (keys[i].startsWith(StringRef(self->clientPrefix)) ||
 				    (keys[i].size() == 0 && self->clientPrefixInt == 0) ||
-				    (keys[i].startsWith(LiteralStringRef("\xff")) && self->clientPrefixInt == self->clientCount - 1)) {
+				    (keys[i].startsWith("\xff"_sr) && self->clientPrefixInt == self->clientCount - 1)) {
 					break;
 				}
 
@@ -553,7 +553,7 @@ public:
 				if (endKey == self->store.endKey()) {
 					for (int i = 0; i < range.size(); i++) {
 						// Don't include results in the 0xFF key-space
-						if (!range[i].key.startsWith(LiteralStringRef("\xff")))
+						if (!range[i].key.startsWith("\xff"_sr))
 							dbResults.push_back_deep(dbResults.arena(), range[i]);
 					}
 					if (reverse && dbResults.size() < storeResults.size()) {

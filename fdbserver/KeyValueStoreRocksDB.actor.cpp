@@ -497,11 +497,11 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/Reopen") {
 	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	wait(kvStore->init());
 
-	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+	kvStore->set({ "foo"_sr, "bar"_sr });
 	wait(kvStore->commit(false));
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+	Optional<Value> val = wait(kvStore->readValue("foo"_sr));
+	ASSERT(Optional<Value>("bar"_sr) == val);
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->close();
@@ -512,8 +512,8 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/Reopen") {
 	// Confirm that `init()` is idempotent.
 	wait(kvStore->init());
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+	Optional<Value> val = wait(kvStore->readValue("foo"_sr));
+	ASSERT(Optional<Value>("bar"_sr) == val);
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->close();
