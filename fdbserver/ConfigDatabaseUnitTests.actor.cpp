@@ -22,7 +22,7 @@
 #include "fdbclient/IConfigTransaction.h"
 #include "fdbclient/TestKnobCollection.h"
 #include "fdbserver/ConfigBroadcaster.h"
-#include "fdbserver/IConfigDatabaseNode.h"
+#include "fdbserver/ConfigNode.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "fdbclient/Tuple.h"
 #include "flow/UnitTest.h"
@@ -55,7 +55,7 @@ class WriteToTransactionEnvironment {
 	std::string dataDir;
 	ConfigTransactionInterface cti;
 	ConfigFollowerInterface cfi;
-	Reference<IConfigDatabaseNode> node;
+	Reference<ConfigNode> node;
 	Future<Void> ctiServer;
 	Future<Void> cfiServer;
 	Version lastWrittenVersion{ 0 };
@@ -94,7 +94,7 @@ class WriteToTransactionEnvironment {
 
 public:
 	WriteToTransactionEnvironment(std::string const& dataDir)
-	  : dataDir(dataDir), node(IConfigDatabaseNode::createSimple(dataDir)) {
+	  : dataDir(dataDir), node(makeReference<ConfigNode>(dataDir)) {
 		platform::eraseDirectoryRecursive(dataDir);
 		setup();
 	}
@@ -111,7 +111,7 @@ public:
 	void restartNode() {
 		cfiServer.cancel();
 		ctiServer.cancel();
-		node = IConfigDatabaseNode::createSimple(dataDir);
+		node = makeReference<ConfigNode>(dataDir);
 		setup();
 	}
 

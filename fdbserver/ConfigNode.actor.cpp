@@ -1,5 +1,5 @@
 /*
- * SimpleConfigDatabaseNode.actor.cpp
+ * ConfigNode.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,7 +21,7 @@
 #include <map>
 
 #include "fdbclient/SystemData.h"
-#include "fdbserver/SimpleConfigDatabaseNode.h"
+#include "fdbserver/ConfigNode.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/OnDemandStore.h"
 #include "flow/Arena.h"
@@ -64,9 +64,9 @@ Version getVersionFromVersionedMutationKey(KeyRef versionedMutationKey) {
 	return fromBigEndian64(bigEndianResult);
 }
 
-} //namespace
+} // namespace
 
-TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutationKeys") {
+TEST_CASE("/fdbserver/ConfigDB/ConfigNode/Internal/versionedMutationKeys") {
 	std::vector<Key> keys;
 	for (Version version = 0; version < 1000; ++version) {
 		for (int index = 0; index < 5; ++index) {
@@ -79,7 +79,7 @@ TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutati
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutationKeyOrdering") {
+TEST_CASE("/fdbserver/ConfigDB/ConfigNode/Internal/versionedMutationKeyOrdering") {
 	Standalone<VectorRef<KeyRef>> keys;
 	for (Version version = 0; version < 1000; ++version) {
 		for (auto index = 0; index < 5; ++index) {
@@ -93,7 +93,7 @@ TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutati
 	return Void();
 }
 
-class SimpleConfigDatabaseNodeImpl {
+class ConfigNodeImpl {
 	UID id;
 	OnDemandStore kvStore;
 	CounterCollection cc;
@@ -114,7 +114,7 @@ class SimpleConfigDatabaseNodeImpl {
 	Counter newVersionRequests;
 	Future<Void> logger;
 
-	ACTOR static Future<ConfigGeneration> getGeneration(SimpleConfigDatabaseNodeImpl* self) {
+	ACTOR static Future<ConfigGeneration> getGeneration(ConfigNodeImpl* self) {
 		state ConfigGeneration generation;
 		Optional<Value> value = wait(self->kvStore->readValue(currentGenerationKey));
 		if (value.present()) {
@@ -126,7 +126,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return generation;
 	}
 
-	ACTOR static Future<Version> getLastCompactedVersion(SimpleConfigDatabaseNodeImpl* self) {
+	ACTOR static Future<Version> getLastCompactedVersion(ConfigNodeImpl* self) {
 		Optional<Value> value = wait(self->kvStore->readValue(lastCompactedVersionKey));
 		state Version lastCompactedVersion = 0;
 		if (value.present()) {
@@ -140,8 +140,9 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	// Returns all commit annotations between for commits with version in [startVersion, endVersion]
-	ACTOR static Future<Standalone<VectorRef<VersionedConfigCommitAnnotationRef>>>
-	getAnnotations(SimpleConfigDatabaseNodeImpl* self, Version startVersion, Version endVersion) {
+	ACTOR static Future<Standalone<VectorRef<VersionedConfigCommitAnnotationRef>>> getAnnotations(ConfigNodeImpl* self,
+	                                                                                              Version startVersion,
+	                                                                                              Version endVersion) {
 		Key startKey = versionedAnnotationKey(startVersion);
 		Key endKey = versionedAnnotationKey(endVersion + 1);
 		state KeyRangeRef keys(startKey, endKey);
@@ -157,14 +158,15 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	// Returns all mutations with version in [startVersion, endVersion]
-	ACTOR static Future<Standalone<VectorRef<VersionedConfigMutationRef>>>
-	getMutations(SimpleConfigDatabaseNodeImpl* self, Version startVersion, Version endVersion) {
+	ACTOR static Future<Standalone<VectorRef<VersionedConfigMutationRef>>> getMutations(ConfigNodeImpl* self,
+	                                                                                    Version startVersion,
+	                                                                                    Version endVersion) {
 		Key startKey = versionedMutationKey(startVersion, 0);
 		Key endKey = versionedMutationKey(endVersion + 1, 0);
 		state KeyRangeRef keys(startKey, endKey);
 		RangeResult range = wait(self->kvStore->readRange(keys));
 		Standalone<VectorRef<VersionedConfigMutationRef>> result;
-		for (const auto &kv : range) {
+		for (const auto& kv : range) {
 			auto version = getVersionFromVersionedMutationKey(kv.key);
 			ASSERT_LE(version, endVersion);
 			auto mutation = ObjectReader::fromStringRef<ConfigMutation>(kv.value, IncludeVersion());
@@ -173,7 +175,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return result;
 	}
 
-	ACTOR static Future<Void> getChanges(SimpleConfigDatabaseNodeImpl *self, ConfigFollowerGetChangesRequest req) {
+	ACTOR static Future<Void> getChanges(ConfigNodeImpl* self, ConfigFollowerGetChangesRequest req) {
 		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		if (req.lastSeenVersion < lastCompactedVersion) {
 			++self->failedChangeRequests;
@@ -198,8 +200,7 @@ class SimpleConfigDatabaseNodeImpl {
 
 	// New transactions increment the database's current live version. This effectively serves as a lock, providing
 	// serializability
-	ACTOR static Future<Void> getNewGeneration(SimpleConfigDatabaseNodeImpl* self,
-	                                           ConfigTransactionGetGenerationRequest req) {
+	ACTOR static Future<Void> getNewGeneration(ConfigNodeImpl* self, ConfigTransactionGetGenerationRequest req) {
 		state ConfigGeneration generation = wait(getGeneration(self));
 		++generation.liveVersion;
 		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
@@ -208,7 +209,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> get(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetRequest req) {
+	ACTOR static Future<Void> get(ConfigNodeImpl* self, ConfigTransactionGetRequest req) {
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation != currentGeneration) {
 			// TODO: Also send information about highest seen version
@@ -223,8 +224,8 @@ class SimpleConfigDatabaseNodeImpl {
 		}
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, 0, req.generation.committedVersion));
-		for (const auto &versionedMutation : versionedMutations) {
-			const auto &mutation = versionedMutation.mutation;
+		for (const auto& versionedMutation : versionedMutations) {
+			const auto& mutation = versionedMutation.mutation;
 			if (mutation.getKey() == req.key) {
 				if (mutation.isSet()) {
 					value = mutation.getValue();
@@ -240,8 +241,7 @@ class SimpleConfigDatabaseNodeImpl {
 	// Retrieve all configuration classes that contain explicitly defined knobs
 	// TODO: Currently it is possible that extra configuration classes may be returned, we
 	// may want to fix this to clean up the contract
-	ACTOR static Future<Void> getConfigClasses(SimpleConfigDatabaseNodeImpl* self,
-	                                           ConfigTransactionGetConfigClassesRequest req) {
+	ACTOR static Future<Void> getConfigClasses(ConfigNodeImpl* self, ConfigTransactionGetConfigClassesRequest req) {
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation != currentGeneration) {
 			req.reply.sendError(transaction_too_old());
@@ -274,7 +274,7 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	// Retrieve all knobs explicitly defined for the specified configuration class
-	ACTOR static Future<Void> getKnobs(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
+	ACTOR static Future<Void> getKnobs(ConfigNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation != currentGeneration) {
 			req.reply.sendError(transaction_too_old());
@@ -310,7 +310,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> commit(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionCommitRequest req) {
+	ACTOR static Future<Void> commit(ConfigNodeImpl* self, ConfigTransactionCommitRequest req) {
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation != currentGeneration) {
 			++self->failedCommits;
@@ -318,11 +318,11 @@ class SimpleConfigDatabaseNodeImpl {
 			return Void();
 		}
 		int index = 0;
-		for (const auto &mutation : req.mutations) {
+		for (const auto& mutation : req.mutations) {
 			Key key = versionedMutationKey(req.generation.liveVersion, index++);
 			Value value = ObjectWriter::toValue(mutation, IncludeVersion());
 			if (mutation.isSet()) {
-				TraceEvent("SimpleConfigDatabaseNodeSetting")
+				TraceEvent("ConfigNodeSetting")
 				    .detail("ConfigClass", mutation.getConfigClass())
 				    .detail("KnobName", mutation.getKnobName())
 				    .detail("Value", mutation.getValue().toString())
@@ -343,7 +343,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface const* cti) {
+	ACTOR static Future<Void> serve(ConfigNodeImpl* self, ConfigTransactionInterface const* cti) {
 		loop {
 			choose {
 				when(ConfigTransactionGetGenerationRequest req = waitNext(cti->getGeneration.getFuture())) {
@@ -368,7 +368,7 @@ class SimpleConfigDatabaseNodeImpl {
 		}
 	}
 
-	ACTOR static Future<Void> getSnapshotAndChanges(SimpleConfigDatabaseNodeImpl* self,
+	ACTOR static Future<Void> getSnapshotAndChanges(ConfigNodeImpl* self,
 	                                                ConfigFollowerGetSnapshotAndChangesRequest req) {
 		state ConfigFollowerGetSnapshotAndChangesReply reply;
 		RangeResult data = wait(self->kvStore->readRange(kvKeys));
@@ -392,7 +392,7 @@ class SimpleConfigDatabaseNodeImpl {
 	// Apply mutations from the WAL in mutationKeys into the kvKeys key space.
 	// Periodic compaction prevents the database from growing too large, and improve read performance.
 	// However, commit annotations for compacted mutations are lost
-	ACTOR static Future<Void> compact(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerCompactRequest req) {
+	ACTOR static Future<Void> compact(ConfigNodeImpl* self, ConfigFollowerCompactRequest req) {
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeCompacting", self->id)
 		    .detail("Version", req.version)
@@ -435,14 +435,13 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> getCommittedVersion(SimpleConfigDatabaseNodeImpl* self,
-	                                              ConfigFollowerGetCommittedVersionRequest req) {
+	ACTOR static Future<Void> getCommittedVersion(ConfigNodeImpl* self, ConfigFollowerGetCommittedVersionRequest req) {
 		ConfigGeneration generation = wait(getGeneration(self));
 		req.reply.send(ConfigFollowerGetCommittedVersionReply{ generation.committedVersion });
 		return Void();
 	}
 
-	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface const* cfi) {
+	ACTOR static Future<Void> serve(ConfigNodeImpl* self, ConfigFollowerInterface const* cfi) {
 		loop {
 			choose {
 				when(ConfigFollowerGetSnapshotAndChangesRequest req =
@@ -467,7 +466,7 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 public:
-	SimpleConfigDatabaseNodeImpl(std::string const& folder)
+	ConfigNodeImpl(std::string const& folder)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigDatabaseNode"),
 	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
@@ -476,7 +475,7 @@ public:
 	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {
 		logger = traceCounters(
 		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
-		TraceEvent(SevDebug, "StartingSimpleConfigDatabaseNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
+		TraceEvent(SevDebug, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
 	}
 
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
@@ -484,15 +483,14 @@ public:
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
 };
 
-SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& folder)
-  : _impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(folder)) {}
+ConfigNode::ConfigNode(std::string const& folder) : _impl(std::make_unique<ConfigNodeImpl>(folder)) {}
 
-SimpleConfigDatabaseNode::~SimpleConfigDatabaseNode() = default;
+ConfigNode::~ConfigNode() = default;
 
-Future<Void> SimpleConfigDatabaseNode::serve(ConfigTransactionInterface const& cti) {
+Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {
 	return impl().serve(cti);
 }
 
-Future<Void> SimpleConfigDatabaseNode::serve(ConfigFollowerInterface const& cfi) {
+Future<Void> ConfigNode::serve(ConfigFollowerInterface const& cfi) {
 	return impl().serve(cfi);
 }
