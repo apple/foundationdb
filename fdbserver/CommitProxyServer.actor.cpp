@@ -1153,6 +1153,9 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 					break;
 				}
 				when(wait(pProxyCommitData->cx->onProxiesChanged())) {}
+				// @todo probably there is no need to get the (entire) version vector from the sequencer
+				// in this case, and if so, consider adding a flag to the request to tell the sequencer
+				// to not send the version vector information.
 				when(GetRawCommittedVersionReply v = wait(pProxyCommitData->master.getLiveCommittedVersion.getReply(
 				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID, invalidVersion),
 				         TaskPriority::GetLiveCommittedVersionReply))) {
@@ -1311,7 +1314,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// self->committedVersion by reporting commit version first before updating self->committedVersion. Otherwise, a
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
-	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // A later version was reported committed first
+	TEST(pProxyCommitData->committedVersion.get() >
+	     self->commitVersion); // A later version was reported committed first
 	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
 		state Optional<std::set<Tag>> writtenTags;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
