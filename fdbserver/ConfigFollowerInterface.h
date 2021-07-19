@@ -98,7 +98,7 @@ struct ConfigFollowerGetSnapshotAndChangesRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, reply, mostRecentVersion);
 	}
 };
 
@@ -132,7 +132,7 @@ struct ConfigFollowerGetChangesRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastSeenVersion, reply);
+		serializer(ar, lastSeenVersion, mostRecentVersion, reply);
 	}
 };
 
@@ -196,6 +196,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact);
+		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact, getCommittedVersion);
 	}
 };

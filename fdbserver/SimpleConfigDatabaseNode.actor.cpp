@@ -103,6 +103,7 @@ class SimpleConfigDatabaseNodeImpl {
 	Counter successfulChangeRequests;
 	Counter failedChangeRequests;
 	Counter snapshotRequests;
+	Counter getCommittedVersionRequests;
 
 	// Transaction counters
 	Counter successfulCommits;
@@ -185,7 +186,7 @@ class SimpleConfigDatabaseNodeImpl {
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
 		    wait(getAnnotations(self, req.lastSeenVersion + 1, committedVersion));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeSendingChanges")
+		TraceEvent(SevDebug, "ConfigDatabaseNodeSendingChanges", self->id)
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 		    .detail("CommittedVersion", committedVersion)
 		    .detail("NumMutations", versionedMutations.size())
@@ -434,6 +435,13 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> getCommittedVersion(SimpleConfigDatabaseNodeImpl* self,
+	                                              ConfigFollowerGetCommittedVersionRequest req) {
+		ConfigGeneration generation = wait(getGeneration(self));
+		req.reply.send(ConfigFollowerGetCommittedVersionReply{ generation.committedVersion });
+		return Void();
+	}
+
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface const* cfi) {
 		loop {
 			choose {
@@ -449,6 +457,10 @@ class SimpleConfigDatabaseNodeImpl {
 					++self->compactRequests;
 					wait(compact(self, req));
 				}
+				when(ConfigFollowerGetCommittedVersionRequest req = waitNext(cfi->getCommittedVersion.getFuture())) {
+					++self->getCommittedVersionRequests;
+					wait(getCommittedVersion(self, req));
+				}
 				when(wait(self->kvStore->getError())) { ASSERT(false); }
 			}
 		}
@@ -459,8 +471,8 @@ public:
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigDatabaseNode"),
 	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
-	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
-	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
+	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), successfulCommits("SuccessfulCommits", cc),
+	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
 	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {
 		logger = traceCounters(
 		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
