@@ -151,6 +151,7 @@ set(FDBSERVER_SRCS
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
+  workloads/BitFlipping.actor.cpp
   workloads/BlobStoreWorkload.h
   workloads/BulkLoad.actor.cpp
   workloads/BulkSetup.actor.h
@@ -158,7 +159,6 @@ set(FDBSERVER_SRCS
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
-  workloads/DiskThrottling.actor.cpp
   workloads/SuspendProcesses.actor.cpp
   workloads/CommitBugCheck.actor.cpp
   workloads/ConfigureDatabase.actor.cpp
@@ -172,6 +172,7 @@ set(FDBSERVER_SRCS
   workloads/DDMetricsExclude.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
+  workloads/DiskThrottling.actor.cpp
   workloads/Downgrade.actor.cpp
   workloads/DummyWorkload.actor.cpp
   workloads/ExternalWorkload.actor.cpp
