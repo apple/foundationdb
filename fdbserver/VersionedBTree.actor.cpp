@@ -5869,7 +5869,7 @@ private:
 		}
 
 		state Reference<const ArenaPage> page =
-		    wait(readPage(PagerEventReasons::Commit, height, snapshot, rootID, height - 1, false, true));
+		    wait(readPage(PagerEventReasons::Commit, height, snapshot, rootID, height, false, true));
 		state Version writeVersion = self->getLastCommittedVersion() + 1;
 
 		// If the page exists in the cache, it must be copied before modification.
