@@ -146,7 +146,7 @@ LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::uno
 }
 
 void TLogGroupCollection::addTLogGroup(TLogGroupRef group) {
-	TraceEvent("TLogGroupLoad")
+	TraceEvent("TLogGroupAdd")
 	    .detail("GroupID", group->id())
 	    .detail("Size", group->size())
 	    .detail("Group", group->toString());
@@ -158,7 +158,7 @@ TLogGroupRef TLogGroupCollection::selectFreeGroup(int seed) {
 }
 
 void TLogGroupCollection::addStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers) {
-	// TODO:
+	TraceEvent("TLogGroupAddStorageTeam").detail("StorageTeamIdW", teamId).detail("Servers", describe(servers));
 	if (storageTeams.find(teamId) == storageTeams.end()) {
 		return;
 	}
@@ -168,6 +168,7 @@ void TLogGroupCollection::addStorageTeam(ptxn::StorageTeamID teamId, vector<UID>
 
 bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId) {
 	// ASSERT(storageTeamToTLogGroupMap.find(teamId) == storageTeamToTLogGroupMap.end());
+	TraceEvent("TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", groupId);
 	auto group = getGroup(groupId, true);
 	ASSERT(group.isValid());
 	storageTeamToTLogGroupMap[teamId] = group;
@@ -176,6 +177,7 @@ bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, UID grou
 }
 
 bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group) {
+	TraceEvent("TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", group->id());
 	storageTeamToTLogGroupMap[teamId] = group;
 	group->assignStorageTeam(teamId);
 	return true;
@@ -235,6 +237,7 @@ void TLogGroupCollection::seedTLogGroupAssignment(Arena& arena,
 
 	// Step 3: Assign the storage team to a TLogGroup (Storage Team -> TLogGroup).
 	TLogGroupRef group = selectFreeGroup();
+	TraceEvent("TLogGroupSeedTeam").detail("StorageTeamId", teamId);
 	tr.set(arena, storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(group->id(), Unversioned()));
 	assignStorageTeam(teamId, group);
 	storageTeams[teamId] = serverSrcUID;
@@ -386,8 +389,8 @@ void printTLogGroupCollection(const TLogGroupCollection& collection) {
 	}
 }
 
-// Checks if each TLog belongs to only one TLogGroup in 'collection', number of workers inside
-// each group is equal to 'groupSize' and the total number of recruited workers is equal to
+// Checks if each TLogGroup in 'collection', number of workers inside each group
+// is equal to 'groupSize' and the total number of recruited workers is equal to
 // 'totalProcesses', or else will fail assertion.
 void checkGroupMembersUnique(const TLogGroupCollection& collection, int groupSize, int totalProcesses) {
 	const auto& groups = collection.groups();
