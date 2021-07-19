@@ -195,9 +195,11 @@ void applyMetadataMutations(
 				}
 			} else if (m.param1.startsWith(storageTeamIdKeyPrefix)) {
 				if (tLogGroupCollection.isValid()) {
-					tLogGroupCollection->addStorageTeam(storageTeamIdKeyDecode(m.param1), decodeStorageTeams(m.param2));
-					auto group = tLogGroupCollection->selectFreeGroup();
-					txnStateStore->set(KeyValueRef(storageTeamIdToTLogGroupKey(storageTeamIdKeyDecode(m.param1)),
+					auto teamid = storageTeamIdKeyDecode(m.param1);
+					tLogGroupCollection->addStorageTeam(teamid, decodeStorageTeams(m.param2));
+					// TODO (Vishesh): Select a good group than just a deterministic group.
+					auto group = tLogGroupCollection->selectFreeGroup(teamid.hash());
+					txnStateStore->set(KeyValueRef(storageTeamIdToTLogGroupKey(teamid),
 					                               BinaryWriter::toValue(group->id(), Unversioned())));
 				}
 

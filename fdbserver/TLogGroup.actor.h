@@ -98,7 +98,7 @@ public:
 	void addTLogGroup(TLogGroupRef group);
 
 	// Find a TLogGroup for assigning a storage team.
-	TLogGroupRef selectFreeGroup();
+	TLogGroupRef selectFreeGroup(int seed = 0);
 
 	// Add storage team ID to lists of storage servers in that team.
 	void addStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers);

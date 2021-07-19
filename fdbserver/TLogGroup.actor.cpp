@@ -153,8 +153,8 @@ void TLogGroupCollection::addTLogGroup(TLogGroupRef group) {
 	recruitedGroups.push_back(group);
 }
 
-TLogGroupRef TLogGroupCollection::selectFreeGroup() {
-	return deterministicRandom()->randomChoice(recruitedGroups);
+TLogGroupRef TLogGroupCollection::selectFreeGroup(int seed) {
+	return recruitedGroups[seed % recruitedGroups.size()];
 }
 
 void TLogGroupCollection::addStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers) {
