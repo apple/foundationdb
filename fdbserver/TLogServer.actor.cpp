@@ -341,6 +341,7 @@ struct TLogData : NonCopyable {
 	int64_t targetVolatileBytes; // The number of bytes of mutations this TLog should hold in memory before spilling.
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
+	int activePeekStreams = 0;
 
 	WorkerCache<TLogInterface> tlogCache;
 	FlowLock peekMemoryLimiter;
@@ -557,7 +558,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	TLogData* tLogData;
 	Promise<Void> recoveryComplete, committingQueue;
 	Version unrecoveredBefore, recoveredAt;
-	int activePeekStreams = 0;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>>
@@ -669,7 +669,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PeekMemoryReserved", [tLogData]() { return tLogData->peekMemoryLimiter.activePermits(); });
 		specialCounter(cc, "PeekMemoryRequestsStalled", [tLogData]() { return tLogData->peekMemoryLimiter.waiters(); });
 		specialCounter(cc, "Generation", [this]() { return this->recoveryCount; });
-		specialCounter(cc, "ActivePeekStreams", [this]() { return this->activePeekStreams; });
+		specialCounter(cc, "ActivePeekStreams", [tLogData]() { return tLogData->activePeekStreams; });
 	}
 
 	~LogData() {
@@ -1919,7 +1919,8 @@ ACTOR Future<TLogPeekReply> peekTLog(TLogData* self,
 
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
-	logData->activePeekStreams ++;
+	self->activePeekStreams++;
+	TraceEvent(SevDebug, "TLogPeekStream", logData->logId);
 	state Version begin = req.begin;
 	state bool onlySpilled = false;
 	if (req.tag.locality == tagLocalityTxs && req.tag.id >= logData->txsTags && logData->txsTags > 0) {
@@ -1936,7 +1937,9 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			onlySpilled = reply.rep.onlySpilled;
 			wait(delay(0, g_network->getCurrentTask()));
 		} catch (Error& e) {
-			logData->activePeekStreams --;
+			self->activePeekStreams--;
+			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId).detail("Error", e.what());
+
 			if (e.code() == error_code_end_of_stream) {
 				req.reply.sendError(e);
 				return Void();

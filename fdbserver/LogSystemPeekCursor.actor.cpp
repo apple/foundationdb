@@ -26,16 +26,20 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 // create a peek stream for cursor when it's possible
-void tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
+ACTOR Future<Void> tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
 	if (self->peekReplyStream.present())
-		return;
+		return Void();
 	else if (!self->interf || !self->interf->get().present()) {
 		self->peekReplyStream.reset();
-		return;
+		return Never();
 	}
+	wait(IFailureMonitor::failureMonitor().onStateEqual(self->interf->get().interf().peekStreamMessages.getEndpoint(),
+	                                                    FailureStatus(false)));
 	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(TLogPeekStreamRequest(
 	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max()));
-	TraceEvent(SevDebug, "SPC_StreamCreated", self->randomID);
+	TraceEvent(SevDebug, "SPC_StreamCreated", self->randomID)
+	    .detail("PeerAddress", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress());
+	return Void();
 }
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
@@ -328,21 +332,23 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 
 	loop {
 		try {
-			tryEstablishPeekStream(self);
 			state Future<TLogPeekReply> fPeekReply = self->peekReplyStream.present()
 			                                             ? map(waitAndForward(self->peekReplyStream.get().getFuture()),
 			                                                   [](const TLogPeekStreamReply& r) { return r.rep; })
 			                                             : Never();
 			choose {
+				when(wait(self->peekReplyStream.present() ? Never() : tryEstablishPeekStream(self))) {}
 				when(wait(self->interf->onChange())) {
 					self->onlySpilled = false;
 					self->peekReplyStream.reset();
 				}
-				when(TLogPeekReply res =
-				         wait(self->peekReplyStream.present()
-				                  ? recordRequestMetrics(
-				                        self, self->peekReplyStream.get().getEndpoint().getPrimaryAddress(), fPeekReply)
-				                  : Never())) {
+				when(TLogPeekReply res = wait(
+				         self->peekReplyStream.present()
+				             ? recordRequestMetrics(
+				                   self,
+				                   self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress(),
+				                   fPeekReply)
+				             : Never())) {
 					updateCursorWithReply(self, res);
 					TraceEvent("SPC_GetMoreB", self->randomID)
 					    .detail("Has", self->hasMessage())
@@ -352,6 +358,7 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 				}
 			}
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "SPC_GetMoreB_Error", self->randomID).detail("Error", e.what());
 			if (e.code() == error_code_connection_failed) {
 				self->peekReplyStream.reset();
 			} else if (e.code() == error_code_end_of_stream) {
@@ -406,15 +413,15 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 		return Void();
 	if (!more.isValid() || more.isReady()) {
 		more = serverPeekStreamGetMore(this, taskID);
-//		if (usePeekStream && taskID == TaskPriority::TLogPeekReply) {
-//			more = serverPeekStreamGetMore(this, taskID);
-//		}
-//      if (parallelGetMore || onlySpilled || futureResults.size()) {
-//          more = serverPeekParallelGetMore(this, taskID);
-//      }
-//		else {
-//			more = serverPeekGetMore(this, taskID);
-//		}
+		//		if (usePeekStream && taskID == TaskPriority::TLogPeekReply) {
+		//			more = serverPeekStreamGetMore(this, taskID);
+		//		}
+		//      if (parallelGetMore || onlySpilled || futureResults.size()) {
+		//          more = serverPeekParallelGetMore(this, taskID);
+		//      }
+		//		else {
+		//			more = serverPeekGetMore(this, taskID);
+		//		}
 	}
 	return more;
 }
