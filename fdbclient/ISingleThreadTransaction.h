@@ -23,6 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 
@@ -44,23 +45,23 @@ public:
 	};
 
 	static ISingleThreadTransaction* allocateOnForeignThread(Type type);
-	static void create(ISingleThreadTransaction* tr, Type type, Database db);
+	virtual void setDatabase(Database const&) = 0;
 
 	virtual void setVersion(Version v) = 0;
 	virtual Future<Version> getReadVersion() = 0;
 	virtual Optional<Version> getCachedReadVersion() const = 0;
-	virtual Future<Optional<Value>> get(const Key& key, bool snapshot = false) = 0;
-	virtual Future<Key> getKey(const KeySelector& key, bool snapshot = false) = 0;
+	virtual Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False) = 0;
+	virtual Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False) = 0;
 	virtual Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
 	                                                    const KeySelector& end,
 	                                                    int limit,
-	                                                    bool snapshot = false,
-	                                                    bool reverse = false) = 0;
+	                                                    Snapshot = Snapshot::False,
+	                                                    Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
 	                                                    KeySelector end,
 	                                                    GetRangeLimits limits,
-	                                                    bool snapshot = false,
-	                                                    bool reverse = false) = 0;
+	                                                    Snapshot = Snapshot::False,
+	                                                    Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
 	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
 	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;

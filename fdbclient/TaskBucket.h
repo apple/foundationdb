@@ -35,6 +35,11 @@
 class FutureBucket;
 class TaskFuture;
 
+FDB_DECLARE_BOOLEAN_PARAM(AccessSystemKeys);
+FDB_DECLARE_BOOLEAN_PARAM(PriorityBatch);
+FDB_DECLARE_BOOLEAN_PARAM(VerifyTask);
+FDB_DECLARE_BOOLEAN_PARAM(UpdateParams);
+
 // A Task is a set of key=value parameters that constitute a unit of work for a TaskFunc to perform.
 // The parameter keys are specific to the TaskFunc that the Task is for, except for a set of reserved
 // parameter keys which are used by TaskBucket to determine which TaskFunc to run and provide
@@ -134,13 +139,16 @@ class FutureBucket;
 // instance may declare the Task a failure and move it back to the available subspace.
 class TaskBucket : public ReferenceCounted<TaskBucket> {
 public:
-	TaskBucket(const Subspace& subspace, bool sysAccess = false, bool priorityBatch = false, bool lockAware = false);
+	TaskBucket(const Subspace& subspace,
+	           AccessSystemKeys = AccessSystemKeys::False,
+	           PriorityBatch = PriorityBatch::False,
+	           LockAware = LockAware::False);
 	virtual ~TaskBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
 		if (system_access)
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		if (lock_aware)
+		if (lockAware)
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	}
 
@@ -191,7 +199,10 @@ public:
 
 	Future<bool> doOne(Database cx, Reference<FutureBucket> futureBucket);
 
-	Future<Void> run(Database cx, Reference<FutureBucket> futureBucket, double* pollDelay, int maxConcurrentTasks);
+	Future<Void> run(Database cx,
+	                 Reference<FutureBucket> futureBucket,
+	                 std::shared_ptr<double const> pollDelay,
+	                 int maxConcurrentTasks);
 	Future<Void> watchPaused(Database cx, Reference<AsyncVar<bool>> paused);
 
 	Future<bool> isEmpty(Reference<ReadYourWritesTransaction> tr);
@@ -207,11 +218,11 @@ public:
 	// Extend the task's timeout as if it just started and also save any parameter changes made to the task
 	Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr,
 	                              Reference<Task> task,
-	                              bool updateParams,
+	                              UpdateParams updateParams,
 	                              Version newTimeoutVersion = invalidVersion);
 	Future<Void> extendTimeout(Database cx,
 	                           Reference<Task> task,
-	                           bool updateParams,
+	                           UpdateParams updateParams,
 	                           Version newTimeoutVersion = invalidVersion) {
 		return map(runRYWTransaction(cx,
 		                             [=](Reference<ReadYourWritesTransaction> tr) {
@@ -250,7 +261,7 @@ public:
 
 	bool getSystemAccess() const { return system_access; }
 
-	bool getLockAware() const { return lock_aware; }
+	bool getLockAware() const { return lockAware; }
 
 	Key getPauseKey() const { return pauseKey; }
 
@@ -293,20 +304,20 @@ private:
 	uint32_t timeout;
 	bool system_access;
 	bool priority_batch;
-	bool lock_aware;
+	bool lockAware;
 };
 
 class TaskFuture;
 
 class FutureBucket : public ReferenceCounted<FutureBucket> {
 public:
-	FutureBucket(const Subspace& subspace, bool sysAccess = false, bool lockAware = false);
+	FutureBucket(const Subspace& subspace, AccessSystemKeys = AccessSystemKeys::False, LockAware = LockAware::False);
 	virtual ~FutureBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
 		if (system_access)
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		if (lock_aware)
+		if (lockAware)
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	}
 
@@ -324,7 +335,7 @@ public:
 
 	Reference<TaskFuture> unpack(Key key);
 	bool isSystemAccess() const { return system_access; };
-	bool isLockAware() const { return lock_aware; };
+	bool isLockAware() const { return lockAware; };
 
 private:
 	friend class TaskFuture;
@@ -333,7 +344,7 @@ private:
 
 	Subspace prefix;
 	bool system_access;
-	bool lock_aware;
+	bool lockAware;
 };
 
 class TaskFuture : public ReferenceCounted<TaskFuture> {
