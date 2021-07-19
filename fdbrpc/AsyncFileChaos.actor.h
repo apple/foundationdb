@@ -28,14 +28,14 @@
 
 
 //template <class AsyncFileType>
-class AsyncFileDelayed final : public IAsyncFile, public ReferenceCounted<AsyncFileDelayed> {
+class AsyncFileChaos final : public IAsyncFile, public ReferenceCounted<AsyncFileChaos> {
 private:
 	Reference<IAsyncFile> file;
 public:
-	explicit AsyncFileDelayed(Reference<IAsyncFile> file) : file(file) {}
+	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {}
 
-	void addref() override { ReferenceCounted<AsyncFileDelayed>::addref(); }
-	void delref() override { ReferenceCounted<AsyncFileDelayed>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileChaos>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileChaos>::delref(); }
 
 	uint8_t toggleNthBit(uint8_t b, uint8_t n) {
 		auto singleBitMask = uint8_t(1) << (n);
@@ -54,10 +54,10 @@ public:
 
 	Future<int> read(void* data, int length, int64_t offset) override {
 		double delay = 0.0;
-		auto res = g_network->global(INetwork::enFailureInjector);
+		auto res = g_network->global(INetwork::enDiskFailureInjector);
 		if (res)
 			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
-		TraceEvent("AsyncFileDelayedRead").detail("ThrottleDelay", delay);
+		TraceEvent("AsyncFileChaosRead").detail("ThrottleDelay", delay);
 		return delayed(file->read(data, length, offset), delay);
 	}
 
@@ -78,16 +78,16 @@ public:
 			}
 		}
 
-		res = g_network->global(INetwork::enFailureInjector);
+		res = g_network->global(INetwork::enDiskFailureInjector);
 		if (res)
 			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
-		TraceEvent("AsyncFileDelayedWrite").detail("ThrottleDelay", delay);
+		TraceEvent("AsyncFileChaosWrite").detail("ThrottleDelay", delay);
 		return delayed(file->write((pdata != nullptr) ? pdata : data, length, offset), delay);
 	}
 
 	Future<Void> truncate(int64_t size) override {
 		double delay = 0.0;
-		auto res = g_network->global(INetwork::enFailureInjector);
+		auto res = g_network->global(INetwork::enDiskFailureInjector);
 		if (res)
 			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
 		return delayed(file->truncate(size), delay);
@@ -95,7 +95,7 @@ public:
 
 	Future<Void> sync() override {
 		double delay = 0.0;
-		auto res = g_network->global(INetwork::enFailureInjector);
+		auto res = g_network->global(INetwork::enDiskFailureInjector);
 		if (res)
 			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
 		return delayed(file->sync(), delay);
@@ -103,7 +103,7 @@ public:
 
 	Future<int64_t> size() const override {
 		double delay = 0.0;
-		auto res = g_network->global(INetwork::enFailureInjector);
+		auto res = g_network->global(INetwork::enDiskFailureInjector);
 		if (res)
 			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
 		return delayed(file->size(), delay);

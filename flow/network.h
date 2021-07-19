@@ -487,7 +487,7 @@ public:
 		enClientFailureMonitor = 12,
 		enSQLiteInjectedError = 13,
 		enGlobalConfig = 14,
-		enFailureInjector = 15,
+		enDiskFailureInjector = 15,
 		enBitFlipper = 16
 	};
 
@@ -688,10 +688,10 @@ public: // construction
 
 struct DiskFailureInjector : FastAllocated<DiskFailureInjector> {
 	static DiskFailureInjector* injector() {
-		auto res = g_network->global(INetwork::enFailureInjector);
+		auto res = g_network->global(INetwork::enDiskFailureInjector);
 		if (!res) {
 			res = new DiskFailureInjector();
-			g_network->setGlobal(INetwork::enFailureInjector, res);
+			g_network->setGlobal(INetwork::enDiskFailureInjector, res);
 		}
 		return static_cast<DiskFailureInjector*>(res);
 	}
