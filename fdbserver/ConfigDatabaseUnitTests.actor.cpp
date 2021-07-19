@@ -65,11 +65,10 @@ class WriteToTransactionEnvironment {
 		return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 	}
 
-	ACTOR template <class T>
-	static Future<Void> set(WriteToTransactionEnvironment* self,
-	                        Optional<KeyRef> configClass,
-	                        T value,
-	                        KeyRef knobName) {
+	ACTOR static Future<Void> set(WriteToTransactionEnvironment* self,
+	                              Optional<KeyRef> configClass,
+	                              int64_t value,
+	                              KeyRef knobName) {
 		state Reference<IConfigTransaction> tr = IConfigTransaction::createTestSimple(self->cti);
 		auto configKey = encodeConfigKey(configClass, knobName);
 		tr->set(configKey, longToValue(value));
@@ -99,8 +98,7 @@ public:
 		setup();
 	}
 
-	template <class T>
-	Future<Void> set(Optional<KeyRef> configClass, T value, KeyRef knobName = "test_long"_sr) {
+	Future<Void> set(Optional<KeyRef> configClass, int64_t value, KeyRef knobName = "test_long"_sr) {
 		return set(this, configClass, value, knobName);
 	}
 
