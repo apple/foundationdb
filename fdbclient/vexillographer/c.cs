@@ -52,7 +52,7 @@ namespace vexillographer
         {
             string parameterComment = "";
             if (o.scope.ToString().EndsWith("Option"))
-                parameterComment = String.Format("{0}/* {1} */\n", indent, "Parameter: " + o.getParameterComment());
+                parameterComment = String.Format("{0}/* {1} {2}*/\n", indent, "Parameter: " + o.getParameterComment(), o.hidden ? "This is a hidden parameter and should not be used directly by applications." : "");
             return String.Format("{0}/* {2} */\n{5}{0}{1}{3}={4}", indent, prefix, o.comment, o.name.ToUpper(), o.code, parameterComment);
         }
 
@@ -64,7 +64,7 @@ namespace vexillographer
                 options = new Option[] { new Option{ scope = scope,
                     comment = "This option is only a placeholder for C compatibility and should not be used",
                     code = -1, name = "DUMMY_DO_NOT_USE", paramDesc = null } };
-            outFile.WriteLine(string.Join(",\n\n", options.Where(f => !f.hidden).Select(f => getCLine(f, "    ", prefix)).ToArray()));
+            outFile.WriteLine(string.Join(",\n\n", options.Select(f => getCLine(f, "    ", prefix)).ToArray()));
             outFile.WriteLine("}} FDB{0};", scope.ToString());
             outFile.WriteLine();
         }

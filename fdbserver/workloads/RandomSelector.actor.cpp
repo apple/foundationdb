@@ -103,7 +103,7 @@ struct RandomSelectorWorkload : TestWorkload {
 		state int offsetB;
 		state int randomLimit;
 		state int randomByteLimit;
-		state Reverse reverse = Reverse::FALSE;
+		state Reverse reverse = Reverse::False;
 		state Error error;
 
 		clientID = format("%08d", self->clientId);
@@ -447,7 +447,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						    wait(trRYOW.getRange(KeySelectorRef(StringRef(clientID + "b/" + myKeyA), onEqualA, offsetA),
 						                         KeySelectorRef(StringRef(clientID + "b/" + myKeyB), onEqualB, offsetB),
 						                         randomLimit,
-						                         Snapshot::FALSE,
+						                         Snapshot::False,
 						                         reverse));
 						getRangeTest1 = getRangeTest;
 
@@ -457,7 +457,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								    tr.getRange(KeySelectorRef(StringRef(clientID + "d/" + myKeyA), onEqualA, offsetA),
 								                KeySelectorRef(StringRef(clientID + "d/" + myKeyB), onEqualB, offsetB),
 								                randomLimit,
-								                Snapshot::FALSE,
+								                Snapshot::False,
 								                reverse));
 
 								bool fail = false;
