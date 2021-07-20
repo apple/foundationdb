@@ -338,7 +338,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 			rocksdb::PinnableSlice value;
-			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto options = getReadOptions();
+			uint64_t readValueTimeoutMircos =
+			    db->GetEnv()->NowMicros() +
+			    (SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT - (timer_monotonic() - a.startTime)) * 1000000;
+			std::chrono::seconds readValueTimeoutSeconds(readValueTimeoutMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(readValueTimeoutSeconds);
+			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 				traceBatch.get().dump();
@@ -380,7 +386,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 			rocksdb::PinnableSlice value;
-			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto options = getReadOptions();
+			uint64_t readValuePrefixTimeoutMircos =
+			    db->GetEnv()->NowMicros() +
+			    (SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT - (timer_monotonic() - a.startTime)) * 1000000;
+			std::chrono::seconds readValuePrefixTimeoutSeconds(readValuePrefixTimeoutMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(readValuePrefixTimeoutSeconds);
+			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValuePrefixDebug",
 				                          a.debugID.get().first(),
@@ -426,10 +438,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
 			auto options = getReadOptions();
-			std::chrono::seconds readRangeTimeout(SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT);
-			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(
-			                       std::chrono::system_clock::now().time_since_epoch()) +
-			                   std::chrono::duration_cast<std::chrono::microseconds>(readRangeTimeout);
+			uint64_t readRangeTimeoutMircos =
+			    db->GetEnv()->NowMicros() +
+			    (SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT - (timer_monotonic() - a.startTime)) * 1000000;
+			std::chrono::seconds readRangeTimeoutSeconds(readRangeTimeoutMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(readRangeTimeoutSeconds);
 			// When using a prefix extractor, ensure that keys are returned in order even if they cross
 			// a prefix boundary.
 			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
