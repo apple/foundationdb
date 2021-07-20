@@ -1056,7 +1056,7 @@ void* worker_thread(void* thread_args) {
 	}
 
 	fprintf(debugme,
-	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) (tid:%ld)\n",
+	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) (tid:%lld)\n",
 	        worker_id,
 	        args->num_processes,
 	        thread_id,
