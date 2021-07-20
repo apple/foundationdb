@@ -75,7 +75,7 @@ using StorageTeamID = UID;
 const StorageTeamID txsTeam = UID(1, 1);
 
 // Map from storage team id to a TLog group
-TLogGroupID tLogGroupByStorageTeamID(std::vector<TLogGroupID> tLogGroups, StorageTeamID storageTeamID);
+TLogGroupID tLogGroupByStorageTeamID(const std::vector<TLogGroupID>& tLogGroups, const StorageTeamID& storageTeamID);
 
 } // namespace ptxn
 

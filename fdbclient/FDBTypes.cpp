@@ -68,7 +68,7 @@ std::string KeySelectorRef::toString() const {
 
 namespace ptxn {
 
-TLogGroupID tLogGroupByStorageTeamID(std::vector<TLogGroupID> tLogGroups, StorageTeamID storageTeamID) {
+TLogGroupID tLogGroupByStorageTeamID(const std::vector<TLogGroupID>& tLogGroups, const StorageTeamID& storageTeamID) {
 	return tLogGroups[std::hash<StorageTeamID>{}(storageTeamID) % tLogGroups.size()];
 }
 

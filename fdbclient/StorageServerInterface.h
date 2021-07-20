@@ -177,7 +177,7 @@ struct ServerCacheInfo {
 	std::vector<Reference<StorageInfo>> dest_info;
 	// Primary and remote DC teams for the key range. For now, ptxn is only enabled for primary DC so
 	// size of teams is always 1
-	std::set<ptxn::StorageTeamID> teams;
+	std::set<ptxn::StorageTeamID> storageTeams;
 
 	void populateTags() {
 		if (tags.size())
