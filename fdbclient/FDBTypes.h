@@ -25,6 +25,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 #include "flow/Arena.h"
 #include "flow/flow.h"
@@ -263,6 +264,11 @@ std::string describeList(T const& items, int max_items) {
 
 template <class T>
 std::string describe(std::vector<T> const& items, int max_items = -1) {
+	return describeList(items, max_items);
+}
+
+template <class T>
+std::string describe(std::unordered_set<T> const& items, int max_items = -1) {
 	return describeList(items, max_items);
 }
 
@@ -734,6 +740,19 @@ struct KeyValueStoreType {
 		default:
 			return "unknown";
 		}
+	}
+
+	static KeyValueStoreType fromString(const std::string& typeStr) {
+		static const std::unordered_map<std::string, StoreType> STR_TO_TYPE = {
+			{ "ssd-1", SSD_BTREE_V1 },
+			{ "ssd-2", SSD_BTREE_V2 },
+			{ "ssd-redwood-experimental", SSD_REDWOOD_V1 },
+			{ "ssd-rocksdb-experimental", SSD_ROCKSDB_V1 },
+			{ "memory", MEMORY },
+			{ "memory-radixtree-beta", MEMORY_RADIXTREE }
+		};
+		auto it = STR_TO_TYPE.find(typeStr);
+		return KeyValueStoreType(it == STR_TO_TYPE.end() ? END : it->second);
 	}
 
 private:

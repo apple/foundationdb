@@ -29,9 +29,10 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 
 	MockLogSystem();
 
-	MockLogSystem(const MockLogSystem& that);
-	MockLogSystem(const MockLogSystem&& that) = delete;
-	MockLogSystem& operator=(const MockLogSystem&) = delete;
+	MockLogSystem(const MockLogSystem&);
+	MockLogSystem& operator=(const MockLogSystem&);
+
+	MockLogSystem(const MockLogSystem&&) = delete;
 	MockLogSystem& operator=(const MockLogSystem&&) = delete;
 
 	void addref() final;
@@ -59,6 +60,7 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	Reference<IPeekCursor> peekSingle(UID dbgid,
 	                                  Version begin,
 	                                  Tag tag,
+	                                  Optional<ptxn::StorageTeamID> storageTeam,
 	                                  std::vector<std::pair<Version, Tag>> history) final;
 	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) final;
 	Reference<IPeekCursor> peekTxs(UID dbgid,

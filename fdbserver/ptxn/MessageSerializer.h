@@ -53,10 +53,15 @@ struct MessageHeader : MultipleItemHeaderBase {
 
 	MessageHeader() : MultipleItemHeaderBase(MessageSerializationProtocolVersion) {}
 
-	template <typename Reader>
-	void loadFromArena(Reader& reader) {
-		MultipleItemHeaderBase::loadFromArena(reader);
-		reader >> storageTeamID >> firstVersion >> lastVersion;
+	std::string toString() const {
+		return concatToString(MultipleItemHeaderBase::toString(),
+		                      " StorageTeamID=",
+		                      storageTeamID,
+		                      " Version Range=[",
+		                      firstVersion,
+		                      ", ",
+		                      lastVersion,
+		                      "]");
 	}
 
 	template <typename Ar>
@@ -77,16 +82,15 @@ struct SubsequencedItemsHeader : MultipleItemHeaderBase {
 
 	SubsequencedItemsHeader() : MultipleItemHeaderBase(MessageSerializationProtocolVersion) {}
 
-	template <typename Reader>
-	void loadFromArena(Reader& reader) {
-		MultipleItemHeaderBase::loadFromArena(reader);
-		reader >> version;
+	std::string toString() const {
+		return concatToString(
+		    MultipleItemHeaderBase::toString(), " version=", version, " lastSubsequence=", lastSubsequence);
 	}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		MultipleItemHeaderBase::serialize(ar);
-		serializer(ar, version);
+		serializer(ar, version, lastSubsequence);
 	}
 };
 
@@ -161,7 +165,8 @@ public:
 	void write(const Subsequence&, StringRef);
 
 	// Writes a serialized section to the serializer
-	// void writeSection()
+	// The serialized section should contain the section header together with the serialized messages
+	void writeSection(StringRef);
 
 	// Gets the current version being written
 	const Version& getCurrentVersion() const;
@@ -180,6 +185,24 @@ public:
 
 	// Gets the serialized data for a given TeamID
 	Standalone<StringRef> getSerialized();
+};
+
+// Wrapper of SubsequencedMessageSerializer only accepts serialized data
+class TLogSubsequencedMessageSerializer {
+private:
+	SubsequencedMessageSerializer serializer;
+
+public:
+	explicit TLogSubsequencedMessageSerializer(const StorageTeamID& storageTeamID);
+
+	// Writes a serialized section
+	void writeSerializedVersionSection(StringRef serialized);
+
+	// Gets the serialized data
+	Standalone<StringRef> getSerialized();
+
+	// Gets total bytes serialized
+	size_t getTotalBytes() const;
 };
 
 // Wrapper of multiple StorageTeamID <-> SubsequencedMessageSerializer
@@ -250,7 +273,7 @@ public:
 	}
 
 	// Get serialized data for a given storage team ID
-	StringRef getSerialized(const StorageTeamID& storageTeamID);
+	Standalone<StringRef> getSerialized(const StorageTeamID& storageTeamID);
 
 	// Get all serialized data
 	std::unordered_map<StorageTeamID, Standalone<StringRef>> getAllSerialized();
@@ -259,16 +282,35 @@ public:
 template <typename T>
 using ConstInputIteratorBase = std::iterator<std::input_iterator_tag, T, size_t, const T* const, const T&>;
 
-class SubsequencedMessageDeserializer {
-private:
-	Arena serializedArena;
+namespace details {
+class SubsequencedMessageDeserializerBase {
+protected:
 	StringRef serialized;
+	MessageHeader header;
 
+	// Reset the deserializer, start with new serialized data
+	void resetImpl(const StringRef);
+
+public:
+	// Gets the team ID
+	const StorageTeamID& getStorageTeamID() const;
+
+	// Gets the number of different versions in this part
+	size_t getNumVersions() const;
+
+	// Gets the first version in this serialized message
+	const Version& getFirstVersion() const;
+
+	// Gets the last version in this serialized message
+	const Version& getLastVersion() const;
+};
+
+} // namespace details
+
+class SubsequencedMessageDeserializer : public details::SubsequencedMessageDeserializerBase {
+private:
 	using DeserializerImpl =
 	    TwoLevelHeaderedItemsDeserializer<details::MessageHeader, details::SubsequencedItemsHeader>;
-
-	// Header of the deserialized data
-	details::MessageHeader header;
 
 public:
 	class iterator : public ConstInputIteratorBase<VersionSubsequenceMessage> {
@@ -279,6 +321,9 @@ public:
 
 		// We keep a pointer to the original serialized data, so when we compare two iterators, we knows they are not
 		// the same if they are pointing to two different seralized.
+		// NOTE we do not use const StringRef even it is const. Otherwise the default move constructor will be
+		// ill-formed. In this case, SubsequencedMessageDeserializer::begin()/end() will not work. Setting up the move
+		// constructor require much more coding.
 		StringRef rawSerializedData;
 
 		// The header of the deserialized data, it is small so we hold a local copy
@@ -296,11 +341,10 @@ public:
 		// Store the deserialized data
 		VersionSubsequenceMessage currentItem;
 
-		// serializedArena_ is the arena that used to store the serialized data
 		// serialized_ refers to the serialized data
 		// If isEndIterator, then the iterator indicates the end of the serialized data. The behavior of dereferencing
 		// the iterator is undefined.
-		iterator(const Arena& serializedArena_, StringRef serialized_, bool isEndIterator = false);
+		iterator(StringRef serialized_, bool isEndIterator = false);
 
 	public:
 		bool operator==(const iterator& another) const;
@@ -315,6 +359,12 @@ public:
 
 		// Postfix operator++, this is more expensive and should be avoided.
 		iterator operator++(int);
+
+		// Returns the arena used by the deserializer. Any objects deserialized and required an arena, e.g. StringRefs,
+		// will depend on this arena. If the arena destructed when the iterator destructs, those objects would be
+		// invalidated, i.e. the life cycle will be the same to the iterator. To extend the life cycle, this arena
+		// should be dependent on other arenas.
+		Arena& arena();
 	};
 
 private:
@@ -323,28 +373,13 @@ private:
 public:
 	using const_iterator = iterator;
 
-	SubsequencedMessageDeserializer(const Standalone<StringRef>& serialized_);
-
-	// serializedArena_ is the arena that used to store the serialized data
 	// serialized_ refers to the serialized data
-	SubsequencedMessageDeserializer(const Arena& serializedArena_, const StringRef serialized_);
+	SubsequencedMessageDeserializer(const StringRef serialized_);
 
-	// Resets the deserializer with new arena and StringRef, see comments in constructor
-	// NOTE: All iterators will be invalidated after reset.
-	void reset(const Arena&, const StringRef);
+	// Resets the deserializer, this will invalidate all iterators
+	void reset(const StringRef serialized_);
 
-	// Gets the team ID
-	const StorageTeamID& getStorageTeamID() const;
-
-	// Gets the number of different versions in this part
-	size_t getNumVersions() const;
-
-	// Gets the first version in this serialized message
-	const Version& getFirstVersion() const;
-
-	// Gets the last version in this serialized message
-	const Version& getLastVersion() const;
-
+	// Returns an iterator.
 	iterator begin() const;
 	// end() is called multiple times in typical for loop:
 	//    for(auto iter = deserializer.begin(); iter != deserializer.end(); ++iter)

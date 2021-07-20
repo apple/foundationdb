@@ -369,6 +369,8 @@ public:
 	}
 	template <class T>
 	void serializeBinaryItem(const T& t) {
+		static_assert(is_binary_serializable<T>::value,
+		              "Object must be binary serializable, see BINARY_SERIALIZABLE macro");
 		*(T*)writeBytes(sizeof(T)) = t;
 	}
 	void* getData() { return data; }
@@ -544,6 +546,8 @@ public:
 	}
 	template <class T>
 	void serializeBinaryItem(const T& t) {
+		static_assert(is_binary_serializable<T>::value,
+		              "Object must be binary serializable, see BINARY_SERIALIZABLE macro");
 		writeBytes(&t, sizeof(T));
 	}
 
@@ -578,6 +582,8 @@ public:
 
 	template <class T>
 	void serializeBinaryItem(T& t) {
+		static_assert(is_binary_serializable<T>::value,
+		              "Object must be binary serializable, see BINARY_SERIALIZABLE macro");
 		t = *(T*)(static_cast<Impl*>(this)->readBytes(sizeof(T)));
 	}
 
@@ -809,6 +815,8 @@ struct PacketWriter {
 	void serializeBytes(StringRef bytes) { serializeBytes(bytes.begin(), bytes.size()); }
 	template <class T>
 	void serializeBinaryItem(const T& t) {
+		static_assert(is_binary_serializable<T>::value,
+		              "Object must be binary serializable, see BINARY_SERIALIZABLE macro");
 		if (sizeof(T) <= buffer->bytes_unwritten()) {
 			*(T*)(buffer->data() + buffer->bytes_written) = t;
 			buffer->bytes_written += sizeof(T);

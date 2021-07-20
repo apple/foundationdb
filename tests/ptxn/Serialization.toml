@@ -19,6 +19,16 @@ startDelay = 0
     testsMatching = '/fdbserver/ptxn/test/twoLevelHeaderedSerializer'
 
 [[test]]
+testTitle = 'Test TwoLevelHeaderedItemsSerializer with preserialized data'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/twoLevelHeaderedSerializer/preserialized'
+
+[[test]]
 testTitle = 'Test SubsequencedMessageSerializer'
 useDB = false
 startDelay = 0
@@ -37,6 +47,16 @@ startDelay = 0
     testName = 'UnitTests'
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/ProxySubsequenceMessageSerializer/normal'
+
+[[test]]
+testTitle = 'Test TLogSubsequenceMessageSerializer'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/TLogSubsequencedMessageSerializer/normal'
 
 [[test]]
 testTitle = 'Test SubsequencedMessageSerializer -- Huge amount of data'

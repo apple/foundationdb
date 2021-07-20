@@ -38,6 +38,12 @@ MockLogSystem::MockLogSystem(const MockLogSystem& that) : cursor(that.cursor) {
 	logMethodName(__func__);
 }
 
+MockLogSystem& MockLogSystem::operator=(const MockLogSystem& that) {
+	logMethodName(__func__);
+	cursor = that.cursor;
+	return *this;
+}
+
 void MockLogSystem::addref() {
 	logMethodName(__func__);
 	ReferenceCounted<MockLogSystem>::addref();
@@ -114,6 +120,7 @@ Reference<ILogSystem::IPeekCursor> MockLogSystem::peek(UID dbgid,
 Reference<ILogSystem::IPeekCursor> MockLogSystem::peekSingle(UID dbgid,
                                                              Version begin,
                                                              Tag tag,
+                                                             Optional<ptxn::StorageTeamID> storageTeam,
                                                              std::vector<std::pair<Version, Tag>> history) {
 	logMethodName(__func__);
 	return cursor;

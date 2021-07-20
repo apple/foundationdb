@@ -161,6 +161,7 @@ public:
 	double ALL_DATA_REMOVED_DELAY;
 	double INITIAL_FAILURE_REACTION_DELAY;
 	double CHECK_TEAM_DELAY;
+	double PERPETUAL_WIGGLE_DELAY;
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -389,6 +390,7 @@ public:
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
 	double CLIENT_REGISTER_INTERVAL;
+	bool CLUSTER_CONTROLLER_ENABLE_WORKER_HEALTH_MONITOR;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)

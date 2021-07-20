@@ -21,39 +21,100 @@
 #ifndef FDBSERVER_MOCK_PEEK_CURSOR
 #define FDBSERVER_MOCK_PEEK_CURSOR
 
+#include <iosfwd>
 #include "fdbserver/LogSystem.h"
 
 struct MockPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<MockPeekCursor> {
 
-	struct MessageAndTags {
-		MessageAndTags(const std::string& message, const vector<Tag>& tags) : message(message), tags(tags) {}
-		std::string message;
-		std::vector<Tag> tags;
-		// We don't handle subversion in this mock because storage server doesn't care about it.
+	struct VersionedMessage {
+		// Every message should be able to have independent arenas so that they can be freed separately after consumed.
+		Arena arena;
+		Version version;
+		// Subversion is not used for now.
+		uint32_t sub = 0;
+		StringRef message;
+		VectorRef<Tag> tags;
+		VersionedMessage() = default;
+		VersionedMessage(const Arena& arena, Version version, const StringRef& message, const VectorRef<Tag>& tags)
+		  : arena(arena), version(version), message(message), tags(tags) {}
+
+		friend std::ostream& operator<<(std::ostream& os, const VersionedMessage& versionedMessage);
 	};
-	typedef std::pair<Version, std::vector<MessageAndTags>> OneVersionMessages;
 
-	// Input: The messages that need to be feed into the mock cursor.
-	const std::vector<OneVersionMessages> allVersionMessages;
+	struct VersionedMessageSupplier final : ReferenceCounted<VersionedMessageSupplier> {
+		int i = 0;
+		int end;
+		Standalone<VectorRef<Tag>> tags;
+		int advanceVersionsPerMutation;
 
-	// Iteration statuses of the cursor
-	std::size_t pVersion = 0;
-	std::size_t pMessage = 0;
+		Optional<VersionedMessage> get() {
+			// std::cout << "OnDemandVersionedMessageSupplier get " << i << ", end " << end << std::endl;
+			ASSERT(i <= end);
+			if (i == end) {
+				return Optional<VersionedMessage>();
+			}
+			Arena arena;
+			// TODO: Support keys in random order.
+			MutationRef mutation(arena,
+			                     MutationRef::SetValue,
+			                     StringRef(arena, "Key-" + std::to_string(i)),
+			                     StringRef(arena, "Value-" + std::to_string(i)));
+			StringRef str = StringRef(arena, BinaryWriter::toValue(mutation, AssumeVersion(currentProtocolVersion)));
+			Version version = i * advanceVersionsPerMutation + 1;
+			VersionedMessage message(arena, version, str, tags);
 
-	// _version could be derived from pVersion. We have an additional field so version() can return a reference.
-	LogMessageVersion cursorVersion;
-	// _reader could be derived too. We have an additional field so reader() can return a reference.
-	ArenaReader cursorReader;
+			i++;
+			return Optional<VersionedMessage>(message);
+		}
+
+		static Version commitVersion(int id, int advanceVersionsPerMutation) {
+			return id * advanceVersionsPerMutation + 1;
+		}
+
+		explicit VersionedMessageSupplier(const int end,
+		                                  const Standalone<VectorRef<Tag>> tags,
+		                                  const int advanceVersionsPerMutation)
+		  : end(end), tags(tags), advanceVersionsPerMutation(advanceVersionsPerMutation) {}
+
+		VersionedMessageSupplier(const VersionedMessageSupplier& that)
+		  : i(that.i), end(that.end), tags(that.tags), advanceVersionsPerMutation(that.advanceVersionsPerMutation) {}
+		VersionedMessageSupplier& operator=(const VersionedMessageSupplier& that) {
+			i = that.i;
+			end = that.end;
+			tags = that.tags;
+			advanceVersionsPerMutation = that.advanceVersionsPerMutation;
+			return *this;
+		}
+
+		using ReferenceCounted<VersionedMessageSupplier>::addref;
+		using ReferenceCounted<VersionedMessageSupplier>::delref;
+	};
+
+	// Every time when getMore() is called, the end of supplier is extended by nMutationsPerMore until it reaches
+	// maxMutations().
+	int nMutationsPerMore = 0;
+	Optional<int> maxMutations = 0;
+
+	VersionedMessageSupplier supplier;
 	Arena cursorArena;
 
-	MockPeekCursor(const std::vector<OneVersionMessages>& allVersionMessages, const Arena& arena);
-	MockPeekCursor(const std::vector<OneVersionMessages>& allVersionMessages,
-	               size_t pVersion,
-	               size_t pMessage,
-	               const LogMessageVersion& version,
-	               const Arena& arena);
+	// The following 2 variables keeps the information of the next message after calling nextMessage()
+	Optional<VersionedMessage> curVersionedMessage;
+	LogMessageVersion curVersion;
+	// This can be updated every time reader() is called, so we do not need to keep its status. It's here just for
+	// managing the pointer returned by reader().
+	std::unique_ptr<ArenaReader> curReader = nullptr;
 
-	void describe();
+	MockPeekCursor(int nMutationsPerMore,
+	               Optional<int> maxMutations,
+	               const VersionedMessageSupplier& supplier,
+	               const Arena& cursorArena);
+
+	// When cloneNoMore().
+	MockPeekCursor(const VersionedMessageSupplier& supplier,
+	               const Arena& cursorArena,
+	               const Optional<VersionedMessage>& curVersionedMessage,
+	               const LogMessageVersion& curVersion);
 
 	Reference<IPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;

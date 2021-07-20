@@ -151,6 +151,7 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct RegisterMasterRequest> registerMaster;
 	RequestStream<struct GetServerDBInfoRequest>
 	    getServerDBInfo; // only used by testers; the cluster controller will send the serverDBInfo to workers
+	RequestStream<struct UpdateWorkerHealthRequest> updateWorkerHealth;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -160,7 +161,8 @@ struct ClusterControllerFullInterface {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
-		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady();
+		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
+		       updateWorkerHealth.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -172,6 +174,7 @@ struct ClusterControllerFullInterface {
 		getWorkers.getEndpoint(TaskPriority::ClusterController);
 		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
 		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
+		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -187,7 +190,8 @@ struct ClusterControllerFullInterface {
 		           registerWorker,
 		           getWorkers,
 		           registerMaster,
-		           getServerDBInfo);
+		           getServerDBInfo,
+		           updateWorkerHealth);
 	}
 };
 
@@ -435,6 +439,20 @@ struct TLogGroup {
 
 } // namespace ptxn
 
+struct UpdateWorkerHealthRequest {
+	constexpr static FileIdentifier file_identifier = 5789927;
+	NetworkAddress address;
+	std::vector<NetworkAddress> degradedPeers;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, address, degradedPeers);
+	}
+};
+
 struct InitializeTLogRequest {
 	constexpr static FileIdentifier file_identifier = 15604392;
 	UID recruitmentID;
@@ -641,6 +659,7 @@ struct InitializeStorageRequest {
 	Tag seedTag; //< If this server will be passed to seedShardServers, this will be a tag, otherwise it is invalidTag
 	UID reqId;
 	UID interfaceId;
+	Optional<ptxn::StorageTeamID> storageTeamId;
 	KeyValueStoreType storeType;
 	Optional<std::pair<UID, Version>>
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
@@ -648,7 +667,7 @@ struct InitializeStorageRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion);
+		serializer(ar, seedTag, reqId, interfaceId, storageTeamId, storeType, reply, tssPairIDAndVersion);
 	}
 };
 
@@ -883,7 +902,9 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     // Only applicable when logSystemType is mock.
     // This has to be a shared_ptr rather than unique_ptr or Reference because MockLogSystem is only forward declared.
-    std::shared_ptr<MockLogSystem> mockLogSystem = nullptr);
+    std::shared_ptr<MockLogSystem> mockLogSystem = nullptr,
+    // Storage team id of a ptxn storage server
+    Optional<ptxn::StorageTeamID> storageTeamId = Optional<ptxn::StorageTeamID>());
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,

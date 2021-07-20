@@ -7,3 +7,8 @@ startDelay = 0
     testName = 'UnitTests'
     maxTestCases = 1
     testsMatching = 'fdbserver/ptxn/test/storageserver'
+
+    nMutationsPerMore = 20
+    maxMutations = 200
+    advanceVersionsPerMutation = 1000
+    verifyId = 198

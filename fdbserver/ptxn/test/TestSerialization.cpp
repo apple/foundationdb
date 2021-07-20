@@ -118,7 +118,7 @@ TEST_CASE("/fdbserver/ptxn/test/headeredSerializer") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
+TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer/base") {
 	using TestSerializer = ptxn::TwoLevelHeaderedItemsSerializer<TestSerializerHeader, TestSerializerSectionHeader>;
 	using TestDeserializer = ptxn::TwoLevelHeaderedItemsDeserializer<TestSerializerHeader, TestSerializerSectionHeader>;
 
@@ -131,7 +131,6 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 	          ptxn::SerializerVersionOptionBytes + ptxn::getSerializedBytes<TestSerializerHeader>());
 	ASSERT(serializer.isSectionCompleted());
 	ASSERT(!serializer.isAllItemsCompleted());
-	ASSERT_EQ(serializer.getNumItems(), 0);
 	ASSERT_EQ(serializer.getNumItemsCurrentSection(), 0);
 	ASSERT_EQ(serializer.getNumSections(), 0);
 
@@ -147,11 +146,9 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 	// Add new items in the current section
 	serializer.writeItem(TestSerializerItemA{ 1 });
 	ASSERT_EQ(serializer.getNumItemsCurrentSection(), 1);
-	ASSERT_EQ(serializer.getNumItems(), 1);
 
 	serializer.writeItem(TestSerializerItemB{ 2 });
 	ASSERT_EQ(serializer.getNumItemsCurrentSection(), 2);
-	ASSERT_EQ(serializer.getNumItems(), 2);
 
 	// Close the section
 	serializer.completeSectionWriting();
@@ -167,11 +164,9 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 	// Add new items in the current section
 	serializer.writeItem(TestSerializerItemA{ 4 });
 	ASSERT_EQ(serializer.getNumItemsCurrentSection(), 1);
-	ASSERT_EQ(serializer.getNumItems(), 3);
 
 	serializer.writeItem(TestSerializerItemB{ 5 });
 	ASSERT_EQ(serializer.getNumItemsCurrentSection(), 2);
-	ASSERT_EQ(serializer.getNumItems(), 4);
 
 	// Close the section
 	serializer.completeSectionWriting();
@@ -185,7 +180,7 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 	serializer.writeHeader(TestSerializerHeader{ 10, 11, 12 });
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	TestDeserializer deserializer(serialized.arena(), serialized);
+	TestDeserializer deserializer(serialized);
 
 	TestSerializerHeader mainHeader = deserializer.deserializeAsMainHeader();
 	ASSERT_EQ(mainHeader.item1, 10);
@@ -210,6 +205,85 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 	ASSERT_EQ(itemA.item1, 4);
 	deserializer.deserializeItem(itemB);
 	ASSERT_EQ(itemB.item2, 5);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer/preserialized") {
+	using TestSerializer = ptxn::TwoLevelHeaderedItemsSerializer<TestSerializerHeader, TestSerializerSectionHeader>;
+	using TestDeserializer = ptxn::TwoLevelHeaderedItemsDeserializer<TestSerializerHeader, TestSerializerSectionHeader>;
+
+	ptxn::test::print::PrintTiming printTiming("test/twoLevelHeaderedSerializer/preserialized");
+
+	const size_t HEADER_LENGTH = ptxn::getSerializedBytes<TestSerializerHeader>();
+
+	// Pre-serialize some data
+	TestSerializer preserializer;
+	preserializer.startNewSection();
+	preserializer.writeItem(TestSerializerItemA{ 0xff });
+	preserializer.writeItem(TestSerializerItemB{ 0xee });
+	preserializer.completeSectionWriting();
+	preserializer.writeSectionHeader(TestSerializerSectionHeader{ 0xdd, 0xcc });
+	preserializer.completeAllItemsWriting();
+
+	Standalone<StringRef> preserialized = preserializer.getSerialized();
+
+	// Inject data into serializer
+	TestSerializer serializer;
+
+	serializer.startNewSection();
+	serializer.writeItem(TestSerializerItemA{ 1 });
+	serializer.completeSectionWriting();
+	serializer.writeSectionHeader(TestSerializerSectionHeader{ 10, 20 });
+
+	serializer.writeSerializedSection(
+	    StringRef(preserialized.begin() + ptxn::SerializerVersionOptionBytes + HEADER_LENGTH,
+	              preserialized.size() - ptxn::SerializerVersionOptionBytes - HEADER_LENGTH));
+
+	serializer.startNewSection();
+	serializer.writeItem(TestSerializerItemB{ 2 });
+	serializer.completeSectionWriting();
+	serializer.writeSectionHeader(TestSerializerSectionHeader{ 30, 40 });
+
+	serializer.completeAllItemsWriting();
+
+	serializer.writeHeader(TestSerializerHeader{ 1, 2, 3 });
+
+	Standalone<StringRef> serialized = serializer.getSerialized();
+
+	// Deserialize and verify
+	TestDeserializer deserializer(serialized);
+
+	auto mainHeader = deserializer.deserializeAsMainHeader();
+	ASSERT_EQ(mainHeader.item1, 1);
+	ASSERT_EQ(mainHeader.item2, 2);
+	ASSERT_EQ(mainHeader.item3, 3);
+
+	auto section1Header = deserializer.deserializeAsSectionHeader();
+	ASSERT_EQ(section1Header.item1, 10);
+	ASSERT_EQ(section1Header.item2, 20);
+
+	auto section1Item1 = deserializer.deserializeItem<TestSerializerItemA>();
+	ASSERT_EQ(section1Item1.item1, 1);
+
+	auto section2Header = deserializer.deserializeAsSectionHeader();
+	ASSERT_EQ(section2Header.item1, 0xdd);
+	ASSERT_EQ(section2Header.item2, 0xcc);
+
+	auto section2Item1 = deserializer.deserializeItem<TestSerializerItemA>();
+	ASSERT_EQ(section2Item1.item1, 0xff);
+
+	auto section2Item2 = deserializer.deserializeItem<TestSerializerItemB>();
+	ASSERT_EQ(section2Item2.item2, 0xee);
+
+	auto section3Header = deserializer.deserializeAsSectionHeader();
+	ASSERT_EQ(section3Header.item1, 30);
+	ASSERT_EQ(section3Header.item2, 40);
+
+	auto section3Item1 = deserializer.deserializeItem<TestSerializerItemB>();
+	ASSERT_EQ(section3Item1.item2, 2);
+
+	ASSERT(deserializer.allConsumed());
 
 	return Void();
 }
@@ -426,11 +500,12 @@ bool testSerialization() {
 
 	serializer.completeMessageWriting();
 
-	printTiming << "Serialization" << std::endl;
+	printTiming << "Serialization, storageTeamID = " << storageTeamID.toString() << std::endl;
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
+	SubsequencedMessageDeserializer deserializer(serialized);
 	SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
+	printTiming << deserializer.getStorageTeamID() << std::endl;
 
 	ASSERT(deserializer.getStorageTeamID() == storageTeamID);
 	ASSERT_EQ(deserializer.getNumVersions(), 6);
@@ -461,7 +536,7 @@ bool testSerializationEmpty() {
 	serializer.completeMessageWriting();
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
+	SubsequencedMessageDeserializer deserializer(serialized);
 	SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
 
 	ASSERT(iterator == deserializer.cend());
@@ -513,7 +588,7 @@ bool testDeserializerIterators() {
 
 	auto serialized = serializer.getSerialized();
 
-	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
+	SubsequencedMessageDeserializer deserializer(serialized);
 
 	ASSERT(deserializer.getStorageTeamID() == storageTeamID);
 	ASSERT_EQ(deserializer.getNumVersions(), 2);
@@ -612,13 +687,13 @@ bool testDeserializerReset() {
 	serializer2.completeMessageWriting();
 	Standalone<StringRef> serialized2 = serializer2.getSerialized();
 
-	SubsequencedMessageDeserializer deserializer(serialized1.arena(), serialized1);
+	SubsequencedMessageDeserializer deserializer(serialized1);
 	auto iter1 = deserializer.begin();
 	ASSERT(*iter1++ == DATA1[0]);
 	ASSERT(*iter1++ == DATA1[1]);
 	ASSERT(iter1 == deserializer.end());
 
-	deserializer.reset(serialized2.arena(), serialized2);
+	deserializer.reset(serialized2);
 	auto iter2 = deserializer.begin();
 	ASSERT(*iter2++ == DATA2[0]);
 	ASSERT(iter2 == deserializer.end());
@@ -681,7 +756,7 @@ TEST_CASE("/fdbserver/ptxn/test/SubsequencedMessageSerializer/timing") {
 
 	ptxn::test::print::PrintTiming printTiming("test/SubsequencedMessageSerializer/timing");
 
-	const int numMutations = params.getInt("numMutations").orDefault(32 * 1024);
+	const int numMutations = params.getInt("numMutations").orDefault(10); // 32 * 1024);
 
 	Arena mutationArena;
 	std::vector<VersionSubsequenceMessage> data;
@@ -702,6 +777,68 @@ TEST_CASE("/fdbserver/ptxn/test/SubsequencedMessageSerializer/timing") {
 	for (SubsequencedMessageDeserializer::iterator iter = deserializer.begin(); iter != deserializer.end(); ++iter)
 		;
 	printTiming << "Deserialized " << numMutations << " mutations" << std::endl;
+
+	return Void();
+}
+
+namespace {
+
+namespace testTLogSubsequencedMessageSerializer {
+	struct A {
+		uint8_t x = 0xff;
+		uint32_t y = 0xabcd;
+
+		template <typename Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, x, y);
+		}
+	} a;
+
+bool testWriteSerialized() {
+	using namespace ptxn;
+
+	ptxn::details::SubsequencedItemsHeader header;
+	header.version = 0xab; 
+	header.lastSubsequence = 1;
+	header.numItems = 1;
+	header.length = 0xff; // TODO even in this test the length is not being used, set the proper value
+	ptxn::SubsequenceSpanContextItem item;
+	item.subsequence = 1;
+	item.spanContext = SpanContextMessage(SpanID(1, 2));
+
+	BinaryWriter preserializer(IncludeVersion());
+	preserializer << header << item;
+	Standalone<StringRef> preserialized = preserializer.toValue();
+	const size_t PREFIX_LENGTH = ptxn::SerializerVersionOptionBytes;
+	StringRef serializedWithoutVersionOptions(preserialized.begin() + PREFIX_LENGTH,
+	                                          preserialized.size() - PREFIX_LENGTH);
+
+	TLogSubsequencedMessageSerializer serializer(ptxn::test::randomUID());
+	serializer.writeSerializedVersionSection(serializedWithoutVersionOptions);
+	Standalone<StringRef> serialized = serializer.getSerialized();
+	SubsequencedMessageDeserializer deserializer(serialized);
+
+	auto iter = deserializer.begin();
+	ASSERT_EQ(iter->version, 0xab);
+	ASSERT_EQ(iter->subsequence, 1);
+	ASSERT(std::get<SpanContextMessage>(iter->message).spanContext == SpanID(1, 2));
+
+	++iter;
+	ASSERT(iter == deserializer.end());
+
+	return true;
+}
+
+} // namespace testTLogSubsequencedMessageSerializer
+
+} // anonymous namespace
+
+TEST_CASE("/fdbserver/ptxn/test/TLogSubsequencedMessageSerializer/normal") {
+	using namespace testTLogSubsequencedMessageSerializer;
+
+	ptxn::test::print::PrintTiming printTiming("test/TLogSubsequencedMessageSerializer");
+
+	ASSERT(testWriteSerialized());
 
 	return Void();
 }

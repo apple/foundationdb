@@ -201,10 +201,16 @@ that process, and wait for necessary data to be moved away.
 #. ``\xff\xff/management/consistency_check_suspended`` Read/write. Set or read this key will set or read the underlying system key ``\xff\x02/ConsistencyCheck/Suspend``. The value of this special key is unused thus if present, will be empty. In particular, if the key exists, then consistency is suspended. For more details, see help text of ``fdbcli`` command ``consistencycheck``.
 #. ``\xff\xff/management/db_locked`` Read/write. A single key that can be read and modified. Set the key will lock the database and clear the key will unlock. If the database is already locked, then the commit will fail with the ``special_keys_api_failure`` error. For more details, see help text of ``fdbcli`` command ``lock`` and ``unlock``.
 #. ``\xff\xff/management/auto_coordinators`` Read-only. A single key, if read, will return a set of processes which is able to satisfy the current redundency level and serve as new coordinators. The return value is formatted as a comma delimited string of network addresses of coordinators, i.e. ``<ip:port>,<ip:port>,...,<ip:port>``.
+#. ``\xff\xff/management/excluded_locality/<locality>`` Read/write. Indicates that the cluster should move data away from processes matching ``<locality>``, so that they can be safely removed. See :ref:`removing machines from a cluster <removing-machines-from-a-cluster>` for documentation for the corresponding fdbcli command.
+#. ``\xff\xff/management/failed_locality/<locality>`` Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See :ref:`removing machines from a cluster <removing-machines-from-a-cluster>` for documentation for the corresponding fdbcli command.
+#. ``\xff\xff/management/options/excluded_locality/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/excluded_locality/<locality>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
+#. ``\xff\xff/management/options/failed_locality/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/failed_locality/<locality>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
 
 An exclusion is syntactically either an ip address (e.g. ``127.0.0.1``), or
-an ip address and port (e.g. ``127.0.0.1:4500``). If no port is specified,
-then all processes on that host match the exclusion.
+an ip address and port (e.g. ``127.0.0.1:4500``) or any locality (e.g ``locality_dcid:primary-satellite`` or
+``locality_zoneid:primary-satellite-log-2`` or ``locality_machineid:primary-stateless-1`` or ``locality_processid:223be2da244ca0182375364e4d122c30``).
+If no port is specified, then all processes on that host match the exclusion.
+For locality, all processes that match the given locality are excluded.
 
 Configuration module
 --------------------
@@ -233,6 +239,29 @@ retriable                  boolean  Whether or not this operation might succeed 
 command                    string   The fdbcli command corresponding to this operation
 message                    string   Help text explaining the reason this operation failed
 ========================== ======== ===============
+
+Global configuration module
+---------------------------
+
+The global configuration module provides an interface to read and write values
+to :doc:`global-configuration`. In general, clients should not read and write
+the global configuration special key space keys directly, but should instead
+use the global configuration functions.
+
+#. ``\xff\xff/global_config/<key> := <value>`` Read/write. Reading keys in the range will return a tuple decoded string representation of the value for the given key. Writing a value will update all processes in the cluster with the new key-value pair. Values must be written using the :ref:`api-python-tuple-layer`.
+
+.. _special-key-space-tracing-module:
+
+Tracing module
+--------------
+
+The tracing module provides read and write access to a transactions' tracing
+data. Every transaction contains a unique identifier which follows the
+transaction through the system. By providing access to set this identifier,
+clients can connect FoundationDB transactions to outside events.
+
+#. ``\xff\xff/tracing/transaction_id := <transaction_id>`` Read/write. A 64-bit integer transaction ID which follows the transaction as it moves through FoundationDB. All transactions are assigned a random transaction ID on creation, and this key can be read to surface the randomly generated ID. Alternatively, set this key to provide a custom identifier. When setting this key, provide a string in the form of a 64-bit integer, which will be automatically converted to the appropriate type.
+#. ``\xff\xff/tracing/token := <tracing_enabled>`` Read/write. Set to true/false to enable or disable tracing for the transaction, respectively. If read, returns a 64-bit integer set to 0 if tracing has been disabled, or a random 64-bit integer otherwise (this integers value has no meaning to the client other than to determine whether the transaction will be traced).
 
 .. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
 .. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS
