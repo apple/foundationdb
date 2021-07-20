@@ -90,8 +90,8 @@ struct ResolveTransactionBatchReply {
 	// transaction index -> conflicting read_conflict_range ids given by the resolver
 	std::map<int, VectorRef<int>> conflictingKeyRangeMap;
 
-	// Each team's previous commit version
-	std::map<ptxn::StorageTeamID, Version> previousCommitVersions;
+	// Each group's previous commit version
+	std::map<ptxn::TLogGroupID, Version> previousCommitVersions;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -112,9 +112,9 @@ struct ResolveTransactionBatchRequest {
 	VectorRef<int> txnStateTransactions;
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
-	std::vector<ptxn::StorageTeamID> updatedTeams; // Teams updated in this batch
-	std::vector<ptxn::StorageTeamID> newTeams; // New teams added in this batch
-	std::vector<ptxn::StorageTeamID> staleTeams; // Teams that become stale in this batch
+	std::vector<ptxn::TLogGroupID> updatedGroups; // Groups updated in this batch
+	std::vector<ptxn::TLogGroupID> newGroups; // New groups added in this batch
+	std::vector<ptxn::TLogGroupID> staleGroups; // Groups that become stale in this batch
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -128,9 +128,9 @@ struct ResolveTransactionBatchRequest {
 		           arena,
 		           debugID,
 		           spanContext,
-		           updatedTeams,
-		           newTeams,
-		           staleTeams);
+		           updatedGroups,
+		           newGroups,
+		           staleGroups);
 	}
 };
 

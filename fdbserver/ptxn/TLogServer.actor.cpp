@@ -687,6 +687,7 @@ void TLogQueue::updateVersionSizes(const TLogQueueEntry& result,
 	}
 }
 
+// TODO: should deserialize messages to pairs of storage team -> message
 void commitMessages(Reference<TLogGroupData> self,
                     Reference<LogGenerationData> logData,
                     Version version,
