@@ -23,7 +23,9 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/JsonBuilder.h"
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "flow/StreamCipher.h"
+#endif
 #include "flow/UnitTest.h"
 
 #include <algorithm>
@@ -1127,6 +1129,8 @@ public:
 		return false;
 	}
 
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+
 	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
 		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
 		    filename,
@@ -1163,6 +1167,7 @@ public:
 		StreamCipher::Key::initializeKey(std::move(key));
 		return Void();
 	}
+#endif
 }; // class BackupContainerFileSystemImpl
 
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeLogFile(Version beginVersion,
@@ -1475,6 +1480,8 @@ bool BackupContainerFileSystem::usesEncryption() const {
 Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 	return encryptionSetupFuture;
 }
+
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
 	if (encryptionKeyFileName.present()) {
 		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
@@ -1483,6 +1490,11 @@ void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& en
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const &filename) {
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
 }
+#else
+Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
+	return Void();
+}
+#endif
 
 namespace backup_test {
 
