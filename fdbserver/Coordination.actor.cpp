@@ -233,7 +233,11 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 		}
 	}
 
-	req.reply.sendErrorOr(replyContents);
+	if (replyContents.present()) {
+		req.reply.send(replyContents.get());
+	} else {
+		req.reply.sendError(replyContents.getError());
+	}
 
 	if (--(*clientCount) == 0) {
 		hasConnectedClients->set(false);

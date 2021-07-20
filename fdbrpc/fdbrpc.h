@@ -123,14 +123,6 @@ public:
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
-	template <class U>
-	void sendErrorOr(U&& value) const {
-		if (value.present()) {
-			sav->send(std::forward<U>(value).get());
-		} else {
-			sav->sendError(value.getError());
-		}
-	}
 
 	Future<T> getFuture() const {
 		sav->addFutureRef();
