@@ -53,6 +53,7 @@ set(FLOW_SRCS
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
+  StreamCipher.h
   SystemMonitor.cpp
   SystemMonitor.h
   TDMetric.actor.h
@@ -100,8 +101,7 @@ set(FLOW_SRCS
 if(WITH_TLS AND NOT WIN32)
   set(FLOW_SRCS
     ${FLOW_SRCS}
-    StreamCipher.cpp
-    StreamCipher.h)
+    StreamCipher.cpp)
 endif()
 
 add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)

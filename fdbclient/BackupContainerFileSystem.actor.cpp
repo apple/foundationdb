@@ -1129,8 +1129,7 @@ public:
 		return false;
 	}
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
-
+#if ENCRYPTION_ENABLED
 	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
 		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
 		    filename,
@@ -1167,7 +1166,8 @@ public:
 		StreamCipher::Key::initializeKey(std::move(key));
 		return Void();
 	}
-#endif
+#endif // ENCRYPTION_ENABLED
+
 }; // class BackupContainerFileSystemImpl
 
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeLogFile(Version beginVersion,
@@ -1484,11 +1484,19 @@ Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
 	if (encryptionKeyFileName.present()) {
+#if ENCRYPTION_ENABLED
 		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
+#else
+		encryptionSetupFuture = Void();
+#endif
 	}
 }
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const &filename) {
+#if ENCRYPTION_ENABLED
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
+#else
+	return Void();
+#endif
 }
 #else
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
