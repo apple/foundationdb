@@ -500,6 +500,8 @@ struct CommitBatchContext {
 
 	void setupTraceBatch();
 
+	void trackStorageTeam(const ptxn::StorageTeamID& storageTeam);
+
 private:
 	void evaluateBatchSize();
 };
@@ -555,6 +557,12 @@ void CommitBatchContext::evaluateBatchSize() {
 		const auto& mutations = tr.transaction.mutations;
 		batchOperations += mutations.size();
 		batchBytes += mutations.expectedSize();
+	}
+}
+
+void CommitBatchContext::trackStorageTeam(const ptxn::StorageTeamID& storageTeam) {
+	if (!pProxyCommitData->tLogGroups.empty()) {
+		overlappingTLogGroups.insert(ptxn::tLogGroupByStorageTeamID(pProxyCommitData->tLogGroups, storageTeam));
 	}
 }
 
@@ -973,21 +981,18 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				}
 				self->toCommit.writeTypedMessage(m);
 
-				auto& teams = pProxyCommitData->keyInfo[m.param1].teams;
-				if (!pProxyCommitData->tLogGroups.empty()) {
-					for (auto& team : teams) {
-						self->overlappingTLogGroups.insert(
-						    ptxn::tLogGroupByStorageTeamID(pProxyCommitData->tLogGroups, team));
-					}
+				auto& storageTeams = pProxyCommitData->keyInfo[m.param1].storageTeams;
+				for (auto& team : storageTeams) {
+					self->trackStorageTeam(team);
 				}
 				// TODO: pTeamMessageBuilder needs to take a tlog group parameter
-				self->pTeamMessageBuilder->write(m, teams);
+				self->pTeamMessageBuilder->write(m, storageTeams);
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
 				auto firstRange = ranges.begin();
 				++firstRange;
-				std::set<ptxn::StorageTeamID> storageTeams; // write m to these teams
+				std::set<ptxn::StorageTeamID> storageTeams; // write m to these storage teams
 				if (firstRange == ranges.end()) {
 					// Fast path
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
@@ -997,7 +1002,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
-					auto& dstTeams = ranges.begin().value().teams;
+					auto& dstTeams = ranges.begin().value().storageTeams;
 					storageTeams.insert(dstTeams.begin(), dstTeams.end());
 
 					// check whether clear is sampled
@@ -1016,7 +1021,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					for (auto r : ranges) {
 						r.value().populateTags();
 						allSources.insert(r.value().tags.begin(), r.value().tags.end());
-						auto& dstTeams = r.value().teams;
+						auto& dstTeams = r.value().storageTeams;
 						storageTeams.insert(dstTeams.begin(), dstTeams.end());
 
 						// check whether clear is sampled
@@ -1044,11 +1049,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				if (!pProxyCommitData->tLogGroups.empty()) {
-					for (auto& storageTeam : storageTeams) {
-						self->overlappingTLogGroups.insert(
-						    ptxn::tLogGroupByStorageTeamID(pProxyCommitData->tLogGroups, storageTeam));
-					}
+				for (auto& team : storageTeams) {
+					self->trackStorageTeam(team);
 				}
 				// TODO: need to take tlog group information as parameter
 				self->pTeamMessageBuilder->write(m, storageTeams);
@@ -1229,6 +1231,11 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
+
+	// TODO:
+	// new code will push each LogPushData into each individual TLog group with its own previous commit version
+	// and commit version in this batch
+
 	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
 	                                                          self->commitVersion,
 	                                                          pProxyCommitData->committedVersion.get(),
@@ -1918,7 +1925,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	// retrieve TLog group ids info from ServerDBInfo
-	for (auto& tLogSet : commitData.db->get().logSystemConfig.tLogs) {
+	// TODO: change it to retrieve from master through txnStateStore
+	for (const auto& tLogSet : commitData.db->get().logSystemConfig.tLogs) {
 		if (tLogSet.isLocal) {
 			TEST(tLogSet.tLogGroups.empty()); // primary DC should have recruited ptxn TLog groups
 			commitData.tLogGroups = tLogSet.tLogGroups;

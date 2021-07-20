@@ -1026,7 +1026,7 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 		req.version = self->lastEpochEnd;
 		req.lastReceivedVersion = -1;
 		req.newGroups.reserve(self->tLogGroupCollection->groups().size());
-		for (auto& tLogGroup : self->tLogGroupCollection->groups()) {
+		for (const auto& tLogGroup : self->tLogGroupCollection->groups()) {
 			req.newGroups.push_back(tLogGroup->id());
 		}
 		replies.push_back(brokenPromiseToNever(r.resolve.getReply(req)));

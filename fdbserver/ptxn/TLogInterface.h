@@ -59,6 +59,10 @@ struct TLogCommitRequest {
 	// Team ID
 	StorageTeamID storageTeamID;
 
+	// TODO:
+	// std::unordered_map<StorageTeamID, StringRef> commits
+	// TLogGroupID group
+
 	// Arena
 	Arena arena;
 
