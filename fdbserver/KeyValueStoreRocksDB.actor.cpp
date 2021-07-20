@@ -8,6 +8,7 @@
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
+#include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
@@ -557,8 +558,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Optional<Future<Void>> metrics;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
-		writeThread = createGenericThreadPool();
-		readThreads = createGenericThreadPool();
+		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
+		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
+		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
+		// performing the reads in background threads in simulation, the event loop thinks there is no work to do and
+		// advances time faster than 1 sec/sec. By the time the blocking read actually finishes, simulation has advanced
+		// time by more than 5 seconds, so every read fails with a transaction_too_old error. Doing blocking IO on the
+		// main thread solves this issue. There are almost certainly better fixes, but my goal was to get a less
+		// invasive change merged first and work on a more realistic version if/when we think that would provide
+		// substantially more confidence in the correctness.
+		// TODO: Adapt the simulation framework to not advance time quickly when background reads/writes are occurring.
+		if (g_network->isSimulated()) {
+			writeThread = CoroThreadPool::createThreadPool();
+			readThreads = CoroThreadPool::createThreadPool();
+		} else {
+			writeThread = createGenericThreadPool();
+			readThreads = createGenericThreadPool();
+		}
 		writeThread->addThread(new Writer(db, id), "fdb-rocksdb-wr");
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
