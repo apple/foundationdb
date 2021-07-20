@@ -2361,7 +2361,7 @@ public:
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysical"),
-		             toString(pageID).c_str(),
+		             toString(pageIDs).c_str(),
 		             page->begin());
 
 		++g_redwoodMetrics.metric.pagerDiskWrite;
@@ -2465,7 +2465,7 @@ public:
 	                                                  Reference<ArenaPage> data,
 	                                                  Version v) override {
 		debug_printf(
-		    "DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageIDs)).c_str(), v);
+		    "DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageIDs).c_str(), v);
 		Future<VectorRef<LogicalPageID>> f =
 		    map(newPageIDs(pageIDs.size()), [=](Standalone<VectorRef<LogicalPageID>> newIDs) {
 			    updatePage(reason, level, newIDs, data);
@@ -2623,7 +2623,7 @@ public:
 		if (!header) {
 			if (!page->verifyChecksum(pageIDs.front())) {
 				debug_printf(
-				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageIDs)).c_str());
+				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageIDs).c_str());
 				Error e = checksum_failed();
 				TraceEvent(SevError, "RedwoodChecksumFailed")
 				    .detail("Filename", self->filename.c_str())
@@ -5328,10 +5328,9 @@ private:
 	                                                    Arena* arena,
 	                                                    Reference<ArenaPage> page,
 	                                                    Version writeVersion) {
-		state BTreePageIDRef newID;
-		newID.resize(*arena, oldID.size());
+		state BTreePage* btPage = (BTreePage*)page->begin();
 		if (REDWOOD_DEBUG) {
-			BTreePage* btPage = (BTreePage*)page->begin();
+			//BTreePage* btPage = (BTreePage*)page->begin();
 			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
 			debug_printf_always(
 			    "updateBTreePage(%s, %s) %s\n",
@@ -5341,13 +5340,13 @@ private:
 			        ? "<noDecodeCache>"
 			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
 		}
-		state size_t i = 0;
-		state BTreePage* btPage = (BTreePage*)page->begin();
+		state BTreePageIDRef newID;
+		newID.resize(*arena, oldID.size());
 		auto f =
 		    map(self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, btPage->height, oldID, page, writeVersion),
 		        [=](VectorRef<LogicalPageID> ids) {
 			        ASSERT(ids.size() == oldID.size());
-			        for (; i < ids.size(); i++) {
+			        for (size_t i=0; i < ids.size(); ++i) {
 				        newID[i] = ids[i];
 			        }
 			        return Void();
