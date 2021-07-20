@@ -1671,7 +1671,7 @@ class ObjectCache : NonCopyable {
 	typedef boost::intrusive::list<Entry> EvictionOrderT;
 
 public:
-	ObjectCache(int sizeLimit = 1) : sizeLimit(sizeLimit) {}
+	ObjectCache(int sizeLimit = 1) : sizeLimit(sizeLimit), currentSize(0) {}
 
 	void setSizeLimit(int n) {
 		ASSERT(n > 0);
@@ -1721,7 +1721,7 @@ public:
 	// After a get(), the object for i is the last in evictionOrder.
 	// If noHit is set, do not consider this access to be cache hit if the object is present
 	// If noMiss is set, do not consider this access to be a cache miss if the object is not present
-	ObjectType& get(const IndexType& index, size_t size, bool noHit = false) {
+	ObjectType& get(const IndexType& index, int size, bool noHit = false) {
 		Entry& entry = cache[index];
 
 		// If entry is linked into evictionOrder then move it to the back of the order
@@ -1744,6 +1744,11 @@ public:
 
 			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
 			while (currentSize > sizeLimit) {
+				debug_printf("input pageSize is %s currentSize is %s and sizeLimit is %s\n",
+							 toString(size).c_str(),
+				             toString(currentSize).c_str(),
+				             toString(sizeLimit).c_str());
+
 				Entry& toEvict = evictionOrder.front();
 
 				// It's critical that we do not evict the item we just added because it would cause the reference
@@ -2470,6 +2475,7 @@ public:
 		    map(newPageIDs(pageIDs.size()), [=](Standalone<VectorRef<LogicalPageID>> newIDs) {
 			    updatePage(reason, level, newIDs, data);
 			    // TODO:  Possibly limit size of remap queue since it must be recovered on cold start
+				ASSERT(newIDs.size() == pageIDs.size());
 			    for (size_t i = 0; i < pageIDs.size(); i++) {
 				    RemappedPage r{ v, pageIDs[i], newIDs[i] };
 				    remapQueue.pushBack(r);
@@ -5323,14 +5329,13 @@ private:
 	// Write new version of pageID at version v using page as its data.
 	// Attempts to reuse original id(s) in btPageID, returns BTreePageID.
 	// UpdateBtreePage is only called from commitSubTree funciton
-	ACTOR static Future<BTreePageIDRef> updateBTreePage(VersionedBTree* self,
+	static Future<BTreePageIDRef> updateBTreePage(VersionedBTree* self,
 	                                                    BTreePageIDRef oldID,
 	                                                    Arena* arena,
 	                                                    Reference<ArenaPage> page,
 	                                                    Version writeVersion) {
-		state BTreePage* btPage = (BTreePage*)page->begin();
+		BTreePage* btPage = (BTreePage*)page->begin();
 		if (REDWOOD_DEBUG) {
-			//BTreePage* btPage = (BTreePage*)page->begin();
 			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
 			debug_printf_always(
 			    "updateBTreePage(%s, %s) %s\n",
@@ -5340,16 +5345,14 @@ private:
 			        ? "<noDecodeCache>"
 			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
 		}
-		state BTreePageIDRef newID;
-		newID.resize(*arena, oldID.size());
-		auto f =
+		Future<BTreePageIDRef> newID =
 		    map(self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, btPage->height, oldID, page, writeVersion),
 		        [=](VectorRef<LogicalPageID> ids) {
 			        ASSERT(ids.size() == oldID.size());
-			        for (size_t i=0; i < ids.size(); ++i) {
+			        /*for (size_t i=0; i < ids.size(); ++i) {
 				        newID[i] = ids[i];
-			        }
-			        return Void();
+			        }*/
+			        return ids;
 		        });
 		return newID;
 	}
