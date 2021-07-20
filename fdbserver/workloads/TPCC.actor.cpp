@@ -468,7 +468,7 @@ struct TPCC : TestWorkload {
 			order.o_w_id = customer.c_w_id;
 			order.o_d_id = customer.c_d_id;
 			order.o_c_id = customer.c_id;
-			RangeResult range = wait(tr.getRange(order.keyRange(1), 1, Snapshot::FALSE, Reverse::TRUE));
+			RangeResult range = wait(tr.getRange(order.keyRange(1), 1, Snapshot::False, Reverse::True));
 			ASSERT(range.size() > 0);
 			{
 				BinaryReader r(range[0].value, IncludeVersion());

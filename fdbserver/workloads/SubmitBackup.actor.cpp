@@ -62,7 +62,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 			                                    self->tag.toString(),
 			                                    backupRanges,
 			                                    self->stopWhenDone,
-			                                    UsePartitionedLog::FALSE,
+			                                    UsePartitionedLog::False,
 			                                    self->incremental));
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);

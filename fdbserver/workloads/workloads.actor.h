@@ -43,6 +43,7 @@ bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
 vector<std::string> getOption(VectorRef<KeyValueRef> options,
                               Key key,
                               vector<std::string> defaultValue); // comma-separated strings
+bool hasOption(VectorRef<KeyValueRef> options, Key key);
 
 struct WorkloadContext {
 	Standalone<VectorRef<KeyValueRef>> options;
@@ -53,9 +54,7 @@ struct WorkloadContext {
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
 	~WorkloadContext();
-
-private:
-	void operator=(const WorkloadContext&);
+	WorkloadContext& operator=(const WorkloadContext&) = delete;
 };
 
 struct TestWorkload : NonCopyable, WorkloadContext {

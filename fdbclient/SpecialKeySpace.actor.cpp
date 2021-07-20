@@ -441,7 +441,7 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks,
 	                                        KeySelector(firstGreaterOrEqual(key)),
 	                                        KeySelector(firstGreaterOrEqual(keyAfter(key))),
 	                                        GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                        Reverse::FALSE));
+	                                        Reverse::False));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
 		return Optional<Value>(result[0].value);

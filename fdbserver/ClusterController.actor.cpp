@@ -133,9 +133,9 @@ public:
 		    serverInfo(new AsyncVar<ServerDBInfo>()), db(DatabaseContext::create(clientInfo,
 		                                                                         Future<Void>(),
 		                                                                         LocalityData(),
-		                                                                         EnableLocalityLoadBalance::TRUE,
+		                                                                         EnableLocalityLoadBalance::True,
 		                                                                         TaskPriority::DefaultEndpoint,
-		                                                                         LockAware::TRUE)) // SOMEDAY: Locality!
+		                                                                         LockAware::True)) // SOMEDAY: Locality!
 		{}
 
 		void setDistributor(const DataDistributorInterface& interf) {
@@ -1578,6 +1578,20 @@ public:
 		return result;
 	}
 
+	// Given datacenter ID, returns the primary and remote regions.
+	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(const std::vector<RegionInfo>& regions, Key dcId) {
+		RegionInfo region;
+		RegionInfo remoteRegion;
+		for (const auto& r : regions) {
+			if (r.dcId == dcId) {
+				region = r;
+			} else {
+				remoteRegion = r;
+			}
+		}
+		return std::make_pair(region, remoteRegion);
+	}
+
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(RecruitFromConfigurationRequest const& req,
 	                                                                         Optional<Key> dcId) {
 		RecruitFromConfigurationReply result;
@@ -1590,15 +1604,7 @@ public:
 		primaryDC.insert(dcId);
 		result.dcId = dcId;
 
-		RegionInfo region;
-		RegionInfo remoteRegion;
-		for (auto& r : req.configuration.regions) {
-			if (r.dcId == dcId.get()) {
-				region = r;
-			} else {
-				remoteRegion = r;
-			}
-		}
+		auto [region, remoteRegion] = getPrimaryAndRemoteRegion(req.configuration.regions, dcId.get());
 
 		if (req.recruitSeedServers) {
 			auto primaryStorageServers =
@@ -2043,67 +2049,82 @@ public:
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
 		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req);
 		if (g_network->isSimulated()) {
-			RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
+			// FIXME: The logic to pick a satellite in a remote region is not
+			// deterministic and can therefore break this nondeterminism check.
+			// Since satellites will generally be in the primary region,
+			// disable the determinism check for remote region satellites.
+			bool remoteDCUsedAsSatellite = false;
+			if (req.configuration.regions.size() > 1) {
+				auto [region, remoteRegion] = getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
+				for (const auto& satellite : region.satellites) {
+					if (satellite.dcId == remoteRegion.dcId) {
+						remoteDCUsedAsSatellite = true;
+					}
+				}
+			}
+			if (!remoteDCUsedAsSatellite) {
+				RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
 
-			std::map<Optional<Standalone<StringRef>>, int> firstUsed;
-			std::map<Optional<Standalone<StringRef>>, int> secondUsed;
-			updateKnownIds(&firstUsed);
-			updateKnownIds(&secondUsed);
+				std::map<Optional<Standalone<StringRef>>, int> firstUsed;
+				std::map<Optional<Standalone<StringRef>>, int> secondUsed;
+				updateKnownIds(&firstUsed);
+				updateKnownIds(&secondUsed);
 
-			// auto mworker = id_worker.find(masterProcessId);
-			//TraceEvent("CompareAddressesMaster")
-			//    .detail("Master",
-			//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
+				// auto mworker = id_worker.find(masterProcessId);
+				//TraceEvent("CompareAddressesMaster")
+				//    .detail("Master",
+				//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
 
-			updateIdUsed(rep.tLogs, firstUsed);
-			updateIdUsed(compare.tLogs, secondUsed);
-			compareWorkers(
-			    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
-			updateIdUsed(rep.satelliteTLogs, firstUsed);
-			updateIdUsed(compare.satelliteTLogs, secondUsed);
-			compareWorkers(req.configuration,
-			               rep.satelliteTLogs,
-			               firstUsed,
-			               compare.satelliteTLogs,
-			               secondUsed,
-			               ProcessClass::TLog,
-			               "Satellite");
-			updateIdUsed(rep.commitProxies, firstUsed);
-			updateIdUsed(compare.commitProxies, secondUsed);
-			updateIdUsed(rep.grvProxies, firstUsed);
-			updateIdUsed(compare.grvProxies, secondUsed);
-			updateIdUsed(rep.resolvers, firstUsed);
-			updateIdUsed(compare.resolvers, secondUsed);
-			compareWorkers(req.configuration,
-			               rep.commitProxies,
-			               firstUsed,
-			               compare.commitProxies,
-			               secondUsed,
-			               ProcessClass::CommitProxy,
-			               "CommitProxy");
-			compareWorkers(req.configuration,
-			               rep.grvProxies,
-			               firstUsed,
-			               compare.grvProxies,
-			               secondUsed,
-			               ProcessClass::GrvProxy,
-			               "GrvProxy");
-			compareWorkers(req.configuration,
-			               rep.resolvers,
-			               firstUsed,
-			               compare.resolvers,
-			               secondUsed,
-			               ProcessClass::Resolver,
-			               "Resolver");
-			updateIdUsed(rep.backupWorkers, firstUsed);
-			updateIdUsed(compare.backupWorkers, secondUsed);
-			compareWorkers(req.configuration,
-			               rep.backupWorkers,
-			               firstUsed,
-			               compare.backupWorkers,
-			               secondUsed,
-			               ProcessClass::Backup,
-			               "Backup");
+				updateIdUsed(rep.tLogs, firstUsed);
+				updateIdUsed(compare.tLogs, secondUsed);
+				compareWorkers(
+				    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
+				updateIdUsed(rep.satelliteTLogs, firstUsed);
+				updateIdUsed(compare.satelliteTLogs, secondUsed);
+				compareWorkers(req.configuration,
+				               rep.satelliteTLogs,
+				               firstUsed,
+				               compare.satelliteTLogs,
+				               secondUsed,
+				               ProcessClass::TLog,
+				               "Satellite");
+				updateIdUsed(rep.commitProxies, firstUsed);
+				updateIdUsed(compare.commitProxies, secondUsed);
+				updateIdUsed(rep.grvProxies, firstUsed);
+				updateIdUsed(compare.grvProxies, secondUsed);
+				updateIdUsed(rep.resolvers, firstUsed);
+				updateIdUsed(compare.resolvers, secondUsed);
+				compareWorkers(req.configuration,
+				               rep.commitProxies,
+				               firstUsed,
+				               compare.commitProxies,
+				               secondUsed,
+				               ProcessClass::CommitProxy,
+				               "CommitProxy");
+				compareWorkers(req.configuration,
+				               rep.grvProxies,
+				               firstUsed,
+				               compare.grvProxies,
+				               secondUsed,
+				               ProcessClass::GrvProxy,
+				               "GrvProxy");
+				compareWorkers(req.configuration,
+				               rep.resolvers,
+				               firstUsed,
+				               compare.resolvers,
+				               secondUsed,
+				               ProcessClass::Resolver,
+				               "Resolver");
+				updateIdUsed(rep.backupWorkers, firstUsed);
+				updateIdUsed(compare.backupWorkers, secondUsed);
+				compareWorkers(req.configuration,
+				               rep.backupWorkers,
+				               firstUsed,
+				               compare.backupWorkers,
+				               secondUsed,
+				               ProcessClass::Backup,
+				               "Backup");
+			}
 		}
 		return rep;
 	}
@@ -2820,7 +2841,7 @@ public:
 		for (auto& [workerAddress, health] : workerHealth) {
 			for (auto it = health.degradedPeers.begin(); it != health.degradedPeers.end();) {
 				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL) {
-					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("peer", it->first);
+					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("Peer", it->first);
 					health.degradedPeers.erase(it++);
 				} else {
 					++it;
@@ -2830,7 +2851,7 @@ public:
 
 		for (auto it = workerHealth.begin(); it != workerHealth.end();) {
 			if (it->second.degradedPeers.empty()) {
-				TraceEvent("WorkerAllPeerHealthRecovered").detail("worker", it->first);
+				TraceEvent("WorkerAllPeerHealthRecovered").detail("Worker", it->first);
 				workerHealth.erase(it++);
 			} else {
 				++it;
@@ -3057,7 +3078,7 @@ public:
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
 		db.serverInfo->set(serverInfo);
-		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
+		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 
 	~ClusterControllerData() {

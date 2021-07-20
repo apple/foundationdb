@@ -45,23 +45,23 @@ public:
 	};
 
 	static ISingleThreadTransaction* allocateOnForeignThread(Type type);
-	static void create(ISingleThreadTransaction* tr, Type type, Database db);
+	virtual void setDatabase(Database const&) = 0;
 
 	virtual void setVersion(Version v) = 0;
 	virtual Future<Version> getReadVersion() = 0;
 	virtual Optional<Version> getCachedReadVersion() const = 0;
-	virtual Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::FALSE) = 0;
-	virtual Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::FALSE) = 0;
+	virtual Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False) = 0;
+	virtual Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False) = 0;
 	virtual Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
 	                                                    const KeySelector& end,
 	                                                    int limit,
-	                                                    Snapshot = Snapshot::FALSE,
-	                                                    Reverse = Reverse::FALSE) = 0;
+	                                                    Snapshot = Snapshot::False,
+	                                                    Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
 	                                                    KeySelector end,
 	                                                    GetRangeLimits limits,
-	                                                    Snapshot = Snapshot::FALSE,
-	                                                    Reverse = Reverse::FALSE) = 0;
+	                                                    Snapshot = Snapshot::False,
+	                                                    Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
 	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
 	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;

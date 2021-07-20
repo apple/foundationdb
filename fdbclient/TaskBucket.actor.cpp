@@ -173,14 +173,14 @@ public:
 
 		{
 			// Get a task key that is <= a random UID task key, if successful then return it
-			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), Snapshot::TRUE));
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), Snapshot::True));
 			if (space.contains(k))
 				return Optional<Key>(k);
 		}
 
 		{
 			// Get a task key that is <= the maximum possible UID, if successful return it.
-			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), Snapshot::TRUE));
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), Snapshot::True));
 			if (space.contains(k))
 				return Optional<Key>(k);
 		}
@@ -395,7 +395,7 @@ public:
 					taskBucket->setOptions(tr);
 
 					// Attempt to extend the task's timeout
-					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, UpdateParams::FALSE));
+					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, UpdateParams::False));
 					wait(tr->commit());
 					task->timeoutVersion = newTimeout;
 					versionNow = tr->getCommittedVersion();

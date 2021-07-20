@@ -1007,9 +1007,9 @@ public:
 		THREAD_RETURN;
 	}
 
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
 		SimThreadArgs* simArgs = new SimThreadArgs(func, arg);
-		return ::startThread(simStartThread, simArgs);
+		return ::startThread(simStartThread, simArgs, stackSize, name);
 	}
 
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
@@ -1950,6 +1950,7 @@ public:
 			g_clogging.clogRecvFor(ip, seconds);
 	}
 	void clogPair(const IPAddress& from, const IPAddress& to, double seconds) override {
+		TraceEvent("CloggingPair").detail("From", from).detail("To", to).detail("Seconds", seconds);
 		g_clogging.clogPairFor(from, to, seconds);
 	}
 	std::vector<ProcessInfo*> getAllProcesses() const override {
