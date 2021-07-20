@@ -71,7 +71,7 @@ struct VersionIndexerState {
 	Version committedVersion = invalidVersion, previousVersion = invalidVersion;
 	std::deque<VersionEntry> versionWindow;
 	VersionIndexerStats stats;
-	explicit VersionIndexerState(UID id) : id(id), stats(id) { version.set(invalidVersion); }
+	explicit VersionIndexerState(UID id) : id(id), version(invalidVersion), stats(id) {}
 	void truncate(Version to) {
 		while (versionWindow.front().version > to) {
 			previousVersion = versionWindow.front().version;

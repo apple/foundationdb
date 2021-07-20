@@ -1680,7 +1680,7 @@ public:
 		                                               first_resolver);
 		auto version_indexers = getWorkersForRoleInDatacenter(dcId,
 		                                                      ProcessClass::VersionIndexer,
-		                                                      req.configuration.getDesiredResolvers(),
+		                                                      req.configuration.getDesiredVersionIndexers(),
 		                                                      req.configuration,
 		                                                      id_used,
 		                                                      preferredSharing,
@@ -2088,7 +2088,7 @@ public:
 			TraceEvent(SevError, "NonDeterministicRecruitment")
 			    .detail("FirstFitness", firstFitness.toString())
 			    .detail("SecondFitness", secondFitness.toString())
-			    .detail("ClusterRole", role);
+			    .detail("ClusterRole", to_string(role));
 		}
 	}
 
@@ -2140,6 +2140,8 @@ public:
 				updateIdUsed(compare.grvProxies, secondUsed);
 				updateIdUsed(rep.resolvers, firstUsed);
 				updateIdUsed(compare.resolvers, secondUsed);
+				updateIdUsed(rep.versionIndexers, firstUsed);
+				updateIdUsed(compare.versionIndexers, secondUsed);
 				compareWorkers(req.configuration,
 				               rep.commitProxies,
 				               firstUsed,
@@ -2161,6 +2163,13 @@ public:
 				               secondUsed,
 				               ProcessClass::Resolver,
 				               "Resolver");
+				compareWorkers(req.configuration,
+				               rep.versionIndexers,
+				               firstUsed,
+				               compare.versionIndexers,
+				               secondUsed,
+				               ProcessClass::VersionIndexer,
+				               "VersionIndexer");
 				updateIdUsed(rep.backupWorkers, firstUsed);
 				updateIdUsed(compare.backupWorkers, secondUsed);
 				compareWorkers(req.configuration,
@@ -2699,7 +2708,7 @@ public:
 		                                               true);
 		auto version_indexers = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                      ProcessClass::VersionIndexer,
-		                                                      db.config.getDesiredResolvers(),
+		                                                      db.config.getDesiredVersionIndexers(),
 		                                                      db.config,
 		                                                      id_used,
 		                                                      preferredSharing,

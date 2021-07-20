@@ -202,6 +202,8 @@ public:
 	}
 };
 
+StringRef to_string(ProcessClass::ClusterRole role);
+
 struct LocalityData {
 	std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>> _data;
 
