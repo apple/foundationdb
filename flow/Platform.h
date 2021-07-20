@@ -228,6 +228,23 @@ struct SystemStatistics {
 	    machineCommittedRAM(0), machineAvailableRAM(0) {}
 };
 
+struct ThreadStatistics {
+	double cpuSeconds;
+	double elapsed;
+
+	ThreadStatistics() : cpuSeconds(0), elapsed(0) {}
+};
+
+struct ThreadStatisticsState {
+	double lastClockThread;
+	double lastTime;
+	std::string name;
+
+	ThreadStatisticsState(std::string name) : lastClockThread(0), lastTime(0), name(name) {}
+};
+
+ThreadStatistics getThreadStatistics(ThreadStatisticsState& threadStatState);
+
 struct SystemStatisticsState;
 
 struct IPAddress;

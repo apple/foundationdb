@@ -10,6 +10,7 @@
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
+#include "flow/SystemMonitor.h"
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -96,8 +97,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	struct Writer : IThreadPoolReceiver {
 		DB& db;
 		UID id;
+		ThreadStatisticsState threadStatState;
 
-		explicit Writer(DB& db, UID id) : db(db), id(id) {}
+		explicit Writer(DB& db, UID id, std::string name) : db(db), id(id), threadStatState(name) {}
 
 		~Writer() override {
 			if (db) {
@@ -105,7 +107,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
-		void init() override {}
+		void init() override {
+			threadMonitor(threadStatState);
+			uncancellable(recurring([this]() { threadMonitor(threadStatState); }, SERVER_KNOBS->ROCKSDB_THREADS_MONITOR_FREQUENCY, TaskPriority::FlushTrace));
+		}
 
 		Error statusToError(const rocksdb::Status& s) {
 			if (s == rocksdb::Status::IOError()) {
@@ -220,10 +225,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	struct Reader : IThreadPoolReceiver {
 		DB& db;
+		ThreadStatisticsState threadStatState;
 
-		explicit Reader(DB& db) : db(db) {}
+		explicit Reader(DB& db, std::string name) : db(db), threadStatState(name) {}
 
-		void init() override {}
+		void init() override {
+			threadMonitor(threadStatState);
+			uncancellable(recurring([this]() { threadMonitor(threadStatState); }, SERVER_KNOBS->ROCKSDB_THREADS_MONITOR_FREQUENCY, TaskPriority::FlushTrace));
+		}
 
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
@@ -387,9 +396,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = createGenericThreadPool();
 			readThreads = createGenericThreadPool();
 		}
-		writeThread->addThread(new Writer(db, id), "fdb-rocksdb-wr");
+		writeThread->addThread(new Writer(db, id, "fdb-rocksdb-wr"), "fdb-rocksdb-wr");
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
-			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
+			std::string name = "fdb-rocksdb-re" + std::to_string(i);
+			readThreads->addThread(new Reader(db, name), name.c_str());
 		}
 	}
 
