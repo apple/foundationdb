@@ -85,6 +85,7 @@ set(FLOW_SRCS
   flow.h
   genericactors.actor.cpp
   genericactors.actor.h
+  multithread.h
   network.cpp
   network.h
   rte_memcpy.h
