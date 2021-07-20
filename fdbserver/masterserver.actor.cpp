@@ -50,6 +50,7 @@
 #include "flow/Trace.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/serialize.h"
 
 using std::max;
 using std::min;
@@ -200,6 +201,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Reference<ILogSystem> logSystem;
 	Reference<TLogGroupCollection> tLogGroupCollection;
 	Optional<Standalone<RangeResultRef>> tLogGroupRecoveredState;
+	std::unordered_map<ptxn::StorageTeamID, UID>
+	    storageTeamIdToGroupId; // temp store to keep assignment during recovery.
 
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
@@ -300,8 +303,8 @@ ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfi
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
 		TraceEvent("CommitProxyReplies", self->dbgid)
-			.detail("WorkerID", recr.commitProxies[i].id())
-			.detail("FirstProxy", req.firstProxy ? "True" : "False");
+		    .detail("WorkerID", recr.commitProxies[i].id())
+		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -778,6 +781,15 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get());
 	self->tLogGroupCollection->recruitEverything();
 
+	// Restore storage team to TLogGroup assignments. This will make sure that
+	// across recovery, we don't assign a different TLogGroup to a team. It
+	// reads the state from `storageTeamIdToTLogGroupRange` range
+	for (const auto& [teamId, groupId] : self->storageTeamIdToGroupId) {
+		auto group = self->tLogGroupCollection->getGroup(groupId);
+		ASSERT(group.isValid()); // TODO: Should tolerate this.
+		self->tLogGroupCollection->assignStorageTeam(teamId, group);
+	}
+
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
@@ -916,6 +928,13 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	                                                               self->configuration.tLogReplicationFactor);
 	self->tLogGroupRecoveredState = tLogGroupState;
 
+	// Load SS team to TLogGroup assignments. Actually, put into TLogGroup data structures in recruitEverything.
+	RangeResult ssTeamToTLogGroup = wait(self->txnStateStore->readRange(storageTeamIdToTLogGroupRange));
+	for (auto& r : ssTeamToTLogGroup) {
+		auto teamId = decodeStorageTeamIdToTLogGroupKey(r.key);
+		self->storageTeamIdToGroupId[teamId] = BinaryReader::fromStringRef<UID>(r.value, Unversioned());
+	}
+
 	// auto kvs = self->txnStateStore->readRange( systemKeys );
 	// for( auto & kv : kvs.get() )
 	//	TraceEvent("MasterRecoveredTXS", self->dbgid).detail("K", kv.key).detail("V", kv.value);
@@ -979,9 +998,9 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 	}
 	wait(waitForAll(txnReplies));
 	TraceEvent("RecoveryInternal", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::recovery_transaction)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.detail("Step", "SentTxnStateStoreToCommitProxies");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "SentTxnStateStoreToCommitProxies");
 
 	// To avoid race of recovery transaction with the above broadcast,
 	// resolvers are initialized after the broadcast is done. This ensures
@@ -999,9 +1018,9 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 
 	wait(waitForAll(replies));
 	TraceEvent("RecoveryInternal", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::recovery_transaction)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.detail("Step", "InitializedAllResolvers");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "InitializedAllResolvers");
 	return Void();
 }
 
@@ -1891,6 +1910,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
+		self->tLogGroupCollection->seedTLogGroupAssignment(recoveryCommitRequest.arena, tr, seedServers);
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely

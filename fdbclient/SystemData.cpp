@@ -303,6 +303,7 @@ bool serverHasKey(ValueRef storedValue) {
 }
 
 const KeyRef storageTeamIdKeyPrefix = LiteralStringRef("\xff/storageTeams/");
+const KeyRangeRef storageTeamIdKeyRange(LiteralStringRef("\xff/storageTeams/"), LiteralStringRef("\xff/storageTeams0"));
 
 const Key storageTeamIdKey(ptxn::StorageTeamID teamId) {
 	BinaryWriter wr(Unversioned());
@@ -316,10 +317,6 @@ ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key) {
 	BinaryReader rd(key.removePrefix(storageTeamIdKeyPrefix), Unversioned());
 	rd >> teamId;
 	return teamId;
-}
-
-std::vector<UID> decodeStorageTeams(const ValueRef& value) {
-	return BinaryReader::fromStringRef<std::vector<UID>>(value, Unversioned());
 }
 
 const KeyRef storageServerToTeamIdKeyPrefix = LiteralStringRef("\xff/storageServerToTeam/");
@@ -343,12 +340,28 @@ const Key storageServerListToTeamIdKey(std::vector<UID> servers) {
 }
 
 const Value encodeStorageTeams(const std::vector<UID>& value) {
+	return BinaryWriter::toValue(value, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+}
+
+std::vector<UID> decodeStorageTeams(const ValueRef& value) {
+	return BinaryReader::fromStringRef<std::vector<UID>>(value,
+	                                                     IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+}
+
+const KeyRef storageTeamIdToTLogGroupPrefix = LiteralStringRef("\xff/storageTeamIdToTLogGroup/");
+const KeyRangeRef storageTeamIdToTLogGroupRange(LiteralStringRef("\xff/storageTeamIdToTLogGroup/"),
+                                                LiteralStringRef("\xff/storageTeamIdToTLogGroup0"));
+const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId) {
 	BinaryWriter wr(Unversioned());
-	wr << value.size();
-	for (auto& v : value) {
-		wr << v;
-	}
+	wr.serializeBytes(storageTeamIdToTLogGroupPrefix);
+	wr << teamId;
 	return wr.toValue();
+}
+const ptxn::StorageTeamID decodeStorageTeamIdToTLogGroupKey(const KeyRef& k) {
+	BinaryReader br(k.removePrefix(storageTeamIdToTLogGroupPrefix), Unversioned());
+	ptxn::StorageTeamID teamId;
+	br >> teamId;
+	return teamId;
 }
 
 const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
