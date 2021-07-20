@@ -1920,7 +1920,8 @@ ACTOR Future<TLogPeekReply> peekTLog(TLogData* self,
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
 	self->activePeekStreams++;
-	TraceEvent(SevDebug, "TLogPeekStream", logData->logId);
+	TraceEvent(SevDebug, "TLogPeekStream", logData->logId).detail("Token", req.reply.getEndpoint().token);
+
 	state Version begin = req.begin;
 	state bool onlySpilled = false;
 	if (req.tag.locality == tagLocalityTxs && req.tag.id >= logData->txsTags && logData->txsTags > 0) {
@@ -1938,7 +1939,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			wait(delay(0, g_network->getCurrentTask()));
 		} catch (Error& e) {
 			self->activePeekStreams--;
-			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId).detail("Error", e.what());
+			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId).error(e, true);
 
 			if (e.code() == error_code_end_of_stream) {
 				req.reply.sendError(e);

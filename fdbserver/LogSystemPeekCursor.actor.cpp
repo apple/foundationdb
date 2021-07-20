@@ -354,6 +354,10 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 					    .detail("Has", self->hasMessage())
 					    .detail("End", res.end)
 					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
+
+					// NOTE: delay is needed here since TLog need to be scheduled to response if there are TLog and SS
+					// on the same machine
+					wait(delay(0));
 					return Void();
 				}
 			}
@@ -412,16 +416,12 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		more = serverPeekStreamGetMore(this, taskID);
-		//		if (usePeekStream && taskID == TaskPriority::TLogPeekReply) {
-		//			more = serverPeekStreamGetMore(this, taskID);
-		//		}
-		//      if (parallelGetMore || onlySpilled || futureResults.size()) {
-		//          more = serverPeekParallelGetMore(this, taskID);
-		//      }
-		//		else {
-		//			more = serverPeekGetMore(this, taskID);
-		//		}
+		// more = serverPeekStreamGetMore(this, taskID);
+		if (parallelGetMore || onlySpilled || futureResults.size()) {
+			more = serverPeekParallelGetMore(this, taskID);
+		} else {
+			more = serverPeekGetMore(this, taskID);
+		}
 	}
 	return more;
 }

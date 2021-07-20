@@ -634,10 +634,11 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if (g_network->isSimulated())
 		wait(delay(5.0));
-
+	printf("------- 1 -------\n");
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::TRUE));
+	printf("------- 2 -------\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;

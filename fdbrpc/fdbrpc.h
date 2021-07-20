@@ -492,8 +492,8 @@ public:
 			errors->delPromiseRef();
 	}
 
-	// The endpoints of a ReplyPromiseStream must be initialized at Task::NoDeliverDelay, because with lower priorities a
-	// delay(0) in FlowTransport deliver can cause out of order delivery.
+	// The endpoints of a ReplyPromiseStream must be initialized at Task::NoDeliverDelay, because with lower priorities
+	// a delay(0) in FlowTransport deliver can cause out of order delivery.
 	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::NoDeliverDelay); }
 
 	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
@@ -710,20 +710,17 @@ public:
 
 	template <class X>
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
+		Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
+		auto& p = getReplyPromiseStream(value);
+		Reference<Peer> peer;
 		if (queue->isRemoteEndpoint()) {
-			Future<Void> disc =
-			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
-			auto& p = getReplyPromiseStream(value);
-			Reference<Peer> peer =
-			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-			// FIXME: defer sending the message until we know the connection is established
-			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
-			return p;
+			peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 		} else {
 			send(value);
-			auto& p = getReplyPromiseStream(value);
-			return p;
 		}
+		// FIXME: defer sending the message until we know the connection is established
+		endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+		return p;
 	}
 
 	// stream.getReplyUnlessFailedFor( request, double sustainedFailureDuration, double sustainedFailureSlope )
