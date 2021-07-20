@@ -1401,25 +1401,22 @@ struct RedwoodMetrics {
 			metrics = {};
 			if (!buildFillPctSketch.isValid() ||
 			    buildFillPctSketch->name() != ("buildFillPct:" + std::to_string(levelCounter))) {
-				buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"),
-				                                             LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                             Histogram::Unit::percentage);
-				modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"),
-				                                              LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                              Histogram::Unit::percentage);
-				buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"),
-				                                               LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                               Histogram::Unit::percentage);
-				modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"),
-				                                                LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                                Histogram::Unit::percentage);
+				std::string levelCounterStr = std::to_string(levelCounter);
+				buildFillPctSketch = Histogram::getHistogram(
+				    LiteralStringRef("buildFillPct"), StringRef(levelCounterStr), Histogram::Unit::percentage);
+				modifyFillPctSketch = Histogram::getHistogram(
+				    LiteralStringRef("modifyFillPct"), StringRef(levelCounterStr), Histogram::Unit::percentage);
+				buildStoredPctSketch = Histogram::getHistogram(
+				    LiteralStringRef("buildStoredPct"), StringRef(levelCounterStr), Histogram::Unit::percentage);
+				modifyStoredPctSketch = Histogram::getHistogram(
+				    LiteralStringRef("modifyStoredPct"), StringRef(levelCounterStr), Histogram::Unit::percentage);
 				buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"),
-				                                               LiteralStringRef(std::to_string(levelCounter).c_str()),
+				                                               StringRef(levelCounterStr),
 				                                               Histogram::Unit::count,
 				                                               0,
 				                                               maxRecordCount);
 				modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"),
-				                                                LiteralStringRef(std::to_string(levelCounter).c_str()),
+				                                                StringRef(levelCounterStr),
 				                                                Histogram::Unit::count,
 				                                                0,
 				                                                maxRecordCount);
