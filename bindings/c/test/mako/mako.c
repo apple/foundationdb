@@ -1056,12 +1056,12 @@ void* worker_thread(void* thread_args) {
 	}
 
 	fprintf(debugme,
-	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) (tid:%d)\n",
+	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) (tid:%lld)\n",
 	        worker_id,
 	        args->num_processes,
 	        thread_id,
 	        args->num_threads,
-	        (unsigned int)pthread_self());
+	        (uint64_t)pthread_self());
 
 	if (args->tpsmax) {
 		thread_tps = compute_thread_tps(args->tpsmax, worker_id, thread_id, args->num_processes, args->num_threads);

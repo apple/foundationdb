@@ -20,7 +20,9 @@
 
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "fdbrpc/AsyncFileEncrypted.h"
+#endif
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -145,7 +147,9 @@ BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndp
                                                        const S3BlobStoreEndpoint::ParametersT& params,
                                                        const Optional<std::string>& encryptionKeyFileName)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	setEncryptionKey(encryptionKeyFileName);
+#endif
 	// Currently only one parameter is supported, "bucket"
 	for (const auto& [name, value] : params) {
 		if (name == "bucket") {
@@ -171,6 +175,7 @@ std::string BackupContainerS3BlobStore::getURLFormat() {
 
 Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreRead>(m_bstore, m_bucket, dataPath(path));
+
 #if ENCRYPTION_ENABLED
 	if (usesEncryption()) {
 		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);

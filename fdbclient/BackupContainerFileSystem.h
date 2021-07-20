@@ -152,12 +152,13 @@ public:
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                  bool logsOnly,
 	                                                  Version beginVersion) final;
-
 	static Future<Void> createTestEncryptionKeyFile(std::string const& filename);
 
 protected:
 	bool usesEncryption() const;
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
+#endif
 	Future<Void> encryptionSetupComplete() const;
 
 private:

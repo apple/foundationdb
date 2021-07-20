@@ -23,7 +23,9 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/JsonBuilder.h"
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "flow/StreamCipher.h"
+#endif
 #include "flow/UnitTest.h"
 
 #include <algorithm>
@@ -1478,6 +1480,8 @@ bool BackupContainerFileSystem::usesEncryption() const {
 Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 	return encryptionSetupFuture;
 }
+
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
 	if (encryptionKeyFileName.present()) {
 #if ENCRYPTION_ENABLED
@@ -1494,6 +1498,11 @@ Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string 
 	return Void();
 #endif
 }
+#else
+Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
+	return Void();
+}
+#endif
 
 namespace backup_test {
 
