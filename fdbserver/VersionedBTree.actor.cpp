@@ -2373,11 +2373,10 @@ public:
 
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		page->updateChecksum(pageIDs.front());
-		const int beforeUpdateChecksum = page->getChecksum();
 
 		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
 		             filename.c_str(),
-		             toString(pageIDs.front()).c_str(),
+		             toString(pageIDs).c_str(),
 		             page->calculateChecksum(pageIDs.front()),
 		             page->getChecksum());
 
@@ -2408,7 +2407,6 @@ public:
 			writers.push_back(p);
 		}
 		Future<Void> f = holdWhile(page, waitForAll(writers));
-		ASSERT(beforeUpdateChecksum == page->getChecksum());
 		operations.add(f);
 		return f;
 	}
@@ -2428,7 +2426,7 @@ public:
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), true);
 		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n",
 		             filename.c_str(),
-		             toString(pageIDs.front()).c_str(),
+		             toString(pageIDs).c_str(),
 		             cacheEntry.initialized(),
 		             cacheEntry.initialized() && cacheEntry.reading(),
 		             cacheEntry.initialized() && cacheEntry.writing());
@@ -2470,7 +2468,7 @@ public:
 	                                                  Reference<ArenaPage> data,
 	                                                  Version v) override {
 		debug_printf(
-		    "DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageIDs.front()).c_str(), v);
+		    "DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageIDs)).c_str(), v);
 		Future<VectorRef<LogicalPageID>> f =
 		    map(newPageIDs(pageIDs.size()), [=](Standalone<VectorRef<LogicalPageID>> newIDs) {
 			    updatePage(reason, level, newIDs, data);
@@ -2609,7 +2607,7 @@ public:
 		           : self->newPageBuffer(pageIDs.size());
 		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p\n",
 		             self->filename.c_str(),
-		             toString(pageIDs.front()).c_str(),
+		             toString(pageIDs).c_str(),
 		             page->begin());
 
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
@@ -2628,7 +2626,7 @@ public:
 		if (!header) {
 			if (!page->verifyChecksum(pageIDs.front())) {
 				debug_printf(
-				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageID).c_str());
+				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageIDs)).c_str());
 				Error e = checksum_failed();
 				TraceEvent(SevError, "RedwoodChecksumFailed")
 				    .detail("Filename", self->filename.c_str())
@@ -2668,28 +2666,28 @@ public:
 		auto& eventReasons = g_redwoodMetrics.level(level).metrics.eventReasons;
 		eventReasons.addEventReason(PagerEvents::CacheLookup, reason);
 		if (!cacheable) {
-			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
+			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageIDs).c_str());
 			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageIDs.front());
 			if (pCacheEntry != nullptr) {
 				++g_redwoodMetrics.metric.pagerProbeHit;
-				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageID).c_str());
+				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageIDs).c_str());
 				return pCacheEntry->readFuture;
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
-			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
+			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageIDs).c_str());
 			return forwardError(readPhysicalPages(this, pageIDs), errorPromise);
 		}
 
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
 		             filename.c_str(),
-		             toString(pageIDs.front()).c_str(),
+		             toString(pageIDs).c_str(),
 		             cacheEntry.initialized(),
 		             cacheEntry.initialized() && cacheEntry.reading(),
 		             cacheEntry.initialized() && cacheEntry.writing(),
 		             noHit);
 		if (!cacheEntry.initialized()) {
-			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageID).c_str());
+			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageIDs).c_str());
 			cacheEntry.readFuture = forwardError(readPhysicalPages(this, pageIDs), errorPromise);
 			cacheEntry.writeFuture = Void();
 
@@ -5106,7 +5104,7 @@ private:
 				pageUpperBound.truncate(commonPrefix + 1);
 			}
 
-			state Reference<ArenaPage> pages = self->m_pager->newPageBuffer(p.blockCount);
+			state Reference<ArenaPage> pages;
 			BTreePage* btPage;
 
 			if (p.blockCount == 1) {
@@ -5156,11 +5154,13 @@ private:
 			if (p.blockCount != 1) {
 				// Mark the slack in the page buffer as defined
 				VALGRIND_MAKE_MEM_DEFINED(((uint8_t*)btPage) + written, (p.blockCount * p.blockSize) - written);
+				Reference<ArenaPage> page = self->m_pager->newPageBuffer(p.blockCount);
 				const uint8_t* rptr = (const uint8_t*)btPage;
 				for (int b = 0; b < p.blockCount; ++b) {
-					memcpy(pages->mutate() + b * p.blockSize, rptr, p.blockSize);
+					memcpy(page->mutate() + b * p.blockSize, rptr, p.blockSize);
 					rptr += p.blockSize;
 				}
+				pages = std::move(page);
 				delete[](uint8_t*) btPage;
 			}
 
@@ -6189,7 +6189,7 @@ private:
 
 				// If this page has height of 2 then its children are leaf nodes
 				recursions.push_back(self->commitSubtree(
-				    self, snapshot, mutationBuffer, pageID, btPage->height == 2, btPage->height, mBegin, mEnd, &u));
+				    self, snapshot, mutationBuffer, pageID, btPage->height == 2, btPage->height - 1, mBegin, mEnd, &u)); // TODO: check if this should be btPgae->height - 1
 			}
 
 			debug_printf(
