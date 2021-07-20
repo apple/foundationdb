@@ -371,3 +371,14 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 	statState->networkState = netData;
 	return currentStats;
 }
+
+void threadMonitor(ThreadStatisticsState& threadStatState) {
+	ThreadStatistics currentStats = getThreadStatistics(threadStatState);
+
+	if (!g_network->isSimulated()) {
+		TraceEvent("ThreadMetrics")
+			.detail("Name", threadStatState.name)
+			.detail("Elapsed", currentStats.elapsed)
+			.detail("CPUSeconds", currentStats.cpuSeconds);
+	}
+}
