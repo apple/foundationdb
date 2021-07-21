@@ -252,7 +252,7 @@ public:
 	//
 	// Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
 	// version, some other mechanism should be used to connect to that peer.
-	Reference<AsyncVar<Optional<ProtocolVersion>>> getPeerProtocolAsyncVar(NetworkAddress addr);
+	Reference<AsyncVar<Optional<ProtocolVersion>> const> getPeerProtocolAsyncVar(NetworkAddress addr);
 
 	static FlowTransport& transport() {
 		return *static_cast<FlowTransport*>((void*)g_network->global(INetwork::enFlowTransport));

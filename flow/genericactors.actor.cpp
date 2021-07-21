@@ -158,7 +158,7 @@ ACTOR Future<Void> testPublisher(Reference<AsyncVar<DummyState>> input) {
 	return Void();
 }
 
-ACTOR Future<Void> testSubscriber(Reference<IDependentAsyncVar<int>> output, Optional<int> expected) {
+ACTOR Future<Void> testSubscriber(Reference<IAsyncListener<int>> output, Optional<int> expected) {
 	loop {
 		wait(output->onChange());
 		ASSERT(expected.present());
@@ -170,12 +170,12 @@ ACTOR Future<Void> testSubscriber(Reference<IDependentAsyncVar<int>> output, Opt
 
 } // namespace
 
-TEST_CASE("/flow/genericactors/DependentAsyncVar") {
+TEST_CASE("/flow/genericactors/AsyncListener") {
 	auto input = makeReference<AsyncVar<DummyState>>();
 	state Future<Void> subscriber1 =
-	    testSubscriber(IDependentAsyncVar<int>::create(input, [](auto const& var) { return var.changed; }), 100);
+	    testSubscriber(IAsyncListener<int>::create(input, [](auto const& var) { return var.changed; }), 100);
 	state Future<Void> subscriber2 =
-	    testSubscriber(IDependentAsyncVar<int>::create(input, [](auto const& var) { return var.unchanged; }), {});
+	    testSubscriber(IAsyncListener<int>::create(input, [](auto const& var) { return var.unchanged; }), {});
 	wait(subscriber1 && testPublisher(input));
 	ASSERT(!subscriber2.isReady());
 	return Void();
