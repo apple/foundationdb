@@ -1904,7 +1904,7 @@ public:
 			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
 			while (currentSize > sizeLimit) {
 				debug_printf("input pageSize is %s currentSize is %s and sizeLimit is %s\n",
-							 toString(size).c_str(),
+							 std::to_string(size).c_str(),
 				             toString(currentSize).c_str(),
 				             toString(sizeLimit).c_str());
 
@@ -2550,20 +2550,20 @@ public:
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		state std::vector<Future<Void>> writers;
-		for (size_t i = 0; i < pageIDs.size(); i++) {
-			Future<Void> p = self->pageFile->write(page->mutate() + i * blockSize, blockSize, (int64_t)pageIDs[i] * blockSize);
-			if (REDWOOD_DEBUG) {
-				writers.push_back(p);
-			}
+		state int i = 0;
+		for (const auto& pageID : pageIDs) {
+			Future<Void> p = self->pageFile->write(page->mutate() + i * blockSize, blockSize, (int64_t)pageID * blockSize);
+			i += 1;
+			writers.push_back(p);
 		}
 		if (REDWOOD_DEBUG) {
 			Standalone<VectorRef<PhysicalPageID>> pageIDsCopy = pageIDs;
 			debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
 						self->filename.c_str(),
 						(header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
-						toString(pageIDs).c_str(),
+						toString(pageIDsCopy).c_str(),
 						page->begin(),
-						(pageIDs.front() * blockSize));
+						(pageIDsCopy.front() * blockSize));
 		}
 		auto f = holdWhile(page, waitForAll(writers));
 		return Void();
@@ -2787,10 +2787,14 @@ public:
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		state int totalReadBytes = 0;
 		state int i = 0;
+		state std::vector<Future<int>> readers;
 		for (; i < pageIDs.size(); i++) {
-			int readBytes = wait(self->pageFile->read(page->mutate()+ i * blockSize, blockSize, (int64_t)pageIDs[i] * blockSize));
-			totalReadBytes += readBytes;
+			//int readBytes = wait(self->pageFile->read(page->mutate()+ i * blockSize, blockSize, (int64_t)pageIDs[i] * blockSize));
+			//totalReadBytes += readBytes;
+			Future<int> readBytes = self->pageFile->read(page->mutate()+ i * blockSize, blockSize, (int64_t)pageIDs[i] * blockSize);
+			readers.push_back(readBytes);
 		}
+		auto f = holdWhile(page, waitForAll(readers));
 		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageIDs).c_str(),
@@ -5499,9 +5503,9 @@ private:
 	static void preLoadPage(IPagerSnapshot* snapshot, unsigned int l, BTreePageIDRef PageIDs, int priority) {
 		g_redwoodMetrics.metric.btreeLeafPreload += 1;
 		g_redwoodMetrics.metric.btreeLeafPreloadExt += (PageIDs.size() - 1);
-
+		// Prefetches are always at the Leaf level currently so it isn't part of the per-level metrics set
 		snapshot->getPhysicalPage(
-		    PagerEventReasons::RangePrefetch, nonBtreeLevel, PageIDs, priority, true, true); // prefetch btree leaf node
+		    PagerEventReasons::RangePrefetch, nonBtreeLevel, PageIDs, priority, true, true);
 	}
 
 	void freeBTreePage(BTreePageIDRef btPageID, Version v) {
