@@ -19,9 +19,7 @@
  */
 
 #include "fdbclient/BackupContainerAzureBlobStore.h"
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "fdbrpc/AsyncFileEncrypted.h"
-#emdif
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -250,9 +248,7 @@ BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const NetworkAddres
                                                              const std::string& containerName,
                                                              const Optional<std::string>& encryptionKeyFileName)
   : containerName(containerName) {
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	setEncryptionKey(encryptionKeyFileName);
-#endif
 	std::string accountKey = std::getenv("AZURE_KEY");
 	auto credential = std::make_shared<azure::storage_lite::shared_key_credential>(accountName, accountKey);
 	auto storageAccount = std::make_shared<azure::storage_lite::storage_account>(
