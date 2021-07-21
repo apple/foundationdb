@@ -156,9 +156,7 @@ public:
 
 protected:
 	bool usesEncryption() const;
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
-#endif
 	Future<Void> encryptionSetupComplete() const;
 
 private:

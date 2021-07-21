@@ -133,9 +133,7 @@ std::string BackupContainerLocalDirectory::getURLFormat() {
 
 BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url,
                                                              const Optional<std::string>& encryptionKeyFileName) {
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	setEncryptionKey(encryptionKeyFileName);
-#endif
 
 	std::string path;
 	if (url.find("file://") != 0) {
