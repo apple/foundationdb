@@ -47,6 +47,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "flow/Util.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void failAfter(Future<Void> trigger, Endpoint e);
@@ -1881,13 +1882,7 @@ public:
 				}
 			}
 
-			for (auto& proxy : dbi.client.grvProxies) {
-				if (proxy.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
-
-			for (auto& proxy : dbi.client.commitProxies) {
+			for (auto& proxy : dbi.client.proxies) {
 				if (proxy.addresses().contains(excludedServer)) {
 					return true;
 				}
@@ -3993,10 +3988,8 @@ namespace {
 // `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
     // Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-    state ClusterControllerData data(ClusterControllerFullInterface(),
-                                     LocalityData(),
-                                     ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
-    state NetworkAddress workerAddress(IPAddress(0x01010101), 1);
+	state ClusterControllerData data(ClusterControllerFullInterface(), LocalityData());
+	state NetworkAddress workerAddress(IPAddress(0x01010101), 1);
     state NetworkAddress badPeer1(IPAddress(0x02020202), 1);
     state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
     state NetworkAddress badPeer3(IPAddress(0x04040404), 1);
@@ -4051,9 +4044,7 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 
 TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	ClusterControllerData data = ClusterControllerData(ClusterControllerFullInterface(), LocalityData());
 	NetworkAddress worker1(IPAddress(0x01010101), 1);
 	NetworkAddress worker2(IPAddress(0x11111111), 1);
 	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
@@ -4087,9 +4078,7 @@ TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
 
 TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	ClusterControllerData data = ClusterControllerData(ClusterControllerFullInterface(), LocalityData());
 	NetworkAddress worker(IPAddress(0x01010101), 1);
 	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
 	NetworkAddress badPeer2(IPAddress(0x03030303), 1);
@@ -4188,9 +4177,7 @@ TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 
 TEST_CASE("/fdbserver/clustercontroller/recentRecoveryCountDueToHealth") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	ClusterControllerData data = ClusterControllerData(ClusterControllerFullInterface(), LocalityData());
 
 	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 0);
 
@@ -4208,9 +4195,7 @@ TEST_CASE("/fdbserver/clustercontroller/recentRecoveryCountDueToHealth") {
 
 TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServers") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	ClusterControllerData data = ClusterControllerData(ClusterControllerFullInterface(), LocalityData());
 	NetworkAddress master(IPAddress(0x01010101), 1);
 	NetworkAddress tlog(IPAddress(0x02020202), 1);
 	NetworkAddress satelliteTlog(IPAddress(0x03030303), 1);
@@ -4253,9 +4238,9 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	remoteTLogSet.tLogs.push_back(OptionalInterface(remoteTLogInterf));
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
-	GrvProxyInterface proxyInterf;
-	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, UID(1, 2)));
-	testDbInfo.client.grvProxies.push_back(proxyInterf);
+	MasterProxyInterface proxyInterf;
+	proxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ proxy }, UID(1, 2)));
+	testDbInfo.client.proxies.push_back(proxyInterf);
 
 	ResolverInterface resolverInterf;
 	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, UID(1, 2)));

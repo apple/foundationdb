@@ -44,6 +44,7 @@
 #include "flow/Profiler.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -681,17 +682,26 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	remoteTlog.initEndpoints();
 	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
-	ASSERT(!addressInDbAndPrimaryDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+	{
+		Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>(testDbInfo));
+		ASSERT(!addressInDbAndPrimaryDc(g_network->getLocalAddress(), dbInfo));
+	}
 
 	// Next, create a local TLog. Now, the local address should be considered as in local DC.
 	TLogInterface localTlog(testLocal);
 	localTlog.initEndpoints();
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(localTlog));
-	ASSERT(addressInDbAndPrimaryDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+	{
+		Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>(testDbInfo));
+		ASSERT(addressInDbAndPrimaryDc(g_network->getLocalAddress(), dbInfo));
+	}
 
 	// Last, use the master's address to test, which should be considered as in local DC.
 	testDbInfo.logSystemConfig.tLogs.clear();
-	ASSERT(addressInDbAndPrimaryDc(testAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+	{
+		Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>(testDbInfo));
+		ASSERT(addressInDbAndPrimaryDc(testAddress, dbInfo));
+	}
 
 	return Void();
 }
