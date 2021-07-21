@@ -1447,7 +1447,7 @@ int nextPowerOf2(uint32_t x) {
 }
 
 struct RedwoodMetrics {
-	static constexpr int btreeLevels = 5;
+	static constexpr unsigned int btreeLevels = 5;
 	static int maxRecordCount;
 
 	struct EventReasonsArray {
@@ -1622,16 +1622,11 @@ struct RedwoodMetrics {
 	}
 
 	Level& level(unsigned int level) {
-		// Storage for metrics for out of bound levels, such as if the BTree grows beyond 5 levels,
-		// which can happen in simulation with tiny page sizes.
-		static Level outOfBound;
 		// Valid levels are from 0 - btreeLevels
-		// Levels 1 through btreeLevels correspond to BTree node heights
-		// Level 0 is for operations that are not BTree level specific
-		if (level < 0 || level > btreeLevels) {
-			return outOfBound;
-		}
-		return levels[level];
+		// Level 0 is for operations that are not BTree level specific, as many of the metrics are the same
+		// Level 0 - btreeLevels correspond to BTree node height, however heights above btreeLevels are combined
+		//           into the level at btreeLevels
+		return levels[std::min(level, btreeLevels)];
 	}
 
 	void updateMaxRecordCount(int maxRecords) {
@@ -9030,7 +9025,7 @@ TEST_CASE("/redwood/correctness/btree") {
 		    mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
 			// Wait for previous commit to finish
 			wait(commit);
-			printf("Last commit complete.  Next commit %d bytes, %" PRId64 " bytes committed so far.",
+			printf("Commit complete.  Next commit %d bytes, %" PRId64 " bytes committed so far.",
 			       mutationBytesThisCommit,
 			       mutationBytes.get() - mutationBytesThisCommit);
 			printf("  Stats:  Insert %.2f MB/s  ClearedKeys %.2f MB/s  Total %.2f\n",
