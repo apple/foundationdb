@@ -9,8 +9,6 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 
 #if defined(__linux__)
 #include <linux/limits.h>
@@ -113,31 +111,6 @@ void update_op_lat_stats(struct timespec* start, struct timespec* end, int op, m
 	if (latencyus > stats->latency_us_max[op]) {
 		stats->latency_us_max[op] = latencyus;
 	}
-
-}
-
-
-void update_op_lat_stats_Temp(struct timespec* start, struct timespec* end, int op, mako_stats_t* stats, uint64_t* data[], int* elem_size) {
-	uint64_t latencyus;
-
-	latencyus = (((uint64_t)end->tv_sec * 1000000000 + end->tv_nsec) -
-	             ((uint64_t)start->tv_sec * 1000000000 + start->tv_nsec)) /
-	            1000;
-	stats->latency_samples[op]++;
-	stats->latency_us_total[op] += latencyus;
-	if (latencyus < stats->latency_us_min[op]) {
-		stats->latency_us_min[op] = latencyus;
-	}
-	if (latencyus > stats->latency_us_max[op]) {
-		stats->latency_us_max[op] = latencyus;
-	}
-	if(elem_size[op]<stats->latency_samples[op]){
-		elem_size[op] = elem_size[op]*2+1;
-		data[op] = (uint64_t*)realloc(data[op],sizeof(uint64_t)*(elem_size[op]));
-		//printf("%d_%lld_%d\n",op,latencyus,elem_size[op]);
-	}
-	data[op][stats->latency_samples[op]-1] = latencyus;
-
 }
 
 /* FDB network thread */
@@ -440,8 +413,12 @@ int run_op_clearrange(FDBTransaction* transaction, char* keystr, char* keystr2) 
 }
 
 /* run one transaction */
-int run_one_transaction(FDBTransaction* transaction, mako_args_t* args, mako_stats_t* stats, char* keystr,
-                        char* keystr2, char* valstr, uint64_t* data[], int * elem_size) {
+int run_one_transaction(FDBTransaction* transaction,
+                        mako_args_t* args,
+                        mako_stats_t* stats,
+                        char* keystr,
+                        char* keystr2,
+                        char* valstr) {
 	int i;
 	int count;
 	int rc;
@@ -547,7 +524,7 @@ retryTxn:
 						if (rc == FDB_SUCCESS) {
 							stats->ops[OP_COMMIT]++;
 							clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-							update_op_lat_stats_Temp(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT, stats,data,elem_size);
+							update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT, stats);
 						} else {
 							/* error */
 							if (rc == FDB_ERROR_CONFLICT) {
@@ -599,7 +576,7 @@ retryTxn:
 					if (rc == FDB_SUCCESS) {
 						stats->ops[OP_COMMIT]++;
 						clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-						update_op_lat_stats_Temp(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT, stats,data,elem_size);
+						update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT, stats);
 					} else {
 						/* error */
 						if (rc == FDB_ERROR_CONFLICT) {
@@ -627,7 +604,7 @@ retryTxn:
 					clock_gettime(CLOCK_MONOTONIC, &timer_end);
 					if (rc == FDB_SUCCESS) {
 						/* per op latency, record successful transactions */
-						update_op_lat_stats_Temp(&timer_start, &timer_end, i, stats, data,elem_size);
+						update_op_lat_stats(&timer_start, &timer_end, i, stats);
 					}
 				}
 
@@ -659,7 +636,7 @@ retryTxn:
 			/* success */
 			stats->ops[OP_COMMIT]++;
 			clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-			update_op_lat_stats_Temp(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT, stats, data,elem_size);
+			update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT, stats);
 		} else {
 			/* error */
 			if (rc == FDB_ERROR_CONFLICT) {
@@ -683,8 +660,14 @@ retryTxn:
 	return 0;
 }
 
-int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps, volatile double* throttle_factor,
-                 int thread_iters, volatile int* signal, mako_stats_t* stats, int dotrace, uint64_t* data[], int* elem_size) {
+int run_workload(FDBTransaction* transaction,
+                 mako_args_t* args,
+                 int thread_tps,
+                 volatile double* throttle_factor,
+                 int thread_iters,
+                 volatile int* signal,
+                 mako_stats_t* stats,
+                 int dotrace) {
 	int xacts = 0;
 	int64_t total_xacts = 0;
 	int rc = 0;
@@ -772,7 +755,7 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 			}
 		} /* throttle or txntrace */
 
-		rc = run_one_transaction(transaction, args, stats, keystr, keystr2, valstr,data, elem_size);
+		rc = run_one_transaction(transaction, args, stats, keystr, keystr2, valstr);
 		if (rc) {
 			/* FIXME: run_one_transaction should return something meaningful */
 			fprintf(annoyme, "ERROR: run_one_transaction failed (%d)\n", rc);
@@ -800,58 +783,6 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 	return rc;
 }
 
-void getFileName(char filename[], int worker_id, int thread_id, int op){
-	char str1[10],str2[10];
-	sprintf(str1,"%d",worker_id+1);
-	sprintf(str2,"%d",thread_id+1);
-	strcat(filename,"/dev/shm/tempDataFile/");
-	strcat(filename,str1);
-	strcat(filename,"_");
-	strcat(filename,str2);
-	strcat(filename,"_");
-	switch (op) {
-	case OP_GETREADVERSION:
-		strcat(filename, "GRV");
-		break;
-	case OP_GET:
-		strcat(filename, "GET");
-		break;
-	case OP_GETRANGE:
-		strcat(filename, "GETRANGE");
-		break;
-	case OP_SGET:
-		strcat(filename, "SGET");
-		break;
-	case OP_SGETRANGE:
-		strcat(filename, "SGETRANGE");
-		break;
-	case OP_UPDATE:
-		strcat(filename, "UPDATE");
-		break;
-	case OP_INSERT:
-		strcat(filename, "INSERT");
-		break;
-	case OP_INSERTRANGE:
-		strcat(filename, "INSERTRANGE");
-		break;
-	case OP_CLEAR:
-		strcat(filename, "CLEAR");
-		break;
-	case OP_SETCLEAR:
-		strcat(filename, "SETCLEAR");
-		break;
-	case OP_CLEARRANGE:
-		strcat(filename, "CLEARRANGE");
-		break;
-	case OP_SETCLEARRANGE:
-		strcat(filename, "SETCLRRANGE");
-		break;
-	case OP_COMMIT:
-		strcat(filename, "TPS");
-		break;
-	}
-}
-
 /* mako worker thread */
 void* worker_thread(void* thread_args) {
 	int worker_id = ((thread_args_t*)thread_args)->process->worker_id;
@@ -864,24 +795,18 @@ void* worker_thread(void* thread_args) {
 	int thread_tps = 0;
 	int thread_iters = 0;
 	int op;
-	int i;
 	int dotrace = (worker_id == 0 && thread_id == 0 && args->txntrace) ? args->txntrace : 0;
 	volatile int* signal = &((thread_args_t*)thread_args)->process->shm->signal;
 	volatile double* throttle_factor = &((thread_args_t*)thread_args)->process->shm->throttle_factor;
 	volatile int* readycount = &((thread_args_t*)thread_args)->process->shm->readycount;
-	volatile int* stopcount = &((thread_args_t*)thread_args)->process->shm->stopcount;
 	mako_stats_t* stats = (void*)((thread_args_t*)thread_args)->process->shm + sizeof(mako_shmhdr_t) /* skip header */
 	                      + (sizeof(mako_stats_t) * (worker_id * args->num_threads + thread_id));
-
-	uint64_t** data = &((thread_args_t*)thread_args)->data[0];
-	int* elem_size = &((thread_args_t*)thread_args)->elem_size[0];
 
 	/* init latency */
 	for (op = 0; op < MAX_OP; op++) {
 		stats->latency_us_min[op] = 0xFFFFFFFFFFFFFFFF; /* uint64_t */
 		stats->latency_us_max[op] = 0;
 		stats->latency_us_total[op] = 0;
-		stats->latency_samples[op] = 0;
 	}
 
 	fprintf(debugme,
@@ -929,35 +854,14 @@ void* worker_thread(void* thread_args) {
 
 	/* run the workload */
 	else if (args->mode == MODE_RUN) {
-		rc = run_workload(transaction, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, data, elem_size);
+		rc = run_workload(transaction, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace);
 		if (rc < 0) {
 			fprintf(stderr, "ERROR: run_workload failed\n");
 		}
-		rc = mkdir("/dev/shm/tempDataFile", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-		for (op = 0; op < MAX_OP; op++) {
-			if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT) {
-				FILE* fp;
-				char fileName[NAME_MAX] = {'\0'};
-				getFileName(fileName, worker_id, thread_id, op);
-				fp = fopen(fileName,"w");
-				int size = stats->latency_samples[op];
-				for(i=0; i<size; i++){
-					fwrite(&data[op][i], sizeof(uint64_t),1,fp);
-				}
-				fclose(fp);
-			}
-		}
 	}
-
-	__sync_fetch_and_add(stopcount, 1);
 
 	/* fall through */
 failExit:
-	for(op=0; i<MAX_OP; i++) {
-		if(args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT) {
-			if(stats->latency_samples[op]) free(data[op]);
-		}
-	}
 	fdb_transaction_destroy(transaction);
 	pthread_exit(0);
 }
@@ -1097,10 +1001,6 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm) {
 
 	for (i = 0; i < args->num_threads; i++) {
 		thread_args[i].thread_id = i;
-		for(int j=0;j<MAX_OP;j++){
-			thread_args[i].data[j] = (uint64_t*)malloc(sizeof(uint64_t)*INIT_STORE);
-			thread_args[i].elem_size[j] = 0;
-		}
 		thread_args[i].process = &process;
 		rc = pthread_create(&worker_threads[i], NULL, worker_thread, (void*)&thread_args[i]);
 		if (rc != 0) {
@@ -1119,7 +1019,6 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm) {
 			fprintf(stderr, "ERROR: threads %d failed to join\n", i);
 		}
 	}
-
 
 failExit:
 	if (worker_threads)
@@ -1618,7 +1517,6 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 	return;
 }
 
-
 void print_stats_header(mako_args_t* args) {
 	int op;
 	int i;
@@ -1692,7 +1590,7 @@ void print_stats_header(mako_args_t* args) {
 }
 
 void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer_now, struct timespec* timer_start) {
-	int i, j, k, op, index;
+	int i, j, op;
 	uint64_t totalxacts = 0;
 	uint64_t conflicts = 0;
 	uint64_t totalerrors = 0;
@@ -1826,84 +1724,9 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 		}
 	}
 	printf("\n");
-
-	/* Total Samples */
-	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Total Sample");
-		for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_COMMIT) {
-			if (lat_total[op]) {
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_samples[op]);
-			} else {
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
-			}
-		}
-	}
-	printf("\n");
-
-	uint64_t* dataPoints[MAX_OP];
-	uint64_t median;
-	int point_99pct;
-	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Median");
-	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT) {
-			if(lat_total[op]){
-				dataPoints[op] = (uint64_t*)malloc(sizeof(uint64_t)*lat_samples[op]);
-				k = 0;
-				for (i = 0; i < args->num_processes; i++) {
-					for (j = 0; j < args->num_threads; j++) {
-						char fileName[NAME_MAX] = {'\0'};
-						getFileName(fileName, i, j, op);
-						FILE* f = fopen(fileName,"r");
-						fseek(f,0,SEEK_END);
-						int numPoints = ftell(f)/sizeof(uint64_t);
-						fseek(f,0,0);
-						index = 0;
-						while(index<numPoints) {
-							fread(&dataPoints[op][k++],sizeof(uint64_t),1,f);
-							++index;
-						}
-						fclose(f);
-					}
-				}
-				radix_sort(dataPoints[op],lat_samples[op]);
-				if(lat_samples[op] & 1){
-					median = dataPoints[op][lat_samples[op]/2];
-				}
-				else{
-					median = (dataPoints[op][lat_samples[op]/2]+dataPoints[op][lat_samples[op]/2-1])>>1;
-				}
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", median);
-			}
-			else {
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
-			}
-		}
-	}
-	printf("\n");
-
-	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.9 pctile");
-	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT) {
-			if(lat_total[op]){
-				point_99pct = ((float)(lat_samples[op])*0.999)-1;
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_99pct]);
-			}
-			else{
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
-			}
-		}
-	}
-	printf("\n");
-
-	for(op=0; i<MAX_OP; i++) {
-		if(args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT) {
-			if(lat_total[op]) free(dataPoints[op]);
-		}
-	}
-
 }
 
-int stats_process_main(mako_args_t* args, mako_stats_t* stats, volatile double* throttle_factor, volatile int* signal, volatile int* stopcount) {
+int stats_process_main(mako_args_t* args, mako_stats_t* stats, volatile double* throttle_factor, volatile int* signal) {
 	struct timespec timer_start, timer_prev, timer_now;
 	double sin_factor;
 
@@ -1965,9 +1788,6 @@ int stats_process_main(mako_args_t* args, mako_stats_t* stats, volatile double* 
 	/* print report */
 	if (args->verbose >= VERBOSE_DEFAULT) {
 		clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_now);
-		while (*stopcount < args->num_threads*args->num_processes) {
-		 	usleep(10000); /* 10ms */
-		}
 		print_report(args, stats, &timer_now, &timer_start);
 	}
 
@@ -2047,7 +1867,6 @@ int main(int argc, char* argv[]) {
 	/* get ready */
 	shm->signal = SIGNAL_OFF;
 	shm->readycount = 0;
-	shm->stopcount = 0;
 	shm->throttle_factor = 1.0;
 
 	/* fork worker processes + 1 stats process */
@@ -2099,7 +1918,7 @@ int main(int argc, char* argv[]) {
 			/* no stats needed for clean mode */
 			exit(0);
 		}
-		stats_process_main(&args, stats, &shm->throttle_factor, &shm->signal, &shm->stopcount);
+		stats_process_main(&args, stats, &shm->throttle_factor, &shm->signal);
 		exit(0);
 	}
 
