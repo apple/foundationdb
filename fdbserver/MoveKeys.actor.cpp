@@ -637,8 +637,11 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 	state std::vector<std::pair<UID, UID>> tssToKill;
 	state std::unordered_set<UID> tssToIgnore;
-	// try waiting for tss for a 2 loops, give up if they're stuck to not affect the rest of the cluster
-	state int waitForTSSCounter = 2;
+	// try waiting for tss for extra time, give up if they're stuck to not affect the rest of the cluster
+	state double startTime = now();
+	state bool waitingOnTSS = false;
+	state double waitForTSSTimeout = 0.0;
+	state double waitingForTSSStartTime = 0.0;
 
 	ASSERT(!destinationTeam.empty());
 
@@ -653,6 +656,9 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 			TEST(begin > keys.begin); // Multi-transactional finishMoveKeys
 
 			state Transaction tr(occ);
+			waitingOnTSS = false;
+			waitingForTSSStartTime = 0.0;
+			waitForTSSTimeout = 0.0;
 
 			// printf("finishMoveKeys( '%s'-'%s' )\n", begin.toString().c_str(), keys.end.toString().c_str());
 			loop {
@@ -668,7 +674,10 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						wait(removeTSSPairsFromCluster(occ, tssToKill));
 
 						for (auto& tssPair : tssToKill) {
-							TraceEvent(SevWarnAlways, "TSS_KillMoveKeys").detail("TSSID", tssPair.second);
+							TraceEvent(SevWarnAlways, "TSS_KillMoveKeys")
+							    .detail("TSSID", tssPair.second)
+							    .detail("SSMoveTime", waitingForTSSStartTime - startTime)
+							    .detail("TSSMoveTimeout", waitForTSSTimeout);
 							tssToIgnore.insert(tssPair.second);
 						}
 						tssToKill.clear();
@@ -861,8 +870,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 						auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
 
-						if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
-						    !tssToIgnore.count(tssPair->second.id())) {
+						if (tssPair != tssMapping.end() && !tssToIgnore.count(tssPair->second.id())) {
 							tssReadyInterfs.push_back(tssPair->second);
 							tssReady.push_back(waitForShardReady(
 							    tssPair->second, keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
@@ -870,15 +878,15 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					}
 
 					// Wait for all storage server moves, and explicitly swallow errors for tss ones with
-					// waitForAllReady If this takes too long the transaction will time out and retry, which is ok
+					// waitForAllReady. If this takes too long the transaction will time out and retry, which is ok
 					wait(timeout(waitForAll(serverReady) && waitForAllReady(tssReady),
 					             SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT,
 					             Void(),
 					             TaskPriority::MoveKeys));
 
-					// Check to see if we're waiting only on tss. If so, decrement the waiting counter.
-					// If the waiting counter is zero, kill the slow/non-responsive tss processes before finalizing the
-					// data move.
+					// Check to see if we're waiting only on tss. If so, track how long all SS have been done and we're
+					// only waiting on TSS. If waiting on TSS exceeds the timeout, kill the slow/non-responsive TSS
+					// processes before finalizing the data move.
 					if (tssReady.size()) {
 						bool allSSDone = true;
 						for (auto& f : serverReady) {
@@ -889,17 +897,24 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						}
 
 						if (allSSDone) {
+							double tssNow = now();
+							if (!waitingOnTSS) {
+								waitingOnTSS = true;
+								waitingForTSSStartTime = tssNow;
+								waitForTSSTimeout = std::max(SERVER_KNOBS->MOVEKEYS_WAIT_TSS_MIN_TIMEOUT,
+								                             SERVER_KNOBS->MOVEKEYS_WAIT_TSS_TIMEOUT_FACTOR *
+								                                 (waitingForTSSStartTime - startTime));
+							}
 							bool anyTssNotDone = false;
 
 							for (auto& f : tssReady) {
 								if (!f.isReady() || f.isError()) {
 									anyTssNotDone = true;
-									waitForTSSCounter--;
 									break;
 								}
 							}
 
-							if (anyTssNotDone && waitForTSSCounter == 0) {
+							if (anyTssNotDone && (tssNow - waitingForTSSStartTime) >= waitForTSSTimeout) {
 								for (int i = 0; i < tssReady.size(); i++) {
 									if (!tssReady[i].isReady() || tssReady[i].isError()) {
 										tssToKill.push_back(
@@ -920,21 +935,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					for (int s = 0; s < tssReady.size(); s++)
 						tssCount += tssReady[s].isReady() && !tssReady[s].isError();
 
-					/*if (tssReady.size()) {
-					    printf("  fMK: [%s - %s) moved data to %d/%d servers and %d/%d tss\n",
-					           begin.toString().c_str(),
-					           keys.end.toString().c_str(),
-					           count,
-					           serverReady.size(),
-					           tssCount,
-					           tssReady.size());
-					} else {
-					    printf("  fMK: [%s - %s) moved data to %d/%d servers\n",
-					           begin.toString().c_str(),
-					           keys.end.toString().c_str(),
-					           count,
-					           serverReady.size());
-					}*/
 					TraceEvent(SevDebug, waitInterval.end(), relocationIntervalId).detail("ReadyServers", count);
 
 					if (count == dest.size()) {
