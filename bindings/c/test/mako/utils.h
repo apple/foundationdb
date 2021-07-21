@@ -2,8 +2,6 @@
 #define UTILS_H
 #pragma once
 
-#include <stdint.h>
-
 /* uniform-distribution random */
 /* return a uniform random number between low and high, both inclusive */
 int urand(int low, int high);
@@ -49,12 +47,5 @@ int digits(int num);
 /* generate a key for a given key number */
 /* len is the buffer size, key length + null */
 void genkey(char* str, int num, int rows, int len);
-
-
-// The main function to that sorts arr[] of size n using  
-// Radix Sort 
-void radix_sort(uint64_t arr[], int n);
-void countSort(uint64_t arr[], int n, uint64_t exp) ;
-uint64_t getMax(uint64_t arr[], int n) ;
 
 #endif /* UTILS_H */
