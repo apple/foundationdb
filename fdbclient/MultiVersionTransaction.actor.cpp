@@ -490,7 +490,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
-		api->createDatabase(clusterFilePath, &db);
+		throwIfError(api->createDatabase(clusterFilePath, &db));
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	} else {
 		return DLApi::createDatabase609(clusterFilePath);
