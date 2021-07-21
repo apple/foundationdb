@@ -1461,71 +1461,51 @@ struct RedwoodMetrics {
 				}
 			}
 		}
+
 		void addEventReason(PagerEvents event, PagerEventReasons reason) {
 			eventReasons[(size_t)event][(size_t)reason] += 1;
 		}
-		const unsigned int& getEventReason(PagerEvents event, PagerEventReasons reason) {
+
+		unsigned int getEventReason(PagerEvents event, PagerEventReasons reason) const {
 			return eventReasons[(size_t)event][(size_t)reason];
 		}
 
-		std::string ouputSummary(int currLevel) {
-			std::string result = "";
-			PagerEvents prevEvent = PagerEvents::MAXEVENTS;
-			if (currLevel == 0) {
-				for (const auto& ER : L0PossibleEventReasonPairs) {
-					if (prevEvent != ER.first) {
-						result += "\n";
-						result += PagerEventsStrings[(size_t)ER.first];
-						result += "\n\t";
-						prevEvent = ER.first;
-					}
-					std::string num = std::to_string(eventReasons[(size_t)ER.first][(size_t)ER.second]);
-					result += PagerEventReasonsStrings[(size_t)ER.second];
-					result.append(16 - PagerEventReasonsStrings[(size_t)ER.second].length(), ' ');
-					result.append(8 - num.length(), ' ');
-					result += num;
-					result.append(13, ' ');
+		std::string toString(int level, double elapsed) const {
+			std::string result;
+
+			const auto& pairs = (level == 0 ? L0PossibleEventReasonPairs : possibleEventReasonPairs);
+			PagerEvents prevEvent = pairs.front().first;
+			std::string lineStart = (level == 0) ? "" : "\t";
+
+			for (const auto& p : pairs) {
+				if (p.first != prevEvent) {
+					result += "\n";
+					result += lineStart;
 				}
-			} else {
-				for (const auto& ER : possibleEventReasonPairs) {
-					if (prevEvent != ER.first) {
-						result += "\n";
-						result += PagerEventsStrings[(size_t)ER.first];
-						result += "\n\t";
-						prevEvent = ER.first;
-					}
-					std::string num = std::to_string(eventReasons[(size_t)ER.first][(size_t)ER.second]);
-					result += PagerEventReasonsStrings[(size_t)ER.second];
-					result.append(16 - PagerEventReasonsStrings[(size_t)ER.second].length(), ' ');
-					result.append(8 - num.length(), ' ');
-					result += num;
-					result.append(13, ' ');
-				}
+
+				std::string name =
+				    format("%s%s", PagerEventsStrings[(int)p.first], PagerEventReasonsStrings[(int)p.second]);
+				int count = getEventReason(p.first, p.second);
+				result += format("%-15s %8u %8u/s  ", name.c_str(), count, int(count / elapsed));
+
+				prevEvent = p.first;
 			}
+
 			return result;
 		}
-		void reportTrace(TraceEvent* t, int h) {
-			if (h == 0) {
-				for (const auto& ER : L0PossibleEventReasonPairs) {
-					t->detail(
-					    format("L%d%s",
-					           h,
-					           (PagerEventsStrings[(size_t)ER.first] + PagerEventReasonsStrings[(size_t)ER.second])
-					               .c_str()),
-					    eventReasons[(size_t)ER.first][(size_t)ER.second]);
-				}
-			} else {
-				for (const auto& ER : possibleEventReasonPairs) {
-					t->detail(
-					    format("L%d%s",
-					           h,
-					           (PagerEventsStrings[(size_t)ER.first] + PagerEventReasonsStrings[(size_t)ER.second])
-					               .c_str()),
-					    eventReasons[(size_t)ER.first][(size_t)ER.second]);
-				}
+
+		void toTraceEvent(TraceEvent* t, int level) const {
+			const auto& pairs = (level == 0 ? L0PossibleEventReasonPairs : possibleEventReasonPairs);
+			for (const auto& p : pairs) {
+				std::string name =
+				    format(level == 0 ? "" : "L%d", level) +
+				    format("%s%s", PagerEventsStrings[(int)p.first], PagerEventReasonsStrings[(int)p.second]);
+				int count = getEventReason(p.first, p.second);
+				t->detail(std::move(name), count);
 			}
 		}
 	};
+
 	// Metrics by level
 	struct Level {
 		struct Counters {
@@ -1542,7 +1522,7 @@ struct RedwoodMetrics {
 			unsigned int lazyClearFreeExt;
 			unsigned int forceUpdate;
 			unsigned int detachChild;
-			EventReasonsArray eventReasons;
+			EventReasonsArray events;
 		};
 		Counters metrics;
 		Reference<Histogram> buildFillPctSketch;
@@ -1581,7 +1561,7 @@ struct RedwoodMetrics {
 				                                                0,
 				                                                maxRecordCount);
 			}
-			metrics.eventReasons.clear();
+			metrics.events.clear();
 			buildFillPctSketch->clear();
 			modifyFillPctSketch->clear();
 			buildStoredPctSketch->clear();
@@ -1655,8 +1635,12 @@ struct RedwoodMetrics {
 	}
 
 	Level& level(unsigned int level) {
+		// Storage for metrics for out of bound levels, such as if the BTree grows beyond 5 levels,
+		// which can happen in simulation with tiny page sizes.
 		static Level outOfBound;
 		// Valid levels are from 0 - btreeLevels
+		// Levels 1 through btreeLevels correspond to BTree node heights
+		// Level 0 is for operations that are not BTree level specific
 		if (level < 0 || level > btreeLevels) {
 			return outOfBound;
 		}
@@ -1702,7 +1686,8 @@ struct RedwoodMetrics {
 			                                               { "", 0 },
 			                                               { "PagerRemapFree", metric.pagerRemapFree },
 			                                               { "PagerRemapCopy", metric.pagerRemapCopy },
-			                                               { "PagerRemapSkip", metric.pagerRemapSkip } };
+			                                               { "PagerRemapSkip", metric.pagerRemapSkip },
+			                                               { "", 0 } };
 		GetHistogramRegistry().logReport();
 
 		double elapsed = now() - startTime;
@@ -1714,6 +1699,7 @@ struct RedwoodMetrics {
 					e->detail(m.first, m.second);
 				}
 			}
+			levels[0].metrics.events.toTraceEvent(e, 0);
 		}
 
 		if (s != nullptr) {
@@ -1724,10 +1710,10 @@ struct RedwoodMetrics {
 					*s += format("%-15s %-8u %8" PRId64 "/s  ", m.first, m.second, int64_t(m.second / elapsed));
 				}
 			}
-			*s += "\n";
+			*s += levels[0].metrics.events.toString(0, elapsed);
 		}
 
-		for (int i = 0; i < btreeLevels + 1; ++i) {
+		for (int i = 1; i < btreeLevels + 1; ++i) {
 			auto& metric = levels[i].metrics;
 
 			std::pair<const char*, unsigned int> metrics[] = {
@@ -1757,7 +1743,7 @@ struct RedwoodMetrics {
 						e->detail(format("L%d%s", i + 1, m.first + (c == '-' ? 1 : 0)), m.second);
 					}
 				}
-				metric.eventReasons.reportTrace(e, i);
+				metric.events.toTraceEvent(e, i);
 			}
 
 			if (s != nullptr) {
@@ -1777,8 +1763,7 @@ struct RedwoodMetrics {
 						*s += format("%-15s %8u %8u/s  ", name, m.second, rate ? int(m.second / elapsed) : 0);
 					}
 				}
-				*s += '\n';
-				*s += metric.eventReasons.ouputSummary(i);
+				*s += metric.events.toString(i, elapsed);
 			}
 		}
 	}
@@ -2519,7 +2504,7 @@ public:
 
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(header ? ioMaxPriority : ioMinPriority));
 		++g_redwoodMetrics.metric.pagerDiskWrite;
-		g_redwoodMetrics.level(level).metrics.eventReasons.addEventReason(PagerEvents::PageWrite, reason);
+		g_redwoodMetrics.level(level).metrics.events.addEventReason(PagerEvents::PageWrite, reason);
 
 		if (self->memoryOnly) {
 			return Void();
@@ -2795,7 +2780,7 @@ public:
 	                                      bool noHit) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
-		auto& eventReasons = g_redwoodMetrics.level(level).metrics.eventReasons;
+		auto& eventReasons = g_redwoodMetrics.level(level).metrics.events;
 		eventReasons.addEventReason(PagerEvents::CacheLookup, reason);
 		if (!cacheable) {
 			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
@@ -2953,7 +2938,7 @@ public:
 	Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) override {
 		debug_printf("DWALPager(%s) op=readExtent %s\n", filename.c_str(), toString(pageID).c_str());
 		PageCacheEntry* pCacheEntry = extentCache.getIfExists(pageID);
-		auto& eventReasons = g_redwoodMetrics.level(0).metrics.eventReasons;
+		auto& eventReasons = g_redwoodMetrics.level(0).metrics.events;
 		if (pCacheEntry != nullptr) {
 			eventReasons.addEventReason(PagerEvents::CacheLookup, PagerEventReasons::MetaData);
 			debug_printf("DWALPager(%s) Cache Entry exists for %s\n", filename.c_str(), toString(pageID).c_str());
@@ -5415,8 +5400,8 @@ private:
 		}
 
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
-		const BTreePage* pTreePage = (const BTreePage*)page->begin();
-		auto& metrics = g_redwoodMetrics.level(pTreePage->height).metrics;
+		const BTreePage* btPage = (const BTreePage*)page->begin();
+		auto& metrics = g_redwoodMetrics.level(btPage->height).metrics;
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
 
@@ -6677,7 +6662,7 @@ public:
 		std::string toString() const {
 			std::string r = format("{ptr=%p reason=%s %s ",
 			                       this,
-			                       PagerEventsStrings[(int)reason].c_str(),
+			                       PagerEventsStrings[(int)reason],
 			                       ::toString(pager->getVersion()).c_str());
 			for (int i = 0; i < path.size(); ++i) {
 				std::string id = "<debugOnly>";
