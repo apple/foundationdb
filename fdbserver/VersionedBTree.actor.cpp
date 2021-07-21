@@ -2521,7 +2521,7 @@ public:
 		state std::vector<Future<Void>> writers;
 		state int i = 0;
 		for (const auto& pageID : pageIDs) {
-			Future<Void> p = self->pageFile->write(page->mutate() + i * blockSize, blockSize, (int64_t)pageID * blockSize);
+			Future<Void> p = self->pageFile->write(page->mutate() + i * blockSize, blockSize, ((int64_t)pageID) * blockSize);
 			i += 1;
 			writers.push_back(p);
 		}
@@ -2756,14 +2756,10 @@ public:
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		state int totalReadBytes = 0;
 		state int i = 0;
-		state std::vector<Future<int>> readers;
 		for (; i < pageIDs.size(); i++) {
-			//int readBytes = wait(self->pageFile->read(page->mutate()+ i * blockSize, blockSize, (int64_t)pageIDs[i] * blockSize));
-			//totalReadBytes += readBytes;
-			Future<int> readBytes = self->pageFile->read(page->mutate()+ i * blockSize, blockSize, (int64_t)pageIDs[i] * blockSize);
-			readers.push_back(readBytes);
+			int readBytes = wait(self->pageFile->read(page->mutate()+ i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize));
+			totalReadBytes += readBytes;
 		}
-		auto f = holdWhile(page, waitForAll(readers));
 		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageIDs).c_str(),
@@ -3143,7 +3139,7 @@ public:
 
 			// Write the data to the original page so it can be read using its original pageID
 			self->updatePage(
-			    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&p.newPageID, 1), data);
+			    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&p.originalPageID, 1), data);
 			++g_redwoodMetrics.metric.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
 			++g_redwoodMetrics.metric.pagerRemapSkip;
