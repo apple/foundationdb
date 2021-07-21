@@ -55,7 +55,7 @@ struct UnitTestWorkload : TestWorkload {
 		if (g_network->isSimulated()) {
 			testParams.setDataDir(getOption(options, "dataDir"_sr, "simfdb/unittests/"_sr).toString());
 		} else {
-			testParams.setDataDir(getOption(options, "dataDir"_sr, "/private/tmp/"_sr).toString());
+			testParams.setDataDir(getOption(options, "dataDir"_sr, "unittests/"_sr).toString());
 		}
 		cleanupAfterTests = getOption(options, "cleanupAfterTests"_sr, true);
 

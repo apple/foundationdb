@@ -416,6 +416,6 @@ if __name__ == '__main__':
     else:
         assert process_number > 1, "Process number should be positive"
         coordinators()
-        exclude()
+        # exclude()
 
     

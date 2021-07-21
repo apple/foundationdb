@@ -152,7 +152,6 @@ public:
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                  bool logsOnly,
 	                                                  Version beginVersion) final;
-
 	static Future<Void> createTestEncryptionKeyFile(std::string const& filename);
 
 protected:
