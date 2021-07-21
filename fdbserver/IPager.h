@@ -42,10 +42,10 @@ typedef uint32_t QueueID;
 
 // Pager Events
 enum class PagerEvents { CacheLookup = 0, CacheHit, CacheMiss, PageWrite, MAXEVENTS };
-static const std::string PagerEventsCodes[] = { "Lookup", "Hit", "Miss", "Write" };
+static const std::string PagerEventsStrings[] = { "Lookup", "Hit", "Miss", "Write", "Unknown" };
 // Reasons for page level events.
 enum class PagerEventReasons { PointRead = 0, RangeRead, RangePrefetch, Commit, LazyClear, MetaData, MAXEVENTREASONS };
-static const std::string PagerEventReasonsCodes[] = { "Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta" };
+static const std::string PagerEventReasonsStrings[] = { "Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta", "Unknown" };
 
 static const int nonBtreeLevel = 0;
 static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
@@ -167,6 +167,7 @@ public:
 	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
 	                                                           unsigned int level,
 	                                                           LogicalPageID pageID,
+	                                                           int priority,
 	                                                           bool cacheable,
 	                                                           bool nohit) = 0;
 	virtual bool tryEvictPage(LogicalPageID id) = 0;
@@ -238,8 +239,9 @@ public:
 	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                              unsigned int level,
 	                                              LogicalPageID pageID,
-	                                              bool cacheable = true,
-	                                              bool noHit = false) = 0;
+	                                              int priority,
+	                                              bool cacheable,
+	                                              bool noHit) = 0;
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 
