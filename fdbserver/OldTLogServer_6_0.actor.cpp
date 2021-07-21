@@ -276,6 +276,7 @@ struct TLogData : NonCopyable {
 	int64_t targetVolatileBytes; // The number of bytes of mutations this TLog should hold in memory before spilling.
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
+	int activePeekStreams = 0;
 
 	WorkerCache<TLogInterface> tlogCache;
 
@@ -573,6 +574,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		});
 		specialCounter(
 		    cc, "QueueDiskBytesTotal", [tLogData]() { return tLogData->rawPersistentQueue->getStorageBytes().total; });
+		specialCounter(cc, "ActivePeekStreams", [tLogData]() { return tLogData->activePeekStreams;});
 	}
 
 	~LogData() {
@@ -1173,19 +1175,20 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 };
 
 void peekMessagesFromMemory(Reference<LogData> self,
-                            TLogPeekRequest const& req,
+                            Tag tag,
+                            Version begin,
                             BinaryWriter& messages,
                             Version& endVersion) {
-	ASSERT(!messages.getLength());
+    ASSERT(!messages.getLength());
 
-	auto& deque = getVersionMessages(self, req.tag);
-	//TraceEvent("TLogPeekMem", self->dbgid).detail("Tag", req.tag1).detail("PDS", self->persistentDataSequence).detail("PDDS", self->persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
+    auto& deque = getVersionMessages(self, tag);
+    //TraceEvent("TLogPeekMem", self->dbgid).detail("Tag", req.tag1).detail("PDS", self->persistentDataSequence).detail("PDDS", self->persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
 
-	Version begin = std::max(req.begin, self->persistentDataDurableVersion + 1);
-	auto it = std::lower_bound(deque.begin(),
-	                           deque.end(),
-	                           std::make_pair(begin, LengthPrefixedStringRef()),
-	                           CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+    begin = std::max(begin, self->persistentDataDurableVersion + 1);
+    auto it = std::lower_bound(deque.begin(),
+                               deque.end(),
+                               std::make_pair(begin, LengthPrefixedStringRef()),
+                               CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
 
 	Version currentVersion = -1;
 	for (; it != deque.end(); ++it) {
@@ -1204,7 +1207,294 @@ void peekMessagesFromMemory(Reference<LogData> self,
 	}
 }
 
+// Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
+ACTOR Future<TLogPeekReply> peekTLog(TLogData* self,
+                                     Reference<LogData> logData,
+                                     Version begin,
+                                     Tag tag,
+                                     bool returnIfBlocked = false,
+                                     bool reqOnlySpilled = false,
+                                     Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>()) {
+    state BinaryWriter messages(Unversioned());
+    state BinaryWriter messages2(Unversioned());
+    state int sequenceNum = -1;
+    state UID peekId;
+    state double queueStart = now();
+
+    if (tag.locality == tagLocalityTxs && tag.id >= logData->txsTags && logData->txsTags > 0) {
+        tag.id = tag.id % logData->txsTags;
+    }
+
+    // TODO: once the fake stream is replaced by ReplyPromiseStream, we can remove the code handling sequence requests
+    // STEP: a. mark obsolete sequence requests; b. wait previous sequence requests are handled in order
+    if (sequence.present()) {
+        peekId = sequence.get().first;
+        sequenceNum = sequence.get().second;
+        if (sequenceNum >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
+            logData->peekTracker.find(peekId) == logData->peekTracker.end()) {
+            throw operation_obsolete();
+        }
+        auto& trackerData = logData->peekTracker[peekId];
+        if (sequenceNum == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
+            trackerData.tag = tag;
+            trackerData.sequence_version[0].send(std::make_pair(begin, reqOnlySpilled));
+        }
+        auto seqBegin = trackerData.sequence_version.begin();
+        // The peek cursor and this comparison need to agree about the maximum number of in-flight requests.
+        while (trackerData.sequence_version.size() &&
+               seqBegin->first <= sequenceNum - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
+            if (seqBegin->second.canBeSet()) {
+                seqBegin->second.sendError(operation_obsolete());
+            }
+            trackerData.sequence_version.erase(seqBegin);
+            seqBegin = trackerData.sequence_version.begin();
+        }
+
+        if (trackerData.sequence_version.size() && sequenceNum < seqBegin->first) {
+            throw operation_obsolete();
+        }
+
+        Future<std::pair<Version, bool>> fPrevPeekData = trackerData.sequence_version[sequenceNum].getFuture();
+        if (fPrevPeekData.isReady()) {
+            trackerData.unblockedPeeks++;
+            double t = now() - trackerData.lastUpdate;
+            if (t > trackerData.idleMax)
+                trackerData.idleMax = t;
+            trackerData.idleTime += t;
+        }
+        trackerData.lastUpdate = now();
+        std::pair<Version, bool> prevPeekData = wait(fPrevPeekData);
+        begin = std::max(prevPeekData.first, begin);
+        reqOnlySpilled = prevPeekData.second;
+        wait(yield());
+    }
+
+    state double blockStart = now();
+
+    if (returnIfBlocked && logData->version.get() < begin) {
+        if (sequence.present()) {
+            auto& trackerData = logData->peekTracker[peekId];
+            auto& sequenceData = trackerData.sequence_version[sequenceNum + 1];
+            trackerData.lastUpdate = now();
+            if (!sequenceData.isSet()) {
+                sequenceData.send(std::make_pair(begin, reqOnlySpilled));
+            }
+        }
+        throw end_of_stream();
+    }
+
+    //TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
+    // Wait until we have something to return that the caller doesn't already have
+    if (logData->version.get() < begin) {
+        wait(logData->version.whenAtLeast(begin));
+        wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+    }
+
+    if (logData->locality != tagLocalitySatellite && tag.locality == tagLocalityLogRouter) {
+        wait(self->concurrentLogRouterReads.take());
+        state FlowLock::Releaser globalReleaser(self->concurrentLogRouterReads);
+        wait(delay(0.0, TaskPriority::Low));
+    }
+
+    if (begin <= logData->persistentDataDurableVersion && tag.locality != tagLocalityTxs && tag != txsTag) {
+        // Reading spilled data will almost always imply that the storage server is >5s behind the rest
+        // of the cluster.  We shouldn't prioritize spending CPU on helping this server catch up
+        // slightly faster over keeping the rest of the cluster operating normally.
+        // txsTag is only ever peeked on recovery, and we would still wish to prioritize requests
+        // that impact recovery duration.
+        wait(delay(0, TaskPriority::TLogSpilledPeekReply));
+    }
+
+    state double workStart = now();
+
+    Version poppedVer = poppedVersion(logData, tag);
+    if (poppedVer > begin) {
+        // reply with an empty message and let the next reply start from poppedVer
+        TLogPeekReply rep;
+        rep.maxKnownVersion = logData->version.get();
+        rep.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+        rep.popped = poppedVer;
+        rep.end = poppedVer;
+        rep.onlySpilled = false;
+
+        // TODO: once the fake stream is replaced by ReplyPromiseStream, we can remove the code handling sequence
+        // requests.
+        if (sequence.present()) {
+            auto& trackerData = logData->peekTracker[peekId];
+            auto& sequenceData = trackerData.sequence_version[sequenceNum + 1];
+            trackerData.lastUpdate = now();
+            if (trackerData.sequence_version.size() && sequenceNum + 1 < trackerData.sequence_version.begin()->first) {
+                if (!sequenceData.isSet())
+                    sequenceData.sendError(operation_obsolete());
+                throw operation_obsolete();
+            }
+            if (sequenceData.isSet()) {
+                if (sequenceData.getFuture().get().first != rep.end) {
+                    TEST(true); // 1 tlog peek second attempt ended at a different version
+                    throw operation_obsolete();
+                }
+            } else {
+                sequenceData.send(std::make_pair(rep.end, rep.onlySpilled));
+            }
+            rep.begin = begin;
+        }
+
+        return rep;
+    }
+
+    state Version endVersion = logData->version.get() + 1;
+    state bool onlySpilled = false;
+
+    // grab messages from disk
+    //TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
+    if (begin <= logData->persistentDataDurableVersion) {
+        // Just in case the durable version changes while we are waiting for the read, we grab this data from memory. We
+        // may or may not actually send it depending on whether we get enough data from disk. SOMEDAY: Only do this if
+        // an initial attempt to read from disk results in insufficient data and the required data is no longer in
+        // memory SOMEDAY: Should we only send part of the messages we collected, to actually limit the size of the
+        // result?
+
+        if (reqOnlySpilled) {
+            endVersion = logData->persistentDataDurableVersion + 1;
+        } else {
+            peekMessagesFromMemory(logData, tag, begin, messages2, endVersion);
+        }
+
+        RangeResult kvs = wait(self->persistentData->readRange(
+            KeyRangeRef(persistTagMessagesKey(logData->logId, tag, begin),
+                        persistTagMessagesKey(logData->logId, tag, logData->persistentDataDurableVersion + 1)),
+            SERVER_KNOBS->DESIRED_TOTAL_BYTES,
+            SERVER_KNOBS->DESIRED_TOTAL_BYTES));
+
+        //TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", reply.getEndpoint().address).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
+
+        for (auto& kv : kvs) {
+            auto ver = decodeTagMessagesKey(kv.key);
+            messages << VERSION_HEADER << ver;
+            messages.serializeBytes(kv.value);
+        }
+
+        if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+            endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
+            onlySpilled = true;
+        } else {
+            messages.serializeBytes(messages2.toValue());
+        }
+    } else {
+        peekMessagesFromMemory(logData, tag, begin, messages, endVersion);
+        //TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", reply.getEndpoint().address).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
+    }
+
+    TLogPeekReply reply;
+    reply.maxKnownVersion = logData->version.get();
+    reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+    reply.messages = StringRef(reply.arena, messages.toValue());
+    reply.end = endVersion;
+    reply.onlySpilled = onlySpilled;
+
+    //TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", reply.getEndpoint().address);
+
+    if (sequence.present()) {
+        auto& trackerData = logData->peekTracker[peekId];
+        trackerData.lastUpdate = now();
+
+        double queueT = blockStart - queueStart;
+        double blockT = workStart - blockStart;
+        double workT = now() - workStart;
+
+        trackerData.totalPeeks++;
+        trackerData.replyBytes += reply.messages.size();
+
+        if (queueT > trackerData.queueMax)
+            trackerData.queueMax = queueT;
+        if (blockT > trackerData.blockMax)
+            trackerData.blockMax = blockT;
+        if (workT > trackerData.workMax)
+            trackerData.workMax = workT;
+
+        trackerData.queueTime += queueT;
+        trackerData.blockTime += blockT;
+        trackerData.workTime += workT;
+
+        auto& sequenceData = trackerData.sequence_version[sequenceNum + 1];
+        if (trackerData.sequence_version.size() && sequenceNum + 1 < trackerData.sequence_version.begin()->first) {
+            if (!sequenceData.isSet()) {
+                // It would technically be more correct to .send({req.begin, req.onlySpilled}), as the next
+                // request might still be in the window of active requests, but LogSystemPeekCursor will
+                // throw away all future responses upon getting an operation_obsolete(), so computing a
+                // response will probably be a waste of CPU.
+                sequenceData.sendError(operation_obsolete());
+            }
+            throw operation_obsolete();
+        }
+        if (sequenceData.isSet()) {
+            trackerData.duplicatePeeks++;
+            if (sequenceData.getFuture().get().first != reply.end) {
+                TEST(true); // 1 tlog peek second attempt ended at a different version (2)
+                throw operation_obsolete();
+            }
+        } else {
+            sequenceData.send(std::make_pair(reply.end, reply.onlySpilled));
+        }
+        reply.begin = begin;
+    }
+
+    return reply;
+}
+
+// This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
+ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
+    self->activePeekStreams++;
+    TraceEvent(SevDebug, "TLogPeekStream", logData->logId).detail("Token", req.reply.getEndpoint().token);
+
+    state Version begin = req.begin;
+    state bool onlySpilled = false;
+    if (req.tag.locality == tagLocalityTxs && req.tag.id >= logData->txsTags && logData->txsTags > 0) {
+        req.tag.id = req.tag.id % logData->txsTags;
+    }
+    req.reply.setByteLimit(std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, req.limitBytes));
+    loop {
+        state TLogPeekStreamReply reply;
+        try {
+            wait(req.reply.onReady() &&
+                 store(reply.rep, peekTLog(self, logData, begin, req.tag, req.returnIfBlocked, onlySpilled)));
+            req.reply.send(reply);
+            begin = reply.rep.end;
+            onlySpilled = reply.rep.onlySpilled;
+            wait(delay(0, g_network->getCurrentTask()));
+        } catch (Error& e) {
+            self->activePeekStreams--;
+            TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId).error(e, true);
+
+            if (e.code() == error_code_end_of_stream) {
+                req.reply.sendError(e);
+                return Void();
+            } else if (e.code() == error_code_operation_obsolete) {
+                // reply stream is cancelled on the client
+                return Void();
+            } else {
+                throw;
+            }
+        }
+    }
+}
+
 ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Reference<LogData> logData) {
+    /*try {
+        TLogPeekReply reply =
+            wait(peekTLog(self, logData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
+        req.reply.send(reply);
+    } catch (Error& e) {
+        if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete ||
+            e.code() == error_code_end_of_stream) {
+            req.reply.sendError(e);
+            return Void();
+        } else {
+            throw;
+        }
+    }
+
+    return Void();*/
 	state BinaryWriter messages(Unversioned());
 	state BinaryWriter messages2(Unversioned());
 	state int sequence = -1;
@@ -1354,7 +1644,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		if (req.onlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			peekMessagesFromMemory(logData, req, messages2, endVersion);
+			peekMessagesFromMemory(logData, req.tag, req.begin, messages2, endVersion);
 		}
 
 		RangeResult kvs = wait(self->persistentData->readRange(
@@ -1378,7 +1668,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 			messages.serializeBytes(messages2.toValue());
 		}
 	} else {
-		peekMessagesFromMemory(logData, req, messages, endVersion);
+		peekMessagesFromMemory(logData, req.tag, req.begin, messages, endVersion);
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().address).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
 	}
 
@@ -1933,6 +2223,9 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
 			logData->addActor.send(tLogPeekMessages(self, req, logData));
 		}
+        when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
+            logData->addActor.send(tLogPeekStream(self, req, logData));
+        }
 		when(TLogPopRequest req = waitNext(tli.popMessages.getFuture())) {
 			logData->addActor.send(tLogPop(self, req, logData));
 		}
@@ -2328,6 +2621,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		recruited.initEndpoints();
 
 		DUMPTOKEN(recruited.peekMessages);
+		DUMPTOKEN(recruited.peekStreamMessages);
 		DUMPTOKEN(recruited.popMessages);
 		DUMPTOKEN(recruited.commit);
 		DUMPTOKEN(recruited.lock);
@@ -2538,6 +2832,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	recruited.initEndpoints();
 
 	DUMPTOKEN(recruited.peekMessages);
+	DUMPTOKEN(recruited.peekStreamMessages);
 	DUMPTOKEN(recruited.popMessages);
 	DUMPTOKEN(recruited.commit);
 	DUMPTOKEN(recruited.lock);
@@ -2730,7 +3025,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	state TLogData self(tlogId, workerID, persistentData, persistentQueue, db, degraded, folder);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
-	TraceEvent("SharedTlog", tlogId);
+	TraceEvent("SharedTlog", tlogId).detail("Version", "6.0");
 	try {
 		if (restoreFromDisk) {
 			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
