@@ -1454,13 +1454,7 @@ struct RedwoodMetrics {
 		unsigned int eventReasons[(size_t)PagerEvents::MAXEVENTS][(size_t)PagerEventReasons::MAXEVENTREASONS];
 
 		EventReasonsArray() { clear(); }
-		void clear() {
-			for (size_t i = 0; i < (size_t)PagerEvents::MAXEVENTS; i++) {
-				for (size_t j = 0; j < (size_t)PagerEventReasons::MAXEVENTREASONS; j++) {
-					eventReasons[i][j] = 0;
-				}
-			}
-		}
+		void clear() { memset(eventReasons, 0, sizeof(eventReasons)); }
 
 		void addEventReason(PagerEvents event, PagerEventReasons reason) {
 			eventReasons[(size_t)event][(size_t)reason] += 1;
@@ -1534,40 +1528,33 @@ struct RedwoodMetrics {
 
 		Level() { clear(); }
 
-		void clear(int levelCounter = -1) {
+		void clear(int level = 0) {
 			metrics = {};
-			if (!buildFillPctSketch.isValid() ||
-			    buildFillPctSketch->name() != ("buildFillPct:" + std::to_string(levelCounter))) {
-				buildFillPctSketch = Histogram::getHistogram(LiteralStringRef("buildFillPct"),
-				                                             LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                             Histogram::Unit::percentage);
-				modifyFillPctSketch = Histogram::getHistogram(LiteralStringRef("modifyFillPct"),
-				                                              LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                              Histogram::Unit::percentage);
-				buildStoredPctSketch = Histogram::getHistogram(LiteralStringRef("buildStoredPct"),
-				                                               LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                               Histogram::Unit::percentage);
-				modifyStoredPctSketch = Histogram::getHistogram(LiteralStringRef("modifyStoredPct"),
-				                                                LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                                Histogram::Unit::percentage);
-				buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"),
-				                                               LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                               Histogram::Unit::count,
-				                                               0,
-				                                               maxRecordCount);
-				modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"),
-				                                                LiteralStringRef(std::to_string(levelCounter).c_str()),
-				                                                Histogram::Unit::count,
-				                                                0,
-				                                                maxRecordCount);
+
+			if (level > 0) {
+				if (!buildFillPctSketch) {
+					std::string levelString = format("L%d", level);
+					buildFillPctSketch = Histogram::getHistogram(
+					    LiteralStringRef("buildFillPct"), levelString, Histogram::Unit::percentage);
+					modifyFillPctSketch = Histogram::getHistogram(
+					    LiteralStringRef("modifyFillPct"), levelString, Histogram::Unit::percentage);
+					buildStoredPctSketch = Histogram::getHistogram(
+					    LiteralStringRef("buildStoredPct"), levelString, Histogram::Unit::percentage);
+					modifyStoredPctSketch = Histogram::getHistogram(
+					    LiteralStringRef("modifyStoredPct"), levelString, Histogram::Unit::percentage);
+					buildItemCountSketch = Histogram::getHistogram(
+					    LiteralStringRef("buildItemCount"), levelString, Histogram::Unit::count, 0, maxRecordCount);
+					modifyItemCountSketch = Histogram::getHistogram(
+					    LiteralStringRef("modifyItemCount"), levelString, Histogram::Unit::count, 0, maxRecordCount);
+				}
+
+				buildFillPctSketch->clear();
+				modifyFillPctSketch->clear();
+				buildStoredPctSketch->clear();
+				modifyStoredPctSketch->clear();
+				buildItemCountSketch->clear();
+				modifyItemCountSketch->clear();
 			}
-			metrics.events.clear();
-			buildFillPctSketch->clear();
-			modifyFillPctSketch->clear();
-			buildStoredPctSketch->clear();
-			modifyStoredPctSketch->clear();
-			buildItemCountSketch->clear();
-			modifyItemCountSketch->clear();
 		}
 	};
 
@@ -1650,7 +1637,7 @@ struct RedwoodMetrics {
 	void updateMaxRecordCount(int maxRecords) {
 		if (maxRecordCount != maxRecords) {
 			maxRecordCount = maxRecords;
-			for (int i = 0; i < btreeLevels + 1; ++i) {
+			for (int i = 1; i <= btreeLevels; ++i) {
 				auto& level = levels[i];
 				level.buildItemCountSketch->updateUpperBound(maxRecordCount);
 				level.modifyItemCountSketch->updateUpperBound(maxRecordCount);
@@ -1688,7 +1675,6 @@ struct RedwoodMetrics {
 			                                               { "PagerRemapCopy", metric.pagerRemapCopy },
 			                                               { "PagerRemapSkip", metric.pagerRemapSkip },
 			                                               { "", 0 } };
-		GetHistogramRegistry().logReport();
 
 		double elapsed = now() - startTime;
 
