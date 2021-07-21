@@ -52,17 +52,17 @@ static const char* const PagerEventReasonsStrings[] = {
 static const int nonBtreeLevel = 0;
 static const std::vector<std::pair<PagerEvents, PagerEventReasons>> possibleEventReasonPairs = {
 	{ PagerEvents::CacheLookup, PagerEventReasons::Commit },
+	{ PagerEvents::CacheLookup, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheLookup, PagerEventReasons::PointRead },
 	{ PagerEvents::CacheLookup, PagerEventReasons::RangeRead },
-	{ PagerEvents::CacheLookup, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheHit, PagerEventReasons::Commit },
+	{ PagerEvents::CacheHit, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheHit, PagerEventReasons::PointRead },
 	{ PagerEvents::CacheHit, PagerEventReasons::RangeRead },
-	{ PagerEvents::CacheHit, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheMiss, PagerEventReasons::Commit },
+	{ PagerEvents::CacheMiss, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheMiss, PagerEventReasons::PointRead },
 	{ PagerEvents::CacheMiss, PagerEventReasons::RangeRead },
-	{ PagerEvents::CacheMiss, PagerEventReasons::LazyClear },
 	{ PagerEvents::PageWrite, PagerEventReasons::Commit },
 	{ PagerEvents::PageWrite, PagerEventReasons::LazyClear },
 };

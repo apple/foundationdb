@@ -6707,11 +6707,11 @@ public:
 
 		// Initialize or reinitialize cursor
 		Future<Void> init(VersionedBTree* btree_in,
-		                  PagerEventReasons reason,
+		                  PagerEventReasons reason_in,
 		                  Reference<IPagerSnapshot> pager_in,
 		                  BTreePageIDRef root) {
 			btree = btree_in;
-			reason = reason;
+			reason = reason_in;
 			pager = pager_in;
 			path.clear();
 			path.reserve(6);
