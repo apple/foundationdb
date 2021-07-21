@@ -416,14 +416,14 @@ function(add_fdbclient_test)
   message(STATUS "Adding Client test ${T_NAME}")
   if (T_PROCESS_NUMBER)
     add_test(NAME "${T_NAME}"
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --process-number ${T_PROCESS_NUMBER}
             --
             ${T_COMMAND})
   else()
     add_test(NAME "${T_NAME}"
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --
             ${T_COMMAND})
@@ -459,7 +459,7 @@ function(add_multi_fdbclient_test)
   endif()
   message(STATUS "Adding Client test ${T_NAME}")
   add_test(NAME "${T_NAME}"
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --clusters 3
             --
