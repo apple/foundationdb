@@ -14,6 +14,7 @@ function(configure_testing)
   set(multiValueArgs IGNORE_PATTERNS)
   cmake_parse_arguments(CONFIGURE_TESTING "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   set(no_tests YES)
+  add_custom_target(package_all_tests ALL)
   if(CONFIGURE_TESTING_ERROR_ON_ADDITIONAL_FILES)
     file(GLOB_RECURSE candidates "${CONFIGURE_TESTING_TEST_DIRECTORY}/*.txt")
     file(GLOB_RECURSE toml_candidates "${CONFIGURE_TESTING_TEST_DIRECTORY}/*.toml")
@@ -260,7 +261,7 @@ function(create_correctness_package)
     WORKING_DIRECTORY ${out_dir}
     COMMENT "Package correctness archive"
     )
-  add_custom_target(package_tests ALL DEPENDS ${tar_file})
+  add_custom_target(package_tests DEPENDS ${tar_file})
   add_dependencies(package_tests strip_only_fdbserver TestHarness)
   set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/correctness.tar.gz")
   add_custom_command(
@@ -270,6 +271,7 @@ function(create_correctness_package)
     COMMENT "Copy correctness package to ${unversioned_tar_file}")
   add_custom_target(package_tests_u DEPENDS "${unversioned_tar_file}")
   add_dependencies(package_tests_u package_tests)
+  add_dependencies(package_all_tests package_tests_u)
 endfunction()
 
 function(create_valgrind_correctness_package)
@@ -295,7 +297,7 @@ function(create_valgrind_correctness_package)
       WORKING_DIRECTORY ${out_dir}
       COMMENT "Package valgrind correctness archive"
       )
-    add_custom_target(package_valgrind_tests ALL DEPENDS ${tar_file})
+    add_custom_target(package_valgrind_tests DEPENDS ${tar_file})
     add_dependencies(package_valgrind_tests strip_only_fdbserver TestHarness)
     set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/valgrind.tar.gz")
     add_custom_command(
@@ -305,6 +307,7 @@ function(create_valgrind_correctness_package)
       COMMENT "Copy valgrind package to ${unversioned_tar_file}")
     add_custom_target(package_valgrind_tests_u DEPENDS "${unversioned_tar_file}")
     add_dependencies(package_valgrind_tests_u package_valgrind_tests)
+    add_dependencies(package_all_tests package_valgrind_tests_u)
   endif()
 endfunction()
 
