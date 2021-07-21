@@ -153,4 +153,6 @@ SystemStatistics customSystemMonitor(std::string const& eventName,
                                      bool machineMetrics = false);
 SystemStatistics getSystemStatistics();
 
+void threadMonitor(ThreadStatisticsState& threadStatState);
+
 #endif /* FLOW_SYSTEM_MONITOR_H */

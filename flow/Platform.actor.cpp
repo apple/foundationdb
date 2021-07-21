@@ -1720,6 +1720,23 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	return returnStats;
 }
 
+ThreadStatistics getThreadStatistics(ThreadStatisticsState& threadStatState) {
+	ThreadStatistics returnStats;
+
+	double nowTime = timer_monotonic();
+	double nowClockThread = getProcessorTimeThread();
+
+	if (threadStatState.lastTime != 0) {
+		returnStats.cpuSeconds = nowClockThread - threadStatState.lastClockThread;
+		returnStats.elapsed = nowTime - threadStatState.lastTime;
+	}
+
+	threadStatState.lastTime = nowTime;
+	threadStatState.lastClockThread = nowClockThread;
+
+	return returnStats;
+}
+
 #ifdef _WIN32
 struct OffsetTimer {
 	double secondsPerCount, offset;
