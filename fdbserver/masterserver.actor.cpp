@@ -209,6 +209,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	int64_t memoryLimit;
 	std::map<Optional<Value>, int8_t> dcId_locality;
 	std::vector<Tag> allTags;
+	std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups;
+	std::unordered_map<UID, std::vector<UID>> tlogGroupIdToTlogServerIds;
 
 	int8_t getNextLocality() {
 		int8_t maxLocality = -1;
@@ -364,7 +366,7 @@ std::unordered_map<UID, std::vector<UID>> getTlogGroupIdToTlogServerIds(Referenc
 	return tLogGroupIdToServerIds;
 }
 
-std::unordered_map<UID, std::vector<TLogGroupRef>> gettlogServerIdToTlogGroups(Reference<MasterData> self) {
+std::unordered_map<UID, std::vector<TLogGroupRef>> getTlogServerIdToTlogGroups(Reference<MasterData> self) {
 	std::unordered_map<UID, std::vector<TLogGroupRef>> tLogServerIdtoTLogGroups;
 	std::vector<TLogGroupRef> groups = self->tLogGroupCollection->groups();
 	for (const TLogGroupRef group : groups) {
@@ -380,6 +382,9 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
                                   RecruitFromConfigurationReply recr,
                                   Reference<ILogSystem> oldLogSystem,
                                   vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
+
+	self->tlogGroupIdToTlogServerIds = getTlogGroupIdToTlogServerIds(self);
+	self->tlogServerIdToTlogGroups = getTlogServerIdToTlogGroups(self);
 	if (self->configuration.usableRegions > 1) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
 		if (!self->dcId_locality.count(recr.dcId)) {
@@ -419,6 +424,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 
 		self->primaryLocality = self->dcId_locality[recr.dcId];
 		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
+
 		Reference<ILogSystem> newLogSystem = wait(oldLogSystem->newEpoch(recr,
 		                                                                 fRemoteWorkers,
 		                                                                 self->configuration,
@@ -427,8 +433,8 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
 		                                                                 self->recruitmentStalled,
-		                                                                 getTlogGroupIdToTlogServerIds(self),
-																		 gettlogServerIdToTlogGroups(self)));
+		                                                                 self->tlogGroupIdToTlogServerIds,
+																		 self->tlogServerIdToTlogGroups));
 		self->logSystem = newLogSystem;
 	} else {
 		self->primaryLocality = tagLocalitySpecial;
@@ -441,8 +447,8 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
 		                                                                 self->recruitmentStalled,
-		                                                                 getTlogGroupIdToTlogServerIds(self),
-																		 gettlogServerIdToTlogGroups(self)));
+		                                                                 self->tlogGroupIdToTlogServerIds,
+																		 self->tlogServerIdToTlogGroups));
 		self->logSystem = newLogSystem;
 	}
 	return Void();
@@ -800,7 +806,6 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .trackLatest("MasterRecoveryState");
 
 	// Recruit TLog groups
-	// Question: Where is the KNOB to choose whether to use TLog groups at all, if this code path is run anyways? I need to RE-USE the KNOB..
 	ASSERT(self->tLogGroupRecoveredState.present());
 	self->tLogGroupCollection->addWorkers(recruits.tLogs);
 	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get());

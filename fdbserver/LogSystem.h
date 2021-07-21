@@ -56,8 +56,7 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
-	// question: why above we use reference -> asyncvar -> optionalinterface? Can I skip them here?
-	std::vector<ptxn::TLogInterface_PassivelyPull> logServersNew;
+	std::unordered_map<UID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>> groupIdToInterfaces;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
@@ -241,10 +240,9 @@ public:
 		}
 
 		// the following logic supports upgrades from 5.X
-		int size = SERVER_KNOBS->TLOG_NEW_INTERFACE ? logServersNew.size() : logServers.size();
 		if (tag == txsTag)
-			return txsTagOld % size;
-		return tag.id % size;
+			return txsTagOld % logServers.size();;
+		return tag.id % logServers.size();;
 	}
 
 	void updateLocalitySet(std::vector<LocalityData> const& localities) {
@@ -297,8 +295,7 @@ public:
 		if (allLocations) {
 			// special handling for allLocations
 			TraceEvent("AllLocationsSet");
-			int size =  SERVER_KNOBS->TLOG_NEW_INTERFACE ? logServersNew.size() : logServers.size();
-			for (int i = 0; i < size; i++) {
+			for (int i = 0; i < logServers.size(); i++) {
 				newLocations.push_back(i);
 			}
 		} else {
