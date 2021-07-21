@@ -419,7 +419,7 @@ struct RequestData : NonCopyable {
 		Reference<ModelHolder> holderCapture = std::move(modelHolder);
 		auto triedAllOptionsCapture = triedAllOptions;
 		Future<Void> updateModel = map(response, [holderCapture, triedAllOptionsCapture](Reply result) {
-			checkAndProcessResultImpl(result, holderCapture, AtMostOnce::FALSE, triedAllOptionsCapture);
+			checkAndProcessResultImpl(result, holderCapture, AtMostOnce::False, triedAllOptionsCapture);
 			return Void();
 		});
 		model->addActor.send(updateModel);
@@ -447,7 +447,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
     Request request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
-        AtMostOnce::FALSE, // if true, throws request_maybe_delivered() instead of retrying automatically
+        AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = nullptr) {
 
 	state RequestData<Request, Interface, Multi> firstRequestData;
@@ -459,7 +459,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	state Promise<Void> requestFinished;
 	state double startTime = now();
 
-	state TriedAllOptions triedAllOptions = TriedAllOptions::FALSE;
+	state TriedAllOptions triedAllOptions = TriedAllOptions::False;
 
 	setReplyPriority(request, taskID);
 	if (!alternatives)
@@ -602,7 +602,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				break;
 			nextAlt = (nextAlt + 1) % alternatives->size();
 			if (nextAlt == startAlt)
-				triedAllOptions = TriedAllOptions::TRUE;
+				triedAllOptions = TriedAllOptions::True;
 			stream = nullptr;
 		}
 
@@ -709,7 +709,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 		nextAlt = (nextAlt + 1) % alternatives->size();
 		if (nextAlt == startAlt)
-			triedAllOptions = TriedAllOptions::TRUE;
+			triedAllOptions = TriedAllOptions::True;
 		resetReply(request, taskID);
 		secondDelay = Never();
 	}
@@ -731,7 +731,7 @@ Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> al
                                              RequestStream<Request> Interface::*channel,
                                              Request request = Request(),
                                              TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-                                             AtMostOnce atMostOnce = AtMostOnce::FALSE) {
+                                             AtMostOnce atMostOnce = AtMostOnce::False) {
 	setReplyPriority(request, taskID);
 	if (!alternatives)
 		return Never();

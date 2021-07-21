@@ -579,7 +579,7 @@ Future<Void> readCommitted(Database cx,
                            KeyRangeRef range,
                            std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy) {
 	return readCommitted(
-	    cx, results, Void(), lock, range, groupBy, Terminator::TRUE, AccessSystemKeys::TRUE, LockAware::TRUE);
+	    cx, results, Void(), lock, range, groupBy, Terminator::True, AccessSystemKeys::True, LockAware::True);
 }
 
 ACTOR Future<int> dumpData(Database cx,
