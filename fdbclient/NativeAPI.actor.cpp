@@ -285,7 +285,7 @@ std::string unprintable(std::string const& val) {
 	return s;
 }
 
-void DatabaseContext::validateVersion(Version version) {
+void DatabaseContext::validateVersion(Version version) const {
 	// Version could be 0 if the INITIALIZE_NEW_DATABASE option is set. In that case, it is illegal to perform any
 	// reads. We throw client_invalid_operation because the caller didn't directly set the version, so the
 	// version_invalid error might be confusing.
@@ -650,7 +650,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 	}
 }
 
-ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
                                                AsyncTrigger* triggerVar) {
 	state vector<CommitProxyInterface> curCommitProxies;
 	state vector<GrvProxyInterface> curGrvProxies;
@@ -1085,7 +1085,7 @@ Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* 
 
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
-                                 Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+                                 Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
                                  Future<Void> clientInfoMonitor,
                                  TaskPriority taskID,
                                  LocalityData const& clientLocality,
@@ -1482,7 +1482,7 @@ void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
 }
 
-Future<Void> DatabaseContext::onProxiesChanged() {
+Future<Void> DatabaseContext::onProxiesChanged() const {
 	return this->proxiesChangeTrigger.onTrigger();
 }
 
@@ -1759,7 +1759,8 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 	}
 
 	auto database = Database(db);
-	GlobalConfig::create(database, clientInfo, std::addressof(clientInfo->get()));
+	GlobalConfig::create(
+	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
 	return database;
 }
 
@@ -5760,7 +5761,7 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
     NetworkAddress coordinatorAddress,
     Optional<ProtocolVersion> expectedVersion) {
 
-	state Reference<AsyncVar<Optional<ProtocolVersion>>> protocolVersion =
+	state Reference<AsyncVar<Optional<ProtocolVersion>> const> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
 	loop {
@@ -5785,7 +5786,7 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 // Returns the protocol version reported by the given coordinator
 // If an expected version is given, the future won't return until the protocol version is different than expected
 ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
     Optional<ProtocolVersion> expectedVersion) {
 
 	state bool needToConnect = true;

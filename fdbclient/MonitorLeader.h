@@ -49,7 +49,7 @@ struct ClientData {
 
 	OpenDatabaseRequest getRequest();
 
-	ClientData() : clientInfo(new AsyncVar<CachedSerialization<ClientDBInfo>>(CachedSerialization<ClientDBInfo>())) {}
+	ClientData() : clientInfo(makeReference<AsyncVar<CachedSerialization<ClientDBInfo>>>()) {}
 };
 
 struct MonitorLeaderInfo {

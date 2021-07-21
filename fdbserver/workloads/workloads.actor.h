@@ -222,7 +222,7 @@ double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
 ACTOR Future<Void> databaseWarmer(Database cx);
 
 Future<Void> quietDatabase(Database const& cx,
-                           Reference<AsyncVar<struct ServerDBInfo>> const&,
+                           Reference<AsyncVar<struct ServerDBInfo> const> const&,
                            std::string phase,
                            int64_t dataInFlightGate = 2e6,
                            int64_t maxTLogQueueGate = 5e6,

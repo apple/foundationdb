@@ -162,7 +162,7 @@ public:
 	ProtocolVersion logProtocol;
 	Reference<ILogSystem> logSystem;
 	Key ck; // cacheKey
-	Reference<AsyncVar<ServerDBInfo>> const& db;
+	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
 	StorageCacheUpdater* updater;
 
@@ -238,7 +238,7 @@ public:
 		}
 	} counters;
 
-	explicit StorageCacheData(UID thisServerID, uint16_t index, Reference<AsyncVar<ServerDBInfo>> const& db)
+	explicit StorageCacheData(UID thisServerID, uint16_t index, Reference<AsyncVar<ServerDBInfo> const> const& db)
 	  : /*versionedData(FastAllocPTree<KeyRef>{std::make_shared<int>(0)}), */
 	    thisServerID(thisServerID), index(index), logProtocol(0), db(db), cacheRangeChangeCounter(0),
 	    lastTLogVersion(0), lastVersionWithData(0), peekVersion(0), compactionInProgress(Void()),
@@ -2165,7 +2165,9 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 	}
 }
 
-ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db) {
+ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
+                                      uint16_t id,
+                                      Reference<AsyncVar<ServerDBInfo> const> db) {
 	state StorageCacheData self(ssi.id(), id, db);
 	state ActorCollection actors(false);
 	state Future<Void> dbInfoChange = Void();
