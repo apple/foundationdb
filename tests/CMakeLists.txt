@@ -1,5 +1,7 @@
 include(AddFdbTest)
 
+add_subdirectory(TestHarness)
+
 # We need some variables to configure the test setup
 set(ENABLE_BUGGIFY ON CACHE BOOL "Enable buggify for tests")
 set(RUN_IGNORED_TESTS OFF CACHE BOOL "Run tests that are marked for ignore")

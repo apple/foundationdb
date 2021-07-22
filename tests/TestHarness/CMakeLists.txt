@@ -1,0 +1,6 @@
+add_subdirectory(fmt)
+add_executable(NativeTestHarness TestHarness.cpp Events.h Events.cpp)
+target_link_libraries(NativeTestHarness PRIVATE fmt Threads::Threads)
+target_include_directories(NativeTestHarness PRIVATE ${CMAKE_SOURCE_DIR}/fdbclient/rapidxml)
+target_include_directories(NativeTestHarness PRIVATE ${CMAKE_SOURCE_DIR}/fdbclient/rapidjson)
+strip_debug_symbols(NativeTestHarness)
