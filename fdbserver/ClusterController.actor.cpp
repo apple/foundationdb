@@ -3407,6 +3407,16 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration(ClusterControllerData* 
 	}
 }
 
+void printGroupsToServersMapping(LogSystemConfig logSystemConfig) {
+    std::unordered_map<UID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>> ptxnTLogGroups 
+		= logSystemConfig.tLogs[0].ptxnTLogGroups;
+    for (auto iterator : ptxnTLogGroups) {
+        auto serverIds = iterator.first;
+        TraceEvent("tLogGroupToLogServerIds:Group ID: ", serverIds)
+			.detail("group size : ", iterator.second.size());
+    }
+}
+
 void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest const& req) {
 	req.reply.send(Void());
 
