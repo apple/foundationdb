@@ -217,21 +217,6 @@ public class LocalityUtil {
 			BoundaryIterator.this.tr.close();
 			closed = true;
 		}
-
-		@Override
-		protected void finalize() throws Throwable {
-			try {
-				if(FDB.instance().warnOnUnclosed && !closed) {
-					System.err.println("CloseableAsyncIterator not closed (getBoundaryKeys)");
-				}
-				if(!closed) {
-					close();
-				}
-			}
-			finally {
-				super.finalize();
-			}
-		}
 	}
 
 	private static final Charset ASCII = Charset.forName("US-ASCII");
