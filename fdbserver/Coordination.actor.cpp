@@ -37,6 +37,30 @@
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
 
+namespace {
+
+class LivenessChecker {
+	double threshold;
+	AsyncVar<double> lastTime;
+	ACTOR static Future<Void> checkStuck(LivenessChecker const* self) {
+		loop {
+			choose {
+				when(wait(delayUntil(self->lastTime.get() + self->threshold))) { return Void(); }
+				when(wait(self->lastTime.onChange())) {}
+			}
+		}
+	}
+
+public:
+	explicit LivenessChecker(double threshold) : threshold(threshold), lastTime(now()) {}
+
+	void confirmLiveness() { lastTime.set(now()); }
+
+	Future<Void> checkStuck() const { return checkStuck(this); }
+};
+
+} // namespace
+
 struct GenerationRegVal {
 	UniqueGeneration readGen, writeGen;
 	Optional<Value> val;
@@ -179,7 +203,10 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 ACTOR Future<Void> openDatabase(ClientData* db,
                                 int* clientCount,
                                 Reference<AsyncVar<bool>> hasConnectedClients,
-                                OpenDatabaseCoordRequest req) {
+                                OpenDatabaseCoordRequest req,
+                                Future<Void> checkStuck) {
+	state ErrorOr<CachedSerialization<ClientDBInfo>> replyContents;
+
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
@@ -191,18 +218,26 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 	while (db->clientInfo->get().read().id == req.knownClientInfoID &&
 	       !db->clientInfo->get().read().forward.present()) {
 		choose {
+			when(wait(checkStuck)) {
+				replyContents = failed_to_progress();
+				break;
+			}
 			when(wait(yieldedFuture(db->clientInfo->onChange()))) {}
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
+				if (req.supportedVersions.size() > 0) {
+					db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
+				}
+				replyContents = db->clientInfo->get();
 				break;
 			} // The client might be long gone!
 		}
 	}
 
-	if (req.supportedVersions.size() > 0) {
-		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
+	if (replyContents.present()) {
+		req.reply.send(replyContents.get());
+	} else {
+		req.reply.sendError(replyContents.getError());
 	}
-
-	req.reply.send(db->clientInfo->get());
 
 	if (--(*clientCount) == 0) {
 		hasConnectedClients->set(false);
@@ -255,6 +290,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state AsyncVar<Value> leaderInterface;
 	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader =
 	    makeReference<AsyncVar<Optional<LeaderInfo>>>();
+	state LivenessChecker canConnectToLeader(SERVER_KNOBS->COORDINATOR_LEADER_CONNECTION_TIMEOUT);
 
 	loop choose {
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
@@ -266,7 +302,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 					leaderMon =
 					    monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
 				}
-				actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
+				actors.add(
+				    openDatabase(&clientData, &clientCount, hasConnectedClients, req, canConnectToLeader.checkStuck()));
 			}
 		}
 		when(ElectionResultRequest req = waitNext(interf.electionResult.getFuture())) {
@@ -320,8 +357,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			// TODO: use notify to only send a heartbeat once per interval
 			availableLeaders.erase(LeaderInfo(req.prevChangeID));
 			availableLeaders.insert(req.myInfo);
-			req.reply.send(
-			    LeaderHeartbeatReply{ currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo) });
+			bool const isCurrentLeader = currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo);
+			if (isCurrentLeader) {
+				canConnectToLeader.confirmLiveness();
+			}
+			req.reply.send(LeaderHeartbeatReply{ isCurrentLeader });
 		}
 		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
 			LeaderInfo newInfo;
