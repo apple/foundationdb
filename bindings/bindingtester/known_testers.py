@@ -47,10 +47,33 @@ class Tester:
             return Tester(test_name_or_args.split(' ')[0], test_name_or_args)
 
 
+    # get_cmd():
+    #   return the command associated with the tester
+    #   It augments the basic command with cbatrace, i.e., C binding Api Tracing, 
+    #   command if needed. 
+    # NOTE: 
+    #   - Set environment variable "CBATRACE_ENABLE" to 1 to enable cbatrace 
+    #   - For now, cba tracing is only enabled for java tests
+    def get_cmd(self):
+      # check whether cba tracing is enabled  
+      if (os.environ.get('CBATRACE_ENABLE') == '1' and self.name.startswith('java')):
+        # trace file name 
+        trcFile = 'cbatrace.' + self.name + '.xml'
+        # trace file path 
+        trcPath = os.path.join(os.environ.get('WORKDIR'), 'log', trcFile) 
+        # set command    
+        cmd = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'cbatrace', 'cbatrace -o ' + trcPath)
+        # final command 
+        cmd = cmd + ' ' + self.cmd
+        return cmd
+      else:
+          return self.cmd 
+
+# get absolute path 
 def _absolute_path(path):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', path)
 
-
+# set java command 
 _java_cmd = 'java -ea -cp %s:%s com.apple.foundationdb.test.' % (
     _absolute_path('java/foundationdb-client.jar'),
     _absolute_path('java/foundationdb-tests.jar'))

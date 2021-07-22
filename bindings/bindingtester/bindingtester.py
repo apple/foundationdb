@@ -286,7 +286,7 @@ class TestRunner(object):
             thread.insert_operations(self.db, subspace)
 
     def _run_tester(self, test):
-        params = test.cmd.split(' ') + [self.args.instruction_prefix, str(self.args.api_version)]
+        params = test.get_cmd().split(' ') + [self.args.instruction_prefix, str(self.args.api_version)]
         if self.args.cluster_file is not None:
             params += [self.args.cluster_file]
 

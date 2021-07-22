@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+#########################################################################################
+#
+# cbatrace - C Bindings Api TRACE Script for FDB_C library.
+#   A test script for running with FoundationDB binding tests. 
+#
+# This test script is the main driver used to trace C bindings API calls when used during 
+# the bindingtester testing.
+# The script exploits the the LD_PRELOAD trick provided by the dynamic linker on Linux 
+# to override APIs from the libfdb_c.so library in order to track their calls.
+#
+# The script producess a XML trace file. Its XML schema resembles the one used 
+# by the TraceEvent facility. 
+#
+# Example:
+# <?xml version="1.0"?>
+# <Trace>
+#   <Event Type="api" Name="fdb_get_client_version" Count="1" \>
+#   <Event Type="api" Name="fdb_create_database" Count="1" \>
+#   <Event Type="api" Name="fdb_database_create_transaction" Count="1" \>
+#   <Event Type="api" Name="fdb_transaction_set" Count="1" \>
+#   <Event Type="api" Name="fdb_transaction_set" Count="2" \>
+#   ... 
+#   <Event Type="api" Name="fdb_future_destroy" Count="1" \>
+#   <Event Type="api" Name="fdb_future_destroy" Count="2" \>
+#   <Event Type="api" Name="fdb_future_destroy" Count="3" \>
+#   <Event Type="api" Name="fdb_future_destroy" Count="4" \>
+#   ... 
+#   <Event Type="summary" Name="totals">
+#     <Event Type="api" Name="fdb_get_error" Count="0" \>
+#     <Event Type="api" Name="fdb_transaction_on_error" Count="0" \>
+#     <Event Type="api" Name="fdb_transaction_watch" Count="0" \>
+#     ...
+#     <Event Type="api" Name="fdb_create_database" Count="1" \>
+#     <Event Type="api" Name="fdb_transaction_set" Count="2" \>
+#     ...
+#     <Event Type="api" Name="fdb_future_destroy" Count="4" \>
+#     <Event Type="api" Name="fdb_database_create_transaction" Count="1" \>
+#  </Event>
+# </Trace>
+#     
+#
+# Author: Khaled yagoub
+# Date:	 20-10-17
+# Version: 1.0
+#########################################################################################
+
+me=`basename "$0"`
+echo ""
+echo "    > Running Script: $me"
+echo "    ----------------------------------------------"
+echo "    - run command: ${command} \"${@}\""
+
+usage() {
+    echo ""
+    echo "    cbatrace - A utility script used to trace C bindings API calls. "
+    echo "      The script uses the LD_PRELOAD trick to intercept calls to APIs " 
+    echo "      tp the shared libarary libfdb_c.so and replace them by calls " 
+    echo "      to their corresponding wrapper APIs from library libcbatracefdb_c.so" 
+    echo "      in order to produce tracing information" 
+    echo ""
+    echo "    Usage: $0 [options] <program> [args...]"
+    echo ""
+    echo "    Options:"
+    echo "      -h            : Show this help."
+    echo "      -c            : Count and show calls for each library call."
+    echo "      -o <file_name>: Write the trace output to the file file_name rather than to stdout."
+    echo ""
+    echo "    Examples:"
+    echo "      - Trace the C binding API calls when running test 'fdb_c_txn_size_test'."
+    echo "        Show the summary of calls on stdout."
+    echo "        > ./cbatrace ~/build/bin/fdb_c_txn_size_test"
+    echo ""
+    echo "      - Same as above, but also show every API call (as it occurs) with incremental counts."
+    echo "        Show the summary of calls on stdout."
+    echo "        > ./cbatrace -c ~/build/bin/fdb_c_txn_size_test"
+    echo ""
+    echo "      - Same as above, but use file 'cbatrace.log' to save the tracing result."
+    echo "        > ./cbatrace -c -o /tmp/cbatrace.log ~/build/bin/fdb_c_txn_size_test"
+    echo ""          
+    if [ "$#" = 0 ]; then
+	exit 0
+    else
+	exit "$1"
+    fi
+}
+
+
+#set default tag for output file name 
+CBATRACE_OUTPUT_FILE_TAG="default"
+while :; do
+	case "$1" in
+		-h|--help)
+			usage
+			;;
+		-c)
+			export _CBATRACE_FLAGS=1
+			;;
+		-o)
+			shift
+			_CBATRACE_OUTPUT_FILE="${1}"
+			export _CBATRACE_OUTPUT_FILE
+			;;
+
+		*)
+			break
+			;;
+	esac
+	shift
+done
+
+# get lib directory 
+CBATRACE_LIBDIR=$(dirname $(realpath "$0"))
+
+# display usage if missing arguments
+if [ "$#" = "0" ]; then
+    usage 1
+fi
+
+# run command 
+LD_PRELOAD="$CBATRACE_LIBDIR/libcbatracefdb_c.so:$LD_PRELOAD" exec "$@"
