@@ -27,7 +27,7 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 
-struct XmlTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
+struct XmlTraceLogFormatter final : public ITraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
 	void addref() override;
 	void delref() override;
 

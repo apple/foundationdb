@@ -32,6 +32,7 @@
  */
 class IConfigDatabaseNode : public ReferenceCounted<IConfigDatabaseNode> {
 public:
+	virtual ~IConfigDatabaseNode() = default;
 	virtual Future<Void> serve(ConfigTransactionInterface const&) = 0;
 	virtual Future<Void> serve(ConfigFollowerInterface const&) = 0;
 

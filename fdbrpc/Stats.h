@@ -80,7 +80,7 @@ struct CounterCollection {
 	void logToTraceEvent(TraceEvent& te) const;
 };
 
-struct Counter : ICounter, NonCopyable {
+struct Counter final : ICounter, NonCopyable {
 public:
 	typedef int64_t Value;
 

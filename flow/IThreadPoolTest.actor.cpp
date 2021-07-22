@@ -11,10 +11,10 @@
 
 void forceLinkIThreadPoolTests() {}
 
-struct ThreadNameReceiver : IThreadPoolReceiver {
+struct ThreadNameReceiver final : IThreadPoolReceiver {
 	void init() override {}
 
-	struct GetNameAction : TypedAction<ThreadNameReceiver, GetNameAction> {
+	struct GetNameAction final : TypedAction<ThreadNameReceiver, GetNameAction> {
 		ThreadReturnPromise<std::string> name;
 
 		double getTimeEstimate() const override { return 3.; }

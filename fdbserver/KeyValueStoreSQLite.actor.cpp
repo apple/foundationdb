@@ -1639,7 +1639,7 @@ private:
 			return cursor;
 		}
 
-		struct ReadValueAction : TypedAction<Reader, ReadValueAction>, FastAllocated<ReadValueAction> {
+		struct ReadValueAction final : TypedAction<Reader, ReadValueAction>, FastAllocated<ReadValueAction> {
 			Key key;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
@@ -1692,7 +1692,7 @@ private:
 			// if (t >= 1.0) TraceEvent("ReadValuePrefixActionSlow",dbgid).detail("Elapsed", t);
 		}
 
-		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
+		struct ReadRangeAction final : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
 			ThreadReturnPromise<RangeResult> result;
@@ -1775,7 +1775,7 @@ private:
 			}
 		}
 
-		struct InitAction : TypedAction<Writer, InitAction>, FastAllocated<InitAction> {
+		struct InitAction final : TypedAction<Writer, InitAction>, FastAllocated<InitAction> {
 			ThreadReturnPromise<Void> result;
 			double getTimeEstimate() const override { return 0; }
 		};
@@ -1784,7 +1784,7 @@ private:
 			a.result.send(Void());
 		}
 
-		struct SetAction : TypedAction<Writer, SetAction>, FastAllocated<SetAction> {
+		struct SetAction final : TypedAction<Writer, SetAction>, FastAllocated<SetAction> {
 			KeyValue kv;
 			SetAction(KeyValue kv) : kv(kv) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->SET_TIME_ESTIMATE; }
@@ -1799,7 +1799,7 @@ private:
 				TraceEvent("SetActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
-		struct ClearAction : TypedAction<Writer, ClearAction>, FastAllocated<ClearAction> {
+		struct ClearAction final : TypedAction<Writer, ClearAction>, FastAllocated<ClearAction> {
 			KeyRange range;
 			ClearAction(KeyRange range) : range(range) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->CLEAR_TIME_ESTIMATE; }
@@ -1813,7 +1813,7 @@ private:
 				TraceEvent("ClearActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
-		struct CommitAction : TypedAction<Writer, CommitAction>, FastAllocated<CommitAction> {
+		struct CommitAction final : TypedAction<Writer, CommitAction>, FastAllocated<CommitAction> {
 			double issuedTime;
 			ThreadReturnPromise<Void> result;
 			CommitAction() : issuedTime(now()) {}
@@ -1887,7 +1887,8 @@ private:
 			// freeListPages, iterationsi, freeTableEmpty);
 		}
 
-		struct SpringCleaningAction : TypedAction<Writer, SpringCleaningAction>, FastAllocated<SpringCleaningAction> {
+		struct SpringCleaningAction final : TypedAction<Writer, SpringCleaningAction>,
+		                                    FastAllocated<SpringCleaningAction> {
 			ThreadReturnPromise<SpringCleaningWorkPerformed> result;
 			double getTimeEstimate() const override {
 				return std::max(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE,

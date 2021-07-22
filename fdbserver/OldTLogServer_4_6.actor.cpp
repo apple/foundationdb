@@ -108,7 +108,7 @@ struct TLogQueueEntryRef {
 
 typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
 
-struct TLogQueue : public IClosable {
+struct TLogQueue final : public IClosable {
 public:
 	TLogQueue(IDiskQueue* queue, UID dbgid) : queue(queue), dbgid(dbgid) {}
 
