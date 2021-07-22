@@ -2162,17 +2162,18 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		return Void();
 	}
 
-	ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
-	                                 Reference<TaskBucket> taskBucket,
-	                                 Key logUid,
-	                                 Key backupUid,
-	                                 Key keyAddPrefix,
-	                                 Key keyRemovePrefix,
-	                                 Key keyConfigBackupRanges,
-	                                 Key tagName,
-	                                 TaskCompletionKey completionKey,
-	                                 Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
-	                                 bool databasesInSync = false) {
+	ACTOR static Future<Key> addTask(
+	    Reference<ReadYourWritesTransaction> tr,
+	    Reference<TaskBucket> taskBucket,
+	    Key logUid,
+	    Key backupUid,
+	    Key keyAddPrefix,
+	    Key keyRemovePrefix,
+	    Key keyConfigBackupRanges,
+	    Key tagName,
+	    TaskCompletionKey completionKey,
+	    Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
+	    DatabaseBackupAgent::PreBackupAction backupAction = DatabaseBackupAgent::PreBackupAction::VERIFY) {
 		Key doneKey = wait(completionKey.get(tr, taskBucket));
 		Reference<Task> task(new Task(StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version, doneKey));
 
@@ -2183,7 +2184,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		task->params[BackupAgentBase::keyConfigBackupRanges] = keyConfigBackupRanges;
 		task->params[BackupAgentBase::keyTagName] = tagName;
 		task->params[DatabaseBackupAgent::keyDatabasesInSync] =
-		    databasesInSync ? LiteralStringRef("t") : LiteralStringRef("f");
+		    backupAction == DatabaseBackupAgent::PreBackupAction::NONE ? LiteralStringRef("t") : LiteralStringRef("f");
 
 		if (!waitFor) {
 			return taskBucket->addTask(tr,
@@ -2429,7 +2430,7 @@ public:
 	                                       Key addPrefix,
 	                                       Key removePrefix,
 	                                       bool lockDB,
-	                                       bool databasesInSync) {
+	                                       DatabaseBackupAgent::PreBackupAction backupAction) {
 		state UID logUid = deterministicRandom()->randomUniqueID();
 		state Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
 		state UID logUidCurrent = wait(backupAgent->getLogUid(tr, tagName));
@@ -2473,7 +2474,7 @@ public:
 			}
 		}
 
-		if (!databasesInSync) {
+		if (backupAction == DatabaseBackupAgent::PreBackupAction::VERIFY) {
 			// Make sure all of the ranges are empty before we backup into them.
 			state std::vector<Future<Standalone<RangeResultRef>>> backupIntoResults;
 			for (auto& backupRange : backupRanges) {
@@ -2486,6 +2487,11 @@ public:
 					// One of the ranges we will be backing up into has pre-existing data.
 					throw restore_destination_not_empty();
 				}
+			}
+		} else if (backupAction == DatabaseBackupAgent::PreBackupAction::CLEAR) {
+			// Clear out all ranges before we backup into them.
+			for (auto& backupRange : backupRanges) {
+				tr->clear(backupRange.removePrefix(removePrefix).withPrefix(addPrefix));
 			}
 		}
 
@@ -2525,7 +2531,7 @@ public:
 		tr->clear(KeyRangeRef(mapPrefix, mapEnd));
 
 		state Version readVersion = invalidVersion;
-		if (databasesInSync) {
+		if (backupAction == DatabaseBackupAgent::PreBackupAction::NONE) {
 			Transaction readTransaction(backupAgent->taskBucket->src);
 			readTransaction.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Version _ = wait(readTransaction.getReadVersion());
@@ -2544,7 +2550,7 @@ public:
 		    tagName,
 		    TaskCompletionKey::noSignal(),
 		    Reference<TaskFuture>(),
-		    databasesInSync));
+		    backupAction));
 
 		if (lockDB)
 			wait(lockDatabase(tr, logUid));
@@ -2687,8 +2693,14 @@ public:
 		TraceEvent("DBA_SwitchoverVersionUpgraded");
 
 		try {
-			wait(drAgent.submitBackup(
-			    backupAgent->taskBucket->src, tagName, backupRanges, false, addPrefix, removePrefix, true, true));
+			wait(drAgent.submitBackup(backupAgent->taskBucket->src,
+			                          tagName,
+			                          backupRanges,
+			                          false,
+			                          addPrefix,
+			                          removePrefix,
+			                          true,
+			                          DatabaseBackupAgent::PreBackupAction::NONE));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_duplicate)
 				throw;
@@ -3153,9 +3165,9 @@ Future<Void> DatabaseBackupAgent::submitBackup(Reference<ReadYourWritesTransacti
                                                Key addPrefix,
                                                Key removePrefix,
                                                bool lockDatabase,
-                                               bool databasesInSync) {
+                                               PreBackupAction backupAction) {
 	return DatabaseBackupAgentImpl::submitBackup(
-	    this, tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase, databasesInSync);
+	    this, tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase, backupAction);
 }
 
 Future<Void> DatabaseBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {

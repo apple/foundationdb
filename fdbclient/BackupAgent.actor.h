@@ -493,6 +493,14 @@ public:
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return unlockBackup(tr, tagName); });
 	}
 
+	// Specifies the action to take on the backup's destination key range
+	// before the backup begins.
+	enum PreBackupAction {
+		NONE = 0, // No action is taken
+		VERIFY = 1, // Verify the key range being restored to is empty.
+		CLEAR = 2 // Clear the key range being restored to.
+	};
+
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -500,7 +508,7 @@ public:
 	                          Key addPrefix = StringRef(),
 	                          Key removePrefix = StringRef(),
 	                          bool lockDatabase = false,
-	                          bool databasesInSync = false);
+	                          PreBackupAction backupAction = PreBackupAction::VERIFY);
 	Future<Void> submitBackup(Database cx,
 	                          Key tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -508,10 +516,10 @@ public:
 	                          Key addPrefix = StringRef(),
 	                          Key removePrefix = StringRef(),
 	                          bool lockDatabase = false,
-	                          bool databasesInSync = false) {
+	                          PreBackupAction backupAction = PreBackupAction::VERIFY) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(
-			    tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase, databasesInSync);
+			    tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase, backupAction);
 		});
 	}
 
