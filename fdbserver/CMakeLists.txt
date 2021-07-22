@@ -263,6 +263,9 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
     NAMES liblz4.a REQUIRED)
 endif()
 
+# Enable sampling
+add_definitions(-DVISIBILITY_SAMPLING)
+
 # Suppress warnings in sqlite since it's third party
 if(NOT WIN32)
   target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
