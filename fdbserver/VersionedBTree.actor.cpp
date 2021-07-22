@@ -8776,7 +8776,7 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 		strings.push_back(randomString(arena, 5));
 	}
 
-	printf("Inserting and then finding each string...\n", count);
+	printf("Inserting and then finding each string count=%d...\n", count);
 	double start = timer();
 	VersionedBTree::MutationBuffer m;
 	for (int i = 0; i < count; ++i) {
