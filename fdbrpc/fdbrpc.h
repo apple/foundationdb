@@ -300,7 +300,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 			Promise<Void> hold = ready;
 			hold.sendError(message.getError());
 		} else {
-			ASSERT(message.get().bytes > bytesAcknowledged);
+			ASSERT(message.get().bytes > bytesAcknowledged || (message.get().bytes < 0 && bytesAcknowledged > 0));
 			bytesAcknowledged = message.get().bytes;
 			if (ready.isValid() && bytesSent - bytesAcknowledged < bytesLimit) {
 				Promise<Void> hold = ready;
@@ -336,6 +336,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
 		this->addPromiseRef();
+		TraceEvent(SevDebug, "NetNotifiedQueueWithAcknowledgementsReceive")
+		    .detail("PromiseRef", this->getPromiseReferenceCount());
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
 
@@ -369,6 +371,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			this->send(std::move(message.get().asUnderlyingType()));
 		}
 		this->delPromiseRef();
+		TraceEvent(SevDebug, "NetNotifiedQueueWithAcknowledgementsReceiveEnd")
+		    .detail("PromiseRef", this->getPromiseReferenceCount());
 	}
 
 	T pop() override {
@@ -393,7 +397,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			    false);
 		}
 		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
-			// The ReplyPromiseStream was cancelled before sending an error, so the storage server must have died
+			// Notify the client ReplyPromiseStream was cancelled before sending an error, so the storage server must
+			// have died
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(broken_promise()),
 			                                          getEndpoint(TaskPriority::NoDeliverDelay),
 			                                          false);
@@ -416,6 +421,7 @@ public:
 	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
 			if (!queue->acknowledgements.getRawEndpoint().isValid()) {
+				// register acknowledge receiver on sender and tell the receiver where to send acknowledge messages
 				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay).token;
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
@@ -477,6 +483,8 @@ public:
 			errors->delPromiseRef();
 	}
 
+	// The endpoints of a ReplyPromiseStream must be initialized at Task::NoDeliverDelay, because with lower priorities
+	// a delay(0) in FlowTransport deliver can cause out of order delivery.
 	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::NoDeliverDelay); }
 
 	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
@@ -693,20 +701,18 @@ public:
 
 	template <class X>
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
+		auto p = getReplyPromiseStream(value);
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
-			auto& p = getReplyPromiseStream(value);
 			Reference<Peer> peer =
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			// FIXME: defer sending the message until we know the connection is established
 			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
-			return p;
 		} else {
 			send(value);
-			auto& p = getReplyPromiseStream(value);
-			return p;
 		}
+		return p;
 	}
 
 	// stream.getReplyUnlessFailedFor( request, double sustainedFailureDuration, double sustainedFailureSlope )

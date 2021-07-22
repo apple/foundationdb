@@ -25,6 +25,24 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// create a peek stream for cursor when it's possible
+ACTOR Future<Void> tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
+	if (self->peekReplyStream.present())
+		return Void();
+	else if (!self->interf || !self->interf->get().present()) {
+		self->peekReplyStream.reset();
+		return Never();
+	}
+	wait(IFailureMonitor::failureMonitor().onStateEqual(self->interf->get().interf().peekStreamMessages.getEndpoint(),
+	                                                    FailureStatus(false)));
+	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(TLogPeekStreamRequest(
+	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max()));
+	TraceEvent(SevDebug, "SPC_StreamCreated", self->randomID)
+	    .detail("PeerAddress", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress())
+	    .detail("PeerToken", self->interf->get().interf().peekStreamMessages.getEndpoint().token);
+	return Void();
+}
+
 ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
                                                Tag tag,
                                                Version begin,
@@ -35,10 +53,14 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterf
     rd(results.arena, results.messages, Unversioned()), randomID(deterministicRandom()->randomUniqueID()),
     poppedVersion(0), returnIfBlocked(returnIfBlocked), sequence(0), onlySpilled(false),
     parallelGetMore(parallelGetMore), lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0),
-    resetCheck(Void()) {
+    resetCheck(Void()), usePeekStream(SERVER_KNOBS->PEEK_USEING_STREAMING) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
-	//TraceEvent("SPC_Starting", randomID).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).backtrace();
+	TraceEvent("SPC_Starting", randomID)
+	    .detail("Tag", tag.toString())
+	    .detail("Begin", begin)
+	    .detail("End", end)
+	    .backtrace();
 }
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
@@ -51,7 +73,7 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
   : results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion),
     end(end), messageAndTags(message), hasMsg(hasMsg), randomID(deterministicRandom()->randomUniqueID()),
     poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false),
-    lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void()) {
+    lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void()), usePeekStream(false) {
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
@@ -154,6 +176,20 @@ void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {
 	}
 }
 
+// This function is called after the cursor received one TLogPeekReply to update its members, which is the common logic
+// in getMore helper functions.
+void updateCursorWithReply(ILogSystem::ServerPeekCursor* self, const TLogPeekReply& res) {
+	self->results = res;
+	self->onlySpilled = res.onlySpilled;
+	if (res.popped.present())
+		self->poppedVersion = std::min(std::max(self->poppedVersion, res.popped.get()), self->end.version);
+	self->rd = ArenaReader(self->results.arena, self->results.messages, Unversioned());
+	LogMessageVersion skipSeq = self->messageVersion;
+	self->hasMsg = true;
+	self->nextMessage();
+	self->advanceTo(skipSeq);
+}
+
 ACTOR Future<Void> resetChecker(ILogSystem::ServerPeekCursor* self, NetworkAddress addr) {
 	self->slowReplies = 0;
 	self->unknownReplies = 0;
@@ -209,11 +245,10 @@ ACTOR Future<TLogPeekReply> recordRequestMetrics(ILogSystem::ServerPeekCursor* s
 }
 
 ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self, TaskPriority taskID) {
-	if (!self->interf || self->messageVersion >= self->end) {
+	if (!self->interf || self->isExhausted()) {
 		if (self->hasMessage())
 			return Void();
-		wait(Future<Void>(Never()));
-		throw internal_error();
+		return Never();
 	}
 
 	if (!self->interfaceChanged.isValid()) {
@@ -254,16 +289,7 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 					}
 					expectedBegin = res.end;
 					self->futureResults.pop_front();
-					self->results = res;
-					self->onlySpilled = res.onlySpilled;
-					if (res.popped.present())
-						self->poppedVersion =
-						    std::min(std::max(self->poppedVersion, res.popped.get()), self->end.version);
-					self->rd = ArenaReader(self->results.arena, self->results.messages, Unversioned());
-					LogMessageVersion skipSeq = self->messageVersion;
-					self->hasMsg = true;
-					self->nextMessage();
-					self->advanceTo(skipSeq);
+					updateCursorWithReply(self, res);
 					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
@@ -297,10 +323,62 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 	}
 }
 
+ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, TaskPriority taskID) {
+	if (!self->interf || self->isExhausted()) {
+		self->peekReplyStream.reset();
+		if (self->hasMessage())
+			return Void();
+		return Never();
+	}
+
+	loop {
+		try {
+			state Future<TLogPeekReply> fPeekReply = self->peekReplyStream.present()
+			                                             ? map(waitAndForward(self->peekReplyStream.get().getFuture()),
+			                                                   [](const TLogPeekStreamReply& r) { return r.rep; })
+			                                             : Never();
+			choose {
+				when(wait(self->peekReplyStream.present() ? Never() : tryEstablishPeekStream(self))) {}
+				when(wait(self->interf->onChange())) {
+					self->onlySpilled = false;
+					self->peekReplyStream.reset();
+				}
+				when(TLogPeekReply res = wait(
+				         self->peekReplyStream.present()
+				             ? recordRequestMetrics(
+				                   self,
+				                   self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress(),
+				                   fPeekReply)
+				             : Never())) {
+					updateCursorWithReply(self, res);
+					// TraceEvent("SPC_GetMoreB", self->randomID)
+					//     .detail("Has", self->hasMessage())
+					//     .detail("End", res.end)
+					//     .detail("Popped", res.popped.present() ? res.popped.get() : 0);
+
+					// NOTE: delay is needed here since TLog need to be scheduled to response if there are TLog and SS
+					// on the same machine
+					wait(delay(0));
+					return Void();
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "SPC_GetMoreB_Error", self->randomID).detail("Error", e.what());
+			if (e.code() == error_code_connection_failed || e.code() == error_code_operation_obsolete) {
+				self->peekReplyStream.reset();
+			} else if (e.code() == error_code_end_of_stream) {
+				self->end.reset(self->messageVersion.version);
+				return Void();
+			} else {
+				throw;
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPriority taskID) {
-	if (!self->interf || self->messageVersion >= self->end) {
-		wait(Future<Void>(Never()));
-		throw internal_error();
+	if (!self->interf || self->isExhausted()) {
+		return Never();
 	}
 	try {
 		loop {
@@ -314,16 +392,7 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 				                                        self->onlySpilled),
 				                        taskID))
 				                  : Never())) {
-					self->results = res;
-					self->onlySpilled = res.onlySpilled;
-					if (res.popped.present())
-						self->poppedVersion =
-						    std::min(std::max(self->poppedVersion, res.popped.get()), self->end.version);
-					self->rd = ArenaReader(self->results.arena, self->results.messages, Unversioned());
-					LogMessageVersion skipSeq = self->messageVersion;
-					self->hasMsg = true;
-					self->nextMessage();
-					self->advanceTo(skipSeq);
+					updateCursorWithReply(self, res);
 					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
@@ -340,15 +409,20 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 }
 
 Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
-	//TraceEvent("SPC_GetMore", randomID).detail("HasMessage", hasMessage()).detail("More", !more.isValid() || more.isReady()).detail("MessageVersion", messageVersion.toString()).detail("End", end.toString());
+	// TraceEvent("SPC_GetMore", randomID)
+	//     .detail("HasMessage", hasMessage())
+	//     .detail("More", !more.isValid() || more.isReady())
+	//     .detail("MessageVersion", messageVersion.toString())
+	//     .detail("End", end.toString());
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		if (parallelGetMore || onlySpilled || futureResults.size()) {
-			more = serverPeekParallelGetMore(this, taskID);
+		more = serverPeekStreamGetMore(this, taskID);
+		/*if (parallelGetMore || onlySpilled || futureResults.size()) {
+		    more = serverPeekParallelGetMore(this, taskID);
 		} else {
-			more = serverPeekGetMore(this, taskID);
-		}
+		    more = serverPeekGetMore(this, taskID);
+		}*/
 	}
 	return more;
 }
@@ -359,6 +433,12 @@ ACTOR Future<Void> serverPeekOnFailed(ILogSystem::ServerPeekCursor* self) {
 			when(wait(self->interf->get().present()
 			              ? IFailureMonitor::failureMonitor().onStateEqual(
 			                    self->interf->get().interf().peekMessages.getEndpoint(), FailureStatus())
+			              : Never())) {
+				return Void();
+			}
+			when(wait(self->interf->get().present()
+			              ? IFailureMonitor::failureMonitor().onStateEqual(
+			                    self->interf->get().interf().peekStreamMessages.getEndpoint(), FailureStatus())
 			              : Never())) {
 				return Void();
 			}
@@ -374,9 +454,14 @@ Future<Void> ILogSystem::ServerPeekCursor::onFailed() {
 bool ILogSystem::ServerPeekCursor::isActive() const {
 	if (!interf->get().present())
 		return false;
-	if (messageVersion >= end)
+	if (isExhausted())
 		return false;
-	return IFailureMonitor::failureMonitor().getState(interf->get().interf().peekMessages.getEndpoint()).isAvailable();
+	return IFailureMonitor::failureMonitor()
+	           .getState(interf->get().interf().peekMessages.getEndpoint())
+	           .isAvailable() &&
+	       IFailureMonitor::failureMonitor()
+	           .getState(interf->get().interf().peekStreamMessages.getEndpoint())
+	           .isAvailable();
 }
 
 bool ILogSystem::ServerPeekCursor::isExhausted() const {
