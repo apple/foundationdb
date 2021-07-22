@@ -51,6 +51,7 @@
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/MultiThreadTest.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -931,7 +932,9 @@ enum class ServerRole {
 	SkipListTest,
 	Test,
 	VersionedMapTest,
-	UnitTests
+	UnitTests,
+	MultiThreadedFDBClient,
+	MultiThreadedFDBServer
 };
 struct CLIOptions {
 	std::string commandLine;
@@ -1129,6 +1132,10 @@ private:
 					role = ServerRole::ConsistencyCheck;
 				else if (!strcmp(sRole, "unittests"))
 					role = ServerRole::UnitTests;
+				else if (!strcmp(sRole, "multithreadedfdbserver"))
+					role = ServerRole::MultiThreadedFDBServer;
+				else if (!strcmp(sRole, "multithreadedfdbclient"))
+					role = ServerRole::MultiThreadedFDBClient;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1571,6 +1578,12 @@ private:
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
+		if (role == ServerRole::MultiThreadedFDBClient && !testServersStr.size()) {
+			fprintf(stderr, "ERROR: please specify --testservers\n");
+			printHelpTeaser(argv[0]);
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
 		// Interpret legacy "maxLogs" option in the most sensible and unsurprising way we can while eliminating its code
 		// path
 		if (maxLogsSet) {
@@ -1722,7 +1735,8 @@ int main(int argc, char* argv[]) {
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress =
-			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
+			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore ||
+			     role == ServerRole::MultiThreadedFDBServer);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
@@ -2056,6 +2070,12 @@ int main(int argc, char* argv[]) {
 			}
 
 			f = result;
+		} else if (role == ServerRole::MultiThreadedFDBServer) {
+			f = stopAfter(multiThreadedFDBTestServer());
+			g_network->run();
+		} else if (role == ServerRole::MultiThreadedFDBClient) {
+			f = stopAfter(multiThreadedFDBTestClient(opts.testServersStr));
+			g_network->run();
 		}
 
 		int rc = FDB_EXIT_SUCCESS;

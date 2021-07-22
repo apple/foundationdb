@@ -63,6 +63,8 @@ set(FDBSERVER_SRCS
   MutationTracking.cpp
   MoveKeys.actor.h
   MoveKeys.actor.cpp
+  MultiThreadTest.h
+  MultiThreadTest.actor.cpp
   networktest.actor.cpp
   NetworkTest.h
   OldTLogServer_4_6.actor.cpp
