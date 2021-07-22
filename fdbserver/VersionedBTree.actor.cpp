@@ -1928,19 +1928,20 @@ public:
 		currentSize = self->currentSize;
 
 		state typename EvictionOrderT::iterator i = evictionOrder.begin();
-		state typename EvictionOrderT::iterator iEnd = evictionOrder.begin();
+		state typename EvictionOrderT::iterator iEnd = evictionOrder.end();
 
 		while (i != iEnd) {
 			if (!i->item.evictable()) {
 				wait(i->item.onEvictable());
 			}
+			currentSize -= i->size;
+			self->currentSize -= i->size;
 			++i;
 		}
 
 		evictionOrder.clear();
 		cache.clear();
-		self->currentSize -= currentSize;
-		//TODO: add an assertion here to check if currentSize becomes 0.
+		ASSERT(currentSize == 0);
 		return Void();
 	}
 
