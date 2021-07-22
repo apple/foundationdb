@@ -130,7 +130,10 @@ public:
 	                            std::function<T(FdbCApi::FDBFuture*, FdbCApi*)> extractValue)
 	  : api(api), f(f), extractValue(extractValue), futureRefCount(1) {
 		ThreadSingleAssignmentVar<T>::addref();
-		api->futureSetCallback(f, &futureCallback, this);
+		FdbCApi::fdb_error_t e = api->futureSetCallback(f, &futureCallback, this);
+		if (e) {
+			throw Error(e);
+		}
 	}
 
 	~DLThreadSingleAssignmentVar() override {
