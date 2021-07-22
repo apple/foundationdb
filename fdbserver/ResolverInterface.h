@@ -43,6 +43,7 @@ struct ResolverInterface {
 	bool operator==(ResolverInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ResolverInterface const& r) const { return id() != r.id(); }
 	NetworkAddress address() const { return resolve.getEndpoint().getPrimaryAddress(); }
+	NetworkAddressList addresses() const { return resolve.getEndpoint().addresses; }
 	void initEndpoints() {
 		metrics.getEndpoint(TaskPriority::ResolutionMetrics);
 		split.getEndpoint(TaskPriority::ResolutionMetrics);

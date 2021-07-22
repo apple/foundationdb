@@ -65,6 +65,7 @@ struct TLogInterface {
 	bool operator==(TLogInterface const& r) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return peekMessages.getEndpoint().addresses.secondaryAddress; }
+	NetworkAddressList addresses() const { return peekMessages.getEndpoint().addresses; }
 
 	void initEndpoints() {
 		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;

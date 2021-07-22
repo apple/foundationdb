@@ -298,6 +298,10 @@ struct NetworkAddressList {
 		return address.toString() + ", " + secondaryAddress.get().toString();
 	}
 
+	bool contains(const NetworkAddress& r) const {
+		return address == r || (secondaryAddress.present() && secondaryAddress.get() == r);
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, address, secondaryAddress);
