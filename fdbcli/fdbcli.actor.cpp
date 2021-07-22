@@ -671,6 +671,7 @@ void initHelp() {
 	    CommandHelp("triggerddteaminfolog",
 	                "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
+	helpMap["rangefeed"] = CommandHelp("rangefeed <register|get|pop> <RANGEID> <BEGINKEY> <ENDKEY>", "", "");
 	helpMap["tssq"] =
 	    CommandHelp("tssq start|stop <StorageUID>",
 	                "start/stop tss quarantine",
@@ -3556,6 +3557,54 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "rangefeed")) {
+					if (tokens.size() == 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+						continue;
+					}
+					if (tokencmp(tokens[1], "register")) {
+						if (tokens.size() != 5) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						state Transaction trx(db);
+						loop {
+							try {
+								wait(trx.registerRangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
+								wait(trx.commit());
+								break;
+							} catch (Error& e) {
+								wait(trx.onError(e));
+							}
+						}
+					} else if (tokencmp(tokens[1], "get")) {
+						if (tokens.size() != 3) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						Standalone<VectorRef<MutationRefAndVersion>> res = wait(db->getRangeFeedMutations(tokens[2]));
+						for (auto& it : res) {
+							printf("%lld %s\n", it.version, it.mutation.toString().c_str());
+						}
+					} else if (tokencmp(tokens[1], "pop")) {
+						if (tokens.size() != 4) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						Version v;
+						int n = 0;
+						if (sscanf(tokens[3].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[3].size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(db->popRangeFeedMutations(tokens[2], v));
+						}
+					}
+				}
 				if (tokencmp(tokens[0], "tssq")) {
 					if (tokens.size() == 2) {
 						if (tokens[1] != LiteralStringRef("list")) {

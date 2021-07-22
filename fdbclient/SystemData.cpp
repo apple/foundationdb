@@ -1030,6 +1030,22 @@ const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
 
+const KeyRangeRef rangeFeedKeys(LiteralStringRef("\xff\x02/feed/"), LiteralStringRef("\xff\x02/feed0"));
+const KeyRef rangeFeedPrefix = rangeFeedKeys.begin;
+const KeyRef rangeFeedPrivatePrefix = LiteralStringRef("\xff\xff\x02/feed/");
+
+const Value rangeFeedValue(KeyRangeRef const& range) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
+	wr << range;
+	return wr.toValue();
+}
+KeyRange decodeRangeFeedValue(ValueRef const& value) {
+	KeyRange range;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> range;
+	return range;
+}
+
 const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
 const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);

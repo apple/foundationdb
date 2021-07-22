@@ -4311,6 +4311,21 @@ Future<Standalone<VectorRef<const char*>>> Transaction::getAddressesForKey(const
 	return getAddressesForKeyActor(key, ver, cx, info, options);
 }
 
+ACTOR Future<Void> registerRangeFeedActor(Transaction* tr, Key rangeID, KeyRange range) {
+	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
+	Optional<Value> val = wait(tr->get(rangeIDKey));
+	if (!val.present()) {
+		tr->set(rangeIDKey, rangeFeedValue(range));
+	} else if (decodeRangeFeedValue(val.get()) != range) {
+		throw unsupported_operation();
+	}
+	return Void();
+}
+
+Future<Void> Transaction::registerRangeFeed(const Key& rangeID, const KeyRange& range) {
+	return registerRangeFeedActor(this, rangeID, range);
+}
+
 ACTOR Future<Key> getKeyAndConflictRange(Database cx,
                                          KeySelector k,
                                          Future<Version> version,
@@ -6502,6 +6517,80 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
+ACTOR Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutationsActor(Reference<DatabaseContext> db,
+                                                                                      StringRef rangeID) {
+	state Database cx(db);
+	state Transaction tr(cx);
+	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
+	state Span span("NAPI:GetRangeFeedMutations"_loc);
+	Optional<Value> val = wait(tr.get(rangeIDKey));
+	if (!val.present()) {
+		throw unsupported_operation();
+	}
+	KeyRange keys = decodeRangeFeedValue(val.get());
+	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+	    wait(getKeyRangeLocations(cx,
+	                              keys,
+	                              100,
+	                              false,
+	                              &StorageServerInterface::rangeFeed,
+	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
+
+	if (locations.size() > 1) {
+		throw unsupported_operation();
+	}
+
+	state RangeFeedRequest req;
+	req.rangeID = rangeID;
+
+	RangeFeedReply rep = wait(loadBalance(cx.getPtr(),
+	                                      locations[0].second,
+	                                      &StorageServerInterface::rangeFeed,
+	                                      req,
+	                                      TaskPriority::DefaultPromiseEndpoint,
+	                                      false,
+	                                      cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
+	return Standalone<VectorRef<MutationRefAndVersion>>(rep.mutations, rep.arena);
+}
+
+Future<Standalone<VectorRef<MutationRefAndVersion>>> DatabaseContext::getRangeFeedMutations(StringRef rangeID) {
+	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID);
+}
+
+ACTOR Future<Void> popRangeFeedMutationsActor(Reference<DatabaseContext> db, StringRef rangeID, Version version) {
+	state Database cx(db);
+	state Transaction tr(cx);
+	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
+	state Span span("NAPI:PopRangeFeedMutations"_loc);
+	Optional<Value> val = wait(tr.get(rangeIDKey));
+	if (!val.present()) {
+		throw unsupported_operation();
+	}
+	KeyRange keys = decodeRangeFeedValue(val.get());
+	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+	    wait(getKeyRangeLocations(cx,
+	                              keys,
+	                              100,
+	                              false,
+	                              &StorageServerInterface::rangeFeed,
+	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
+
+	if (locations.size() > 1) {
+		throw unsupported_operation();
+	}
+
+	state std::vector<Future<Void>> popRequests;
+	for (int i = 0; i < locations[0].second->size(); i++) {
+		popRequests.push_back(
+		    locations[0].second->getInterface(i).rangeFeedPop.getReply(RangeFeedPopRequest(rangeID, version)));
+	}
+	wait(waitForAll(popRequests));
+	return Void();
+}
+
+Future<Void> DatabaseContext::popRangeFeedMutations(StringRef rangeID, Version version) {
+	return popRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
+}
 ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
 	state ReadYourWritesTransaction tr(cx);
 	loop {

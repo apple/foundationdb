@@ -31,6 +31,7 @@
 #include "fdbrpc/TimedRequest.h"
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbclient/CommitTransaction.h"
 #include "flow/UnitTest.h"
 
 // Dead code, removed in the next protocol version
@@ -76,6 +77,8 @@ struct StorageServerInterface {
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
+	RequestStream<struct RangeFeedRequest> rangeFeed;
+	RequestStream<struct RangeFeedPopRequest> rangeFeedPop;
 	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
@@ -117,8 +120,11 @@ struct StorageServerInterface {
 				    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
 				getRangeSplitPoints =
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
+				rangeFeed = RequestStream<struct RangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+				rangeFeedPop =
+				    RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
 				getKeyValuesStream =
-				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -160,6 +166,8 @@ struct StorageServerInterface {
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
+		streams.push_back(rangeFeed.getReceiver());
+		streams.push_back(rangeFeedPop.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		FlowTransport::transport().addEndpoints(streams);
 	}
@@ -612,6 +620,66 @@ struct SplitRangeRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, chunkSize, reply, arena);
+	}
+};
+
+struct MutationRefAndVersion {
+	MutationRef mutation;
+	Version version;
+
+	MutationRefAndVersion() {}
+	MutationRefAndVersion(MutationRef mutation, Version version) : mutation(mutation), version(version) {}
+	MutationRefAndVersion(Arena& to, MutationRef mutation, Version version)
+	  : mutation(to, mutation), version(version) {}
+	MutationRefAndVersion(Arena& to, const MutationRefAndVersion& from)
+	  : mutation(to, from.mutation), version(from.version) {}
+	int expectedSize() const { return mutation.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mutation, version);
+	}
+};
+
+struct RangeFeedReply {
+	constexpr static FileIdentifier file_identifier = 11815134;
+	VectorRef<MutationRefAndVersion> mutations;
+	bool cached;
+	Arena arena;
+
+	RangeFeedReply() : cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mutations, arena);
+	}
+};
+struct RangeFeedRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	Key rangeID;
+	ReplyPromise<RangeFeedReply> reply;
+
+	RangeFeedRequest() {}
+	RangeFeedRequest(Key const& rangeID) : rangeID(rangeID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeID, reply);
+	}
+};
+
+struct RangeFeedPopRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	Key rangeID;
+	Version version;
+	ReplyPromise<Void> reply;
+
+	RangeFeedPopRequest() {}
+	RangeFeedPopRequest(Key const& rangeID, Version version) : rangeID(rangeID), version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeID, version, reply);
 	}
 };
 

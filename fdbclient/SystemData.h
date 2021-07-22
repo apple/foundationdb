@@ -495,6 +495,12 @@ extern const ValueRef writeRecoveryKeyTrue;
 //	Allows incremental restore to read and set starting version for consistency.
 extern const KeyRef snapshotEndVersionKey;
 
+extern const KeyRangeRef rangeFeedKeys;
+const Value rangeFeedValue(KeyRangeRef const& range);
+KeyRange decodeRangeFeedValue(ValueRef const& value);
+extern const KeyRef rangeFeedPrefix;
+extern const KeyRef rangeFeedPrivatePrefix;
+
 // Configuration database special keys
 extern const KeyRef configTransactionDescriptionKey;
 extern const KeyRange globalConfigKnobKeys;
