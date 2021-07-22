@@ -1235,7 +1235,7 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
 		// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-		self->ssVersionVector.setVersions(req.writtenTags.get(), req.version);
+		self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
 	}
 	if (req.version > self->liveCommittedVersion.get()) {
 		self->databaseLocked = req.locked;
