@@ -1,0 +1,96 @@
+# name: test_backup_restore[centos]
+  '
+  Submitted and now waiting for the backup on tag `default' to complete.
+  
+  '
+---
+# name: test_backup_restore[centos].1
+  '
+  `x' is `y'
+  
+  '
+---
+# name: test_backup_restore[ubuntu]
+  '
+  Submitted and now waiting for the backup on tag `default' to complete.
+  
+  '
+---
+# name: test_backup_restore[ubuntu].1
+  '
+  `x' is `y'
+  
+  '
+---
+# name: test_fdbcli_help_text[centos]
+  '
+  FoundationDB CLI 7.1 (v7.1.0)
+  usage: fdbcli [OPTIONS]
+  
+    -C CONNFILE    The path of a file containing the connection string for the
+                   FoundationDB cluster. The default is first the value of the
+                   FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',
+                   then `/etc/foundationdb/fdb.cluster'.
+    --log          Enables trace file logging for the CLI session.
+    --log-dir PATH Specifes the output directory for trace files. If
+                   unspecified, defaults to the current directory. Has
+                   no effect unless --log is specified.
+    --trace_format FORMAT
+                   Select the format of the log files. xml (the default) and json
+                   are supported. Has no effect unless --log is specified.
+    --exec CMDS    Immediately executes the semicolon separated CLI commands
+                   and then exits.
+    --no-status    Disables the initial status check done when starting
+                   the CLI.
+    --knob_KNOBNAME KNOBVALUE
+                   Changes a knob option. KNOBNAME should be lowercase.
+    --debug-tls    Prints the TLS configuration and certificate chain, then exits.
+                   Useful in reporting and diagnosing TLS issues.
+    --build_flags  Print build information and exit.
+    -v, --version  Print FoundationDB CLI version information and exit.
+    -h, --help     Display this help and exit.
+  
+  '
+---
+# name: test_fdbcli_help_text[ubuntu]
+  '
+  FoundationDB CLI 7.1 (v7.1.0)
+  usage: fdbcli [OPTIONS]
+  
+    -C CONNFILE    The path of a file containing the connection string for the
+                   FoundationDB cluster. The default is first the value of the
+                   FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',
+                   then `/etc/foundationdb/fdb.cluster'.
+    --log          Enables trace file logging for the CLI session.
+    --log-dir PATH Specifes the output directory for trace files. If
+                   unspecified, defaults to the current directory. Has
+                   no effect unless --log is specified.
+    --trace_format FORMAT
+                   Select the format of the log files. xml (the default) and json
+                   are supported. Has no effect unless --log is specified.
+    --exec CMDS    Immediately executes the semicolon separated CLI commands
+                   and then exits.
+    --no-status    Disables the initial status check done when starting
+                   the CLI.
+    --knob_KNOBNAME KNOBVALUE
+                   Changes a knob option. KNOBNAME should be lowercase.
+    --debug-tls    Prints the TLS configuration and certificate chain, then exits.
+                   Useful in reporting and diagnosing TLS issues.
+    --build_flags  Print build information and exit.
+    -v, --version  Print FoundationDB CLI version information and exit.
+    -h, --help     Display this help and exit.
+  
+  '
+---
+# name: test_write[centos]
+  '
+  `x' is `y'
+  
+  '
+---
+# name: test_write[ubuntu]
+  '
+  `x' is `y'
+  
+  '
+---
