@@ -2529,6 +2529,7 @@ public:
 			i += 1;
 			writers.push_back(p);
 		}
+		wait(waitForAll(writers));
 		if (REDWOOD_DEBUG) {
 			Standalone<VectorRef<PhysicalPageID>> pageIDsCopy = pageIDs;
 			debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
@@ -2538,7 +2539,6 @@ public:
 						page->begin(),
 						(pageIDsCopy.front() * blockSize));
 		}
-		wait(waitForAll(writers));
 		return Void();
 	}
 
@@ -2616,8 +2616,8 @@ public:
 			    // TODO:  Possibly limit size of remap queue since it must be recovered on cold start
 				ASSERT(newIDs.size() == pageIDs.size());
 			    for (size_t i = 0; i < pageIDs.size(); i++) {
-				    RemappedPage r{ v, pageIDs[i], newIDs[i] };
-				    remapQueue.pushBack(r);
+					RemappedPage r{ v, pageIDs[i], newIDs[i]};
+					remapQueue.pushBack(r);
 				    auto& versionedMap = remappedPages[pageIDs[i]];
 
 				    // An update page is unlikely to have its old version read again soon, so prioritize its cache
