@@ -19,6 +19,7 @@
  */
 
 // Included via StorageMetrics.h
+#include <math.h>
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
@@ -26,6 +27,8 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// TODO why does this have actorcompiler and end in actor.h if it doesn't have any actors?
 
 const StringRef STORAGESERVER_HISTOGRAM_GROUP = LiteralStringRef("StorageServer");
 const StringRef FETCH_KEYS_LATENCY_HISTOGRAM = LiteralStringRef("FetchKeysLatency");
@@ -333,17 +336,17 @@ struct StorageServerMetrics {
 	// static void waitMetrics( StorageServerMetrics* const& self, WaitMetricsRequest const& req );
 
 	// This function can run on untrusted user data.  We must validate all divisions carefully.
-	KeyRef getSplitKey(int64_t remaining,
-	                   int64_t estimated,
-	                   int64_t limits,
-	                   int64_t used,
-	                   int64_t infinity,
-	                   bool isLastShard,
-	                   const StorageMetricSample& sample,
-	                   double divisor,
-	                   KeyRef const& lastKey,
-	                   KeyRef const& key,
-	                   bool hasUsed) const {
+	KeyRef getSplitKeyOld(int64_t remaining,
+	                      int64_t estimated,
+	                      int64_t limits,
+	                      int64_t used,
+	                      int64_t infinity,
+	                      bool isLastShard,
+	                      const StorageMetricSample& sample,
+	                      double divisor,
+	                      KeyRef const& lastKey,
+	                      KeyRef const& key,
+	                      bool hasUsed) const {
 		ASSERT(remaining >= 0);
 		ASSERT(limits > 0);
 		ASSERT(divisor > 0);
@@ -374,72 +377,372 @@ struct StorageServerMetrics {
 		return key;
 	}
 
+	// TODO REMOVE!!!!! Just for comparison
+	SplitMetricsReply splitMetricsOld(SplitMetricsRequest req) const {
+		SplitMetricsReply reply;
+		KeyRef lastKey = req.keys.begin;
+		StorageMetrics used = req.used;
+		StorageMetrics estimated = req.estimated;
+		StorageMetrics remaining = getMetrics(req.keys) + used;
+
+		/*printf("Splitting range OLD WAY [%s - %s) %lld/%lld\n",
+		       req.keys.begin.printable().c_str(),
+		       req.keys.end.printable().c_str(),
+		       remaining.bytes,
+		       req.limits.bytes);*/
+
+		//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
+
+		while (true) {
+			if (remaining.bytes < 2 * SERVER_KNOBS->MIN_SHARD_BYTES)
+				break;
+			KeyRef key = req.keys.end;
+			bool hasUsed = used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0;
+			key = getSplitKeyOld(remaining.bytes,
+			                     estimated.bytes,
+			                     req.limits.bytes,
+			                     used.bytes,
+			                     req.limits.infinity,
+			                     req.isLastShard,
+			                     byteSample,
+			                     1,
+			                     lastKey,
+			                     key,
+			                     hasUsed);
+			if (used.bytes < SERVER_KNOBS->MIN_SHARD_BYTES)
+				key = std::max(key,
+				               byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end),
+				                                        SERVER_KNOBS->MIN_SHARD_BYTES - used.bytes));
+			key = getSplitKeyOld(remaining.iosPerKSecond,
+			                     estimated.iosPerKSecond,
+			                     req.limits.iosPerKSecond,
+			                     used.iosPerKSecond,
+			                     req.limits.infinity,
+			                     req.isLastShard,
+			                     iopsSample,
+			                     SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
+			                     lastKey,
+			                     key,
+			                     hasUsed);
+			key = getSplitKeyOld(remaining.bytesPerKSecond,
+			                     estimated.bytesPerKSecond,
+			                     req.limits.bytesPerKSecond,
+			                     used.bytesPerKSecond,
+			                     req.limits.infinity,
+			                     req.isLastShard,
+			                     bandwidthSample,
+			                     SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
+			                     lastKey,
+			                     key,
+			                     hasUsed);
+			ASSERT(key != lastKey || hasUsed);
+			if (key == req.keys.end)
+				break;
+			reply.splits.push_back_deep(reply.splits.arena(), key);
+
+			StorageMetrics diff = (getMetrics(KeyRangeRef(lastKey, key)) + used);
+			remaining -= diff;
+			estimated -= diff;
+
+			used = StorageMetrics();
+			lastKey = key;
+
+			// TODO REMOVE
+			// printf("    %lld\n  %s\n", diff.bytes, key.printable().c_str());
+		}
+
+		reply.used = getMetrics(KeyRangeRef(lastKey, req.keys.end)) + used;
+		/*printf("    %lld", reply.used.bytes);
+		if (reply.used.bytes < req.limits.bytes * 2.0 / 3.0) {
+		    printf(" (TRUNCATED)");
+		}
+		printf("\n\n");*/
+		return reply;
+	}
+
+	// This function can run on untrusted user data.  We must validate all divisions carefully.
+	KeyRef getSplitKey(int64_t remaining,
+	                   int64_t estimated,
+	                   int64_t limits,
+	                   int64_t used,
+	                   int64_t infinity,
+	                   bool isFirstShard,
+	                   bool isLastShard,
+	                   SequentialWriteState seqWriteState,
+	                   const StorageMetricSample& sample,
+	                   double divisor,
+	                   KeyRef const& lastKey,
+	                   KeyRef const& key,
+	                   bool hasUsed,
+	                   bool evenNonSequential,
+	                   double splitJitter) const {
+		ASSERT(remaining >= 0);
+		ASSERT(limits > 0);
+		ASSERT(divisor > 0);
+
+		if (limits < infinity / 2) {
+			double sizeEstimator = (isLastShard || remaining > estimated) ? remaining : estimated;
+			// TODO why did this used to be '+ 0.5'? It results in uneven shard split sizes, and it wasn't for div/0
+			// because limits > 0
+			double sizeDivisor = sizeEstimator / limits;
+
+			int64_t expectedSize = remaining / sizeDivisor;
+			if (seqWriteState == S4SequentialDecreasing || seqWriteState == S4SequentialIncreasing) {
+				// TODO remove coverage after testing
+				TEST(true); // Doing sequential shard split in getSplitKey
+				// The default limit is a 50/50 split.
+				// For sequential writes, we want an 80/20 split, where the new shard in the direction of the sequential
+				// writes is much smaller, allowing more writes before splitting, and the other shard(s) are
+				// larger, because they're unlikely to be written to and split again.
+				// To accomplish this 80/20 split, we  make the small shard 2/5ths of the limit and large shard(s) up to
+				// 8/5ths of the limit
+				int64_t smallExpectedSize = (expectedSize * 2) / 5;
+
+				if (seqWriteState == S4SequentialDecreasing && isFirstShard) {
+					expectedSize = smallExpectedSize;
+				} else {
+
+					int64_t seqRemaining = remaining;
+					// either we're sequential decreasing after the first shard, or sequential increasing.
+					// sequential increasing needs to take the last small shard into account if it has multiple shards
+					// left, sequential decreasing doesn't.
+					// But, if we're at the end of sequential write increasing and splitting the sequential shard off
+					// the end would cause another small shard at the end, make this the last shard
+					if (seqWriteState == S4SequentialIncreasing /* && seqRemaining > 2 * smallExpectedSize*/) {
+						sizeEstimator -= smallExpectedSize;
+						seqRemaining -= smallExpectedSize;
+					}
+
+					limits = (limits * 8) / 5;
+					sizeDivisor = sizeEstimator / limits;
+					// only round up to split evenly if we have 2 or more non-sequential shards left, or if this is the
+					// end of sequential increasing and not rounding would cause 2 shards both smaller than the small
+					// shard size
+					if (isLastShard && sizeDivisor > 1 ||
+					    (seqWriteState == S4SequentialIncreasing && sizeEstimator > smallExpectedSize)) {
+						sizeDivisor = ceil(sizeDivisor);
+					}
+
+					expectedSize = seqRemaining / sizeDivisor;
+				}
+			} else if (evenNonSequential && isLastShard && sizeDivisor > 1) {
+				// If this is the last shard to split, but it will generate multiple output shards, split them evenly
+				// instead of having a large and small split, since the small split can't carry over to another shard.
+				// Ex: If last shard is 100MB and limit is 80MB, split 50/50 instead of 80/20 by rounding 1.25 up to 2.0
+				sizeDivisor = ceil(sizeDivisor);
+				expectedSize = remaining / sizeDivisor;
+			} else {
+				// use old approach that skews slightly larger first, and then combines the last two if they're too
+				// small
+				sizeDivisor += 0.5;
+			}
+			// overestimate a bit because of rounding and inaccuracy of sampling. Overestimate more with more splits
+			// left to go, but only up to a couple percent
+			double sizeOverestimateFactor = 1.0 + std::min(0.01 * sizeDivisor, 0.03);
+
+			if (remaining > expectedSize) {
+				// This does the conversion from native units to bytes using the divisor.
+				double offset = (expectedSize - used) / divisor;
+				if (offset <= 0)
+					return hasUsed ? lastKey : key;
+				return sample.splitEstimate(
+				    KeyRangeRef(lastKey, key),
+				    offset * sizeOverestimateFactor *
+				        ((1.0 - splitJitter) + 2 * deterministicRandom()->random01() * splitJitter));
+			}
+		}
+
+		return key;
+	}
+
+	SplitMetricsReply _splitMetrics(const SplitMetricsRequest& req, bool evenNonSequential, double splitJitter) const {
+		SplitMetricsReply reply;
+
+		KeyRef lastKey = req.keys.begin;
+		StorageMetrics used = req.used;
+		StorageMetrics estimated = req.estimated;
+		StorageMetrics remaining = getMetrics(req.keys) + used;
+		bool isFirstShard = req.isFirstShard;
+		SequentialWriteState seqWriteState = static_cast<SequentialWriteState>(req.seqWriteState);
+
+		// TODO just for sequential split metrics, remove or change to debug eventually
+		std::vector<uint64_t> splitSizesBytes;
+
+		// TODO REMOVE
+		printf("Splitting range [%s - %s) %lld/%lld %s\n",
+		       req.keys.begin.printable().c_str(),
+		       req.keys.end.printable().c_str(),
+		       remaining.bytes,
+		       req.limits.bytes,
+		       getSequentialWriteStateName(seqWriteState));
+
+		//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
+
+		while (true) {
+			if (remaining.bytes < 2 * SERVER_KNOBS->MIN_SHARD_BYTES)
+				break;
+			KeyRef key = req.keys.end;
+			bool hasUsed = used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0;
+			key = getSplitKey(remaining.bytes,
+			                  estimated.bytes,
+			                  req.limits.bytes,
+			                  used.bytes,
+			                  req.limits.infinity,
+			                  isFirstShard,
+			                  req.isLastShard,
+			                  seqWriteState, // only use sequential writes for byte splitting
+			                  byteSample,
+			                  1,
+			                  lastKey,
+			                  key,
+			                  hasUsed,
+			                  evenNonSequential,
+			                  splitJitter);
+			if (used.bytes < SERVER_KNOBS->MIN_SHARD_BYTES) {
+				printf("Checking for min shard size bytes b/c used=%d\n", used.bytes);
+				key = std::max(key,
+				               byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end),
+				                                        SERVER_KNOBS->MIN_SHARD_BYTES - used.bytes));
+			}
+			Key byteSplitKey = key;
+			key = getSplitKey(remaining.iosPerKSecond,
+			                  estimated.iosPerKSecond,
+			                  req.limits.iosPerKSecond,
+			                  used.iosPerKSecond,
+			                  req.limits.infinity,
+			                  isFirstShard,
+			                  req.isLastShard,
+			                  S4NonSequential,
+			                  iopsSample,
+			                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
+			                  lastKey,
+			                  key,
+			                  hasUsed,
+			                  evenNonSequential,
+			                  splitJitter);
+			// TODO REMOVE, just for debugging
+			// stop using sequential writes to split if we split on something other than bytes
+			if (key != byteSplitKey &&
+			    (seqWriteState == S4SequentialDecreasing || seqWriteState == S4SequentialIncreasing)) {
+				printf("Cancelling sequential split b/c iosKey key %s != byte split key %s\n",
+				       key.printable().c_str(),
+				       byteSplitKey.printable().c_str());
+				seqWriteState = S4NonSequential;
+			}
+			key = getSplitKey(remaining.bytesPerKSecond,
+			                  estimated.bytesPerKSecond,
+			                  req.limits.bytesPerKSecond,
+			                  used.bytesPerKSecond,
+			                  req.limits.infinity,
+			                  isFirstShard,
+			                  req.isLastShard,
+			                  S4NonSequential,
+			                  bandwidthSample,
+			                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
+			                  lastKey,
+			                  key,
+			                  hasUsed,
+			                  evenNonSequential,
+			                  splitJitter);
+			// TODO REMOVE, just for debugging
+			// stop using sequential writes to split if we split on something other than bytes
+			if (key != byteSplitKey &&
+			    (seqWriteState == S4SequentialDecreasing || seqWriteState == S4SequentialIncreasing)) {
+				printf("Cancelling sequential split b/c bytesPerKSec key %s != byte split key %s\n",
+				       key.printable().c_str(),
+				       byteSplitKey.printable().c_str());
+				seqWriteState = S4NonSequential;
+			}
+
+			ASSERT(key != lastKey || hasUsed);
+			if (key == req.keys.end)
+				break;
+			reply.splits.push_back_deep(reply.splits.arena(), key);
+
+			StorageMetrics diff = (getMetrics(KeyRangeRef(lastKey, key)) + used);
+			remaining -= diff;
+			estimated -= diff;
+
+			splitSizesBytes.push_back(diff.bytes);
+
+			used = StorageMetrics();
+			lastKey = key;
+			isFirstShard = false;
+			// stop using sequential writes to split if we split on something other than bytes
+			if (key != byteSplitKey) {
+				seqWriteState = S4NonSequential;
+			}
+			// TODO REMOVE
+			printf("    %lld\n  %s\n", diff.bytes, key.printable().c_str());
+		}
+
+		reply.used = getMetrics(KeyRangeRef(lastKey, req.keys.end)) + used;
+		splitSizesBytes.push_back(reply.used.bytes);
+		reply.seqWriteState = seqWriteState;
+
+		printf("    %lld\n\n", reply.used.bytes);
+
+		printf("  End state: %s: (%d)\n", getSequentialWriteStateName(seqWriteState), splitSizesBytes.size());
+
+		// TODO change to debug level or delete later
+		if ((seqWriteState == S4SequentialDecreasing || seqWriteState == S4SequentialIncreasing) &&
+		    splitSizesBytes.size() > 1) {
+			TEST(true); // Full sequential split. Record a trace event with the details
+
+			TraceEvent splitEv("SeqWriteSplit");
+			splitEv.detail("Dir", getSequentialWriteStateName(seqWriteState));
+			splitEv.detail("StartKey", req.keys.begin.printable());
+			splitEv.detail("EndKey", req.keys.end.printable());
+			for (int i = 0; i < splitSizesBytes.size() - 1; i++) {
+				splitEv.detail("S" + std::to_string(i), std::to_string(splitSizesBytes[i]));
+				splitEv.detail("K" + std::to_string(i), reply.splits[i]);
+			}
+			int start = 0;
+			int end = splitSizesBytes.size() - 1;
+			uint64_t seqSplitSize;
+			splitEv.detail("S" + std::to_string(end), std::to_string(splitSizesBytes[end]));
+			if (seqWriteState == S4SequentialDecreasing) {
+				seqSplitSize = splitSizesBytes[start];
+				start++;
+			} else {
+				seqSplitSize = splitSizesBytes[end];
+				end--;
+			}
+			if (splitSizesBytes.size() > 2) {
+				splitEv.detail("SeqSplitSize", seqSplitSize);
+
+				uint64_t maxSplitSize = 0;
+				uint64_t minSplitSize = 1000000000000;
+				uint64_t splitSizeSum = 0;
+				while (start <= end) {
+					maxSplitSize = std::max(maxSplitSize, splitSizesBytes[start]);
+					minSplitSize = std::min(minSplitSize, splitSizesBytes[start]);
+					splitSizeSum += splitSizesBytes[start];
+					start++;
+				}
+
+				splitEv.detailf("SeqSizeRatioMin", "%.3f", ((double)seqSplitSize) / minSplitSize);
+				splitEv.detailf("SeqSizeRatioMax", "%.3f", ((double)seqSplitSize) / maxSplitSize);
+				splitEv.detailf(
+				    "SeqSizeRatioAvg", "%.3f", ((double)seqSplitSize) * (splitSizesBytes.size() - 1) / splitSizeSum);
+				splitEv.detailf("SeqSizeRatioTotal", "%.3f", ((double)seqSplitSize) / (seqSplitSize + splitSizeSum));
+			} else {
+				int nonSeqIndex = seqWriteState == S4SequentialIncreasing ? 0 : 1;
+				splitEv.detailf("SplitSizeRatio", "%.3f", ((double)seqSplitSize) / splitSizesBytes[nonSeqIndex]);
+			}
+		}
+		return reply;
+	}
+
 	void splitMetrics(SplitMetricsRequest req) const {
 		try {
 			SplitMetricsReply reply;
-			KeyRef lastKey = req.keys.begin;
-			StorageMetrics used = req.used;
-			StorageMetrics estimated = req.estimated;
-			StorageMetrics remaining = getMetrics(req.keys) + used;
-
-			//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
-
-			while (true) {
-				if (remaining.bytes < 2 * SERVER_KNOBS->MIN_SHARD_BYTES)
-					break;
-				KeyRef key = req.keys.end;
-				bool hasUsed = used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0;
-				key = getSplitKey(remaining.bytes,
-				                  estimated.bytes,
-				                  req.limits.bytes,
-				                  used.bytes,
-				                  req.limits.infinity,
-				                  req.isLastShard,
-				                  byteSample,
-				                  1,
-				                  lastKey,
-				                  key,
-				                  hasUsed);
-				if (used.bytes < SERVER_KNOBS->MIN_SHARD_BYTES)
-					key = std::max(key,
-					               byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end),
-					                                        SERVER_KNOBS->MIN_SHARD_BYTES - used.bytes));
-				key = getSplitKey(remaining.iosPerKSecond,
-				                  estimated.iosPerKSecond,
-				                  req.limits.iosPerKSecond,
-				                  used.iosPerKSecond,
-				                  req.limits.infinity,
-				                  req.isLastShard,
-				                  iopsSample,
-				                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
-				                  lastKey,
-				                  key,
-				                  hasUsed);
-				key = getSplitKey(remaining.bytesPerKSecond,
-				                  estimated.bytesPerKSecond,
-				                  req.limits.bytesPerKSecond,
-				                  used.bytesPerKSecond,
-				                  req.limits.infinity,
-				                  req.isLastShard,
-				                  bandwidthSample,
-				                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
-				                  lastKey,
-				                  key,
-				                  hasUsed);
-				ASSERT(key != lastKey || hasUsed);
-				if (key == req.keys.end)
-					break;
-				reply.splits.push_back_deep(reply.splits.arena(), key);
-
-				StorageMetrics diff = (getMetrics(KeyRangeRef(lastKey, key)) + used);
-				remaining -= diff;
-				estimated -= diff;
-
-				used = StorageMetrics();
-				lastKey = key;
+			if (SERVER_KNOBS->STORAGE_METRICS_OLD) {
+				reply = splitMetricsOld(req);
+			} else {
+				reply = _splitMetrics(req, false, SERVER_KNOBS->SPLIT_JITTER_AMOUNT);
 			}
 
-			reply.used = getMetrics(KeyRangeRef(lastKey, req.keys.end)) + used;
 			req.reply.send(reply);
 		} catch (Error& e) {
 			req.reply.sendError(e);
@@ -606,6 +909,24 @@ private:
 		collapse(map, keys.end);
 	}
 };
+
+// Contains information about whether or not a key-value pair should be included in a byte sample
+// Also contains size information about the byte sample
+struct ByteSampleInfo {
+	bool inSample;
+
+	// Actual size of the key value pair
+	int64_t size;
+
+	// The recorded size of the sample (max of bytesPerSample, size)
+	int64_t sampledSize;
+};
+
+// test that using bytes read instead of bytes cancels sequential logic
+
+// Determines whether a key-value pair should be included in a byte sample
+// Also returns size information about the sample
+ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue);
 
 TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/simple") {
 
@@ -787,20 +1108,208 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/consecutiveRanges") {
 	return Void();
 }
 
-// Contains information about whether or not a key-value pair should be included in a byte sample
-// Also contains size information about the byte sample
-struct ByteSampleInfo {
-	bool inSample;
+// TODO add back explicit unit test for sizes and add thing for non-byte splits stopping sequential splits, once i've
+// sorted all of this crap out
 
-	// Actual size of the key value pair
-	int64_t size;
+TEST_CASE("/fdbserver/StorageMetricSample/seqWrites/simple") {
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
 
-	// The recorded size of the sample (max of bytesPerSample, size)
-	int64_t sampledSize;
-};
+	ssm.byteSample.sample.insert(LiteralStringRef("A"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Absolute"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Apple"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bah"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Banana"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bob"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("But"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Dah"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Dog"), 20 * sampleUnit);
 
-// Determines whether a key-value pair should be included in a byte sample
-// Also returns size information about the sample
-ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue);
+	int64_t totalSize = 200 * sampleUnit;
+
+	SplitMetricsRequest req;
+	req.keys = allKeys;
+	req.limits.bytes = 110 * sampleUnit;
+	req.limits.bytesPerKSecond = req.limits.infinity;
+	req.limits.iosPerKSecond = req.limits.infinity;
+	req.limits.bytesReadPerKSecond = req.limits.infinity;
+	req.estimated.bytes = totalSize;
+	req.seqWriteState = S4Unknown;
+	req.isFirstShard = true;
+	req.isLastShard = true;
+
+	// TODO just for comparison
+	ssm.splitMetricsOld(req);
+
+	// splits 100/100
+	SplitMetricsReply rep = ssm._splitMetrics(req, true, 0.0);
+	ASSERT(rep.splits.size() == 1);
+	ASSERT(LiteralStringRef("Bo") == rep.splits[0]);
+
+	// splits 40/160 due to discreteness of 10 units
+	req.seqWriteState = S4SequentialDecreasing;
+	rep = ssm._splitMetrics(req, true, 0.0);
+	ASSERT(rep.splits.size() == 1);
+	ASSERT(LiteralStringRef("Ap") == rep.splits[0]);
+
+	// splits 140/60 due to discreteness of 10 units
+	req.seqWriteState = S4SequentialIncreasing;
+	rep = ssm._splitMetrics(req, true, 0.0);
+	ASSERT(rep.splits.size() == 1);
+	ASSERT(LiteralStringRef("C") == rep.splits[0]);
+
+	// splits 60/60/40/40
+
+	// TODO just for comparison
+	ssm.splitMetricsOld(req);
+
+	req.limits.bytes = 70 * sampleUnit;
+	req.seqWriteState = S4Unknown;
+	rep = ssm._splitMetrics(req, true, 0.0);
+	ASSERT(rep.splits.size() == 3);
+	ASSERT(LiteralStringRef("B") == rep.splits[0]);
+	ASSERT(LiteralStringRef("Bu") == rep.splits[1]);
+	ASSERT(LiteralStringRef("D") == rep.splits[2]);
+
+	// splits 40/80/80
+	req.seqWriteState = S4SequentialDecreasing;
+	rep = ssm._splitMetrics(req, true, 0.0);
+	ASSERT(rep.splits.size() == 2);
+	ASSERT(LiteralStringRef("Ap") == rep.splits[0]);
+	ASSERT(LiteralStringRef("Bu") == rep.splits[1]);
+
+	// splits 80/80/40
+	req.seqWriteState = S4SequentialIncreasing;
+	rep = ssm._splitMetrics(req, true, 0.0);
+	ASSERT(rep.splits.size() == 2);
+	ASSERT(LiteralStringRef("Ban") == rep.splits[0]);
+	ASSERT(LiteralStringRef("D") == rep.splits[1]);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/StorageMetricSample/seqWrites/ignore") {
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	ssm.iopsSample.sample.insert(LiteralStringRef("A"), 1000 * sampleUnit);
+	ssm.iopsSample.sample.insert(LiteralStringRef("Apple"), 1000 * sampleUnit);
+	ssm.iopsSample.sample.insert(LiteralStringRef("B"), 2000 * sampleUnit);
+	ssm.iopsSample.sample.insert(LiteralStringRef("Boo"), 1000 * sampleUnit);
+	ssm.iopsSample.sample.insert(LiteralStringRef("Cathode"), 1000 * sampleUnit);
+	ssm.iopsSample.sample.insert(LiteralStringRef("Dog"), 1000 * sampleUnit);
+
+	ssm.byteSample.sample.insert(LiteralStringRef("A"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Absolute"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Apple"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bah"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Banana"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bob"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("But"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Dah"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Dog"), 20 * sampleUnit);
+
+	int64_t totalSize = 200 * sampleUnit;
+
+	// req should always split on iops and ignore sequential write directives, so splits should always be the same
+	SplitMetricsRequest req;
+	req.keys = allKeys;
+	req.limits.bytes = 100 * sampleUnit;
+	req.limits.bytesPerKSecond = req.limits.infinity;
+	req.limits.iosPerKSecond = 100 * sampleUnit;
+	req.limits.bytesReadPerKSecond = req.limits.infinity;
+	req.estimated.bytes = totalSize;
+	req.seqWriteState = S4Unknown;
+	req.isFirstShard = true;
+	req.isLastShard = true;
+
+	SplitMetricsReply rep = ssm._splitMetrics(req, true, 0.0);
+
+	req.seqWriteState = S4SequentialDecreasing;
+	SplitMetricsReply rep2 = ssm._splitMetrics(req, true, 0.0);
+	ASSERT(rep.splits.size() == rep2.splits.size());
+	for (int i = 0; i < rep.splits.size(); i++) {
+		ASSERT(rep.splits[i] == rep2.splits[i]);
+	}
+
+	req.seqWriteState = S4SequentialIncreasing;
+	SplitMetricsReply rep3 = ssm._splitMetrics(req, true, 0.0);
+	ASSERT(rep.splits.size() == rep3.splits.size());
+	for (int i = 0; i < rep.splits.size(); i++) {
+		ASSERT(rep.splits[i] == rep3.splits[i]);
+	}
+
+	return Void();
+}
+
+// Test for random data size/split size combinations that sequential write splitting causes the sequential shard to be
+// no larger than a non-sequential split, and results a similar number of shards as the non-sequential split
+TEST_CASE("/fdbserver/StorageMetricSample/seqWrites/randomSplits") {
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	int numSamples = 20 + (30 * deterministicRandom()->random01());
+	// TODO just for my own printing, remove
+	std::vector<std::pair<UID, int>> x;
+
+	int64_t totalSize = 0;
+	for (int i = 0; i < numSamples; i++) {
+		// varies between 1 and 19 sample units, for an average of 10 per key
+		int itemSize = 1 + (18 * deterministicRandom()->random01());
+		totalSize += itemSize * sampleUnit;
+		UID uid = deterministicRandom()->randomUniqueID();
+		x.emplace_back(uid, itemSize);
+		ssm.byteSample.sample.insert(StringRef(uid.toString()), itemSize * sampleUnit);
+	}
+
+	std::sort(x.begin(), x.end());
+
+	printf("Sample (%d):\n", x.size());
+	for (auto& it : x) {
+		printf("%s: %d\n", it.first.toString().substr(0, 6).c_str(), it.second);
+	}
+
+	SplitMetricsRequest req;
+	req.keys = allKeys;
+	req.limits.bytesPerKSecond = req.limits.infinity;
+	req.limits.iosPerKSecond = req.limits.infinity;
+	req.limits.bytesReadPerKSecond = req.limits.infinity;
+	req.estimated.bytes = totalSize;
+	req.isFirstShard = true;
+	req.isLastShard = true;
+
+	for (int t = 0; t < 10; t++) {
+		// split amount between 20% and 80% of totalSize
+		req.limits.bytes = totalSize / 5 + (totalSize * 6 * deterministicRandom()->random01() / 10);
+
+		ssm.splitMetricsOld(req);
+
+		req.seqWriteState = S4Unknown;
+		SplitMetricsReply rep = ssm._splitMetrics(req, true, 0.0);
+		ASSERT(rep.splits.size() > 0);
+		Key firstNormalSplitKey = rep.splits[0];
+		int normalSplitCount = rep.splits.size();
+		Key lastNormalSplitKey = rep.splits[normalSplitCount - 1];
+
+		// assert that the number of splits increased by at most 1 (should normally be equal or less than but there are
+		// edge cases where it's one more), and that the split key in the sequential direction is at least as skewed
+		// towards the sequential direction as the normal split
+		req.seqWriteState = S4SequentialDecreasing;
+		rep = ssm._splitMetrics(req, true, 0.0);
+		ASSERT(rep.splits.size() > 0);
+		ASSERT(normalSplitCount >= rep.splits.size() - 1);
+		ASSERT(rep.splits[0] <= firstNormalSplitKey);
+
+		req.seqWriteState = S4SequentialIncreasing;
+		rep = ssm._splitMetrics(req, true, 0.0);
+		ASSERT(rep.splits.size() > 0);
+		ASSERT(normalSplitCount >= rep.splits.size() - 1);
+		ASSERT(rep.splits[rep.splits.size() - 1] >= lastNormalSplitKey);
+	}
+
+	return Void();
+}
 
 #include "flow/unactorcompiler.h"

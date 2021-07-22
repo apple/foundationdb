@@ -30,6 +30,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbrpc/TSSComparison.h"
+#include "fdbclient/SequentialWriteTracking.h"
 #include "fdbclient/TagThrottle.h"
 #include "flow/UnitTest.h"
 
@@ -506,10 +507,11 @@ struct SplitMetricsReply {
 	constexpr static FileIdentifier file_identifier = 11530792;
 	Standalone<VectorRef<KeyRef>> splits;
 	StorageMetrics used;
+	int32_t seqWriteState;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, splits, used);
+		serializer(ar, splits, used, seqWriteState);
 	}
 };
 
@@ -520,7 +522,9 @@ struct SplitMetricsRequest {
 	StorageMetrics limits;
 	StorageMetrics used;
 	StorageMetrics estimated;
+	bool isFirstShard;
 	bool isLastShard;
+	int32_t seqWriteState;
 	ReplyPromise<SplitMetricsReply> reply;
 
 	SplitMetricsRequest() {}
@@ -528,12 +532,15 @@ struct SplitMetricsRequest {
 	                    StorageMetrics const& limits,
 	                    StorageMetrics const& used,
 	                    StorageMetrics const& estimated,
-	                    bool isLastShard)
-	  : keys(arena, keys), limits(limits), used(used), estimated(estimated), isLastShard(isLastShard) {}
+	                    bool isFirstShard,
+	                    bool isLastShard,
+	                    SequentialWriteState seqWriteState)
+	  : keys(arena, keys), limits(limits), used(used), estimated(estimated), isFirstShard(isFirstShard),
+	    isLastShard(isLastShard), seqWriteState(seqWriteState) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, limits, used, estimated, isLastShard, reply, arena);
+		serializer(ar, keys, limits, used, estimated, isFirstShard, isLastShard, seqWriteState, reply, arena);
 	}
 };
 

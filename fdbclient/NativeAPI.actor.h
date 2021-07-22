@@ -38,6 +38,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClientLogEvents.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/SequentialWriteTracking.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
@@ -342,7 +343,8 @@ public:
 	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
 	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
 	                                                          StorageMetrics const& limit,
-	                                                          StorageMetrics const& estimated);
+	                                                          StorageMetrics const& estimated,
+	                                                          SequentialWriteState seqWriteState = S4Unknown);
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
 	// Try to split the given range into equally sized chunks based on estimated size.

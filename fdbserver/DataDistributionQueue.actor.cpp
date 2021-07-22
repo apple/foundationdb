@@ -59,6 +59,7 @@ struct RelocateData {
 	    wantsNewServers(rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
+	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD_SEQ_HOT ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT),
 	    interval("QueuedRelocation") {}
 
@@ -71,7 +72,10 @@ struct RelocateData {
 	}
 
 	static bool isBoundaryPriority(int priority) {
-		return priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD || priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD;
+		return priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
+		       priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD_SEQ_HOT ||
+		       priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD_SEQ_COLD ||
+		       priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD;
 	}
 
 	bool operator>(const RelocateData& rhs) const {
@@ -565,6 +569,29 @@ struct DDQueueData {
 			std::set<RelocateData, std::greater<RelocateData>> queuedRelocationsMatch;
 			for (auto it = queue.begin(); it != queue.end(); ++it)
 				queuedRelocationsMatch.insert(it->second.begin(), it->second.end());
+			if (queuedRelocations != queuedRelocationsMatch.size() + fetchingSourcesQueue.size()) {
+				printf("Queued relocations:\n%d != %d + %d\n",
+				       queuedRelocations,
+				       queuedRelocationsMatch.size(),
+				       fetchingSourcesQueue.size());
+
+				printf("match: [range) (priority) (time)\n");
+				for (auto& it : queuedRelocationsMatch) {
+					printf("[%s - %s) (%d) (%.3f)\n",
+					       it.keys.begin.printable().c_str(),
+					       it.keys.end.printable().c_str(),
+					       it.priority,
+					       it.startTime);
+				}
+				printf("fetchingSources:\n");
+				for (auto& it : fetchingSourcesQueue) {
+					printf("[%s - %s) (%d) (%.3f)\n",
+					       it.keys.begin.printable().c_str(),
+					       it.keys.end.printable().c_str(),
+					       it.priority,
+					       it.startTime);
+				}
+			}
 			ASSERT(queuedRelocations == queuedRelocationsMatch.size() + fetchingSourcesQueue.size());
 
 			int testActive = 0;
@@ -1601,6 +1628,11 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 			choose {
 				when(RelocateShard rs = waitNext(self.input)) {
+					// TODO REMOVE
+					printf("relocating shard [%s - %s) with priority %d\n",
+					       rs.keys.begin.printable().c_str(),
+					       rs.keys.end.printable().c_str(),
+					       rs.priority);
 					bool wasEmpty = serversToLaunchFrom.empty();
 					self.queueRelocation(rs, serversToLaunchFrom);
 					if (wasEmpty && !serversToLaunchFrom.empty())
@@ -1633,6 +1665,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 						    .detail("Duration", now() - done.startTime);
 						debug_setCheckRelocationDuration(false);
 					}
+					printf("Done relocating [%s - %s)\n",
+					       done.keys.begin.printable().c_str(),
+					       done.keys.end.printable().c_str());
 				}
 				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
 				when(wait(recordMetrics)) {
@@ -1676,6 +1711,10 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					    .detail("PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
 					    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
 					    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
+					    .detail("PrioritySplitShardSeqHot",
+					            self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD_SEQ_HOT])
+					    .detail("PrioritySplitShardSeqCold",
+					            self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD_SEQ_COLD])
 					    .trackLatest("MovingData");
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
