@@ -70,6 +70,9 @@ public:
 	double HUGE_ARENA_LOGGING_BYTES;
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
+	// Chaos testing
+	bool ENABLE_CHAOS_FEATURES;
+
 	// run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_INTERVAL;
