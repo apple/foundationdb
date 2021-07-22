@@ -105,6 +105,7 @@ public:
 	double PUSH_STATS_SLOW_AMOUNT;
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
+	double BLOCKING_PEEK_TIMEOUT;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;

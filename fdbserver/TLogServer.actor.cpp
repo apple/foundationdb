@@ -549,6 +549,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	CounterCollection cc;
 	Counter bytesInput;
 	Counter bytesDurable;
+	Counter blockingPeeks;
+	Counter blockingPeekTimeouts;
 
 	UID logId;
 	ProtocolVersion protocolVersion;
@@ -628,7 +630,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                 std::vector<Tag> tags,
 	                 std::string context)
 	  : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()), cc("TLog", interf.id().toString()),
-	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary),
+	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
+	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), remoteTag(remoteTag), isPrimary(isPrimary),
 	    logRouterTags(logRouterTags), txsTags(txsTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion),
 	    logSpillType(logSpillType), logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0),
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0),
@@ -1526,14 +1529,19 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 	return tagData->versionMessages;
 };
 
-ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest* req) {
+ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest* req, double timeout) {
+	self->blockingPeeks += 1;
 	auto tagData = self->getTagData(req->tag);
 	if (tagData.isValid()) {
 		return Void();
 	}
-	wait(self->waitingTags[req->tag].getFuture());
-	// we want the caller to finish first, otherwise the data structure it is building might not be complete
-	wait(delay(0.0));
+	choose {
+		when(wait(self->waitingTags[req->tag].getFuture())) {
+			// we want the caller to finish first, otherwise the data structure it is building might not be complete
+			wait(delay(0.0));
+		}
+		when(wait(delay(timeout))) { self->blockingPeekTimeouts += 1; }
+	}
 	return Void();
 }
 
@@ -1868,7 +1876,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		} else {
 			if (req.tag.locality >= 0 && !req.returnIfBlocked) {
 				// wait for at most 1 second
-				wait(waitForMessagesForTag(logData, &req) || delay(1.0));
+				wait(waitForMessagesForTag(logData, &req, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
 			}
 			peekMessagesFromMemory(logData, req, messages, endVersion);
 		}
