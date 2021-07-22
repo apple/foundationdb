@@ -296,6 +296,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			throw backup_invalid_url();
 		}
 
+		r->encryptionKeyFileName = encryptionKeyFileName;
 		r->URL = url;
 		return r;
 	} catch (Error& e) {
