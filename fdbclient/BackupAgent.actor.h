@@ -65,6 +65,7 @@ public:
 	static const Key keyConfigStopWhenDoneKey;
 	static const Key keyStateStatus;
 	static const Key keyStateStop;
+	static const Key keyStateLogBeginVersion;
 	static const Key keyLastUid;
 	static const Key keyBeginKey;
 	static const Key keyEndKey;
