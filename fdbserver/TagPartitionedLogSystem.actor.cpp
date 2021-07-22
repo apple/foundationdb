@@ -2870,7 +2870,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
 		logSystem->tLogs[0]->logServers.resize(
 		    recr.tLogs.size()); // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
-		// assuming tLogs[0] is primary?
 		logSystem->tLogs[0]->updateLocalitySet(localities);
 
 		std::vector<int> locations;
@@ -3063,7 +3062,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for (int i = 0; i < logSystem->tLogs[0]->logServers.size(); i++)
 			recoveryComplete.push_back(transformErrors(
 			    throwErrorOr(
-					// TODO: make recoveryFinished work with new tlog interfaces.
+			        // TODO: make recoveryFinished work with new tlog interfaces.
 			        logSystem->tLogs[0]->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor(
 			            TLogRecoveryFinishedRequest(),
 			            SERVER_KNOBS->TLOG_TIMEOUT,

@@ -172,7 +172,6 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	auto& tLogSet = dbInfoBuilder.logSystemConfig.tLogs.back();
 	tLogSet.locality = locality;
 	for (auto tLogGroup : pContext->tLogGroupLeaders) {
-		// I am not sure we want to add leader here, we should have added all interfaces to LogSet in LogSystemConfig, when recruiting.
 		OptionalInterface<ptxn::TLogInterface_PassivelyPull> optionalInterface = 
 			OptionalInterface<ptxn::TLogInterface_PassivelyPull>(*std::dynamic_pointer_cast<ptxn::TLogInterface_PassivelyPull>(tLogGroup.second));
 		tLogSet.ptxnTLogGroups[tLogGroup.first].push_back(makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(optionalInterface));

@@ -241,8 +241,8 @@ public:
 
 		// the following logic supports upgrades from 5.X
 		if (tag == txsTag)
-			return txsTagOld % logServers.size();;
-		return tag.id % logServers.size();;
+			return txsTagOld % logServers.size();
+		return tag.id % logServers.size();
 	}
 
 	void updateLocalitySet(std::vector<LocalityData> const& localities) {
