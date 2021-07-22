@@ -40,6 +40,7 @@ public:
 	virtual ~IConfigTransaction() = default;
 
 	static Reference<IConfigTransaction> createTestSimple(ConfigTransactionInterface const&);
+	static Reference<IConfigTransaction> createTestPaxos(std::vector<ConfigTransactionInterface> const&);
 
 	// Not implemented:
 	void setVersion(Version) override { throw client_invalid_operation(); }

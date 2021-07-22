@@ -31,10 +31,15 @@ class PaxosConfigConsumer : public IConfigConsumer {
 	PaxosConfigConsumerImpl& impl() { return *_impl; }
 
 public:
-	PaxosConfigConsumer(ServerCoordinators const& cfi,
-	                    Optional<double> pollingInterval,
+	PaxosConfigConsumer(ServerCoordinators const& coordinators,
+	                    double pollingInterval,
 	                    Optional<double> compactionInterval);
 	~PaxosConfigConsumer();
 	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
 	UID getID() const override;
+
+public: // Testing
+	PaxosConfigConsumer(std::vector<ConfigFollowerInterface> const& cfis,
+	                    double pollingInterval,
+	                    Optional<double> compactionInterval);
 };

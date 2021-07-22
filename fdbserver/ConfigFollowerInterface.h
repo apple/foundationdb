@@ -66,7 +66,6 @@ using VersionedConfigCommitAnnotation = Standalone<VersionedConfigCommitAnnotati
 struct ConfigFollowerGetSnapshotAndChangesReply {
 	static constexpr FileIdentifier file_identifier = 1734095;
 	Version snapshotVersion;
-	Version changesVersion;
 	std::map<ConfigKey, KnobValue> snapshot;
 	// TODO: Share arena
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
@@ -76,61 +75,64 @@ struct ConfigFollowerGetSnapshotAndChangesReply {
 	template <class Snapshot>
 	explicit ConfigFollowerGetSnapshotAndChangesReply(
 	    Version snapshotVersion,
-	    Version changesVersion,
 	    Snapshot&& snapshot,
 	    Standalone<VectorRef<VersionedConfigMutationRef>> changes,
 	    Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations)
-	  : snapshotVersion(snapshotVersion), changesVersion(changesVersion), snapshot(std::forward<Snapshot>(snapshot)),
-	    changes(changes), annotations(annotations) {
-		ASSERT_GE(changesVersion, snapshotVersion);
-	}
+	  : snapshotVersion(snapshotVersion), snapshot(std::forward<Snapshot>(snapshot)), changes(changes),
+	    annotations(annotations) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapshotVersion, changesVersion, snapshot, changes);
+		serializer(ar, snapshotVersion, snapshot, changes);
 	}
 };
 
 struct ConfigFollowerGetSnapshotAndChangesRequest {
 	static constexpr FileIdentifier file_identifier = 294811;
 	ReplyPromise<ConfigFollowerGetSnapshotAndChangesReply> reply;
+	Version mostRecentVersion;
+
+	ConfigFollowerGetSnapshotAndChangesRequest() = default;
+	explicit ConfigFollowerGetSnapshotAndChangesRequest(Version mostRecentVersion)
+	  : mostRecentVersion(mostRecentVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, reply, mostRecentVersion);
 	}
 };
 
 struct ConfigFollowerGetChangesReply {
 	static constexpr FileIdentifier file_identifier = 234859;
-	Version mostRecentVersion;
 	// TODO: Share arena
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
 	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
 
-	ConfigFollowerGetChangesReply() : mostRecentVersion(0) {}
+	ConfigFollowerGetChangesReply() = default;
 	explicit ConfigFollowerGetChangesReply(Version mostRecentVersion,
 	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                                       Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations)
-	  : mostRecentVersion(mostRecentVersion), changes(changes), annotations(annotations) {}
+	  : changes(changes), annotations(annotations) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, mostRecentVersion, changes, annotations);
+		serializer(ar, changes, annotations);
 	}
 };
 
 struct ConfigFollowerGetChangesRequest {
 	static constexpr FileIdentifier file_identifier = 178935;
 	Version lastSeenVersion{ 0 };
+	Version mostRecentVersion{ 0 };
 	ReplyPromise<ConfigFollowerGetChangesReply> reply;
 
 	ConfigFollowerGetChangesRequest() = default;
-	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion) : lastSeenVersion(lastSeenVersion) {}
+	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, Version mostRecentVersion)
+	  : lastSeenVersion(lastSeenVersion), mostRecentVersion(mostRecentVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastSeenVersion, reply);
+		serializer(ar, lastSeenVersion, mostRecentVersion, reply);
 	}
 };
 
@@ -148,6 +150,29 @@ struct ConfigFollowerCompactRequest {
 	}
 };
 
+struct ConfigFollowerGetCommittedVersionReply {
+	static constexpr FileIdentifier file_identifier = 9214735;
+	Version version;
+
+	ConfigFollowerGetCommittedVersionReply() = default;
+	explicit ConfigFollowerGetCommittedVersionReply(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
+struct ConfigFollowerGetCommittedVersionRequest {
+	static constexpr FileIdentifier file_identifier = 1093472;
+	ReplyPromise<ConfigFollowerGetCommittedVersionReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
 /*
  * Configuration database nodes serve a ConfigFollowerInterface which contains well known endpoints,
  * used by workers to receive configuration database updates
@@ -160,6 +185,7 @@ public:
 	RequestStream<ConfigFollowerGetSnapshotAndChangesRequest> getSnapshotAndChanges;
 	RequestStream<ConfigFollowerGetChangesRequest> getChanges;
 	RequestStream<ConfigFollowerCompactRequest> compact;
+	RequestStream<ConfigFollowerGetCommittedVersionRequest> getCommittedVersion;
 
 	ConfigFollowerInterface();
 	void setupWellKnownEndpoints();
@@ -170,6 +196,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact);
+		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact, getCommittedVersion);
 	}
 };

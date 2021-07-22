@@ -27,6 +27,7 @@ void ConfigFollowerInterface::setupWellKnownEndpoints() {
 	                                            TaskPriority::Coordination);
 	getChanges.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETCHANGES, TaskPriority::Coordination);
 	compact.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_COMPACT, TaskPriority::Coordination);
+	getCommittedVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION, TaskPriority::Coordination);
 }
 
 ConfigFollowerInterface::ConfigFollowerInterface() : _id(deterministicRandom()->randomUniqueID()) {}
@@ -35,7 +36,8 @@ ConfigFollowerInterface::ConfigFollowerInterface(NetworkAddress const& remote)
   : _id(deterministicRandom()->randomUniqueID()),
     getSnapshotAndChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES)),
     getChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
-    compact(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)) {}
+    compact(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)),
+    getCommittedVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)) {}
 
 bool ConfigFollowerInterface::operator==(ConfigFollowerInterface const& rhs) const {
 	return _id == rhs._id;

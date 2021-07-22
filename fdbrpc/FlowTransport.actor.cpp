@@ -51,7 +51,7 @@ constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
-static constexpr int WLTOKEN_COUNTS = 20; // number of wellKnownEndpoints
+static constexpr int WLTOKEN_COUNTS = 21; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:
