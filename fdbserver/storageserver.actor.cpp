@@ -3439,8 +3439,8 @@ public:
 	Version currentVersion;
 
 private:
-	Version fromVersion;
-	Version restoredVersion;
+	Version fromVersion; // latest mutation version seen by SS
+	Version restoredVersion; // restored persistent version from SS file
 
 	KeyRef startKey;
 	bool nowAssigned;
