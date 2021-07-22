@@ -73,16 +73,15 @@ public class CycleMultiClientIntegrationTest {
 
     private static void setup(Collection<Database> dbs) {
         // 0 -> 1 -> 2 -> 3 -> 0
-        for (int k = 0; k < cycleLength; k++) {
-            String key = Integer.toString(k);
-            String value = Integer.toString((k + 1) % cycleLength);
-
-            for (Database db : dbs) {
-                db.run(tr -> {
+        for (Database db : dbs) {
+            db.run(tr -> {
+                for (int k = 0; k < cycleLength; k++) {
+                    String key = Integer.toString(k);
+                    String value = Integer.toString((k + 1) % cycleLength);
                     tr.set(Tuple.from(key).pack(), Tuple.from(value).pack());
-                    return null;
-                });
-            }
+                }
+                return null;
+            });
         }
     }
 
