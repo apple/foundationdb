@@ -298,12 +298,14 @@ public:
 	static std::vector<std::string> getURLFormats();
 	static Future<std::vector<std::string>> listContainers(const std::string& baseURL);
 
-	std::string getURL() const { return URL; }
+	std::string const &getURL() const { return URL; }
+	Optional<std::string> const &getEncryptionKeyFileName() const { return encryptionKeyFileName; }
 
 	static std::string lastOpenError;
 
 private:
 	std::string URL;
+	Optional<std::string> encryptionKeyFileName;
 };
 
 #endif
