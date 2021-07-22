@@ -277,9 +277,9 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 	using FastAllocated<AcknowledgementReceiver>::operator new;
 	using FastAllocated<AcknowledgementReceiver>::operator delete;
 
-	uint64_t bytesSent;
-	uint64_t bytesAcknowledged;
-	uint64_t bytesLimit;
+	int64_t bytesSent;
+	int64_t bytesAcknowledged;
+	int64_t bytesLimit;
 	Promise<Void> ready;
 	Future<Void> failures;
 
@@ -300,7 +300,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 			Promise<Void> hold = ready;
 			hold.sendError(message.getError());
 		} else {
-			ASSERT(message.get().bytes > bytesAcknowledged);
+			ASSERT(message.get().bytes > bytesAcknowledged || (message.get().bytes < 0 && bytesAcknowledged > 0));
 			bytesAcknowledged = message.get().bytes;
 			if (ready.isValid() && bytesSent - bytesAcknowledged < bytesLimit) {
 				Promise<Void> hold = ready;
@@ -336,6 +336,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
 		this->addPromiseRef();
+		TraceEvent(SevDebug, "NetNotifiedQueueWithAcknowledgementsReceive")
+		    .detail("PromiseRef", this->getPromiseReferenceCount());
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
 
@@ -358,25 +360,19 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 				// send an ack immediately
 				if (acknowledgements.getRawEndpoint().isValid()) {
 					acknowledgements.bytesAcknowledged += message.get().asUnderlyingType().expectedSize();
-					// int64_t overflow: we need to reset this stream
-					if (acknowledgements.bytesAcknowledged > std::numeric_limits<int64_t>::max()) {
-						FlowTransport::transport().sendUnreliable(
-						    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
-						    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
-						    false);
-					} else {
-						FlowTransport::transport().sendUnreliable(
-						    SerializeSource<ErrorOr<AcknowledgementReply>>(
-						        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
-						    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
-						    false);
-					}
+					FlowTransport::transport().sendUnreliable(
+					    SerializeSource<ErrorOr<AcknowledgementReply>>(
+					        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
+					    acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay),
+					    false);
 				}
 			}
 
 			this->send(std::move(message.get().asUnderlyingType()));
 		}
 		this->delPromiseRef();
+		TraceEvent(SevDebug, "NetNotifiedQueueWithAcknowledgementsReceiveEnd")
+		    .detail("PromiseRef", this->getPromiseReferenceCount());
 	}
 
 	T pop() override {
@@ -384,17 +380,10 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 		// A reply that has been queued up is being consumed, so send an ack to the server
 		if (acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += res.expectedSize();
-			if (acknowledgements.bytesAcknowledged > std::numeric_limits<int64_t>::max()) {
-				FlowTransport::transport().sendUnreliable(
-				    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
-				    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
-				    false);
-			} else {
-				FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(
-				                                              AcknowledgementReply(acknowledgements.bytesAcknowledged)),
-				                                          acknowledgements.getEndpoint(TaskPriority::ReadSocket),
-				                                          false);
-			}
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(
+			                                              AcknowledgementReply(acknowledgements.bytesAcknowledged)),
+			                                          acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay),
+			                                          false);
 		}
 		return res;
 	}
@@ -408,7 +397,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			    false);
 		}
 		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
-			// The ReplyPromiseStream was cancelled before sending an error, so the storage server must have died
+			// Notify the client ReplyPromiseStream was cancelled before sending an error, so the storage server must
+			// have died
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(broken_promise()),
 			                                          getEndpoint(TaskPriority::NoDeliverDelay),
 			                                          false);
@@ -431,6 +421,7 @@ public:
 	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
 			if (!queue->acknowledgements.getRawEndpoint().isValid()) {
+				// register acknowledge receiver on sender and tell the receiver where to send acknowledge messages
 				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay).token;
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
@@ -710,16 +701,17 @@ public:
 
 	template <class X>
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
-		Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
-		auto& p = getReplyPromiseStream(value);
-		Reference<Peer> peer;
+		auto p = getReplyPromiseStream(value);
 		if (queue->isRemoteEndpoint()) {
-			peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+			Future<Void> disc =
+			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
+			Reference<Peer> peer =
+			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+			// FIXME: defer sending the message until we know the connection is established
+			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
 		} else {
 			send(value);
 		}
-		// FIXME: defer sending the message until we know the connection is established
-		endStreamOnDisconnect(disc, p, getEndpoint(), peer);
 		return p;
 	}
 

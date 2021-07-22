@@ -559,7 +559,7 @@ ACTOR Future<TLogPeekReply> peekLogRouter(LogRouterData* self,
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamRequest req) {
 	self->activePeekStreams++;
-	TraceEvent(SevDebug, "TLogPeekStream", self->dbgid).detail("Token", req.reply.getEndpoint().token);
+	TraceEvent(SevDebug, "LogRouterPeekStream", self->dbgid).detail("Token", req.reply.getEndpoint().token);
 
 	state Version begin = req.begin;
 	state bool onlySpilled = false;
@@ -576,15 +576,12 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 			wait(delay(0, g_network->getCurrentTask()));
 		} catch (Error& e) {
 			self->activePeekStreams--;
-			TraceEvent(SevDebug, "TLogPeekStreamEnd", self->dbgid).error(e, true);
+			TraceEvent(SevDebug, "LogRouterPeekStreamEnd", self->dbgid).error(e, true);
 
 			if (e.code() == error_code_no_action_needed) {
-				return Void();
-			} else if (e.code() == error_code_end_of_stream) {
+				req.reply.sendError(end_of_stream());
+			} else if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
-				return Void();
-			} else if (e.code() == error_code_operation_obsolete) {
-				// reply stream is cancelled on the client
 				return Void();
 			} else {
 				throw;

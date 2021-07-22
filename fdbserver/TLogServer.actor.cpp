@@ -1941,11 +1941,8 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId).error(e, true);
 
-			if (e.code() == error_code_end_of_stream) {
+			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
-				return Void();
-			} else if (e.code() == error_code_operation_obsolete) {
-				// reply stream is cancelled on the client
 				return Void();
 			} else {
 				throw;

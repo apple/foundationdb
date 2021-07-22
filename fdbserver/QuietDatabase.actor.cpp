@@ -636,7 +636,9 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 		wait(delay(5.0));
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
+	printf("------- 1 -------\n");
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
+	printf("------- 2 -------\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;

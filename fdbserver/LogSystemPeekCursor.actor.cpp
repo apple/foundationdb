@@ -38,7 +38,8 @@ ACTOR Future<Void> tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
 	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(TLogPeekStreamRequest(
 	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max()));
 	TraceEvent(SevDebug, "SPC_StreamCreated", self->randomID)
-	    .detail("PeerAddress", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress());
+	    .detail("PeerAddress", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress())
+	    .detail("PeerToken", self->interf->get().interf().peekStreamMessages.getEndpoint().token);
 	return Void();
 }
 
@@ -350,10 +351,10 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 				                   fPeekReply)
 				             : Never())) {
 					updateCursorWithReply(self, res);
-					TraceEvent("SPC_GetMoreB", self->randomID)
-					    .detail("Has", self->hasMessage())
-					    .detail("End", res.end)
-					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
+					// TraceEvent("SPC_GetMoreB", self->randomID)
+					//     .detail("Has", self->hasMessage())
+					//     .detail("End", res.end)
+					//     .detail("Popped", res.popped.present() ? res.popped.get() : 0);
 
 					// NOTE: delay is needed here since TLog need to be scheduled to response if there are TLog and SS
 					// on the same machine
@@ -363,7 +364,7 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 			}
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "SPC_GetMoreB_Error", self->randomID).detail("Error", e.what());
-			if (e.code() == error_code_connection_failed) {
+			if (e.code() == error_code_connection_failed || e.code() == error_code_operation_obsolete) {
 				self->peekReplyStream.reset();
 			} else if (e.code() == error_code_end_of_stream) {
 				self->end.reset(self->messageVersion.version);
@@ -408,20 +409,20 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 }
 
 Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
-	TraceEvent("SPC_GetMore", randomID)
-	    .detail("HasMessage", hasMessage())
-	    .detail("More", !more.isValid() || more.isReady())
-	    .detail("MessageVersion", messageVersion.toString())
-	    .detail("End", end.toString());
+	// TraceEvent("SPC_GetMore", randomID)
+	//     .detail("HasMessage", hasMessage())
+	//     .detail("More", !more.isValid() || more.isReady())
+	//     .detail("MessageVersion", messageVersion.toString())
+	//     .detail("End", end.toString());
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		// more = serverPeekStreamGetMore(this, taskID);
-		if (parallelGetMore || onlySpilled || futureResults.size()) {
-			more = serverPeekParallelGetMore(this, taskID);
+		more = serverPeekStreamGetMore(this, taskID);
+		/*if (parallelGetMore || onlySpilled || futureResults.size()) {
+		    more = serverPeekParallelGetMore(this, taskID);
 		} else {
-			more = serverPeekGetMore(this, taskID);
-		}
+		    more = serverPeekGetMore(this, taskID);
+		}*/
 	}
 	return more;
 }

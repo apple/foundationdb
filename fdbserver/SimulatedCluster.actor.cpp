@@ -253,7 +253,7 @@ public:
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	// Set true to simplify simulation configs for easier debugging
-	bool simpleConfig = false;
+	bool simpleConfig = true;
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
