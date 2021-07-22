@@ -1917,6 +1917,7 @@ public:
 	ACTOR static Future<Void> clear_impl(ObjectCache* self) {
 		state ObjectCache::CacheT cache;
 		state EvictionOrderT evictionOrder;
+		state int64_t currentSize;
 
 		// Swap cache contents to local state vars
 		// After this, no more entries will be added to or read from these
@@ -1924,6 +1925,7 @@ public:
 		// after it is either evictable or onEvictable() is ready.
 		cache.swap(self->cache);
 		evictionOrder.swap(self->evictionOrder);
+		currentSize = self->currentSize;
 
 		state typename EvictionOrderT::iterator i = evictionOrder.begin();
 		state typename EvictionOrderT::iterator iEnd = evictionOrder.begin();
@@ -1937,7 +1939,8 @@ public:
 
 		evictionOrder.clear();
 		cache.clear();
-		self->currentSize = 0; // TODO: check if the currentSize should be 0?
+		self->currentSize -= currentSize;
+		//TODO: add an assertion here to check if currentSize becomes 0.
 		return Void();
 	}
 
@@ -2534,7 +2537,7 @@ public:
 						page->begin(),
 						(pageIDsCopy.front() * blockSize));
 		}
-		auto f = holdWhile(page, waitForAll(writers));
+		wait(waitForAll(writers));
 		return Void();
 	}
 
@@ -2972,7 +2975,7 @@ public:
 	Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) override {
 		debug_printf("DWALPager(%s) op=readExtent %s\n", filename.c_str(), toString(pageID).c_str());
 		PageCacheEntry* pCacheEntry = extentCache.getIfExists(pageID);
-		auto& eventReasons = g_redwoodMetrics.level(0).metrics.events;
+		auto& eventReasons = g_redwoodMetrics.level(nonBtreeLevel).metrics.events;
 		if (pCacheEntry != nullptr) {
 			eventReasons.addEventReason(PagerEvents::CacheLookup, PagerEventReasons::MetaData);
 			debug_printf("DWALPager(%s) Cache Entry exists for %s\n", filename.c_str(), toString(pageID).c_str());
