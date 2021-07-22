@@ -3321,6 +3321,8 @@ ACTOR Future<RangeResult> getRange(Database cx,
 			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
+                        cx->getLatestCommitVersions(beginServer.second, version, req.ssLatestCommitVersions);
+
 			// In case of async tss comparison, also make req arena depend on begin, end, and/or shard's arena depending
 			// on which  is used
 			bool dependOnShard = false;

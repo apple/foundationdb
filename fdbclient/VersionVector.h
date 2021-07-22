@@ -121,6 +121,15 @@ struct VersionVector {
 			setVersion(tags, version);
 		}
 	}
+	std::string toString() const {
+		std::stringstream vector;
+		vector << "[";
+		for (const auto& [tag, version] : versions) {
+			vector << '{' << tag.toString() << "," << version << '}';
+		}
+		vector << " maxversion: " << maxVersion << "]";
+		return vector.str();
+	}
 
 	bool operator==(const VersionVector& vv) const { return maxVersion == vv.maxVersion; }
 	bool operator!=(const VersionVector& vv) const { return maxVersion != vv.maxVersion; }
