@@ -2110,13 +2110,13 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
-		//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
+		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
 		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
 			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
-			//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
-			//shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -2193,10 +2193,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				}
 
 				/*for( int i = 0; i < r.data.size(); i++ ) {
-					StorageMetrics m;
-					m.bytesPerKSecond = r.data[i].expectedSize();
-					m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
-					data->metrics.notify(r.data[i].key, m);
+				    StorageMetrics m;
+				    m.bytesPerKSecond = r.data[i].expectedSize();
+				    m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an
+				int data->metrics.notify(r.data[i].key, m);
 				}*/
 
 				// For performance concerns, the cost of a range read is billed to the start key and end key of the

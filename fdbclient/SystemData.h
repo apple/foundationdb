@@ -25,6 +25,7 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h
 #include "fdbclient/StorageServerInterface.h"
 
 // Don't warn on constants being defined in this file.
@@ -507,8 +508,26 @@ extern const KeyRangeRef blobRangeKeys;
 
 // blob granule keys
 
-// \xff/blobGranule/(startKey, endKey, {snapshot,delta}, version) = [[filename]]
-extern const KeyRangeRef blobGranuleKeys;
+// TODO probably want to add key range of file here so we can prune requests
+// TODO this also technically means clients don't have to go through the blob worker for time-travel reads if they're
+// older than the last delta file.
+// \xff/blobGranuleFiles/(startKey, endKey, {snapshot|delta}, version) = [[filename]]
+extern const KeyRangeRef blobGranuleFileKeys;
+
+// TODO could shrink the size of this keyspace by using something similar to tags instead of UIDs
+// \xff/blobGranuleMapping/[[begin]] = [[BlobWorkerID]]
+extern const KeyRangeRef blobGranuleMappingKeys;
+
+const Value blobGranuleMappingValueFor(UID const& workerID);
+UID decodeBlobGranuleMappingValue(ValueRef const& value);
+
+// \xff/blobWorkerList/[[BlobWorkerID]] = [[BlobWorkerInterface]]
+extern const KeyRangeRef blobWorkerListKeys;
+
+const Key blobWorkerListKeyFor(UID workerID);
+const Value blobWorkerListValue(BlobWorkerInterface const& interface);
+UID decodeBlobWorkerListKey(KeyRef const& key);
+BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
 #pragma clang diagnostic pop
 

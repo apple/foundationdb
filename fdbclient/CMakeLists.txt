@@ -17,6 +17,9 @@ set(FDBCLIENT_SRCS
   BackupContainerS3BlobStore.h
   ClientBooleanParams.cpp
   ClientBooleanParams.h
+  BlobWorkerInterface.h
+  BlobGranuleReader.actor.cpp
+  BlobGranuleReader.actor.h
   ClientKnobCollection.cpp
   ClientKnobCollection.h
   ClientKnobs.cpp

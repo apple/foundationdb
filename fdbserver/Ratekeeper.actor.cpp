@@ -27,6 +27,7 @@
 #include "fdbclient/Tuple.h" // TODO REMOVE
 #include "fdbclient/S3BlobStore.h" // TODO REMOVE
 #include "fdbclient/AsyncFileS3BlobStore.actor.h" // TODO REMOVE
+#include "fdbclient/BlobWorkerInterface.h" // TODO REMOVE
 #include "fdbclient/TagThrottle.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
@@ -540,26 +541,6 @@ struct GrvProxyInfo {
 
 	GrvProxyInfo()
 	  : totalTransactions(0), batchTransactions(0), lastUpdateTime(0), lastThrottledTagChangeId(0), lastTagPushTime(0) {
-	}
-};
-
-// TODO MOVE elsewhere
-struct GranuleSnapshot : VectorRef<KeyValueRef> {
-
-	constexpr static FileIdentifier file_identifier = 4268040;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ((VectorRef<KeyValueRef>&)*this));
-	}
-};
-
-struct GranuleDeltas : VectorRef<MutationAndVersion> {
-	constexpr static FileIdentifier file_identifier = 4268042;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ((VectorRef<MutationAndVersion>&)*this));
 	}
 };
 
@@ -1446,6 +1427,7 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 	}
 }
 
+// TODO add granule locks
 ACTOR Future<std::pair<Version, std::string>> writeDeltaFile(RatekeeperData* self,
                                                              Reference<S3BlobStoreEndpoint> bstore,
                                                              std::string bucket,
@@ -1479,7 +1461,7 @@ ACTOR Future<std::pair<Version, std::string>> writeDeltaFile(RatekeeperData* sel
 			Tuple deltaFileKey;
 			deltaFileKey.append(startKey).append(endKey);
 			deltaFileKey.append(LiteralStringRef("delta")).append(lastVersion);
-			tr->set(deltaFileKey.getDataAsStandalone().withPrefix(blobGranuleKeys.begin), fname);
+			tr->set(deltaFileKey.getDataAsStandalone().withPrefix(blobGranuleFileKeys.begin), fname);
 
 			wait(tr->commit());
 			printf("blob worker updated fdb with delta file %s at version %lld\n", fname.c_str(), lastVersion);
@@ -1544,7 +1526,7 @@ ACTOR Future<std::pair<Version, std::string>> dumpSnapshotFromFDB(RatekeeperData
 			Tuple snapshotFileKey;
 			snapshotFileKey.append(startKey).append(endKey);
 			snapshotFileKey.append(LiteralStringRef("snapshot")).append(readVersion);
-			tr->set(snapshotFileKey.getDataAsStandalone().withPrefix(blobGranuleKeys.begin), fname);
+			tr->set(snapshotFileKey.getDataAsStandalone().withPrefix(blobGranuleFileKeys.begin), fname);
 			wait(tr->commit());
 			printf("Blob worker committed new snapshot file for range\n");
 			return std::pair<Version, std::string>(readVersion, fname);
@@ -1561,22 +1543,17 @@ ACTOR Future<std::pair<Version, std::string>> dumpSnapshotFromFDB(RatekeeperData
 	}
 }
 
-// TODO might need to use IBackupFile instead of blob store interface to support non-s3 things like azure
-ACTOR Future<Void> blobWorker(RatekeeperData* self,
-                              Reference<GranuleMetadata> metadata,
-                              Reference<S3BlobStoreEndpoint> bstore,
-                              std::string bucket,
-                              PromiseStream<MutationAndVersion> rangeFeed,
-                              PromiseStream<Version> snapshotVersions, // update fake range feed with actual versions
-                              Key startKey,
-                              Key endKey) {
-	state Arena deltaArena;
-	printf("Blob worker starting for [%s - %s) for bucket %s\n",
-	       startKey.printable().c_str(),
-	       endKey.printable().c_str(),
-	       bucket.c_str());
+ACTOR Future<Void> blobWorkerUpdateFiles(
+    RatekeeperData* self,
+    Reference<GranuleMetadata> metadata,
+    Reference<S3BlobStoreEndpoint> bstore,
+    std::string bucket,
+    PromiseStream<MutationAndVersion> rangeFeed,
+    PromiseStream<Version> snapshotVersions, // update fake range feed with actual versions
+    Key startKey,
+    Key endKey) {
 
-	// dump snapshot at the start
+	state Arena deltaArena;
 	std::pair<Version, std::string> newSnapshotFile = wait(dumpSnapshotFromFDB(self, bstore, bucket, startKey, endKey));
 	metadata->snapshotFiles.push_back(newSnapshotFile);
 	metadata->lastWriteVersion = newSnapshotFile.first;
@@ -1623,142 +1600,6 @@ ACTOR Future<Void> blobWorker(RatekeeperData* self,
 	}
 }
 
-// dumb series of mutations that just sets/clears same key that is unrelated to actual db transactions
-ACTOR Future<Void> fakeRangeFeed(PromiseStream<MutationAndVersion> mutationStream,
-                                 PromiseStream<Version> snapshotVersions,
-                                 Key startKey,
-                                 Key endKey) {
-	state Version version = waitNext(snapshotVersions.getFuture());
-	state uint32_t targetKbPerSec = (uint32_t)(SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES) / 10;
-	state Arena arena;
-	printf("Fake range feed got initial version %lld\n", version);
-	loop {
-		// dumb series of mutations that just sets/clears same key that is unrelated to actual db transactions
-		state uint32_t bytesGenerated = 0;
-		state uint32_t targetKbThisSec =
-		    targetKbPerSec / 2 + (uint32_t)(deterministicRandom()->random01() * targetKbPerSec);
-		state uint32_t mutationsGenerated = 0;
-		while (bytesGenerated < targetKbThisSec) {
-			MutationAndVersion update;
-			update.v = version;
-			update.m.param1 = startKey;
-			update.m.param2 = startKey;
-			if (deterministicRandom()->random01() < 0.5) {
-				// clear start key
-				update.m.type = MutationRef::Type::ClearRange;
-			} else {
-				// set
-				update.m.type = MutationRef::Type::SetValue;
-			}
-			mutationsGenerated++;
-			bytesGenerated += 17 + 2 * startKey.size();
-			mutationStream.send(update);
-
-			// simulate multiple mutations with same version (TODO: this should be possible right)
-			if (deterministicRandom()->random01() < 0.4) {
-				version++;
-			}
-			if (mutationsGenerated % 1000 == 0) {
-				wait(yield());
-			}
-		}
-
-		printf("Fake range feed generated %d mutations at version %lld\n", mutationsGenerated, version);
-
-		choose {
-			when(wait(delay(1.0))) {
-				// slightly slower than real versions, to try to ensure it doesn't get ahead
-				version += 950000;
-			}
-			when(Version _v = waitNext(snapshotVersions.getFuture())) {
-				if (_v > version) {
-					printf("updating fake range feed from %lld to snapshot version %lld\n", version, _v);
-					version = _v;
-				} else {
-					printf("snapshot version %lld was ahead of fake range feed version %lld, keeping fake version\n",
-					       _v,
-					       version);
-				}
-			}
-		}
-	}
-}
-
-// TODO MOVE ELSEWHERE
-ACTOR Future<Void> blobManagerPoc(RatekeeperData* self) {
-	state Future<Void> currentWorker;
-	state Future<Void> currentRangeFeed;
-	state Reference<S3BlobStoreEndpoint> bstore;
-	state std::string bucket = SERVER_KNOBS->BG_BUCKET;
-
-	printf("Initializing blob manager s3 stuff\n");
-	try {
-		printf("constructing s3blobstoreendpoint from %s\n", SERVER_KNOBS->BG_URL.c_str());
-		bstore = S3BlobStoreEndpoint::fromString(SERVER_KNOBS->BG_URL);
-		printf("checking if bucket %s exists\n", bucket.c_str());
-		bool bExists = wait(bstore->bucketExists(bucket));
-		if (!bExists) {
-			printf("Bucket %s does not exist!\n", bucket.c_str());
-			return Void();
-		}
-	} catch (Error& e) {
-		printf("Blob manager got s3 init error %s\n", e.name());
-		return Void();
-	}
-
-	loop {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
-
-		printf("Blob manager checking for range updates\n");
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-				// TODO probably knobs here? This should always be pretty small though
-				RangeResult results = wait(krmGetRanges(
-				    tr, blobRangeKeys.begin, KeyRange(allKeys), 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-
-				bool foundRange = false;
-				for (int i = 0; i < results.size() - 1; i++) {
-					if (results[i].value == LiteralStringRef("1")) {
-						ASSERT(!foundRange); // TODO for now only assume at most 1 range is set
-						ASSERT(results[i + 1].value == StringRef());
-						printf("Blob manager sees range [%s - %s)\n",
-						       results[i].key.printable().c_str(),
-						       results[i + 1].key.printable().c_str());
-
-						// TODO better way to make standalone to copy the keys into?
-						self->granuleRange = KeyRangeRef(results[i].key, results[i + 1].key);
-						self->granuleMetadata = makeReference<GranuleMetadata>();
-						foundRange = true;
-						PromiseStream<MutationAndVersion> mutationStream;
-						PromiseStream<Version> snapshotVersions;
-						currentRangeFeed =
-						    fakeRangeFeed(mutationStream, snapshotVersions, results[i].key, results[i + 1].key);
-						currentWorker = blobWorker(self,
-						                           self->granuleMetadata,
-						                           bstore,
-						                           bucket,
-						                           mutationStream,
-						                           snapshotVersions,
-						                           results[i].key,
-						                           results[i + 1].key);
-					}
-				}
-
-				state Future<Void> watchFuture = tr->watch(blobRangeChangeKey);
-				wait(tr->commit());
-				wait(watchFuture);
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-	}
-}
-
 static void handleBlobGranuleFileRequest(RatekeeperData* self, const BlobGranuleFileRequest& req) {
 	if (!self->granuleMetadata.isValid()) {
 		printf("No blob granule found, skipping request\n");
@@ -1766,7 +1607,7 @@ static void handleBlobGranuleFileRequest(RatekeeperData* self, const BlobGranule
 		return;
 	}
 	BlobGranuleFileReply rep;
-	// TODO could check for intersection, but just assume it intersects for now
+	// TODO could check for intersection, but just assume it intersects all files+mutations for now
 
 	// copy everything into reply's arena
 	BlobGranuleChunk chunk;
@@ -1820,6 +1661,258 @@ static void handleBlobGranuleFileRequest(RatekeeperData* self, const BlobGranule
 	req.reply.send(rep);
 }
 
+// TODO list of key ranges in the future
+ACTOR Future<Void> registerBlobWorker(RatekeeperData* self, BlobWorkerInterface interf, KeyRange keyRange) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	loop {
+		try {
+			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
+			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
+			tr->set(blobWorkerListKey, blobWorkerListValue(interf));
+
+			wait(krmSetRangeCoalescing(tr,
+			                           blobGranuleMappingKeys.begin,
+			                           keyRange,
+			                           KeyRange(allKeys),
+			                           blobGranuleMappingValueFor(interf.id())));
+
+			wait(tr->commit());
+
+			printf("Registered blob worker %s for key range [%s - %s)\n",
+			       interf.id().toString().c_str(),
+			       keyRange.begin.printable().c_str(),
+			       keyRange.end.printable().c_str());
+			return Void();
+		} catch (Error& e) {
+			printf("Registering blob worker %s for key range [%s - %s) got error %s\n",
+			       interf.id().toString().c_str(),
+			       keyRange.begin.printable().c_str(),
+			       keyRange.end.printable().c_str(),
+			       e.name());
+			wait(tr->onError(e));
+		}
+	}
+}
+
+// TODO might need to use IBackupFile instead of blob store interface to support non-s3 things like azure?
+ACTOR Future<Void> blobWorkerCore(RatekeeperData* self,
+                                  Reference<GranuleMetadata> metadata,
+                                  Reference<S3BlobStoreEndpoint> bstore,
+                                  std::string bucket,
+                                  PromiseStream<MutationAndVersion> rangeFeed,
+                                  PromiseStream<Version> snapshotVersions,
+                                  Key startKey,
+                                  Key endKey,
+                                  LocalityData locality) {
+	printf("Blob worker starting for [%s - %s) for bucket %s\n",
+	       startKey.printable().c_str(),
+	       endKey.printable().c_str(),
+	       bucket.c_str());
+
+	state BlobWorkerInterface interf(locality, deterministicRandom()->randomUniqueID());
+	interf.initEndpoints();
+
+	wait(registerBlobWorker(self, interf, KeyRange(KeyRangeRef(startKey, endKey))));
+
+	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> collection = actorCollection(addActor.getFuture());
+
+	addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
+	// start file updater
+	addActor.send(blobWorkerUpdateFiles(self, metadata, bstore, bucket, rangeFeed, snapshotVersions, startKey, endKey));
+
+	try {
+		loop choose {
+			when(BlobGranuleFileRequest req = waitNext(interf.blobGranuleFileRequest.getFuture())) {
+				printf("Got blob granule request [%s - %s)\n",
+				       req.keyRange.begin.printable().c_str(),
+				       req.keyRange.end.printable().c_str());
+				handleBlobGranuleFileRequest(self, req);
+			}
+			when(wait(collection)) {
+				ASSERT(false);
+				throw internal_error();
+			}
+		}
+	} catch (Error& e) {
+		printf("Blob worker got error %s, exiting\n", e.name());
+		TraceEvent("BlobWorkerDied", interf.id()).error(e, true);
+	}
+
+	return Void();
+}
+
+// dumb series of mutations that just sets/clears same key that is unrelated to actual db transactions
+ACTOR Future<Void> fakeRangeFeed(PromiseStream<MutationAndVersion> mutationStream,
+                                 PromiseStream<Version> snapshotVersions,
+                                 Key startKey,
+                                 Key endKey) {
+	state Version version = waitNext(snapshotVersions.getFuture());
+	state uint32_t targetKbPerSec = (uint32_t)(SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES) / 10;
+	state Arena arena;
+	printf("Fake range feed got initial version %lld\n", version);
+	loop {
+		// dumb series of mutations that just sets/clears same key that is unrelated to actual db transactions
+		state uint32_t bytesGenerated = 0;
+		state uint32_t targetKbThisSec =
+		    targetKbPerSec / 2 + (uint32_t)(deterministicRandom()->random01() * targetKbPerSec);
+		state uint32_t mutationsGenerated = 0;
+		while (bytesGenerated < targetKbThisSec) {
+			MutationAndVersion update;
+			update.v = version;
+			update.m.param1 = startKey;
+			update.m.param2 = startKey;
+			if (deterministicRandom()->random01() < 0.5) {
+				// clear start key
+				update.m.type = MutationRef::Type::ClearRange;
+			} else {
+				// set
+				update.m.type = MutationRef::Type::SetValue;
+			}
+			mutationsGenerated++;
+			bytesGenerated += 17 + 2 * startKey.size();
+			mutationStream.send(update);
+
+			// simulate multiple mutations with same version (TODO: this should be possible right)
+			if (deterministicRandom()->random01() < 0.4) {
+				version++;
+			}
+			if (mutationsGenerated % 1000 == 0) {
+				wait(yield());
+			}
+		}
+
+		// printf("Fake range feed generated %d mutations at version %lld\n", mutationsGenerated, version);
+
+		choose {
+			when(wait(delay(1.0))) {
+				// slightly slower than real versions, to try to ensure it doesn't get ahead
+				version += 950000;
+			}
+			when(Version _v = waitNext(snapshotVersions.getFuture())) {
+				if (_v > version) {
+					printf("updating fake range feed from %lld to snapshot version %lld\n", version, _v);
+					version = _v;
+				} else {
+					printf("snapshot version %lld was ahead of fake range feed version %lld, keeping fake version\n",
+					       _v,
+					       version);
+				}
+			}
+		}
+	}
+}
+
+// TODO REMOVE eventually
+ACTOR Future<Void> nukeBlobWorkerData(RatekeeperData* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	loop {
+		try {
+			tr->clear(blobWorkerListKeys);
+			tr->clear(blobGranuleMappingKeys);
+
+			return Void();
+		} catch (Error& e) {
+			printf("Nuking blob worker data got error %s\n", e.name());
+			wait(tr->onError(e));
+		}
+	}
+}
+
+// TODO MOVE ELSEWHERE
+ACTOR Future<Void> blobManagerPoc(RatekeeperData* self, LocalityData locality) {
+	state Future<Void> currentWorker;
+	state Future<Void> currentRangeFeed;
+	state Reference<S3BlobStoreEndpoint> bstore;
+	state std::string bucket = SERVER_KNOBS->BG_BUCKET;
+
+	printf("Initializing blob manager s3 stuff\n");
+	try {
+		printf("constructing s3blobstoreendpoint from %s\n", SERVER_KNOBS->BG_URL.c_str());
+		bstore = S3BlobStoreEndpoint::fromString(SERVER_KNOBS->BG_URL);
+		printf("checking if bucket %s exists\n", bucket.c_str());
+		bool bExists = wait(bstore->bucketExists(bucket));
+		if (!bExists) {
+			printf("Bucket %s does not exist!\n", bucket.c_str());
+			return Void();
+		}
+	} catch (Error& e) {
+		printf("Blob manager got s3 init error %s\n", e.name());
+		return Void();
+	}
+
+	// TODO remove once we have persistence + failure detection
+	// TODO move to separate actor
+	printf("Blob manager nuking previous workers and range assignments on startup\n");
+	wait(nukeBlobWorkerData(self));
+	printf("Blob manager nuked previous workers and range assignments\n");
+
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+
+		printf("Blob manager checking for range updates\n");
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				// TODO probably knobs here? This should always be pretty small though
+				RangeResult results = wait(krmGetRanges(
+				    tr, blobRangeKeys.begin, KeyRange(allKeys), 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+
+				bool foundRange = false;
+				for (int i = 0; i < results.size() - 1; i++) {
+					if (results[i].value == LiteralStringRef("1")) {
+						ASSERT(!foundRange); // TODO for now only assume at most 1 range is set
+						ASSERT(results[i + 1].value == StringRef());
+						printf("Blob manager sees range [%s - %s)\n",
+						       results[i].key.printable().c_str(),
+						       results[i + 1].key.printable().c_str());
+
+						// TODO better way to make standalone to copy the keys into?
+						self->granuleRange = KeyRangeRef(results[i].key, results[i + 1].key);
+						self->granuleMetadata = makeReference<GranuleMetadata>();
+						foundRange = true;
+						PromiseStream<MutationAndVersion> mutationStream;
+						PromiseStream<Version> snapshotVersions;
+						currentRangeFeed =
+						    fakeRangeFeed(mutationStream, snapshotVersions, results[i].key, results[i + 1].key);
+						currentWorker = blobWorkerCore(self,
+						                               self->granuleMetadata,
+						                               bstore,
+						                               bucket,
+						                               mutationStream,
+						                               snapshotVersions,
+						                               results[i].key,
+						                               results[i + 1].key,
+						                               locality);
+					}
+				}
+				if (!foundRange) {
+					// cancel current one
+					printf("Blob manager found zero blob ranges, cancelling current worker and fake range feed!\n");
+					currentRangeFeed = Never();
+					currentWorker = Never();
+				}
+
+				state Future<Void> watchFuture = tr->watch(blobRangeChangeKey);
+				wait(tr->commit());
+				printf("Blob manager awaiting new range update\n");
+				wait(watchFuture);
+				break;
+			} catch (Error& e) {
+				printf("Blob manager got error looking for range updates %s\n", e.name());
+				wait(tr->onError(e));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Future<Void> timeout = Void();
@@ -1849,7 +1942,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 		printf("Starting blob manager with url=%s and bucket=%s\n",
 		       SERVER_KNOBS->BG_URL.c_str(),
 		       SERVER_KNOBS->BG_BUCKET.c_str());
-		self.addActor.send(blobManagerPoc(&self));
+		self.addActor.send(blobManagerPoc(&self, rkInterf.locality));
 	}
 
 	TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
@@ -1943,12 +2036,6 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 			when(ReportCommitCostEstimationRequest req = waitNext(rkInterf.reportCommitCostEstimation.getFuture())) {
 				updateCommitCostEstimation(&self, req.ssTrTagCommitCost);
 				req.reply.send(Void());
-			}
-			when(BlobGranuleFileRequest req = waitNext(rkInterf.blobGranuleFileRequest.getFuture())) {
-				printf("Got blob granule request [%s - %s)\n",
-				       req.keyRange.begin.printable().c_str(),
-				       req.keyRange.end.printable().c_str());
-				handleBlobGranuleFileRequest(&self, req);
 			}
 			when(wait(err.getFuture())) {}
 			when(wait(dbInfo->onChange())) {

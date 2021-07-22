@@ -32,8 +32,6 @@ struct RatekeeperInterface {
 	RequestStream<struct GetRateInfoRequest> getRateInfo;
 	RequestStream<struct HaltRatekeeperRequest> haltRatekeeper;
 	RequestStream<struct ReportCommitCostEstimationRequest> reportCommitCostEstimation;
-	// TODO REMOVE!!!
-	RequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
 	struct LocalityData locality;
 	UID myId;
 
@@ -48,14 +46,7 @@ struct RatekeeperInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar,
-		           waitFailure,
-		           getRateInfo,
-		           haltRatekeeper,
-		           reportCommitCostEstimation,
-		           blobGranuleFileRequest,
-		           locality,
-		           myId);
+		serializer(ar, waitFailure, getRateInfo, haltRatekeeper, reportCommitCostEstimation, locality, myId);
 	}
 };
 
@@ -146,65 +137,6 @@ struct ReportCommitCostEstimationRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, ssTrTagCommitCost, reply);
-	}
-};
-
-// TODO MOVE ELSEWHERE
-struct MutationAndVersion {
-	constexpr static FileIdentifier file_identifier = 4268041;
-	MutationRef m;
-	Version v;
-
-	MutationAndVersion() {}
-	MutationAndVersion(Arena& to, MutationRef m, Version v) : m(to, m), v(v) {}
-	MutationAndVersion(Arena& to, const MutationAndVersion& from) : m(to, from.m), v(from.v) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, m, v);
-	}
-};
-
-// the assumption of this response is
-struct BlobGranuleChunk {
-	KeyRangeRef keyRange;
-	StringRef snapshotFileName;
-	VectorRef<StringRef> deltaFileNames;
-	VectorRef<MutationAndVersion> newDeltas;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, keyRange, snapshotFileName, deltaFileNames, newDeltas);
-	}
-};
-
-struct BlobGranuleFileReply {
-	// TODO "proper" way to generate file_identifier?
-	constexpr static FileIdentifier file_identifier = 6858612;
-	Arena arena;
-	VectorRef<BlobGranuleChunk> chunks;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, chunks, arena);
-	}
-};
-
-// TODO could do a reply promise stream of file mutations to bound memory requirements?
-// Have to load whole snapshot file into memory though so it doesn't actually matter too much
-struct BlobGranuleFileRequest {
-
-	constexpr static FileIdentifier file_identifier = 4150141;
-	Arena arena;
-	KeyRangeRef keyRange;
-	Version readVersion;
-	ReplyPromise<BlobGranuleFileReply> reply;
-
-	BlobGranuleFileRequest() {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, keyRange, readVersion, reply, arena);
 	}
 };
 

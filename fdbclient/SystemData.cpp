@@ -1039,10 +1039,53 @@ const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/config
 const KeyRef blobRangeChangeKey = LiteralStringRef("\xff\x02/blobRangeChange");
 const KeyRangeRef blobRangeKeys(LiteralStringRef("\xff/blobRange/"), LiteralStringRef("\xff/blobRange0"));
 
-// TODO need something for tracking "current" granules
-
 // blob range file data
-const KeyRangeRef blobGranuleKeys(LiteralStringRef("\xff/blobGranules/"), LiteralStringRef("\xff/blobGranules0"));
+const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff/blobGranuleFiles/"),
+                                      LiteralStringRef("\xff/blobGranuleFiles0"));
+
+const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff/blobGranuleMapping/"),
+                                         LiteralStringRef("\xff/blobGranuleMapping0"));
+
+const Value blobGranuleMappingValueFor(UID const& workerID) {
+	BinaryWriter wr(Unversioned());
+	wr << workerID;
+	return wr.toValue();
+}
+
+UID decodeBlobGranuleMappingValue(ValueRef const& value) {
+	UID workerID;
+	BinaryReader reader(value, Unversioned());
+	reader >> workerID;
+	return workerID;
+}
+
+const KeyRangeRef blobWorkerListKeys(LiteralStringRef("\xff/blobWorkerList/"),
+                                     LiteralStringRef("\xff/blobWorkerList0"));
+
+const Key blobWorkerListKeyFor(UID workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(blobWorkerListKeys.begin);
+	wr << workerID;
+	return wr.toValue();
+}
+
+const Value blobWorkerListValue(BlobWorkerInterface const& worker) {
+	return ObjectWriter::toValue(worker, IncludeVersion());
+}
+
+UID decodeBlobWorkerListKey(KeyRef const& key) {
+	UID workerID;
+	BinaryReader reader(key.removePrefix(blobWorkerListKeys.begin), Unversioned());
+	reader >> workerID;
+	return workerID;
+}
+
+BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
+	BlobWorkerInterface interf;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(interf);
+	return interf;
+}
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
