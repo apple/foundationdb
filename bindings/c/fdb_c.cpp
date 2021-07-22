@@ -362,6 +362,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 // A value of 0 indicates that the client is more or less idle
 // A value of 1 (or more) indicates that the client is saturated
 extern "C" DLLEXPORT double fdb_database_get_main_thread_busyness(FDBDatabase* d) {
+	if (g_api_version < 631) {
+		return 0;
+	}
+
 	return DB(d)->getMainThreadBusyness();
 }
 
