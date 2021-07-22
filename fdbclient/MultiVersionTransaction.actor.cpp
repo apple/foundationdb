@@ -156,11 +156,12 @@ ThreadFuture<Standalone<VectorRef<const char*>>> DLTransaction::getAddressesForK
 }
 
 ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
-	if (!api->transactionGetVersionstamp) {
-		return unsupported_operation();
+	FdbCApi::FDBFuture* f;
+	try {
+		f = api->transactionGetVersionstamp(tr);
+	} catch (Error& e) {
+		return e;
 	}
-
-	FdbCApi::FDBFuture* f = api->transactionGetVersionstamp(tr);
 
 	return toThreadFuture<Standalone<StringRef>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const uint8_t* str;
@@ -174,11 +175,14 @@ ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
 }
 
 ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
-	if (!api->transactionGetEstimatedRangeSizeBytes) {
-		return unsupported_operation();
+	FdbCApi::FDBFuture* f;
+	try {
+
+		f = api->transactionGetEstimatedRangeSizeBytes(
+		    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
+	} catch (Error& e) {
+		return e;
 	}
-	FdbCApi::FDBFuture* f = api->transactionGetEstimatedRangeSizeBytes(
-	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
 
 	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		int64_t sampledSize;
@@ -190,11 +194,14 @@ ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(const KeyRangeRe
 
 ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(const KeyRangeRef& range,
                                                                                int64_t chunkSize) {
-	if (!api->transactionGetRangeSplitPoints) {
-		return unsupported_operation();
+	FdbCApi::FDBFuture* f;
+	try {
+
+		f = api->transactionGetRangeSplitPoints(
+		    tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize);
+	} catch (Error& e) {
+		return e;
 	}
-	FdbCApi::FDBFuture* f = api->transactionGetRangeSplitPoints(
-	    tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize);
 
 	return toThreadFuture<Standalone<VectorRef<KeyRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBKey* splitKeys;
@@ -255,11 +262,12 @@ Version DLTransaction::getCommittedVersion() {
 }
 
 ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
-	if (!api->transactionGetApproximateSize) {
-		return unsupported_operation();
+	FdbCApi::FDBFuture* f;
+	try {
+		f = api->transactionGetApproximateSize(tr);
+	} catch (Error& e) {
+		return e;
 	}
-
-	FdbCApi::FDBFuture* f = api->transactionGetApproximateSize(tr);
 	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		int64_t size = 0;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
@@ -306,7 +314,7 @@ ThreadFuture<Void> DLDatabase::onReady() {
 
 Reference<ITransaction> DLDatabase::createTransaction() {
 	FdbCApi::FDBTransaction* tr;
-	api->databaseCreateTransaction(db, &tr);
+	throwIfError(api->databaseCreateTransaction(db, &tr));
 	return Reference<ITransaction>(new DLTransaction(api, tr));
 }
 
@@ -318,11 +326,13 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 }
 
 ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
-	if (!api->databaseRebootWorker) {
-		return unsupported_operation();
-	}
 
-	FdbCApi::FDBFuture* f = api->databaseRebootWorker(db, address.begin(), address.size(), check, duration);
+	FdbCApi::FDBFuture* f;
+	try {
+		f = api->databaseRebootWorker(db, address.begin(), address.size(), check, duration);
+	} catch (Error& e) {
+		return e;
+	}
 	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		int64_t res;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
@@ -332,30 +342,27 @@ ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool ch
 }
 
 ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
-	if (!api->databaseForceRecoveryWithDataLoss) {
-		return unsupported_operation();
+	FdbCApi::FDBFuture* f;
+	try {
+		f = api->databaseForceRecoveryWithDataLoss(db, dcid.begin(), dcid.size());
+	} catch (Error& e) {
+		return e;
 	}
-
-	FdbCApi::FDBFuture* f = api->databaseForceRecoveryWithDataLoss(db, dcid.begin(), dcid.size());
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
 ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
-	if (!api->databaseCreateSnapshot) {
-		return unsupported_operation();
+	FdbCApi::FDBFuture* f;
+	try {
+		f = api->databaseCreateSnapshot(db, uid.begin(), uid.size(), snapshot_command.begin(), snapshot_command.size());
+	} catch (Error& e) {
+		return e;
 	}
-
-	FdbCApi::FDBFuture* f =
-	    api->databaseCreateSnapshot(db, uid.begin(), uid.size(), snapshot_command.begin(), snapshot_command.size());
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
 // Get network thread busyness
 double DLDatabase::getMainThreadBusyness() {
-	if (api->databaseGetMainThreadBusyness != nullptr) {
-		return api->databaseGetMainThreadBusyness(db);
-	}
-
 	return 0;
 }
 
@@ -363,8 +370,6 @@ double DLDatabase::getMainThreadBusyness() {
 // If an expected version is given, the future won't return until the protocol version is different than expected
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
-	ASSERT(api->databaseGetServerProtocol != nullptr);
-
 	uint64_t expected =
 	    expectedVersion.map<uint64_t>([](const ProtocolVersion& v) { return v.version(); }).orDefault(0);
 	FdbCApi::FDBFuture* f = api->databaseGetServerProtocol(db, expected);
@@ -398,8 +403,7 @@ void loadClientFunction(T* fp, void* lib, std::string libPath, const char* funct
 DLApi::DLApi(std::string fdbCPath, bool unlinkOnLoad)
   : api(new FdbCApi()), fdbCPath(fdbCPath), unlinkOnLoad(unlinkOnLoad), networkSetup(false) {}
 
-// Loads client API functions (definitions are in FdbCApi struct)
-void DLApi::init() {
+void FdbCApi::init(const std::string& fdbCPath, int headerVersion, bool unlinkOnLoad) {
 	if (isLibraryLoaded(fdbCPath.c_str())) {
 		throw external_client_already_loaded();
 	}
@@ -417,88 +421,81 @@ void DLApi::init() {
 		}
 	}
 
-	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl");
-	loadClientFunction(&api->getClientVersion, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
-	loadClientFunction(&api->setNetworkOption, lib, fdbCPath, "fdb_network_set_option");
-	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network");
-	loadClientFunction(&api->runNetwork, lib, fdbCPath, "fdb_run_network");
-	loadClientFunction(&api->stopNetwork, lib, fdbCPath, "fdb_stop_network");
-	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
+	loadClientFunction(&selectApiVersion_, lib, fdbCPath, "fdb_select_api_version_impl");
+	loadClientFunction(&getClientVersion_, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
+	loadClientFunction(&setNetworkOption_, lib, fdbCPath, "fdb_network_set_option");
+	loadClientFunction(&setupNetwork_, lib, fdbCPath, "fdb_setup_network");
+	loadClientFunction(&runNetwork_, lib, fdbCPath, "fdb_run_network");
+	loadClientFunction(&stopNetwork_, lib, fdbCPath, "fdb_stop_network");
+	loadClientFunction(&createDatabase_, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
 
-	loadClientFunction(&api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction");
-	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option");
-	loadClientFunction(&api->databaseGetMainThreadBusyness,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_database_get_main_thread_busyness",
-	                   headerVersion >= 700);
+	loadClientFunction(&databaseCreateTransaction_, lib, fdbCPath, "fdb_database_create_transaction");
+	loadClientFunction(&databaseSetOption_, lib, fdbCPath, "fdb_database_set_option");
 	loadClientFunction(
-	    &api->databaseGetServerProtocol, lib, fdbCPath, "fdb_database_get_server_protocol", headerVersion >= 700);
-	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
-	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
-	loadClientFunction(&api->databaseForceRecoveryWithDataLoss,
+	    &databaseGetMainThreadBusyness_, lib, fdbCPath, "fdb_database_get_main_thread_busyness", headerVersion >= 700);
+	loadClientFunction(
+	    &databaseGetServerProtocol_, lib, fdbCPath, "fdb_database_get_server_protocol", headerVersion >= 700);
+	loadClientFunction(&databaseDestroy_, lib, fdbCPath, "fdb_database_destroy");
+	loadClientFunction(&databaseRebootWorker_, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
+	loadClientFunction(&databaseForceRecoveryWithDataLoss_,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_force_recovery_with_data_loss",
 	                   headerVersion >= 700);
-	loadClientFunction(
-	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
+	loadClientFunction(&databaseCreateSnapshot_, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
 
-	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option");
-	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy");
-	loadClientFunction(&api->transactionSetReadVersion, lib, fdbCPath, "fdb_transaction_set_read_version");
-	loadClientFunction(&api->transactionGetReadVersion, lib, fdbCPath, "fdb_transaction_get_read_version");
-	loadClientFunction(&api->transactionGet, lib, fdbCPath, "fdb_transaction_get");
-	loadClientFunction(&api->transactionGetKey, lib, fdbCPath, "fdb_transaction_get_key");
-	loadClientFunction(&api->transactionGetAddressesForKey, lib, fdbCPath, "fdb_transaction_get_addresses_for_key");
-	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range");
+	loadClientFunction(&transactionSetOption_, lib, fdbCPath, "fdb_transaction_set_option");
+	loadClientFunction(&transactionDestroy_, lib, fdbCPath, "fdb_transaction_destroy");
+	loadClientFunction(&transactionSetReadVersion_, lib, fdbCPath, "fdb_transaction_set_read_version");
+	loadClientFunction(&transactionGetReadVersion_, lib, fdbCPath, "fdb_transaction_get_read_version");
+	loadClientFunction(&transactionGet_, lib, fdbCPath, "fdb_transaction_get");
+	loadClientFunction(&transactionGetKey_, lib, fdbCPath, "fdb_transaction_get_key");
+	loadClientFunction(&transactionGetAddressesForKey_, lib, fdbCPath, "fdb_transaction_get_addresses_for_key");
+	loadClientFunction(&transactionGetRange_, lib, fdbCPath, "fdb_transaction_get_range");
 	loadClientFunction(
-	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
-	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set");
-	loadClientFunction(&api->transactionClear, lib, fdbCPath, "fdb_transaction_clear");
-	loadClientFunction(&api->transactionClearRange, lib, fdbCPath, "fdb_transaction_clear_range");
-	loadClientFunction(&api->transactionAtomicOp, lib, fdbCPath, "fdb_transaction_atomic_op");
-	loadClientFunction(&api->transactionCommit, lib, fdbCPath, "fdb_transaction_commit");
-	loadClientFunction(&api->transactionGetCommittedVersion, lib, fdbCPath, "fdb_transaction_get_committed_version");
-	loadClientFunction(&api->transactionGetApproximateSize,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_get_approximate_size",
-	                   headerVersion >= 620);
-	loadClientFunction(&api->transactionWatch, lib, fdbCPath, "fdb_transaction_watch");
-	loadClientFunction(&api->transactionOnError, lib, fdbCPath, "fdb_transaction_on_error");
-	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
-	loadClientFunction(&api->transactionCancel, lib, fdbCPath, "fdb_transaction_cancel");
-	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
-	loadClientFunction(&api->transactionGetEstimatedRangeSizeBytes,
+	    &transactionGetVersionstamp_, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
+	loadClientFunction(&transactionSet_, lib, fdbCPath, "fdb_transaction_set");
+	loadClientFunction(&transactionClear_, lib, fdbCPath, "fdb_transaction_clear");
+	loadClientFunction(&transactionClearRange_, lib, fdbCPath, "fdb_transaction_clear_range");
+	loadClientFunction(&transactionAtomicOp_, lib, fdbCPath, "fdb_transaction_atomic_op");
+	loadClientFunction(&transactionCommit_, lib, fdbCPath, "fdb_transaction_commit");
+	loadClientFunction(&transactionGetCommittedVersion_, lib, fdbCPath, "fdb_transaction_get_committed_version");
+	loadClientFunction(
+	    &transactionGetApproximateSize_, lib, fdbCPath, "fdb_transaction_get_approximate_size", headerVersion >= 620);
+	loadClientFunction(&transactionWatch_, lib, fdbCPath, "fdb_transaction_watch");
+	loadClientFunction(&transactionOnError_, lib, fdbCPath, "fdb_transaction_on_error");
+	loadClientFunction(&transactionReset_, lib, fdbCPath, "fdb_transaction_reset");
+	loadClientFunction(&transactionCancel_, lib, fdbCPath, "fdb_transaction_cancel");
+	loadClientFunction(&transactionAddConflictRange_, lib, fdbCPath, "fdb_transaction_add_conflict_range");
+	loadClientFunction(&transactionGetEstimatedRangeSizeBytes_,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_get_estimated_range_size_bytes",
 	                   headerVersion >= 630);
-	loadClientFunction(&api->transactionGetRangeSplitPoints,
+	loadClientFunction(&transactionGetRangeSplitPoints_,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_get_range_split_points",
 	                   headerVersion >= 700);
 
 	loadClientFunction(
-	    &api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
-	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64", headerVersion >= 700);
-	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
-	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
-	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
-	loadClientFunction(&api->futureGetStringArray, lib, fdbCPath, "fdb_future_get_string_array");
-	loadClientFunction(&api->futureGetKeyArray, lib, fdbCPath, "fdb_future_get_key_array", headerVersion >= 700);
-	loadClientFunction(&api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array");
-	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback");
-	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel");
-	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy");
+	    &futureGetInt64_, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
+	loadClientFunction(&futureGetUInt64_, lib, fdbCPath, "fdb_future_get_uint64", headerVersion >= 700);
+	loadClientFunction(&futureGetError_, lib, fdbCPath, "fdb_future_get_error");
+	loadClientFunction(&futureGetKey_, lib, fdbCPath, "fdb_future_get_key");
+	loadClientFunction(&futureGetValue_, lib, fdbCPath, "fdb_future_get_value");
+	loadClientFunction(&futureGetStringArray_, lib, fdbCPath, "fdb_future_get_string_array");
+	loadClientFunction(&futureGetKeyArray_, lib, fdbCPath, "fdb_future_get_key_array", headerVersion >= 700);
+	loadClientFunction(&futureGetKeyValueArray_, lib, fdbCPath, "fdb_future_get_keyvalue_array");
+	loadClientFunction(&futureSetCallback_, lib, fdbCPath, "fdb_future_set_callback");
+	loadClientFunction(&futureCancel_, lib, fdbCPath, "fdb_future_cancel");
+	loadClientFunction(&futureDestroy_, lib, fdbCPath, "fdb_future_destroy");
 
-	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database", headerVersion < 610);
-	loadClientFunction(&api->createCluster, lib, fdbCPath, "fdb_create_cluster", headerVersion < 610);
-	loadClientFunction(&api->clusterCreateDatabase, lib, fdbCPath, "fdb_cluster_create_database", headerVersion < 610);
-	loadClientFunction(&api->clusterDestroy, lib, fdbCPath, "fdb_cluster_destroy", headerVersion < 610);
-	loadClientFunction(&api->futureGetCluster, lib, fdbCPath, "fdb_future_get_cluster", headerVersion < 610);
+	loadClientFunction(&futureGetDatabase_, lib, fdbCPath, "fdb_future_get_database", headerVersion < 610);
+	loadClientFunction(&createCluster_, lib, fdbCPath, "fdb_create_cluster", headerVersion < 610);
+	loadClientFunction(&clusterCreateDatabase_, lib, fdbCPath, "fdb_cluster_create_database", headerVersion < 610);
+	loadClientFunction(&clusterDestroy_, lib, fdbCPath, "fdb_cluster_destroy", headerVersion < 610);
+	loadClientFunction(&futureGetCluster_, lib, fdbCPath, "fdb_future_get_cluster", headerVersion < 610);
 }
 
 void DLApi::selectApiVersion(int apiVersion) {
@@ -506,16 +503,12 @@ void DLApi::selectApiVersion(int apiVersion) {
 	// Versions newer than what we understand are rejected in the C bindings
 	headerVersion = std::max(apiVersion, 400);
 
-	init();
+	api->init(fdbCPath, headerVersion, unlinkOnLoad);
 	throwIfError(api->selectApiVersion(apiVersion, headerVersion));
 	throwIfError(api->setNetworkOption(static_cast<FDBNetworkOption>(FDBNetworkOptions::EXTERNAL_CLIENT), nullptr, 0));
 }
 
 const char* DLApi::getClientVersion() {
-	if (!api->getClientVersion) {
-		return "unknown";
-	}
-
 	return api->getClientVersion();
 }
 
@@ -557,7 +550,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 
 	auto clusterFuture = toThreadFuture<FdbCApi::FDBCluster*>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::FDBCluster* cluster;
-		api->futureGetCluster(f, &cluster);
+		throwIfError(api->futureGetCluster(f, &cluster));
 		return cluster;
 	});
 
@@ -573,7 +566,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 		                                              innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2),
 		                                              [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 			                                              FdbCApi::FDBDatabase* db;
-			                                              api->futureGetDatabase(f, &db);
+			                                              throwIfError(api->futureGetDatabase(f, &db));
 			                                              return db;
 		                                              });
 
@@ -2278,24 +2271,25 @@ struct DLTest {
 			api = makeReference<FdbCApi>();
 
 			// Functions needed for DLSingleAssignmentVar
-			api->futureSetCallback = [](FdbCApi::FDBFuture* f, FdbCApi::FDBCallback callback, void* callbackParameter) {
-				try {
-					CAPICallback* cb = new CAPICallback(callback, f, callbackParameter);
-					int ignore;
-					((ThreadSingleAssignmentVarBase*)f)->callOrSetAsCallback(cb, ignore, 0);
-					return FdbCApi::fdb_error_t(error_code_success);
-				} catch (Error& e) {
-					return FdbCApi::fdb_error_t(e.code());
-				}
-			};
-			api->futureCancel = [](FdbCApi::FDBFuture* f) {
+			api->futureSetCallback_ =
+			    [](FdbCApi::FDBFuture* f, FdbCApi::FDBCallback callback, void* callbackParameter) {
+				    try {
+					    CAPICallback* cb = new CAPICallback(callback, f, callbackParameter);
+					    int ignore;
+					    ((ThreadSingleAssignmentVarBase*)f)->callOrSetAsCallback(cb, ignore, 0);
+					    return FdbCApi::fdb_error_t(error_code_success);
+				    } catch (Error& e) {
+					    return FdbCApi::fdb_error_t(e.code());
+				    }
+			    };
+			api->futureCancel_ = [](FdbCApi::FDBFuture* f) {
 				((ThreadSingleAssignmentVarBase*)f)->addref();
 				((ThreadSingleAssignmentVarBase*)f)->cancel();
 			};
-			api->futureGetError = [](FdbCApi::FDBFuture* f) {
+			api->futureGetError_ = [](FdbCApi::FDBFuture* f) {
 				return FdbCApi::fdb_error_t(((ThreadSingleAssignmentVarBase*)f)->getErrorCode());
 			};
-			api->futureDestroy = [](FdbCApi::FDBFuture* f) { ((ThreadSingleAssignmentVarBase*)f)->cancel(); };
+			api->futureDestroy_ = [](FdbCApi::FDBFuture* f) { ((ThreadSingleAssignmentVarBase*)f)->cancel(); };
 		}
 
 		return api;
