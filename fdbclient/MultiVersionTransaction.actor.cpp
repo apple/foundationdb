@@ -890,22 +890,43 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 
 		api->runOnExternalClients(threadIdx, [this](Reference<ClientInfo> client) { dbState->addClient(client); });
 
-		if (!externalClientsInitialized.test_and_set()) {
-			api->runOnExternalClientsAllThreads([&clusterFilePath](Reference<ClientInfo> client) {
-				// This creates a database to initialize some client state on the external library
-				// We only do this on 6.2+ clients to avoid some bugs associated with older versions
-				// This deletes the new database immediately to discard its connections
-				if (client->protocolVersion.hasCloseUnusedConnection()) {
-					Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+		api->runOnExternalClientsAllThreads([&clusterFilePath](Reference<ClientInfo> client) {
+			// This creates a database to initialize some client state on the external library
+			// We only do this on 6.2+ clients to avoid some bugs associated with older versions
+			// This deletes the new database immediately to discard its connections
+			if (client->protocolVersion.hasCloseUnusedConnection() && !client->initialized) {
+				MutexHolder holder(client->initializationMutex);
+
+				if (!client->initialized) {
+					try {
+						Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+						client->initialized = true;
+					} catch (Error& e) {
+						// This connection is not initialized. It is still possible to connect with it,
+						// but we may not see trace logs from this client until a successful connection
+						// is established.
+						TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
+						    .detail("LibraryPath", client->libPath)
+						    .detail("ClusterFilePath", clusterFilePath)
+						    .error(e);
+					}
 				}
-			});
-		}
+			}
+		});
 
 		// For clients older than 6.2 we create and maintain our database connection
 		api->runOnExternalClients(threadIdx, [this, &clusterFilePath](Reference<ClientInfo> client) {
 			if (!client->protocolVersion.hasCloseUnusedConnection()) {
-				dbState->legacyDatabaseConnections[client->protocolVersion] =
-				    client->api->createDatabase(clusterFilePath.c_str());
+				try {
+					dbState->legacyDatabaseConnections[client->protocolVersion] =
+					    client->api->createDatabase(clusterFilePath.c_str());
+				} catch (Error& e) {
+					// This connection is discarded
+					TraceEvent(SevWarnAlways, "FailedToCreateLegacyDatabaseConnection")
+					    .detail("LibraryPath", client->libPath)
+					    .detail("ClusterFilePath", clusterFilePath)
+					    .error(e);
+				}
 			}
 		});
 
@@ -1083,7 +1104,20 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 			    .detail("Failed", client->failed)
 			    .detail("External", client->external);
 
-			Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+			Reference<IDatabase> newDb;
+			try {
+				newDb = client->api->createDatabase(clusterFilePath.c_str());
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "MultiVersionClientFailedToCreateDatabase")
+				    .detail("LibraryPath", client->libPath)
+				    .detail("External", client->external)
+				    .detail("ClusterFilePath", clusterFilePath)
+				    .error(e);
+
+				// Put the client in a disconnected state until the version changes again
+				updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
+				return;
+			}
 
 			if (client->external && !MultiVersionApi::apiVersionAtLeast(610)) {
 				// Old API versions return a future when creating the database, so we need to wait for it
@@ -1146,12 +1180,28 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			versionMonitorDb = db;
 		} else {
 			// For older clients that don't have an API to get the protocol version, we have to monitor it locally
-			versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+			try {
+				versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+			} catch (Error& e) {
+				// We can't create a database to monitor the cluster version. This means we will continue using the
+				// previous one, and that could result in us having extra connections
+				TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
+				    .detail("ClusterFilePath", clusterFilePath)
+				    .error(e);
+			}
 		}
 	} else {
 		// We don't have a database connection, so use the local client to monitor the protocol version
 		db = Reference<IDatabase>();
-		versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+		try {
+			versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+		} catch (Error& e) {
+			// We can't create a database to monitor the cluster version. This means we will continue using the
+			// previous one, and that could result in us having extra connections
+			TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
+			    .detail("ClusterFilePath", clusterFilePath)
+			    .error(e);
+		}
 	}
 
 	dbVar->set(db);
@@ -1258,8 +1308,6 @@ void MultiVersionDatabase::LegacyVersionMonitor::close() {
 		versionMonitor.cancel();
 	}
 }
-
-std::atomic_flag MultiVersionDatabase::externalClientsInitialized = ATOMIC_FLAG_INIT;
 
 // MultiVersionApi
 bool MultiVersionApi::apiVersionAtLeast(int minVersion) {
