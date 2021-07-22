@@ -2437,6 +2437,9 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
 			logData->addActor.send(tLogPeekMessages(self, req, logData));
 		}
+		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
+			logData->addActor.send(tLogPeekStream(self, req, logData));
+		}
 		when(TLogPopRequest req = waitNext(tli.popMessages.getFuture())) {
 			logData->addActor.send(tLogPop(self, req, logData));
 		}
