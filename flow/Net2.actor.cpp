@@ -1155,7 +1155,7 @@ private:
 };
 #endif
 
-struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
+struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
 	PromiseTask() {}
 	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
