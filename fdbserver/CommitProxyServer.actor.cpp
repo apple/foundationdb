@@ -1631,7 +1631,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 	}
 }
 
-ACTOR Future<Void> ddMetricsRequestServer(CommitProxyInterface proxy, Reference<AsyncVar<ServerDBInfo>> db) {
+ACTOR Future<Void> ddMetricsRequestServer(CommitProxyInterface proxy, Reference<AsyncVar<ServerDBInfo> const> db) {
 	loop {
 		choose {
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture())) {
@@ -1789,7 +1789,8 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 	return Void();
 }
 
-ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db, ExclusionSafetyCheckRequest req) {
+ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> const> db,
+                                           ExclusionSafetyCheckRequest req) {
 	TraceEvent("SafetyCheckCommitProxyBegin");
 	state ExclusionSafetyCheckReply reply(false);
 	if (!db->get().distributor.present()) {
@@ -1818,7 +1819,7 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 }
 
 ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
-                                          Reference<AsyncVar<ServerDBInfo>> db,
+                                          Reference<AsyncVar<ServerDBInfo> const> db,
                                           UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> nextReply = Never();
@@ -1853,7 +1854,7 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 
 ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          MasterInterface master,
-                                         Reference<AsyncVar<ServerDBInfo>> db,
+                                         Reference<AsyncVar<ServerDBInfo> const> db,
                                          LogEpoch epoch,
                                          Version recoveryTransactionVersion,
                                          bool firstProxy,
@@ -2072,7 +2073,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 uint64_t recoveryCount,
                                 CommitProxyInterface myInterface) {
 	loop {
@@ -2086,7 +2087,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
 
 ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo>> db,
+                                     Reference<AsyncVar<ServerDBInfo> const> db,
                                      std::string whitelistBinPaths) {
 	try {
 		state Future<Void> core = commitProxyServerCore(proxy,

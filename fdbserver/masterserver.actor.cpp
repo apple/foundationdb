@@ -229,7 +229,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	ReusableCoordinatedState cstate;
 	Promise<Void> cstateUpdated;
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	int64_t registrationCount; // Number of different MasterRegistrationRequests sent to clusterController
 
 	RecoveryState recoveryState;
@@ -256,7 +256,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Future<Void> logger;
 
-	MasterData(Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
+	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	           MasterInterface const& myInterface,
 	           ServerCoordinators const& coordinators,
 	           ClusterControllerFullInterface const& clusterController,
@@ -2014,7 +2014,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 }
 
 ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo>> db,
+                                Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators coordinators,
                                 LifetimeToken lifetime,
