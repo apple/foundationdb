@@ -296,6 +296,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						// When a server wants to penalize itself (the default
 						// penalty value is 1.0), consider this server as bad.
 						// penalty is sent from server.
+						// TODO: When server is SS, SS should account for its version lag into penalty. Otherwise,
+						// load balancer may fail to choose a SS with lower latency.
 						++badServers;
 					}
 
