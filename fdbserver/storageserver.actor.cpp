@@ -323,6 +323,11 @@ public:
 	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
+struct VersionStreamMessage {
+	Version previous, version;
+	bool expectData;
+};
+
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -647,6 +652,7 @@ public:
 
 	Promise<Void> otherError;
 	Promise<Void> coreStarted;
+	PromiseStream<VersionStreamMessage> versionStream;
 	bool shuttingDown;
 
 	bool behind;
@@ -3597,6 +3603,7 @@ ACTOR Future<Void> tssDelayForever() {
 	}
 }
 
+// Fetches mutations from the tlog system and adds them to the ptree
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
@@ -4949,6 +4956,49 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	}
 }
 
+ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
+	state std::vector<Reference<ReferencedInterface<VersionIndexerInterface>>> interfaces;
+	state Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>> multi;
+	state VersionIndexerPeekReply reply;
+	state int i = 0;
+	state Version prevVersion;
+	for (auto& vInterface : self->db->get().versionIndexers) {
+		interfaces.emplace_back(new ReferencedInterface<VersionIndexerInterface>(vInterface));
+	}
+	multi = Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>>(
+	    new MultiInterface<ReferencedInterface<VersionIndexerInterface>>(interfaces));
+	loop {
+		VersionIndexerPeekRequest request;
+		request.lastKnownVersion = self->version.get();
+		request.tag = self->tag;
+		VersionIndexerPeekReply _reply =
+		    wait(brokenPromiseToNever(loadBalance(multi, &VersionIndexerInterface::peek, request)));
+		reply = _reply;
+		prevVersion = reply.previousVersion;
+		wait(self->version.whenAtLeast(prevVersion));
+		for (; i < reply.versions.size(); ++i) {
+			if (self->version.get() == prevVersion && !reply.versions[i].second) {
+				self->version.set(reply.versions[i].first);
+			} else if (self->version.get() < reply.versions[i].first) {
+				wait(self->version.whenAtLeast(reply.versions[i].first));
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> versionIndexerPeeker(StorageServer* self) {
+	loop {
+		Future<Void> impl = Never();
+		if (self->db.isValid() && !self->db->get().versionIndexers.empty()) {
+			impl = versionIndexerPeekerImpl(self);
+		}
+		choose {
+			when(wait(impl)) { ASSERT(false); }
+			when(wait(self->db->onChange())) {}
+		}
+	}
+}
+
 ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived =
@@ -4971,6 +5021,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
+	self->actors.add(versionIndexerPeeker(self));
 
 	self->transactionTagCounter.startNewInterval(self->thisServerID);
 	self->actors.add(recurring([&]() { self->transactionTagCounter.startNewInterval(self->thisServerID); },

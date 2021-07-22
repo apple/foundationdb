@@ -133,6 +133,23 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		default:
 			return ProcessClass::WorstFit;
 		}
+	case ProcessClass::VersionIndexer:
+		switch (_class) {
+		case ProcessClass::VersionIndexerClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::TransactionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
 	case ProcessClass::LogRouter:
 		switch (_class) {
 		case ProcessClass::LogRouterClass:
@@ -179,6 +196,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::MasterClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::VersionIndexerClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
@@ -253,4 +272,51 @@ LBDistance::Type loadBalanceDistance(LocalityData const& loc1, LocalityData cons
 		return LBDistance::SAME_DC;
 	}
 	return LBDistance::DISTANT;
+}
+
+StringRef to_string(ProcessClass::ClusterRole role) {
+	switch (role) {
+	case ProcessClass::Storage:
+		return "Storage"_sr;
+		break;
+	case ProcessClass::TLog:
+		return "TLog"_sr;
+		break;
+	case ProcessClass::CommitProxy:
+		return "CommitProxy"_sr;
+		break;
+	case ProcessClass::GrvProxy:
+		return "GrvProxy"_sr;
+		break;
+	case ProcessClass::Master:
+		return "Master"_sr;
+		break;
+	case ProcessClass::Resolver:
+		return "Resolver"_sr;
+		break;
+	case ProcessClass::LogRouter:
+		return "LogRouter"_sr;
+		break;
+	case ProcessClass::ClusterController:
+		return "ClusterController"_sr;
+		break;
+	case ProcessClass::DataDistributor:
+		return "DataDistributor"_sr;
+		break;
+	case ProcessClass::Ratekeeper:
+		return "Ratekeeper"_sr;
+		break;
+	case ProcessClass::StorageCache:
+		return "StorageCache"_sr;
+		break;
+	case ProcessClass::Backup:
+		return "Backup"_sr;
+		break;
+	case ProcessClass::VersionIndexer:
+		return "VersionIndexer"_sr;
+		break;
+	case ProcessClass::NoRole:
+		return "NoRole"_sr;
+		break;
+	}
 }
