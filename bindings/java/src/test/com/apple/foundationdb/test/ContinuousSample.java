@@ -20,43 +20,29 @@
 
 package com.apple.foundationdb.test;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.Arrays;
 import java.util.Random;
 
-public class ContinuousSample<T extends Number & Comparable<T>> {
-	public ContinuousSample(int sampleSize) {
+public abstract class ContinuousSample<T extends Comparable<T>> {
+	protected final Random random = new Random();
+	protected final int sampleSize;
+	protected boolean sorted;
+
+	protected long populationSize;
+
+	protected ContinuousSample(int sampleSize) {
 		this.sampleSize = sampleSize;
-		this.samples = new ArrayList<>(sampleSize);
 		this.populationSize = 0;
-		this.sorted = true;
+		this.sorted = false;
 	}
 
-	public ContinuousSample<T> addSample(T sample) {
-		if(populationSize == 0)
-			min = max = sample;
-		populationSize++;
-		sorted = false;
-
-		if(populationSize <= sampleSize) {
-			samples.add(sample);
-		} else if(random.nextDouble() < ((double)sampleSize / populationSize)) {
-			samples.add(random.nextInt(sampleSize), sample);
-		}
-
-		max = sample.compareTo(max) > 0 ? sample : max;
-		min = sample.compareTo(min) < 0 ? sample : min;
-		return this;
-	}
+	public abstract ContinuousSample<T> addSample(T sample);
 
 	public double mean() {
-		if (samples.size() == 0) return 0;
-		double sum = 0;
-		for(int c = 0; c < samples.size(); c++) {
-			sum += samples.get(c).doubleValue();
+		if(populationSize ==0){
+			return 0;
 		}
-		return sum / samples.size();
+		return sum()/populationSize;
 	}
 
 	public T median() {
@@ -64,20 +50,24 @@ public class ContinuousSample<T extends Number & Comparable<T>> {
 	}
 
 	public T percentile(double percentile) {
-		if(samples.size() == 0 || percentile < 0.0 || percentile > 1.0)
-			return null;
 		sort();
-		int idx = (int)Math.floor((samples.size() - 1) * percentile);
-		return samples.get(idx);
+		int size = populationSize < sampleSize? (int)populationSize : sampleSize;
+		int idx = (int)Math.floor((size - 1) * percentile);
+		if(idx<0 ){
+			return minValue();
+		}
+		return valueAt(idx);
 	}
 
-	public T min() {
-		return min;
-	}
+	public abstract double sum();
 
-	public T max() {
-		return max;
-	}
+	protected abstract T valueAt(int idx);
+
+	public abstract T minValue(); 
+
+	public abstract T maxValue(); 
+
+	protected abstract void sort();
 
 	@Override
 	public String toString() {
@@ -85,16 +75,162 @@ public class ContinuousSample<T extends Number & Comparable<T>> {
 				mean(), median(), percentile(0.90), percentile(0.98));
 	}
 
-	private Random random = new Random();
-	private int sampleSize;
-	private long populationSize;
-	private boolean sorted;
-	private List<T> samples;
-	private T min, max;
 
-	private void sort() {
-		if(!sorted && samples.size() > 1)
-			Collections.sort(samples);
-		sorted = true;
+	public static class LongSample extends ContinuousSample<Long>{
+		private final long[] samples;
+		private long min,max;
+		private long sum = 0L;
+
+		protected LongSample(int sampleSize) {
+			super(sampleSize);
+			this.samples = new long[sampleSize];
+		}
+
+		@Override
+		public double sum(){
+			return sum;
+		}
+
+		public long min(){
+			return min;
+		}
+
+		public long max(){
+			return max;
+		} 
+
+		@Override
+		public Long minValue(){
+			return min();
+		}
+
+		@Override
+		public Long maxValue(){
+			return max();
+		}
+
+		@Override
+		protected Long valueAt(int idx) {
+			return samples[idx];
+		}
+
+		@Override
+		public ContinuousSample<Long> addSample(Long sample){
+			return add(sample);
+		}
+
+		protected void sort(){
+			if(!sorted && populationSize>1){
+				Arrays.sort(samples,0,(int)(populationSize> sampleSize? sampleSize : populationSize));
+				sorted = true;
+			}
+		}
+
+		public LongSample add(long sample){
+			if(populationSize ==0){
+				min = max = sample;
+			}
+			populationSize++;
+
+			if(populationSize <= sampleSize){
+				samples[(int)(populationSize-1)] = sample;
+			}else if(random.nextDouble() < ((double)sampleSize/populationSize)){
+				samples[random.nextInt(samples.length)] = sample;
+			}
+
+			if(sample > max){
+				max = sample;
+			}
+			if(sample < min){
+				min = sample;
+			}
+
+			sum+=sample;
+
+			return this;
+		}
+	}
+
+	public static class DoubleSample extends ContinuousSample<Double>{
+		private final double[] samples;
+		private double min,max;
+		private double sum = 0L;
+
+		protected DoubleSample(int sampleSize) {
+			super(sampleSize);
+			this.samples = new double[sampleSize];
+		}
+
+		@Override
+		public double sum(){
+			return sum;
+		}
+
+		public double min(){
+			return min;
+		}
+
+		public double max(){
+			return max;
+		} 
+
+		public double p(double percentile){
+			sort();
+			int pos = populationSize<sampleSize? (int)populationSize : sampleSize;
+			int idx = (int)(percentile*pos);
+			return samples[idx];
+		}
+
+		@Override
+		public Double minValue(){
+			return min();
+		}
+
+		@Override
+		public Double maxValue(){
+			return max();
+		}
+
+		@Override
+		protected Double valueAt(int idx) {
+			return samples[idx];
+		}
+
+		@Override
+		public ContinuousSample<Double> addSample(Double sample){
+			assert sample != null : "Cannot accept a null sample";
+			return add(sample);
+		}
+
+		protected void sort(){
+			if(!sorted && populationSize>1){
+				Arrays.sort(samples,0,(int)(populationSize> sampleSize? sampleSize : populationSize));
+				sorted = true;
+			}
+		}
+
+		public DoubleSample add(double sample){
+			if(populationSize ==0){
+				min = max = sample;
+			}
+			populationSize++;
+
+			if(populationSize <= sampleSize){
+				samples[(int)populationSize-1] = sample;
+			}else if(random.nextDouble() < ((double)sampleSize/populationSize)){
+				samples[random.nextInt(samples.length)] = sample;
+			}
+
+			if(sample > max){
+				max = sample;
+			}
+			if(sample < min){
+				min = sample;
+			}
+
+			sum+=sample;
+
+			return this;
+		}
 	}
 }
