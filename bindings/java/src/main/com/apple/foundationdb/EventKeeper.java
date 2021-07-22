@@ -167,6 +167,72 @@ public interface EventKeeper {
 			public boolean isTimeEvent() {
 				return true;
 			}
-		};
+		},
+		/**
+		 * The number of single-key get requests.
+		 */
+		GET_REQUESTS,
+		/**
+		 * The number of getKey requests.
+		 */
+		GET_KEY_REQUESTS,
+		/**
+		 * The number of requests for an estimated range size(i.e. {@link
+		 * FDBTransaction#getEstimatedRangeSizeBytes(Range)} or {@link FDBTransaction#getEstimatedRangeSizeBytes(byte[],
+		 * byte[])})
+		 */
+		ESTIMATED_RANGE_SIZE_REQUESTS,
+		/**
+		 * The number of requests for a range split point.
+		 */
+		GET_RANGE_SPLIT_POINT_REQUESTS,
+		/**
+		 * The number of calls to add a conflict range
+		 */
+		ADD_CONFLICT_RANGES,
+		/**
+		 * The number of set calls.
+		 */
+		SETS,
+		/**
+		 * The number of clear requests made.
+		 */
+		CLEAR_REQUESTS,
+		/**
+		 * The number of mutation requests made.
+		 */
+		MUTATIONS,
+		/**
+		 * The number of setOption requests made.
+		 */
+		SET_TRANSACTION_OPTION,
+		/**
+		 * The number of commits requested.
+		 */
+		COMMITS,
+		/**
+		 * The number of requests for the committed version.
+		 */
+		GET_COMMITTED_VERSION_REQUESTS,
+		/**
+		 * The number of requests for the versionstamp.
+		 */
+		GET_VERSIONSTAMP_REQUESTS,
+		/**
+		 * The number of requests for  the approximate sizre.
+		 */
+		GET_APPROXIMATE_SIZE_REQUESTS,
+		/**
+		 * The number of requests for watches.
+		 */
+		WATCH_REQUESTS,
+		/**
+		 * The number of {@link Transaction#cancel()} requests.
+		 */
+		CANCEL_REQUESTS,
+		/**
+		 * The number of requests for {@link FDBTransaction#getAddressesForKey(byte[])}
+		 */
+		ADDRESSES_FOR_KEY_REQUESTS;
 	}
 }
