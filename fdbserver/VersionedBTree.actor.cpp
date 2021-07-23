@@ -1533,7 +1533,7 @@ struct RedwoodMetrics {
 			metrics = {};
 
 			if (level > 0) {
-				if (!buildFillPctSketch && registry!=nullptr) {
+				if (!buildFillPctSketch && registry != nullptr) {
 					std::string levelString = format("L%d", level);
 					buildFillPctSketch = Histogram::getHistogram(
 					    LiteralStringRef("buildFillPct"), levelString, Histogram::Unit::percentage, registry);
@@ -1543,10 +1543,18 @@ struct RedwoodMetrics {
 					    LiteralStringRef("buildStoredPct"), levelString, Histogram::Unit::percentage, registry);
 					modifyStoredPctSketch = Histogram::getHistogram(
 					    LiteralStringRef("modifyStoredPct"), levelString, Histogram::Unit::percentage, registry);
-					buildItemCountSketch = Histogram::getHistogram(
-					    LiteralStringRef("buildItemCount"), levelString, Histogram::Unit::count, registry, 0, maxRecordCount);
-					modifyItemCountSketch = Histogram::getHistogram(
-					    LiteralStringRef("modifyItemCount"), levelString, Histogram::Unit::count, registry, 0, maxRecordCount);
+					buildItemCountSketch = Histogram::getHistogram(LiteralStringRef("buildItemCount"),
+					                                               levelString,
+					                                               Histogram::Unit::count,
+					                                               registry,
+					                                               0,
+					                                               maxRecordCount);
+					modifyItemCountSketch = Histogram::getHistogram(LiteralStringRef("modifyItemCount"),
+					                                                levelString,
+					                                                Histogram::Unit::count,
+					                                                registry,
+					                                                0,
+					                                                maxRecordCount);
 				}
 
 				buildFillPctSketch->clear();
@@ -1584,13 +1592,11 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() {
-		if (redwoodHistograms == nullptr) {
-			redwoodHistograms = new HistogramRegistry();
-		}
-		kvSizeWritten =
-		    Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes, redwoodHistograms);
-		kvSizeReadByGet =
-		    Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet"), Histogram::Unit::bytes, redwoodHistograms);
+		redwoodHistograms = new HistogramRegistry();
+		kvSizeWritten = Histogram::getHistogram(
+		    LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes, redwoodHistograms);
+		kvSizeReadByGet = Histogram::getHistogram(
+		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet"), Histogram::Unit::bytes, redwoodHistograms);
 		kvSizeReadByGetRange = Histogram::getHistogram(
 		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByGetRange"), Histogram::Unit::bytes, redwoodHistograms);
 		clear(redwoodHistograms);

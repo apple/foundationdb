@@ -86,7 +86,7 @@ public:
 	static Reference<Histogram> getHistogram(StringRef group,
 	                                         StringRef op,
 	                                         Unit unit,
-											 HistogramRegistry* regis = nullptr,
+	                                         HistogramRegistry* regis = nullptr,
 	                                         uint32_t lower = 0,
 	                                         uint32_t upper = UINT32_MAX) {
 		std::string group_str = group.toString();
