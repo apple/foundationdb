@@ -52,7 +52,7 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	double delta;
 	uint64_t token;
 
-	ModelHolder(QueueModel* model, uint64_t token) : model(model), token(token), released(false), startTime(now()) {
+	ModelHolder(QueueModel* model, uint64_t token) : model(model), released(false), startTime(now()), token(token) {
 		if (model) {
 			delta = model->addRequest(token);
 		}

@@ -55,7 +55,7 @@ struct StagingKey {
 	LogMessageVersion version; // largest version of set or clear for the key
 	std::map<LogMessageVersion, Standalone<MutationRef>> pendingMutations; // mutations not set or clear type
 
-	explicit StagingKey(Key key) : key(key), version(0), type(MutationRef::MAX_ATOMIC_OP) {}
+	explicit StagingKey(Key key) : key(key), type(MutationRef::MAX_ATOMIC_OP), version(0) {}
 
 	// Add mutation m at newVersion to stagingKey
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
@@ -269,8 +269,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
 		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
-		    receivedBytes("ReceivedBytes", cc), receivedMutations("ReceivedMutations", cc),
-		    receivedAtomicOps("ReceivedAtomicOps", cc), receivedWeightedBytes("ReceivedWeightedMutations", cc),
+		    receivedBytes("ReceivedBytes", cc), receivedWeightedBytes("ReceivedWeightedMutations", cc),
+		    receivedMutations("ReceivedMutations", cc), receivedAtomicOps("ReceivedAtomicOps", cc),
 		    appliedBytes("AppliedBytes", cc), appliedWeightedBytes("AppliedWeightedBytes", cc),
 		    appliedMutations("AppliedMutations", cc), appliedAtomicOps("AppliedAtomicOps", cc),
 		    appliedTxns("AppliedTxns", cc), appliedTxnRetries("AppliedTxnRetries", cc), fetchKeys("FetchKeys", cc),
@@ -282,10 +282,9 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
-	  : counters(this, nodeID, batchIndex),
+	  : vbState(ApplierVersionBatchState::NOT_INIT), receiveMutationReqs(0), receivedBytes(0), appliedBytes(0),
 	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
-	    totalBytesToWrite(-1), applyingDataBytes(0), vbState(ApplierVersionBatchState::NOT_INIT),
-	    receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
+	    totalBytesToWrite(-1), applyingDataBytes(0), counters(this, nodeID, batchIndex) {
 		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex),
 		                            nodeID,
 		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,

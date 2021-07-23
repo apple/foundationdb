@@ -277,7 +277,7 @@ private:
 	mutable Int64MetricHandle countLogicalReads;
 
 	AsyncFileEIO(int fd, int flags, std::string const& filename)
-	  : fd(fd), flags(flags), filename(filename), err(new ErrorInfo) {
+	  : fd(fd), flags(flags), err(new ErrorInfo), filename(filename) {
 		if (!g_network->isSimulated()) {
 			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
 			countFileLogicalReads.init(LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);

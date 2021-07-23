@@ -190,9 +190,8 @@ private:
 	                    Reference<DiskParameters> diskParameters,
 	                    NetworkAddress openedAddress,
 	                    bool aio)
-	  : filename(filename), initialFilename(initialFilename), file(file), diskParameters(diskParameters),
-	    openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false),
-	    aio(aio) {
+	  : filename(filename), initialFilename(initialFilename), approximateSize(0), openedAddress(openedAddress),
+	    aio(aio), file(file), diskParameters(diskParameters), pendingModifications(uint64_t(-1)), reponses(false) {
 
 		// This is only designed to work in simulation
 		ASSERT(g_network->isSimulated());

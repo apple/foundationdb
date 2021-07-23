@@ -48,8 +48,8 @@ using namespace std;
 WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
-  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), dbInfo(r.dbInfo),
-    sharedRandomNumber(r.sharedRandomNumber) {}
+  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
+    dbInfo(r.dbInfo) {}
 
 WorkloadContext::~WorkloadContext() {}
 

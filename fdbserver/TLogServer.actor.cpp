@@ -60,7 +60,7 @@ struct TLogQueueEntryRef {
 
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
-	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id),
+	  : id(from.id), version(from.version), knownCommittedVersion(from.knownCommittedVersion),
 	    messages(a, from.messages) {}
 
 	// To change this serialization, ProtocolVersion::TLogQueueEntryRef must be updated, and downgrades need to be
@@ -375,14 +375,14 @@ struct TLogData : NonCopyable {
 	         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	         Reference<AsyncVar<bool>> degraded,
 	         std::string folder)
-	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
-	    persistentData(persistentData), rawPersistentQueue(persistentQueue),
-	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo), degraded(degraded), queueCommitBegin(0),
-	    queueCommitEnd(0), diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0),
+	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
+	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo), queueCommitEnd(0), queueCommitBegin(0),
+	    diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
+	    instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0), bytesDurable(0),
 	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopRequest(false),
-	    ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped(),
+	    dataFolder(folder), degraded(degraded),
 	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
 	                                              LiteralStringRef("commit"),
 	                                              Histogram::Unit::microseconds)) {
@@ -626,17 +626,16 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                 TLogSpillType logSpillType,
 	                 std::vector<Tag> tags,
 	                 std::string context)
-	  : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()), cc("TLog", interf.id().toString()),
-	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary),
-	    logRouterTags(logRouterTags), txsTags(txsTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion),
-	    logSpillType(logSpillType), logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0),
-	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0),
-	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), minPoppedTagVersion(0),
-	    minPoppedTag(invalidTag),
-	    // These are initialized differently on init() or recovery
-	    recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0),
-	    newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
-	    logRouterPopToVersion(0), locality(tagLocalityInvalid), execOpCommitInProgress(false) {
+	  : stopped(false), initialized(false), knownCommittedVersion(0), cc("TLog", interf.id().toString()),
+	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), logId(interf.id()),
+	    protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion), tLogData(tLogData),
+	    unrecoveredBefore(1), recoveredAt(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag),
+	    isPrimary(isPrimary), logRouterTags(logRouterTags), txsTags(txsTags), recruitmentID(recruitmentID),
+	    logSpillType(logSpillType), logRouterPoppedVersion(0), durableKnownCommittedVersion(0),
+	    minKnownCommittedVersion(0), queuePoppedVersion(0), allTags(tags.begin(), tags.end()),
+	    terminated(tLogData->terminated.getFuture()), minPoppedTagVersion(0), minPoppedTag(invalidTag),
+	    queueCommittingVersion(0), unpoppedRecoveredTags(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
+	    execOpCommitInProgress(false) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,

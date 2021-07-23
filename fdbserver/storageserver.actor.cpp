@@ -808,8 +808,8 @@ public:
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi)
-	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
-	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
+	  : instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage), db(db), actors(false),
+	    lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
 	    primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
@@ -3402,7 +3402,7 @@ static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "Pr
 class StorageUpdater {
 public:
 	StorageUpdater()
-	  : fromVersion(invalidVersion), currentVersion(invalidVersion), restoredVersion(invalidVersion),
+	  : currentVersion(invalidVersion), fromVersion(invalidVersion), restoredVersion(invalidVersion),
 	    processedStartKey(false), processedCacheStartKey(false) {}
 	StorageUpdater(Version fromVersion, Version restoredVersion)
 	  : fromVersion(fromVersion), currentVersion(fromVersion), restoredVersion(restoredVersion),

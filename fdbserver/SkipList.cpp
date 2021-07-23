@@ -786,7 +786,7 @@ private:
 };
 
 struct ConflictSet {
-	ConflictSet() : oldestVersion(0), removalKey(makeString(0)) {}
+	ConflictSet() : removalKey(makeString(0)), oldestVersion(0) {}
 	~ConflictSet() {}
 
 	SkipList versionHistory;

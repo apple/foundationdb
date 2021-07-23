@@ -110,8 +110,8 @@ struct KVTest {
 	bool dispose;
 
 	explicit KVTest(int nodeCount, bool dispose, int keyBytes)
-	  : store(nullptr), dispose(dispose), startVersion(Version(time(nullptr)) << 30), lastSet(startVersion),
-	    lastCommit(startVersion), lastDurable(startVersion), nodeCount(nodeCount), keyBytes(keyBytes) {}
+	  : store(nullptr), startVersion(Version(time(nullptr)) << 30), lastSet(startVersion), lastCommit(startVersion),
+	    lastDurable(startVersion), nodeCount(nodeCount), keyBytes(keyBytes), dispose(dispose) {}
 	~KVTest() { close(); }
 	void close() {
 		if (store) {
