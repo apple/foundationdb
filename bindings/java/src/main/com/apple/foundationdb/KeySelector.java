@@ -167,7 +167,7 @@ public class KeySelector {
 	/**
 	 * Returns the {@code or-equal} parameter of this {@code KeySelector}. For internal use.
 	 */
-	boolean orEqual() {
+	public boolean orEqual() {
 		return orEqual;
 	}
 
