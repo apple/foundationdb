@@ -195,7 +195,6 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
                                                                                int64_t chunkSize) {
 	FdbCApi::FDBFuture* f;
 	try {
-
 		f = api->transactionGetRangeSplitPoints(
 		    tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize);
 	} catch (Error& e) {
