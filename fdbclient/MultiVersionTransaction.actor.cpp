@@ -550,7 +550,8 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 
 	auto clusterFuture = toThreadFuture<FdbCApi::FDBCluster*>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::FDBCluster* cluster;
-		throwIfError(api->futureGetCluster(f, &cluster));
+		auto err = api->futureGetCluster(f, &cluster);
+		ASSERT(!err);
 		return cluster;
 	});
 
