@@ -363,7 +363,7 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 
 // Get network thread busyness
 double DLDatabase::getMainThreadBusyness() {
-	return 0;
+	return api->databaseGetMainThreadBusyness(db);
 }
 
 // Returns the protocol version reported by the coordinator this client is connected to
