@@ -1,6 +1,3 @@
-[configuration]
-storageEngineExcludeTypes = [4]
-
 [[test]]
 testTitle = 'RestoreBackup'
 simBackupAgents = 'BackupToFile'

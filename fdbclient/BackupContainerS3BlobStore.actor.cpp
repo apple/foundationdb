@@ -20,7 +20,9 @@
 
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "fdbrpc/AsyncFileEncrypted.h"
+#endif
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -171,9 +173,12 @@ std::string BackupContainerS3BlobStore::getURLFormat() {
 
 Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreRead>(m_bstore, m_bucket, dataPath(path));
+
+#if ENCRYPTION_ENABLED
 	if (usesEncryption()) {
 		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
 	}
+#endif
 	f = makeReference<AsyncFileReadAheadCache>(f,
 	                                           m_bstore->knobs.read_block_size,
 	                                           m_bstore->knobs.read_ahead_blocks,
@@ -189,9 +194,11 @@ Future<std::vector<std::string>> BackupContainerS3BlobStore::listURLs(Reference<
 
 Future<Reference<IBackupFile>> BackupContainerS3BlobStore::writeFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreWrite>(m_bstore, m_bucket, dataPath(path));
+#if ENCRYPTION_ENABLED
 	if (usesEncryption()) {
 		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 	}
+#endif
 	return Future<Reference<IBackupFile>>(makeReference<BackupContainerS3BlobStoreImpl::BackupFile>(path, f));
 }
 

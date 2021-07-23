@@ -35,7 +35,7 @@
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0) {
+ACTOR Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
 		choose {
 			when(vector<WorkerDetails> w = wait(brokenPromiseToNever(
@@ -48,7 +48,7 @@ ACTOR Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo>>
 }
 
 // Gets the WorkerInterface representing the Master server.
-ACTOR Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("GetMasterWorker").detail("Stage", "GettingWorkers");
 
 	loop {
@@ -75,7 +75,7 @@ ACTOR Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<Se
 }
 
 // Gets the WorkerInterface representing the data distributor.
-ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("GetDataDistributorWorker").detail("Stage", "GettingWorkers");
 
 	loop {
@@ -118,7 +118,7 @@ ACTOR Future<int64_t> getDataInFlight(Database cx, WorkerInterface distributorWo
 }
 
 // Gets the number of bytes in flight from the data distributor.
-ACTOR Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	WorkerInterface distributorInterf = wait(getDataDistributorWorker(cx, dbInfo));
 	int64_t dataInFlight = wait(getDataInFlight(cx, distributorInterf));
 	return dataInFlight;
@@ -144,7 +144,7 @@ int64_t getPoppedVersionLag(const TraceEventFields& md) {
 	return persistentDataDurableVersion - queuePoppedVersion;
 }
 
-ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
 	Optional<Value> coordinators =
@@ -177,7 +177,8 @@ ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<Asy
 }
 
 // This is not robust in the face of a TLog failure
-ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
+                                                           Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ContactingLogs");
 
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
@@ -245,7 +246,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool
 }
 
 ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx,
-                                                        Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                                         bool localOnly) {
 	state std::vector<StorageServerInterface> servers = wait(getStorageServers(cx));
 	state std::map<NetworkAddress, WorkerInterface> workersMap;
@@ -335,7 +336,7 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 };
 
 // Gets the maximum size of all the storage server queues
-ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("MaxStorageServerQueueSize").detail("Stage", "ContactingStorageServers");
 
 	Future<std::vector<StorageServerInterface>> serversFuture = getStorageServers(cx);
@@ -399,7 +400,7 @@ ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
 // Gets the size of the data distribution queue.  If reportInFlight is true, then data in flight is considered part of
 // the queue Convenience method that first finds the master worker from a zookeeper interface
 ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
-                                                   Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                                    bool reportInFlight) {
 	WorkerInterface distributorInterf = wait(getDataDistributorWorker(cx, dbInfo));
 	int64_t inQueue = wait(getDataDistributionQueueSize(cx, distributorInterf, reportInFlight));
@@ -516,7 +517,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 // Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
 // Convenience method that first finds the master worker from a zookeeper interface
-ACTOR Future<bool> getTeamCollectionValid(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<bool> getTeamCollectionValid(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	WorkerInterface dataDistributorWorker = wait(getDataDistributorWorker(cx, dbInfo));
 	bool valid = wait(getTeamCollectionValid(cx, dataDistributorWorker));
 	return valid;
@@ -565,7 +566,9 @@ ACTOR Future<bool> getStorageServersRecruiting(Database cx, WorkerInterface dist
 	}
 }
 
-ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string context) {
+ACTOR Future<Void> repairDeadDatacenter(Database cx,
+                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                        std::string context) {
 	if (g_network->isSimulated() && g_simulator.usableRegions > 1) {
 		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
 		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
@@ -601,7 +604,7 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 
 ACTOR Future<Void> reconfigureAfter(Database cx,
                                     double time,
-                                    Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                    Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                     std::string context) {
 	wait(delay(time));
 	wait(repairDeadDatacenter(cx, dbInfo, context));
@@ -611,7 +614,7 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 // Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
 // requires the database to be available and healthy in order to succeed.
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
-                                        Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string phase,
                                         int64_t dataInFlightGate = 2e6,
                                         int64_t maxTLogQueueGate = 5e6,
@@ -637,7 +640,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
-	wait(setPerpetualStorageWiggle(cx, false, LockAware::TRUE));
+	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
@@ -747,7 +750,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 }
 
 Future<Void> quietDatabase(Database const& cx,
-                           Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
+                           Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                            std::string phase,
                            int64_t dataInFlightGate,
                            int64_t maxTLogQueueGate,

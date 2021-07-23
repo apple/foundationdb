@@ -1,5 +1,4 @@
 buggify=off
-storageEngineExcludeTypes=4
 
 testTitle=SnapCycleRestore
 runSetup=false

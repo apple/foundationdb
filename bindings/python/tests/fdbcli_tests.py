@@ -382,17 +382,18 @@ def exclude(logger):
         logger.debug("Excluding process: {}".format(excluded_address))
         error_message = run_fdbcli_command_and_get_error('exclude', excluded_address)
         if error_message == 'WARNING: {} is a coordinator!'.format(excluded_address):
-            # exclude coordinator will fail, verify the randomly selected process is the coordinator
+            # exclude coordinator will print the warning, verify the randomly selected process is the coordinator
             coordinator_list = get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')
             assert len(coordinator_list) == 1
             assert coordinator_list[0]['address'] == excluded_address
             break
         elif not error_message:
             break
+        else:
+            logger.debug("Error message: {}\n".format(error_message))
         logger.debug("Retry exclude after 1 second")
         time.sleep(1)
     output2 = run_fdbcli_command('exclude')
-    # logger.debug(output3)
     assert 'There are currently 1 servers or localities being excluded from the database' in output2
     assert excluded_address in output2
     run_fdbcli_command('include', excluded_address)

@@ -162,7 +162,7 @@ public:
 	ProtocolVersion logProtocol;
 	Reference<ILogSystem> logSystem;
 	Key ck; // cacheKey
-	Reference<AsyncVar<ServerDBInfo>> const& db;
+	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
 	StorageCacheUpdater* updater;
 
@@ -238,7 +238,7 @@ public:
 		}
 	} counters;
 
-	explicit StorageCacheData(UID thisServerID, uint16_t index, Reference<AsyncVar<ServerDBInfo>> const& db)
+	explicit StorageCacheData(UID thisServerID, uint16_t index, Reference<AsyncVar<ServerDBInfo> const> const& db)
 	  : /*versionedData(FastAllocPTree<KeyRef>{std::make_shared<int>(0)}), */
 	    thisServerID(thisServerID), index(index), logProtocol(0), db(db), cacheRangeChangeCounter(0),
 	    lastTLogVersion(0), lastVersionWithData(0), peekVersion(0), compactionInProgress(Void()),
@@ -251,7 +251,7 @@ public:
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
 		addCacheRange(CacheRangeInfo::newNotAssigned(allKeys));
-		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::TRUE);
+		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 
 	// Puts the given cacheRange into cachedRangeMap.  The caller is responsible for adding cacheRanges
@@ -1194,7 +1194,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 
 	try {
 		loop {
-			RangeResult rep = wait(tr.getRange(begin, end, limits, Snapshot::TRUE));
+			RangeResult rep = wait(tr.getRange(begin, end, limits, Snapshot::True));
 			limits.decrement(rep);
 
 			if (limits.isReached() || !rep.more) {
@@ -1392,7 +1392,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 					// TODO: NEELAM: what's this for?
 					// FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
-						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::FALSE;
+						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::False;
 					}
 
 					debug_getRangeRetries++;
@@ -2165,7 +2165,9 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 	}
 }
 
-ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db) {
+ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
+                                      uint16_t id,
+                                      Reference<AsyncVar<ServerDBInfo> const> db) {
 	state StorageCacheData self(ssi.id(), id, db);
 	state ActorCollection actors(false);
 	state Future<Void> dbInfoChange = Void();

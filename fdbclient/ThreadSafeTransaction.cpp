@@ -122,7 +122,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	    [db, connFile, apiVersion]() {
 		    try {
 			    Database::createDatabase(
-			        Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::FALSE, LocalityData(), db)
+			        Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::False, LocalityData(), db)
 			        .extractPtr();
 		    } catch (Error& e) {
 			    new (db) DatabaseContext(e);

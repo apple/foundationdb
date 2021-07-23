@@ -97,7 +97,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,
-			                              StopWhenDone::FALSE,
+			                              StopWhenDone::False,
 			                              self->usePartitionedLogs));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -105,7 +105,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("AtomicRestore_Wait");
-		wait(success(backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), StopWhenDone::FALSE)));
+		wait(success(backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), StopWhenDone::False)));
 		TraceEvent("AtomicRestore_BackupStart");
 		wait(delay(self->restoreAfter * deterministicRandom()->random01()));
 		TraceEvent("AtomicRestore_RestoreStart");

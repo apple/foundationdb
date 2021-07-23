@@ -228,7 +228,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	ReusableCoordinatedState cstate;
 	Promise<Void> cstateUpdated;
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	int64_t registrationCount; // Number of different MasterRegistrationRequests sent to clusterController
 
 	RecoveryState recoveryState;
@@ -255,7 +255,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Future<Void> logger;
 
-	MasterData(Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
+	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	           MasterInterface const& myInterface,
 	           ServerCoordinators const& coordinators,
 	           ClusterControllerFullInterface const& clusterController,
@@ -577,7 +577,7 @@ Future<Void> sendMasterRegistration(MasterData* self,
 }
 
 ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILogSystem> logSystem) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	state Future<Void> trigger = self->registrationTrigger.onTrigger();
 	state Future<Void> updateLogsKey;
 
@@ -1965,7 +1965,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		self->addActor.send(resolutionBalancing(self));
 
 	self->addActor.send(changeCoordinators(self));
-	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
+	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {
 		self->addActor.send(recruitBackupWorkers(self, cx));
@@ -1978,7 +1978,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 }
 
 ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo>> db,
+                                Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators coordinators,
                                 LifetimeToken lifetime,

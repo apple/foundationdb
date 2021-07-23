@@ -33,9 +33,7 @@
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "fdbrpc/AsyncFileEncrypted.h"
-#endif
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
@@ -2477,14 +2475,14 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if ENCRYPTION_ENABLED
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {
 				auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
 				                                               : AsyncFileEncrypted::Mode::READ_ONLY;
 				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
 			});
-#endif
+#endif // ENCRYPTION_ENABLED
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);

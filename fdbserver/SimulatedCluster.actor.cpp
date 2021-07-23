@@ -22,6 +22,7 @@
 #include <fstream>
 #include <ostream>
 #include <sstream>
+#include <string_view>
 #include <toml.hpp>
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
@@ -49,6 +50,19 @@ extern "C" int g_expect_full_pointermap;
 extern const char* getSourceVersion();
 
 using namespace std::literals;
+
+// TODO: Defining these here is just asking for ODR violations.
+template <>
+std::string describe(bool const& val) {
+	return val ? "true" : "false";
+}
+
+template <>
+std::string describe(int const& val) {
+	return format("%d", val);
+}
+
+namespace {
 
 const int MACHINE_REBOOT_TIME = 10;
 
@@ -628,16 +642,6 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 			    .detail("KillType", shutdownResult);
 		}
 	}
-}
-
-template <>
-std::string describe(bool const& val) {
-	return val ? "true" : "false";
-}
-
-template <>
-std::string describe(int const& val) {
-	return format("%d", val);
 }
 
 // Since a datacenter kill is considered to be the same as killing a machine, files cannot be swapped across datacenters
@@ -2092,8 +2096,16 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 
 using namespace std::literals;
 
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+bool rocksDBEnabled = true;
+#else
+bool rocksDBEnabled = false;
+#endif
+
 // Populates the TestConfig fields according to what is found in the test file.
 void checkTestConf(const char* testFile, TestConfig* testConfig) {}
+
+} // namespace
 
 ACTOR void setupAndRun(std::string dataFolder,
                        const char* testFile,
@@ -2108,6 +2120,19 @@ ACTOR void setupAndRun(std::string dataFolder,
 	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
+
+	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
+	// snapshot of the storage engine without a snapshotting file system.
+	// https://github.com/apple/foundationdb/issues/5155
+	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.push_back(4);
+	}
+
+	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
+	// in the build.
+	if (!rocksDBEnabled) {
+		testConfig.storageEngineExcludeTypes.push_back(4);
+	}
 
 	state ProtocolVersion protocolVersion = currentProtocolVersion;
 	if (testConfig.startIncompatibleProcess) {

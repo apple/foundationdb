@@ -220,7 +220,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
 		state FileBackupAgent agent;
 		loop {
-			std::string status = wait(agent.getStatus(cx, ShowErrors::TRUE, tag));
+			std::string status = wait(agent.getStatus(cx, ShowErrors::True, tag));
 			puts(status.c_str());
 			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
 			puts(statusJSON.c_str());
@@ -271,8 +271,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               tag.toString(),
 			                               backupRanges,
 			                               StopWhenDone{ !stopDifferentialDelay },
-			                               UsePartitionedLog::FALSE,
-			                               IncrementalBackupOnly::FALSE,
+			                               UsePartitionedLog::False,
+			                               IncrementalBackupOnly::False,
 			                               self->encryptionKeyFileName));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
@@ -299,7 +299,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					state Reference<IBackupContainer> lastBackupContainer;
 					state UID lastBackupUID;
 					state EBackupState resultWait = wait(backupAgent->waitBackup(
-					    cx, backupTag.tagName, StopWhenDone::FALSE, &lastBackupContainer, &lastBackupUID));
+					    cx, backupTag.tagName, StopWhenDone::False, &lastBackupContainer, &lastBackupUID));
 
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID)
 					    .detail("Tag", backupTag.tagName)
@@ -380,11 +380,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BARW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
-		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::TRUE));
+		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True));
 
 		state std::string statusText;
 
-		std::string _statusText = wait(backupAgent->getStatus(cx, ShowErrors::TRUE, tag.toString()));
+		std::string _statusText = wait(backupAgent->getStatus(cx, ShowErrors::True, tag.toString()));
 		statusText = _statusText;
 		// Can we validate anything about status?
 
@@ -423,9 +423,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                  cx,
 				                                  self->backupTag,
 				                                  KeyRef(lastBackupContainer),
-				                                  WaitForComplete::TRUE,
+				                                  WaitForComplete::True,
 				                                  ::invalidVersion,
-				                                  Verbose::TRUE,
+				                                  Verbose::True,
 				                                  normalKeys,
 				                                  Key(),
 				                                  Key(),
@@ -527,7 +527,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       StopWhenDone::TRUE);
+					                                       StopWhenDone::True);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
@@ -593,15 +593,15 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						                                       cx,
 						                                       restoreTag,
 						                                       KeyRef(lastBackupContainer->getURL()),
-						                                       WaitForComplete::TRUE,
+						                                       WaitForComplete::True,
 						                                       targetVersion,
-						                                       Verbose::TRUE,
+						                                       Verbose::True,
 						                                       range,
 						                                       Key(),
 						                                       Key(),
 						                                       self->locked,
-						                                       OnlyApplyMutationLogs::FALSE,
-						                                       InconsistentSnapshotOnly::FALSE,
+						                                       OnlyApplyMutationLogs::False,
+						                                       InconsistentSnapshotOnly::False,
 						                                       ::invalidVersion,
 						                                       self->encryptionKeyFileName));
 					}
@@ -617,14 +617,14 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       restoreTag,
 					                                       KeyRef(lastBackupContainer->getURL()),
 					                                       self->restoreRanges,
-					                                       WaitForComplete::TRUE,
+					                                       WaitForComplete::True,
 					                                       targetVersion,
-					                                       Verbose::TRUE,
+					                                       Verbose::True,
 					                                       Key(),
 					                                       Key(),
 					                                       self->locked,
-					                                       OnlyApplyMutationLogs::FALSE,
-					                                       InconsistentSnapshotOnly::FALSE,
+					                                       OnlyApplyMutationLogs::False,
+					                                       InconsistentSnapshotOnly::False,
 					                                       ::invalidVersion,
 					                                       self->encryptionKeyFileName));
 				}
@@ -647,14 +647,14 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 							                                             restoreTags[restoreIndex],
 							                                             KeyRef(lastBackupContainer->getURL()),
 							                                             self->restoreRanges,
-							                                             WaitForComplete::TRUE,
+							                                             WaitForComplete::True,
 							                                             ::invalidVersion,
-							                                             Verbose::TRUE,
+							                                             Verbose::True,
 							                                             Key(),
 							                                             Key(),
 							                                             self->locked,
-							                                             OnlyApplyMutationLogs::FALSE,
-							                                             InconsistentSnapshotOnly::FALSE,
+							                                             OnlyApplyMutationLogs::False,
+							                                             InconsistentSnapshotOnly::False,
 							                                             ::invalidVersion,
 							                                             self->encryptionKeyFileName);
 						}
@@ -675,15 +675,15 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 								                                             cx,
 								                                             restoreTags[restoreIndex],
 								                                             KeyRef(lastBackupContainer->getURL()),
-								                                             WaitForComplete::TRUE,
+								                                             WaitForComplete::True,
 								                                             ::invalidVersion,
-								                                             Verbose::TRUE,
+								                                             Verbose::True,
 								                                             self->restoreRanges[restoreIndex],
 								                                             Key(),
 								                                             Key(),
 								                                             self->locked,
-																			 OnlyApplyMutationLogs::FALSE,
-																			 InconsistentSnapshotOnly::FALSE,
+																			 OnlyApplyMutationLogs::False,
+																			 InconsistentSnapshotOnly::False,
 								                                             ::invalidVersion,
 								                                             self->encryptionKeyFileName);
 							}

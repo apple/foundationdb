@@ -60,4 +60,6 @@ TEST_CASE("/flow/IThreadPool/NamedThread") {
 	return Void();
 }
 
+#else
+void forceLinkIThreadPoolTests() {}
 #endif

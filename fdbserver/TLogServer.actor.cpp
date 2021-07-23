@@ -329,7 +329,7 @@ struct TLogData : NonCopyable {
 	AsyncVar<bool>
 	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
 
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	Database cx;
 
 	NotifiedVersion queueCommitEnd;
@@ -372,7 +372,7 @@ struct TLogData : NonCopyable {
 	         UID workerID,
 	         IKeyValueStore* persistentData,
 	         IDiskQueue* persistentQueue,
-	         Reference<AsyncVar<ServerDBInfo>> dbInfo,
+	         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	         Reference<AsyncVar<bool>> degraded,
 	         std::string folder)
 	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
@@ -386,7 +386,7 @@ struct TLogData : NonCopyable {
 	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
 	                                              LiteralStringRef("commit"),
 	                                              Histogram::Unit::microseconds)) {
-		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
+		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
 
@@ -1798,7 +1798,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 			state std::vector<Future<Standalone<StringRef>>> messageReads;
 			messageReads.reserve(commitLocations.size());
 			for (const auto& pair : commitLocations) {
-				messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::TRUE));
+				messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::True));
 			}
 			commitLocations.clear();
 			wait(waitForAll(messageReads));
@@ -3280,7 +3280,7 @@ ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Referen
 // New tLog (if !recoverFrom.size()) or restore from network
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
                         UID tlogId,

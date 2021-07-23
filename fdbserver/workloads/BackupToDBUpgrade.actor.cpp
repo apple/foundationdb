@@ -117,7 +117,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 						}
 					}
 					wait(backupAgent->submitBackup(
-					    tr, tag, backupRanges, StopWhenDone::FALSE, self->backupPrefix, StringRef()));
+					    tr, tag, backupRanges, StopWhenDone::False, self->backupPrefix, StringRef()));
 					wait(tr->commit());
 					break;
 				} catch (Error& e) {
@@ -133,7 +133,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		wait(success(backupAgent->waitBackup(self->extraDB, tag, StopWhenDone::FALSE)));
+		wait(success(backupAgent->waitBackup(self->extraDB, tag, StopWhenDone::False)));
 
 		return Void();
 	}
@@ -500,7 +500,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			try {
 				TraceEvent("DRU_RestoreDb").detail("RestoreTag", printable(self->restoreTag));
 				wait(restoreTool.submitBackup(
-				    cx, self->restoreTag, restoreRanges, StopWhenDone::TRUE, StringRef(), self->backupPrefix));
+				    cx, self->restoreTag, restoreRanges, StopWhenDone::True, StringRef(), self->backupPrefix));
 			} catch (Error& e) {
 				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(self->restoreTag));
 				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)

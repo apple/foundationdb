@@ -122,7 +122,7 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 	return notUpdated;
 }
 
-ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> db,
                                             Reference<AsyncVar<ClientDBInfo>> info) {
 	state std::vector<UID> lastCommitProxyUIDs;
 	state std::vector<CommitProxyInterface> lastCommitProxies;
@@ -136,7 +136,7 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo>> db
 	}
 }
 
-Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
+Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                         TaskPriority taskID,
                         LockAware lockAware,
                         EnableLocalityLoadBalance enableLocalityLoadBalance) {
@@ -502,15 +502,15 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 
 // Register the worker interf to cluster controller (cc) and
 // re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
-ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                       WorkerInterface interf,
                                       Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                       ProcessClass initialClass,
-                                      Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
-                                      Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
-                                      Reference<AsyncVar<bool>> degraded,
+                                      Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
+                                      Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                      Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
-                                      Reference<AsyncVar<std::set<std::string>>> issues) {
+                                      Reference<AsyncVar<std::set<std::string>> const> issues) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -1215,13 +1215,13 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		if (metricsConnFile.size() > 0) {
 			try {
 				state Database db =
-				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, IsInternal::TRUE, locality);
+				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, IsInternal::True, locality);
 				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
 		} else {
-			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::TRUE : LockAware::FALSE;
+			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
 			metricsLogger =
 			    runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware), KeyRef(metricsPrefix));
 		}
@@ -2303,10 +2303,9 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 
 		if (useConfigDB != UseConfigDB::DISABLED) {
-			actors.push_back(
-			    reportErrors(localConfig.consume(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(
-			                     dbInfo, [](auto const& info) { return info.configBroadcaster; })),
-			                 "LocalConfiguration"));
+			actors.push_back(reportErrors(localConfig.consume(IAsyncListener<ConfigBroadcastFollowerInterface>::create(
+			                                  dbInfo, [](auto const& info) { return info.configBroadcaster; })),
+			                              "LocalConfiguration"));
 		}
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));

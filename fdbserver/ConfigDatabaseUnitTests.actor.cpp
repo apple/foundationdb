@@ -126,7 +126,7 @@ class ReadFromLocalConfigEnvironment {
 	UID id;
 	std::string dataDir;
 	LocalConfiguration localConfiguration;
-	Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> cbfi;
+	Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> cbfi;
 	Future<Void> consumer;
 
 	ACTOR static Future<Void> checkEventually(LocalConfiguration const* localConfiguration,
@@ -158,17 +158,17 @@ public:
 	ReadFromLocalConfigEnvironment(std::string const& dataDir,
 	                               std::string const& configPath,
 	                               std::map<std::string, std::string> const& manualKnobOverrides)
-	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::TRUE),
+	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::True),
 	    consumer(Never()) {}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, IsTest::TRUE);
+		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, IsTest::True);
 		return setup();
 	}
 
-	void connectToBroadcaster(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& cbfi) {
+	void connectToBroadcaster(Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& cbfi) {
 		ASSERT(!this->cbfi);
 		this->cbfi = cbfi;
 		consumer = localConfiguration.consume(cbfi);
@@ -228,7 +228,7 @@ class BroadcasterToLocalConfigEnvironment {
 
 	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self) {
 		wait(self->readFrom.setup());
-		self->readFrom.connectToBroadcaster(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(self->cbfi));
+		self->readFrom.connectToBroadcaster(IAsyncListener<ConfigBroadcastFollowerInterface>::create(self->cbfi));
 		self->broadcastServer = self->broadcaster.serve(self->cbfi->get());
 		return Void();
 	}
@@ -364,7 +364,7 @@ class TransactionToLocalConfigEnvironment {
 
 	ACTOR static Future<Void> setup(TransactionToLocalConfigEnvironment* self) {
 		wait(self->readFrom.setup());
-		self->readFrom.connectToBroadcaster(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(self->cbfi));
+		self->readFrom.connectToBroadcaster(IAsyncListener<ConfigBroadcastFollowerInterface>::create(self->cbfi));
 		self->broadcastServer = self->broadcaster.serve(self->cbfi->get());
 		return Void();
 	}
