@@ -1186,6 +1186,8 @@ template <class ReturnValue>
 struct Actor : SAV<ReturnValue> {
 #ifdef VISIBILITY_SAMPLING
 	LineageReference lineage = *currentLineage;
+#else
+	LineageReference lineage;
 #endif
 	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
 	                         // group #
@@ -1206,6 +1208,8 @@ struct Actor<void> {
 
 #ifdef VISIBILITY_SAMPLING
 	LineageReference lineage = *currentLineage;
+#else
+	LineageReference lineage;
 #endif
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
