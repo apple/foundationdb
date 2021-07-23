@@ -86,16 +86,17 @@ public:
 	static Reference<Histogram> getHistogram(StringRef group,
 	                                         StringRef op,
 	                                         Unit unit,
+											 HistogramRegistry* regis = nullptr,
 	                                         uint32_t lower = 0,
 	                                         uint32_t upper = UINT32_MAX) {
 		std::string group_str = group.toString();
 		std::string op_str = op.toString();
 		std::string name = generateName(group_str, op_str);
-		HistogramRegistry& registry = GetHistogramRegistry();
-		Histogram* h = registry.lookupHistogram(name);
+		HistogramRegistry* registry = (regis == nullptr) ? &GetHistogramRegistry() : regis;
+		Histogram* h = registry->lookupHistogram(name);
 		if (!h) {
-			h = new Histogram(group_str, op_str, unit, registry, lower, upper);
-			registry.registerHistogram(h);
+			h = new Histogram(group_str, op_str, unit, *registry, lower, upper);
+			registry->registerHistogram(h);
 			return Reference<Histogram>(h);
 		} else {
 			return Reference<Histogram>::addRef(h);
