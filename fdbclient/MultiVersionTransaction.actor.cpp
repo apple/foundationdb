@@ -565,7 +565,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 		                                              innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2),
 		                                              [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 			                                              FdbCApi::FDBDatabase* db;
-			                                              auto err = (api->futureGetDatabase(f, &db));
+			                                              auto err = api->futureGetDatabase(f, &db);
 			                                              ASSERT(!err);
 			                                              return db;
 		                                              });
