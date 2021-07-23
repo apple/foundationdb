@@ -25,7 +25,7 @@ import com.apple.foundationdb.async.CloneableException;
  */
 public abstract class AbstractFDBException extends RuntimeException implements CloneableException {
 
-    private final int code;
+    protected final int code;
 
     /**
      * Constructor to be used by subclasses
