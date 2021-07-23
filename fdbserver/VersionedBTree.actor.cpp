@@ -1449,7 +1449,7 @@ int nextPowerOf2(uint32_t x) {
 struct RedwoodMetrics {
 	static constexpr unsigned int btreeLevels = 5;
 	static int maxRecordCount;
-	HistogramRegistry* redwoodHistograms;
+	HistogramRegistry* redwoodHistogramRegistry;
 
 	struct EventReasonsArray {
 		unsigned int eventReasons[(size_t)PagerEvents::MAXEVENTS][(size_t)PagerEventReasons::MAXEVENTREASONS];
@@ -1592,14 +1592,14 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() {
-		redwoodHistograms = new HistogramRegistry();
+		redwoodHistogramRegistry = new HistogramRegistry();
 		kvSizeWritten = Histogram::getHistogram(
-		    LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes, redwoodHistograms);
+		    LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes, redwoodHistogramRegistry);
 		kvSizeReadByGet = Histogram::getHistogram(
-		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet"), Histogram::Unit::bytes, redwoodHistograms);
+		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet"), Histogram::Unit::bytes, redwoodHistogramRegistry);
 		kvSizeReadByGetRange = Histogram::getHistogram(
-		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByGetRange"), Histogram::Unit::bytes, redwoodHistograms);
-		clear(redwoodHistograms);
+		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByGetRange"), Histogram::Unit::bytes, redwoodHistogramRegistry);
+		clear(redwoodHistogramRegistry);
 	}
 
 	void clear(HistogramRegistry* registry = nullptr) {
@@ -1681,7 +1681,7 @@ struct RedwoodMetrics {
 			                                               { "", 0 } };
 
 		double elapsed = now() - startTime;
-		redwoodHistograms->logReport();
+		redwoodHistogramRegistry->logReport();
 		if (e != nullptr) {
 			for (auto& m : metrics) {
 				char c = m.first[0];
