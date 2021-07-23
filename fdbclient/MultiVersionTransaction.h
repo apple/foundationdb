@@ -420,8 +420,6 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	std::atomic_bool initialized;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
-	Mutex initializationMutex;
-
 	ClientInfo()
 	  : ClientDesc(std::string(), false), protocolVersion(0), api(nullptr), failed(true), initialized(false) {}
 	ClientInfo(IClientApi* api)
