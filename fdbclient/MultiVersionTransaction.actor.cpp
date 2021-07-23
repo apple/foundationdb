@@ -787,25 +787,25 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 		api->runOnExternalClients(threadIdx, [this](Reference<ClientInfo> client) { dbState->addClient(client); });
 
 		api->runOnExternalClientsAllThreads([&clusterFilePath](Reference<ClientInfo> client) {
-			// This creates a database to initialize some client state on the external library
-			// We only do this on 6.2+ clients to avoid some bugs associated with older versions
-			// This deletes the new database immediately to discard its connections
+			// This creates a database to initialize some client state on the external library.
+			// We only do this on 6.2+ clients to avoid some bugs associated with older versions.
+			// This deletes the new database immediately to discard its connections.
+			//
+			// Simultaneous attempts to create a database could result in us running this initialization
+			// code in multiple threads simultaneously. It is necessary that each attempt have a chance
+			// to run this initialization in case the other fails, and it's safe to run them in parallel.
 			if (client->protocolVersion.hasCloseUnusedConnection() && !client->initialized) {
-				MutexHolder holder(client->initializationMutex);
-
-				if (!client->initialized) {
-					try {
-						Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
-						client->initialized = true;
-					} catch (Error& e) {
-						// This connection is not initialized. It is still possible to connect with it,
-						// but we may not see trace logs from this client until a successful connection
-						// is established.
-						TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
-						    .detail("LibraryPath", client->libPath)
-						    .detail("ClusterFilePath", clusterFilePath)
-						    .error(e);
-					}
+				try {
+					Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+					client->initialized = true;
+				} catch (Error& e) {
+					// This connection is not initialized. It is still possible to connect with it,
+					// but we may not see trace logs from this client until a successful connection
+					// is established.
+					TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
+					    .detail("LibraryPath", client->libPath)
+					    .detail("ClusterFilePath", clusterFilePath)
+					    .error(e);
 				}
 			}
 		});
