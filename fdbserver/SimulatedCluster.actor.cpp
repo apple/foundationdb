@@ -40,6 +40,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
+#include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -1637,7 +1638,7 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
 		set_config(confStr);
 		double tssRandom = deterministicRandom()->random01();
-		if (tssRandom > 0.5) {
+		if (tssRandom > 0.5 || !faultInjectionActivated) {
 			// normal tss mode
 			g_simulator.tssMode = ISimulator::TSSMode::EnabledNormal;
 		} else if (tssRandom < 0.25 && !testConfig.isFirstTestInRestart) {
