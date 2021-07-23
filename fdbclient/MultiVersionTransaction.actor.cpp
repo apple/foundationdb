@@ -1188,8 +1188,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			try {
 				versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
 			} catch (Error& e) {
-				// We can't create a database to monitor the cluster version. This means we will continue using the
-				// previous one, and that could result in us having extra connections
+				// We can't create a new database to monitor the cluster version. This means we will continue using the
+				// previous one, which should hopefully continue to work.
 				TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
 				    .detail("ClusterFilePath", clusterFilePath)
 				    .error(e);
@@ -1201,8 +1201,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		try {
 			versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
 		} catch (Error& e) {
-			// We can't create a database to monitor the cluster version. This means we will continue using the
-			// previous one, and that could result in us having extra connections
+			// We can't create a new database to monitor the cluster version. This means we will continue using the
+			// previous one, which should hopefully continue to work.
 			TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
 			    .detail("ClusterFilePath", clusterFilePath)
 			    .error(e);
