@@ -192,9 +192,8 @@ import com.apple.foundationdb.async.CloneableException;
  * @see com.apple.foundationdb.Transaction#onError(Throwable) Transaction.onError()
  * @see com.apple.foundationdb.Database#runAsync(Function) Database.runAsync()
  */
-public class FDBException extends RuntimeException implements CloneableException {
+public class FDBException extends AbstractFDBException {
     private static final long serialVersionUID = 1L;
-    private final int code;
 
     /**
      * A general constructor.  Not for use by client code.
@@ -203,26 +202,10 @@ public class FDBException extends RuntimeException implements CloneableException
      * @param code internal FDB error code of this exception
      */
     public FDBException(String message, int code) {
-        super(message);
-        this.code = code;
+        super(message, code);
     }
 
-    /**
-     * Gets the code for this error. A list of common errors codes
-     *  are published <a href=""/foundationdb/api-error-codes.html"">elsewhere within
-     *  our documentation</a>.
-     *
-     * @return the internal FDB error code
-     */
-    public int getCode() {
-        return code;
-    }
-
-    /**
-     * Determine if this {@code FDBException} represents a success code from the native layer.
-     *
-     * @return {@code true} if this error represents success, {@code false} otherwise
-     */
+    @Override
     public boolean isSuccess() {
         return getCode() == 0;
     }
@@ -250,6 +233,7 @@ public class FDBException extends RuntimeException implements CloneableException
                     }
                     if (option.isDeprecated())
                         outFile.WriteLine("\t@Deprecated");
+                    outFile.WriteLine("\t@Override");
                     outFile.WriteLine("\tpublic boolean {0}() {{ return FDB.evalErrorPredicate({1}, this.code); }}", toPredicateFuncName(option.name), option.code);
                 }
             }

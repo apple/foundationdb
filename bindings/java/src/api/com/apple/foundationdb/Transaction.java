@@ -122,7 +122,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * @param value the value to set in the database
 	 *
 	 * @throws IllegalArgumentException if {@code key} or {@code value} is {@code null}
-	 * @throws FDBException if the set operation otherwise fails
+	 * @throws AbstractFDBException if the set operation otherwise fails
 	 */
 	void set(byte[] key, byte[] value);
 
@@ -133,7 +133,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * @param key the key whose value is to be cleared
 	 *
 	 * @throws IllegalArgumentException if {@code key} is {@code null}
-	 * @throws FDBException if clear operation otherwise fails
+	 * @throws AbstractFDBException if clear operation otherwise fails
 	 */
 	void clear(byte[] key);
 
@@ -148,7 +148,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * @param endKey the key one past the last key to clear
 	 *
 	 * @throws IllegalArgumentException if {@code beginKey} or {@code endKey} is {@code null}
-	 * @throws FDBException if the clear operation otherwise fails
+	 * @throws AbstractFDBException if the clear operation otherwise fails
 	 */
 	void clear(byte[] beginKey, byte[] endKey);
 
@@ -167,7 +167,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *
 	 * @param range the range of keys to clear
 	 *
-	 * @throws FDBException if the clear operation fails
+	 * @throws AbstractFDBException if the clear operation fails
 	 */
 	void clear(Range range);
 
@@ -177,7 +177,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *
 	 * @param prefix the starting bytes from the keys to be cleared.
 	 *
-	 * @throws FDBException if the clear-range operation fails
+	 * @throws AbstractFDBException if the clear-range operation fails
 	 */
 	@Deprecated
 	void clearRangeStartsWith(byte[] prefix);
@@ -221,7 +221,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * <p>
 	 * As with other client/server databases, in some failure scenarios a client may
 	 *  be unable to determine whether a transaction succeeded. In these cases, an
-	 *  {@link FDBException} will be thrown with error code {@code commit_unknown_result} (1021).
+	 *  {@link AbstractFDBException} will be thrown with error code {@code commit_unknown_result} (1021).
 	 *  The {@link #onError} function regards this exception as a retryable one, so
 	 *  retry loops that don't specifically detect {@code commit_unknown_result} could end
 	 *  up executing a transaction twice. For more information, see the FoundationDB
@@ -237,7 +237,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *
 	 * @return a {@code CompletableFuture} that, when set without error, guarantees the
 	 *  {@code Transaction}'s modifications committed durably to the
-	 *  database. If the commit failed, it will throw an {@link FDBException}.
+	 *  database. If the commit failed, it will throw an {@link AbstractFDBException}.
 	 */
 	CompletableFuture<Void> commit();
 
@@ -336,11 +336,11 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *
 	 * @return a {@code CompletableFuture} that will become ready when the value changes
 	 *
-	 * @throws FDBException if too many watches have been created on this database. The
+	 * @throws AbstractFDBException if too many watches have been created on this database. The
 	 *  limit defaults to 10,000 and can be modified with a call to
 	 *  {@link DatabaseOptions#setMaxWatches(long)}.
 	 */
-	CompletableFuture<Void> watch(byte[] key) throws FDBException;
+	CompletableFuture<Void> watch(byte[] key);
 
 	/**
 	 * Returns the {@link Database} that this {@code Transaction} is interacting

@@ -1,5 +1,6 @@
 # Build artifacts
 /my_build/
+/build/
 /bin/
 /lib/
 /packages/

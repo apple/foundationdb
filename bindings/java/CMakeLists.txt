@@ -2,30 +2,57 @@ set(RUN_JAVA_TESTS ON CACHE BOOL "Run Java unit tests")
 set(RUN_JUNIT_TESTS OFF CACHE BOOL "Compile and run junit tests")
 set(RUN_JAVA_INTEGRATION_TESTS OFF CACHE BOOL "Compile and run integration tests")
 
+set(JAVA_API_SRCS
+  src/api/com/apple/foundationdb/async/AsyncIterable.java
+  src/api/com/apple/foundationdb/async/AsyncIterator.java
+  src/api/com/apple/foundationdb/async/AsyncUtil.java
+  src/api/com/apple/foundationdb/async/Cancellable.java
+  src/api/com/apple/foundationdb/async/CloneableException.java
+  src/api/com/apple/foundationdb/async/CloseableAsyncIterator.java
+  src/api/com/apple/foundationdb/async/package-info.java
+  src/api/com/apple/foundationdb/AbstractFDBException.java
+  src/api/com/apple/foundationdb/Database.java
+  src/api/com/apple/foundationdb/DefaultExecutor.java
+  src/api/com/apple/foundationdb/directory/Directory.java
+  src/api/com/apple/foundationdb/directory/DirectoryAlreadyExistsException.java
+  src/api/com/apple/foundationdb/directory/DirectoryException.java
+  src/api/com/apple/foundationdb/directory/DirectoryLayer.java
+  src/api/com/apple/foundationdb/directory/DirectoryMoveException.java
+  src/api/com/apple/foundationdb/directory/DirectoryPartition.java
+  src/api/com/apple/foundationdb/directory/DirectorySubspace.java
+  src/api/com/apple/foundationdb/directory/DirectoryUtil.java
+  src/api/com/apple/foundationdb/directory/DirectoryVersionException.java
+  src/api/com/apple/foundationdb/directory/MismatchedLayerException.java
+  src/api/com/apple/foundationdb/directory/NoSuchDirectoryException.java
+  src/api/com/apple/foundationdb/directory/package-info.java
+  src/api/com/apple/foundationdb/directory/PathUtil.java
+  src/api/com/apple/foundationdb/OptionConsumer.java
+  src/api/com/apple/foundationdb/OptionsSet.java
+  src/api/com/apple/foundationdb/package-info.java
+  src/api/com/apple/foundationdb/Range.java
+  src/api/com/apple/foundationdb/KeySelector.java
+  src/api/com/apple/foundationdb/KeyValue.java
+  src/api/com/apple/foundationdb/KeyArrayResult.java
+  src/api/com/apple/foundationdb/ReadTransaction.java
+  src/api/com/apple/foundationdb/ReadTransactionContext.java
+  src/api/com/apple/foundationdb/EventKeeper.java
+  src/api/com/apple/foundationdb/MapEventKeeper.java
+  src/api/com/apple/foundationdb/subspace/package-info.java
+  src/api/com/apple/foundationdb/subspace/Subspace.java
+  src/api/com/apple/foundationdb/Transaction.java
+  src/api/com/apple/foundationdb/TransactionContext.java
+  src/api/com/apple/foundationdb/tuple/ByteArrayUtil.java
+  src/api/com/apple/foundationdb/tuple/FastByteComparisons.java
+  src/api/com/apple/foundationdb/tuple/IterableComparator.java
+  src/api/com/apple/foundationdb/tuple/package-info.java
+  src/api/com/apple/foundationdb/tuple/StringUtil.java
+  src/api/com/apple/foundationdb/tuple/Tuple.java
+  src/api/com/apple/foundationdb/tuple/TupleUtil.java
+  src/api/com/apple/foundationdb/tuple/Versionstamp.java)
+
 set(JAVA_BINDING_SRCS
-  src/main/com/apple/foundationdb/async/AsyncIterable.java
-  src/main/com/apple/foundationdb/async/AsyncIterator.java
-  src/main/com/apple/foundationdb/async/AsyncUtil.java
-  src/main/com/apple/foundationdb/async/Cancellable.java
-  src/main/com/apple/foundationdb/async/CloneableException.java
-  src/main/com/apple/foundationdb/async/CloseableAsyncIterator.java
-  src/main/com/apple/foundationdb/async/package-info.java
   src/main/com/apple/foundationdb/Cluster.java
   src/main/com/apple/foundationdb/ClusterOptions.java
-  src/main/com/apple/foundationdb/Database.java
-  src/main/com/apple/foundationdb/directory/Directory.java
-  src/main/com/apple/foundationdb/directory/DirectoryAlreadyExistsException.java
-  src/main/com/apple/foundationdb/directory/DirectoryException.java
-  src/main/com/apple/foundationdb/directory/DirectoryLayer.java
-  src/main/com/apple/foundationdb/directory/DirectoryMoveException.java
-  src/main/com/apple/foundationdb/directory/DirectoryPartition.java
-  src/main/com/apple/foundationdb/directory/DirectorySubspace.java
-  src/main/com/apple/foundationdb/directory/DirectoryUtil.java
-  src/main/com/apple/foundationdb/directory/DirectoryVersionException.java
-  src/main/com/apple/foundationdb/directory/MismatchedLayerException.java
-  src/main/com/apple/foundationdb/directory/NoSuchDirectoryException.java
-  src/main/com/apple/foundationdb/directory/package-info.java
-  src/main/com/apple/foundationdb/directory/PathUtil.java
   src/main/com/apple/foundationdb/DirectBufferIterator.java
   src/main/com/apple/foundationdb/DirectBufferPool.java
   src/main/com/apple/foundationdb/FDB.java
@@ -39,40 +66,17 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FutureStrings.java
   src/main/com/apple/foundationdb/FutureVoid.java
   src/main/com/apple/foundationdb/JNIUtil.java
-  src/main/com/apple/foundationdb/KeySelector.java
-  src/main/com/apple/foundationdb/KeyValue.java
   src/main/com/apple/foundationdb/LocalityUtil.java
   src/main/com/apple/foundationdb/NativeFuture.java
   src/main/com/apple/foundationdb/NativeObjectWrapper.java
-  src/main/com/apple/foundationdb/OptionConsumer.java
-  src/main/com/apple/foundationdb/OptionsSet.java
-  src/main/com/apple/foundationdb/package-info.java
-  src/main/com/apple/foundationdb/Range.java
   src/main/com/apple/foundationdb/RangeQuery.java
-  src/main/com/apple/foundationdb/KeyArrayResult.java
   src/main/com/apple/foundationdb/RangeResult.java
   src/main/com/apple/foundationdb/RangeResultInfo.java
   src/main/com/apple/foundationdb/RangeResultSummary.java
-  src/main/com/apple/foundationdb/ReadTransaction.java
-  src/main/com/apple/foundationdb/ReadTransactionContext.java
-  src/main/com/apple/foundationdb/subspace/package-info.java
-  src/main/com/apple/foundationdb/subspace/Subspace.java
-  src/main/com/apple/foundationdb/Transaction.java
-  src/main/com/apple/foundationdb/TransactionContext.java
-  src/main/com/apple/foundationdb/EventKeeper.java
-  src/main/com/apple/foundationdb/MapEventKeeper.java
   src/main/com/apple/foundationdb/testing/AbstractWorkload.java
   src/main/com/apple/foundationdb/testing/WorkloadContext.java
   src/main/com/apple/foundationdb/testing/Promise.java
-  src/main/com/apple/foundationdb/testing/PerfMetric.java
-  src/main/com/apple/foundationdb/tuple/ByteArrayUtil.java
-  src/main/com/apple/foundationdb/tuple/FastByteComparisons.java
-  src/main/com/apple/foundationdb/tuple/IterableComparator.java
-  src/main/com/apple/foundationdb/tuple/package-info.java
-  src/main/com/apple/foundationdb/tuple/StringUtil.java
-  src/main/com/apple/foundationdb/tuple/Tuple.java
-  src/main/com/apple/foundationdb/tuple/TupleUtil.java
-  src/main/com/apple/foundationdb/tuple/Versionstamp.java)
+  src/main/com/apple/foundationdb/testing/PerfMetric.java)
 
 set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/AbstractTester.java
@@ -114,17 +118,21 @@ include(src/tests.cmake)
 set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundationdb)
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
 
-set(GENERATED_JAVA_FILES
+set(GENERATED_JAVA_API_FILES
   ${GENERATED_JAVA_DIR}/ConflictRangeType.java
   ${GENERATED_JAVA_DIR}/DatabaseOptions.java
   ${GENERATED_JAVA_DIR}/MutationType.java
   ${GENERATED_JAVA_DIR}/NetworkOptions.java
   ${GENERATED_JAVA_DIR}/StreamingMode.java
-  ${GENERATED_JAVA_DIR}/TransactionOptions.java
+  ${GENERATED_JAVA_DIR}/TransactionOptions.java)
+
+set(GENERATED_JAVA_IMPL_FILES
   ${GENERATED_JAVA_DIR}/FDBException.java)
 
-vexillographer_compile(TARGET fdb_java_options LANG java OUT ${GENERATED_JAVA_DIR}
-  OUTPUT ${GENERATED_JAVA_FILES})
+vexillographer_compile(TARGET fdb_java_api_options LANG java OUT ${GENERATED_JAVA_DIR}
+  OUTPUT ${GENERATED_JAVA_API_FILES})
+vexillographer_compile(TARGET fdb_java_impl_options LANG java OUT ${GENERATED_JAVA_DIR}
+  OUTPUT ${GENERATED_JAVA_IMPL_FILES})
 
 set(SYSTEM_NAME "linux")
 if (APPLE)
@@ -160,11 +168,26 @@ set(CMAKE_JNI_TARGET TRUE)
 # build a manifest file
 set(JAR_VERSION "${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 string(TIMESTAMP BND_LAST_MODIFIED_SEC "%s")
-set(MANIFEST_TEXT "Manifest-Version: 1.0
+set(API_MANIFEST_TEXT "Manifest-Version: 1.0
 Bnd-LastModified: ${BND_LAST_MODIFIED_SEC}000
 Build-Jdk: ${Java_VERSION_STRING}
 Built-By: CMake ${CMAKE_VERSION}
-Bundle-Description: FoundationDB Java bindings and API
+Bundle-Description: FoundationDB Java API
+Bundle-ManifestVersion: 2
+Bundle-Name: fdb-java-api
+Bundle-SymbolicName: com.apple.foundationdb
+Bundle-Version: ${JAR_VERSION}
+Created-By: CMake ${CMAKE_VERSION}
+Implementation-Title: fdb-java-api
+Implementation-Version: ${CURRENT_GIT_VERSION}
+Specification-Title: FoundationDB Java API
+Specification-Version: ${JAR_VERSION}
+")
+set(IMPL_MANIFEST_TEXT "Manifest-Version: 1.0
+Bnd-LastModified: ${BND_LAST_MODIFIED_SEC}000
+Build-Jdk: ${Java_VERSION_STRING}
+Built-By: CMake ${CMAKE_VERSION}
+Bundle-Description: FoundationDB Java bindings
 Bundle-ManifestVersion: 2
 Bundle-Name: fdb-java
 Bundle-SymbolicName: com.apple.foundationdb
@@ -172,18 +195,25 @@ Bundle-Version: ${JAR_VERSION}
 Created-By: CMake ${CMAKE_VERSION}
 Implementation-Title: fdb-java
 Implementation-Version: ${CURRENT_GIT_VERSION}
-Specification-Title: FoundationDB Java bindings and API
+Specification-Title: FoundationDB Java bindings
 Specification-Version: ${JAR_VERSION}
 ")
 
 # write the manifest file
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/resources/META-INF)
-set(MANIFEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/resources/META-INF/MANIFEST.MF)
-file(WRITE ${MANIFEST_FILE} ${MANIFEST_TEXT})
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/api/resources/META-INF)
+set(API_MANIFEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/api/resources/META-INF/MANIFEST.MF)
+file(WRITE ${API_MANIFEST_FILE} ${IMPL_MANIFEST_TEXT})
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/impl/resources/META-INF)
+set(IMPL_MANIFEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/impl/resources/META-INF/MANIFEST.MF)
+file(WRITE ${IMPL_MANIFEST_FILE} ${IMPL_MANIFEST_TEXT})
 
-add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
-  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION} MANIFEST ${MANIFEST_FILE})
-add_dependencies(fdb-java fdb_java_options fdb_java)
+add_jar(fdb-java-api ${JAVA_API_SRCS} ${GENERATED_JAVA_API_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
+  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION} MANIFEST ${API_MANIFEST_FILE})
+add_dependencies(fdb-java-api fdb_java_api_options)
+add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_IMPL_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
+  INCLUDE_JARS fdb-java-api
+  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION} MANIFEST ${IMPL_MANIFEST_FILE})
+add_dependencies(fdb-java fdb-java-api fdb_java fdb_java_impl_options)
 
 if(NOT OPEN_FOR_IDE)
   set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
@@ -243,13 +273,15 @@ if(NOT OPEN_FOR_IDE)
     set(prerelease_string "")
   endif()
   set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}.jar)
+  set(target_api_jar ${jar_destination}/fdb-java-api-${CMAKE_PROJECT_VERSION}${prerelease_string}.jar)
   add_custom_command(OUTPUT ${target_jar}
     COMMAND ${Java_JAR_EXECUTABLE} cfm ${target_jar} ${unpack_dir}/META-INF/MANIFEST.MF .
     WORKING_DIRECTORY ${unpack_dir}
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMENT "Build ${target_jar}")
-  add_jar(foundationdb-tests SOURCES ${JAVA_TESTS_SRCS} INCLUDE_JARS fdb-java)
-  add_dependencies(foundationdb-tests fdb_java_options)
+  add_jar(foundationdb-tests SOURCES ${JAVA_TESTS_SRCS} INCLUDE_JARS fdb-java fdb-java-api)
+  add_dependencies(foundationdb-tests fdb_java_api_options)
+  add_dependencies(foundationdb-tests fdb_java_impl_options)
   set(tests_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}-tests.jar)
   add_custom_command(OUTPUT ${tests_jar}
     COMMAND ${CMAKE_COMMAND} -E copy foundationdb-tests.jar "${tests_jar}"
@@ -262,6 +294,14 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(fat-jar fdb-java)
   add_dependencies(fat-jar copy_lib)
   add_dependencies(packages fat-jar)
+  add_custom_command(OUTPUT ${target_api_jar}
+    COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/lib/fdb-java-api.jar "${target_api_jar}"
+    WORKING_DIRECTORY .
+    DEPENDS fdb-java-api
+    COMMENT "Build ${tests_jar}")
+  add_custom_target(api-jar ALL DEPENDS ${target_api_jar})
+  add_dependencies(api-jar fdb-java-api)
+  add_dependencies(packages api-jar)
 
   set(TEST_CP ${tests_jar} ${target_jar})
 
@@ -325,7 +365,7 @@ if(NOT OPEN_FOR_IDE)
     # ctest has lots of flexible command options, so be sure to refer to its documentation if you want to do something specific(documentation
     # can be found at https://cmake.org/cmake/help/v3.19/manual/ctest.1.html)
 
-    add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} ${JUNIT_RESOURCES} INCLUDE_JARS fdb-java
+    add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} ${JUNIT_RESOURCES} INCLUDE_JARS fdb-java fdb-java-api
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar
@@ -336,7 +376,7 @@ if(NOT OPEN_FOR_IDE)
 
     add_test(NAME java-unit
       COMMAND ${Java_JAVA_EXECUTABLE}
-            -classpath "${target_jar}:${junit_jar_path}:${JUNIT_CLASSPATH}"
+            -classpath "${target_jar}:${target_api_jar}:${junit_jar_path}:${JUNIT_CLASSPATH}"
             -Djava.library.path=${CMAKE_BINARY_DIR}/lib
             org.junit.platform.console.ConsoleLauncher "--details=summary" "-class-path=${junit_jar_path}" "--scan-classpath" "--disable-banner"
     )
@@ -368,7 +408,7 @@ if(NOT OPEN_FOR_IDE)
     # empty, consider generating a random prefix for the keys you write, use
     # the directory layer with a unique path, etc.)
     #
-    add_jar(fdb-integration SOURCES ${JAVA_INTEGRATION_TESTS} ${JAVA_INTEGRATION_RESOURCES} INCLUDE_JARS fdb-java
+    add_jar(fdb-integration SOURCES ${JAVA_INTEGRATION_TESTS} ${JAVA_INTEGRATION_RESOURCES} INCLUDE_JARS fdb-java fdb-java-api
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar
@@ -380,14 +420,14 @@ if(NOT OPEN_FOR_IDE)
     # add_fdbclient_test will set FDB_CLUSTER_FILE if it's not set already
     add_fdbclient_test(NAME java-integration
                     COMMAND ${Java_JAVA_EXECUTABLE}
-                      -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
+                      -classpath "${target_jar}:${target_api_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
                       -Djava.library.path=${CMAKE_BINARY_DIR}/lib
                       org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-T MultiClient"
     )
 
     add_multi_fdbclient_test(NAME java-multi-integration
                     COMMAND ${Java_JAVA_EXECUTABLE}
-                    -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
+                    -classpath "${target_jar}:${target_api_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
                     -Djava.library.path=${CMAKE_BINARY_DIR}/lib
                     org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-t MultiClient"
     )

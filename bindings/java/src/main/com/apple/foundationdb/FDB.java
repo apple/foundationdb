@@ -24,8 +24,8 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.atomic.AtomicInteger;
+
+import com.apple.foundationdb.DefaultExecutor;
 
 /**
  * The starting point for accessing FoundationDB.
@@ -62,24 +62,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class FDB {
 	static FDB singleton = null;
 
-	static class DaemonThreadFactory implements ThreadFactory {
-		private final ThreadFactory factory;
-		private static AtomicInteger threadCount = new AtomicInteger();
-
-		DaemonThreadFactory(ThreadFactory factory) {
-			this.factory = factory;
-		}
-
-		@Override
-		public Thread newThread(Runnable r) {
-			Thread t = factory.newThread(r);
-			t.setName("fdb-java-" + threadCount.incrementAndGet());
-			t.setDaemon(true);
-			return t;
-		}
-	}
-
-	public static final ExecutorService DEFAULT_EXECUTOR;
+	public static final ExecutorService DEFAULT_EXECUTOR = DefaultExecutor.DEFAULT_EXECUTOR;
 
 	private final int apiVersion;
 	private volatile boolean netStarted = false;
@@ -99,9 +82,6 @@ public class FDB {
 			// EAT: this can be useful for loading on windows
 		}
 		JNIUtil.loadLibrary("fdb_java");
-
-		ThreadFactory factory = new DaemonThreadFactory(Executors.defaultThreadFactory());
-		DEFAULT_EXECUTOR = Executors.newCachedThreadPool(factory);
 	}
 
 	/**
@@ -181,8 +161,8 @@ public class FDB {
 			}
 			return singleton;
 		}
-		if(version < 510)
-			throw new IllegalArgumentException("API version not supported (minimum 510)");
+		if(version < 520)
+			throw new IllegalArgumentException("API version not supported (minimum 520)");
 		if(version > 710)
 			throw new IllegalArgumentException("API version not supported (maximum 710)");
 

@@ -20,7 +20,7 @@
 
 package com.apple.foundationdb.async;
 
-import static com.apple.foundationdb.FDB.DEFAULT_EXECUTOR;
+import static com.apple.foundationdb.DefaultExecutor.DEFAULT_EXECUTOR;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -514,7 +514,7 @@ public class AsyncUtil {
 	 *  method requires that the handler return a {@link CompletableFuture}.
 	 *  The returned future will then be ready with the result of the
 	 *  handler's future (or an error if that future completes exceptionally).
-	 *  The handler will execute on the {@link com.apple.foundationdb.FDB#DEFAULT_EXECUTOR default executor}
+	 *  The handler will execute on the {@link com.apple.foundationdb.DefaultExecutor#DEFAULT_EXECUTOR default executor}
 	 *  used for asychronous tasks.
 	 *
 	 * @param future future to compose the handler onto

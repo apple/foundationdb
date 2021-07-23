@@ -37,8 +37,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-import com.apple.foundationdb.FDB;
-
 class TupleUtil {
 	private static final byte nil = 0x00;
 	private static final Charset UTF8 = StandardCharsets.UTF_8;
@@ -164,10 +162,6 @@ class TupleUtil {
 		}
 	}
 
-	private static boolean useOldVersionOffsetFormat() {
-		return FDB.instance().getAPIVersion() < 520;
-	}
-
 	// These four functions are for adjusting the encoding of floating point numbers so
 	// that when their byte representation is written out in big-endian order, unsigned
 	// lexicographic byte comparison orders the values in the same way as the semantic
@@ -220,7 +214,7 @@ class TupleUtil {
 		buffer.putShort((short)versionPosition);
 	}
 
-	private static void adjustVersionPosition520(byte[] packed, int delta) {
+	static void adjustVersionPosition(byte[] packed, int delta) {
 		int offsetOffset = packed.length - Integer.BYTES;
 		ByteBuffer buffer = ByteBuffer.wrap(packed, offsetOffset, Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN);
 		int versionPosition = buffer.getInt() + delta;
@@ -229,15 +223,6 @@ class TupleUtil {
 		}
 		buffer.position(offsetOffset);
 		buffer.putInt(versionPosition);
-	}
-
-	static void adjustVersionPosition(byte[] packed, int delta) {
-		if(useOldVersionOffsetFormat()) {
-			adjustVersionPosition300(packed, delta);
-		}
-		else {
-			adjustVersionPosition520(packed, delta);
-		}
 	}
 
 	static int getCodeFor(Object o) {
@@ -713,15 +698,8 @@ class TupleUtil {
 			throw new IllegalArgumentException("No incomplete Versionstamp included in tuple packInternal with versionstamp");
 		}
 		else {
-			if(useOldVersionOffsetFormat() && state.versionPos > 0xffff) {
-				throw new IllegalArgumentException("Tuple has incomplete version at position " + state.versionPos + " which is greater than the maximum " + 0xffff);
-			}
 			dest.order(ByteOrder.LITTLE_ENDIAN);
-			if (useOldVersionOffsetFormat()) {
-				dest.putShort((short)state.versionPos);
-			} else {
-				dest.putInt(state.versionPos);
-			}
+			dest.putInt(state.versionPos);
 			return dest.array();
 		}
 	}
@@ -762,7 +740,7 @@ class TupleUtil {
 				packedSize += 1 + Versionstamp.LENGTH;
 				Versionstamp versionstamp = (Versionstamp)item;
 				if(!versionstamp.isComplete()) {
-					int suffixSize = useOldVersionOffsetFormat() ? Short.BYTES : Integer.BYTES;
+					int suffixSize = Integer.BYTES;
 					packedSize += suffixSize;
 				}
 			}
