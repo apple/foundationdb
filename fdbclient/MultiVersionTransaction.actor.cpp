@@ -177,7 +177,6 @@ ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
 ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
 	FdbCApi::FDBFuture* f;
 	try {
-
 		f = api->transactionGetEstimatedRangeSizeBytes(
 		    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
 	} catch (Error& e) {
