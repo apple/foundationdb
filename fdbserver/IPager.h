@@ -44,9 +44,9 @@ typedef uint32_t QueueID;
 enum class PagerEvents { CacheLookup = 0, CacheHit, CacheMiss, PageWrite, MAXEVENTS };
 static const char* const PagerEventsStrings[] = { "Lookup", "Hit", "Miss", "Write", "Unknown" };
 // Reasons for page level events.
-enum class PagerEventReasons { PointRead = 0, RangeRead, RangePrefetch, Commit, LazyClear, MetaData, RemapPage, MAXEVENTREASONS };
+enum class PagerEventReasons { PointRead = 0, RangeRead, RangePrefetch, Commit, LazyClear, MetaData, MAXEVENTREASONS };
 static const char* const PagerEventReasonsStrings[] = {
-	"Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta", "Remap", "Unknown"
+	"Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta", "Unknown"
 };
 
 static const int nonBtreeLevel = 0;
@@ -245,13 +245,13 @@ public:
 	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                              unsigned int level,
 	                                              Standalone<VectorRef<LogicalPageID>> pageIDs,
-												  int priority,
+	                                              int priority,
 	                                              bool cacheable,
 	                                              bool noHit) = 0;
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                      unsigned int level,
 	                                      LogicalPageID pageID,
-										  int priority,
+	                                      int priority,
 	                                      bool cacheable,
 	                                      bool noHit) {
 		return readPage(reason, level, VectorRef<LogicalPageID>(&pageID, 1), priority, cacheable, noHit);

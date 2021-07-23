@@ -23,6 +23,7 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 #include "flow/Histogram.h"
+#include <_types/_uint32_t.h>
 #include <limits>
 #include <random>
 #include "fdbrpc/ContinuousSample.h"
@@ -44,7 +45,7 @@
 #include <cinttypes>
 #include <boost/intrusive/list.hpp>
 
-#define REDWOOD_DEBUG 0
+#define REDWOOD_DEBUG 1
 
 // Only print redwood debug statements for a certain address. Useful in simulation with many redwood processes to reduce
 // log size.
@@ -1109,15 +1110,15 @@ public:
 				// Position the page pointer to current page in the extent
 				Reference<ArenaPage> page =
 				    c.page->subPage(pageIdx++ * self->pager->getPhysicalPageSize(), self->pager->getLogicalPageSize());
-				debug_printf("FIFOQueue::Cursor(%s) peekALLExt %s. Offset %d, CalculateChecksum %d ChecksumInPage %d\n",
+				debug_printf("FIFOQueue::Cursor(%s) peekALLExt %s. Offset %d, CalculateChecksum %u ChecksumInPage %u\n",
 				             c.toString().c_str(),
 				             toString(c.pageID).c_str(),
 				             c.pageID * self->pager->getPhysicalPageSize(),
-				             page->calculateChecksum(c.pageID),
-				             page->getChecksum());
+				             (uint32_t)page->calculateChecksum(c.pageID),
+				             (uint32_t)page->getChecksum());
 				if (!page->verifyChecksum(c.pageID)) {
 					debug_printf("FIFOQueue::Cursor(%s) peekALLExt checksum failed for %s. Offset %d, "
-					             "CalculateChecksum %d ChecksumInPage %d\n",
+					             "CalculateChecksum %u ChecksumInPage %u\n",
 					             c.toString().c_str(),
 					             toString(c.pageID).c_str(),
 					             c.pageID * self->pager->getPhysicalPageSize(),
@@ -1873,7 +1874,7 @@ public:
 			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
 			while (currentSize > sizeLimit) {
 				debug_printf("input pageSize is %s currentSize is %s and sizeLimit is %s\n",
-							 std::to_string(size).c_str(),
+				             std::to_string(size).c_str(),
 				             toString(currentSize).c_str(),
 				             toString(sizeLimit).c_str());
 
@@ -2452,6 +2453,10 @@ public:
 			LogicalPageID id = wait(self->newPageID());
 			newPages.push_back(newPages.arena(), id);
 		}
+		debug_printf("DWALPager(%s) newPageIDs_impl(%d) returning %s at end of file\n",
+		             self->filename.c_str(),
+		             size,
+		             toString(newPages).c_str());
 		return newPages;
 	}
 
@@ -2504,14 +2509,13 @@ public:
 		             page->begin());
 
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
-		if(reason!=PagerEventReasons::RemapPage){
-			page->updateChecksum(pageIDs.front());
-			debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
+		page->updateChecksum(pageIDs.front());
+		debug_printf("DWALPager(%s) writePhysicalPage %s pagesize %d CalculatedChecksum=%u ChecksumInPage=%u\n",
 		             self->filename.c_str(),
 		             toString(pageIDs).c_str(),
-		             page->calculateChecksum(pageIDs.front()),
-		             page->getChecksum());
-		}
+		             page->size(),
+		             (uint32_t)page->calculateChecksum(pageIDs.front()),
+		             (uint32_t)page->getChecksum());
 
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(header ? ioMaxPriority : ioMinPriority));
 		++g_redwoodMetrics.metric.pagerDiskWrite;
@@ -2526,7 +2530,8 @@ public:
 		state std::vector<Future<Void>> writers;
 		state int i = 0;
 		for (const auto& pageID : pageIDs) {
-			Future<Void> p = self->pageFile->write(page->mutate() + i * blockSize, blockSize, ((int64_t)pageID) * blockSize);
+			Future<Void> p =
+			    self->pageFile->write(page->mutate() + i * blockSize, blockSize, ((int64_t)pageID) * blockSize);
 			i += 1;
 			writers.push_back(p);
 		}
@@ -2534,11 +2539,11 @@ public:
 		if (REDWOOD_DEBUG) {
 			Standalone<VectorRef<PhysicalPageID>> pageIDsCopy = pageIDs;
 			debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
-						self->filename.c_str(),
-						(header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
-						toString(pageIDsCopy).c_str(),
-						page->begin(),
-						(pageIDsCopy.front() * blockSize));
+			             self->filename.c_str(),
+			             (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
+			             toString(pageIDsCopy).c_str(),
+			             page->begin(),
+			             (pageIDsCopy.front() * blockSize));
 		}
 		return Void();
 	}
@@ -2554,6 +2559,7 @@ public:
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
+		debug_printf("writeHeaderPage, page size%d\n", page->size());
 		return writePhysicalPage(
 		    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page, true);
 	}
@@ -2566,12 +2572,13 @@ public:
 		// or as a cache miss because there is no benefit to the page already being in cache
 		// Similarly, this does not count as a point lookup for reason.
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), true);
-		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n",
+		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d pagesize=%d\n",
 		             filename.c_str(),
 		             toString(pageIDs).c_str(),
 		             cacheEntry.initialized(),
 		             cacheEntry.initialized() && cacheEntry.reading(),
-		             cacheEntry.initialized() && cacheEntry.writing());
+		             cacheEntry.initialized() && cacheEntry.writing(),
+		             data->size());
 
 		// If the page is still being read then it's not also being written because a write places
 		// the new content into readFuture when the write is launched, not when it is completed.
@@ -2609,16 +2616,15 @@ public:
 	                                                  VectorRef<LogicalPageID> pageIDs,
 	                                                  Reference<ArenaPage> data,
 	                                                  Version v) override {
-		debug_printf(
-		    "DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageIDs).c_str(), v);
+		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageIDs).c_str(), v);
 		Future<VectorRef<LogicalPageID>> f =
 		    map(newPageIDs(pageIDs.size()), [=](Standalone<VectorRef<LogicalPageID>> newIDs) {
 			    updatePage(reason, level, newIDs, data);
 			    // TODO:  Possibly limit size of remap queue since it must be recovered on cold start
-				ASSERT(newIDs.size() == pageIDs.size());
+			    ASSERT(newIDs.size() == pageIDs.size());
 			    for (size_t i = 0; i < pageIDs.size(); i++) {
-					RemappedPage r{ v, pageIDs[i], newIDs[i]};
-					remapQueue.pushBack(r);
+				    RemappedPage r{ v, pageIDs[i], newIDs[i] };
+				    remapQueue.pushBack(r);
 				    auto& versionedMap = remappedPages[pageIDs[i]];
 
 				    // An update page is unlikely to have its old version read again soon, so prioritize its cache
@@ -2739,8 +2745,7 @@ public:
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
 	                                                           Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                                                           int priority,
-	                                                           bool header,
-															   bool remap) {
+	                                                           bool header) {
 		ASSERT(!self->memoryOnly);
 
 		// if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
@@ -2763,7 +2768,8 @@ public:
 		state int totalReadBytes = 0;
 		state int i = 0;
 		for (; i < pageIDs.size(); i++) {
-			int readBytes = wait(self->pageFile->read(page->mutate()+ i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize));
+			int readBytes = wait(
+			    self->pageFile->read(page->mutate() + i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize));
 			totalReadBytes += readBytes;
 		}
 		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
@@ -2773,7 +2779,7 @@ public:
 		             totalReadBytes);
 
 		// Header reads are checked explicitly during recovery
-		if (!header && !remap) {
+		if (!header) {
 			if (!page->verifyChecksum(pageIDs.front())) {
 				debug_printf(
 				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageIDs).c_str());
@@ -2796,7 +2802,7 @@ public:
 	}
 
 	static Future<Reference<ArenaPage>> readHeaderPage(DWALPager* self, PhysicalPageID pageID) {
-		return readPhysicalPage(self, VectorRef<LogicalPageID>(&pageID, 1), ioMaxPriority, true, false);
+		return readPhysicalPage(self, VectorRef<LogicalPageID>(&pageID, 1), ioMaxPriority, true);
 	}
 
 	bool tryEvictPage(LogicalPageID logicalID, Version v) {
@@ -2826,7 +2832,7 @@ public:
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageIDs).c_str());
-			return forwardError(readPhysicalPage(this, pageIDs, priority, false, reason == PagerEventReasons::RemapPage), errorPromise);
+			return forwardError(readPhysicalPage(this, pageIDs, priority, false), errorPromise);
 		}
 
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), noHit);
@@ -2839,8 +2845,7 @@ public:
 		             noHit);
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageIDs).c_str());
-			cacheEntry.readFuture =
-			    forwardError(readPhysicalPage(this, pageIDs, priority, false, reason == PagerEventReasons::RemapPage), errorPromise);
+			cacheEntry.readFuture = forwardError(readPhysicalPage(this, pageIDs, priority, false), errorPromise);
 			cacheEntry.writeFuture = Void();
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
@@ -3140,12 +3145,18 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data = wait(
-			    self->readPage(PagerEventReasons::RemapPage, nonBtreeLevel, VectorRef<LogicalPageID>(&p.newPageID, 1), ioLeafPriority, false, true));
+			Reference<ArenaPage> data = wait(self->readPage(PagerEventReasons::MetaData,
+			                                                nonBtreeLevel,
+			                                                VectorRef<LogicalPageID>(&p.newPageID, 1),
+			                                                ioLeafPriority,
+			                                                false,
+			                                                true));
 
 			// Write the data to the original page so it can be read using its original pageID
-			self->updatePage(
-			    PagerEventReasons::RemapPage, nonBtreeLevel, VectorRef<LogicalPageID>(&p.originalPageID, 1), data->subPage(0, self->physicalPageSize));
+			self->updatePage(PagerEventReasons::MetaData,
+			                 nonBtreeLevel,
+			                 VectorRef<LogicalPageID>(&p.originalPageID, 1),
+			                 data->subPage(0, self->physicalPageSize));
 			++g_redwoodMetrics.metric.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
 			++g_redwoodMetrics.metric.pagerRemapSkip;
@@ -5475,8 +5486,7 @@ private:
 		g_redwoodMetrics.metric.btreeLeafPreload += 1;
 		g_redwoodMetrics.metric.btreeLeafPreloadExt += (PageIDs.size() - 1);
 		// Prefetches are always at the Leaf level currently so it isn't part of the per-level metrics set
-		snapshot->getPhysicalPage(
-		    PagerEventReasons::RangePrefetch, nonBtreeLevel, PageIDs, priority, true, true);
+		snapshot->getPhysicalPage(PagerEventReasons::RangePrefetch, nonBtreeLevel, PageIDs, priority, true, true);
 	}
 
 	void freeBTreePage(BTreePageIDRef btPageID, Version v) {
@@ -5490,10 +5500,10 @@ private:
 	// Attempts to reuse original id(s) in btPageID, returns BTreePageID.
 	// UpdateBtreePage is only called from commitSubTree funciton
 	static Future<BTreePageIDRef> updateBTreePage(VersionedBTree* self,
-	                                                    BTreePageIDRef oldID,
-	                                                    Arena* arena,
-	                                                    Reference<ArenaPage> page,
-	                                                    Version writeVersion) {
+	                                              BTreePageIDRef oldID,
+	                                              Arena* arena,
+	                                              Reference<ArenaPage> page,
+	                                              Version writeVersion) {
 		if (REDWOOD_DEBUG) {
 			BTreePage* btPage = (BTreePage*)page->begin();
 			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
