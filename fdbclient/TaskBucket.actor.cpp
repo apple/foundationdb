@@ -873,13 +873,14 @@ TaskBucket::TaskBucket(const Subspace& subspace,
                        AccessSystemKeys sysAccess,
                        PriorityBatch priorityBatch,
                        LockAware lockAware)
-  : prefix(subspace), active(prefix.get(LiteralStringRef("ac"))), available(prefix.get(LiteralStringRef("av"))),
+  : cc("TaskBucket"), dbgid(deterministicRandom()->randomUniqueID()),
+    dispatchSlotChecksStarted("DispatchSlotChecksStarted", cc), dispatchErrors("DispatchErrors", cc),
+    dispatchDoTasks("DispatchDoTasks", cc), dispatchEmptyTasks("DispatchEmptyTasks", cc),
+    dispatchSlotChecksComplete("DispatchSlotChecksComplete", cc), prefix(subspace),
+    active(prefix.get(LiteralStringRef("ac"))), available(prefix.get(LiteralStringRef("av"))),
     available_prioritized(prefix.get(LiteralStringRef("avp"))), timeouts(prefix.get(LiteralStringRef("to"))),
-    pauseKey(prefix.pack(LiteralStringRef("pause"))), timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS),
-    system_access(sysAccess), priority_batch(priorityBatch), lockAware(lockAware), cc("TaskBucket"),
-    dbgid(deterministicRandom()->randomUniqueID()), dispatchSlotChecksStarted("DispatchSlotChecksStarted", cc),
-    dispatchErrors("DispatchErrors", cc), dispatchDoTasks("DispatchDoTasks", cc),
-    dispatchEmptyTasks("DispatchEmptyTasks", cc), dispatchSlotChecksComplete("DispatchSlotChecksComplete", cc) {}
+    timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS), pauseKey(prefix.pack(LiteralStringRef("pause"))),
+    system_access(sysAccess), priority_batch(priorityBatch), lockAware(lockAware) {}
 
 TaskBucket::~TaskBucket() {}
 

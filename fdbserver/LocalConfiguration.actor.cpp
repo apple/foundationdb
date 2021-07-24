@@ -326,9 +326,9 @@ public:
 	                       std::string const& configPath,
 	                       std::map<std::string, std::string> const& manualKnobOverrides,
 	                       IsTest isTest)
-	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"), cc("LocalConfiguration"),
-	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
-	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"),
+	    configKnobOverrides(configPath), cc("LocalConfiguration"), broadcasterChanges("BroadcasterChanges", cc),
+	    snapshots("Snapshots", cc), changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc),
 	    manualKnobOverrides(manualKnobOverrides) {
 		if (isTest) {
 			testKnobCollection =

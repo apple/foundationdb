@@ -515,8 +515,7 @@ struct RatekeeperLimits {
 	                 int64_t logSpringBytes,
 	                 double maxVersionDifference,
 	                 int64_t durabilityLagTargetVersions)
-	  : priority(priority), tpsLimit(std::numeric_limits<double>::infinity()),
-	    tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
+	  : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
 	    reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
 	    storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
 	    maxVersionDifference(maxVersionDifference),
@@ -524,7 +523,8 @@ struct RatekeeperLimits {
 	        durabilityLagTargetVersions +
 	        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
 	                                                           // be durable on the storage servers
-	    durabilityLagLimit(std::numeric_limits<double>::infinity()), lastDurabilityLag(0), context(context) {}
+	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
+	    context(context) {}
 };
 
 struct GrvProxyInfo {
@@ -536,7 +536,7 @@ struct GrvProxyInfo {
 	double lastTagPushTime;
 
 	GrvProxyInfo()
-	  : totalTransactions(0), batchTransactions(0), lastUpdateTime(0), lastThrottledTagChangeId(0), lastTagPushTime(0) {
+	  : totalTransactions(0), batchTransactions(0), lastThrottledTagChangeId(0), lastUpdateTime(0), lastTagPushTime(0) {
 	}
 };
 
@@ -577,7 +577,7 @@ struct RatekeeperData {
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
-	    throttledTagChangeId(0), lastBusiestCommitTagPick(0),
+	    lastBusiestCommitTagPick(0), throttledTagChangeId(0),
 	    normalLimits(TransactionPriority::DEFAULT,
 	                 "",
 	                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,

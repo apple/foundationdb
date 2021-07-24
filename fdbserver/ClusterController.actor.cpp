@@ -128,15 +128,15 @@ public:
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
 		DBInfo()
-		  : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0),
-		    logGenerations(0), cachePopulated(false), clientInfo(new AsyncVar<ClientDBInfo>()), dbInfoCount(0),
-		    serverInfo(new AsyncVar<ServerDBInfo>()), db(DatabaseContext::create(clientInfo,
-		                                                                         Future<Void>(),
-		                                                                         LocalityData(),
-		                                                                         EnableLocalityLoadBalance::True,
-		                                                                         TaskPriority::DefaultEndpoint,
-		                                                                         LockAware::True)) // SOMEDAY: Locality!
-		{}
+		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
+		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
+		    db(DatabaseContext::create(clientInfo,
+		                               Future<Void>(),
+		                               LocalityData(),
+		                               EnableLocalityLoadBalance::True,
+		                               TaskPriority::DefaultEndpoint,
+		                               LockAware::True)), // SOMEDAY: Locality!
+		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false) {}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -1431,12 +1431,12 @@ public:
 		bool degraded = false;
 
 		RoleFitness(int bestFit, int worstFit, int count, ProcessClass::ClusterRole role)
-		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), count(count),
-		    role(role) {}
+		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), role(role),
+		    count(count) {}
 
 		RoleFitness(int fitness, int count, ProcessClass::ClusterRole role)
-		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), count(count),
-		    role(role) {}
+		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), role(role),
+		    count(count) {}
 
 		RoleFitness()
 		  : bestFit(ProcessClass::NeverAssign), worstFit(ProcessClass::NeverAssign), role(ProcessClass::NoRole),
@@ -3059,9 +3059,9 @@ public:
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators)
-	  : clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
-	    gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
+	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), clusterControllerProcessId(locality.processId()),
+	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
+	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
 	    recruitingDistributor(false), recruitRatekeeper(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),

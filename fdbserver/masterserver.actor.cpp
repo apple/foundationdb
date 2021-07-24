@@ -95,8 +95,8 @@ public:
 	ReusableCoordinatedState(ServerCoordinators const& coordinators,
 	                         PromiseStream<Future<Void>> const& addActor,
 	                         UID const& dbgid)
-	  : coordinators(coordinators), cstate(coordinators), addActor(addActor), dbgid(dbgid), finalWriteStarted(false),
-	    previousWrite(Void()) {}
+	  : finalWriteStarted(false), previousWrite(Void()), cstate(coordinators), coordinators(coordinators),
+	    addActor(addActor), dbgid(dbgid) {}
 
 	Future<Void> read() { return _read(this); }
 
@@ -265,12 +265,12 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    lastCommitTime(0), liveCommittedVersion(invalidVersion), databaseLocked(false),
-	    minKnownCommittedVersion(invalidVersion), myInterface(myInterface), dbInfo(dbInfo),
-	    cstate(coordinators, addActor, dbgid), coordinators(coordinators), clusterController(clusterController),
-	    dbId(dbId), forceRecovery(forceRecovery), safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid),
-	    neverCreated(false), hasConfiguration(false), version(invalidVersion), lastVersionTime(0),
-	    txnStateStore(nullptr), memoryLimit(2e9), registrationCount(0), addActor(addActor),
-	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), cc("Master", dbgid.toString()),
+	    minKnownCommittedVersion(invalidVersion), hasConfiguration(false), coordinators(coordinators),
+	    version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
+	    myInterface(myInterface), clusterController(clusterController), cstate(coordinators, addActor, dbgid),
+	    dbInfo(dbInfo), registrationCount(0), addActor(addActor),
+	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
 	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),

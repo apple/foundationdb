@@ -241,8 +241,8 @@ class BroadcasterToLocalConfigEnvironment {
 
 public:
 	BroadcasterToLocalConfigEnvironment(std::string const& dataDir, std::string const& configPath)
-	  : broadcaster(ConfigFollowerInterface{}), cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
-	    readFrom(dataDir, configPath, {}) {}
+	  : readFrom(dataDir, configPath, {}), cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
+	    broadcaster(ConfigFollowerInterface{}) {}
 
 	Future<Void> setup() { return setup(this); }
 
@@ -371,8 +371,9 @@ class TransactionToLocalConfigEnvironment {
 
 public:
 	TransactionToLocalConfigEnvironment(std::string const& dataDir, std::string const& configPath)
-	  : writeTo(dataDir), readFrom(dataDir, configPath, {}), broadcaster(writeTo.getFollowerInterface()),
-	    cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()) {}
+	  : writeTo(dataDir), readFrom(dataDir, configPath, {}),
+	    cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()), broadcaster(writeTo.getFollowerInterface()) {
+	}
 
 	Future<Void> setup() { return setup(this); }
 

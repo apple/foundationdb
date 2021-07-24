@@ -243,7 +243,7 @@ public:
 	struct DelayedTask : OrderedTask {
 		double at;
 		DelayedTask(double at, int64_t priority, TaskPriority taskID, Task* task)
-		  : at(at), OrderedTask(priority, taskID, task) {}
+		  : OrderedTask(priority, taskID, task), at(at) {}
 		bool operator<(DelayedTask const& rhs) const { return at > rhs.at; } // Ordering is reversed for priority_queue
 	};
 	std::priority_queue<DelayedTask, std::vector<DelayedTask>> timers;
@@ -1169,19 +1169,16 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 // 5MB for loading files into memory
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
-  : useThreadPool(useThreadPool), network(this), reactor(this), stopped(false), tasksIssued(0),
-    ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE),
-    // Until run() is called, yield() will always yield
-    tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield), numYields(0),
-    lastPriorityStats(nullptr), tlsInitializedState(ETLSInitState::NONE), tlsConfig(tlsConfig), started(false)
+  : useThreadPool(useThreadPool), reactor(this),
 #ifndef TLS_DISABLED
-    ,
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
-    sslPoolHandshakesInProgress(0), sslHandshakerThreadsStarted(0)
+    sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0),
 #endif
-
-{
+    tlsConfig(tlsConfig), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
+    currentTaskID(TaskPriority::DefaultYield), tasksIssued(0), stopped(false), started(false), numYields(0),
+    lastPriorityStats(nullptr), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE), tlsInitializedState(ETLSInitState::NONE) {
+	// Until run() is called, yield() will always yield
 	TraceEvent("Net2Starting");
 
 	// Set the global members
@@ -1908,7 +1905,7 @@ void Net2::getDiskBytes(std::string const& directory, int64_t& free, int64_t& to
 #include <sched.h>
 #endif
 
-ASIOReactor::ASIOReactor(Net2* net) : network(net), firstTimer(ios), do_not_stop(ios) {
+ASIOReactor::ASIOReactor(Net2* net) : do_not_stop(ios), network(net), firstTimer(ios) {
 #ifdef __linux__
 	// Reactor flags are used only for experimentation, and are platform-specific
 	if (FLOW_KNOBS->REACTOR_FLAGS & 1) {

@@ -205,7 +205,7 @@ public:
 		WriterThread(Reference<BarrierList> barriers,
 		             Reference<ITraceLogWriter> logWriter,
 		             Reference<ITraceLogFormatter> formatter)
-		  : barriers(barriers), logWriter(logWriter), formatter(formatter) {}
+		  : logWriter(logWriter), formatter(formatter), barriers(barriers) {}
 
 		void init() override {}
 
@@ -277,8 +277,8 @@ public:
 	};
 
 	TraceLog()
-	  : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList),
-	    logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()), issues(new IssuesList) {}
+	  : formatter(new XmlTraceLogFormatter()), loggedLength(0), bufferLength(0), opened(false), preopenOverflowCount(0),
+	    logTraceEventMetrics(false), issues(new IssuesList), barriers(new BarrierList) {}
 
 	bool isOpen() const { return opened; }
 
@@ -835,28 +835,27 @@ Future<Void> pingTraceLogWriterThread() {
 }
 
 TraceEvent::TraceEvent(const char* type, UID id)
-  : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
+  : initialized(false), enabled(true), logged(false), severity(SevInfo), type(type), id(id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
 TraceEvent::TraceEvent(Severity severity, const char* type, UID id)
-  : id(id), type(type), severity(severity), initialized(false), logged(false),
-    enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
+  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), logged(false),
+    severity(severity), type(type), id(id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
 TraceEvent::TraceEvent(TraceInterval& interval, UID id)
-  : id(id), type(interval.type), severity(interval.severity), initialized(false), logged(false),
-    enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity) {
-
+  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity),
+    logged(false), type(interval.type), id(id), severity(interval.severity) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 
 	init(interval);
 }
 TraceEvent::TraceEvent(Severity severity, TraceInterval& interval, UID id)
-  : id(id), type(interval.type), severity(severity), initialized(false), logged(false),
-    enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
+  : initialized(false), logged(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity),
+    type(interval.type), id(id), severity(severity) {
 
 	setMaxFieldLength(0);
 	setMaxEventLength(0);

@@ -241,8 +241,8 @@ struct BackupData {
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
-	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false),
-	    lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)) {
+	    pulledVersion(0), paused(false), lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)),
+	    cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });

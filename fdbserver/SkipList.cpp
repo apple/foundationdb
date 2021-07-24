@@ -92,7 +92,7 @@ struct KeyInfo {
 
 	KeyInfo() = default;
 	KeyInfo(StringRef key, bool begin, bool write, int transaction, int* pIndex)
-	  : key(key), begin(begin), write(write), transaction(transaction), pIndex(pIndex) {}
+	  : key(key), pIndex(pIndex), begin(begin), write(write), transaction(transaction) {}
 };
 
 force_inline int extra_ordering(const KeyInfo& ki) {
@@ -343,7 +343,7 @@ public:
 		StringRef value;
 
 		Finger() = default;
-		Finger(Node* header, const StringRef& ptr) : value(ptr), x(header) {}
+		Finger(Node* header, const StringRef& ptr) : x(header), value(ptr) {}
 
 		void init(const StringRef& value, Node* header) {
 			this->value = value;

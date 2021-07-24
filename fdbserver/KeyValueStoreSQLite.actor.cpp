@@ -681,7 +681,7 @@ struct SQLiteTransaction {
 struct IntKeyCursor {
 	SQLiteDB& db;
 	BtCursor* cursor;
-	IntKeyCursor(SQLiteDB& db, int table, bool write) : cursor(0), db(db) {
+	IntKeyCursor(SQLiteDB& db, int table, bool write) : db(db), cursor(nullptr) {
 		cursor = (BtCursor*)new char[sqlite3BtreeCursorSize()];
 		sqlite3BtreeCursorZero(cursor);
 		db.checkError("BtreeCursor", sqlite3BtreeCursor(db.btree, table, write, nullptr, cursor));
@@ -705,7 +705,7 @@ struct RawCursor {
 
 	operator bool() const { return valid; }
 
-	RawCursor(SQLiteDB& db, int table, bool write) : cursor(0), db(db), valid(false) {
+	RawCursor(SQLiteDB& db, int table, bool write) : db(db), cursor(nullptr), valid(false) {
 		keyInfo.db = db.db;
 		keyInfo.enc = db.db->aDb[0].pSchema->enc;
 		keyInfo.aColl[0] = db.db->pDfltColl;
@@ -1732,9 +1732,9 @@ private:
 		                volatile int64_t& freeListPages,
 		                UID dbgid,
 		                vector<Reference<ReadCursor>>* pReadThreads)
-		  : kvs(kvs), conn(kvs->filename, isBtreeV2, isBtreeV2), commits(), setsThisCommit(), freeTableEmpty(false),
-		    writesComplete(writesComplete), springCleaningStats(springCleaningStats), diskBytesUsed(diskBytesUsed),
-		    freeListPages(freeListPages), cursor(nullptr), dbgid(dbgid), readThreads(*pReadThreads),
+		  : kvs(kvs), conn(kvs->filename, isBtreeV2, isBtreeV2), cursor(nullptr), commits(), setsThisCommit(),
+		    freeTableEmpty(false), writesComplete(writesComplete), springCleaningStats(springCleaningStats),
+		    diskBytesUsed(diskBytesUsed), freeListPages(freeListPages), dbgid(dbgid), readThreads(*pReadThreads),
 		    checkAllChecksumsOnOpen(checkAllChecksumsOnOpen), checkIntegrityOnOpen(checkIntegrityOnOpen) {}
 		~Writer() override {
 			TraceEvent("KVWriterDestroying", dbgid);
@@ -2109,7 +2109,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
                                          KeyValueStoreType storeType,
                                          bool checkChecksums,
                                          bool checkIntegrity)
-  : type(storeType), filename(filename), logID(id), readThreads(CoroThreadPool::createThreadPool()),
+  : type(storeType), logID(id), filename(filename), readThreads(CoroThreadPool::createThreadPool()),
     writeThread(CoroThreadPool::createThreadPool()), readsRequested(0), writesRequested(0), writesComplete(0),
     diskBytesUsed(0), freeListPages(0) {
 	TraceEvent(SevDebug, "KeyValueStoreSQLiteCreate").detail("Filename", filename);
