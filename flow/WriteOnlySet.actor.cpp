@@ -27,6 +27,7 @@
 #include <random>
 #include "flow/actorcompiler.h" // has to be last include
 
+#ifdef ENABLE_SAMPLING
 template <class T, class IndexType, IndexType CAPACITY>
 auto WriteOnlySet<T, IndexType, CAPACITY>::insert(const Reference<T>& lineage) -> Index {
 	Index res;
@@ -271,3 +272,4 @@ TEST_CASE("/flow/WriteOnlySet") {
 	return Void();
 }
 } // namespace
+#endif

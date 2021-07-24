@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include <boost/lockfree/queue.hpp>
 
+#ifdef ENABLE_SAMPLING
 /**
  * This is a Write-Only set that supports copying the whole content. This data structure is lock-free and allows a user
  * to insert and remove objects up to a given capacity (passed by a template).
@@ -160,3 +161,4 @@ class ActorLineage;
 extern template class WriteOnlySet<ActorLineage, unsigned, 1024>;
 
 using ActorLineageSet = WriteOnlySet<ActorLineage, unsigned, 1024>;
+#endif

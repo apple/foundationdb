@@ -204,7 +204,9 @@ public:
 
 	bool checkRunnable() override;
 
+#ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override;
+#endif
 
 	bool useThreadPool;
 
@@ -235,7 +237,9 @@ public:
 	std::atomic<bool> stopped;
 	mutable std::map<IPAddress, bool> addressOnHostCache;
 
+#ifdef ENABLE_SAMPLING
 	ActorLineageSet actorLineageSet;
+#endif
 
 	std::atomic<bool> started;
 
@@ -1389,9 +1393,11 @@ bool Net2::checkRunnable() {
 	return !started.exchange(true);
 }
 
+#ifdef ENABLE_SAMPLING
 ActorLineageSet& Net2::getActorLineageSet() {
 	return actorLineageSet;
 }
+#endif
 
 void Net2::run() {
 	TraceEvent::setNetworkThread();

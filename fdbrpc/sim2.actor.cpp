@@ -979,9 +979,11 @@ public:
 
 	bool checkRunnable() override { return net2->checkRunnable(); }
 
+#ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override {
 		return actorLineageSet;
 	}
+#endif
 
 	void stop() override { isStopped = true; }
 	void addStopCallback(std::function<void()> fn) override { stopCallbacks.emplace_back(std::move(fn)); }
@@ -2126,7 +2128,9 @@ public:
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
 
+#ifdef ENABLE_SAMPLING
 	ActorLineageSet actorLineageSet;
+#endif
 };
 
 class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
@@ -2511,9 +2515,11 @@ Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 	return fileWrites[filename];
 }
 
+#ifdef ENABLE_SAMPLING
 ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
 	return actorLineageSet;
 }
+#endif
 
 void Sim2FileSystem::newFileSystem() {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());

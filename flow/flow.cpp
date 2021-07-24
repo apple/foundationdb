@@ -26,14 +26,17 @@
 #include <stdarg.h>
 #include <cinttypes>
 
-
 std::atomic<bool> startSampling = false;
 LineageReference rootLineage;
 thread_local LineageReference* currentLineage = &rootLineage;
 
 LineagePropertiesBase::~LineagePropertiesBase() {}
 
+#ifdef ENABLE_SAMPLING
 ActorLineage::ActorLineage() : properties(), parent(*currentLineage) {}
+#else
+ActorLineage::ActorLineage() : properties() {}
+#endif
 
 ActorLineage::~ActorLineage() {
 	for (auto property : properties) {

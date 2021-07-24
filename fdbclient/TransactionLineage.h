@@ -86,6 +86,7 @@ struct TransactionLineageCollector : IALPCollector<TransactionLineage> {
 	}
 };
 
+#ifdef ENABLE_SAMPLING
 template <class T, class V>
 class ScopedLineage {
 	V before;
@@ -126,3 +127,4 @@ template <class T, class V>
 ScopedLineage<T, V> make_scoped_lineage(V T::*member, V const& value) {
 	return ScopedLineage<T, V>(member, value);
 }
+#endif

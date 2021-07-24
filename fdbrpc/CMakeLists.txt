@@ -55,6 +55,14 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc PUBLIC flow)
+
+add_flow_target(STATIC_LIBRARY NAME fdbrpc_sampling
+  SRCS ${FDBRPC_SRCS}
+  DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
+target_include_directories(fdbrpc_sampling PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
+target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling)
+target_compile_definitions(fdbrpc_sampling PRIVATE -DENABLE_SAMPLING)
+
 if(COMPILE_EIO)
   add_library(eio STATIC libeio/eio.c)
   if(USE_VALGRIND)
@@ -63,8 +71,10 @@ if(COMPILE_EIO)
   target_compile_definitions(eio PRIVATE USE_UCONTEXT)
   target_compile_options(eio BEFORE PRIVATE -w) # disable warnings for eio
   target_link_libraries(fdbrpc PRIVATE eio)
+  target_link_libraries(fdbrpc_sampling PRIVATE eio)
 endif()
 if(WIN32)
   add_library(coro STATIC libcoroutine/Common.c libcoroutine/Coro.c)
   target_link_libraries(fdbrpc PRIVATE coro)
+  target_link_libraries(fdbrpc_sampling PRIVATE coro)
 endif()

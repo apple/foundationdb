@@ -1626,7 +1626,9 @@ private:
 int main(int argc, char* argv[]) {
 	// TODO: Remove later, this is just to force the statics to be initialized
 	// otherwise the unit test won't run
+#ifdef ENABLE_SAMPLING
 	ActorLineageSet _;
+#endif
 	try {
 		platformInit();
 

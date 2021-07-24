@@ -578,6 +578,7 @@ struct StackLineage : LineageProperties<StackLineage> {
 	StringRef actorName;
 };
 
+#ifdef ENABLE_SAMPLING
 struct LineageScope {
 	LineageReference* oldLineage;
 	LineageScope(LineageReference* with) : oldLineage(currentLineage) {
@@ -587,6 +588,7 @@ struct LineageScope {
 		replaceLineage(oldLineage);
 	}
 };
+#endif
 
 // This class can be used in order to modify all lineage properties
 // of actors created within a (non-actor) scope
@@ -594,14 +596,14 @@ struct LocalLineage {
 	LineageReference lineage;
 	LineageReference* oldLineage;
 	LocalLineage() {
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 		lineage.allocate();
 		oldLineage = currentLineage;
 		replaceLineage(&lineage);
 #endif
 	}
 	~LocalLineage() {
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 		replaceLineage(oldLineage);
 #endif
 	}
@@ -1184,10 +1186,8 @@ static inline void destruct(T& t) {
 
 template <class ReturnValue>
 struct Actor : SAV<ReturnValue> {
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 	LineageReference lineage = *currentLineage;
-#else
-	LineageReference lineage;
 #endif
 	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
 	                         // group #
@@ -1195,7 +1195,7 @@ struct Actor : SAV<ReturnValue> {
 	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/ }
 	// ~Actor() { --actorCount; }
 
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 	LineageReference* lineageAddr() {
 		return std::addressof(lineage);
 	}
@@ -1206,17 +1206,15 @@ template <>
 struct Actor<void> {
 	// This specialization is for a void actor (one not returning a future, hence also uncancellable)
 
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 	LineageReference lineage = *currentLineage;
-#else
-	LineageReference lineage;
 #endif
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
 	Actor() : actor_wait_state(0) { /*++actorCount;*/ }
 	// ~Actor() { --actorCount; }
 
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 	LineageReference* lineageAddr() {
 		return std::addressof(lineage);
 	}
@@ -1226,13 +1224,13 @@ struct Actor<void> {
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
 	virtual void fire(ValueType const& value) override {
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 #endif
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
 	virtual void error(Error e) override {
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 #endif
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
@@ -1242,19 +1240,19 @@ struct ActorCallback : Callback<ValueType> {
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
 	void fire(ValueType const& value) override {
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 #endif
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
 	void fire(ValueType&& value) override {
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 #endif
 		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
 	}
 	void error(Error e) override {
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 #endif
 		static_cast<ActorType*>(this)->a_callback_error(this, e);

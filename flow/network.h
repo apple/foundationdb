@@ -560,8 +560,10 @@ public:
 	// returns false.
 	virtual bool checkRunnable() = 0;
 
+#ifdef ENABLE_SAMPLING
 	// Returns the shared memory data structure used to store actor lineages.
 	virtual ActorLineageSet& getActorLineageSet() = 0;
+#endif
 
 	virtual ProtocolVersion protocolVersion() = 0;
 

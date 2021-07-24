@@ -1286,7 +1286,7 @@ namespace actorcompiler
             constructor.WriteLine("{");
             constructor.Indent(+1);
             ProbeEnter(constructor, actor.name);
-            constructor.WriteLine("#ifdef VISIBILITY_SAMPLING");
+            constructor.WriteLine("#ifdef ENABLE_SAMPLING");
             constructor.WriteLine("this->lineage.setActorName(\"{0}\");", actor.name);
             constructor.WriteLine("LineageScope _(&this->lineage);");
             constructor.WriteLine("#endif");

@@ -119,8 +119,10 @@ public:
 	// Returns the time of the last modification of the file.
 	virtual Future<std::time_t> lastWriteTime(const std::string& filename) = 0;
 
+#ifdef ENABLE_SAMPLING
 	// Returns the shared memory data structure used to store actor lineages.
 	virtual ActorLineageSet& getActorLineageSet() = 0;
+#endif
 
 	static IAsyncFileSystem* filesystem() { return filesystem(g_network); }
 	static runCycleFuncPtr runCycleFunc() {

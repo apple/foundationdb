@@ -1565,7 +1565,7 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 
 	void destroy() override { delete this; }
 
-#ifdef VISIBILITY_SAMPLING
+#ifdef ENABLE_SAMPLING
 	LineageReference* lineageAddr() {
 		return currentLineage;
 	}
