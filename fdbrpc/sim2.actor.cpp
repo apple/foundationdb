@@ -178,7 +178,7 @@ SimClogging g_clogging;
 
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn(ISimulator::ProcessInfo* process)
-	  : process(process), dbgid(deterministicRandom()->randomUniqueID()), opened(false), closedByCaller(false),
+	  : opened(false), closedByCaller(false), process(process), dbgid(deterministicRandom()->randomUniqueID()),
 	    stopReceive(Never()) {
 		pipes = sender(this) && receiver(this);
 	}
@@ -562,8 +562,8 @@ private:
 	           const std::string& filename,
 	           const std::string& actualFilename,
 	           int flags)
-	  : h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename),
-	    actualFilename(actualFilename), dbgId(deterministicRandom()->randomUniqueID()), flags(flags) {}
+	  : h(h), diskParameters(diskParameters), filename(filename), actualFilename(actualFilename), flags(flags),
+	    dbgId(deterministicRandom()->randomUniqueID()), delayOnWrite(delayOnWrite) {}
 
 	static int flagConversion(int flags) {
 		int outFlags = O_BINARY | O_CLOEXEC;
@@ -1988,7 +1988,7 @@ public:
 	}
 
 	Sim2()
-	  : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
+	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), taskCount(0), yielded(false), yield_limit(0) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",

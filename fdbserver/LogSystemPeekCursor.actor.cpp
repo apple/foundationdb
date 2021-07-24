@@ -48,9 +48,10 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
                                                Version poppedVersion,
                                                Tag tag)
   : tag(tag), results(results), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion),
-    end(end), messageAndTags(message), hasMsg(hasMsg), randomID(deterministicRandom()->randomUniqueID()),
-    poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false),
-    lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void()) {
+    end(end), poppedVersion(poppedVersion), messageAndTags(message), hasMsg(hasMsg),
+    randomID(deterministicRandom()->randomUniqueID()), returnIfBlocked(false), onlySpilled(false),
+    parallelGetMore(false), sequence(0), lastReset(0), resetCheck(Void()), slowReplies(0), fastReplies(0),
+    unknownReplies(0) {
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
@@ -408,8 +409,8 @@ Version ILogSystem::ServerPeekCursor::popped() const {
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor(vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
                                                Version begin)
-  : serverCursors(serverCursors), bestServer(-1), readQuorum(serverCursors.size()), tag(invalidTag), currentCursor(0),
-    hasNextMessage(false), messageVersion(begin), randomID(deterministicRandom()->randomUniqueID()),
+  : serverCursors(serverCursors), tag(invalidTag), bestServer(-1), currentCursor(0), readQuorum(serverCursors.size()),
+    messageVersion(begin), hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
     tLogReplicationFactor(0) {
 	sortedVersions.resize(serverCursors.size());
 }
@@ -452,8 +453,8 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(vector<Reference<ILogSystem::IPee
                                                Optional<LogMessageVersion> nextVersion,
                                                Reference<LogSet> logSet,
                                                int tLogReplicationFactor)
-  : serverCursors(serverCursors), bestServer(bestServer), readQuorum(readQuorum), currentCursor(0),
-    hasNextMessage(false), messageVersion(messageVersion), nextVersion(nextVersion), logSet(logSet),
+  : logSet(logSet), serverCursors(serverCursors), bestServer(bestServer), currentCursor(0), readQuorum(readQuorum),
+    nextVersion(nextVersion), messageVersion(messageVersion), hasNextMessage(false),
     randomID(deterministicRandom()->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor) {
 	sortedVersions.resize(serverCursors.size());
 	calcHasMessage();
@@ -697,8 +698,8 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
                                          Version begin,
                                          Version end,
                                          bool parallelGetMore)
-  : logSets(logSets), bestSet(bestSet), bestServer(bestServer), tag(tag), currentCursor(0), currentSet(bestSet),
-    hasNextMessage(false), messageVersion(begin), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()) {
+  : logSets(logSets), tag(tag), bestSet(bestSet), bestServer(bestServer), currentSet(bestSet), currentCursor(0),
+    messageVersion(begin), hasNextMessage(false), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()) {
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
 	for (int i = 0; i < logSets.size(); i++) {
@@ -719,8 +720,8 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
                                          int bestServer,
                                          Optional<LogMessageVersion> nextVersion,
                                          bool useBestSet)
-  : logSets(logSets), serverCursors(serverCursors), messageVersion(messageVersion), bestSet(bestSet),
-    bestServer(bestServer), nextVersion(nextVersion), currentSet(bestSet), currentCursor(0), hasNextMessage(false),
+  : logSets(logSets), serverCursors(serverCursors), bestSet(bestSet), bestServer(bestServer), currentSet(bestSet),
+    currentCursor(0), nextVersion(nextVersion), messageVersion(messageVersion), hasNextMessage(false),
     useBestSet(useBestSet), randomID(deterministicRandom()->randomUniqueID()) {
 	int maxServers = 0;
 	for (int i = 0; i < logSets.size(); i++) {
@@ -1155,8 +1156,8 @@ ILogSystem::BufferedCursor::BufferedCursor(std::vector<Reference<IPeekCursor>> c
                                            bool collectTags,
                                            bool canDiscardPopped)
   : cursors(cursors), messageIndex(0), messageVersion(begin), end(end), hasNextMessage(false), withTags(withTags),
-    poppedVersion(0), initialPoppedVersion(0), canDiscardPopped(canDiscardPopped), knownUnique(false),
-    minKnownCommittedVersion(0), randomID(deterministicRandom()->randomUniqueID()), collectTags(collectTags) {
+    knownUnique(false), minKnownCommittedVersion(0), poppedVersion(0), initialPoppedVersion(0),
+    canDiscardPopped(canDiscardPopped), randomID(deterministicRandom()->randomUniqueID()), collectTags(collectTags) {
 	targetQueueSize = SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES / cursors.size();
 	messages.reserve(SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES);
 	cursorMessages.resize(cursors.size());
@@ -1168,8 +1169,8 @@ ILogSystem::BufferedCursor::BufferedCursor(
     Version begin,
     Version end,
     bool parallelGetMore)
-  : messageVersion(begin), end(end), withTags(true), messageIndex(0), hasNextMessage(false), poppedVersion(0),
-    initialPoppedVersion(0), canDiscardPopped(false), knownUnique(true), minKnownCommittedVersion(0),
+  : messageIndex(0), messageVersion(begin), end(end), hasNextMessage(false), withTags(true), knownUnique(true),
+    minKnownCommittedVersion(0), poppedVersion(0), initialPoppedVersion(0), canDiscardPopped(false),
     randomID(deterministicRandom()->randomUniqueID()), collectTags(false) {
 	targetQueueSize = SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES / logServers.size();
 	messages.reserve(SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES);
