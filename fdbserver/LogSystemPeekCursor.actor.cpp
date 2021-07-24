@@ -1154,10 +1154,9 @@ ILogSystem::BufferedCursor::BufferedCursor(std::vector<Reference<IPeekCursor>> c
                                            bool withTags,
                                            bool collectTags,
                                            bool canDiscardPopped)
-  : cursors(cursors), messageVersion(begin), end(end), withTags(withTags), collectTags(collectTags),
-    hasNextMessage(false), messageIndex(0), poppedVersion(0), initialPoppedVersion(0),
-    canDiscardPopped(canDiscardPopped), knownUnique(false), minKnownCommittedVersion(0),
-    randomID(deterministicRandom()->randomUniqueID()) {
+  : cursors(cursors), messageIndex(0), messageVersion(begin), end(end), hasNextMessage(false), withTags(withTags),
+    poppedVersion(0), initialPoppedVersion(0), canDiscardPopped(canDiscardPopped), knownUnique(false),
+    minKnownCommittedVersion(0), randomID(deterministicRandom()->randomUniqueID()), collectTags(collectTags) {
 	targetQueueSize = SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES / cursors.size();
 	messages.reserve(SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES);
 	cursorMessages.resize(cursors.size());

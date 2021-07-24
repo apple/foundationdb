@@ -2012,13 +2012,13 @@ public:
 		ProcessInfo* machine;
 		Promise<Void> action;
 		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action)
-		  : time(time), taskID(taskID), stable(stable), machine(machine), action(std::move(action)) {}
+		  : taskID(taskID), time(time), stable(stable), machine(machine), action(std::move(action)) {}
 		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future)
-		  : time(time), taskID(taskID), stable(stable), machine(machine) {
+		  : taskID(taskID), time(time), stable(stable), machine(machine) {
 			future = action.getFuture();
 		}
 		Task(Task&& rhs) noexcept
-		  : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine),
+		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
 		    action(std::move(rhs.action)) {}
 		void operator=(Task const& rhs) {
 			taskID = rhs.taskID;

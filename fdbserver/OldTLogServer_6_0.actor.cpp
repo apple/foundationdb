@@ -57,7 +57,7 @@ struct TLogQueueEntryRef {
 
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
-	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id),
+	  : id(from.id), version(from.version), knownCommittedVersion(from.knownCommittedVersion),
 	    messages(a, from.messages) {}
 
 	template <class Ar>
@@ -304,13 +304,13 @@ struct TLogData : NonCopyable {
 	         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	         Reference<AsyncVar<bool>> degraded,
 	         std::string folder)
-	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
-	    persistentData(persistentData), rawPersistentQueue(persistentQueue),
-	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo), degraded(degraded), queueCommitBegin(0),
-	    queueCommitEnd(0), diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0),
+	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
+	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), diskQueueCommitBytes(0),
+	    largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0), queueCommitBegin(0),
+	    instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0), bytesDurable(0),
 	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopRequest(false),
-	    ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped() {
+	    dataFolder(folder), degraded(degraded) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
@@ -326,12 +326,12 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		Tag tag;
 
 		TagData(Tag tag, Version popped, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered)
-		  : tag(tag), nothingPersistent(nothingPersistent), popped(popped), poppedRecently(poppedRecently),
-		    unpoppedRecovered(unpoppedRecovered) {}
+		  : nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), popped(popped),
+		    unpoppedRecovered(unpoppedRecovered), tag(tag) {}
 
 		TagData(TagData&& r) noexcept
 		  : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent),
-		    poppedRecently(r.poppedRecently), popped(r.popped), tag(r.tag), unpoppedRecovered(r.unpoppedRecovered) {}
+		    poppedRecently(r.poppedRecently), popped(r.popped), unpoppedRecovered(r.unpoppedRecovered), tag(r.tag) {}
 		void operator=(TagData&& r) noexcept {
 			versionMessages = std::move(r.versionMessages);
 			nothingPersistent = r.nothingPersistent;
@@ -524,15 +524,14 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                 UID recruitmentID,
 	                 std::vector<Tag> tags,
 	                 std::string context)
-	  : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()), cc("TLog", interf.id().toString()),
-	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary),
-	    logRouterTags(logRouterTags), txsTags(txsTags), recruitmentID(recruitmentID),
-	    logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0),
-	    minKnownCommittedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
-	    // These are initialized differently on init() or recovery
-	    recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0),
-	    newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
-	    logRouterPopToVersion(0), locality(tagLocalityInvalid), execOpCommitInProgress(false) {
+	  : stopped(false), initialized(false), queueCommittingVersion(0), knownCommittedVersion(0),
+	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), unpoppedRecoveredTags(0),
+	    cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc),
+	    logId(interf.id()), newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1),
+	    recoveredAt(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
+	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
+	    recruitmentID(recruitmentID), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
+	    execOpCommitInProgress(false), txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,

@@ -191,7 +191,7 @@ private:
 	                    NetworkAddress openedAddress,
 	                    bool aio)
 	  : filename(filename), initialFilename(initialFilename), approximateSize(0), openedAddress(openedAddress),
-	    aio(aio), file(file), diskParameters(diskParameters), pendingModifications(uint64_t(-1)), reponses(false) {
+	    aio(aio), file(file), pendingModifications(uint64_t(-1)), diskParameters(diskParameters), reponses(false) {
 
 		// This is only designed to work in simulation
 		ASSERT(g_network->isSimulated());

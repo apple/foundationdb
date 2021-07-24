@@ -1392,10 +1392,10 @@ struct SystemStatisticsState {
 	uint64_t lastBusyTicks, lastReads, lastWrites, lastWriteSectors, lastReadSectors;
 	uint64_t lastClockIdleTime, lastClockTotalTime;
 	SystemStatisticsState()
-	  : machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0), lastBusyTicks(0),
+	  : processLastReceived(0), lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0),
+	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0), lastBusyTicks(0),
 	    lastReads(0), lastWrites(0), lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0),
-	    lastClockTotalTime(0), lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0),
-	    processLastReceived(0) {}
+	    lastClockTotalTime(0) {}
 #else
 #error Port me!
 #endif
