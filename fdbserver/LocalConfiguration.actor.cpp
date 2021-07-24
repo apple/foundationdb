@@ -327,9 +327,9 @@ public:
 	                       std::map<std::string, std::string> const& manualKnobOverrides,
 	                       IsTest isTest)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"),
-	    configKnobOverrides(configPath), cc("LocalConfiguration"), broadcasterChanges("BroadcasterChanges", cc),
-	    snapshots("Snapshots", cc), changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc),
-	    manualKnobOverrides(manualKnobOverrides) {
+	    configKnobOverrides(configPath), manualKnobOverrides(manualKnobOverrides), cc("LocalConfiguration"),
+	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
+	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc) {
 		if (isTest) {
 			testKnobCollection =
 			    IKnobCollection::create(IKnobCollection::Type::TEST,

@@ -847,15 +847,15 @@ TraceEvent::TraceEvent(Severity severity, const char* type, UID id)
 }
 TraceEvent::TraceEvent(TraceInterval& interval, UID id)
   : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity),
-    logged(false), type(interval.type), id(id), severity(interval.severity) {
+    logged(false), severity(interval.severity), type(interval.type), id(id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 
 	init(interval);
 }
 TraceEvent::TraceEvent(Severity severity, TraceInterval& interval, UID id)
-  : initialized(false), logged(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity),
-    type(interval.type), id(id), severity(severity) {
+  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), logged(false),
+    severity(severity), type(interval.type), id(id) {
 
 	setMaxFieldLength(0);
 	setMaxEventLength(0);

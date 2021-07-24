@@ -203,7 +203,7 @@ class ConfigBroadcasterImpl {
 	}
 
 	ConfigBroadcasterImpl()
-	  : mostRecentVersion(0), lastCompactedVersion(0), id(deterministicRandom()->randomUniqueID()),
+	  : lastCompactedVersion(0), mostRecentVersion(0), id(deterministicRandom()->randomUniqueID()),
 	    cc("ConfigBroadcaster"), compactRequest("CompactRequest", cc),
 	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
 	    snapshotRequest("SnapshotRequest", cc) {
