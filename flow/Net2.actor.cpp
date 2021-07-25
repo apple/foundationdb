@@ -1175,9 +1175,9 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
     sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0),
 #endif
-    tlsConfig(tlsConfig), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
+    tlsConfig(tlsConfig), tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
     currentTaskID(TaskPriority::DefaultYield), tasksIssued(0), stopped(false), started(false), numYields(0),
-    lastPriorityStats(nullptr), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE), tlsInitializedState(ETLSInitState::NONE) {
+    lastPriorityStats(nullptr), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE) {
 	// Until run() is called, yield() will always yield
 	TraceEvent("Net2Starting");
 

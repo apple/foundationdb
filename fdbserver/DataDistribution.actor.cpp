@@ -87,10 +87,10 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	             bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet,
 	             Version addedVersion = 0)
-	  : id(ssi.id()), collection(collection), lastKnownInterface(ssi), lastKnownClass(processClass),
-	    dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()),
-	    inDesiredDC(inDesiredDC), storeType(KeyValueStoreType::END), onTSSPairRemoved(Never()),
-	    addedVersion(addedVersion) {
+	  : id(ssi.id()), addedVersion(addedVersion), collection(collection), lastKnownInterface(ssi),
+	    lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()),
+	    onRemoved(removed.getFuture()), onTSSPairRemoved(Never()), inDesiredDC(inDesiredDC),
+	    storeType(KeyValueStoreType::END) {
 
 		if (!ssi.isTss()) {
 			localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -187,7 +187,7 @@ public:
 	Future<Void> tracker;
 
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
-	  : servers(servers), healthy(true), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), wrongConfiguration(false),
+	  : servers(servers), healthy(true), wrongConfiguration(false), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY),
 	    id(deterministicRandom()->randomUniqueID()) {
 		if (servers.empty()) {
 			TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers");
@@ -377,8 +377,8 @@ struct ServerStatus {
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
 	ServerStatus(bool isFailed, bool isUndesired, bool isWiggling, LocalityData const& locality)
-	  : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false),
-	    initialized(true), isWiggling(isWiggling) {}
+	  : isWiggling(isWiggling), isFailed(isFailed), isUndesired(isUndesired), isWrongConfiguration(false),
+	    initialized(true), locality(locality) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
 	const char* toString() const {
 		return isFailed ? "Failed" : isUndesired ? "Undesired" : isWiggling ? "Wiggling" : "Healthy";
@@ -751,8 +751,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), isTssRecruiting(false),
 	    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
 	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
-	    getShardMetrics(getShardMetrics), removeFailedServer(removeFailedServer),
-	    getUnhealthyRelocationCount(getUnhealthyRelocationCount) {
+	    getShardMetrics(getShardMetrics), getUnhealthyRelocationCount(getUnhealthyRelocationCount),
+	    removeFailedServer(removeFailedServer) {
 		if (!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest("DDTrackerStarting");
 		}
@@ -4987,7 +4987,7 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	TSSPairState() : active(false) {}
 
 	TSSPairState(const LocalityData& locality)
-	  : active(true), dcId(locality.dcId()), dataHallId(locality.dataHallId()) {}
+	  : dcId(locality.dcId()), dataHallId(locality.dataHallId()), active(true) {}
 
 	bool inDataZone(const LocalityData& locality) {
 		return locality.dcId() == dcId && locality.dataHallId() == dataHallId;
