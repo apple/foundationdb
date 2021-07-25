@@ -33,7 +33,7 @@ class BackupContainerAzureBlobStore final : public BackupContainerFileSystem,
                                             ReferenceCounted<BackupContainerAzureBlobStore> {
 	using AzureClient = azure::storage_lite::blob_client;
 
-	std::unique_ptr<AzureClient> client;
+	std::shared_ptr<AzureClient> client;
 	std::string containerName;
 	AsyncTaskThread asyncTaskThread;
 

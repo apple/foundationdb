@@ -31,14 +31,14 @@ public:
 		AsyncTaskThread* asyncTaskThread;
 		std::string containerName;
 		std::string blobName;
-		AzureClient* client;
+		std::shared_ptr<AzureClient> client;
 
 	public:
 		ReadFile(AsyncTaskThread& asyncTaskThread,
 		         const std::string& containerName,
 		         const std::string& blobName,
-		         AzureClient& client)
-		  : asyncTaskThread(&asyncTaskThread), containerName(containerName), blobName(blobName), client(&client) {}
+		         std::shared_ptr<AzureClient> const& client)
+		  : asyncTaskThread(&asyncTaskThread), containerName(containerName), blobName(blobName), client(client) {}
 
 		void addref() override { ReferenceCounted<ReadFile>::addref(); }
 		void delref() override { ReferenceCounted<ReadFile>::delref(); }
@@ -73,7 +73,7 @@ public:
 
 	class WriteFile final : public IAsyncFile, ReferenceCounted<WriteFile> {
 		AsyncTaskThread* asyncTaskThread;
-		AzureClient* client;
+		std::shared_ptr<AzureClient> client;
 		std::string containerName;
 		std::string blobName;
 		int64_t m_cursor{ 0 };
@@ -88,8 +88,8 @@ public:
 		WriteFile(AsyncTaskThread& asyncTaskThread,
 		          const std::string& containerName,
 		          const std::string& blobName,
-		          AzureClient& client)
-		  : asyncTaskThread(&asyncTaskThread), containerName(containerName), blobName(blobName), client(&client) {}
+		          std::shared_ptr<AzureClient> const& client)
+		  : asyncTaskThread(&asyncTaskThread), containerName(containerName), blobName(blobName), client(client) {}
 
 		void addref() override { ReferenceCounted<WriteFile>::addref(); }
 		void delref() override { ReferenceCounted<WriteFile>::delref(); }
@@ -178,7 +178,7 @@ public:
 			throw file_not_found();
 		}
 		Reference<IAsyncFile> f =
-		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, *self->client);
+		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, self->client);
 		if (self->usesEncryption()) {
 			f = encryptFile(f, AsyncFileEncrypted::Mode::READ_ONLY);
 		}
@@ -187,19 +187,19 @@ public:
 
 	ACTOR static Future<Reference<IBackupFile>> writeFile(BackupContainerAzureBlobStore* self, std::string fileName) {
 		wait(self->asyncTaskThread.execAsync(
-		    [client = self->client.get(), containerName = self->containerName, fileName = fileName] {
+		    [client = self->client, containerName = self->containerName, fileName = fileName] {
 			    auto outcome = client->create_append_blob(containerName, fileName).get();
 			    return Void();
 		    }));
 		Reference<IAsyncFile> f =
-		    makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, *self->client);
+		    makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client);
 		if (self->usesEncryption()) {
 			f = encryptFile(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 		}
 		return makeReference<BackupFile>(fileName, f);
 	}
 
-	static void listFiles(AzureClient* client,
+	static void listFiles(std::shared_ptr<AzureClient> const& client,
 	                      const std::string& containerName,
 	                      const std::string& path,
 	                      std::function<bool(std::string const&)> folderPathFilter,
@@ -220,7 +220,7 @@ public:
 			BackupContainerFileSystem::FilesAndSizesT files = wait(self->listFiles());
 			filesToDelete = files.size();
 		}
-		wait(self->asyncTaskThread.execAsync([containerName = self->containerName, client = self->client.get()] {
+		wait(self->asyncTaskThread.execAsync([containerName = self->containerName, client = self->client] {
 			client->delete_container(containerName).wait();
 			return Void();
 		}));
@@ -233,11 +233,10 @@ public:
 };
 
 Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileName) {
-	return asyncTaskThread.execAsync(
-	    [client = this->client.get(), containerName = this->containerName, fileName = fileName] {
-		    auto resp = client->get_blob_properties(containerName, fileName).get().response();
-		    return resp.valid();
-	    });
+	return asyncTaskThread.execAsync([client = this->client, containerName = this->containerName, fileName = fileName] {
+		auto resp = client->get_blob_properties(containerName, fileName).get().response();
+		return resp.valid();
+	});
 }
 
 BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const NetworkAddress& address,
@@ -263,7 +262,7 @@ void BackupContainerAzureBlobStore::delref() {
 
 Future<Void> BackupContainerAzureBlobStore::create() {
 	Future<Void> createContainerFuture =
-	    asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
+	    asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
 		    client->create_container(containerName).wait();
 		    return Void();
 	    });
@@ -271,7 +270,7 @@ Future<Void> BackupContainerAzureBlobStore::create() {
 	return createContainerFuture && encryptionSetupFuture;
 }
 Future<bool> BackupContainerAzureBlobStore::exists() {
-	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
+	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
 		auto resp = client->get_container_properties(containerName).get().response();
 		return resp.valid();
 	});
@@ -288,22 +287,19 @@ Future<Reference<IBackupFile>> BackupContainerAzureBlobStore::writeFile(const st
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerAzureBlobStore::listFiles(
     const std::string& path,
     std::function<bool(std::string const&)> folderPathFilter) {
-	return asyncTaskThread.execAsync([client = this->client.get(),
-	                                  containerName = this->containerName,
-	                                  path = path,
-	                                  folderPathFilter = folderPathFilter] {
-		FilesAndSizesT result;
-		BackupContainerAzureBlobStoreImpl::listFiles(client, containerName, path, folderPathFilter, result);
-		return result;
-	});
+	return asyncTaskThread.execAsync(
+	    [client = this->client, containerName = this->containerName, path = path, folderPathFilter = folderPathFilter] {
+		    FilesAndSizesT result;
+		    BackupContainerAzureBlobStoreImpl::listFiles(client, containerName, path, folderPathFilter, result);
+		    return result;
+	    });
 }
 
 Future<Void> BackupContainerAzureBlobStore::deleteFile(const std::string& fileName) {
-	return asyncTaskThread.execAsync(
-	    [containerName = this->containerName, fileName = fileName, client = client.get()]() {
-		    client->delete_blob(containerName, fileName).wait();
-		    return Void();
-	    });
+	return asyncTaskThread.execAsync([containerName = this->containerName, fileName = fileName, client = client]() {
+		client->delete_blob(containerName, fileName).wait();
+		return Void();
+	});
 }
 
 Future<Void> BackupContainerAzureBlobStore::deleteContainer(int* pNumDeleted) {
