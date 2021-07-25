@@ -64,7 +64,7 @@ To simplify the description, we ignore the batching mechanisms happening in each
 
 Figure 1 illustrates how a mutation is routed inside FDB. The solid lines are asynchronous pull operations, while the dotted lines are synchronous push operations.
 
-.. image:: /images/FDB_ha_write_path.png
+.. image:: images/FDB_ha_write_path.png
 
 At Client
 ---------
