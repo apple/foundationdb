@@ -291,8 +291,6 @@ else()
       -Wno-format
       -Wno-mismatched-tags
       -Wno-missing-field-initializers
-      -Wno-reorder
-      -Wno-reorder-ctor
       -Wno-sign-compare
       -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
