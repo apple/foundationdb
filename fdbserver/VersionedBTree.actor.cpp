@@ -136,7 +136,8 @@ private:
 #endif
 
 public:
-	PriorityMultiLock(int concurrency, int maxPriority) : concurrency(concurrency), available(concurrency), waiting(0) {
+	PriorityMultiLock(int concurrency, int maxPriority, int launchLimit = std::numeric_limits<int>::max())
+	  : concurrency(concurrency), available(concurrency), launchLimit(launchLimit), waiting(0) {
 		waiters.resize(maxPriority + 1);
 		fRunner = runner(this);
 	}
@@ -179,6 +180,13 @@ private:
 		state Future<Void> error = self->brokenOnDestruct.getFuture();
 		state int maxPriority = self->waiters.size() - 1;
 
+		// Priority to try to run tasks from next
+		state int priority = maxPriority;
+		state Queue* pQueue = &self->waiters[maxPriority];
+
+		// Track the number of waiters unlocked at the same priority in a row
+		state int lastPriorityCount = 0;
+
 		loop {
 			// Cleanup finished runner futures at the front of the runner queue.
 			while (!self->runners.empty() && self->runners.front().isReady()) {
@@ -195,19 +203,18 @@ private:
 			}
 
 			// While there are available slots and there are waiters, launch tasks
-			int priority = maxPriority;
-
 			while (self->available > 0 && self->waiting > 0) {
-				auto& q = self->waiters[priority];
-				prioritylock_printf(
-				    "Checking priority=%d prioritySize=%d %s\n", priority, q.size(), self->toString().c_str());
+				prioritylock_printf("Checking priority=%d lastPriorityCount=%d %s\n",
+				                    priority,
+				                    lastPriorityCount,
+				                    self->toString().c_str());
 
-				while (!q.empty()) {
-					Slot s = q.front();
-					q.pop_front();
+				while (!pQueue->empty() && ++lastPriorityCount < self->launchLimit) {
+					Slot s = pQueue->front();
+					pQueue->pop_front();
 					--self->waiting;
 					Lock lock;
-					prioritylock_printf("  Running waiter priority=%d prioritySize=%d\n", priority, q.size());
+					prioritylock_printf("  Running waiter priority=%d %s\n", priority, self->toString().c_str());
 					s.send(lock);
 
 					// Self may have been destructed during the lock callback
@@ -226,24 +233,44 @@ private:
 					}
 				}
 
-				// Wrap around to highest priority
+				// If there are no more slots available, then don't move to the next priority
+				if (self->available == 0) {
+					break;
+				}
+
+				// Decrease priority, wrapping around to max from 0
 				if (priority == 0) {
 					priority = maxPriority;
 				} else {
 					--priority;
 				}
+
+				pQueue = &self->waiters[priority];
+				lastPriorityCount = 0;
 			}
 		}
 	}
 
 	std::string toString() const {
-		return format(
-		    "{ slots=%d/%d waiting=%d runners=%d }", (concurrency - available), concurrency, waiting, runners.size());
+		std::string s = format("{ concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d ",
+		                       concurrency,
+		                       available,
+		                       concurrency - available,
+		                       waiting,
+		                       runners.size());
+
+		for (int i = 0; i < waiters.size(); ++i) {
+			s += format("p%d_waiters=%u ", i, waiters[i].size());
+		}
+
+		s += "}";
+		return s;
 	}
 
 	int concurrency;
 	int available;
 	int waiting;
+	int launchLimit;
 	std::vector<Queue> waiters;
 	Deque<Future<Void>> runners;
 	Future<Void> fRunner;
@@ -365,7 +392,7 @@ std::string toString(const std::pair<F, S>& o) {
 
 static constexpr int ioMinPriority = 0;
 static constexpr int ioLeafPriority = 1;
-static constexpr int ioMaxPriority = 2;
+static constexpr int ioMaxPriority = 3;
 
 // A FIFO queue of T stored as a linked list of pages.
 // Main operations are pop(), pushBack(), pushFront(), and flush().
@@ -2053,7 +2080,7 @@ public:
 	  : desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize), filename(filename), pHeader(nullptr),
 	    pageCacheBytes(pageCacheSizeBytes), memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow),
 	    concurrentExtentReads(new FlowLock(concurrentExtentReads)), errorPromise(errorPromise),
-	    ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority) {
+	    ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
@@ -2124,6 +2151,9 @@ public:
 		if (exists) {
 			wait(store(fileSize, self->pageFile->size()));
 		}
+
+		self->lastTruncate = Void();
+		self->lastTruncatePageCount = 0;
 
 		debug_printf(
 		    "DWALPager(%s) recover exists=%d fileSize=%" PRId64 "\n", self->filename.c_str(), exists, fileSize);
@@ -2421,11 +2451,27 @@ public:
 	// Grow the pager file by one page and return it
 	LogicalPageID newLastPageID() {
 		LogicalPageID id = pHeader->pageCount;
-		++pHeader->pageCount;
+		growPager(1);
 		return id;
 	}
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
+
+	void growPager(int64_t pages) {
+		pHeader->pageCount += pages;
+
+		if (!memoryOnly && pHeader->pageCount > lastTruncatePageCount) {
+			// Round up to the nearest growth-size multiple
+			lastTruncatePageCount =
+			    pHeader->pageCount + (SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES -
+			                          (pHeader->pageCount % SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES));
+
+			lastTruncate = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
+			    lastTruncate, [=](Void) { return pageFile->truncate(lastTruncatePageCount * physicalPageSize); });
+
+			operations.add(lastTruncate);
+		}
+	}
 
 	// Get a new, previously available extent and it's first page ID.  The page will be considered in-use after the next
 	// commit regardless of whether or not it was written to, until it is returned to the pager via freePage()
@@ -2456,7 +2502,7 @@ public:
 	// That translates to extentID being same as the return first pageID
 	LogicalPageID newLastExtentID() {
 		LogicalPageID id = pHeader->pageCount;
-		pHeader->pageCount += pagesPerExtent;
+		growPager(pagesPerExtent);
 		return id;
 	}
 
@@ -3489,6 +3535,8 @@ private:
 	// The header will be written to / read from disk as a smallestPhysicalBlock sized chunk.
 	Reference<ArenaPage> headerPage;
 	Header* pHeader;
+	Future<Void> lastTruncate;
+	int64_t lastTruncatePageCount;
 
 	int desiredPageSize;
 	int desiredExtentSize;

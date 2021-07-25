@@ -739,6 +739,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_REMAP_CLEANUP_WINDOW,                           50 );
 	init( REDWOOD_REMAP_CLEANUP_LAG,                             0.1 );
 	init( REDWOOD_LOGGING_INTERVAL,                              5.0 );
+	init( REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES,                  20000 ); if( randomize && BUGGIFY ) { REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES = deterministicRandom()->randomInt(1, 10); }
 
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
