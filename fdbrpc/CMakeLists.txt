@@ -1,6 +1,7 @@
 set(FDBRPC_SRCS
   AsyncFileCached.actor.h
   AsyncFileEIO.actor.h
+  AsyncFileEncrypted.h
   AsyncFileKAIO.actor.h
   AsyncFileNonDurable.actor.h
   AsyncFileReadAhead.actor.h
@@ -36,7 +37,6 @@ set(FDBRPC_SRCS
 if(WITH_TLS AND NOT WIN32)
   set(FDBRPC_SRCS
     ${FDBRPC_SRCS}
-    AsyncFileEncrypted.h
     AsyncFileEncrypted.actor.cpp)
 endif()
 

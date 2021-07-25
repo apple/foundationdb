@@ -42,31 +42,31 @@ typedef uint32_t QueueID;
 
 // Pager Events
 enum class PagerEvents { CacheLookup = 0, CacheHit, CacheMiss, PageWrite, MAXEVENTS };
-static const std::string PagerEventsCodes[] = { "Lookup", "Hit", "Miss", "Write" };
+static const char* const PagerEventsStrings[] = { "Lookup", "Hit", "Miss", "Write", "Unknown" };
 // Reasons for page level events.
 enum class PagerEventReasons { PointRead = 0, RangeRead, RangePrefetch, Commit, LazyClear, MetaData, MAXEVENTREASONS };
-static const std::string PagerEventReasonsCodes[] = { "Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta" };
+static const char* const PagerEventReasonsStrings[] = {
+	"Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta", "Unknown"
+};
 
 static const int nonBtreeLevel = 0;
-static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
+static const std::vector<std::pair<PagerEvents, PagerEventReasons>> possibleEventReasonPairs = {
+	{ PagerEvents::CacheLookup, PagerEventReasons::Commit },
+	{ PagerEvents::CacheLookup, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheLookup, PagerEventReasons::PointRead },
 	{ PagerEvents::CacheLookup, PagerEventReasons::RangeRead },
-	{ PagerEvents::CacheLookup, PagerEventReasons::LazyClear },
-	{ PagerEvents::CacheLookup, PagerEventReasons::MetaData },
+	{ PagerEvents::CacheHit, PagerEventReasons::Commit },
+	{ PagerEvents::CacheHit, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheHit, PagerEventReasons::PointRead },
 	{ PagerEvents::CacheHit, PagerEventReasons::RangeRead },
-	{ PagerEvents::CacheHit, PagerEventReasons::LazyClear },
-	{ PagerEvents::CacheHit, PagerEventReasons::MetaData },
-	{ PagerEvents::CacheHit, PagerEventReasons::Commit },
+	{ PagerEvents::CacheMiss, PagerEventReasons::Commit },
+	{ PagerEvents::CacheMiss, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheMiss, PagerEventReasons::PointRead },
 	{ PagerEvents::CacheMiss, PagerEventReasons::RangeRead },
-	{ PagerEvents::CacheMiss, PagerEventReasons::LazyClear },
-	{ PagerEvents::CacheMiss, PagerEventReasons::MetaData },
-	{ PagerEvents::CacheMiss, PagerEventReasons::Commit },
-	{ PagerEvents::PageWrite, PagerEventReasons::MetaData },
+	{ PagerEvents::PageWrite, PagerEventReasons::Commit },
 	{ PagerEvents::PageWrite, PagerEventReasons::LazyClear },
 };
-static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
+static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEventReasonPairs = {
 	{ PagerEvents::CacheLookup, PagerEventReasons::RangePrefetch },
 	{ PagerEvents::CacheLookup, PagerEventReasons::MetaData },
 	{ PagerEvents::CacheHit, PagerEventReasons::RangePrefetch },
@@ -167,6 +167,7 @@ public:
 	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
 	                                                           unsigned int level,
 	                                                           LogicalPageID pageID,
+	                                                           int priority,
 	                                                           bool cacheable,
 	                                                           bool nohit) = 0;
 	virtual bool tryEvictPage(LogicalPageID id) = 0;
@@ -238,8 +239,9 @@ public:
 	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                              unsigned int level,
 	                                              LogicalPageID pageID,
-	                                              bool cacheable = true,
-	                                              bool noHit = false) = 0;
+	                                              int priority,
+	                                              bool cacheable,
+	                                              bool noHit) = 0;
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 

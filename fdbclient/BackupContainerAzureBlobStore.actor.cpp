@@ -170,9 +170,11 @@ public:
 		}
 		Reference<IAsyncFile> f =
 		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+#if ENCRYPTION_ENABLED
 		if (self->usesEncryption()) {
 			f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
 		}
+#endif
 		return f;
 	}
 
@@ -182,11 +184,12 @@ public:
 			    auto outcome = client->create_append_blob(containerName, fileName).get();
 			    return Void();
 		    }));
-		Reference<IAsyncFile> f =
-		    makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+		auto f = makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+#if ENCRYPTION_ENABLED
 		if (self->usesEncryption()) {
 			f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 		}
+#endif
 		return makeReference<BackupFile>(fileName, f);
 	}
 
