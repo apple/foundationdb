@@ -163,6 +163,15 @@ public:
 
 	static bool isDirectory(const std::string& blobName) { return blobName.size() && blobName.back() == '/'; }
 
+	// Hack to get around the fact that macros don't work inside actor functions
+	static Reference<IAsyncFile> encryptFile(Reference<IAsyncFile> const& f, AsyncFileEncrypted::Mode mode) {
+		Reference<IAsyncFile> result = f;
+#if ENCRYPTION_ENABLED
+		result = makeReference<AsyncFileEncrypted>(result, mode);
+#endif
+		return result;
+	}
+
 	ACTOR static Future<Reference<IAsyncFile>> readFile(BackupContainerAzureBlobStore* self, std::string fileName) {
 		bool exists = wait(self->blobExists(fileName));
 		if (!exists) {
@@ -170,11 +179,9 @@ public:
 		}
 		Reference<IAsyncFile> f =
 		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
-#if ENCRYPTION_ENABLED
 		if (self->usesEncryption()) {
-			f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
+			f = encryptFile(f, AsyncFileEncrypted::Mode::READ_ONLY);
 		}
-#endif
 		return f;
 	}
 
@@ -184,12 +191,11 @@ public:
 			    auto outcome = client->create_append_blob(containerName, fileName).get();
 			    return Void();
 		    }));
-		auto f = makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
-#if ENCRYPTION_ENABLED
+		Reference<IAsyncFile> f =
+		    makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
 		if (self->usesEncryption()) {
-			f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
+			f = encryptFile(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 		}
-#endif
 		return makeReference<BackupFile>(fileName, f);
 	}
 
