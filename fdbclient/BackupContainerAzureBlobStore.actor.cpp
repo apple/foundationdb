@@ -28,7 +28,7 @@ public:
 	using AzureClient = azure::storage_lite::blob_client;
 
 	class ReadFile final : public IAsyncFile, ReferenceCounted<ReadFile> {
-		AsyncTaskThread& asyncTaskThread;
+		AsyncTaskThread* asyncTaskThread;
 		std::string containerName;
 		std::string blobName;
 		AzureClient* client;
@@ -37,18 +37,18 @@ public:
 		ReadFile(AsyncTaskThread& asyncTaskThread,
 		         const std::string& containerName,
 		         const std::string& blobName,
-		         AzureClient* client)
-		  : asyncTaskThread(asyncTaskThread), containerName(containerName), blobName(blobName), client(client) {}
+		         AzureClient& client)
+		  : asyncTaskThread(&asyncTaskThread), containerName(containerName), blobName(blobName), client(&client) {}
 
 		void addref() override { ReferenceCounted<ReadFile>::addref(); }
 		void delref() override { ReferenceCounted<ReadFile>::delref(); }
 		Future<int> read(void* data, int length, int64_t offset) override {
-			return asyncTaskThread.execAsync([client = this->client,
-			                                  containerName = this->containerName,
-			                                  blobName = this->blobName,
-			                                  data,
-			                                  length,
-			                                  offset] {
+			return asyncTaskThread->execAsync([client = this->client,
+			                                   containerName = this->containerName,
+			                                   blobName = this->blobName,
+			                                   data,
+			                                   length,
+			                                   offset] {
 				std::ostringstream oss(std::ios::out | std::ios::binary);
 				client->download_blob_to_stream(containerName, blobName, offset, length, oss);
 				auto str = std::move(oss).str();
@@ -61,9 +61,9 @@ public:
 		Future<Void> truncate(int64_t size) override { throw file_not_writable(); }
 		Future<Void> sync() override { throw file_not_writable(); }
 		Future<int64_t> size() const override {
-			return asyncTaskThread.execAsync([client = this->client,
-			                                  containerName = this->containerName,
-			                                  blobName = this->blobName] {
+			return asyncTaskThread->execAsync([client = this->client,
+			                                   containerName = this->containerName,
+			                                   blobName = this->blobName] {
 				return static_cast<int64_t>(client->get_blob_properties(containerName, blobName).get().response().size);
 			});
 		}
@@ -72,7 +72,7 @@ public:
 	};
 
 	class WriteFile final : public IAsyncFile, ReferenceCounted<WriteFile> {
-		AsyncTaskThread& asyncTaskThread;
+		AsyncTaskThread* asyncTaskThread;
 		AzureClient* client;
 		std::string containerName;
 		std::string blobName;
@@ -88,8 +88,8 @@ public:
 		WriteFile(AsyncTaskThread& asyncTaskThread,
 		          const std::string& containerName,
 		          const std::string& blobName,
-		          AzureClient* client)
-		  : asyncTaskThread(asyncTaskThread), containerName(containerName), blobName(blobName), client(client) {}
+		          AzureClient& client)
+		  : asyncTaskThread(&asyncTaskThread), containerName(containerName), blobName(blobName), client(&client) {}
 
 		void addref() override { ReferenceCounted<WriteFile>::addref(); }
 		void delref() override { ReferenceCounted<WriteFile>::delref(); }
@@ -116,17 +116,17 @@ public:
 		Future<Void> sync() override {
 			auto movedBuffer = std::move(buffer);
 			buffer.clear();
-			return asyncTaskThread.execAsync([client = this->client,
-			                                  containerName = this->containerName,
-			                                  blobName = this->blobName,
-			                                  buffer = std::move(movedBuffer)] {
+			return asyncTaskThread->execAsync([client = this->client,
+			                                   containerName = this->containerName,
+			                                   blobName = this->blobName,
+			                                   buffer = std::move(movedBuffer)] {
 				std::istringstream iss(std::move(buffer));
 				auto resp = client->append_block_from_stream(containerName, blobName, iss).get();
 				return Void();
 			});
 		}
 		Future<int64_t> size() const override {
-			return asyncTaskThread.execAsync(
+			return asyncTaskThread->execAsync(
 			    [client = this->client, containerName = this->containerName, blobName = this->blobName] {
 				    auto resp = client->get_blob_properties(containerName, blobName).get().response();
 				    ASSERT(resp.valid()); // TODO: Should instead throw here
@@ -178,7 +178,7 @@ public:
 			throw file_not_found();
 		}
 		Reference<IAsyncFile> f =
-		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, *self->client);
 		if (self->usesEncryption()) {
 			f = encryptFile(f, AsyncFileEncrypted::Mode::READ_ONLY);
 		}
@@ -192,7 +192,7 @@ public:
 			    return Void();
 		    }));
 		Reference<IAsyncFile> f =
-		    makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+		    makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, *self->client);
 		if (self->usesEncryption()) {
 			f = encryptFile(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 		}
