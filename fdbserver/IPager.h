@@ -227,7 +227,7 @@ public:
 	                                                          Version v) = 0;
 
 	// Free pageID to be used again after the commit that moves oldestVersion past v
-	virtual void freePage(LogicalPageID pageID, Version v) = 0;
+	virtual void freePage(uint8_t level, Version v, VectorRef<LogicalPageID> pageIDs) = 0;
 
 	virtual void freeExtent(LogicalPageID pageID) = 0;
 

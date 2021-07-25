@@ -18,12 +18,14 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 #include "flow/Histogram.h"
 #include <_types/_uint32_t.h>
+#include <_types/_uint8_t.h>
 #include <limits>
 #include <random>
 #include "fdbrpc/ContinuousSample.h"
@@ -45,7 +47,7 @@
 #include <cinttypes>
 #include <boost/intrusive/list.hpp>
 
-#define REDWOOD_DEBUG 1
+#define REDWOOD_DEBUG 0
 
 // Only print redwood debug statements for a certain address. Useful in simulation with many redwood processes to reduce
 // log size.
@@ -994,7 +996,7 @@ public:
 						// because freePage() could cause a push onto a queue that causes a newPageID() call which could
 						// pop() from this very same queue. Queue pages are freed at version 0 because they can be
 						// reused after the next commit.
-						queue->pager->freePage(oldPageID, 0);
+						queue->pager->freePage(0, 0, VectorRef<LogicalPageID>(&oldPageID, 1));
 					} else if (extentCurPageID == extentEndPageID) {
 						// Figure out the beginning of the extent
 						int pagesPerExtent = queue->pagesPerExtent;
@@ -1594,7 +1596,7 @@ struct RedwoodMetrics {
 	}
 
 	void clear() {
-		unsigned int levelCounter = 0;
+		uint8_t levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
 			level.clear(levelCounter);
 			++levelCounter;
@@ -2006,35 +2008,70 @@ public:
 
 	struct RemappedPage {
 		enum Type { NONE = 'N', REMAP = 'R', FREE = 'F', DETACH = 'D' };
-		RemappedPage(Version v = invalidVersion,
-		             LogicalPageID o = invalidLogicalPageID,
-		             LogicalPageID n = invalidLogicalPageID)
-		  : version(v), originalPageID(o), newPageID(n) {}
-
+		RemappedPage(VectorRef<LogicalPageID> o,
+		             VectorRef<LogicalPageID> n,
+					 uint8_t level,
+					 Version v = invalidVersion)
+		  : height(level), version(v) {
+			  originalPageIDs = Standalone(o);
+			  newPageIDs = Standalone(n);
+		  }
+		uint8_t height;
 		Version version;
-		LogicalPageID originalPageID;
-		LogicalPageID newPageID;
+		Standalone<VectorRef<LogicalPageID>> originalPageIDs;
+		Standalone<VectorRef<LogicalPageID>> newPageIDs;
 
-		static Type getTypeOf(LogicalPageID newPageID) {
-			if (newPageID == invalidLogicalPageID) {
+		static Type getTypeOf(Standalone<VectorRef<LogicalPageID>> newPageIDs) {
+			if (newPageIDs.front() == invalidLogicalPageID) {
 				return FREE;
 			}
-			if (newPageID == 0) {
+			if (newPageIDs.front() == 0) {
 				return DETACH;
 			}
 			return REMAP;
 		}
 
-		Type getType() const { return getTypeOf(newPageID); }
+		Type getType() const { return getTypeOf(newPageIDs); }
 
 		bool operator<(const RemappedPage& rhs) const { return version < rhs.version; }
 
+		int readFromBytes(const uint8_t* src) {
+			height = *(uint8_t*)src;
+			src += sizeof(uint8_t);
+			version = *(Version*)src;
+			src += sizeof(Version);
+			int count = *src++;
+			originalPageIDs = Standalone(VectorRef<LogicalPageID>((LogicalPageID*)src, count));
+			src += count;
+			count = *src++; 
+			newPageIDs = Standalone(VectorRef<LogicalPageID>((LogicalPageID*)src, count));
+			return bytesNeeded();
+		}
+
+		int bytesNeeded() const {
+			return sizeof(uint8_t) + sizeof(Version) + 1 + (originalPageIDs.size() * sizeof(LogicalPageID)) + 1 + (newPageIDs.size() * sizeof(LogicalPageID));
+		}
+
+		int writeToBytes(uint8_t* dst) const {
+			*(uint8_t*)dst = height;
+			dst += sizeof(uint8_t);
+			*(Version*)dst = version;
+			dst += sizeof(Version);
+			*dst++ = originalPageIDs.size();
+			memcpy(dst, originalPageIDs.begin(), originalPageIDs.size() * sizeof(LogicalPageID));
+			dst += originalPageIDs.size();
+			*dst++ = newPageIDs.size();
+			memcpy(dst, newPageIDs.begin(), newPageIDs.size() * sizeof(LogicalPageID));
+			return bytesNeeded();
+		}
+
 		std::string toString() const {
-			return format("RemappedPage(%c: %s -> %s %s}",
+			return format("RemappedPage(%c: %s -> %s %s} at height %u",
 			              getType(),
-			              ::toString(originalPageID).c_str(),
-			              ::toString(newPageID).c_str(),
-			              ::toString(version).c_str());
+			              ::toString(originalPageIDs).c_str(),
+			              ::toString(newPageIDs).c_str(),
+			              ::toString(version).c_str(),
+						  (unsigned int)height);
 		}
 	};
 
@@ -2497,7 +2534,7 @@ public:
 
 	ACTOR static Future<Void> writePhysicalPage_impl(DWALPager* self,
 	                                                 PagerEventReasons reason,
-	                                                 unsigned int level,
+	                                                 uint8_t level,
 	                                                 Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                                                 Reference<ArenaPage> page,
 	                                                 bool header = false) {
@@ -2549,7 +2586,7 @@ public:
 	}
 
 	Future<Void> writePhysicalPage(PagerEventReasons reason,
-	                               unsigned int level,
+	                               uint8_t level,
 	                               VectorRef<PhysicalPageID> pageIDs,
 	                               Reference<ArenaPage> page,
 	                               bool header = false) {
@@ -2565,7 +2602,7 @@ public:
 	}
 
 	void updatePage(PagerEventReasons reason,
-	                unsigned int level,
+	                uint8_t level,
 	                Standalone<VectorRef<LogicalPageID>> pageIDs,
 	                Reference<ArenaPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
@@ -2612,7 +2649,7 @@ public:
 	}
 
 	Future<VectorRef<LogicalPageID>> atomicUpdatePage(PagerEventReasons reason,
-	                                                  unsigned int level,
+	                                                  uint8_t level,
 	                                                  VectorRef<LogicalPageID> pageIDs,
 	                                                  Reference<ArenaPage> data,
 	                                                  Version v) override {
@@ -2622,9 +2659,9 @@ public:
 			    updatePage(reason, level, newIDs, data);
 			    // TODO:  Possibly limit size of remap queue since it must be recovered on cold start
 			    ASSERT(newIDs.size() == pageIDs.size());
+				RemappedPage r{ pageIDs, newIDs, level, v };
+				remapQueue.pushBack(r);
 			    for (size_t i = 0; i < pageIDs.size(); i++) {
-				    RemappedPage r{ v, pageIDs[i], newIDs[i] };
-				    remapQueue.pushBack(r);
 				    auto& versionedMap = remappedPages[pageIDs[i]];
 
 				    // An update page is unlikely to have its old version read again soon, so prioritize its cache
@@ -2643,27 +2680,31 @@ public:
 		return f;
 	}
 
-	void freeUnmappedPage(PhysicalPageID pageID, Version v) {
+	void freeUnmappedPage(Standalone<VectorRef<PhysicalPageID>> pageIDs, Version v) {
 		// If v is older than the oldest version still readable then mark pageID as free as of the next commit
 		if (v < effectiveOldestVersion()) {
 			debug_printf("DWALPager(%s) op=freeNow %s @%" PRId64 " oldestVersion=%" PRId64 "\n",
 			             filename.c_str(),
-			             toString(pageID).c_str(),
+			             toString(pageIDs).c_str(),
 			             v,
 			             pLastCommittedHeader->oldestVersion);
-			freeList.pushBack(pageID);
+			for(PhysicalPageID pageID : pageIDs){
+				freeList.pushBack(pageID);
+			}
 		} else {
 			// Otherwise add it to the delayed free list
 			debug_printf("DWALPager(%s) op=freeLater %s @%" PRId64 " oldestVersion=%" PRId64 "\n",
 			             filename.c_str(),
-			             toString(pageID).c_str(),
+			             toString(pageIDs).c_str(),
 			             v,
 			             pLastCommittedHeader->oldestVersion);
-			delayedFreeList.pushBack({ v, pageID });
+			for(PhysicalPageID pageID : pageIDs){
+				delayedFreeList.pushBack({ v, pageID });
+			}
 		}
 
 		// A freed page is unlikely to be read again soon so prioritize its cache eviction
-		pageCache.prioritizeEviction(pageID);
+		pageCache.prioritizeEviction(pageIDs.front());
 	}
 
 	LogicalPageID detachRemappedPage(LogicalPageID pageID, Version v) override {
@@ -2699,22 +2740,23 @@ public:
 			             pLastCommittedHeader->oldestVersion);
 			// Mark id as converted to its last remapped location as of v
 			i->second[v] = 0;
-			remapQueue.pushBack(RemappedPage{ v, pageID, 0 });
+			remapQueue.pushBack(RemappedPage{ VectorRef<LogicalPageID>(&pageID, 1), 0 , v });
 		}
 		return newID;
 	}
 
-	void freePage(LogicalPageID pageID, Version v) override {
+	void freePage( uint8_t level, Version v, VectorRef<LogicalPageID> pageIDs ) override {
 		// If pageID has been remapped, then it can't be freed until all existing remaps for that page have been undone,
 		// so queue it for later deletion
-		auto i = remappedPages.find(pageID);
+		auto i = remappedPages.find(pageIDs.front());
 		if (i != remappedPages.end()) {
 			debug_printf("DWALPager(%s) op=freeRemapped %s @%" PRId64 " oldestVersion=%" PRId64 "\n",
 			             filename.c_str(),
-			             toString(pageID).c_str(),
+			             toString(pageIDs).c_str(),
 			             v,
 			             pLastCommittedHeader->oldestVersion);
-			remapQueue.pushBack(RemappedPage{ v, pageID, invalidLogicalPageID });
+			auto invalidPageID = invalidLogicalPageID;
+			remapQueue.pushBack(RemappedPage{ pageIDs, VectorRef<LogicalPageID>(&invalidPageID, 1), level,v });
 
 			// A freed page is unlikely to be read again soon so prioritize its cache eviction
 			PhysicalPageID previousPhysicalPage = i->second.rbegin()->second;
@@ -2724,7 +2766,7 @@ public:
 			return;
 		}
 
-		freeUnmappedPage(pageID, v);
+		freeUnmappedPage(pageIDs, v);
 	};
 
 	ACTOR static void freeExtent_impl(DWALPager* self, LogicalPageID pageID) {
@@ -2813,7 +2855,7 @@ public:
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
-	                                      unsigned int level,
+	                                      uint8_t level,
 	                                      Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                                      int priority,
 	                                      bool cacheable,
@@ -2894,7 +2936,7 @@ public:
 	}
 
 	Future<Reference<ArenaPage>> readPageAtVersion(PagerEventReasons reason,
-	                                               unsigned int level,
+	                                               uint8_t level,
 	                                               VectorRef<LogicalPageID> logicalIDs,
 	                                               int priority,
 	                                               Version v,
@@ -3065,7 +3107,7 @@ public:
 
 	ACTOR static Future<Void> removeRemapEntry(DWALPager* self, RemappedPage p, Version oldestRetainedVersion) {
 		// Get iterator to the versioned page map entry for the original page
-		state PageToVersionedMapT::iterator iPageMapPair = self->remappedPages.find(p.originalPageID);
+		state PageToVersionedMapT::iterator iPageMapPair = self->remappedPages.find(p.originalPageIDs.front());
 		// The iterator must be valid and not empty and its first page map entry must match p's version
 		ASSERT(iPageMapPair != self->remappedPages.end());
 		ASSERT(!iPageMapPair->second.empty());
@@ -3076,13 +3118,13 @@ public:
 		state RemappedPage::Type secondType;
 		bool secondAfterOldestRetainedVersion = false;
 		state bool deleteAtSameVersion = false;
-		if (p.newPageID == iVersionPagePair->second) {
+		if (p.newPageIDs.front() == iVersionPagePair->second) {
 			auto nextEntry = iVersionPagePair;
 			++nextEntry;
 			if (nextEntry == iPageMapPair->second.end()) {
 				secondType = RemappedPage::NONE;
 			} else {
-				secondType = RemappedPage::getTypeOf(nextEntry->second);
+				secondType = RemappedPage::getTypeOf(VectorRef<LogicalPageID>(&nextEntry->second, 1));
 				secondAfterOldestRetainedVersion = nextEntry->first > oldestRetainedVersion;
 			}
 		} else {
@@ -3178,7 +3220,7 @@ public:
 				self->remappedPages.erase(iPageMapPair);
 			} else if (freeNewID && secondType == RemappedPage::NONE &&
 			           iVersionPagePair != iPageMapPair->second.end() &&
-			           RemappedPage::getTypeOf(iVersionPagePair->second) == RemappedPage::DETACH) {
+			           RemappedPage::getTypeOf(VectorRef<LogicalPageID>(&iVersionPagePair->second, 1)) == RemappedPage::DETACH) {
 				// If we intend to free the new ID and there was no map entry, one could have been added during the wait
 				// above. If so, and if it was a detach operation, then we can't free the new page ID as its lifetime
 				// will be managed by the client starting at some later version.
@@ -3188,13 +3230,13 @@ public:
 
 		if (freeNewID) {
 			debug_printf("DWALPager(%s) remapCleanup freeNew %s\n", self->filename.c_str(), p.toString().c_str());
-			self->freeUnmappedPage(p.newPageID, 0);
+			self->freeUnmappedPage(p.newPageIDs, 0);
 			++g_redwoodMetrics.metric.pagerRemapFree;
 		}
 
 		if (freeOriginalID) {
 			debug_printf("DWALPager(%s) remapCleanup freeOriginal %s\n", self->filename.c_str(), p.toString().c_str());
-			self->freeUnmappedPage(p.originalPageID, 0);
+			self->freeUnmappedPage(p.originalPageIDs, 0);
 			++g_redwoodMetrics.metric.pagerRemapFree;
 		}
 
@@ -3630,7 +3672,7 @@ public:
 	~DWALPagerSnapshot() override {}
 
 	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
-	                                                   unsigned int level,
+	                                                   uint8_t level,
 	                                                   VectorRef<LogicalPageID> pageIDs,
 	                                                   int priority,
 	                                                   bool cacheable,
@@ -4619,7 +4661,7 @@ public:
 						// If this page is height 2, then the children are leaves so free them directly
 						if (entry.height == 2) {
 							debug_printf("LazyClear: freeing child %s\n", toString(btChildPageID).c_str());
-							self->freeBTreePage(btChildPageID, v);
+							self->freeBTreePage((uint8_t)(entry.height-1), v, btChildPageID);
 							freedPages += btChildPageID.size();
 							metrics.lazyClearFree += 1;
 							metrics.lazyClearFreeExt += (btChildPageID.size() - 1);
@@ -4639,7 +4681,7 @@ public:
 
 				// Free the page, now that its children have either been freed or queued
 				debug_printf("LazyClear: freeing queue entry %s\n", toString(entry.pageID).c_str());
-				self->freeBTreePage(entry.pageID, v);
+				self->freeBTreePage((uint8_t)entry.height, v, entry.pageID);
 				freedPages += entry.pageID.size();
 				metrics.lazyClearFree += 1;
 				metrics.lazyClearFreeExt += entry.pageID.size() - 1;
@@ -5214,7 +5256,7 @@ private:
 	                                                                        const RedwoodRecordRef* lowerBound,
 	                                                                        const RedwoodRecordRef* upperBound,
 	                                                                        VectorRef<RedwoodRecordRef> entries,
-	                                                                        int height,
+	                                                                        uint8_t height,
 	                                                                        Version v,
 	                                                                        BTreePageIDRef previousID) {
 		ASSERT(entries.size() > 0);
@@ -5354,7 +5396,7 @@ private:
 				// must be rewritten anyway to count for the change in child count or child links.
 				// Free the old IDs, but only once (before the first output record is added).
 				if (records.empty()) {
-					self->freeBTreePage(previousID, v);
+					self->freeBTreePage( height, v, previousID);
 				}
 				Standalone<VectorRef<LogicalPageID>> emptyPages = wait(self->m_pager->newPageIDs(p.blockCount));
 				self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages, pages);
@@ -5427,7 +5469,7 @@ private:
 	}
 
 	ACTOR static Future<Reference<const ArenaPage>> readPage(PagerEventReasons reason,
-	                                                         unsigned int level,
+	                                                         uint8_t level,
 	                                                         Reference<IPagerSnapshot> snapshot,
 	                                                         BTreePageIDRef id,
 	                                                         int priority,
@@ -5489,11 +5531,9 @@ private:
 		snapshot->getPhysicalPage(PagerEventReasons::RangePrefetch, nonBtreeLevel, PageIDs, priority, true, true);
 	}
 
-	void freeBTreePage(BTreePageIDRef btPageID, Version v) {
+	void freeBTreePage( uint_8 level, Version v, BTreePageIDRef btPageID) {
 		// Free individual pages at v
-		for (LogicalPageID id : btPageID) {
-			m_pager->freePage(id, v);
-		}
+		m_pager->freePage(level, v, btPageID);
 	}
 
 	// Write new version of pageID at version v using page as its data.
@@ -6150,7 +6190,7 @@ private:
 				// If the tree is now empty, delete the page
 				if (cursor.tree->numItems == 0) {
 					update->cleared();
-					self->freeBTreePage(rootID, writeVersion);
+					self->freeBTreePage(height, writeVersion, rootID);
 					debug_printf("%s Page updates cleared all entries, returning %s\n",
 					             context.c_str(),
 					             toString(*update).c_str());
@@ -6169,7 +6209,7 @@ private:
 			// If everything in the page was deleted then this page should be deleted as of the new version
 			if (merged.empty()) {
 				update->cleared();
-				self->freeBTreePage(rootID, writeVersion);
+				self->freeBTreePage( height, writeVersion, rootID);
 
 				debug_printf("%s All leaf page contents were cleared, returning %s\n",
 				             context.c_str(),
@@ -6324,7 +6364,7 @@ private:
 										debug_printf("%s: freeing child page in cleared subtree range: %s\n",
 										             context.c_str(),
 										             ::toString(rec.getChildPage()).c_str());
-										self->freeBTreePage(rec.getChildPage(), writeVersion);
+										self->freeBTreePage((uint8_t)(height - 1), writeVersion, rec.getChildPage());
 									} else {
 										debug_printf("%s: queuing subtree deletion cleared subtree range: %s\n",
 										             context.c_str(),
@@ -6428,7 +6468,7 @@ private:
 					debug_printf("%s All internal page children were deleted so deleting this page too, returning %s\n",
 					             context.c_str(),
 					             toString(*update).c_str());
-					self->freeBTreePage(rootID, writeVersion);
+					self->freeBTreePage( height, writeVersion, rootID);
 					self->childUpdateTracker.erase(rootID.front());
 				} else {
 					if (modifier.updating) {
