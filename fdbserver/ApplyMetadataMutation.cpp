@@ -187,20 +187,20 @@ void applyMetadataMutations(
 					tLogGroupCollection->addTLogGroup(servers);
 				}
 
-				if (toCommit) {
-					// TODO: Don't know how it works?
-				}
 				if (!initialCommit) {
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				}
 			} else if (m.param1.startsWith(storageTeamIdKeyPrefix)) {
 				if (tLogGroupCollection.isValid()) {
 					auto teamid = storageTeamIdKeyDecode(m.param1);
-					tLogGroupCollection->addStorageTeam(teamid, decodeStorageTeams(m.param2));
-					// TODO (Vishesh): Select a good group than just a deterministic group.
-					auto group = tLogGroupCollection->selectFreeGroup(teamid.hash());
-					txnStateStore->set(KeyValueRef(storageTeamIdToTLogGroupKey(teamid),
-					                               BinaryWriter::toValue(group->id(), Unversioned())));
+					if (tLogGroupCollection->tryAddStorageTeam(teamid, decodeStorageTeams(m.param2))) {
+						auto group = tLogGroupCollection->selectFreeGroup(teamid.hash());
+						// TODO: This may be unnessary, as ApplyMetadataMutation case for this key-range
+						//     should do the assignment.
+						tLogGroupCollection->assignStorageTeam(teamid, group);
+						txnStateStore->set(KeyValueRef(storageTeamIdToTLogGroupKey(teamid),
+						                               BinaryWriter::toValue(group->id(), Unversioned())));
+					}
 				}
 
 				// Storage Team ID to Storage Server List

@@ -1395,25 +1395,14 @@ ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, vector<UID> t
 			for (const auto& ss : team) {
 				state Key teamIdKey = storageServerToTeamIdKey(ss);
 				Optional<Value> existingTeamsInServer = wait(tr.get(teamIdKey));
-				std::set<ptxn::StorageTeamID> teamIdsInServer;
-				teamIdsInServer.insert(teamId);
+				std::set<UID> teamIdsInServer;
 
 				if (existingTeamsInServer.present()) {
-					BinaryReader br(existingTeamsInServer.get(), Unversioned());
-					int size;
-					br >> size;
-					for (int i = 0; i < size; ++i) {
-						ptxn::StorageTeamID id;
-						br >> id;
-						teamIdsInServer.insert(id);
-					}
+					teamIdsInServer = decodeStorageServerToTeamIdValue(existingTeamsInServer.get());
 				}
-				BinaryWriter wr(Unversioned());
-				wr << teamIdsInServer.size();
-				for (auto id : teamIdsInServer) {
-					wr << id;
-				}
-				tr.set(teamIdKey, wr.toValue());
+
+				teamIdsInServer.insert(teamId);
+				tr.set(teamIdKey, encodeStorageServerToTeamIdValue(teamIdsInServer));
 			}
 
 			wait(tr.commit());

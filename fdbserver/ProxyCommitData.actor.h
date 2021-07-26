@@ -19,7 +19,6 @@
  */
 
 #pragma once
-#include "flow/FastRef.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -31,6 +30,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/TLogGroup.actor.h"
+#include "flow/FastRef.h"
 #include "flow/IRandom.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

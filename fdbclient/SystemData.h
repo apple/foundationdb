@@ -114,6 +114,8 @@ const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId);
 // team.
 extern const KeyRef storageServerToTeamIdKeyPrefix;
 const Key storageServerToTeamIdKey(UID serverId);
+const Value encodeStorageServerToTeamIdValue(const std::set<UID>& teamIds);
+const std::set<UID> decodeStorageServerToTeamIdValue(const ValueRef& value);
 
 // Create a map from list of storage servers to teamId. The list of server ID in
 // key is stored in sorted order.

@@ -157,22 +157,24 @@ TLogGroupRef TLogGroupCollection::selectFreeGroup(int seed) {
 	return recruitedGroups[seed % recruitedGroups.size()];
 }
 
-void TLogGroupCollection::addStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers) {
-	TraceEvent("TLogGroupAddStorageTeam").detail("StorageTeamIdW", teamId).detail("Servers", describe(servers));
-	if (storageTeams.find(teamId) == storageTeams.end()) {
-		return;
+bool TLogGroupCollection::tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers) {
+	auto it = storageTeams.find(teamId);
+	if (it != storageTeams.end()) {
+		ASSERT(it->second == servers);
+		return false;
 	}
 	storageTeams[teamId] = servers;
-	// TODO: (Vishesh) Initiate assignment commit?
+	TraceEvent("TLogGroupAddStorageTeam").detail("StorageTeamIdW", teamId).detail("Servers", describe(servers));
+	return true;
 }
 
 bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId) {
 	// ASSERT(storageTeamToTLogGroupMap.find(teamId) == storageTeamToTLogGroupMap.end());
-	TraceEvent("TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", groupId);
 	auto group = getGroup(groupId, true);
 	ASSERT(group.isValid());
 	storageTeamToTLogGroupMap[teamId] = group;
 	group->assignStorageTeam(teamId);
+	TraceEvent("TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", groupId);
 	return true;
 }
 
@@ -190,11 +192,18 @@ void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq
 	tr.clear(recoveryCommitReq->arena, tLogGroupKeys);
 	for (const auto& group : recruitedGroups) {
 		const auto& groupServerPrefix = tLogGroupKeyFor(group->id()).withSuffix(serversPrefix);
+		tr.set(recoveryCommitReq->arena, groupServerPrefix, group->toValue());
 		TraceEvent("TLogGroupStore")
 		    .detail("GroupID", group->id())
 		    .detail("Size", group->size())
 		    .detail("Group", group->toString());
-		tr.set(recoveryCommitReq->arena, groupServerPrefix, group->toValue());
+	}
+
+	for (const auto& [teamId, group] : storageTeamToTLogGroupMap) {
+		tr.set(recoveryCommitReq->arena,
+		       storageTeamIdToTLogGroupKey(teamId),
+		       BinaryWriter::toValue(group->id(), Unversioned()));
+		TraceEvent("TLogGroupSSTeamAssignSave").detail("GroupID", group->id()).detail("SSTeamId", teamId);
 	}
 }
 
@@ -229,34 +238,16 @@ void TLogGroupCollection::seedTLogGroupAssignment(Arena& arena,
 	// Step 2: Map from SS to teamID.
 	for (const auto& ss : serverSrcUID) {
 		Key teamIdKey = storageServerToTeamIdKey(ss);
-		BinaryWriter wr(Unversioned());
-		wr << 1;
-		wr << teamId;
-		tr.set(arena, teamIdKey, wr.toValue());
+		Value val = encodeStorageServerToTeamIdValue({ teamId });
+		tr.set(arena, teamIdKey, val);
 	}
 
 	// Step 3: Assign the storage team to a TLogGroup (Storage Team -> TLogGroup).
 	TLogGroupRef group = selectFreeGroup();
 	TraceEvent("TLogGroupSeedTeam").detail("StorageTeamId", teamId);
-	tr.set(arena, storageTeamIdToTLogGroupKey(teamId), BinaryWriter::toValue(group->id(), Unversioned()));
+	tr.set(arena, storageTeamIdToTLogGroupKey(teamId), encodeStorageServerToTeamIdValue({ group->id() }));
 	assignStorageTeam(teamId, group);
 	storageTeams[teamId] = serverSrcUID;
-}
-
-// Returns a map from StorageTeamID that uniquely identifies a team, to the
-// list of storage servers in that storage team.
-ACTOR Future<std::map<ptxn::StorageTeamID, std::vector<UID>>> fetchStorageTeams(IKeyValueStore* store) {
-	state std::map<ptxn::StorageTeamID, vector<UID>> teams;
-
-	RangeResult results = wait(store->readRange(storageTeamIdKeyRange));
-
-	for (auto team : results) {
-		const UID teamId = storageTeamIdKeyDecode(team.key);
-		const std::vector<UID> servers = decodeStorageTeams(team.value);
-		teams[teamId] = servers;
-	}
-
-	return teams;
 }
 
 void TLogGroup::addServer(const TLogWorkerDataRef& workerData) {

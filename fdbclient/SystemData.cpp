@@ -302,8 +302,8 @@ bool serverHasKey(ValueRef storedValue) {
 	return storedValue == serverKeysTrue;
 }
 
-const KeyRef storageTeamIdKeyPrefix = LiteralStringRef("\xff/storageTeams/");
-const KeyRangeRef storageTeamIdKeyRange(LiteralStringRef("\xff/storageTeams/"), LiteralStringRef("\xff/storageTeams0"));
+const KeyRef storageTeamIdKeyPrefix = "\xff/storageTeams/"_sr;
+const KeyRangeRef storageTeamIdKeyRange("\xff/storageTeams/"_sr, "\xff/storageTeams0"_sr);
 
 const Key storageTeamIdKey(ptxn::StorageTeamID teamId) {
 	BinaryWriter wr(Unversioned());
@@ -319,7 +319,7 @@ ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key) {
 	return teamId;
 }
 
-const KeyRef storageServerToTeamIdKeyPrefix = LiteralStringRef("\xff/storageServerToTeam/");
+const KeyRef storageServerToTeamIdKeyPrefix = "\xff/storageServerToTeam/"_sr;
 const Key storageServerToTeamIdKey(UID serverId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(storageServerToTeamIdKeyPrefix);
@@ -327,7 +327,15 @@ const Key storageServerToTeamIdKey(UID serverId) {
 	return wr.toValue();
 }
 
-const KeyRef storageServerListToTeamIdKeyPrefix = LiteralStringRef("\xff/storageServerListToTeamId/");
+const Value encodeStorageServerToTeamIdValue(const std::set<UID>& teamIds) {
+	return BinaryWriter::toValue(teamIds, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+}
+const std::set<UID> decodeStorageServerToTeamIdValue(const ValueRef& value) {
+	return BinaryReader::fromStringRef<std::set<UID>>(value,
+	                                                  IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+}
+
+const KeyRef storageServerListToTeamIdKeyPrefix = "\xff/storageServerListToTeamId/"_sr;
 const Key storageServerListToTeamIdKey(std::vector<UID> servers) {
 	BinaryWriter wr(Unversioned());
 	std::sort(servers.begin(), servers.end());
@@ -348,9 +356,9 @@ std::vector<UID> decodeStorageTeams(const ValueRef& value) {
 	                                                     IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 }
 
-const KeyRef storageTeamIdToTLogGroupPrefix = LiteralStringRef("\xff/storageTeamIdToTLogGroup/");
-const KeyRangeRef storageTeamIdToTLogGroupRange(LiteralStringRef("\xff/storageTeamIdToTLogGroup/"),
-                                                LiteralStringRef("\xff/storageTeamIdToTLogGroup0"));
+const KeyRef storageTeamIdToTLogGroupPrefix = "\xff/storageTeamIdToTLogGroup/"_sr;
+const KeyRangeRef storageTeamIdToTLogGroupRange("\xff/storageTeamIdToTLogGroup/"_sr,
+                                                "\xff/storageTeamIdToTLogGroup0"_sr);
 const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(storageTeamIdToTLogGroupPrefix);
@@ -409,7 +417,7 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 }
 
 // Key prefixes used by TLogGroup to store state in txnStateStore.
-const KeyRangeRef tLogGroupKeys(LiteralStringRef("\xff/tLogGroup/"), LiteralStringRef("\xff/tLogGroup0"));
+const KeyRangeRef tLogGroupKeys("\xff/tLogGroup/"_sr, "\xff/tLogGroup0"_sr);
 const KeyRef tLogGroupPrefix = tLogGroupKeys.begin;
 
 // Returns TLogGroup key prefix to for given `groupID`.
@@ -422,8 +430,8 @@ const Key tLogGroupKeyFor(UID groupID) {
 
 // Returns TLogGroup ID extraced from given TLogGroup key.
 UID decodeTLogGroupKey(const KeyRef& key) {
-	return BinaryReader::fromStringRef<UID>(
-	    key.removePrefix(tLogGroupPrefix).removeSuffix(LiteralStringRef("/servers")), Unversioned());
+	return BinaryReader::fromStringRef<UID>(key.removePrefix(tLogGroupPrefix).removeSuffix("/servers"_sr),
+	                                        Unversioned());
 }
 
 const KeyRangeRef tssMappingKeys(LiteralStringRef("\xff/tss/"), LiteralStringRef("\xff/tss0"));

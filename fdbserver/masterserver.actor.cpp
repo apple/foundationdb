@@ -200,9 +200,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Reference<ILogSystem> logSystem;
 	Reference<TLogGroupCollection> tLogGroupCollection;
-	Optional<Standalone<RangeResultRef>> tLogGroupRecoveredState;
-	std::unordered_map<ptxn::StorageTeamID, UID>
-	    storageTeamIdToGroupId; // temp store to keep assignment during recovery.
 
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
@@ -776,17 +773,12 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .trackLatest("MasterRecoveryState");
 
 	// Recruit TLog groups
-	ASSERT(self->tLogGroupRecoveredState.present());
 	self->tLogGroupCollection->addWorkers(recruits.tLogs);
-	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get());
 	self->tLogGroupCollection->recruitEverything();
 
-	// Restore storage team to TLogGroup assignments. This will make sure that
-	// across recovery, we don't assign a different TLogGroup to a team. It
-	// reads the state from `storageTeamIdToTLogGroupRange` range
-	for (const auto& [teamId, groupId] : self->storageTeamIdToGroupId) {
-		auto group = self->tLogGroupCollection->getGroup(groupId);
-		ASSERT(group.isValid()); // TODO: Should tolerate this.
+	// Assign storage teams to tLogGroups.
+	for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {
+		auto group = self->tLogGroupCollection->selectFreeGroup();
 		self->tLogGroupCollection->assignStorageTeam(teamId, group);
 	}
 
@@ -921,18 +913,19 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 
 	uniquify(self->allTags);
 
-	// Load TLogGroupCollection
-	Standalone<RangeResultRef> tLogGroupState = wait(self->txnStateStore->readRange(tLogGroupKeys));
+	// Clear previouos TLogGroupCollection state
+	self->txnStateStore->clear(tLogGroupKeys);
+	self->txnStateStore->clear(storageTeamIdToTLogGroupRange);
+
 	self->tLogGroupCollection = makeReference<TLogGroupCollection>(self->configuration.tLogPolicy,
 	                                                               SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
 	                                                               self->configuration.tLogReplicationFactor);
-	self->tLogGroupRecoveredState = tLogGroupState;
 
-	// Load SS team to TLogGroup assignments. Actually, put into TLogGroup data structures in recruitEverything.
-	RangeResult ssTeamToTLogGroup = wait(self->txnStateStore->readRange(storageTeamIdToTLogGroupRange));
-	for (auto& r : ssTeamToTLogGroup) {
-		auto teamId = decodeStorageTeamIdToTLogGroupKey(r.key);
-		self->storageTeamIdToGroupId[teamId] = BinaryReader::fromStringRef<UID>(r.value, Unversioned());
+	// Load storage teams from \xff keyspace to tLogGroupCollection.
+	RangeResult ssTeams = wait(self->txnStateStore->readRange(storageTeamIdKeyRange));
+	for (auto& r : ssTeams) {
+		auto teamId = storageTeamIdKeyDecode(r.key);
+		self->tLogGroupCollection->tryAddStorageTeam(teamId, decodeStorageTeams(r.value));
 	}
 
 	// auto kvs = self->txnStateStore->readRange( systemKeys );

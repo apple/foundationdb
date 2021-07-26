@@ -100,8 +100,12 @@ public:
 	// Find a TLogGroup for assigning a storage team.
 	TLogGroupRef selectFreeGroup(int seed = 0);
 
-	// Add storage team ID to lists of storage servers in that team.
-	void addStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers);
+	// Return storage team to list of storage server map.
+	const std::map<ptxn::StorageTeamID, vector<UID>>& getStorageTeams() const { return storageTeams; }
+
+	// Add storage team ID to lists of storage servers in that team. Returns `false` if the team
+	// already exists, else return `true`.
+	bool tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers);
 
 	// Assigns a storage team to given group
 	bool assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId);
