@@ -965,7 +965,6 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.saveTags(self->writtenTags);
 				self->toCommit.writeTypedMessage(m);
 				self->toCommit.saveLocations(self->writtenTLogs);
 			} else if (m.type == MutationRef::ClearRange) {
@@ -1023,7 +1022,6 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.saveTags(self->writtenTags);
 				self->toCommit.writeTypedMessage(m);
 				self->toCommit.saveLocations(self->writtenTLogs);
 			} else {
@@ -1212,6 +1210,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 		tpcvMap = self->tpcvMap;
 	}
+	self->toCommit.saveTags(self->writtenTags);
 	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
 	                                                          self->commitVersion,
 	                                                          pProxyCommitData->committedVersion.get(),

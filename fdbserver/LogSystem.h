@@ -997,8 +997,12 @@ struct LogPushData : NonCopyable {
 	}
 
 	// copy next_message_tags into given set
-	void saveTags(std::set<Tag>& writtenTags) {
-		writtenTags.insert(next_message_tags.begin(), next_message_tags.end());
+	void saveTags(std::set<Tag>& writtenTags, bool filterPseudoTags = true) {
+		for (auto& tag : written_tags) {
+			if (!filterPseudoTags || !tag.isPseudoTag()) {
+				writtenTags.insert(tag);
+			}
+		}
 	}
 
 	// store tlogs as represented by index
@@ -1017,6 +1021,7 @@ struct LogPushData : NonCopyable {
 			}
 			msg_locations.clear();
 			logSystem->getPushLocations(prev_tags, msg_locations);
+			written_tags.insert(written_tags.end(), next_message_tags.begin(), next_message_tags.end());
 			next_message_tags.clear();
 		}
 		uint32_t subseq = this->subsequence++;
@@ -1095,6 +1100,7 @@ struct LogPushData : NonCopyable {
 				wr.serializeBytes((uint8_t*)from.getData() + firstOffset, firstLength);
 			}
 		}
+		written_tags.insert(written_tags.end(), next_message_tags.begin(), next_message_tags.end());
 		next_message_tags.clear();
 	}
 
@@ -1104,6 +1110,7 @@ private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;
+	std::vector<Tag> written_tags;
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<int> msg_locations;
 	// Stores message locations that have had span information written to them
