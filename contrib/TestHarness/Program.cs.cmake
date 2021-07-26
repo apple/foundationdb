@@ -966,6 +966,10 @@ namespace SummarizeTest
                         // When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
                         continue;
                     }
+                    if (err.EndsWith("Warning: unimplemented fcntl command: 1036")) {
+                        // Valgrind produces this warning when F_SET_RW_HINT is used
+                        continue;
+                    }
                     if (stderrSeverity == (int)Magnesium.Severity.SevError)
                     {
                         error = true;

@@ -25,6 +25,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
@@ -78,8 +79,8 @@ struct MachineAttritionWorkload : TestWorkload {
 	std::vector<LocalityData> machines;
 
 	MachineAttritionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		enabled =
-		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
+		// only do this on the "first" client, and only when in simulation and only when fault injection is enabled
+		enabled = !clientId && g_network->isSimulated() && faultInjectionActivated;
 		machinesToKill = getOption(options, LiteralStringRef("machinesToKill"), 2);
 		machinesToLeave = getOption(options, LiteralStringRef("machinesToLeave"), 1);
 		workersToKill = getOption(options, LiteralStringRef("workersToKill"), 2);
