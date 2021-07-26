@@ -1595,10 +1595,14 @@ struct RedwoodMetrics {
 		redwoodHistogramRegistry = new HistogramRegistry();
 		kvSizeWritten = Histogram::getHistogram(
 		    LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes, redwoodHistogramRegistry);
-		kvSizeReadByGet = Histogram::getHistogram(
-		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet"), Histogram::Unit::bytes, redwoodHistogramRegistry);
-		kvSizeReadByGetRange = Histogram::getHistogram(
-		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByGetRange"), Histogram::Unit::bytes, redwoodHistogramRegistry);
+		kvSizeReadByGet = Histogram::getHistogram(LiteralStringRef("kvSize"),
+		                                          LiteralStringRef("ReadByGet"),
+		                                          Histogram::Unit::bytes,
+		                                          redwoodHistogramRegistry);
+		kvSizeReadByGetRange = Histogram::getHistogram(LiteralStringRef("kvSize"),
+		                                               LiteralStringRef("ReadByGetRange"),
+		                                               Histogram::Unit::bytes,
+		                                               redwoodHistogramRegistry);
 		clear(redwoodHistogramRegistry);
 	}
 
@@ -1616,6 +1620,24 @@ struct RedwoodMetrics {
 
 		startTime = g_network ? now() : 0;
 	}
+
+	~RedwoodMetrics() {
+		kvSizeWritten.clear();
+		kvSizeReadByGet.clear();
+		kvSizeReadByGetRange.clear();
+		for (RedwoodMetrics::Level& level : levels) {
+			level.buildFillPctSketch.clear();
+			level.modifyFillPctSketch.clear();
+			level.buildStoredPctSketch.clear();
+			level.modifyStoredPctSketch.clear();
+			level.buildItemCountSketch.clear();
+			level.modifyItemCountSketch.clear();
+		}
+		if (redwoodHistogramRegistry)
+			delete redwoodHistogramRegistry;
+		redwoodHistogramRegistry = nullptr;
+	}
+
 	// btree levels and one extra level for non btree level.
 	Level levels[btreeLevels + 1];
 	metrics metric;
