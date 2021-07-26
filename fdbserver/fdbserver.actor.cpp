@@ -649,7 +649,7 @@ static void printUsage(const char* name, bool devhelp) {
 		    "--kvfile FILE",
 		    "Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.");
 		printOptionUsage("-b [on,off], --buggify [on,off]", " Sets Buggify system state, defaults to `off'.");
-		printOptionUsage("-f [on,off], --fault_injection [on,off]", " Sets fault injection, defaults to `on'.");
+		printOptionUsage("-fi [on,off], --fault_injection [on,off]", " Sets fault injection, defaults to `on'.");
 		printOptionUsage("--crash", "Crash on serious errors instead of continuing.");
 		printOptionUsage("-N NETWORKIMPL, --network NETWORKIMPL",
 		                 " Select network implementation, `net2' (default),"
