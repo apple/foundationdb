@@ -1080,7 +1080,7 @@ public:
 	// Fast path extent peekAll (this zooms through the queue reading extents at a time)
 	// Output interface is a promise stream and one vector of results per extent found is sent to the promise stream
 	// Once we are finished reading all the extents of the queue, end_of_stream() is sent to mark completion
-	ACTOR static Future<Void> peekAll_ext(FIFOQueue* self, PromiseStream<Standalone<VectorRef<T>>> res) {
+	ACTOR static Future<Void> peekAll_ext(FIFOQueue* self, PromiseStream<std::vector<T>> res) {
 		state Cursor c;
 		c.initReadOnly(self->headReader, true);
 
@@ -1103,8 +1103,8 @@ public:
 				wait(yield());
 			}
 
-			state Standalone<VectorRef<T>> results;
-			results.reserve(results.arena(), self->pagesPerExtent * self->pager->getPhysicalPageSize() / sizeof(T));
+			state std::vector<T> results;
+			//results.reserve(results.arena(), self->pagesPerExtent * self->pager->getPhysicalPageSize() / sizeof(T));
 
 			// Loop over all the pages in this extent
 			int pageIdx = 0;
@@ -1146,7 +1146,7 @@ public:
 					T result = Codec::readFromBytes(p->begin() + c.offset, bytesRead);
 					debug_printf(
 					    "FIFOQueue::Cursor(%s) after read of %s\n", c.toString().c_str(), ::toString(result).c_str());
-					results.push_back(results.arena(), result);
+					results.push_back(result);
 					entriesRead++;
 
 					c.offset += bytesRead;
@@ -1199,7 +1199,7 @@ public:
 		} // End of Queue
 	}
 
-	Future<Void> peekAllExt(PromiseStream<Standalone<VectorRef<T>>> resStream) { return peekAll_ext(this, resStream); }
+	Future<Void> peekAllExt(PromiseStream<std::vector<T>> resStream) { return peekAll_ext(this, resStream); }
 
 	ACTOR static Future<Standalone<VectorRef<T>>> peekAll_impl(FIFOQueue* self) {
 		state Standalone<VectorRef<T>> results;
@@ -2008,9 +2008,9 @@ public:
 
 	struct RemappedPage {
 		enum Type { NONE = 'N', REMAP = 'R', FREE = 'F', DETACH = 'D' };
-		RemappedPage(VectorRef<LogicalPageID> o,
-		             VectorRef<LogicalPageID> n,
-					 uint8_t level,
+		RemappedPage(VectorRef<LogicalPageID> o = VectorRef<LogicalPageID>(),
+		             VectorRef<LogicalPageID> n = VectorRef<LogicalPageID>(),
+					 uint8_t level = 0,
 					 Version v = invalidVersion)
 		  : height(level), version(v) {
 			  originalPageIDs = Standalone(o);
@@ -2259,18 +2259,21 @@ public:
 			// And here we consume results of the disk reads and populate the remappedPages map
 			// Using a promiseStream for the peeked results ensures that we use the CPU to populate the map
 			// and the disk concurrently
-			state PromiseStream<Standalone<VectorRef<RemappedPage>>> remapStream;
+			//state PromiseStream<Standalone<VectorRef<RemappedPage>>> remapStream;
+			state PromiseStream<std::vector<RemappedPage>> remapStream;
 			state Future<Void> remapRecoverActor;
 			remapRecoverActor = self->remapQueue.peekAllExt(remapStream);
 			try {
 				loop choose {
-					when(Standalone<VectorRef<RemappedPage>> remaps = waitNext(remapStream.getFuture())) {
+					when(vector<RemappedPage> remaps = waitNext(remapStream.getFuture())) {
 						debug_printf("DWALPager(%s) recovery. remaps size: %d, queueEntries: %d\n",
 						             self->filename.c_str(),
 						             remaps.size(),
 						             self->remapQueue.numEntries);
+						state int i = 0; 
 						for (auto& r : remaps) {
-							self->remappedPages[r.originalPageID][r.version] = r.newPageID;
+							self->remappedPages[r.originalPageIDs[i]][r.version] = r.newPageIDs[i];
+							++i;
 						}
 					}
 					when(wait(remapRecoverActor)) { remapRecoverActor = Never(); }
@@ -2668,9 +2671,8 @@ public:
 				    // eviction If the versioned map is empty for this page then the prior version of the page is at
 				    // stored at the PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered
 				    // map.
-					if(i==0) {
+					if(i == 0)
 				    	pageCache.prioritizeEviction(versionedMap.empty() ? pageIDs[i] : versionedMap.rbegin()->second);
-					}
 				    versionedMap[v] = newIDs[i];
 
 				    debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
@@ -2711,7 +2713,7 @@ public:
 
 	Standalone<VectorRef<LogicalPageID>> detachRemappedPage(VectorRef<LogicalPageID> pageIDs, uint8_t level, Version v) override {
 		Standalone<VectorRef<LogicalPageID>> newIDs;
-		for(auto pageID:pageIDs){
+		for(const auto& pageID:pageIDs){
 			auto i = remappedPages.find(pageID);
 			if (i == remappedPages.end()) {
 				// Page is not remapped
@@ -2735,7 +2737,6 @@ public:
 							v,
 							pLastCommittedHeader->oldestVersion);
 				iLast->second = invalidLogicalPageID;
-				//remapQueue.pushBack(RemappedPage{ v, pageID, invalidLogicalPageID });
 				newIDs.push_back(newIDs.arena(), invalidLogicalPageID);
 			} else {
 				debug_printf("DWALPager(%s) op=detach originalID=%s newID=%s @%" PRId64 " oldestVersion=%" PRId64 "\n",
@@ -2746,36 +2747,41 @@ public:
 							pLastCommittedHeader->oldestVersion);
 				// Mark id as converted to its last remapped location as of v
 				i->second[v] = 0;
-				//remapQueue.pushBack(RemappedPage{ VectorRef<LogicalPageID>(&pageID, 1), 0 , v });
 				newIDs.push_back(newIDs.arena(), 0);
 			}
-			remapQueue.pushBack( RemappedPage{ pageIDs, newIDs, level, v} );
-			return newIDs;
 		}
+		remapQueue.pushBack( RemappedPage{ pageIDs, newIDs, level, v} );
+		return newIDs;
 	}
 
 	void freePage( uint8_t level, Version v, VectorRef<LogicalPageID> pageIDs ) override {
 		// If pageID has been remapped, then it can't be freed until all existing remaps for that page have been undone,
 		// so queue it for later deletion
-		auto i = remappedPages.find(pageIDs.front());
-		if (i != remappedPages.end()) {
-			debug_printf("DWALPager(%s) op=freeRemapped %s @%" PRId64 " oldestVersion=%" PRId64 "\n",
-			             filename.c_str(),
-			             toString(pageIDs).c_str(),
-			             v,
-			             pLastCommittedHeader->oldestVersion);
-			auto invalidPageID = invalidLogicalPageID;
-			remapQueue.pushBack(RemappedPage{ pageIDs, VectorRef<LogicalPageID>(&invalidPageID, 1), level,v });
+		Standalone<VectorRef<LogicalPageID>> unmappedPageIDs;
+		for(auto pageID:pageIDs){
+			auto i = remappedPages.find(pageID);
+			if (i != remappedPages.end()) {
+				debug_printf("DWALPager(%s) op=freeRemapped %s @%" PRId64 " oldestVersion=%" PRId64 "\n",
+							filename.c_str(),
+							toString(pageIDs).c_str(),
+							v,
+							pLastCommittedHeader->oldestVersion);
+				auto invalidPageID = invalidLogicalPageID;
+				remapQueue.pushBack(RemappedPage{ VectorRef<LogicalPageID>(&pageID,1), VectorRef<LogicalPageID>(&invalidPageID, 1), level,v });
 
-			// A freed page is unlikely to be read again soon so prioritize its cache eviction
-			PhysicalPageID previousPhysicalPage = i->second.rbegin()->second;
-			pageCache.prioritizeEviction(previousPhysicalPage);
-
-			i->second[v] = invalidLogicalPageID;
-			return;
+				// A freed page is unlikely to be read again soon so prioritize its cache eviction
+				// If it is a superpage, only the first ID can found in the pageCache.
+				if (pageID == pageIDs.front()){
+					PhysicalPageID previousPhysicalPage = i->second.rbegin()->second;
+					pageCache.prioritizeEviction(previousPhysicalPage);
+				}
+				i->second[v] = invalidLogicalPageID;
+			}
+			else{
+				unmappedPageIDs.push_back(unmappedPageIDs.arena(), pageID);
+			}
 		}
-
-		freeUnmappedPage(pageIDs, v);
+		freeUnmappedPage(unmappedPageIDs, v);
 	};
 
 	ACTOR static void freeExtent_impl(DWALPager* self, LogicalPageID pageID) {
@@ -5541,7 +5547,7 @@ private:
 		snapshot->getPhysicalPage(PagerEventReasons::RangePrefetch, nonBtreeLevel, PageIDs, priority, true, true);
 	}
 
-	void freeBTreePage( uint_8 level, Version v, BTreePageIDRef btPageID) {
+	void freeBTreePage( uint8_t level, Version v, BTreePageIDRef btPageID) {
 		// Free individual pages at v
 		m_pager->freePage(level, v, btPageID);
 	}
@@ -9450,13 +9456,14 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		pager->readExtent(extID);
 	}
 
-	state PromiseStream<Standalone<VectorRef<ExtentQueueEntry<16>>>> resultStream;
+	//state PromiseStream<Standalone<VectorRef<ExtentQueueEntry<16>>>> resultStream;
+	state PromiseStream<std::vector<ExtentQueueEntry<16>>> resultStream;
 	state Future<Void> queueRecoverActor;
 	queueRecoverActor = m_extentQueue.peekAllExt(resultStream);
 	state int entriesRead = 0;
 	try {
 		loop choose {
-			when(Standalone<VectorRef<ExtentQueueEntry<16>>> entries = waitNext(resultStream.getFuture())) {
+			when(std::vector<ExtentQueueEntry<16>> entries = waitNext(resultStream.getFuture())) {
 				entriesRead += entries.size();
 				if (entriesRead == m_extentQueue.numEntries)
 					break;
