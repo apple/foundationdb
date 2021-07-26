@@ -85,14 +85,11 @@ struct serializable_traits<OptionalInterface<Interface>> : std::true_type {
 struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
-
-	// TODO: figure out a way to represent TLog group information needed for a ss to find the corresponding TLog
-	//  interface.
-	// TODO: change other function below to reflect TLogSet
-	// Same order as in the recruitment, will only be set when 'isLocal' is true.
 	std::vector<ptxn::TLogGroupID> tLogGroups;
-	std::unordered_map<ptxn::TLogGroupID, std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>
+	std::unordered_map<ptxn::TLogGroupID,
+	                   std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
 	    ptxnTLogGroups;
+
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
 	std::vector<OptionalInterface<BackupInterface>> backupWorkers;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
