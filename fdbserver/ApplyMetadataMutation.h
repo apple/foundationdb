@@ -57,6 +57,7 @@ void applyMetadataMutations(SpanID const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
-                            IKeyValueStore* txnStateStore);
+                            IKeyValueStore* txnStateStore,
+                            TLogGroupCollectionRef tLogGroupCollection);
 
 #endif

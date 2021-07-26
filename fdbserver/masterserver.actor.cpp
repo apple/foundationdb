@@ -51,6 +51,7 @@
 #include "flow/Trace.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/serialize.h"
 
 using std::max;
 using std::min;
@@ -200,7 +201,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Reference<ILogSystem> logSystem;
 	Reference<TLogGroupCollection> tLogGroupCollection;
-	Optional<Standalone<RangeResultRef>> tLogGroupRecoveredState;
 
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
@@ -806,10 +806,14 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .trackLatest("MasterRecoveryState");
 
 	// Recruit TLog groups
-	ASSERT(self->tLogGroupRecoveredState.present());
 	self->tLogGroupCollection->addWorkers(recruits.tLogs);
-	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get());
 	self->tLogGroupCollection->recruitEverything();
+
+	// Assign storage teams to tLogGroups.
+	for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {
+		auto group = self->tLogGroupCollection->selectFreeGroup();
+		self->tLogGroupCollection->assignStorageTeam(teamId, group);
+	}
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
@@ -942,12 +946,20 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 
 	uniquify(self->allTags);
 
-	// Load TLogGroupCollection
-	Standalone<RangeResultRef> tLogGroupState = wait(self->txnStateStore->readRange(tLogGroupKeys));
+	// Clear previous TLogGroupCollection state
+	self->txnStateStore->clear(tLogGroupKeys);
+	self->txnStateStore->clear(storageTeamIdToTLogGroupRange);
+
 	self->tLogGroupCollection = makeReference<TLogGroupCollection>(self->configuration.tLogPolicy,
 	                                                               SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
 	                                                               self->configuration.tLogReplicationFactor);
-	self->tLogGroupRecoveredState = tLogGroupState;
+
+	// Load storage teams from \xff keyspace to tLogGroupCollection.
+	RangeResult ssTeams = wait(self->txnStateStore->readRange(storageTeamIdKeyRange));
+	for (auto& r : ssTeams) {
+		auto teamId = storageTeamIdKeyDecode(r.key);
+		self->tLogGroupCollection->tryAddStorageTeam(teamId, decodeStorageTeams(r.value));
+	}
 
 	// auto kvs = self->txnStateStore->readRange( systemKeys );
 	// for( auto & kv : kvs.get() )
@@ -1924,6 +1936,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
+		self->tLogGroupCollection->seedTLogGroupAssignment(recoveryCommitRequest.arena, tr, seedServers);
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely
@@ -1959,7 +1972,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),
-	                       self->txnStateStore);
+	                       self->txnStateStore,
+	                       self->tLogGroupCollection);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
