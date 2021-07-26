@@ -456,7 +456,7 @@ struct LeaderRegisterCollection {
 			self->forward[forwardingInfo[i].key.removePrefix(fwdKeys.begin)] = forwardInfo;
 		}
 		for (int i = 0; i < forwardingTime.size(); i++) {
-			double time = std::stod(forwardingTime[i].value.toString().c_str());
+			double time = BinaryReader::fromStringRef<double>(forwardingTime[i].value, Unversioned());
 			self->forwardStartTime[forwardingTime[i].key.removePrefix(fwdTimeKeys.begin)] = time;
 		}
 		return Void();
@@ -495,7 +495,7 @@ struct LeaderRegisterCollection {
 		self->forwardStartTime[key] = forwardTime;
 		OnDemandStore& store = *self->pStore;
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
-		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), std::to_string(forwardTime)));
+		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, Unversioned())));
 		wait(store->commit());
 		return Void();
 	}
