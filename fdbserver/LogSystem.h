@@ -996,7 +996,7 @@ struct LogPushData : NonCopyable {
 		writtenLocations.clear();
 	}
 
-	// copy next_message_tags into given set
+	// copy written_tags into given set
 	void saveTags(std::set<Tag>& writtenTags, bool filterPseudoTags = true) {
 		for (auto& tag : written_tags) {
 			if (!filterPseudoTags || !tag.isPseudoTag()) {
