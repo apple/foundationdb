@@ -1939,7 +1939,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),
-	                       self->txnStateStore);
+	                       self->txnStateStore,
+	                       self->tLogGroupCollection);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial

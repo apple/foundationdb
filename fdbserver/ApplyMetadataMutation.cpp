@@ -180,27 +180,25 @@ void applyMetadataMutations(
 			} else if (m.param1.startsWith(tLogGroupPrefix)) {
 				// Create a private mutation for storage servers
 				// This is done to make the storage servers aware of changed tLogGroup
-				if (tLogGroupCollection.isValid()) {
-					auto groupId = decodeTLogGroupKey(m.param1);
-					auto servers = TLogGroup::fromValue(
-					    groupId, m.param2, std::unordered_map<UID, TLogWorkerDataRef>({ /* TODO: add recruits */ }));
-					tLogGroupCollection->addTLogGroup(servers);
-				}
+				ASSERT_WE_THINK(tLogGroupCollection.isValid());
+				auto groupId = decodeTLogGroupKey(m.param1);
+				auto servers = TLogGroup::fromValue(
+				    groupId, m.param2, std::unordered_map<UID, TLogWorkerDataRef>({ /* TODO: add recruits */ }));
+				tLogGroupCollection->addTLogGroup(servers);
 
 				if (!initialCommit) {
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				}
 			} else if (m.param1.startsWith(storageTeamIdKeyPrefix)) {
-				if (tLogGroupCollection.isValid()) {
-					auto teamid = storageTeamIdKeyDecode(m.param1);
-					if (tLogGroupCollection->tryAddStorageTeam(teamid, decodeStorageTeams(m.param2))) {
-						auto group = tLogGroupCollection->selectFreeGroup(teamid.hash());
-						// TODO: This may be unnessary, as ApplyMetadataMutation case for this key-range
-						//     should do the assignment.
-						tLogGroupCollection->assignStorageTeam(teamid, group);
-						txnStateStore->set(KeyValueRef(storageTeamIdToTLogGroupKey(teamid),
-						                               BinaryWriter::toValue(group->id(), Unversioned())));
-					}
+				ASSERT_WE_THINK(tLogGroupCollection.isValid());
+				auto teamid = storageTeamIdKeyDecode(m.param1);
+				if (tLogGroupCollection->tryAddStorageTeam(teamid, decodeStorageTeams(m.param2))) {
+					auto group = tLogGroupCollection->selectFreeGroup(teamid.hash());
+					// TODO: This may be unnessary, as ApplyMetadataMutation case for this key-range
+					//     should do the assignment.
+					tLogGroupCollection->assignStorageTeam(teamid, group);
+					txnStateStore->set(KeyValueRef(storageTeamIdToTLogGroupKey(teamid),
+					                               BinaryWriter::toValue(group->id(), Unversioned())));
 				}
 
 				// Storage Team ID to Storage Server List
@@ -208,10 +206,9 @@ void applyMetadataMutations(
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				}
 			} else if (m.param1.startsWith(storageTeamIdToTLogGroupPrefix)) {
-				if (tLogGroupCollection.isValid()) {
-					tLogGroupCollection->assignStorageTeam(decodeStorageTeamIdToTLogGroupKey(m.param1),
-					                                       BinaryReader::fromStringRef<UID>(m.param2, Unversioned()));
-				}
+				ASSERT_WE_THINK(tLogGroupCollection.isValid());
+				tLogGroupCollection->assignStorageTeam(decodeStorageTeamIdToTLogGroupKey(m.param1),
+				                                       BinaryReader::fromStringRef<UID>(m.param2, Unversioned()));
 
 				// Storage Team ID to TLogGroup
 				// TODO: Update proxy state
@@ -874,7 +871,8 @@ void applyMetadataMutations(SpanID const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
-                            IKeyValueStore* txnStateStore) {
+                            IKeyValueStore* txnStateStore,
+                            TLogGroupCollectionRef tLogGroupCollection) {
 
 	bool confChange; // Dummy variable, not used.
 
@@ -897,6 +895,6 @@ void applyMetadataMutations(SpanID const& spanContext,
 	                       /* storageCache= */ nullptr,
 	                       /* tag_popped= */ nullptr,
 	                       /* tssMapping= */ nullptr,
-	                       /* tLogGroupCollection= */ Reference<TLogGroupCollection>(),
+	                       tLogGroupCollection,
 	                       /* initialCommit= */ false);
 }
