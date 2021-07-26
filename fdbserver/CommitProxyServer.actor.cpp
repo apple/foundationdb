@@ -1923,10 +1923,14 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 				lastCommit = now();
 
 				if (trs.size() || lastCommitComplete.isReady()) {
-					lastCommitComplete =
-					    commitBatch(&commitData,
-					                const_cast<std::vector<CommitTransactionRequest>*>(&batchedRequests.first),
-					                batchBytes);
+					lastCommitComplete = transformError(
+					    timeoutError(
+					        commitBatch(&commitData,
+					                    const_cast<std::vector<CommitTransactionRequest>*>(&batchedRequests.first),
+					                    batchBytes),
+					        SERVER_KNOBS->COMMIT_PROXY_LIVENESS_TIMEOUT),
+					    timed_out(),
+					    failed_to_progress());
 					addActor.send(lastCommitComplete);
 				}
 			}
@@ -2068,9 +2072,11 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
-		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out) {
+		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out &&
+		    e.code() != error_code_failed_to_progress) {
 			throw;
 		}
+		TEST(e.code() == error_code_failed_to_progress); // Commit proxy failed to progress
 	}
 	return Void();
 }
