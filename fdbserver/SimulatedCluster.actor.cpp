@@ -1648,11 +1648,11 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 	tssCount =
 	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
 
-	if (!testConfig.config.present() && tssCount > 0) {
+	if (!testConfig.config.present() && tssCount > 0 && faultInjectionActivated) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
 		set_config(confStr);
 		double tssRandom = deterministicRandom()->random01();
-		if (tssRandom > 0.5 || !faultInjectionActivated) {
+		if (tssRandom > 0.5) {
 			// normal tss mode
 			g_simulator.tssMode = ISimulator::TSSMode::EnabledNormal;
 		} else if (tssRandom < 0.25 && !testConfig.isFirstTestInRestart) {
