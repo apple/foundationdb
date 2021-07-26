@@ -165,9 +165,13 @@ public class KeySelector {
 	}
 
 	/**
-	 * Returns the {@code or-equal} parameter of this {@code KeySelector}. For internal use.
+	 * Returns the orEqual parameter for this {@code KeySelector}. See the
+	 * {@link #KeySelector(byte[], boolean, int)} KeySelector constructor}
+	 * for more details.
+	 *
+	 * @return the {@code or-equal} parameter of this {@code KeySelector}.
 	 */
-	boolean orEqual() {
+	public boolean orEqual() {
 		return orEqual;
 	}
 

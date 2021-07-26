@@ -60,6 +60,8 @@ Fixes
 * Added a new pre-backup action when creating a backup. Backups can now either verify the range data is being saved to is empty before the backup begins (current behavior) or clear the range where data is being saved to. Fixes a ``restore_destination_not_empty`` failure after a backup retry due to ``commit_unknown_failure``. `(PR #4595) <https://github.com/apple/foundationdb/pull/4595>`_
 * When configured with ``usable_regions=2``, a cluster would not fail over to a region which contained only storage class processes. `(PR #4599) <https://github.com/apple/foundationdb/pull/4599>`_ 
 * If a restore is done using a prefix to remove and specific key ranges to restore, the key range boundaries must begin with the prefix to remove. `(PR #4684) <https://github.com/apple/foundationdb/pull/4684>`_
+* The multi-version client API would not propagate errors that occurred when creating databases on external clients. This could result in a invalid memory accesses. `(PR #5220) <https://github.com/apple/foundationdb/pull/5220>`_
+* Fixed a race between the multi-version client connecting to a cluster and destroying the database that could cause an assertion failure. `(PR #5220) <https://github.com/apple/foundationdb/pull/5220>`_
 
 Status
 ------
