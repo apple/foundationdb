@@ -153,6 +153,7 @@ struct StatusWorkload : TestWorkload {
 
 					tr.set(latencyBandConfigKey, ValueRef(config));
 					wait(tr.commit());
+					tr.reset();
 
 					if (deterministicRandom()->random01() < 0.3) {
 						return Void();

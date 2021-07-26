@@ -783,6 +783,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    Value(worker.processClass.toString())); // Set it as the same class type as before, thus only
 					                                            // class source will be changed
 					wait(tx->commit());
+					tx->reset();
 					Optional<Value> class_source = wait(tx->get(
 					    Key("process/class_source/" + address)
 					        .withPrefix(
