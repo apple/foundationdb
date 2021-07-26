@@ -1920,7 +1920,6 @@ ACTOR Future<TLogPeekReply> peekTLog(TLogData* self,
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
 	self->activePeekStreams++;
-	TraceEvent(SevDebug, "TLogPeekStream", logData->logId).detail("Token", req.reply.getEndpoint().token);
 
 	state Version begin = req.begin;
 	state bool onlySpilled = false;
@@ -2465,6 +2464,8 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			}
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
+			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
+			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {

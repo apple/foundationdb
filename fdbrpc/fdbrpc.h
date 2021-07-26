@@ -328,16 +328,16 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
 		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
-		acknowledgements.failures = tagError<Void>(
-		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint.getPrimaryAddress()),
-		    operation_obsolete());
+		acknowledgements.failures =
+		    tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(remoteEndpoint),
+		                   operation_obsolete());
 	}
 
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
 		this->addPromiseRef();
-		TraceEvent(SevDebug, "NetNotifiedQueueWithAcknowledgementsReceive")
-		    .detail("PromiseRef", this->getPromiseReferenceCount());
+		// TraceEvent(SevDebug, "NetNotifiedQueueWithAcknowledgementsReceive")
+		//     .detail("PromiseRef", this->getPromiseReferenceCount());
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
 
@@ -371,8 +371,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			this->send(std::move(message.get().asUnderlyingType()));
 		}
 		this->delPromiseRef();
-		TraceEvent(SevDebug, "NetNotifiedQueueWithAcknowledgementsReceiveEnd")
-		    .detail("PromiseRef", this->getPromiseReferenceCount());
+		// TraceEvent(SevDebug, "NetNotifiedQueueWithAcknowledgementsReceiveEnd")
+		//     .detail("PromiseRef", this->getPromiseReferenceCount());
 	}
 
 	T pop() override {

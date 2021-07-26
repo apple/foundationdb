@@ -559,7 +559,6 @@ ACTOR Future<TLogPeekReply> peekLogRouter(LogRouterData* self,
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamRequest req) {
 	self->activePeekStreams++;
-	TraceEvent(SevDebug, "LogRouterPeekStream", self->dbgid).detail("Token", req.reply.getEndpoint().token);
 
 	state Version begin = req.begin;
 	state bool onlySpilled = false;
@@ -690,6 +689,8 @@ ACTOR Future<Void> logRouterCore(TLogInterface interf,
 			addActor.send(logRouterPeekMessages(&logRouterData, req));
 		}
 		when(TLogPeekStreamRequest req = waitNext(interf.peekStreamMessages.getFuture())) {
+			TraceEvent(SevDebug, "LogRouterPeekStream", logRouterData.dbgid)
+			    .detail("Token", interf.peekStreamMessages.getEndpoint().token);
 			addActor.send(logRouterPeekStream(&logRouterData, req));
 		}
 		when(TLogPopRequest req = waitNext(interf.popMessages.getFuture())) {

@@ -2438,6 +2438,8 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			logData->addActor.send(tLogPeekMessages(self, req, logData));
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
+			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
+			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPopRequest req = waitNext(tli.popMessages.getFuture())) {

@@ -351,10 +351,10 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 				                   fPeekReply)
 				             : Never())) {
 					updateCursorWithReply(self, res);
-					// TraceEvent("SPC_GetMoreB", self->randomID)
-					//     .detail("Has", self->hasMessage())
-					//     .detail("End", res.end)
-					//     .detail("Popped", res.popped.present() ? res.popped.get() : 0);
+					TraceEvent("SPC_GetMoreB", self->randomID)
+					    .detail("Has", self->hasMessage())
+					    .detail("End", res.end)
+					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
 
 					// NOTE: delay is needed here since TLog need to be scheduled to response if there are TLog and SS
 					// on the same machine
