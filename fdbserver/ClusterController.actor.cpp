@@ -4722,7 +4722,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 	loop {
 		try {
 			while (!self->goodRecruitmentTime.isReady()) {
-				wait(self->goodRecruitmentTime);
+				wait(lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
 			}
 
 			self->degradedServers = self->getServersWithDegradedLink();
