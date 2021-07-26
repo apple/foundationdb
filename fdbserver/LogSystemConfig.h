@@ -85,8 +85,10 @@ struct serializable_traits<OptionalInterface<Interface>> : std::true_type {
 struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
-
-	std::unordered_map<ptxn::TLogGroupID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>> ptxnTLogGroups;
+	std::vector<ptxn::TLogGroupID> tLogGroups;
+	std::unordered_map<ptxn::TLogGroupID,
+	                   std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
+	    ptxnTLogGroups;
 
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
 	std::vector<OptionalInterface<BackupInterface>> backupWorkers;

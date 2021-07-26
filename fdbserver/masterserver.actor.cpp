@@ -434,7 +434,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->allTags,
 		                                                                 self->recruitmentStalled,
 		                                                                 self->tlogGroupIdToTlogServerIds,
-																		 self->tlogServerIdToTlogGroups));
+		                                                                 self->tlogServerIdToTlogGroups));
 		self->logSystem = newLogSystem;
 	} else {
 		self->primaryLocality = tagLocalitySpecial;
@@ -448,7 +448,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->allTags,
 		                                                                 self->recruitmentStalled,
 		                                                                 self->tlogGroupIdToTlogServerIds,
-																		 self->tlogServerIdToTlogGroups));
+		                                                                 self->tlogServerIdToTlogGroups));
 		self->logSystem = newLogSystem;
 	}
 	return Void();
@@ -1037,8 +1037,10 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 		req.prevVersion = -1;
 		req.version = self->lastEpochEnd;
 		req.lastReceivedVersion = -1;
-		// TODO: add all team IDs to the request
-
+		req.newGroups.reserve(self->tLogGroupCollection->groups().size());
+		for (const auto& tLogGroup : self->tLogGroupCollection->groups()) {
+			req.newGroups.push_back(tLogGroup->id());
+		}
 		replies.push_back(brokenPromiseToNever(r.resolve.getReply(req)));
 	}
 

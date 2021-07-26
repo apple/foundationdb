@@ -56,7 +56,8 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
-	std::unordered_map<UID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>> groupIdToInterfaces;
+	std::unordered_map<UID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
+	    groupIdToInterfaces;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
@@ -871,7 +872,7 @@ struct ILogSystem {
 	    std::vector<Tag> const& allTags,
 	    Reference<AsyncVar<bool>> const& recruitmentStalled,
 	    std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
-		std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) = 0;
+	    std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) = 0;
 	// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 	// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional
 	// until the caller updates the coordinated DBCoreState
