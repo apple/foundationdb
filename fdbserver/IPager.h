@@ -233,7 +233,7 @@ public:
 
 	// If id is remapped, delete the original as of version v and return the page it was remapped to.  The caller
 	// is then responsible for referencing and deleting the returned page ID.
-	virtual LogicalPageID detachRemappedPage(LogicalPageID id, Version v) = 0;
+	virtual Standalone<VectorRef<LogicalPageID>> detachRemappedPage(VectorRef<LogicalPageID> pageIDs, uint8_t level, Version v) = 0;
 
 	// Returns the latest data (regardless of version) for a page by LogicalPageID
 	// The data returned will be the later of

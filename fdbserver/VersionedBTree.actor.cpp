@@ -2668,7 +2668,9 @@ public:
 				    // eviction If the versioned map is empty for this page then the prior version of the page is at
 				    // stored at the PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered
 				    // map.
-				    pageCache.prioritizeEviction(versionedMap.empty() ? pageIDs[i] : versionedMap.rbegin()->second);
+					if(i==0) {
+				    	pageCache.prioritizeEviction(versionedMap.empty() ? pageIDs[i] : versionedMap.rbegin()->second);
+					}
 				    versionedMap[v] = newIDs[i];
 
 				    debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
@@ -2707,42 +2709,49 @@ public:
 		pageCache.prioritizeEviction(pageIDs.front());
 	}
 
-	LogicalPageID detachRemappedPage(LogicalPageID pageID, Version v) override {
-		auto i = remappedPages.find(pageID);
-		if (i == remappedPages.end()) {
-			// Page is not remapped
-			return invalidLogicalPageID;
-		}
+	Standalone<VectorRef<LogicalPageID>> detachRemappedPage(VectorRef<LogicalPageID> pageIDs, uint8_t level, Version v) override {
+		Standalone<VectorRef<LogicalPageID>> newIDs;
+		for(auto pageID:pageIDs){
+			auto i = remappedPages.find(pageID);
+			if (i == remappedPages.end()) {
+				// Page is not remapped
+				newIDs.push_back(newIDs.arena(), invalidLogicalPageID);
+				continue;
+			}
 
-		// Get the page that id was most recently remapped to
-		auto iLast = i->second.rbegin();
-		LogicalPageID newID = iLast->second;
-		ASSERT(RemappedPage::getTypeOf(newID) == RemappedPage::REMAP);
+			// Get the page that id was most recently remapped to
+			auto iLast = i->second.rbegin();
+			LogicalPageID newID = iLast->second;
+			ASSERT(RemappedPage::getTypeOf(VectorRef<LogicalPageID>(&newID,1)) == RemappedPage::REMAP);
 
-		// If the last change remap was also at v then change the remap to a delete, as it's essentially
-		// the same as the original page being deleted at that version and newID being used from then on.
-		if (iLast->first == v) {
-			debug_printf("DWALPager(%s) op=detachDelete originalID=%s newID=%s @%" PRId64 " oldestVersion=%" PRId64
-			             "\n",
-			             filename.c_str(),
-			             toString(pageID).c_str(),
-			             toString(newID).c_str(),
-			             v,
-			             pLastCommittedHeader->oldestVersion);
-			iLast->second = invalidLogicalPageID;
-			remapQueue.pushBack(RemappedPage{ v, pageID, invalidLogicalPageID });
-		} else {
-			debug_printf("DWALPager(%s) op=detach originalID=%s newID=%s @%" PRId64 " oldestVersion=%" PRId64 "\n",
-			             filename.c_str(),
-			             toString(pageID).c_str(),
-			             toString(newID).c_str(),
-			             v,
-			             pLastCommittedHeader->oldestVersion);
-			// Mark id as converted to its last remapped location as of v
-			i->second[v] = 0;
-			remapQueue.pushBack(RemappedPage{ VectorRef<LogicalPageID>(&pageID, 1), 0 , v });
+			// If the last change remap was also at v then change the remap to a delete, as it's essentially
+			// the same as the original page being deleted at that version and newID being used from then on.
+			if (iLast->first == v) {
+				debug_printf("DWALPager(%s) op=detachDelete originalID=%s newID=%s @%" PRId64 " oldestVersion=%" PRId64
+							"\n",
+							filename.c_str(),
+							toString(pageID).c_str(),
+							toString(newID).c_str(),
+							v,
+							pLastCommittedHeader->oldestVersion);
+				iLast->second = invalidLogicalPageID;
+				//remapQueue.pushBack(RemappedPage{ v, pageID, invalidLogicalPageID });
+				newIDs.push_back(newIDs.arena(), invalidLogicalPageID);
+			} else {
+				debug_printf("DWALPager(%s) op=detach originalID=%s newID=%s @%" PRId64 " oldestVersion=%" PRId64 "\n",
+							filename.c_str(),
+							toString(pageID).c_str(),
+							toString(newID).c_str(),
+							v,
+							pLastCommittedHeader->oldestVersion);
+				// Mark id as converted to its last remapped location as of v
+				i->second[v] = 0;
+				//remapQueue.pushBack(RemappedPage{ VectorRef<LogicalPageID>(&pageID, 1), 0 , v });
+				newIDs.push_back(newIDs.arena(), 0);
+			}
+			remapQueue.pushBack( RemappedPage{ pageIDs, newIDs, level, v} );
+			return newIDs;
 		}
-		return newID;
 	}
 
 	void freePage( uint8_t level, Version v, VectorRef<LogicalPageID> pageIDs ) override {
@@ -3181,15 +3190,15 @@ public:
 
 		if (copyNewToOriginal) {
 			if (g_network->isSimulated()) {
-				ASSERT(self->remapDestinationsSimOnly.count(p.originalPageID) == 0);
-				self->remapDestinationsSimOnly.insert(p.originalPageID);
+				ASSERT(self->remapDestinationsSimOnly.count(p.originalPageIDs.front()) == 0);
+				self->remapDestinationsSimOnly.insert(p.originalPageIDs.front());	// TODO: check here, front() or all of the pageID?
 			}
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
 			Reference<ArenaPage> data = wait(self->readPage(PagerEventReasons::MetaData,
 			                                                nonBtreeLevel,
-			                                                VectorRef<LogicalPageID>(&p.newPageID, 1),
+			                                                p.newPageIDs,
 			                                                ioLeafPriority,
 			                                                false,
 			                                                true));
@@ -3197,7 +3206,7 @@ public:
 			// Write the data to the original page so it can be read using its original pageID
 			self->updatePage(PagerEventReasons::MetaData,
 			                 nonBtreeLevel,
-			                 VectorRef<LogicalPageID>(&p.originalPageID, 1),
+			                 p.originalPageIDs,
 			                 data->subPage(0, self->physicalPageSize));
 			++g_redwoodMetrics.metric.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
@@ -3255,7 +3264,8 @@ public:
 		state Version oldestRetainedVersion = self->effectiveOldestVersion();
 
 		// Cutoff is the version we can pop to
-		state RemappedPage cutoff(oldestRetainedVersion - self->remapCleanupWindow);
+		auto temp = invalidLogicalPageID;
+		state RemappedPage cutoff(VectorRef<LogicalPageID>(&temp, 1), VectorRef<LogicalPageID>(&temp, 1), nonBtreeLevel, oldestRetainedVersion - self->remapCleanupWindow);
 		debug_printf("DWALPager(%s) remapCleanup cutoff %s oldestRetailedVersion=%" PRId64 " \n",
 		             self->filename.c_str(),
 		             ::toString(cutoff).c_str(),
@@ -6486,17 +6496,20 @@ private:
 							auto& stats = g_redwoodMetrics.level(height);
 							while (cursor.valid()) {
 								if (cursor.get().value.present()) {
+									Standalone<VectorRef<LogicalPageID>> newIDs = 
+										self->m_pager->detachRemappedPage(cursor.get().getChildPage(), height, writeVersion);
+									state int index = 0;
 									for (auto& p : cursor.get().getChildPage()) {
 										if (parentInfo->maybeUpdated(p)) {
-											LogicalPageID newID = self->m_pager->detachRemappedPage(p, writeVersion);
-											if (newID != invalidLogicalPageID) {
-												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
-												p = newID;
+											if (newIDs[index] != invalidLogicalPageID) {
+												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newIDs[index]);
+												p = newIDs[index];
 												++stats.metrics.detachChild;
 												++detached;
 											}
 										}
 									}
+									++index;
 								}
 								cursor.moveNext();
 							}
@@ -6538,10 +6551,12 @@ private:
 								if (rec.value.present()) {
 									BTreePageIDRef oldPages = rec.getChildPage();
 									BTreePageIDRef newPages;
+									Standalone<VectorRef<LogicalPageID>> newIDs = 
+										self->m_pager->detachRemappedPage(oldPages, height, writeVersion);
 									for (int i = 0; i < oldPages.size(); ++i) {
 										LogicalPageID p = oldPages[i];
 										if (parentInfo->maybeUpdated(p)) {
-											LogicalPageID newID = self->m_pager->detachRemappedPage(p, writeVersion);
+											LogicalPageID newID = newIDs[i];
 											if (newID != invalidLogicalPageID) {
 												// Rebuild record values reference original page memory so make a copy
 												if (newPages.empty()) {
