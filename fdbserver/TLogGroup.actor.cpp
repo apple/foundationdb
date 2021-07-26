@@ -22,26 +22,50 @@
 #include <iterator>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/IClientApi.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
+// TODO: Initialize with right params.
+TLogGroupCollection::TLogGroupCollection() : policy(nullptr), targetNumGroups(0), GROUP_SIZE(0) {}
+
 TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize)
   : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {}
+
+TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy,
+                                         int numGroups,
+                                         int groupSize,
+                                         Reference<AsyncVar<ServerDBInfo>> dbInfo)
+  : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {
+
+	ASSERT(dbInfo.isValid());
+	for (auto logSet : dbInfo->get().logSystemConfig.tLogs) {
+		if (logSet.isLocal && logSet.locality != tagLocalitySatellite) {
+			// TODO (Vishesh): Support satellite + remote TLogs
+			addWorkers(logSet.tLogs);
+		}
+	}
+}
 
 const std::vector<TLogGroupRef>& TLogGroupCollection::groups() const {
 	return recruitedGroups;
@@ -53,6 +77,28 @@ int TLogGroupCollection::groupSize() const {
 
 int TLogGroupCollection::targetGroupSize() const {
 	return targetNumGroups;
+}
+
+TLogGroupRef TLogGroupCollection::getGroup(UID groupId, bool create) {
+	// TODO: Change the vector of groups to a map for faster lookup.
+	for (auto& g : recruitedGroups) {
+		if (g->id() == groupId) {
+			return g;
+		}
+	}
+
+	if (create) {
+		recruitedGroups.push_back(makeReference<TLogGroup>(groupId));
+		return recruitedGroups.back();
+	}
+
+	return Reference<TLogGroup>();
+}
+
+void TLogGroupCollection::addWorkers(const std::vector<OptionalInterface<TLogInterface>>& logWorkers) {
+	for (const auto& worker : logWorkers) {
+		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
+	}
 }
 
 void TLogGroupCollection::addWorkers(const std::vector<WorkerInterface>& logWorkers) {
@@ -103,6 +149,46 @@ LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::uno
 	return localityMap;
 }
 
+void TLogGroupCollection::addTLogGroup(TLogGroupRef group) {
+	TraceEvent("TLogGroupAdd")
+	    .detail("GroupID", group->id())
+	    .detail("Size", group->size())
+	    .detail("Group", group->toString());
+	recruitedGroups.push_back(group);
+}
+
+TLogGroupRef TLogGroupCollection::selectFreeGroup(int seed) {
+	return recruitedGroups[seed % recruitedGroups.size()];
+}
+
+bool TLogGroupCollection::tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers) {
+	auto it = storageTeams.find(teamId);
+	if (it != storageTeams.end()) {
+		ASSERT(it->second == servers);
+		return false;
+	}
+	storageTeams[teamId] = servers;
+	TraceEvent("TLogGroupAddStorageTeam").detail("StorageTeamIdW", teamId).detail("Servers", describe(servers));
+	return true;
+}
+
+bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId) {
+	// ASSERT(storageTeamToTLogGroupMap.find(teamId) == storageTeamToTLogGroupMap.end());
+	auto group = getGroup(groupId, true);
+	ASSERT(group.isValid());
+	storageTeamToTLogGroupMap[teamId] = group;
+	group->assignStorageTeam(teamId);
+	TraceEvent("TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", groupId);
+	return true;
+}
+
+bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group) {
+	TraceEvent("TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", group->id());
+	storageTeamToTLogGroupMap[teamId] = group;
+	group->assignStorageTeam(teamId);
+	return true;
+}
+
 void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq) {
 	CommitTransactionRef& tr = recoveryCommitReq->transaction;
 	const auto& serversPrefix = LiteralStringRef("/servers");
@@ -110,11 +196,18 @@ void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq
 	tr.clear(recoveryCommitReq->arena, tLogGroupKeys);
 	for (const auto& group : recruitedGroups) {
 		const auto& groupServerPrefix = tLogGroupKeyFor(group->id()).withSuffix(serversPrefix);
+		tr.set(recoveryCommitReq->arena, groupServerPrefix, group->toValue());
 		TraceEvent("TLogGroupStore")
 		    .detail("GroupID", group->id())
 		    .detail("Size", group->size())
 		    .detail("Group", group->toString());
-		tr.set(recoveryCommitReq->arena, groupServerPrefix, group->toValue());
+	}
+
+	for (const auto& [teamId, group] : storageTeamToTLogGroupMap) {
+		tr.set(recoveryCommitReq->arena,
+		       storageTeamIdToTLogGroupKey(teamId),
+		       BinaryWriter::toValue(group->id(), Unversioned()));
+		TraceEvent("TLogGroupSSTeamAssignSave").detail("GroupID", group->id()).detail("SSTeamId", teamId);
 	}
 }
 
@@ -131,6 +224,36 @@ void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store) {
 	}
 }
 
+void TLogGroupCollection::seedTLogGroupAssignment(Arena& arena,
+                                                  CommitTransactionRef& tr,
+                                                  vector<StorageServerInterface> servers) {
+
+	// Collect UID of SS
+	std::vector<UID> serverSrcUID;
+	serverSrcUID.reserve(servers.size());
+	for (auto& s : servers) {
+		serverSrcUID.push_back(s.id());
+	}
+
+	// Step 1: Create the first storage server team.
+	auto teamId = deterministicRandom()->randomUniqueID();
+	tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(serverSrcUID));
+
+	// Step 2: Map from SS to teamID.
+	for (const auto& ss : serverSrcUID) {
+		Key teamIdKey = storageServerToTeamIdKey(ss);
+		Value val = encodeStorageServerToTeamIdValue({ teamId });
+		tr.set(arena, teamIdKey, val);
+	}
+
+	// Step 3: Assign the storage team to a TLogGroup (Storage Team -> TLogGroup).
+	TLogGroupRef group = selectFreeGroup();
+	TraceEvent("TLogGroupSeedTeam").detail("StorageTeamId", teamId);
+	tr.set(arena, storageTeamIdToTLogGroupKey(teamId), encodeStorageServerToTeamIdValue({ group->id() }));
+	assignStorageTeam(teamId, group);
+	storageTeams[teamId] = serverSrcUID;
+}
+
 void TLogGroup::addServer(const TLogWorkerDataRef& workerData) {
 	serverMap.emplace(workerData->id, workerData);
 }
@@ -145,6 +268,10 @@ std::vector<TLogWorkerDataRef> TLogGroup::servers() const {
 
 int TLogGroup::size() const {
 	return serverMap.size();
+}
+
+void TLogGroup::assignStorageTeam(const UID& teamId) {
+	storageTeamSet.insert(teamId);
 }
 
 Standalone<StringRef> TLogGroup::toValue() const {
@@ -257,8 +384,8 @@ void printTLogGroupCollection(const TLogGroupCollection& collection) {
 	}
 }
 
-// Checks if each TLog belongs to only one TLogGroup in 'collection', number of workers inside
-// each group is equal to 'groupSize' and the total number of recruited workers is equal to
+// Checks if each TLogGroup in 'collection', number of workers inside each group
+// is equal to 'groupSize' and the total number of recruited workers is equal to
 // 'totalProcesses', or else will fail assertion.
 void checkGroupMembersUnique(const TLogGroupCollection& collection, int groupSize, int totalProcesses) {
 	const auto& groups = collection.groups();

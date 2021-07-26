@@ -1278,10 +1278,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
 
-	// TODO:
-	// new code will push each LogPushData into each individual TLog group with its own previous commit version
-	// and commit version in this batch
-
 	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 		self->toCommit.pGroupMessageBuilders = &self->pGroupMessageBuilders;
 		std::vector<Future<Version>> pushResults;

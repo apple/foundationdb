@@ -1,5 +1,5 @@
 /*
- * TLogGroup.h
+ * TLogGroup.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,6 +22,8 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of
 // this file. In intellisense use the source version.
+#include "fdbserver/TesterInterface.actor.h"
+#include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TLOGROUP_ACTOR_G_H)
 #define FDBSERVER_TLOGROUP_ACTOR_G_H
 #include "fdbserver/TLogGroup.actor.g.h"
@@ -57,9 +59,18 @@ typedef Reference<TLogGroupCollection> TLogGroupCollectionRef;
 // TODO: TLogGroupCollection for HA (satellite and remote), either same class or separate.
 class TLogGroupCollection : public ReferenceCounted<TLogGroupCollection> {
 public:
+	explicit TLogGroupCollection();
+
 	// Construct a TLogGroupCollection, where each group has 'groupSize' servers and satifies
 	// the contraints set by ReplicaitonPolicy 'policy'
 	explicit TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize);
+
+	// Construct a TLogGroupCollection, where each group has 'groupSize' servers and satifies
+	// the contraints set by ReplicaitonPolicy 'policy'
+	explicit TLogGroupCollection(const Reference<IReplicationPolicy>& policy,
+	                             int numGroups,
+	                             int groupSize,
+	                             Reference<AsyncVar<ServerDBInfo>> serverDbInfo);
 
 	// Returns list of groups recruited by this collection.
 	const std::vector<TLogGroupRef>& groups() const;
@@ -67,16 +78,40 @@ public:
 	// Returns the size of each TLogGroup.
 	int groupSize() const;
 
+	// Return the group with given 'id'. Returns an null reference if the group
+	// with given ID doesn't exists.
+	TLogGroupRef getGroup(UID groupId, bool create = false);
+
 	// Returns the number of TLogGroups we want to keep in collection. May be not be
 	// equal to number of groups currently recruited/active.
 	int targetGroupSize() const;
 
 	// Add 'logWorkers' to current collection of workers that can be recruited into a TLogGroup.
 	void addWorkers(const std::vector<WorkerInterface>& logWorkers);
+	void addWorkers(const std::vector<OptionalInterface<TLogInterface>>& logWorkers);
 
 	// Build a collection of groups and recruit workers into each group as per the ReplicationPolicy
 	// and group size set in the parent class.
 	void recruitEverything();
+
+	// Add a TLogGroup
+	void addTLogGroup(TLogGroupRef group);
+
+	// Find a TLogGroup for assigning a storage team.
+	TLogGroupRef selectFreeGroup(int seed = 0);
+
+	// Return storage team to list of storage server map.
+	const std::map<ptxn::StorageTeamID, vector<UID>>& getStorageTeams() const { return storageTeams; }
+
+	// Add storage team ID to lists of storage servers in that team. Returns `false` if the team
+	// already exists, else return `true`.
+	bool tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers);
+
+	// Assigns a storage team to given group
+	bool assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId);
+
+	// Assigns a storage team to given group
+	bool assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group);
 
 	// Add mutations to store state to given txnStoreState transaction request 'recoveryCommitReq'.
 	void storeState(CommitTransactionRequest* recoveryCommitReq);
@@ -84,6 +119,17 @@ public:
 	// Loads TLogGroupCollection state from given IKeyValueStore, which will be txnStoreState passed
 	// by master.
 	void loadState(const Standalone<RangeResultRef>& store);
+
+	// Start monitoring storage teams by reading \xff keyspace.
+	// TODO: Get notifications from DD.
+	Future<Void> recoverStorageTeamAssignments(Arena& arena,
+	                                           CommitTransactionRef& tr,
+	                                           vector<StorageServerInterface> servers);
+
+	// Called by the master server to write the very first transaction to the database establishing
+	// the first storage team to tLogGroup mapping. TLogGroups should be created by the time this is
+	// called during recovery. Gives ID to first storage server team, and assigns a TLogGroup to it.
+	void seedTLogGroupAssignment(Arena& arena, CommitTransactionRef& tr, vector<StorageServerInterface> servers);
 
 private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers
@@ -106,6 +152,15 @@ private:
 	// A map from UID or workers to their corresponding TLogWorkerData objects.
 	// This map contains both recruited and unrecruited workers.
 	std::unordered_map<UID, TLogWorkerDataRef> recruitMap;
+
+	// Map from storage TeamID to list of list of storage servers in that team.
+	std::map<ptxn::StorageTeamID, vector<UID>> storageTeams;
+
+	// Map from storage TeamID to the TLogGroup managing that team.
+	std::map<ptxn::StorageTeamID, TLogGroupRef> storageTeamToTLogGroupMap;
+
+	// Holds the future returned by `storageTeamMonitor` actor. Set by calling `monitorStorageTeams()`.
+	Future<Void> initializeOrReocverStorageTeamAssignments;
 };
 
 // Represents a single TLogGroup which consists of TLog workers.
@@ -125,6 +180,13 @@ public:
 	// Returns the number of servers recruited in this group, including failed ones.
 	int size() const;
 
+	// Return set of storage team ids managed by this group.
+	const std::unordered_set<UID>& storageTeams();
+
+	// Helpers to assign and remove a team from group by its ID.
+	void assignStorageTeam(const UID& teamId);
+	void removeStorageTeam(const UID& teamId);
+
 	Standalone<StringRef> toValue() const;
 
 	static TLogGroupRef fromValue(UID groupId,
@@ -141,6 +203,9 @@ private:
 	// Map from worker UID to TLogWorkerData
 	// TODO: Can be an unordered_set.
 	std::unordered_map<UID, TLogWorkerDataRef> serverMap;
+
+	// List of storage teams IDs mananaged by this group.
+	std::unordered_set<ptxn::StorageTeamID> storageTeamSet;
 };
 
 // Represents an individual TLogWorker in this collection. A TLogGroup is a set of TLogWorkerData.
@@ -148,15 +213,26 @@ struct TLogWorkerData : public ReferenceCounted<TLogWorkerData> {
 	const UID id;
 
 	// Locality associated with the current worker.
-	const LocalityData locality;
-	const NetworkAddress address;
+	LocalityData locality;
+	NetworkAddress address;
 
+	TLogWorkerData(const UID& id) : id(id) {}
 	TLogWorkerData(const UID& id, const NetworkAddress& addr, const LocalityData& locality)
 	  : id(id), address(addr), locality(locality) {}
 
 	// Converts a WorkerInterface to TLogWorkerData.
 	static TLogWorkerDataRef fromInterface(const WorkerInterface& interf) {
 		return makeReference<TLogWorkerData>(interf.id(), interf.address(), interf.locality);
+	}
+	// Converts a WorkerInterface to TLogWorkerData.
+	static TLogWorkerDataRef fromInterface(const OptionalInterface<TLogInterface>& interf) {
+		if (interf.present()) {
+			auto inf = interf.interf();
+			return makeReference<TLogWorkerData>(inf.id(), inf.address(), inf.filteredLocality);
+		} else {
+			// TODO (Vishesh) Figure out how to find out locality later?
+			return makeReference<TLogWorkerData>(interf.id());
+		}
 	}
 
 	// Returns user-readable string representation of this object.

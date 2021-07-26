@@ -47,26 +47,28 @@ Reference<StorageInfo> getStorageInfo(UID id,
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all commit proxies at the same time. Otherwise, the data
 // stored in txnStateStore will become corrupted.
-void applyMetadataMutations(SpanID const& spanContext,
-                            UID const& dbgid,
-                            Arena& arena,
-                            VectorRef<MutationRef> const& mutations,
-                            IKeyValueStore* txnStateStore,
-                            LogPushData* toCommit, // non-null if these mutations were part of a new commit handled by this commit proxy
-                            bool& confChange,
-                            Reference<ILogSystem> logSystem,
-                            Version popVersion,
-                            KeyRangeMap<std::set<Key>>* vecBackupKeys,
-                            KeyRangeMap<ServerCacheInfo>* keyInfo,
-                            KeyRangeMap<bool>* cacheInfo,
-                            std::map<Key, ApplyMutationsData>* uid_applyMutationsData,
-                            RequestStream<CommitTransactionRequest> commit,
-                            Database cx,
-                            NotifiedVersion* commitVersion,
-                            std::map<UID, Reference<StorageInfo>>* storageCache,
-                            std::map<Tag, Version>* tag_popped,
-                            std::unordered_map<UID, StorageServerInterface>* tssMapping,
-                            bool initialCommit // true if the mutations were already written to the txnStateStore as part of recovery
+void applyMetadataMutations(
+    SpanID const& spanContext,
+    UID const& dbgid,
+    Arena& arena,
+    VectorRef<MutationRef> const& mutations,
+    IKeyValueStore* txnStateStore,
+    LogPushData* toCommit, // non-null if these mutations were part of a new commit handled by this commit proxy
+    bool& confChange,
+    Reference<ILogSystem> logSystem,
+    Version popVersion,
+    KeyRangeMap<std::set<Key>>* vecBackupKeys,
+    KeyRangeMap<ServerCacheInfo>* keyInfo,
+    KeyRangeMap<bool>* cacheInfo,
+    std::map<Key, ApplyMutationsData>* uid_applyMutationsData,
+    RequestStream<CommitTransactionRequest> commit,
+    Database cx,
+    NotifiedVersion* commitVersion,
+    std::map<UID, Reference<StorageInfo>>* storageCache,
+    std::map<Tag, Version>* tag_popped,
+    std::unordered_map<UID, StorageServerInterface>* tssMapping,
+    Reference<TLogGroupCollection> tLogGroupCollection,
+    bool initialCommit // true if the mutations were already written to the txnStateStore as part of recovery
 ) {
 	// std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
@@ -178,9 +180,38 @@ void applyMetadataMutations(SpanID const& spanContext,
 			} else if (m.param1.startsWith(tLogGroupPrefix)) {
 				// Create a private mutation for storage servers
 				// This is done to make the storage servers aware of changed tLogGroup
-				if (toCommit) {
-					// TODO: Don't know how it works?
+				ASSERT_WE_THINK(tLogGroupCollection.isValid());
+				auto groupId = decodeTLogGroupKey(m.param1);
+				auto servers = TLogGroup::fromValue(
+				    groupId, m.param2, std::unordered_map<UID, TLogWorkerDataRef>({ /* TODO: add recruits */ }));
+				tLogGroupCollection->addTLogGroup(servers);
+
+				if (!initialCommit) {
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				}
+			} else if (m.param1.startsWith(storageTeamIdKeyPrefix)) {
+				ASSERT_WE_THINK(tLogGroupCollection.isValid());
+				auto teamid = storageTeamIdKeyDecode(m.param1);
+				if (tLogGroupCollection->tryAddStorageTeam(teamid, decodeStorageTeams(m.param2))) {
+					auto group = tLogGroupCollection->selectFreeGroup(teamid.hash());
+					// TODO: This may be unnessary, as ApplyMetadataMutation case for this key-range
+					//     should do the assignment.
+					tLogGroupCollection->assignStorageTeam(teamid, group);
+					txnStateStore->set(KeyValueRef(storageTeamIdToTLogGroupKey(teamid),
+					                               BinaryWriter::toValue(group->id(), Unversioned())));
+				}
+
+				// Storage Team ID to Storage Server List
+				if (!initialCommit) {
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				}
+			} else if (m.param1.startsWith(storageTeamIdToTLogGroupPrefix)) {
+				ASSERT_WE_THINK(tLogGroupCollection.isValid());
+				tLogGroupCollection->assignStorageTeam(decodeStorageTeamIdToTLogGroupKey(m.param1),
+				                                       BinaryReader::fromStringRef<UID>(m.param2, Unversioned()));
+
+				// Storage Team ID to TLogGroup
+				// TODO: Update proxy state
 				if (!initialCommit) {
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				}
@@ -832,6 +863,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 	                       &proxyCommitData.storageCache,
 	                       &proxyCommitData.tag_popped,
 	                       &proxyCommitData.tssMapping,
+	                       proxyCommitData.tLogGroupCollection,
 	                       initialCommit);
 }
 
@@ -839,7 +871,8 @@ void applyMetadataMutations(SpanID const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
-                            IKeyValueStore* txnStateStore) {
+                            IKeyValueStore* txnStateStore,
+                            TLogGroupCollectionRef tLogGroupCollection) {
 
 	bool confChange; // Dummy variable, not used.
 
@@ -862,5 +895,6 @@ void applyMetadataMutations(SpanID const& spanContext,
 	                       /* storageCache= */ nullptr,
 	                       /* tag_popped= */ nullptr,
 	                       /* tssMapping= */ nullptr,
+	                       tLogGroupCollection,
 	                       /* initialCommit= */ false);
 }

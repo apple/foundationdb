@@ -333,7 +333,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->pseudoLocalities = lsConf.pseudoLocalities;
 		for (const TLogSet& tLogSet : lsConf.tLogs) {
 			if (!excludeRemote || tLogSet.isLocal) {
-				// create ilogsystem::logset from logsystemconfig::tlogset
 				logSystem->tLogs.push_back(makeReference<LogSet>(tLogSet));
 			}
 		}
@@ -3014,7 +3013,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				UID serverId = recr.tLogs[i].id();
 				std::vector<ptxn::TLogGroup> groups;
 				for (TLogGroupRef tlogGroup : tlogServerIdToTlogGroups[serverId]) {
-					groups.push_back(ptxn::TLogGroup(tlogGroup -> id()));
+					groups.push_back(ptxn::TLogGroup(tlogGroup->id()));
 				}
 				req.tlogGroups = groups;
 			}
@@ -3115,12 +3114,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		wait(waitForAll(initializationReplies) || oldRouterRecruitment);
 
 		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-			state std::unordered_map<UID, ptxn::TLogInterface_PassivelyPull > id2Interface;
+			state std::unordered_map<UID, ptxn::TLogInterface_PassivelyPull> id2Interface;
 			state int i = 0;
 			for (i = 0; i < reqs.size(); i++) {
 				ASSERT(reqs[i].isPrimary);
 				// wait for interfaces being built from TLogServer, then construct id -> interface mapping
-				// cannot use more standard `getReplyUnlessFailedFor`, because it is waiting on `reply` field, here we have ptxn.reply
+				// cannot use more standard `getReplyUnlessFailedFor`, because it is waiting on `reply` field, here we
+				// have ptxn.reply
 				state ptxn::TLogInterface_PassivelyPull serverNew = wait(reqs[i].ptxnReply.getFuture());
 				id2Interface[recr.tLogs[i].id()] = serverNew;
 			}
