@@ -1531,9 +1531,9 @@ struct RedwoodMetrics {
 
 		void clear(int level = 0, HistogramRegistry* registry = nullptr) {
 			metrics = {};
-
+			// These histograms are used for Btree events, hence level > 0
 			if (level > 0) {
-				if (!buildFillPctSketch && registry != nullptr) {
+				if (!buildFillPctSketch && registry) {
 					std::string levelString = format("L%d", level);
 					buildFillPctSketch = Histogram::getHistogram(
 					    LiteralStringRef("buildFillPct"), levelString, Histogram::Unit::percentage, registry);
@@ -1603,13 +1603,13 @@ struct RedwoodMetrics {
 		                                               LiteralStringRef("ReadByGetRange"),
 		                                               Histogram::Unit::bytes,
 		                                               redwoodHistogramRegistry);
-		clear(redwoodHistogramRegistry);
+		clear();
 	}
 
-	void clear(HistogramRegistry* registry = nullptr) {
+	void clear() {
 		unsigned int levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
-			level.clear(levelCounter, registry);
+			level.clear(levelCounter, redwoodHistogramRegistry);
 			++levelCounter;
 		}
 		metric = {};
