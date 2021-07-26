@@ -2145,6 +2145,81 @@ TEST_CASE("monitor_network_busyness") {
 	CHECK(containsGreaterZero);
 }
 
+// Commit a transaction and confirm it has not been reset
+TEST_CASE("commit_does_not_reset") {
+	fdb::Transaction tr(db);
+	fdb::Transaction tr2(db);
+
+	// Commit two transactions, one that will fail with conflict and the other
+	// that will succeed. Ensure both transactions are not reset at the end.
+	while (1) {
+		fdb::Int64Future tr1GrvFuture = tr.get_read_version();
+		fdb_error_t err = wait_future(tr1GrvFuture);
+		if (err) {
+			fdb::EmptyFuture tr1OnErrorFuture = tr.on_error(err);
+			fdb_check(wait_future(tr1OnErrorFuture));
+			continue;
+		}
+
+		int64_t tr1StartVersion;
+		CHECK(!tr1GrvFuture.get(&tr1StartVersion));
+
+		fdb::Int64Future tr2GrvFuture = tr2.get_read_version();
+		err = wait_future(tr2GrvFuture);
+
+		if (err) {
+			fdb::EmptyFuture tr2OnErrorFuture = tr2.on_error(err);
+			fdb_check(wait_future(tr2OnErrorFuture));
+			continue;
+		}
+
+		int64_t tr2StartVersion;
+		CHECK(!tr2GrvFuture.get(&tr2StartVersion));
+
+		tr.set(key("foo"), "bar");
+		fdb::EmptyFuture tr1CommitFuture = tr.commit();
+		err = wait_future(tr1CommitFuture);
+		if (err) {
+			fdb::EmptyFuture tr1OnErrorFuture = tr.on_error(err);
+			fdb_check(wait_future(tr1OnErrorFuture));
+			continue;
+		}
+
+		fdb_check(tr2.add_conflict_range(key("foo"), strinc(key("foo")), FDB_CONFLICT_RANGE_TYPE_READ));
+		tr2.set(key("foo"), "bar");
+		fdb::EmptyFuture tr2CommitFuture = tr2.commit();
+		err = wait_future(tr2CommitFuture);
+		CHECK(err == 1020); // not_committed
+
+		fdb::Int64Future tr1GrvFuture2 = tr.get_read_version();
+		err = wait_future(tr1GrvFuture2);
+		if (err) {
+			fdb::EmptyFuture tr1OnErrorFuture = tr.on_error(err);
+			fdb_check(wait_future(tr1OnErrorFuture));
+			continue;
+		}
+
+		int64_t tr1EndVersion;
+		CHECK(!tr1GrvFuture2.get(&tr1EndVersion));
+
+		fdb::Int64Future tr2GrvFuture2 = tr2.get_read_version();
+		err = wait_future(tr2GrvFuture2);
+		if (err) {
+			fdb::EmptyFuture tr2OnErrorFuture = tr2.on_error(err);
+			fdb_check(wait_future(tr2OnErrorFuture));
+			continue;
+		}
+
+		int64_t tr2EndVersion;
+		CHECK(!tr2GrvFuture2.get(&tr2EndVersion));
+
+		// If we reset the transaction, then the read version will change
+		CHECK(tr1StartVersion == tr1EndVersion);
+		CHECK(tr2StartVersion == tr2EndVersion);
+		break;
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc != 3 && argc != 4) {
 		std::cout << "Unit tests for the FoundationDB C API.\n"
