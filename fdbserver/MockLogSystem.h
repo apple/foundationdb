@@ -50,7 +50,8 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	                     Version minKnownCommittedVersion,
 	                     struct LogPushData& data,
 	                     const SpanID& spanContext,
-	                     Optional<UID> debugID) final;
+	                     Optional<UID> debugID,
+	                     Optional<ptxn::TLogGroupID> tLogGroup) final;
 	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) final;
 	Reference<IPeekCursor> peek(UID dbgid,
 	                            Version begin,
@@ -86,8 +87,7 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	                                       int8_t remoteLocality,
 	                                       const vector<Tag>& allTags,
 	                                       const Reference<AsyncVar<bool>>& recruitmentStalled,
-                                           std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
-										   std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) final;
+	                                       Reference<TLogGroupCollection> tLogGroupCollection) final;
 	LogSystemConfig getLogSystemConfig() const final;
 	Standalone<StringRef> getLogsValue() const final;
 	Future<Void> onLogSystemConfigChange() final;

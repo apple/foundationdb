@@ -890,7 +890,7 @@ bool testWriteMessage(const UnitTestParameters& params) {
 	auto serialized = serializer.getAllSerialized();
 
 	std::map<Subsequence, VersionSubsequenceMessage> allMessages;
-	for (const auto& [_, serializedData] : serialized) {
+	for (const auto& [_, serializedData] : serialized.second) {
 		SubsequencedMessageDeserializer deserializer(serializedData);
 		checkSubequenceIncremental(deserializer);
 

@@ -41,7 +41,7 @@ struct TLogCommitReply {
 
 	Version version;
 
-	TLogCommitReply() {}
+	TLogCommitReply() = default;
 	explicit TLogCommitReply(Version version) : version(version) {}
 
 	template <typename Ar>
@@ -56,18 +56,13 @@ struct TLogCommitRequest {
 	// SpanID for tracing
 	SpanID spanID;
 
-	// Team ID
-	StorageTeamID storageTeamID;
-
-	// TODO:
-	// std::unordered_map<StorageTeamID, StringRef> commits
-	// TLogGroupID group
+	TLogGroupID tLogGroupID;
 
 	// Arena
 	Arena arena;
 
 	// Serialized messages
-	StringRef messages;
+	std::unordered_map<StorageTeamID, StringRef> messages;
 
 	// Versions
 	Version prevVersion;
@@ -79,20 +74,20 @@ struct TLogCommitRequest {
 	Optional<UID> debugID;
 
 	// Response
-	ReplyPromise<TLogCommitReply> reply;
+	ReplyPromise<ptxn::TLogCommitReply> reply;
 
 	TLogCommitRequest() = default;
 	TLogCommitRequest(const SpanID& spanID_,
-	                  const StorageTeamID& storageTeamID_,
+	                  const TLogGroupID& tLogGroupID_,
 	                  const Arena arena_,
-	                  StringRef messages_,
+	                  std::unordered_map<StorageTeamID, StringRef> messages_,
 	                  const Version prevVersion_,
 	                  const Version version_,
 	                  const Version knownCommittedVersion_,
 	                  const Version minKnownCommittedVersion_,
 	                  const Optional<UID>& debugID_)
-	  : spanID(spanID_), storageTeamID(storageTeamID_), arena(arena_), messages(messages_), prevVersion(prevVersion_),
-	    version(version_), knownCommittedVersion(knownCommittedVersion_),
+	  : spanID(spanID_), tLogGroupID(tLogGroupID_), arena(arena_), messages(std::move(messages_)),
+	    prevVersion(prevVersion_), version(version_), knownCommittedVersion(knownCommittedVersion_),
 	    minKnownCommittedVersion(minKnownCommittedVersion_), debugID(debugID_) {}
 
 	template <typename Ar>
@@ -160,6 +155,7 @@ struct TLogPeekRequest {
 	Version beginVersion;
 	Optional<Version> endVersion;
 	StorageTeamID storageTeamID;
+	TLogGroupID tLogGroupID;
 
 	Tag tag;
 	bool returnIfBlocked;
@@ -173,9 +169,10 @@ struct TLogPeekRequest {
 	                const Optional<Version>& endVersion_,
 	                bool returnIfBlocked_,
 	                bool onlySpilled_,
-	                const StorageTeamID& storageTeamID_)
+	                const StorageTeamID& storageTeamID_,
+	                const TLogGroupID& tLogGroupID_)
 	  : debugID(debugID_), beginVersion(beginVersion_), endVersion(endVersion_), returnIfBlocked(returnIfBlocked_),
-	    onlySpilled(onlySpilled_), storageTeamID(storageTeamID_) {}
+	    onlySpilled(onlySpilled_), storageTeamID(storageTeamID_), tLogGroupID(tLogGroupID_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
@@ -185,6 +182,7 @@ struct TLogPeekRequest {
 		           beginVersion,
 		           endVersion,
 		           storageTeamID,
+		           tLogGroupID,
 		           tag,
 		           returnIfBlocked,
 		           onlySpilled,
@@ -361,11 +359,11 @@ struct TLogInterfaceBase {
 
 	constexpr static FileIdentifier file_identifier = 4121433;
 
-	RequestStream<TLogCommitRequest> commit;
-	RequestStream<TLogPeekRequest> peek;
-	RequestStream<TLogPopRequest> pop;
+	RequestStream<struct TLogCommitRequest> commit;
+	RequestStream<struct TLogPeekRequest> peek;
+	RequestStream<struct TLogPopRequest> pop;
 	RequestStream<ReplyPromise<TLogLockResult>> lock; // first stage of database recovery
-	RequestStream<TLogQueuingMetricsRequest> getQueuingMetrics;
+	RequestStream<struct TLogQueuingMetricsRequest> getQueuingMetrics;
 	RequestStream<TLogConfirmRunningRequest> confirmRunning; // used for getReadVersion requests from client
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<TLogRecoveryFinishedRequest> recoveryFinished;

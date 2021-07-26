@@ -279,7 +279,7 @@ public:
 	Standalone<StringRef> getSerialized(const StorageTeamID& storageTeamID);
 
 	// Get all serialized data
-	std::unordered_map<StorageTeamID, Standalone<StringRef>> getAllSerialized();
+	std::pair<Arena, std::unordered_map<StorageTeamID, StringRef>> getAllSerialized();
 };
 
 template <typename T>

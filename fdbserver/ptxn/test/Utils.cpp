@@ -95,7 +95,7 @@ void print(const TLogCommitRequest& request) {
 	std::cout << std::endl << ">>> TLogCommitRequest" << std::endl;
 
 	std::cout << formatKVPair("Span ID", request.spanID) << std::endl
-	          << formatKVPair("Team ID", request.storageTeamID) << std::endl
+	          << formatKVPair("Log Group ID", request.tLogGroupID) << std::endl
 	          << formatKVPair("Debug ID", request.debugID) << std::endl
 	          << formatKVPair("Message data length", request.messages.size()) << std::endl
 	          << formatKVPair("Previous version", request.prevVersion) << std::endl
@@ -108,7 +108,8 @@ void print(const TLogPeekRequest& request) {
 	std::cout << formatKVPair("Debug ID", request.debugID) << std::endl
 	          << formatKVPair("Begin version", request.beginVersion) << std::endl
 	          << formatKVPair("End version", request.endVersion) << std::endl
-	          << formatKVPair("Team ID", request.storageTeamID) << std::endl;
+	          << formatKVPair("Team ID", request.storageTeamID) << std::endl
+	          << formatKVPair("Log Group ID", request.tLogGroupID) << std::endl;
 }
 
 void print(const TLogPeekReply& reply) {

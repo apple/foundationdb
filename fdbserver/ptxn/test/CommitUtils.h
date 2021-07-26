@@ -66,9 +66,10 @@ void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
                             CommitRecord& commitRecord);
 
 // For a given version, serialize the messages from CommitRecord for Proxy use
-void prepareProxySerializedMessages(const CommitRecord& commitRecord,
-                                    const Version& version,
-                                    ProxySubsequencedMessageSerializer& serializer);
+void prepareProxySerializedMessages(
+    const CommitRecord& commitRecord,
+    const Version& version,
+    std::function<std::shared_ptr<ProxySubsequencedMessageSerializer>(StorageTeamID)> serializer);
 
 // Check if all records are validated
 bool isAllRecordsValidated(const CommitRecord& commitRecord);

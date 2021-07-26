@@ -85,6 +85,10 @@ void TLogGroupCollection::recruitEverything() {
 			// TODO: We may have scenarios (simulation), with recruits/zone's < RF. Handle that case.
 		}
 	}
+	//	// sorted by id
+	//	std::sort(recruitedGroups.begin(), recruitedGroups.end(), [](const TLogGroupRef lg1, const TLogGroupRef lg2){
+	//		return lg1->id().compare(lg2->id());
+	//	});
 }
 
 LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::unordered_set<UID>& ignoreServers) {

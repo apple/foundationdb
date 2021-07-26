@@ -85,10 +85,8 @@ struct serializable_traits<OptionalInterface<Interface>> : std::true_type {
 struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
-
-	// std::vector<ptxn::TLogGroupID> tLogGroups;
-	std::unordered_map<ptxn::TLogGroupID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>> ptxnTLogGroups;
-
+	std::vector<ptxn::TLogGroupID> tLogGroupIDs;
+	std::vector<std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>> ptxnTLogGroups;
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
 	std::vector<OptionalInterface<BackupInterface>> backupWorkers;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
@@ -106,14 +104,16 @@ struct TLogSet {
 	explicit TLogSet(const LogSet& rhs);
 
 	std::string toString() const {
-		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s backupWorkers: %s locality: %d",
-		              tLogWriteAntiQuorum,
-		              tLogReplicationFactor,
-		              isLocal,
-		              logRouters.size(),
-		              describe(tLogs).c_str(),
-		              describe(backupWorkers).c_str(),
-		              locality);
+		return format(
+		    "anti: %d replication: %d local: %d routers: %d tLogs %d tLogGroups: %s backupWorkers: %s locality: %d",
+		    tLogWriteAntiQuorum,
+		    tLogReplicationFactor,
+		    isLocal,
+		    logRouters.size(),
+		    describe(tLogs).c_str(),
+		    tLogGroupIDs.size(),
+		    describe(backupWorkers).c_str(),
+		    locality);
 	}
 
 	bool operator==(const TLogSet& rhs) const {
@@ -131,6 +131,11 @@ struct TLogSet {
 			if (tLogs[j].id() != rhs.tLogs[j].id() || tLogs[j].present() != rhs.tLogs[j].present() ||
 			    (tLogs[j].present() &&
 			     tLogs[j].interf().commit.getEndpoint().token != rhs.tLogs[j].interf().commit.getEndpoint().token)) {
+				return false;
+			}
+		}
+		for (int j = 0; j < tLogGroupIDs.size(); j++) {
+			if (tLogGroupIDs[j] != rhs.tLogGroupIDs[j]) {
 				return false;
 			}
 		}
@@ -168,6 +173,11 @@ struct TLogSet {
 				return false;
 			}
 		}
+		for (int i = 0; i < tLogGroupIDs.size(); i++) {
+			if (tLogGroupIDs[i] != r.tLogGroupIDs[i]) {
+				return false;
+			}
+		}
 		return true;
 	}
 
@@ -175,6 +185,8 @@ struct TLogSet {
 	void serialize(Ar& ar) {
 		serializer(ar,
 		           tLogs,
+		           tLogGroupIDs,
+		           ptxnTLogGroups,
 		           logRouters,
 		           tLogWriteAntiQuorum,
 		           tLogReplicationFactor,

@@ -92,26 +92,31 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 		// wait(randomlyPick(pTestDriverContext->resolverInterfaces)->resolve.getReply(resolveRequest));
 
 		// TLog
-		ProxySubsequencedMessageSerializer serializer(version);
-		prepareProxySerializedMessages(commitRecord, version, serializer);
-		std::unordered_map<StorageTeamID, Standalone<StringRef>> serialized = serializer.getAllSerialized();
+		std::unordered_map<ptxn::TLogGroupID, std::shared_ptr<ProxySubsequencedMessageSerializer>> tLogGroupSerializers;
+		prepareProxySerializedMessages(commitRecord, version, [&](StorageTeamID storageTeamId) {
+			auto tLogGroup = pTestDriverContext->storageTeamIDTLogGroupIDMapper[storageTeamId];
+			if (!tLogGroupSerializers.count(tLogGroup)) {
+				tLogGroupSerializers.emplace(tLogGroup, std::make_shared<ProxySubsequencedMessageSerializer>(version));
+			}
+			return tLogGroupSerializers[tLogGroup];
+		});
 
-		for (const auto& [storageTeamID, messages] : serialized) {
-			auto commitVersionPair =
-			    pTestDriverContext->getCommitVersionPair(storageTeamID, commitVersionReply.version);
+		for (auto& [tLogGroupID, serializer] : tLogGroupSerializers) {
+			auto commitVersionPair = pTestDriverContext->getCommitVersionPair(tLogGroupID, commitVersionReply.version);
 			printTiming << commitVersionReply.prevVersion << '\t' << commitVersionReply.version << std::endl;
-			printTiming << storageTeamID.toString() << '\t' << commitVersionPair.first << '\t'
-			            << commitVersionPair.second << std::endl;
+			printTiming << tLogGroupID.toString() << '\t' << commitVersionPair.first << '\t' << commitVersionPair.second
+			            << std::endl;
+			auto serialized = serializer->getAllSerialized();
 			TLogCommitRequest request(deterministicRandom()->randomUniqueID(),
-			                          storageTeamID,
-			                          messages.arena(),
-			                          messages,
+			                          tLogGroupID,
+			                          serialized.first,
+			                          serialized.second,
 			                          commitVersionPair.first,
 			                          commitVersionPair.second,
 			                          0,
 			                          0,
 			                          Optional<UID>(deterministicRandom()->randomUniqueID()));
-			tLogCommitReplies.push_back(pTestDriverContext->getTLogInterface(storageTeamID)->commit.getReply(request));
+			tLogCommitReplies.push_back(pTestDriverContext->tLogGroupLeaders[tLogGroupID]->commit.getReply(request));
 		}
 
 		wait(waitForAll(tLogCommitReplies));
