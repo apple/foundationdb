@@ -91,6 +91,7 @@ Other Changes
 * The ``foundationdb`` service installed by the RPM packages will now automatically restart ``fdbmonitor`` after 60 seconds when it fails. `(PR #3841) <https://github.com/apple/foundationdb/pull/3841>`_
 * Capture output of forked snapshot processes in trace events. `(PR #4254) <https://github.com/apple/foundationdb/pull/4254/files>`_
 * Add ErrorKind field to Severity 40 trace events. `(PR #4741) <https://github.com/apple/foundationdb/pull/4741/files>`_
+* Committing a transaction will no longer partially reset it as of API version 700. `(PR #) <https://github.com/apple/foundationdb/pull//files>`_
 
 Earlier release notes
 ---------------------
