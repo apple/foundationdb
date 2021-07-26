@@ -913,7 +913,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 
 	uniquify(self->allTags);
 
-	// Clear previouos TLogGroupCollection state
+	// Clear previous TLogGroupCollection state
 	self->txnStateStore->clear(tLogGroupKeys);
 	self->txnStateStore->clear(storageTeamIdToTLogGroupRange);
 
