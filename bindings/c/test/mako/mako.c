@@ -925,15 +925,15 @@ int run_workload(FDBTransaction* transaction,
 			}
 		} /* throttle or txntrace */
 
-		/* enable transaction tagging */
-		if (dotagging > 0) {
-			sprintf(tagstr + KEYPREFIXLEN + TAGPREFIXLENGTH_MAX, "%03d", urand(0, args->txntagging - 1));
-			fdb_error_t err =
-			    fdb_transaction_set_option(transaction, FDB_TR_OPTION_AUTO_THROTTLE_TAG, (uint8_t*)tagstr, 16);
-			if (err) {
-				fprintf(stderr, "ERROR: FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: %s\n", fdb_get_error(err));
-			}
-		}
+		/* enable transaction tagging -- NOOP in release-6.2 */
+		// if (dotagging > 0) {
+		// 	sprintf(tagstr + KEYPREFIXLEN + TAGPREFIXLENGTH_MAX, "%03d", urand(0, args->txntagging - 1));
+		// 	fdb_error_t err =
+		// 	    fdb_transaction_set_option(transaction, FDB_TR_OPTION_AUTO_THROTTLE_TAG, (uint8_t*)tagstr, 16);
+		// 	if (err) {
+		// 		fprintf(stderr, "ERROR: FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: %s\n", fdb_get_error(err));
+		// 	}
+		// }
 
 		rc = run_one_transaction(
 		    transaction, args, stats, keystr, keystr2, valstr, block, elem_size, is_memory_allocated);
