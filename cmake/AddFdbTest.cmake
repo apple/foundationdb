@@ -62,9 +62,6 @@ function(add_fdb_test)
   set(options UNIT IGNORE)
   set(oneValueArgs TEST_NAME TIMEOUT)
   set(multiValueArgs TEST_FILES)
-  if (NOT ENABLE_SIMULATION_TESTS)
-    return()
-  endif()
   cmake_parse_arguments(ADD_FDB_TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   set(this_test_timeout ${ADD_FDB_TEST_TIMEOUT})
   if(NOT this_test_timeout)
@@ -125,28 +122,30 @@ function(add_fdb_test)
     set(VALGRIND_OPTION "--use-valgrind")
   endif()
   list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
-  add_test(NAME ${test_name}
-    COMMAND $<TARGET_FILE:Python::Interpreter> ${TestRunner}
-    -n ${test_name}
-    -b ${PROJECT_BINARY_DIR}
-    -t ${test_type}
-    -O ${OLD_FDBSERVER_BINARY}
-    --crash
-    --aggregate-traces ${TEST_AGGREGATE_TRACES}
-    --log-format ${TEST_LOG_FORMAT}
-    --keep-logs ${TEST_KEEP_LOGS}
-    --keep-simdirs ${TEST_KEEP_SIMDIR}
-    --seed ${SEED}
-    --test-number ${assigned_id}
-    ${BUGGIFY_OPTION}
-    ${VALGRIND_OPTION}
-    ${ADD_FDB_TEST_TEST_FILES}
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-  set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
-  get_filename_component(test_dir_full ${first_file} DIRECTORY)
-  if(NOT ${test_dir_full} STREQUAL "")
-    get_filename_component(test_dir ${test_dir_full} NAME)
-    set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout} LABELS "${test_dir}")
+  if (ENABLE_SIMULATION_TESTS)
+    add_test(NAME ${test_name}
+      COMMAND $<TARGET_FILE:Python::Interpreter> ${TestRunner}
+      -n ${test_name}
+      -b ${PROJECT_BINARY_DIR}
+      -t ${test_type}
+      -O ${OLD_FDBSERVER_BINARY}
+      --crash
+      --aggregate-traces ${TEST_AGGREGATE_TRACES}
+      --log-format ${TEST_LOG_FORMAT}
+      --keep-logs ${TEST_KEEP_LOGS}
+      --keep-simdirs ${TEST_KEEP_SIMDIR}
+      --seed ${SEED}
+      --test-number ${assigned_id}
+      ${BUGGIFY_OPTION}
+      ${VALGRIND_OPTION}
+      ${ADD_FDB_TEST_TEST_FILES}
+      WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+    set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+    get_filename_component(test_dir_full ${first_file} DIRECTORY)
+    if(NOT ${test_dir_full} STREQUAL "")
+      get_filename_component(test_dir ${test_dir_full} NAME)
+      set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout} LABELS "${test_dir}")
+    endif()
   endif()
   # set variables used for generating test packages
   set(TEST_NAMES ${TEST_NAMES} ${test_name} PARENT_SCOPE)
