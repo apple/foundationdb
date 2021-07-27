@@ -335,11 +335,16 @@ public:
 	void setCancel(Future<Void>&& cf) { cancelFuture = std::move(cf); }
 
 	virtual void cancel() {
-		onMainThreadVoid(
-		    [this]() {
-			    this->cancelFuture.cancel();
-			    this->delref();
-		    });
+		if (isReady()) {
+			// Avoiding going to the network thread here is an important optimization. Without this we see lower
+			// throughput for e.g. GRV workloads.
+			delref();
+		} else {
+			onMainThreadVoid([this]() {
+				this->cancelFuture.cancel();
+				this->delref();
+			});
+		}
 	}
 
 	void releaseMemory() {
