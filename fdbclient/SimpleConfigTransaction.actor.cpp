@@ -156,7 +156,7 @@ public:
 	Future<Version> getReadVersion() {
 		if (!getGenerationFuture.isValid())
 			getGenerationFuture = getGeneration(this);
-		return map(getGenerationFuture, [](auto const& gen) { return gen.committedVersion; });
+		return map(getGenerationFuture, [](auto const& gen) { return gen.liveVersion; });
 	}
 
 	Optional<Version> getCachedReadVersion() const {
