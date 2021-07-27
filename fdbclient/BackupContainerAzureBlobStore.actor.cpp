@@ -27,13 +27,17 @@
 namespace {
 
 template <class T>
-T waitAzureFuture(std::future<azure::storage_lite::storage_outcome<T>>&& f) {
+T waitAzureFuture(std::future<azure::storage_lite::storage_outcome<T>>&& f, std::string const& operationName) {
 	auto outcome = f.get();
 	if (outcome.success()) {
 		return outcome.response();
 	} else {
 		auto const& err = outcome.error();
-		printf("Error from Azure SDK : %s (%d) : %s", err.code_name.c_str(), err.code.c_str(), err.message.c_str());
+		printf("(%s) : Error from Azure SDK : %s (%s) : %s",
+		       operationName.c_str(),
+		       err.code_name.c_str(),
+		       err.code.c_str(),
+		       err.message.c_str());
 		throw backup_error();
 	}
 }
@@ -60,6 +64,11 @@ public:
 		void addref() override { ReferenceCounted<ReadFile>::addref(); }
 		void delref() override { ReferenceCounted<ReadFile>::delref(); }
 		Future<int> read(void* data, int length, int64_t offset) override {
+			TraceEvent(SevDebug, "BCAzureBlobStoreRead")
+			    .detail("Length", length)
+			    .detail("Offset", offset)
+			    .detail("ContainerName", containerName)
+			    .detail("BlobName", blobName);
 			return asyncTaskThread->execAsync([client = this->client,
 			                                   containerName = this->containerName,
 			                                   blobName = this->blobName,
@@ -67,7 +76,8 @@ public:
 			                                   length,
 			                                   offset] {
 				std::ostringstream oss(std::ios::out | std::ios::binary);
-				waitAzureFuture(client->download_blob_to_stream(containerName, blobName, offset, length, oss));
+				waitAzureFuture(client->download_blob_to_stream(containerName, blobName, offset, length, oss),
+				                "download_blob_to_stream");
 				auto str = std::move(oss).str();
 				memcpy(data, str.c_str(), str.size());
 				return static_cast<int>(str.size());
@@ -78,9 +88,13 @@ public:
 		Future<Void> truncate(int64_t size) override { throw file_not_writable(); }
 		Future<Void> sync() override { throw file_not_writable(); }
 		Future<int64_t> size() const override {
+			TraceEvent(SevDebug, "BCAzureBlobStoreReadFileSize")
+			    .detail("ContainerName", containerName)
+			    .detail("BlobName", blobName);
 			return asyncTaskThread->execAsync(
 			    [client = this->client, containerName = this->containerName, blobName = this->blobName] {
-				    auto resp = waitAzureFuture(client->get_blob_properties(containerName, blobName));
+				    auto resp =
+				        waitAzureFuture(client->get_blob_properties(containerName, blobName), "get_blob_properties");
 				    return static_cast<int64_t>(resp.size);
 			    });
 		}
@@ -131,21 +145,33 @@ public:
 			return Void();
 		}
 		Future<Void> sync() override {
+			TraceEvent(SevDebug, "BCAzureBlobStoreSync")
+			    .detail("Length", buffer.size())
+			    .detail("ContainerName", containerName)
+			    .detail("BlobName", blobName);
 			auto movedBuffer = std::move(buffer);
-			buffer.clear();
-			return asyncTaskThread->execAsync([client = this->client,
-			                                   containerName = this->containerName,
-			                                   blobName = this->blobName,
-			                                   buffer = std::move(movedBuffer)] {
-				std::istringstream iss(std::move(buffer));
-				waitAzureFuture(client->append_block_from_stream(containerName, blobName, iss));
-				return Void();
-			});
+			buffer = {};
+			if (!movedBuffer.empty()) {
+				return asyncTaskThread->execAsync([client = this->client,
+				                                   containerName = this->containerName,
+				                                   blobName = this->blobName,
+				                                   buffer = std::move(movedBuffer)] {
+					std::istringstream iss(std::move(buffer));
+					waitAzureFuture(client->append_block_from_stream(containerName, blobName, iss),
+					                "append_block_from_stream");
+					return Void();
+				});
+			}
+			return Void();
 		}
 		Future<int64_t> size() const override {
+			TraceEvent(SevDebug, "BCAzureBlobStoreSize")
+			    .detail("ContainerName", containerName)
+			    .detail("BlobName", blobName);
 			return asyncTaskThread->execAsync(
 			    [client = this->client, containerName = this->containerName, blobName = this->blobName] {
-				    auto resp = waitAzureFuture(client->get_blob_properties(containerName, blobName));
+				    auto resp =
+				        waitAzureFuture(client->get_blob_properties(containerName, blobName), "get_blob_properties");
 				    return static_cast<int64_t>(resp.size);
 			    });
 		}
@@ -202,9 +228,12 @@ public:
 	}
 
 	ACTOR static Future<Reference<IBackupFile>> writeFile(BackupContainerAzureBlobStore* self, std::string fileName) {
+		TraceEvent(SevDebug, "BCAzureBlobStoreCreateWriteFile")
+		    .detail("ContainerName", self->containerName)
+		    .detail("FileName", fileName);
 		wait(self->asyncTaskThread.execAsync(
 		    [client = self->client, containerName = self->containerName, fileName = fileName] {
-			    waitAzureFuture(client->create_append_blob(containerName, fileName));
+			    waitAzureFuture(client->create_append_blob(containerName, fileName), "create_append_blob");
 			    return Void();
 		    }));
 		Reference<IAsyncFile> f =
@@ -220,7 +249,7 @@ public:
 	                      const std::string& path,
 	                      std::function<bool(std::string const&)> folderPathFilter,
 	                      BackupContainerFileSystem::FilesAndSizesT& result) {
-		auto resp = waitAzureFuture(client->list_blobs_segmented(containerName, "/", "", path));
+		auto resp = waitAzureFuture(client->list_blobs_segmented(containerName, "/", "", path), "list_blobs_segmented");
 		for (const auto& blob : resp.blobs) {
 			if (isDirectory(blob.name) && folderPathFilter(blob.name)) {
 				listFiles(client, containerName, blob.name, folderPathFilter, result);
@@ -236,8 +265,12 @@ public:
 			BackupContainerFileSystem::FilesAndSizesT files = wait(self->listFiles());
 			filesToDelete = files.size();
 		}
+		TraceEvent(SevDebug, "BCAzureBlobStoreDeleteContainer")
+		    .detail("FilesToDelete", filesToDelete)
+		    .detail("ContainerName", self->containerName)
+		    .detail("TrackNumDeleted", pNumDeleted != nullptr);
 		wait(self->asyncTaskThread.execAsync([containerName = self->containerName, client = self->client] {
-			waitAzureFuture(client->delete_container(containerName));
+			waitAzureFuture(client->delete_container(containerName), "delete_container");
 			return Void();
 		}));
 		if (pNumDeleted) {
@@ -249,8 +282,11 @@ public:
 };
 
 Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileName) {
+	TraceEvent(SevDebug, "BCAzureBlobStoreCheckExists")
+	    .detail("FileName", fileName)
+	    .detail("ContainerName", containerName);
 	return asyncTaskThread.execAsync([client = this->client, containerName = this->containerName, fileName = fileName] {
-		auto resp = waitAzureFuture(client->get_blob_properties(containerName, fileName));
+		auto resp = waitAzureFuture(client->get_blob_properties(containerName, fileName), "get_blob_properties");
 		return resp.valid();
 	});
 }
@@ -282,17 +318,19 @@ void BackupContainerAzureBlobStore::delref() {
 }
 
 Future<Void> BackupContainerAzureBlobStore::create() {
+	TraceEvent(SevDebug, "BCAzureBlobStoreCreateContainer").detail("ContainerName", containerName);
 	Future<Void> createContainerFuture =
 	    asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
-		    waitAzureFuture(client->create_container(containerName));
+		    waitAzureFuture(client->create_container(containerName), "create_container");
 		    return Void();
 	    });
 	Future<Void> encryptionSetupFuture = usesEncryption() ? encryptionSetupComplete() : Void();
 	return createContainerFuture && encryptionSetupFuture;
 }
 Future<bool> BackupContainerAzureBlobStore::exists() {
+	TraceEvent(SevDebug, "BCAzureBlobStoreCheckContainerExists").detail("ContainerName", containerName);
 	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
-		auto resp = waitAzureFuture(client->get_container_properties(containerName));
+		auto resp = waitAzureFuture(client->get_container_properties(containerName), "get_container_properties");
 		return resp.valid();
 	});
 }
@@ -308,6 +346,7 @@ Future<Reference<IBackupFile>> BackupContainerAzureBlobStore::writeFile(const st
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerAzureBlobStore::listFiles(
     const std::string& path,
     std::function<bool(std::string const&)> folderPathFilter) {
+	TraceEvent(SevDebug, "BCAzureBlobStoreListFiles").detail("ContainerName", containerName).detail("Path", path);
 	return asyncTaskThread.execAsync(
 	    [client = this->client, containerName = this->containerName, path = path, folderPathFilter = folderPathFilter] {
 		    FilesAndSizesT result;
@@ -317,6 +356,9 @@ Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerAzureBlobStore:
 }
 
 Future<Void> BackupContainerAzureBlobStore::deleteFile(const std::string& fileName) {
+	TraceEvent(SevDebug, "BCAzureBlobStoreDeleteFile")
+	    .detail("ContainerName", containerName)
+	    .detail("FileName", fileName);
 	return asyncTaskThread.execAsync([containerName = this->containerName, fileName = fileName, client = client]() {
 		client->delete_blob(containerName, fileName).wait();
 		return Void();
