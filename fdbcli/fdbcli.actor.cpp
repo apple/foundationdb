@@ -3960,7 +3960,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
-						wait(timeout(GlobalConfig::globalConfig().onInitialized(), 3, Void()));
+						wait(makeInterruptable(GlobalConfig::globalConfig().onInitialized()));
 						if (tokencmp(tokens[2], "get")) {
 							if (tokens.size() != 3) {
 								fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
