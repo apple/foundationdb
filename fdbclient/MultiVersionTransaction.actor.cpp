@@ -448,7 +448,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
-		api->createDatabase(clusterFilePath, &db);
+		throwIfError(api->createDatabase(clusterFilePath, &db));
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	} else {
 		return DLApi::createDatabase609(clusterFilePath);
@@ -793,30 +793,35 @@ void MultiVersionDatabase::Connector::connect() {
 				    connectionFuture.cancel();
 			    }
 
-			    candidateDatabase = client->api->createDatabase(clusterFilePath.c_str());
-			    if (client->external) {
-				    connectionFuture = candidateDatabase.castTo<DLDatabase>()->onReady();
-			    } else {
-				    connectionFuture = ThreadFuture<Void>(Void());
-			    }
+			    try {
+				    candidateDatabase = client->api->createDatabase(clusterFilePath.c_str());
 
-			    connectionFuture = flatMapThreadFuture<Void, Void>(connectionFuture, [this](ErrorOr<Void> ready) {
-				    if (ready.isError()) {
-					    return ErrorOr<ThreadFuture<Void>>(ready.getError());
+				    if (client->external) {
+					    connectionFuture = candidateDatabase.castTo<DLDatabase>()->onReady();
+				    } else {
+					    connectionFuture = ThreadFuture<Void>(Void());
 				    }
 
-				    tr = candidateDatabase->createTransaction();
-				    return ErrorOr<ThreadFuture<Void>>(
-				        mapThreadFuture<Version, Void>(tr->getReadVersion(), [](ErrorOr<Version> v) {
-					        // If the version attempt returns an error, we regard that as a connection (except
-					        // operation_cancelled)
-					        if (v.isError() && v.getError().code() == error_code_operation_cancelled) {
-						        return ErrorOr<Void>(v.getError());
-					        } else {
-						        return ErrorOr<Void>(Void());
-					        }
-				        }));
-			    });
+				    connectionFuture = flatMapThreadFuture<Void, Void>(connectionFuture, [this](ErrorOr<Void> ready) {
+					    if (ready.isError()) {
+						    return ErrorOr<ThreadFuture<Void>>(ready.getError());
+					    }
+
+					    tr = candidateDatabase->createTransaction();
+					    return ErrorOr<ThreadFuture<Void>>(
+					        mapThreadFuture<Version, Void>(tr->getReadVersion(), [](ErrorOr<Version> v) {
+						        // If the version attempt returns an error, we regard that as a connection (except
+						        // operation_cancelled)
+						        if (v.isError() && v.getError().code() == error_code_operation_cancelled) {
+							        return ErrorOr<Void>(v.getError());
+						        } else {
+							        return ErrorOr<Void>(Void());
+						        }
+					        }));
+				    });
+			    } catch (Error& e) {
+				    connectionFuture = ThreadFuture<Void>(e);
+			    }
 
 			    int userParam;
 			    connectionFuture.callOrSetAsCallback(this, userParam, 0);
@@ -850,9 +855,6 @@ void MultiVersionDatabase::Connector::fire(const Void& unused, int& userParam) {
 
 void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
 	if (e.code() != error_code_operation_cancelled) {
-		// TODO: is it right to abandon this connection attempt?
-		client->failed = true;
-		MultiVersionApi::api->updateSupportedVersions();
 		TraceEvent(SevError, "DatabaseConnectionError").error(e).detail("ClientLibrary", this->client->libPath);
 	}
 

@@ -55,7 +55,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
-	fdb_error_t* (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
+	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
 
 	// Database
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
