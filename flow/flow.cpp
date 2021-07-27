@@ -51,6 +51,7 @@ LineageReference getCurrentLineage() {
 	return *currentLineage;
 }
 
+#ifdef ENABLE_SAMPLING
 void sample(LineageReference* lineagePtr);
 
 void replaceLineage(LineageReference* lineage) {
@@ -62,6 +63,7 @@ void replaceLineage(LineageReference* lineage) {
 		currentLineage = lineage;
 	}
 }
+#endif
 
 using namespace std::literals;
 
