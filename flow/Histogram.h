@@ -80,7 +80,10 @@ private:
 	static std::string generateName(std::string const& group, std::string const& op) { return group + ":" + op; }
 
 public:
-	~Histogram() { registry->unregisterHistogram(this); }
+	~Histogram() { 
+		if (registry.isValid())
+			registry->unregisterHistogram(this); 
+	}
 
 	static Reference<Histogram> getHistogram(StringRef group,
 	                                         StringRef op,
