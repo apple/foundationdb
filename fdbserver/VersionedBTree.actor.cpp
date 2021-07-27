@@ -1603,13 +1603,13 @@ struct RedwoodMetrics {
 		                                               LiteralStringRef("ReadByGetRange"),
 		                                               Histogram::Unit::bytes,
 		                                               redwoodHistogramRegistry);
-		clear();
+		clear(redwoodHistogramRegistry);
 	}
 
-	void clear() {
+	void clear(Reference<HistogramRegistry> registry = Reference<HistogramRegistry>()) {
 		unsigned int levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
-			level.clear(levelCounter, redwoodHistogramRegistry);
+			level.clear(levelCounter, registry);
 			++levelCounter;
 		}
 		metric = {};
@@ -1701,8 +1701,7 @@ struct RedwoodMetrics {
 			                                               { "", 0 } };
 
 		double elapsed = now() - startTime;
-		if (redwoodHistogramRegistry)
-			redwoodHistogramRegistry->logReport();
+		redwoodHistogramRegistry->logReport();
 		if (e != nullptr) {
 			for (auto& m : metrics) {
 				char c = m.first[0];
