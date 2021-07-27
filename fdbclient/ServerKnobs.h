@@ -594,6 +594,7 @@ public:
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
 	bool ENABLE_CROSS_CLUSTER_SUPPORT; // Allow a coordinator to serve requests whose connection string does not match
 	                                   // the local descriptor
+	double FORWARD_REQUEST_TOO_OLD; // Do not forward requests older than this setting
 	double COORDINATOR_LEADER_CONNECTION_TIMEOUT;
 
 	// Buggification
