@@ -62,13 +62,12 @@ public:
 	enum class Unit { microseconds = 0, bytes, bytes_per_second, percentage, count, MAXHISTOGRAMUNIT };
 	static const char* const UnitToStringMapper[];
 
-private:
 	Histogram(std::string const& group,
 	          std::string const& op,
 	          Unit unit,
-	          HistogramRegistry& registry,
-	          uint32_t lower,
-	          uint32_t upper)
+	          uint32_t lower = 0,
+	          uint32_t upper = UINT32_MAX,
+			  Reference<HistogramRegistry> registry = Reference<HistogramRegistry>())
 	  : group(group), op(op), unit(unit), registry(registry), lowerBound(lower),
 	    upperBound(upper), ReferenceCounted<Histogram>() {
 
@@ -77,26 +76,26 @@ private:
 
 		clear();
 	}
-
+private:
 	static std::string generateName(std::string const& group, std::string const& op) { return group + ":" + op; }
 
 public:
-	~Histogram() { registry.unregisterHistogram(this); }
+	~Histogram() { registry->unregisterHistogram(this); }
 
 	static Reference<Histogram> getHistogram(StringRef group,
 	                                         StringRef op,
 	                                         Unit unit,
-	                                         Reference<HistogramRegistry> regis =  Reference<HistogramRegistry>(),
+	                                         Reference<HistogramRegistry> regis = Reference<HistogramRegistry>(),
 	                                         uint32_t lower = 0,
 	                                         uint32_t upper = UINT32_MAX) {
 		std::string group_str = group.toString();
 		std::string op_str = op.toString();
 		std::string name = generateName(group_str, op_str);
-		HistogramRegistry& registry = (regis.isValid()) ? *regis : GetHistogramRegistry();
-		Histogram* h = registry.lookupHistogram(name);
+		Reference<HistogramRegistry> registry = (regis.isValid()) ? regis : Reference<HistogramRegistry>(&GetHistogramRegistry());
+		Histogram* h = registry->lookupHistogram(name);
 		if (!h) {
-			h = new Histogram(group_str, op_str, unit, registry, lower, upper);
-			registry.registerHistogram(h);
+			h = new Histogram(group_str, op_str, unit, lower, upper, registry);
+			registry->registerHistogram(h);
 			return Reference<Histogram>(h);
 		} else {
 			return Reference<Histogram>::addRef(h);
@@ -170,7 +169,7 @@ public:
 	std::string const group;
 	std::string const op;
 	Unit const unit;
-	HistogramRegistry& registry;
+	Reference<HistogramRegistry> registry;
 	uint32_t buckets[32];
 	uint32_t lowerBound;
 	uint32_t upperBound;
