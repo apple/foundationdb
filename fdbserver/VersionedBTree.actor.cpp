@@ -1932,6 +1932,7 @@ public:
 
 		state typename EvictionOrderT::iterator i = evictionOrder.begin();
 		state typename EvictionOrderT::iterator iEnd = evictionOrder.end();
+		//state typename EvictionOrderT::iterator iEnd = evictionOrder.begin();
 
 		while (i != iEnd) {
 			if (!i->item.evictable()) {
@@ -2015,6 +2016,12 @@ public:
 		  : height(level), version(v) {
 			  originalPageIDs = Standalone(o);
 			  newPageIDs = Standalone(n);
+			  if (originalPageIDs.size() == 0){
+				  originalPageIDs.push_back(originalPageIDs.arena(), invalidLogicalPageID);
+			  }
+			  if (newPageIDs.size() == 0){
+				  newPageIDs.push_back(newPageIDs.arena(), invalidLogicalPageID);
+			  }
 		  }
 		uint8_t height;
 		Version version;
@@ -2762,10 +2769,10 @@ public:
 			auto i = remappedPages.find(pageID);
 			if (i != remappedPages.end()) {
 				debug_printf("DWALPager(%s) op=freeRemapped %s @%" PRId64 " oldestVersion=%" PRId64 "\n",
-							filename.c_str(),
-							toString(pageIDs).c_str(),
-							v,
-							pLastCommittedHeader->oldestVersion);
+					filename.c_str(),
+					toString(pageID).c_str(),
+					v,
+					pLastCommittedHeader->oldestVersion);
 				auto invalidPageID = invalidLogicalPageID;
 				remapQueue.pushBack(RemappedPage{ VectorRef<LogicalPageID>(&pageID,1), VectorRef<LogicalPageID>(&invalidPageID, 1), level,v });
 
@@ -2781,7 +2788,9 @@ public:
 				unmappedPageIDs.push_back(unmappedPageIDs.arena(), pageID);
 			}
 		}
-		freeUnmappedPage(unmappedPageIDs, v);
+		if(unmappedPageIDs.size()>0) {
+			freeUnmappedPage(unmappedPageIDs, v);
+		}
 	};
 
 	ACTOR static void freeExtent_impl(DWALPager* self, LogicalPageID pageID) {
@@ -6503,7 +6512,7 @@ private:
 							while (cursor.valid()) {
 								if (cursor.get().value.present()) {
 									Standalone<VectorRef<LogicalPageID>> newIDs = 
-										self->m_pager->detachRemappedPage(cursor.get().getChildPage(), height, writeVersion);
+										self->m_pager->detachRemappedPage(cursor.get().getChildPage(), height-1, writeVersion);
 									state int index = 0;
 									for (auto& p : cursor.get().getChildPage()) {
 										if (parentInfo->maybeUpdated(p)) {
@@ -6558,7 +6567,7 @@ private:
 									BTreePageIDRef oldPages = rec.getChildPage();
 									BTreePageIDRef newPages;
 									Standalone<VectorRef<LogicalPageID>> newIDs = 
-										self->m_pager->detachRemappedPage(oldPages, height, writeVersion);
+										self->m_pager->detachRemappedPage(oldPages, height-1, writeVersion);
 									for (int i = 0; i < oldPages.size(); ++i) {
 										LogicalPageID p = oldPages[i];
 										if (parentInfo->maybeUpdated(p)) {
