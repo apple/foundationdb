@@ -3323,7 +3323,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	try {
 		db = Database::createDatabase(ccf, -1, IsInternal::False);
-		wait(GlobalConfig::globalConfig().onInitialized());
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
@@ -3961,6 +3960,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
+						wait(GlobalConfig::globalConfig().onInitialized());
 						if (tokencmp(tokens[2], "get")) {
 							if (tokens.size() != 3) {
 								fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
