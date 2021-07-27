@@ -285,7 +285,7 @@ std::string unprintable(std::string const& val) {
 	return s;
 }
 
-void DatabaseContext::validateVersion(Version version) {
+void DatabaseContext::validateVersion(Version version) const {
 	// Version could be 0 if the INITIALIZE_NEW_DATABASE option is set. In that case, it is illegal to perform any
 	// reads. We throw client_invalid_operation because the caller didn't directly set the version, so the
 	// version_invalid error might be confusing.
@@ -488,7 +488,7 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction* tr, std::vecto
 ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t clientTxInfoSizeLimit) {
 	state const Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 	state const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
-	TraceEvent(SevInfo, "DelExcessClntTxnEntriesCalled");
+	TraceEvent(SevInfo, "DelExcessClntTxnEntriesCalled").log();
 	loop {
 		try {
 			tr->reset();
@@ -496,7 +496,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> ctrValue = wait(tr->get(KeyRef(clientLatencyAtomicCtr), Snapshot::True));
 			if (!ctrValue.present()) {
-				TraceEvent(SevInfo, "NumClntTxnEntriesNotFound");
+				TraceEvent(SevInfo, "NumClntTxnEntriesNotFound").log();
 				return Void();
 			}
 			state int64_t txInfoSize = 0;
@@ -650,7 +650,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 	}
 }
 
-ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
                                                AsyncTrigger* triggerVar) {
 	state vector<CommitProxyInterface> curCommitProxies;
 	state vector<GrvProxyInterface> curGrvProxies;
@@ -1085,7 +1085,7 @@ Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* 
 
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
-                                 Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+                                 Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
                                  Future<Void> clientInfoMonitor,
                                  TaskPriority taskID,
                                  LocalityData const& clientLocality,
@@ -1482,7 +1482,7 @@ void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
 }
 
-Future<Void> DatabaseContext::onProxiesChanged() {
+Future<Void> DatabaseContext::onProxiesChanged() const {
 	return this->proxiesChangeTrigger.onTrigger();
 }
 
@@ -1627,7 +1627,7 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 	loop {
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
-			TraceEvent("SwitchConnectionFileAttemptingGRV");
+			TraceEvent("SwitchConnectionFileAttemptingGRV").log();
 			Version v = wait(tr.getReadVersion());
 			TraceEvent("SwitchConnectionFileGotRV")
 			    .detail("ReadVersion", v)
@@ -1759,7 +1759,8 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 	}
 
 	auto database = Database(db);
-	GlobalConfig::create(database, clientInfo, std::addressof(clientInfo->get()));
+	GlobalConfig::create(
+	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
 	return database;
 }
 
@@ -5198,7 +5199,7 @@ Future<Void> Transaction::commitMutations() {
 
 		if (options.debugDump) {
 			UID u = nondeterministicRandom()->randomUniqueID();
-			TraceEvent("TransactionDump", u);
+			TraceEvent("TransactionDump", u).log();
 			for (auto i = tr.transaction.mutations.begin(); i != tr.transaction.mutations.end(); ++i)
 				TraceEvent("TransactionMutation", u)
 				    .detail("T", i->type)
@@ -5760,7 +5761,7 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
     NetworkAddress coordinatorAddress,
     Optional<ProtocolVersion> expectedVersion) {
 
-	state Reference<AsyncVar<Optional<ProtocolVersion>>> protocolVersion =
+	state Reference<AsyncVar<Optional<ProtocolVersion>> const> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
 	loop {
@@ -5785,7 +5786,7 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 // Returns the protocol version reported by the given coordinator
 // If an expected version is given, the future won't return until the protocol version is different than expected
 ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
     Optional<ProtocolVersion> expectedVersion) {
 
 	state bool needToConnect = true;
@@ -6325,7 +6326,7 @@ void Transaction::setToken(uint64_t token) {
 void enableClientInfoLogging() {
 	ASSERT(networkOptions.logClientInfo.present() == false);
 	networkOptions.logClientInfo = true;
-	TraceEvent(SevInfo, "ClientInfoLoggingEnabled");
+	TraceEvent(SevInfo, "ClientInfoLoggingEnabled").log();
 }
 
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
@@ -6379,7 +6380,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 		}
 		throw;
 	}
-	TraceEvent("ExclusionSafetyCheckCoordinators");
+	TraceEvent("ExclusionSafetyCheckCoordinators").log();
 	state ClientCoordinators coordinatorList(cx->getConnectionFile());
 	state vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
@@ -6392,7 +6393,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	choose {
 		when(wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0))) {}
 		when(wait(delay(3.0))) {
-			TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum");
+			TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum").log();
 			return false;
 		}
 	}

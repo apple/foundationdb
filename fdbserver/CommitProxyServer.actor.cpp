@@ -1596,7 +1596,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 	}
 }
 
-ACTOR Future<Void> ddMetricsRequestServer(CommitProxyInterface proxy, Reference<AsyncVar<ServerDBInfo>> db) {
+ACTOR Future<Void> ddMetricsRequestServer(CommitProxyInterface proxy, Reference<AsyncVar<ServerDBInfo> const> db) {
 	loop {
 		choose {
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture())) {
@@ -1754,8 +1754,9 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 	return Void();
 }
 
-ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db, ExclusionSafetyCheckRequest req) {
-	TraceEvent("SafetyCheckCommitProxyBegin");
+ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> const> db,
+                                           ExclusionSafetyCheckRequest req) {
+	TraceEvent("SafetyCheckCommitProxyBegin").log();
 	state ExclusionSafetyCheckReply reply(false);
 	if (!db->get().distributor.present()) {
 		TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "ExclusionSafetyCheck");
@@ -1777,13 +1778,13 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 			throw e;
 		}
 	}
-	TraceEvent("SafetyCheckCommitProxyFinish");
+	TraceEvent("SafetyCheckCommitProxyFinish").log();
 	req.reply.send(reply);
 	return Void();
 }
 
 ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
-                                          Reference<AsyncVar<ServerDBInfo>> db,
+                                          Reference<AsyncVar<ServerDBInfo> const> db,
                                           UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> nextReply = Never();
@@ -1795,7 +1796,7 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
 				nextRequestTimer = Void();
 			} else {
-				TraceEvent("ProxyRatekeeperDied", myID);
+				TraceEvent("ProxyRatekeeperDied", myID).log();
 				nextRequestTimer = Never();
 			}
 		}
@@ -1818,7 +1819,7 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 
 ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          MasterInterface master,
-                                         Reference<AsyncVar<ServerDBInfo>> db,
+                                         Reference<AsyncVar<ServerDBInfo> const> db,
                                          LogEpoch epoch,
                                          Version recoveryTransactionVersion,
                                          bool firstProxy,
@@ -1922,16 +1923,20 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 				lastCommit = now();
 
 				if (trs.size() || lastCommitComplete.isReady()) {
-					lastCommitComplete =
-					    commitBatch(&commitData,
-					                const_cast<std::vector<CommitTransactionRequest>*>(&batchedRequests.first),
-					                batchBytes);
+					lastCommitComplete = transformError(
+					    timeoutError(
+					        commitBatch(&commitData,
+					                    const_cast<std::vector<CommitTransactionRequest>*>(&batchedRequests.first),
+					                    batchBytes),
+					        SERVER_KNOBS->COMMIT_PROXY_LIVENESS_TIMEOUT),
+					    timed_out(),
+					    failed_to_progress());
 					addActor.send(lastCommitComplete);
 				}
 			}
 		}
 		when(ProxySnapRequest snapReq = waitNext(proxy.proxySnapReq.getFuture())) {
-			TraceEvent(SevDebug, "SnapMasterEnqueue");
+			TraceEvent(SevDebug, "SnapMasterEnqueue").log();
 			addActor.send(proxySnapCreate(snapReq, &commitData));
 		}
 		when(ExclusionSafetyCheckRequest exclCheckReq = waitNext(proxy.exclusionSafetyCheckReq.getFuture())) {
@@ -2037,7 +2042,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 uint64_t recoveryCount,
                                 CommitProxyInterface myInterface) {
 	loop {
@@ -2051,7 +2056,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
 
 ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo>> db,
+                                     Reference<AsyncVar<ServerDBInfo> const> db,
                                      std::string whitelistBinPaths) {
 	try {
 		state Future<Void> core = commitProxyServerCore(proxy,
@@ -2067,9 +2072,11 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
-		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out) {
+		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out &&
+		    e.code() != error_code_failed_to_progress) {
 			throw;
 		}
+		TEST(e.code() == error_code_failed_to_progress); // Commit proxy failed to progress
 	}
 	return Void();
 }

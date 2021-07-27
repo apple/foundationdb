@@ -78,7 +78,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 
-		TraceEvent("DRU_Start");
+		TraceEvent("DRU_Start").log();
 	}
 
 	std::string description() const override { return "BackupToDBUpgrade"; }
@@ -459,7 +459,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				}
 			}
 
-			TraceEvent("DRU_DiffRanges");
+			TraceEvent("DRU_DiffRanges").log();
 			wait(diffRanges(prevBackupRanges, self->backupPrefix, cx, self->extraDB));
 
 			// abort backup

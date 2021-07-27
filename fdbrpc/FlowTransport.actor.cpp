@@ -1019,7 +1019,7 @@ static void scanPackets(TransportData* transport,
 			    BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
-				TraceEvent(SevInfo, "BitsFlip");
+				TraceEvent(SevInfo, "BitsFlip").log();
 				int flipBits = 32 - (int)floor(log2(deterministicRandom()->randomUInt32()));
 
 				uint32_t firstFlipByteLocation = deterministicRandom()->randomUInt32() % packetLen;
@@ -1698,7 +1698,7 @@ Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 //
 // Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
 // version, some other mechanism should be used to connect to that peer.
-Reference<AsyncVar<Optional<ProtocolVersion>>> FlowTransport::getPeerProtocolAsyncVar(NetworkAddress addr) {
+Reference<AsyncVar<Optional<ProtocolVersion>> const> FlowTransport::getPeerProtocolAsyncVar(NetworkAddress addr) {
 	return self->peers.at(addr)->protocolVersion;
 }
 

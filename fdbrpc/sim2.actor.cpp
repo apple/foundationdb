@@ -46,10 +46,11 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
-	if (!g_network->isSimulated())
+	if (!g_network->isSimulated() || !faultInjectionActivated)
 		return false;
 
 	auto p = g_simulator.getCurrentProcess();
@@ -469,12 +470,12 @@ public:
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
 		if (++openCount >= 3000) {
-			TraceEvent(SevError, "TooManyFiles");
+			TraceEvent(SevError, "TooManyFiles").log();
 			ASSERT(false);
 		}
 
 		if (openCount == 2000) {
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles");
+			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles").log();
 			g_simulator.speedUpSimulation = true;
 			g_simulator.connectionFailuresDisableDuration = 1e6;
 		}

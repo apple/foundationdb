@@ -5478,7 +5478,7 @@ public:
 			try {
 				wait(discontinueBackup(backupAgent, ryw_tr, tagName));
 				wait(ryw_tr->commit());
-				TraceEvent("AS_DiscontinuedBackup");
+				TraceEvent("AS_DiscontinuedBackup").log();
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_backup_unneeded || e.code() == error_code_backup_duplicate) {
@@ -5489,7 +5489,7 @@ public:
 		}
 
 		wait(success(waitBackup(backupAgent, cx, tagName.toString(), StopWhenDone::True)));
-		TraceEvent("AS_BackupStopped");
+		TraceEvent("AS_BackupStopped").log();
 
 		ryw_tr->reset();
 		loop {
@@ -5502,7 +5502,7 @@ public:
 					ryw_tr->clear(range);
 				}
 				wait(ryw_tr->commit());
-				TraceEvent("AS_ClearedRange");
+				TraceEvent("AS_ClearedRange").log();
 				break;
 			} catch (Error& e) {
 				wait(ryw_tr->onError(e));
@@ -5512,7 +5512,7 @@ public:
 		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
 
 		if (fastRestore) {
-			TraceEvent("AtomicParallelRestoreStartRestore");
+			TraceEvent("AtomicParallelRestoreStartRestore").log();
 			Version targetVersion = ::invalidVersion;
 			wait(submitParallelRestore(cx,
 			                           tagName,
@@ -5533,7 +5533,7 @@ public:
 			}
 			return -1;
 		} else {
-			TraceEvent("AS_StartRestore");
+			TraceEvent("AS_StartRestore").log();
 			Version ver = wait(restore(backupAgent,
 			                           cx,
 			                           cx,

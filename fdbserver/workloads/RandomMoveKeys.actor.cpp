@@ -62,13 +62,13 @@ struct MoveKeysWorkload : TestWorkload {
 			}
 
 			state int oldMode = wait(setDDMode(cx, 0));
-			TraceEvent("RMKStartModeSetting");
+			TraceEvent("RMKStartModeSetting").log();
 			wait(timeout(
 			    reportErrors(self->worker(cx, self), "MoveKeysWorkloadWorkerError"), self->testDuration, Void()));
 			// Always set the DD mode back, even if we die with an error
-			TraceEvent("RMKDoneMoving");
+			TraceEvent("RMKDoneMoving").log();
 			wait(success(setDDMode(cx, oldMode)));
-			TraceEvent("RMKDoneModeSetting");
+			TraceEvent("RMKDoneModeSetting").log();
 		}
 		return Void();
 	}
@@ -87,7 +87,7 @@ struct MoveKeysWorkload : TestWorkload {
 
 	vector<StorageServerInterface> getRandomTeam(vector<StorageServerInterface> storageServers, int teamSize) {
 		if (storageServers.size() < teamSize) {
-			TraceEvent(SevWarnAlways, "LessThanThreeStorageServers");
+			TraceEvent(SevWarnAlways, "LessThanThreeStorageServers").log();
 			throw operation_failed();
 		}
 
@@ -105,7 +105,7 @@ struct MoveKeysWorkload : TestWorkload {
 		}
 
 		if (t.size() < teamSize) {
-			TraceEvent(SevWarnAlways, "LessThanThreeUniqueMachines");
+			TraceEvent(SevWarnAlways, "LessThanThreeUniqueMachines").log();
 			throw operation_failed();
 		}
 

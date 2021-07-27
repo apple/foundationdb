@@ -133,9 +133,7 @@ std::string BackupContainerLocalDirectory::getURLFormat() {
 
 BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url,
                                                              const Optional<std::string>& encryptionKeyFileName) {
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	setEncryptionKey(encryptionKeyFileName);
-#endif
 
 	std::string path;
 	if (url.find("file://") != 0) {
@@ -229,7 +227,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 		}
 
 		if (g_simulator.getCurrentProcess()->uid == UID()) {
-			TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID");
+			TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID").log();
 		}
 		std::string uniquePath = fullPath + "." + g_simulator.getCurrentProcess()->uid.toString() + ".lnk";
 		unlink(uniquePath.c_str());
