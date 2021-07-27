@@ -65,9 +65,9 @@ struct ChangeConfigWorkload : TestWorkload {
 					// It is not safe to allow automatic failover to a region which is not fully replicated,
 					// so wait for both regions to be fully replicated before enabling failover
 					wait(success(changeConfig(extraDB, g_simulator.startingDisabledConfiguration, true)));
-					TraceEvent("WaitForReplicasExtra");
+					TraceEvent("WaitForReplicasExtra").log();
 					wait(waitForFullReplication(extraDB));
-					TraceEvent("WaitForReplicasExtraEnd");
+					TraceEvent("WaitForReplicasExtraEnd").log();
 				}
 				wait(success(changeConfig(extraDB, self->configMode, true)));
 			}
@@ -99,9 +99,9 @@ struct ChangeConfigWorkload : TestWorkload {
 				// It is not safe to allow automatic failover to a region which is not fully replicated,
 				// so wait for both regions to be fully replicated before enabling failover
 				wait(success(changeConfig(cx, g_simulator.startingDisabledConfiguration, true)));
-				TraceEvent("WaitForReplicas");
+				TraceEvent("WaitForReplicas").log();
 				wait(waitForFullReplication(cx));
-				TraceEvent("WaitForReplicasEnd");
+				TraceEvent("WaitForReplicasEnd").log();
 			}
 			wait(success(changeConfig(cx, self->configMode, true)));
 		}

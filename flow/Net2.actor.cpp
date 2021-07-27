@@ -1182,7 +1182,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 #endif
 
 {
-	TraceEvent("Net2Starting");
+	TraceEvent("Net2Starting").log();
 
 	// Set the global members
 	if (useMetrics) {
@@ -1257,13 +1257,13 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 	lifetimes.push_back(watchFileForChanges(config.getCAPathSync(), &fileChanged));
 	loop {
 		wait(fileChanged.onTrigger());
-		TraceEvent("TLSCertificateRefreshBegin");
+		TraceEvent("TLSCertificateRefreshBegin").log();
 
 		try {
 			LoadedTLSConfig loaded = wait(config.loadAsync());
 			boost::asio::ssl::context context(boost::asio::ssl::context::tls);
 			ConfigureSSLContext(loaded, &context, onPolicyFailure);
-			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded");
+			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded").log();
 			mismatches = 0;
 			contextVar->set(ReferencedObject<boost::asio::ssl::context>::from(std::move(context)));
 		} catch (Error& e) {
@@ -1385,13 +1385,13 @@ bool Net2::checkRunnable() {
 
 void Net2::run() {
 	TraceEvent::setNetworkThread();
-	TraceEvent("Net2Running");
+	TraceEvent("Net2Running").log();
 
 	thread_network = this;
 
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
-		TraceEvent(SevError, "TimeBeginPeriodError");
+		TraceEvent(SevError, "TimeBeginPeriodError").log();
 #endif
 
 	timeOffsetLogger = logTimeOffset();

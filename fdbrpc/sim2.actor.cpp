@@ -470,12 +470,12 @@ public:
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
 		if (++openCount >= 3000) {
-			TraceEvent(SevError, "TooManyFiles");
+			TraceEvent(SevError, "TooManyFiles").log();
 			ASSERT(false);
 		}
 
 		if (openCount == 2000) {
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles");
+			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles").log();
 			g_simulator.speedUpSimulation = true;
 			g_simulator.connectionFailuresDisableDuration = 1e6;
 		}

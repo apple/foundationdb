@@ -1164,7 +1164,7 @@ public:
 		if (!ryw->resetPromise.isSet())
 			ryw->resetPromise.sendError(transaction_timed_out());
 		wait(delay(deterministicRandom()->random01() * 5));
-		TraceEvent("ClientBuggifyInFlightCommit");
+		TraceEvent("ClientBuggifyInFlightCommit").log();
 		wait(ryw->tr.commit());
 	}
 

@@ -242,7 +242,7 @@ public:
 
 	void send(Never) {
 		if (TRACE_SAMPLE())
-			TraceEvent(SevSample, "Promise_sendNever");
+			TraceEvent(SevSample, "Promise_sendNever").log();
 		ThreadSpinLockHolder holder(mutex);
 		if (!canBeSetUnsafe())
 			ASSERT(false); // Promise fulfilled twice
@@ -399,7 +399,7 @@ public:
 
 	void send(const T& value) {
 		if (TRACE_SAMPLE())
-			TraceEvent(SevSample, "Promise_send");
+			TraceEvent(SevSample, "Promise_send").log();
 		this->mutex.enter();
 		if (!canBeSetUnsafe()) {
 			this->mutex.leave();
