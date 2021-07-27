@@ -34,11 +34,6 @@
 void samplingProfilerUpdateFrequency(std::optional<std::any> freq);
 void samplingProfilerUpdateWindow(std::optional<std::any> window);
 
-// TODO: For debugging, remove
-#ifdef ENABLE_SAMPLING
-LineageReference* curLineage();
-#endif
-
 struct IALPCollectorBase {
 	virtual std::optional<std::any> collect(ActorLineage*) = 0;
 	virtual const std::string_view& name() = 0;

@@ -25,17 +25,11 @@
 #include "fdbclient/NameLineage.h"
 #include <msgpack.hpp>
 #include <memory>
+#include <typeindex>
 #include <boost/endian/conversion.hpp>
 #include <boost/asio.hpp>
 
 using namespace std::literals;
-
-// TODO: For debugging, remove
-#ifdef ENABLE_SAMPLING
-LineageReference* curLineage() {
-	return currentLineage;
-}
-#endif
 
 class Packer : public msgpack::packer<msgpack::sbuffer> {
 	struct visitor_t {
