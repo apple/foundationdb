@@ -2869,12 +2869,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state LogSystemConfig oldLogSystemConfig = oldLogSystem->getLogSystemConfig();
 
 		state vector<Future<TLogInterface>> initializationReplies;
-		state vector<Future<ptxn::TLogInterface_PassivelyPull>> initializationRepliesPtxn;
 		state vector<InitializeTLogRequest> reqs = vector<InitializeTLogRequest>(recr.tLogs.size());
 
 		logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
 		logSystem->tLogs[0]->logServers.resize(
 		    recr.tLogs.size()); // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
+		logSystem->tLogs[0]->logServersPtxn.resize(recr.tLogs.size());
 		logSystem->tLogs[0]->updateLocalitySet(localities);
 
 		std::vector<int> locations;
@@ -3039,7 +3039,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				// cannot use more standard `getReplyUnlessFailedFor`, because it is waiting on `reply` field, here we
 				// have ptxn.reply
 				state ptxn::TLogInterface_PassivelyPull serverNew = wait(reqs[i].ptxnReply.getFuture());
-				// tLogGroupCollection->addWorkers({ interf }); TODO (Vishesh): Add TLogHere
+				tLogGroupCollection->addWorkers({ serverNew });
+				logSystem->tLogs[0]->logServersPtxn[i] =
+				    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
+				        OptionalInterface<ptxn::TLogInterface_PassivelyPull>(serverNew));
 				id2Interface[recr.tLogs[i].id()] = serverNew;
 			}
 

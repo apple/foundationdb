@@ -378,6 +378,7 @@ struct TLogInterfaceBase {
 	bool operator!=(const TLogInterfaceBase& r) const { return !this->operator==(r); }
 	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return commit.getEndpoint().addresses.secondaryAddress; }
+	const LocalityData& getLocality() const { return filteredLocality; }
 
 	MessageTransferModel getMessageTransferModel() const;
 

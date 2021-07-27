@@ -31,6 +31,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -52,17 +53,13 @@ TLogGroupCollection::TLogGroupCollection() : policy(nullptr), targetNumGroups(0)
 TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize)
   : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {}
 
-TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy,
-                                         int numGroups,
-                                         int groupSize,
-                                         Reference<AsyncVar<ServerDBInfo>> dbInfo)
-  : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {
+TLogGroupCollection::TLogGroupCollection(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 
 	ASSERT(dbInfo.isValid());
 	for (auto logSet : dbInfo->get().logSystemConfig.tLogs) {
 		if (logSet.isLocal && logSet.locality != tagLocalitySatellite) {
 			// TODO (Vishesh): Support satellite + remote TLogs
-			addWorkers(logSet.tLogs);
+			addWorkers(logSet.tLogsPtxn);
 		}
 	}
 }
@@ -95,13 +92,14 @@ TLogGroupRef TLogGroupCollection::getGroup(UID groupId, bool create) {
 	return Reference<TLogGroup>();
 }
 
-void TLogGroupCollection::addWorkers(const std::vector<OptionalInterface<TLogInterface>>& logWorkers) {
+void TLogGroupCollection::addWorkers(
+    const std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>& logWorkers) {
 	for (const auto& worker : logWorkers) {
 		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
 	}
 }
 
-void TLogGroupCollection::addWorkers(const std::vector<TLogInterface>& logWorkers) {
+void TLogGroupCollection::addWorkers(const std::vector<ptxn::TLogInterface_PassivelyPull>& logWorkers) {
 	for (const auto& worker : logWorkers) {
 		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
 	}
@@ -327,12 +325,10 @@ std::string TLogWorkerData::toString() const {
 namespace testTLogGroup {
 
 // Returns a vector of size 'processCount' containing mocked WorkerInterface, spread across diffeent localities.
-std::vector<TLogInterface> testTLogGroupRecruits(int processCount) {
-	std::vector<TLogInterface> recruits;
+std::vector<ptxn::TLogInterface_PassivelyPull> testTLogGroupRecruits(int processCount) {
+	std::vector<ptxn::TLogInterface_PassivelyPull> recruits;
 	for (int id = 1; id <= processCount; id++) {
 		UID uid(id, 0);
-		TLogInterface interface;
-		interface.initEndpoints();
 
 		int process_id = id;
 		int dc_id = process_id / 1000;
@@ -340,20 +336,22 @@ std::vector<TLogInterface> testTLogGroupRecruits(int processCount) {
 		int zone_id = process_id / 10;
 		int machine_id = process_id / 5;
 
+		LocalityData locality;
+		locality.set(LiteralStringRef("processid"), Standalone<StringRef>(std::to_string(process_id)));
+		locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(machine_id)));
+		locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
+		locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
+		locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
+		ptxn::TLogInterface_PassivelyPull interf(locality);
+		interf.initEndpoints();
+
 		printf("testMachine: process_id:%d zone_id:%d machine_id:%d ip_addr:%s\n",
 		       process_id,
 		       zone_id,
 		       machine_id,
-		       interface.address().toString().c_str());
-		interface.filteredLocality.set(LiteralStringRef("processid"),
-		                               Standalone<StringRef>(std::to_string(process_id)));
-		interface.filteredLocality.set(LiteralStringRef("machineid"),
-		                               Standalone<StringRef>(std::to_string(machine_id)));
-		interface.filteredLocality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
-		interface.filteredLocality.set(LiteralStringRef("data_hall"),
-		                               Standalone<StringRef>(std::to_string(data_hall_id)));
-		interface.filteredLocality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
-		recruits.push_back(interface);
+		       interf.address().toString().c_str());
+
+		recruits.push_back(interf);
 	}
 	return recruits;
 }
@@ -418,7 +416,7 @@ TEST_CASE("/fdbserver/TLogGroup/basic") {
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 	    new PolicyAcross(GROUP_SIZE, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	std::vector<TLogInterface> recruits = testTLogGroupRecruits(TOTAL_PROCESSES);
+	std::vector<ptxn::TLogInterface_PassivelyPull> recruits = testTLogGroupRecruits(TOTAL_PROCESSES);
 
 	TLogGroupCollection collection(policy, NUM_GROUPS, GROUP_SIZE);
 	collection.addWorkers(recruits);

@@ -85,6 +85,7 @@ struct serializable_traits<OptionalInterface<Interface>> : std::true_type {
 struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
+	std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>> tLogsPtxn;
 	std::vector<ptxn::TLogGroupID> tLogGroups;
 	std::unordered_map<ptxn::TLogGroupID,
 	                   std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
@@ -121,7 +122,8 @@ struct TLogSet {
 		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor ||
 		    isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
 		    startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality ||
-		    logRouters.size() != rhs.logRouters.size() || backupWorkers.size() != rhs.backupWorkers.size()) {
+		    tLogsPtxn.size() != rhs.tLogsPtxn.size() || logRouters.size() != rhs.logRouters.size() ||
+		    backupWorkers.size() != rhs.backupWorkers.size()) {
 			return false;
 		}
 		if ((tLogPolicy && !rhs.tLogPolicy) || (!tLogPolicy && rhs.tLogPolicy) ||
@@ -132,6 +134,15 @@ struct TLogSet {
 			if (tLogs[j].id() != rhs.tLogs[j].id() || tLogs[j].present() != rhs.tLogs[j].present() ||
 			    (tLogs[j].present() &&
 			     tLogs[j].interf().commit.getEndpoint().token != rhs.tLogs[j].interf().commit.getEndpoint().token)) {
+				return false;
+			}
+		}
+		for (int j = 0; j < tLogsPtxn.size(); j++) {
+			auto& log = tLogsPtxn[j];
+			auto& rhsLog = rhs.tLogsPtxn[j];
+			if (log.id() != rhsLog.id() || log.present() != rhsLog.present() ||
+			    (log.present() &&
+			     rhsLog.interf().commit.getEndpoint().token != rhsLog.interf().commit.getEndpoint().token)) {
 				return false;
 			}
 		}
@@ -235,8 +246,8 @@ enum class LogSystemType {
 	empty = 0, // Never used.
 	tagPartitioned = 2, // each TLog is primary for a partition of tags and is secondary for any arbitrary tag.
 	teamPartitioned = 3, // TLogs are logically partitoned by TLogGroups while each TLogGroup is responsible for
-						 // a set of storage shard, e.e., key range. Each TLog is a bed of slots for TLogGroups, i.e.,
-						 // contains an arbitrary number of TLogGroup member.
+	                     // a set of storage shard, e.e., key range. Each TLog is a bed of slots for TLogGroups, i.e.,
+	                     // contains an arbitrary number of TLogGroup member.
 };
 
 struct LogSystemConfig {
