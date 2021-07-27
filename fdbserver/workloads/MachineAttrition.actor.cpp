@@ -39,18 +39,18 @@ static std::set<int> const& normalAttritionErrors() {
 
 ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 	// duration doesn't matter since this won't timeout
-	TraceEvent("IgnoreSSFailureStart");
+	TraceEvent("IgnoreSSFailureStart").log();
 	wait(success(setHealthyZone(cx, ignoreSSFailuresZoneString, 0)));
-	TraceEvent("IgnoreSSFailureWait");
+	TraceEvent("IgnoreSSFailureWait").log();
 	wait(delay(duration));
-	TraceEvent("IgnoreSSFailureClear");
+	TraceEvent("IgnoreSSFailureClear").log();
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.clear(healthyZoneKey);
 			wait(tr.commit());
-			TraceEvent("IgnoreSSFailureComplete");
+			TraceEvent("IgnoreSSFailureComplete").log();
 			return true;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -311,7 +311,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				TEST(true); // Killing a machine
 
 				wait(delay(delayBeforeKill));
-				TraceEvent("WorkerKillAfterDelay");
+				TraceEvent("WorkerKillAfterDelay").log();
 
 				if (self->waitForVersion) {
 					state Transaction tr(cx);

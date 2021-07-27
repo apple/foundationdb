@@ -104,14 +104,14 @@ struct AtomicRestoreWorkload : TestWorkload {
 				throw;
 		}
 
-		TraceEvent("AtomicRestore_Wait");
+		TraceEvent("AtomicRestore_Wait").log();
 		wait(success(backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), StopWhenDone::False)));
-		TraceEvent("AtomicRestore_BackupStart");
+		TraceEvent("AtomicRestore_BackupStart").log();
 		wait(delay(self->restoreAfter * deterministicRandom()->random01()));
-		TraceEvent("AtomicRestore_RestoreStart");
+		TraceEvent("AtomicRestore_RestoreStart").log();
 
 		if (self->fastRestore) { // New fast parallel restore
-			TraceEvent(SevInfo, "AtomicParallelRestore");
+			TraceEvent(SevInfo, "AtomicParallelRestore").log();
 			wait(backupAgent.atomicParallelRestore(
 			    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, self->addPrefix, self->removePrefix));
 		} else { // Old style restore
@@ -141,7 +141,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			g_simulator.backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
-		TraceEvent("AtomicRestore_Done");
+		TraceEvent("AtomicRestore_Done").log();
 		return Void();
 	}
 };
