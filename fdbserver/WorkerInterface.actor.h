@@ -963,6 +963,53 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 typedef decltype(&tLog) TLogFn;
 
+ACTOR template <class T>
+Future<T> ioTimeoutError(Future<T> what, double time) {
+	Future<Void> end = lowPriorityDelay(time);
+	choose {
+		when(T t = wait(what)) { return t; }
+		when(wait(end)) {
+			Error err = io_timeout();
+			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+				err = err.asInjectedFault();
+			}
+			TraceEvent(SevError, "IoTimeoutError").error(err);
+			throw err;
+		}
+	}
+}
+
+ACTOR template <class T>
+Future<T> ioDegradedOrTimeoutError(Future<T> what,
+                                   double errTime,
+                                   Reference<AsyncVar<bool>> degraded,
+                                   double degradedTime) {
+	if (degradedTime < errTime) {
+		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
+		choose {
+			when(T t = wait(what)) { return t; }
+			when(wait(degradedEnd)) {
+				TEST(true); // TLog degraded
+				TraceEvent(SevWarnAlways, "IoDegraded");
+				degraded->set(true);
+			}
+		}
+	}
+
+	Future<Void> end = lowPriorityDelay(errTime - degradedTime);
+	choose {
+		when(T t = wait(what)) { return t; }
+		when(wait(end)) {
+			Error err = io_timeout();
+			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+				err = err.asInjectedFault();
+			}
+			TraceEvent(SevError, "IoTimeoutError").error(err);
+			throw err;
+		}
+	}
+}
+
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/unactorcompiler.h"
 #endif
