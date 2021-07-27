@@ -3323,6 +3323,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	try {
 		db = Database::createDatabase(ccf, -1, IsInternal::False);
+		wait(GlobalConfig::globalConfig().onInitialized());
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
