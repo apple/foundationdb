@@ -284,9 +284,9 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
 			u.eat("azure://"_sr);
-			auto endpoint = u.eat("/").toString();
+			auto accountName = u.eat("@"_sr).toString();
+			auto endpoint = u.eat("/"_sr).toString();
 			auto containerName = u.eat("/"_sr).toString();
-			auto accountName = u.eat("/"_sr).toString();
 			r = makeReference<BackupContainerAzureBlobStore>(
 			    endpoint, accountName, containerName, encryptionKeyFileName);
 		}

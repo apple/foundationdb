@@ -322,5 +322,5 @@ Future<std::vector<std::string>> BackupContainerAzureBlobStore::listURLs(const s
 }
 
 std::string BackupContainerAzureBlobStore::getURLFormat() {
-	return "azure://<ip>:<port>/<accountname>/<container>/<path_to_file>";
+	return "azure://<accountname>@<endpoint>/<container>/";
 }
