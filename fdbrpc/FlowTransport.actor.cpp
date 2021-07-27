@@ -913,12 +913,12 @@ ACTOR static void deliver(TransportData* self,
                           TaskPriority priority,
                           ArenaReader reader,
                           bool inReadSocket) {
-	// We want to run the task at the right priority. If the priority
-	// is higher than the current priority (which is ReadSocket) we
-	// can just upgrade. Otherwise we'll context switch so that we
-	// don't block other tasks that might run with a higher priority.
+	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
+	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
+	// with a higher priority. ReplyPromiseStream needs to guarentee that messages are recieved in the order they were
+	// sent, so we are using orderedDelay.
 	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
-		wait(delay(0, priority));
+		wait(orderedDelay(0, priority));
 	} else {
 		g_network->setCurrentTask(priority);
 	}
