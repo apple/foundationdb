@@ -20,8 +20,25 @@
 
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
+#include <future>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+namespace {
+
+template <class T>
+T waitAzureFuture(std::future<azure::storage_lite::storage_outcome<T>>&& f) {
+	auto outcome = f.get();
+	if (outcome.success()) {
+		return outcome.response();
+	} else {
+		auto const& err = outcome.error();
+		printf("Error from Azure SDK : %s (%d) : %s", err.code_name.c_str(), err.code.c_str(), err.message.c_str());
+		throw backup_error();
+	}
+}
+
+} // namespace
 
 class BackupContainerAzureBlobStoreImpl {
 public:
@@ -50,7 +67,7 @@ public:
 			                                   length,
 			                                   offset] {
 				std::ostringstream oss(std::ios::out | std::ios::binary);
-				client->download_blob_to_stream(containerName, blobName, offset, length, oss);
+				waitAzureFuture(client->download_blob_to_stream(containerName, blobName, offset, length, oss));
 				auto str = std::move(oss).str();
 				memcpy(data, str.c_str(), str.size());
 				return static_cast<int>(str.size());
@@ -61,11 +78,11 @@ public:
 		Future<Void> truncate(int64_t size) override { throw file_not_writable(); }
 		Future<Void> sync() override { throw file_not_writable(); }
 		Future<int64_t> size() const override {
-			return asyncTaskThread->execAsync([client = this->client,
-			                                   containerName = this->containerName,
-			                                   blobName = this->blobName] {
-				return static_cast<int64_t>(client->get_blob_properties(containerName, blobName).get().response().size);
-			});
+			return asyncTaskThread->execAsync(
+			    [client = this->client, containerName = this->containerName, blobName = this->blobName] {
+				    auto resp = waitAzureFuture(client->get_blob_properties(containerName, blobName));
+				    return static_cast<int64_t>(resp.size);
+			    });
 		}
 		std::string getFilename() const override { return blobName; }
 		int64_t debugFD() const override { return 0; }
@@ -121,15 +138,14 @@ public:
 			                                   blobName = this->blobName,
 			                                   buffer = std::move(movedBuffer)] {
 				std::istringstream iss(std::move(buffer));
-				auto resp = client->append_block_from_stream(containerName, blobName, iss).get();
+				waitAzureFuture(client->append_block_from_stream(containerName, blobName, iss));
 				return Void();
 			});
 		}
 		Future<int64_t> size() const override {
 			return asyncTaskThread->execAsync(
 			    [client = this->client, containerName = this->containerName, blobName = this->blobName] {
-				    auto resp = client->get_blob_properties(containerName, blobName).get().response();
-				    ASSERT(resp.valid()); // TODO: Should instead throw here
+				    auto resp = waitAzureFuture(client->get_blob_properties(containerName, blobName));
 				    return static_cast<int64_t>(resp.size);
 			    });
 		}
@@ -188,7 +204,7 @@ public:
 	ACTOR static Future<Reference<IBackupFile>> writeFile(BackupContainerAzureBlobStore* self, std::string fileName) {
 		wait(self->asyncTaskThread.execAsync(
 		    [client = self->client, containerName = self->containerName, fileName = fileName] {
-			    auto outcome = client->create_append_blob(containerName, fileName).get();
+			    waitAzureFuture(client->create_append_blob(containerName, fileName));
 			    return Void();
 		    }));
 		Reference<IAsyncFile> f =
@@ -204,7 +220,7 @@ public:
 	                      const std::string& path,
 	                      std::function<bool(std::string const&)> folderPathFilter,
 	                      BackupContainerFileSystem::FilesAndSizesT& result) {
-		auto resp = client->list_blobs_segmented(containerName, "/", "", path).get().response();
+		auto resp = waitAzureFuture(client->list_blobs_segmented(containerName, "/", "", path));
 		for (const auto& blob : resp.blobs) {
 			if (isDirectory(blob.name) && folderPathFilter(blob.name)) {
 				listFiles(client, containerName, blob.name, folderPathFilter, result);
@@ -221,7 +237,7 @@ public:
 			filesToDelete = files.size();
 		}
 		wait(self->asyncTaskThread.execAsync([containerName = self->containerName, client = self->client] {
-			client->delete_container(containerName).wait();
+			waitAzureFuture(client->delete_container(containerName));
 			return Void();
 		}));
 		if (pNumDeleted) {
@@ -234,7 +250,7 @@ public:
 
 Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileName) {
 	return asyncTaskThread.execAsync([client = this->client, containerName = this->containerName, fileName = fileName] {
-		auto resp = client->get_blob_properties(containerName, fileName).get().response();
+		auto resp = waitAzureFuture(client->get_blob_properties(containerName, fileName));
 		return resp.valid();
 	});
 }
@@ -268,18 +284,7 @@ void BackupContainerAzureBlobStore::delref() {
 Future<Void> BackupContainerAzureBlobStore::create() {
 	Future<Void> createContainerFuture =
 	    asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
-		    auto f = client->create_container(containerName);
-		    f.wait();
-		    auto outcome = f.get();
-		    if (!outcome.success()) {
-			    // TODO: Trace error?
-			    auto const err = outcome.error();
-			    printf("Error creating backup container: %s (%s) : %s\n",
-			           err.code_name.c_str(),
-			           err.code.c_str(),
-			           err.message.c_str());
-			    throw backup_error();
-		    }
+		    waitAzureFuture(client->create_container(containerName));
 		    return Void();
 	    });
 	Future<Void> encryptionSetupFuture = usesEncryption() ? encryptionSetupComplete() : Void();
@@ -287,7 +292,7 @@ Future<Void> BackupContainerAzureBlobStore::create() {
 }
 Future<bool> BackupContainerAzureBlobStore::exists() {
 	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
-		auto resp = client->get_container_properties(containerName).get().response();
+		auto resp = waitAzureFuture(client->get_container_properties(containerName));
 		return resp.valid();
 	});
 }
