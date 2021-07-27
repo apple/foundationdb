@@ -1449,7 +1449,6 @@ int nextPowerOf2(uint32_t x) {
 struct RedwoodMetrics {
 	static constexpr unsigned int btreeLevels = 5;
 	static int maxRecordCount;
-	Reference<HistogramRegistry> redwoodHistogramRegistry;
 
 	struct EventReasonsArray {
 		unsigned int eventReasons[(size_t)PagerEvents::MAXEVENTS][(size_t)PagerEventReasons::MAXEVENTREASONS];
@@ -1527,7 +1526,16 @@ struct RedwoodMetrics {
 		Reference<Histogram> buildItemCountSketch;
 		Reference<Histogram> modifyItemCountSketch;
 
-		Level() { clear(); }
+		Level() {
+			metrics = {};
+			buildFillPctSketch = Reference<Histogram>();
+			modifyFillPctSketch = Reference<Histogram>();
+			buildStoredPctSketch = Reference<Histogram>();
+			modifyStoredPctSketch = Reference<Histogram>();
+			buildItemCountSketch = Reference<Histogram>();
+			modifyItemCountSketch = Reference<Histogram>();
+			clear();
+		}
 
 		void clear(int level = 0, Reference<HistogramRegistry> registry = Reference<HistogramRegistry>()) {
 			metrics = {};
@@ -1592,6 +1600,8 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() {
+		metric = {};
+		startTime = g_network ? now() : 0;
 		redwoodHistogramRegistry = Reference<HistogramRegistry>(new HistogramRegistry());
 		kvSizeWritten = Histogram::getHistogram(
 		    LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes, redwoodHistogramRegistry);
@@ -1613,12 +1623,11 @@ struct RedwoodMetrics {
 			++levelCounter;
 		}
 		metric = {};
+		startTime = g_network ? now() : 0;
 
 		kvSizeWritten->clear();
 		kvSizeReadByGet->clear();
 		kvSizeReadByGetRange->clear();
-
-		startTime = g_network ? now() : 0;
 	}
 
 	~RedwoodMetrics() {
@@ -1635,7 +1644,7 @@ struct RedwoodMetrics {
 		}
 		redwoodHistogramRegistry.clear();
 	}
-
+	Reference<HistogramRegistry> redwoodHistogramRegistry;
 	// btree levels and one extra level for non btree level.
 	Level levels[btreeLevels + 1];
 	metrics metric;
@@ -1792,7 +1801,7 @@ struct RedwoodMetrics {
 
 // Using a global for Redwood metrics because a single process shouldn't normally have multiple storage engines
 int RedwoodMetrics::maxRecordCount = 315;
-RedwoodMetrics g_redwoodMetrics;
+RedwoodMetrics g_redwoodMetrics = {};
 Future<Void> g_redwoodMetricsActor;
 
 ACTOR Future<Void> redwoodMetricsLogger() {
