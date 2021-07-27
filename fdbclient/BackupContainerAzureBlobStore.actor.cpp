@@ -251,7 +251,7 @@ public:
 	                      BackupContainerFileSystem::FilesAndSizesT& result) {
 		auto resp = waitAzureFuture(client->list_blobs_segmented(containerName, "/", "", path), "list_blobs_segmented");
 		for (const auto& blob : resp.blobs) {
-			if (isDirectory(blob.name) && folderPathFilter(blob.name)) {
+			if (isDirectory(blob.name) && (!folderPathFilter || folderPathFilter(blob.name))) {
 				listFiles(client, containerName, blob.name, folderPathFilter, result);
 			} else {
 				result.emplace_back(blob.name, blob.content_length);
