@@ -316,12 +316,20 @@ int populate(FDBTransaction* transaction,
 		stats->ops[OP_INSERT]++;
 
 		/* commit every 100 inserts (default) */
+		int rc;
 		if (i % args->txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
 			if (stats->xacts % args->sampling == 0) {
 				clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
 			}
-			if (commit_transaction(transaction) != FDB_SUCCESS)
-				goto failExit;
+		retryTxn:
+			rc = commit_transaction(transaction);
+			if (rc != FDB_SUCCESS) {
+				if (rc == FDB_ERROR_RETRY) {
+					goto retryTxn;
+				} else {
+					goto failExit;
+				}
+			}
 
 			/* xact latency stats */
 			if (stats->xacts % args->sampling == 0) {
