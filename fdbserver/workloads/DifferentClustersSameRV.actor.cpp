@@ -64,7 +64,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override {
 		if (clientId == 0 && !switchComplete) {
-			TraceEvent(SevError, "DifferentClustersSwitchNotComplete");
+			TraceEvent(SevError, "DifferentClustersSwitchNotComplete").log();
 			return false;
 		}
 		return true;
@@ -133,17 +133,17 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			return Void();
 		}));
 		wait(lockDatabase(self->originalDB, lockUid) && lockDatabase(self->extraDB, lockUid));
-		TraceEvent("DifferentClusters_LockedDatabases");
+		TraceEvent("DifferentClusters_LockedDatabases").log();
 		std::pair<Version, Optional<Value>> read1 = wait(doRead(self->originalDB, self));
 		state Version rv = read1.first;
 		state Optional<Value> val1 = read1.second;
 		wait(doWrite(self->extraDB, self->keyToRead, val1));
-		TraceEvent("DifferentClusters_CopiedDatabase");
+		TraceEvent("DifferentClusters_CopiedDatabase").log();
 		wait(advanceVersion(self->extraDB, rv));
-		TraceEvent("DifferentClusters_AdvancedVersion");
+		TraceEvent("DifferentClusters_AdvancedVersion").log();
 		wait(cx->switchConnectionFile(
 		    makeReference<ClusterConnectionFile>(self->extraDB->getConnectionFile()->getConnectionString())));
-		TraceEvent("DifferentClusters_SwitchedConnectionFile");
+		TraceEvent("DifferentClusters_SwitchedConnectionFile").log();
 		state Transaction tr(cx);
 		tr.setVersion(rv);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -160,17 +160,17 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		// that a storage server serves a read at |rv| even after the recovery caused by unlocking the database, and we
 		// want to make that more likely for this test. So read at |rv| then unlock.
 		wait(unlockDatabase(self->extraDB, lockUid));
-		TraceEvent("DifferentClusters_UnlockedExtraDB");
+		TraceEvent("DifferentClusters_UnlockedExtraDB").log();
 		ASSERT(!watchFuture.isReady() || watchFuture.isError());
 		wait(doWrite(self->extraDB, self->keyToWatch, Optional<Value>{ LiteralStringRef("") }));
-		TraceEvent("DifferentClusters_WaitingForWatch");
+		TraceEvent("DifferentClusters_WaitingForWatch").log();
 		try {
 			wait(timeoutError(watchFuture, (self->testDuration - self->switchAfter) / 2));
 		} catch (Error& e) {
 			TraceEvent("DifferentClusters_WatchError").error(e);
 			wait(tr.onError(e));
 		}
-		TraceEvent("DifferentClusters_Done");
+		TraceEvent("DifferentClusters_Done").log();
 		self->switchComplete = true;
 		wait(unlockDatabase(self->originalDB, lockUid)); // So quietDatabase can finish
 		return Void();

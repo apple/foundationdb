@@ -50,7 +50,7 @@ struct DDMetricsWorkload : TestWorkload {
 		try {
 			TraceEvent("DDMetricsWaiting").detail("StartDelay", self->startDelay);
 			wait(delay(self->startDelay));
-			TraceEvent("DDMetricsStarting");
+			TraceEvent("DDMetricsStarting").log();
 			state double startTime = now();
 			loop {
 				wait(delay(2.5));

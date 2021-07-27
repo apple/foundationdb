@@ -1521,7 +1521,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 #else
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	if (threadCount > 1) {
-		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows");
+		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows").log();
 		throw unsupported_operation();
 	}
 	std::vector<std::pair<std::string, bool>> paths;

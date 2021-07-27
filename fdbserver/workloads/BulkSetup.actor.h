@@ -284,7 +284,7 @@ Future<Void> bulkSetup(Database cx,
 					wait(delay(1.0));
 				} else {
 					wait(delay(1.0));
-					TraceEvent("DynamicWarmingDone");
+					TraceEvent("DynamicWarmingDone").log();
 					break;
 				}
 			}
