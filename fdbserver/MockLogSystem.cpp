@@ -196,6 +196,7 @@ Future<Reference<ILogSystem>> MockLogSystem::newEpoch(
     int8_t primaryLocality,
     int8_t remoteLocality,
     const vector<Tag>& allTags,
+    TLogGroupCollectionRef tLogGroupCollection,
     const Reference<AsyncVar<bool>>& recruitmentStalled) {
 	logMethodName(__func__);
 	return Future<Reference<ILogSystem>>();

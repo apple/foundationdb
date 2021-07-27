@@ -1643,6 +1643,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                       int8_t primaryLocality,
 	                                       int8_t remoteLocality,
 	                                       std::vector<Tag> const& allTags,
+	                                       TLogGroupCollectionRef tLogGroupCollection,
 	                                       Reference<AsyncVar<bool>> const& recruitmentStalled) final {
 		return newEpoch(Reference<TagPartitionedLogSystem>::addRef(this),
 		                recr,
@@ -1652,6 +1653,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		                primaryLocality,
 		                remoteLocality,
 		                allTags,
+		                tLogGroupCollection,
 		                recruitmentStalled);
 	}
 
@@ -2685,6 +2687,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                                    int8_t primaryLocality,
 	                                                    int8_t remoteLocality,
 	                                                    std::vector<Tag> allTags,
+	                                                    TLogGroupCollectionRef tLogGroupCollection,
 	                                                    Reference<AsyncVar<bool>> recruitmentStalled) {
 		state double startTime = now();
 		state Reference<TagPartitionedLogSystem> logSystem(
@@ -2997,9 +3000,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		wait(waitForAll(initializationReplies) || oldRouterRecruitment);
 
 		for (int i = 0; i < initializationReplies.size(); i++) {
-			logSystem->tLogs[0]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
-			    OptionalInterface<TLogInterface>(initializationReplies[i].get()));
+			TLogInterface interf = initializationReplies[i].get();
+			logSystem->tLogs[0]->logServers[i] =
+			    makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(interf));
 			logSystem->tLogs[0]->tLogLocalities[i] = recr.tLogs[i].locality;
+			tLogGroupCollection->addWorkers({ interf });
 		}
 		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);
 

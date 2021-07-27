@@ -403,6 +403,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
+		                                                                 self->tLogGroupCollection,
 		                                                                 self->recruitmentStalled));
 		self->logSystem = newLogSystem;
 	} else {
@@ -415,6 +416,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
+		                                                                 self->tLogGroupCollection,
 		                                                                 self->recruitmentStalled));
 		self->logSystem = newLogSystem;
 	}
@@ -772,8 +774,15 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .detail("RemoteDcIds", remoteDcIds)
 	    .trackLatest("MasterRecoveryState");
 
+	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
+	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
+	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
+	wait(newSeedServers(self, recruits, seedServers));
+	state vector<Standalone<CommitTransactionRef>> confChanges;
+	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
+	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
+
 	// Recruit TLog groups
-	self->tLogGroupCollection->addWorkers(recruits.tLogs);
 	self->tLogGroupCollection->recruitEverything();
 
 	// Assign storage teams to tLogGroups.
@@ -782,13 +791,6 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 		self->tLogGroupCollection->assignStorageTeam(teamId, group);
 	}
 
-	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
-	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
-	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
-	wait(newSeedServers(self, recruits, seedServers));
-	state vector<Standalone<CommitTransactionRef>> confChanges;
-	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
-	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 	return confChanges;
 }
 

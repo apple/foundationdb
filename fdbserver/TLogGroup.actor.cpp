@@ -101,7 +101,7 @@ void TLogGroupCollection::addWorkers(const std::vector<OptionalInterface<TLogInt
 	}
 }
 
-void TLogGroupCollection::addWorkers(const std::vector<WorkerInterface>& logWorkers) {
+void TLogGroupCollection::addWorkers(const std::vector<TLogInterface>& logWorkers) {
 	for (const auto& worker : logWorkers) {
 		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
 	}
@@ -327,11 +327,11 @@ std::string TLogWorkerData::toString() const {
 namespace testTLogGroup {
 
 // Returns a vector of size 'processCount' containing mocked WorkerInterface, spread across diffeent localities.
-std::vector<WorkerInterface> testTLogGroupRecruits(int processCount) {
-	std::vector<WorkerInterface> recruits;
+std::vector<TLogInterface> testTLogGroupRecruits(int processCount) {
+	std::vector<TLogInterface> recruits;
 	for (int id = 1; id <= processCount; id++) {
 		UID uid(id, 0);
-		WorkerInterface interface;
+		TLogInterface interface;
 		interface.initEndpoints();
 
 		int process_id = id;
@@ -345,11 +345,14 @@ std::vector<WorkerInterface> testTLogGroupRecruits(int processCount) {
 		       zone_id,
 		       machine_id,
 		       interface.address().toString().c_str());
-		interface.locality.set(LiteralStringRef("processid"), Standalone<StringRef>(std::to_string(process_id)));
-		interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(machine_id)));
-		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
-		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
-		interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
+		interface.filteredLocality.set(LiteralStringRef("processid"),
+		                               Standalone<StringRef>(std::to_string(process_id)));
+		interface.filteredLocality.set(LiteralStringRef("machineid"),
+		                               Standalone<StringRef>(std::to_string(machine_id)));
+		interface.filteredLocality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
+		interface.filteredLocality.set(LiteralStringRef("data_hall"),
+		                               Standalone<StringRef>(std::to_string(data_hall_id)));
+		interface.filteredLocality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
 		recruits.push_back(interface);
 	}
 	return recruits;
@@ -415,7 +418,7 @@ TEST_CASE("/fdbserver/TLogGroup/basic") {
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 	    new PolicyAcross(GROUP_SIZE, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	std::vector<WorkerInterface> recruits = testTLogGroupRecruits(TOTAL_PROCESSES);
+	std::vector<TLogInterface> recruits = testTLogGroupRecruits(TOTAL_PROCESSES);
 
 	TLogGroupCollection collection(policy, NUM_GROUPS, GROUP_SIZE);
 	collection.addWorkers(recruits);

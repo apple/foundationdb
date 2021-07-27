@@ -85,6 +85,7 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	                                       int8_t primaryLocality,
 	                                       int8_t remoteLocality,
 	                                       const vector<Tag>& allTags,
+	                                       TLogGroupCollectionRef tLogGroupCollection,
 	                                       const Reference<AsyncVar<bool>>& recruitmentStalled) final;
 	LogSystemConfig getLogSystemConfig() const final;
 	Standalone<StringRef> getLogsValue() const final;

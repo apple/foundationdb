@@ -37,6 +37,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Replication.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
@@ -87,7 +88,7 @@ public:
 	int targetGroupSize() const;
 
 	// Add 'logWorkers' to current collection of workers that can be recruited into a TLogGroup.
-	void addWorkers(const std::vector<WorkerInterface>& logWorkers);
+	void addWorkers(const std::vector<TLogInterface>& logWorkers);
 	void addWorkers(const std::vector<OptionalInterface<TLogInterface>>& logWorkers);
 
 	// Build a collection of groups and recruit workers into each group as per the ReplicationPolicy
@@ -220,9 +221,9 @@ struct TLogWorkerData : public ReferenceCounted<TLogWorkerData> {
 	TLogWorkerData(const UID& id, const NetworkAddress& addr, const LocalityData& locality)
 	  : id(id), address(addr), locality(locality) {}
 
-	// Converts a WorkerInterface to TLogWorkerData.
-	static TLogWorkerDataRef fromInterface(const WorkerInterface& interf) {
-		return makeReference<TLogWorkerData>(interf.id(), interf.address(), interf.locality);
+	// Converts a TLogInterface to TLogWorkerData.
+	static TLogWorkerDataRef fromInterface(const TLogInterface& interf) {
+		return makeReference<TLogWorkerData>(interf.id(), interf.address(), interf.filteredLocality);
 	}
 	// Converts a WorkerInterface to TLogWorkerData.
 	static TLogWorkerDataRef fromInterface(const OptionalInterface<TLogInterface>& interf) {
