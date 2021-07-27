@@ -1449,7 +1449,7 @@ int nextPowerOf2(uint32_t x) {
 struct RedwoodMetrics {
 	static constexpr unsigned int btreeLevels = 5;
 	static int maxRecordCount;
-	HistogramRegistry* redwoodHistogramRegistry;
+	Reference<HistogramRegistry> redwoodHistogramRegistry;
 
 	struct EventReasonsArray {
 		unsigned int eventReasons[(size_t)PagerEvents::MAXEVENTS][(size_t)PagerEventReasons::MAXEVENTREASONS];
@@ -1529,11 +1529,11 @@ struct RedwoodMetrics {
 
 		Level() { clear(); }
 
-		void clear(int level = 0, HistogramRegistry* registry = nullptr) {
+		void clear(int level = 0, Reference<HistogramRegistry> registry = Reference<HistogramRegistry>()) {
 			metrics = {};
 			// These histograms are used for Btree events, hence level > 0
 			if (level > 0) {
-				if (!buildFillPctSketch && registry) {
+				if (!buildFillPctSketch.isValid() && registry.isValid()) {
 					std::string levelString = format("L%d", level);
 					buildFillPctSketch = Histogram::getHistogram(
 					    LiteralStringRef("buildFillPct"), levelString, Histogram::Unit::percentage, registry);
@@ -1592,7 +1592,7 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() {
-		redwoodHistogramRegistry = new HistogramRegistry();
+		redwoodHistogramRegistry = Reference<HistogramRegistry>(new HistogramRegistry());
 		kvSizeWritten = Histogram::getHistogram(
 		    LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes, redwoodHistogramRegistry);
 		kvSizeReadByGet = Histogram::getHistogram(LiteralStringRef("kvSize"),
@@ -1633,9 +1633,7 @@ struct RedwoodMetrics {
 			level.buildItemCountSketch.clear();
 			level.modifyItemCountSketch.clear();
 		}
-		if (redwoodHistogramRegistry)
-			delete redwoodHistogramRegistry;
-		redwoodHistogramRegistry = nullptr;
+		redwoodHistogramRegistry.clear();
 	}
 
 	// btree levels and one extra level for non btree level.
@@ -1703,7 +1701,8 @@ struct RedwoodMetrics {
 			                                               { "", 0 } };
 
 		double elapsed = now() - startTime;
-		redwoodHistogramRegistry->logReport();
+		if (redwoodHistogramRegistry)
+			redwoodHistogramRegistry->logReport();
 		if (e != nullptr) {
 			for (auto& m : metrics) {
 				char c = m.first[0];
@@ -1794,7 +1793,7 @@ struct RedwoodMetrics {
 
 // Using a global for Redwood metrics because a single process shouldn't normally have multiple storage engines
 int RedwoodMetrics::maxRecordCount = 315;
-RedwoodMetrics g_redwoodMetrics = {};
+RedwoodMetrics g_redwoodMetrics;
 Future<Void> g_redwoodMetricsActor;
 
 ACTOR Future<Void> redwoodMetricsLogger() {
@@ -1947,7 +1946,7 @@ public:
 		evictionOrder.swap(self->evictionOrder);
 
 		state typename EvictionOrderT::iterator i = evictionOrder.begin();
-		state typename EvictionOrderT::iterator iEnd = evictionOrder.begin();
+		state typename EvictionOrderT::iterator iEnd = evictionOrder.end();
 
 		while (i != iEnd) {
 			if (!i->item.evictable()) {
@@ -2950,7 +2949,7 @@ public:
 	Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) override {
 		debug_printf("DWALPager(%s) op=readExtent %s\n", filename.c_str(), toString(pageID).c_str());
 		PageCacheEntry* pCacheEntry = extentCache.getIfExists(pageID);
-		auto& eventReasons = g_redwoodMetrics.level(0).metrics.events;
+		auto& eventReasons = g_redwoodMetrics.level(nonBtreeLevel).metrics.events;
 		if (pCacheEntry != nullptr) {
 			eventReasons.addEventReason(PagerEvents::CacheLookup, PagerEventReasons::MetaData);
 			debug_printf("DWALPager(%s) Cache Entry exists for %s\n", filename.c_str(), toString(pageID).c_str());
