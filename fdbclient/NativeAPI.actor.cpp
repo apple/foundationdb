@@ -495,7 +495,7 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction* tr, std::vecto
 ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t clientTxInfoSizeLimit) {
 	state const Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 	state const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
-	TraceEvent(SevInfo, "DelExcessClntTxnEntriesCalled");
+	TraceEvent(SevInfo, "DelExcessClntTxnEntriesCalled").log();
 	loop {
 		try {
 			tr->reset();
@@ -503,7 +503,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> ctrValue = wait(tr->get(KeyRef(clientLatencyAtomicCtr), Snapshot::True));
 			if (!ctrValue.present()) {
-				TraceEvent(SevInfo, "NumClntTxnEntriesNotFound");
+				TraceEvent(SevInfo, "NumClntTxnEntriesNotFound").log();
 				return Void();
 			}
 			state int64_t txInfoSize = 0;
@@ -1642,7 +1642,7 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 	loop {
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
-			TraceEvent("SwitchConnectionFileAttemptingGRV");
+			TraceEvent("SwitchConnectionFileAttemptingGRV").log();
 			Version v = wait(tr.getReadVersion());
 			TraceEvent("SwitchConnectionFileGotRV")
 			    .detail("ReadVersion", v)
@@ -5219,7 +5219,7 @@ Future<Void> Transaction::commitMutations() {
 
 		if (options.debugDump) {
 			UID u = nondeterministicRandom()->randomUniqueID();
-			TraceEvent("TransactionDump", u);
+			TraceEvent("TransactionDump", u).log();
 			for (auto i = tr.transaction.mutations.begin(); i != tr.transaction.mutations.end(); ++i)
 				TraceEvent("TransactionMutation", u)
 				    .detail("T", i->type)
@@ -6346,7 +6346,7 @@ void Transaction::setToken(uint64_t token) {
 void enableClientInfoLogging() {
 	ASSERT(networkOptions.logClientInfo.present() == false);
 	networkOptions.logClientInfo = true;
-	TraceEvent(SevInfo, "ClientInfoLoggingEnabled");
+	TraceEvent(SevInfo, "ClientInfoLoggingEnabled").log();
 }
 
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
@@ -6400,7 +6400,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 		}
 		throw;
 	}
-	TraceEvent("ExclusionSafetyCheckCoordinators");
+	TraceEvent("ExclusionSafetyCheckCoordinators").log();
 	state ClientCoordinators coordinatorList(cx->getConnectionFile());
 	state vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
@@ -6413,7 +6413,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	choose {
 		when(wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0))) {}
 		when(wait(delay(3.0))) {
-			TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum");
+			TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum").log();
 			return false;
 		}
 	}

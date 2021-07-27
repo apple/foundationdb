@@ -101,7 +101,7 @@ struct StatusWorkload : TestWorkload {
 			TraceEvent(SevError, "SchemaCoverageRequirementsException").detail("What", e.what());
 			throw unknown_error();
 		} catch (...) {
-			TraceEvent(SevError, "SchemaCoverageRequirementsException");
+			TraceEvent(SevError, "SchemaCoverageRequirementsException").log();
 			throw unknown_error();
 		}
 	}

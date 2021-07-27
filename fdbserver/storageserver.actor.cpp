@@ -1190,7 +1190,7 @@ Future<Version> waitForVersion(StorageServer* data, Version version, SpanID span
 	}
 
 	if (deterministicRandom()->random01() < 0.001) {
-		TraceEvent("WaitForVersion1000x");
+		TraceEvent("WaitForVersion1000x").log();
 	}
 	return waitForVersionActor(data, version, spanContext);
 }
@@ -3546,10 +3546,10 @@ private:
 				ASSERT(ssId == data->thisServerID);
 				if (m.type == MutationRef::SetValue) {
 					TEST(true); // Putting TSS in quarantine
-					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID);
+					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID).log();
 					data->startTssQuarantine();
 				} else {
-					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID);
+					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID).log();
 					// dipose of this TSS
 					throw worker_removed();
 				}
@@ -3624,7 +3624,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		    !g_simulator.speedUpSimulation && data->tssFaultInjectTime.present() &&
 		    data->tssFaultInjectTime.get() < now()) {
 			if (deterministicRandom()->random01() < 0.01) {
-				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID);
+				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
 				// small random chance to just completely get stuck here, each tss should eventually hit this in this
 				// mode
 				wait(tssDelayForever());
@@ -3839,7 +3839,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
 					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);
 					if (ver == 1) {
-						TraceEvent("SSPeekMutation", data->thisServerID);
+						TraceEvent("SSPeekMutation", data->thisServerID).log();
 						// The following trace event may produce a value with special characters
 						//TraceEvent("SSPeekMutation", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cloneCursor2->version().toString());
 					}
@@ -4337,15 +4337,15 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	data->byteSampleRecovery =
 	    restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
-	TraceEvent("ReadingDurableState", data->thisServerID);
+	TraceEvent("ReadingDurableState", data->thisServerID).log();
 	wait(waitForAll(std::vector{ fFormat, fID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable }));
 	wait(byteSampleSampleRecovered.getFuture());
-	TraceEvent("RestoringDurableState", data->thisServerID);
+	TraceEvent("RestoringDurableState", data->thisServerID).log();
 
 	if (!fFormat.get().present()) {
 		// The DB was never initialized
-		TraceEvent("DBNeverInitialized", data->thisServerID);
+		TraceEvent("DBNeverInitialized", data->thisServerID).log();
 		storage->dispose();
 		data->thisServerID = UID();
 		data->sk = Key();
@@ -5273,7 +5273,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 							}
 
 							if (self->history.size() && BUGGIFY) {
-								TraceEvent("SSHistoryReboot", self->thisServerID);
+								TraceEvent("SSHistoryReboot", self->thisServerID).log();
 								throw please_reboot();
 							}
 
@@ -5348,7 +5348,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 	try {
 		state double start = now();
-		TraceEvent("StorageServerRebootStart", self.thisServerID);
+		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
 		wait(self.storage.init());
 		choose {
@@ -5357,7 +5357,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			when(wait(self.storage.commit())) {}
 
 			when(wait(memoryStoreRecover(persistentData, connFile, self.thisServerID))) {
-				TraceEvent("DisposeStorageServer", self.thisServerID);
+				TraceEvent("DisposeStorageServer", self.thisServerID).log();
 				throw worker_removed();
 			}
 		}
