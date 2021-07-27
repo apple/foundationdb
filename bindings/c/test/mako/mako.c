@@ -190,9 +190,18 @@ int cleanup(FDBTransaction* transaction, mako_args_t* args) {
 	len += 1;
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
-	fdb_transaction_clear_range(transaction, (uint8_t*)beginstr, len + 1, (uint8_t*)endstr, len + 1);
-	if (commit_transaction(transaction) != FDB_SUCCESS)
-		goto failExit;
+	int rc;
+retryTxn:
+	rc = run_op_clearrange(transaction, beginstr, endstr);
+	rc = commit_transaction(transaction);
+	if (rc != FDB_SUCCESS) {
+		if (rc == FDB_ERROR_RETRY) {
+			fdb_transaction_reset(transaction);
+			goto retryTxn;
+		} else {
+			goto failExit;
+		}
+	}
 
 	fdb_transaction_reset(transaction);
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_end);

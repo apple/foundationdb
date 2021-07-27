@@ -189,4 +189,6 @@ typedef struct {
 /* process type */
 typedef enum { proc_master = 0, proc_worker, proc_stats } proc_type_t;
 
+int run_op_clearrange(FDBTransaction*, char*, char*);
+
 #endif /* MAKO_H */
