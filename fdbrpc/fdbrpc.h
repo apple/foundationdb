@@ -406,9 +406,6 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 template <class T>
 class ReplyPromiseStream {
 public:
-	// The endpoints of a ReplyPromiseStream must be initialized at Task::ReadSocket, because with lower priorities a
-	// delay(0) in FlowTransport deliver can cause out of order delivery.
-
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 

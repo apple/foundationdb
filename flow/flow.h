@@ -1090,6 +1090,9 @@ inline double now() {
 inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(seconds, taskID);
 }
+inline Future<Void> orderedDelay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	return g_network->orderedDelay(seconds, taskID);
+}
 inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(std::max(0.0, time - g_network->now()), taskID);
 }

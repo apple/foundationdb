@@ -501,6 +501,10 @@ public:
 	virtual Future<class Void> delay(double seconds, TaskPriority taskID) = 0;
 	// The given future will be set after seconds have elapsed
 
+	virtual Future<class Void> orderedDelay(double seconds, TaskPriority taskID) = 0;
+	// The given future will be set after seconds have elapsed, delays with the same time and TaskPriority will be
+	// executed in the order they were issues
+
 	virtual Future<class Void> yield(TaskPriority taskID) = 0;
 	// The given future will be set immediately or after higher-priority tasks have executed
 
