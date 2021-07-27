@@ -59,6 +59,7 @@
 #include <sstream>
 #include <iterator>
 #include <functional>
+#include <memory>
 
 #include <string.h>
 #include <errno.h>
@@ -135,6 +136,8 @@ int severity_to_priority(Severity severity) {
 		return LOG_INFO;
 	}
 }
+
+typedef std::string ProcessID;
 
 bool daemonize = false;
 std::string logGroup = "default";
@@ -371,7 +374,7 @@ private:
 	fdb_fd_set fds;
 
 public:
-	const char** argv;
+	char** argv;
 	std::string section, ssection;
 	uint32_t initial_restart_delay;
 	uint32_t max_restart_delay;
@@ -389,11 +392,11 @@ public:
 	int pipes[2][2];
 
 	Command() : argv(nullptr) {}
-	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd)
+	Command(const CSimpleIni& ini, std::string _section, ProcessID id, fdb_fd_set fds, int* maxfd)
 	  : section(_section), argv(nullptr), fork_retry_time(-1), quiet(false), delete_envvars(nullptr), fds(fds),
 	    deconfigured(false), kill_on_configuration_change(true) {
 		char _ssection[strlen(section.c_str()) + 22];
-		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%" PRIu64, section.c_str(), id);
+		snprintf(_ssection, strlen(section.c_str()) + 22, "%s", id.c_str());
 		ssection = _ssection;
 
 		for (auto p : pipes) {
@@ -534,7 +537,7 @@ public:
 				commands.push_back(std::string("--").append(i.pItem).append("=").append(opt));
 		}
 
-		argv = new const char*[commands.size() + 1];
+		argv = new char*[commands.size() + 1];
 		int i = 0;
 		for (auto itr : commands) {
 			argv[i++] = strdup(itr.c_str());
@@ -542,6 +545,9 @@ public:
 		argv[i] = nullptr;
 	}
 	~Command() {
+		for (int i = 0; i < commands.size(); ++i) {
+			free(argv[i]);
+		}
 		delete[] argv;
 		for (auto p : pipes) {
 			if (p[0] >= 0 && p[1] >= 0) {
@@ -589,9 +595,9 @@ public:
 	}
 };
 
-std::unordered_map<uint64_t, Command*> id_command;
-std::unordered_map<pid_t, uint64_t> pid_id;
-std::unordered_map<uint64_t, pid_t> id_pid;
+std::unordered_map<ProcessID, std::unique_ptr<Command>> id_command;
+std::unordered_map<pid_t, ProcessID> pid_id;
+std::unordered_map<ProcessID, pid_t> id_pid;
 
 enum { OPT_CONFFILE, OPT_LOCKFILE, OPT_LOGGROUP, OPT_DAEMONIZE, OPT_HELP };
 
@@ -604,7 +610,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONFFILE, "--conffile", SO_REQ_SEP }
 	                                  { OPT_HELP, "--help", SO_NONE },
 	                                  SO_END_OF_OPTIONS };
 
-void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, sigset_t* mask) {
+void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, sigset_t* mask) {
 	if (!cmd->argv)
 		return;
 
@@ -754,7 +760,7 @@ bool argv_equal(const char** a1, const char** a2) {
 	return true;
 }
 
-void kill_process(uint64_t id, bool wait = true) {
+void kill_process(ProcessID id, bool wait = true) {
 	pid_t pid = id_pid[id];
 
 	log_msg(SevInfo, "Killing process %d\n", pid);
@@ -811,7 +817,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 
 		/* Any change to uid or gid requires the process to be restarted to take effect */
 		if (uid != _uid || gid != _gid) {
-			std::vector<uint64_t> kill_ids;
+			std::vector<ProcessID> kill_ids;
 			for (auto i : id_pid) {
 				if (id_command[i.first]->kill_on_configuration_change) {
 					kill_ids.push_back(i.first);
@@ -819,7 +825,6 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 			}
 			for (auto i : kill_ids) {
 				kill_process(i);
-				delete id_command[i];
 				id_command.erase(i);
 			}
 		}
@@ -828,40 +833,38 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		gid = _gid;
 	}
 
-	std::list<uint64_t> kill_ids;
-	std::list<std::pair<uint64_t, Command*>> start_ids;
+	std::list<ProcessID> kill_ids;
+	std::list<std::pair<ProcessID, Command*>> start_ids;
 
 	for (auto i : id_pid) {
 		if (!loadedConf || ini.GetSectionSize(id_command[i.first]->ssection.c_str()) == -1) {
-			/* Server on this port no longer configured; deconfigure it and kill it if required */
+			/* Process no longer configured; deconfigure it and kill it if required */
 			log_msg(SevInfo, "Deconfigured %s\n", id_command[i.first]->ssection.c_str());
 
 			id_command[i.first]->deconfigured = true;
 
 			if (id_command[i.first]->kill_on_configuration_change) {
 				kill_ids.push_back(i.first);
-				delete id_command[i.first];
 				id_command.erase(i.first);
 			}
 		} else {
-			Command* cmd = new Command(ini, id_command[i.first]->section, i.first, rfds, maxfd);
+			auto cmd = std::make_unique<Command>(ini, id_command[i.first]->section, i.first, rfds, maxfd);
 
 			// If we just turned on 'kill_on_configuration_change', then kill the process to make sure we pick up any of
 			// its pending config changes
 			if (*(id_command[i.first]) != *cmd ||
 			    (cmd->kill_on_configuration_change && !id_command[i.first]->kill_on_configuration_change)) {
 				log_msg(SevInfo, "Found new configuration for %s\n", id_command[i.first]->ssection.c_str());
-				delete id_command[i.first];
-				id_command[i.first] = cmd;
+				auto* c = cmd.get();
+				id_command[i.first] = std::move(cmd);
 
-				if (id_command[i.first]->kill_on_configuration_change) {
+				if (c->kill_on_configuration_change) {
 					kill_ids.push_back(i.first);
-					start_ids.push_back(std::make_pair(i.first, cmd));
+					start_ids.emplace_back(i.first, c);
 				}
 			} else {
 				log_msg(SevInfo, "Updated configuration for %s\n", id_command[i.first]->ssection.c_str());
 				id_command[i.first]->update(*cmd);
-				delete cmd;
 			}
 		}
 	}
@@ -880,30 +883,24 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		ini.GetAllSections(sections);
 		for (auto i : sections) {
 			if (auto dot = strrchr(i.pItem, '.')) {
-				char* strtol_end;
+				ProcessID id = i.pItem;
+				if (!id_pid.count(id)) {
+					/* Found something we haven't yet started */
+					Command* cmd;
 
-				uint64_t id = strtoull(dot + 1, &strtol_end, 10);
+					auto itr = id_command.find(id);
+					if (itr != id_command.end()) {
+						cmd = itr->second.get();
+					} else {
+						std::string section(i.pItem, dot - i.pItem);
+						auto p = std::make_unique<Command>(ini, section, id, rfds, maxfd);
+						cmd = p.get();
+						id_command[id] = std::move(p);
+					}
 
-				if (*strtol_end != '\0' || !(id > 0)) {
-					log_msg(SevError, "Found bogus id in %s\n", i.pItem);
-				} else {
-					if (!id_pid.count(id)) {
-						/* Found something we haven't yet started */
-						Command* cmd;
-
-						auto itr = id_command.find(id);
-						if (itr != id_command.end()) {
-							cmd = itr->second;
-						} else {
-							std::string section(i.pItem, dot - i.pItem);
-							cmd = new Command(ini, section, id, rfds, maxfd);
-							id_command[id] = cmd;
-						}
-
-						if (cmd->fork_retry_time <= timer()) {
-							log_msg(SevInfo, "Starting %s\n", i.pItem);
-							start_process(cmd, id, uid, gid, 0, mask);
-						}
+					if (cmd->fork_retry_time <= timer()) {
+						log_msg(SevInfo, "Starting %s\n", i.pItem);
+						start_process(cmd, id, uid, gid, 0, mask);
 					}
 				}
 			}
@@ -1271,13 +1268,14 @@ int main(int argc, char** argv) {
 
 	// Guaranteed (if non-nullptr) to be an absolute path with no
 	// symbolic link, /./ or /../ components
-	const char* p = realpath(_confpath.c_str(), nullptr);
+	char* p = realpath(_confpath.c_str(), nullptr);
 	if (!p) {
 		log_msg(SevError, "No configuration file at %s\n", _confpath.c_str());
 		exit(1);
 	}
 
 	std::string confpath = p;
+	free(p);
 
 	// Will always succeed given an absolute path
 	std::string confdir = parentDirectory(confpath, false);
@@ -1499,7 +1497,7 @@ int main(int argc, char** argv) {
 		}
 
 		double end_time = std::numeric_limits<double>::max();
-		for (auto i : id_command) {
+		for (auto& i : id_command) {
 			if (i.second->fork_retry_time >= 0) {
 				end_time = std::min(i.second->fork_retry_time, end_time);
 			}
@@ -1590,7 +1588,7 @@ int main(int argc, char** argv) {
 		if (exit_signal > 0) {
 			switch (exit_signal) {
 			case SIGHUP:
-				for (auto i : id_command) {
+				for (auto& i : id_command) {
 					i.second->current_restart_delay = i.second->initial_restart_delay;
 					i.second->fork_retry_time = -1;
 				}
@@ -1643,10 +1641,10 @@ int main(int argc, char** argv) {
 
 			char buf[4096];
 
-			for (auto itr : id_command) {
+			for (auto& itr : id_command) {
 				for (int i = 0; i < 2; i++) {
 					if (FD_ISSET((itr.second)->pipes[i][0], &srfds)) {
-						read_child_output(itr.second, i, watched_fds);
+						read_child_output(itr.second.get(), i, watched_fds);
 					}
 				}
 			}
@@ -1721,14 +1719,13 @@ int main(int argc, char** argv) {
 					break;
 				}
 
-				uint64_t id = pid_id[pid];
-				Command* cmd = id_command[id];
+				ProcessID id = pid_id[pid];
+				Command* cmd = id_command[id].get();
 
 				pid_id.erase(pid);
 				id_pid.erase(id);
 
 				if (cmd->deconfigured) {
-					delete cmd;
 					id_command.erase(id);
 				} else {
 					int delay = cmd->get_and_update_current_restart_delay();

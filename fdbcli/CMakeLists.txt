@@ -1,9 +1,13 @@
 set(FDBCLI_SRCS
   fdbcli.actor.cpp
   fdbcli.actor.h
+  AdvanceVersionCommand.actor.cpp
   ConsistencyCheckCommand.actor.cpp
   FlowLineNoise.actor.cpp
   FlowLineNoise.h
+  ForceRecoveryWithDataLossCommand.actor.cpp
+  MaintenanceCommand.actor.cpp
+  SnapshotCommand.actor.cpp
   Util.cpp
   linenoise/linenoise.h)
 

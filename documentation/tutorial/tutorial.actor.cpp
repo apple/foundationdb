@@ -1,23 +1,23 @@
 /*
- * tutorial.actor.cpp
+* tutorial.actor.cpp
 
- *
- * This source file is part of the FoundationDB open source project
- *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+*
+* This source file is part of the FoundationDB open source project
+*
+* Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 #include "flow/flow.h"
 #include "flow/Platform.h"
@@ -100,10 +100,11 @@ struct EchoServerInterface {
 	RequestStream<struct GetInterfaceRequest> getInterface;
 	RequestStream<struct EchoRequest> echo;
 	RequestStream<struct ReverseRequest> reverse;
+	RequestStream<struct StreamRequest> stream;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, echo, reverse);
+		serializer(ar, echo, reverse, stream);
 	}
 };
 
@@ -141,19 +142,61 @@ struct ReverseRequest {
 	}
 };
 
+struct StreamReply : ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 440804;
+
+	int index = 0;
+	StreamReply() = default;
+	explicit StreamReply(int index) : index(index) {}
+
+	size_t expectedSize() const { return 2e6; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, index);
+	}
+};
+
+struct StreamRequest {
+	constexpr static FileIdentifier file_identifier = 5410805;
+	ReplyPromiseStream<StreamReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
 uint64_t tokenCounter = 1;
 
 ACTOR Future<Void> echoServer() {
 	state EchoServerInterface echoServer;
 	echoServer.getInterface.makeWellKnownEndpoint(UID(-1, ++tokenCounter), TaskPriority::DefaultEndpoint);
 	loop {
-		choose {
-			when(GetInterfaceRequest req = waitNext(echoServer.getInterface.getFuture())) {
-				req.reply.send(echoServer);
+		try {
+			choose {
+				when(GetInterfaceRequest req = waitNext(echoServer.getInterface.getFuture())) {
+					req.reply.send(echoServer);
+				}
+				when(EchoRequest req = waitNext(echoServer.echo.getFuture())) { req.reply.send(req.message); }
+				when(ReverseRequest req = waitNext(echoServer.reverse.getFuture())) {
+					req.reply.send(std::string(req.message.rbegin(), req.message.rend()));
+				}
+				when(state StreamRequest req = waitNext(echoServer.stream.getFuture())) {
+					req.reply.setByteLimit(1024);
+					state int i = 0;
+					for (; i < 100; ++i) {
+						wait(req.reply.onReady());
+						std::cout << "Send " << i << std::endl;
+						req.reply.send(StreamReply{ i });
+					}
+					req.reply.sendError(end_of_stream());
+				}
 			}
-			when(EchoRequest req = waitNext(echoServer.echo.getFuture())) { req.reply.send(req.message); }
-			when(ReverseRequest req = waitNext(echoServer.reverse.getFuture())) {
-				req.reply.send(std::string(req.message.rbegin(), req.message.rend()));
+		} catch (Error& e) {
+			if (e.code() != error_code_operation_obsolete) {
+				fprintf(stderr, "Error: %s\n", e.what());
+				throw e;
 			}
 		}
 	}
@@ -172,6 +215,18 @@ ACTOR Future<Void> echoClient() {
 	reverseRequest.message = "Hello World";
 	std::string reverseString = wait(server.reverse.getReply(reverseRequest));
 	std::cout << format("Sent %s to reverse, received %s\n", "Hello World", reverseString.c_str());
+
+	state ReplyPromiseStream<StreamReply> stream = server.stream.getReplyStream(StreamRequest{});
+	state int j = 0;
+	try {
+		loop {
+			StreamReply rep = waitNext(stream.getFuture());
+			std::cout << "Rep: " << rep.index << std::endl;
+			ASSERT(rep.index == j++);
+		}
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_connection_failed);
+	}
 	return Void();
 }
 
@@ -347,6 +402,68 @@ ACTOR Future<Void> multipleClients() {
 
 std::string clusterFile = "fdb.cluster";
 
+ACTOR Future<Void> logThroughput(int64_t* v, Key* next) {
+	loop {
+		state int64_t last = *v;
+		wait(delay(1));
+		printf("throughput: %ld bytes/s, next: %s\n", *v - last, printable(*next).c_str());
+	}
+}
+
+ACTOR Future<Void> fdbClientStream() {
+	state Database db = Database::createDatabase(clusterFile, 300);
+	state Transaction tx(db);
+	state Key next;
+	state int64_t bytes = 0;
+	state Future<Void> logFuture = logThroughput(&bytes, &next);
+	loop {
+		state PromiseStream<Standalone<RangeResultRef>> results;
+		try {
+			state Future<Void> stream = tx.getRangeStream(results,
+			                                              KeySelector(firstGreaterOrEqual(next), next.arena()),
+			                                              KeySelector(firstGreaterOrEqual(normalKeys.end)),
+			                                              GetRangeLimits());
+			loop {
+				Standalone<RangeResultRef> range = waitNext(results.getFuture());
+				if (range.size()) {
+					bytes += range.expectedSize();
+					next = keyAfter(range.back().key);
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_end_of_stream) {
+				break;
+			}
+			wait(tx.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> fdbClientGetRange() {
+	state Database db = Database::createDatabase(clusterFile, 300);
+	state Transaction tx(db);
+	state Key next;
+	state int64_t bytes = 0;
+	state Future<Void> logFuture = logThroughput(&bytes, &next);
+	loop {
+		try {
+			Standalone<RangeResultRef> range =
+			    wait(tx.getRange(KeySelector(firstGreaterOrEqual(next), next.arena()),
+			                     KeySelector(firstGreaterOrEqual(normalKeys.end)),
+			                     GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
+			bytes += range.expectedSize();
+			if (!range.more) {
+				break;
+			}
+			next = keyAfter(range.back().key);
+		} catch (Error& e) {
+			wait(tx.onError(e));
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> fdbClient() {
 	wait(delay(30));
 	state Database db = Database::createDatabase(clusterFile, 300);
@@ -403,6 +520,8 @@ std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
 	{ "kvStoreServer", &kvStoreServer }, // ./tutorial -p 6666 kvStoreServer
 	{ "kvSimpleClient", &kvSimpleClient }, // ./tutorial -s 127.0.0.1:6666 kvSimpleClient
 	{ "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
+	{ "fdbClientStream", &fdbClientStream }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientStream
+	{ "fdbClientGetRange", &fdbClientGetRange }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientGetRange
 	{ "fdbClient", &fdbClient }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
 	{ "fdbStatusStresser", &fdbStatusStresser }
 }; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser

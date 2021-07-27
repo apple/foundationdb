@@ -263,8 +263,8 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		return baseNetwork->onMainThread(std::move(signal), taskID);
 	}
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
-		return baseNetwork->startThread(func, arg);
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
+		return baseNetwork->startThread(func, arg, stackSize, name);
 	}
 	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
 		return IAsyncFileSystem::filesystem()->open(filename, flags, mode);
@@ -1488,5 +1488,127 @@ TEST_CASE("/flow/flow/PromiseStream/move2") {
 	ASSERT(tracker.moved);
 	ASSERT(!movedTracker.moved);
 	ASSERT(movedTracker.copied == 0);
+	return Void();
+}
+
+constexpr double mutexTestDelay = 0.00001;
+
+ACTOR Future<Void> mutexTest(int id, FlowMutex* mutex, int n, bool allowError, bool* verbose) {
+	while (n-- > 0) {
+		state double d = deterministicRandom()->random01() * mutexTestDelay;
+		if (*verbose) {
+			printf("%d:%d wait %f while unlocked\n", id, n, d);
+		}
+		wait(delay(d));
+
+		if (*verbose) {
+			printf("%d:%d locking\n", id, n);
+		}
+		state FlowMutex::Lock lock = wait(mutex->take());
+		if (*verbose) {
+			printf("%d:%d locked\n", id, n);
+		}
+
+		d = deterministicRandom()->random01() * mutexTestDelay;
+		if (*verbose) {
+			printf("%d:%d wait %f while locked\n", id, n, d);
+		}
+		wait(delay(d));
+
+		// On the last iteration, send an error or drop the lock if allowError is true
+		if (n == 0 && allowError) {
+			if (deterministicRandom()->coinflip()) {
+				// Send explicit error
+				if (*verbose) {
+					printf("%d:%d sending error\n", id, n);
+				}
+				lock.error(end_of_stream());
+			} else {
+				// Do nothing
+				if (*verbose) {
+					printf("%d:%d dropping promise, returning without unlock\n", id, n);
+				}
+			}
+		} else {
+			if (*verbose) {
+				printf("%d:%d unlocking\n", id, n);
+			}
+			lock.release();
+		}
+	}
+
+	if (*verbose) {
+		printf("%d Returning\n", id);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/flow/FlowMutex") {
+	state int count = 100000;
+
+	// Default verboseness
+	state bool verboseSetting = false;
+	// Useful for debugging, enable verbose mode for this iteration number
+	state int verboseTestIteration = -1;
+
+	try {
+		state bool verbose = verboseSetting || count == verboseTestIteration;
+
+		while (--count > 0) {
+			if (count % 1000 == 0) {
+				printf("%d tests left\n", count);
+			}
+
+			state FlowMutex mutex;
+			state std::vector<Future<Void>> tests;
+
+			state bool allowErrors = deterministicRandom()->coinflip();
+			if (verbose) {
+				printf("\nTesting allowErrors=%d\n", allowErrors);
+			}
+
+			state Optional<Error> error;
+
+			try {
+				for (int i = 0; i < 10; ++i) {
+					tests.push_back(mutexTest(i, &mutex, 10, allowErrors, &verbose));
+				}
+				wait(waitForAll(tests));
+
+				if (allowErrors) {
+					if (verbose) {
+						printf("Final wait in case error was injected by the last actor to finish\n");
+					}
+					wait(success(mutex.take()));
+				}
+			} catch (Error& e) {
+				if (verbose) {
+					printf("Caught error %s\n", e.what());
+				}
+				error = e;
+
+				// Some actors can still be running, waiting while locked or unlocked,
+				// but all should become ready, some with errors.
+				state int i;
+				if (verbose) {
+					printf("Waiting for completions.  Future end states:\n");
+				}
+				for (i = 0; i < tests.size(); ++i) {
+					ErrorOr<Void> f = wait(errorOr(tests[i]));
+					if (verbose) {
+						printf("  %d: %s\n", i, f.isError() ? f.getError().what() : "done");
+					}
+				}
+			}
+
+			// If an error was caused, one should have been detected.
+			// Otherwise, no errors should be detected.
+			ASSERT(error.present() == allowErrors);
+		}
+	} catch (Error& e) {
+		printf("Error at count=%d\n", count + 1);
+		ASSERT(false);
+	}
+
 	return Void();
 }

@@ -30,7 +30,9 @@ Developers interested in using FoundationDB can get started by downloading and i
 Developers on an OS for which there is no binary package, or who would like
 to start hacking on the code, can get started by compiling from source.
 
-The official docker image for building is `foundationdb/foundationdb-build`. It has all dependencies installed. To build outside the official docker image you'll need at least these dependencies:
+The official docker image for building is [`foundationdb/build`](https://hub.docker.com/r/foundationdb/build) which has all dependencies installed. The Docker image definitions used by FoundationDB team members can be found in the [dedicated repository.](https://github.com/FoundationDB/fdb-build-support).
+
+To build outside the official docker image you'll need at least these dependencies:
 
 1. Install cmake Version 3.13 or higher [CMake](https://cmake.org/)
 1. Install [Mono](http://www.mono-project.com/download/stable/)
@@ -77,7 +79,7 @@ describe the actor compiler source file, not the post-processed output files,
 and places the output file in the source directory.  This file should then be
 picked up automatically by any tooling.
 
-Note that if building inside of the `foundationdb/foundationdb-build` docker
+Note that if building inside of the `foundationdb/build` docker
 image, the resulting paths will still be incorrect and require manual fixing.
 One will wish to re-run `cmake` with `-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF` to
 prevent it from reverting the manual changes.
@@ -138,7 +140,7 @@ You should create a second build-directory which you will use for building and d
 ### Linux
 
 There are no special requirements for Linux.  A docker image can be pulled from
-`foundationdb/foundationdb-build` that has all of FoundationDB's dependencies
+`foundationdb/build` that has all of FoundationDB's dependencies
 pre-installed, and is what the CI uses to build and test PRs.
 
 ```

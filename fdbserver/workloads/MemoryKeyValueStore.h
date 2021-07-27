@@ -38,7 +38,7 @@ public:
 	Key getKey(KeySelectorRef selector) const;
 
 	// Gets a range of key-value pairs, returning a maximum of <limit> results
-	RangeResult getRange(KeyRangeRef range, int limit, bool reverse) const;
+	RangeResult getRange(KeyRangeRef range, int limit, Reverse reverse) const;
 
 	// Stores a key-value pair in the database
 	void set(KeyRef key, ValueRef value);

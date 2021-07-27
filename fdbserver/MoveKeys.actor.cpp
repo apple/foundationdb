@@ -20,11 +20,11 @@
 
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbclient/DatabaseContext.h" // for tss mapping
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using std::max;
@@ -322,6 +322,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
                                         MoveKeysLock lock,
                                         FlowLock* startMoveKeysLock,
                                         UID relocationIntervalId,
+                                        std::map<UID, StorageServerInterface>* tssMapping,
                                         const DDEnabledState* ddEnabledState) {
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
 	state Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
@@ -329,6 +330,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*startMoveKeysLock);
+	state bool loadedTssMapping = false;
 
 	TraceEvent(SevDebug, interval.begin(), relocationIntervalId);
 
@@ -364,6 +366,12 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 					wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
+
+					if (!loadedTssMapping) {
+						// share transaction for loading tss mapping with the rest of start move keys
+						wait(readTSSMappingRYW(tr, tssMapping));
+						loadedTssMapping = true;
+					}
 
 					vector<Future<Optional<Value>>> serverListEntries;
 					serverListEntries.reserve(servers.size());
@@ -547,7 +555,8 @@ ACTOR Future<Void> checkFetchingState(Database cx,
                                       vector<UID> dest,
                                       KeyRange keys,
                                       Promise<Void> dataMovementComplete,
-                                      UID relocationIntervalId) {
+                                      UID relocationIntervalId,
+                                      std::map<UID, StorageServerInterface> tssMapping) {
 	state Transaction tr(cx);
 
 	loop {
@@ -565,7 +574,6 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 			state vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 			vector<Future<Void>> requests;
 			state vector<Future<Void>> tssRequests;
-			ClientDBInfo clientInfo = cx->clientInfo->get();
 			for (int s = 0; s < serverListValues.size(); s++) {
 				if (!serverListValues[s].present()) {
 					// FIXME: Is this the right behavior?  dataMovementComplete will never be sent!
@@ -577,10 +585,10 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 				requests.push_back(
 				    waitForShardReady(si, keys, tr.getReadVersion().get(), GetShardStateRequest::FETCHING));
 
-				Optional<StorageServerInterface> tssPair = clientInfo.getTssPair(si.id());
-				if (tssPair.present()) {
+				auto tssPair = tssMapping.find(si.id());
+				if (tssPair != tssMapping.end()) {
 					tssRequests.push_back(waitForShardReady(
-					    tssPair.get(), keys, tr.getReadVersion().get(), GetShardStateRequest::FETCHING));
+					    tssPair->second, keys, tr.getReadVersion().get(), GetShardStateRequest::FETCHING));
 				}
 			}
 
@@ -617,6 +625,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
                                          FlowLock* finishMoveKeysParallelismLock,
                                          bool hasRemote,
                                          UID relocationIntervalId,
+                                         std::map<UID, StorageServerInterface> tssMapping,
                                          const DDEnabledState* ddEnabledState) {
 	state TraceInterval interval("RelocateShard_FinishMoveKeys");
 	state TraceInterval waitInterval("");
@@ -626,9 +635,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 	state int retries = 0;
 	state FlowLock::Releaser releaser;
 
-	// for killing tss if any get stuck during movekeys
-	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-	state std::vector<StorageServerInterface> tssToKill;
+	state std::vector<std::pair<UID, UID>> tssToKill;
 	state std::unordered_set<UID> tssToIgnore;
 	// try waiting for tss for a 2 loops, give up if they're stuck to not affect the rest of the cluster
 	state int waitForTSSCounter = 2;
@@ -658,33 +665,13 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						// (and don't want to add bugs) by changing whole method to RYW. Also, using a different
 						// transaction makes it commit earlier which we may need to guarantee causality of tss getting
 						// removed before client sends a request to this key range on the new SS
-						state Reference<ReadYourWritesTransaction> tssTr =
-						    makeReference<ReadYourWritesTransaction>(occ);
-						loop {
-							try {
-								tssTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-								tssTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-								for (auto& tss : tssToKill) {
-									// DO NOT remove server list key - that'll break a bunch of stuff. DD will
-									// eventually call removeStorageServer
+						wait(removeTSSPairsFromCluster(occ, tssToKill));
 
-									tssTr->clear(serverTagKeyFor(tss.id()));
-									tssMapDB.erase(tssTr, tss.tssPairID.get());
-								}
-								tssTr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
-								wait(tssTr->commit());
-
-								for (auto& tss : tssToKill) {
-									TraceEvent(SevWarnAlways, "TSS_KillMoveKeys").detail("TSSID", tss.id().toString());
-									tssToIgnore.insert(tss.id());
-								}
-								tssToKill.clear();
-
-								break;
-							} catch (Error& e) {
-								wait(tssTr->onError(e));
-							}
+						for (auto& tssPair : tssToKill) {
+							TraceEvent(SevWarnAlways, "TSS_KillMoveKeys").detail("TSSID", tssPair.second);
+							tssToIgnore.insert(tssPair.second);
 						}
+						tssToKill.clear();
 					}
 
 					tr.info.taskID = TaskPriority::MoveKeys;
@@ -861,9 +848,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 					// update client info in case tss mapping changed or server got updated
 
-					// Use most up to date version of tss mapping
-					ClientDBInfo clientInfo = occ->clientInfo->get();
-
 					// Wait for new destination servers to fetch the keys
 
 					serverReady.reserve(storageServerInterfaces.size());
@@ -875,13 +859,13 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						                                        tr.getReadVersion().get(),
 						                                        GetShardStateRequest::READABLE));
 
-						Optional<StorageServerInterface> tssPair =
-						    clientInfo.getTssPair(storageServerInterfaces[s].id());
+						auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
 
-						if (tssPair.present() && waitForTSSCounter > 0 && !tssToIgnore.count(tssPair.get().id())) {
-							tssReadyInterfs.push_back(tssPair.get());
+						if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
+						    !tssToIgnore.count(tssPair->second.id())) {
+							tssReadyInterfs.push_back(tssPair->second);
 							tssReady.push_back(waitForShardReady(
-							    tssPair.get(), keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
+							    tssPair->second, keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
 						}
 					}
 
@@ -918,7 +902,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							if (anyTssNotDone && waitForTSSCounter == 0) {
 								for (int i = 0; i < tssReady.size(); i++) {
 									if (!tssReady[i].isReady() || tssReady[i].isError()) {
-										tssToKill.push_back(tssReadyInterfs[i]);
+										tssToKill.push_back(
+										    std::pair(tssReadyInterfs[i].tssPairID.get(), tssReadyInterfs[i].id()));
 									}
 								}
 								// repeat loop and go back to start to kill tss' before continuing on
@@ -1047,18 +1032,36 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 			        ? tr->get(StringRef(encodeFailedServersKey(AddressExclusion(server.secondaryAddress().get().ip))))
 			        : Future<Optional<Value>>(Optional<Value>());
 
-			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
-			state Future<RangeResult> fHistoryTags = tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
+			state vector<Future<Optional<Value>>> localityExclusions;
+			std::map<std::string, std::string> localityData = server.locality.getAllData();
+			for (const auto& l : localityData) {
+				localityExclusions.push_back(tr->get(StringRef(encodeExcludedLocalityKey(
+				    LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second))));
+			}
+
+			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
+			state Future<RangeResult> fHistoryTags =
+			    tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
 
 			wait(success(fTagLocalities) && success(fv) && success(fTags) && success(fHistoryTags) &&
 			     success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) &&
 			     success(fExclProc2) && success(fExclIP2) && success(fFailProc2) && success(fFailIP2));
 
-			// If we have been added to the excluded/failed state servers list, we have to fail
+			for (const auto& exclusion : localityExclusions) {
+				wait(success(exclusion));
+			}
+
+			// If we have been added to the excluded/failed state servers or localities list, we have to fail
 			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() ||
 			    fFailIP.get().present() || fExclProc2.get().present() || fExclIP2.get().present() ||
 			    fFailProc2.get().present() || fFailIP2.get().present()) {
 				throw recruitment_failed();
+			}
+
+			for (const auto& exclusion : localityExclusions) {
+				if (exclusion.get().present()) {
+					throw recruitment_failed();
+				}
 			}
 
 			if (fTagLocalities.get().more || fTags.get().more || fHistoryTags.get().more)
@@ -1080,7 +1083,6 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				}
 
 				tssMapDB.set(tr, server.tssPairID.get(), server.id());
-				tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			} else {
 				int8_t maxTagLocality = 0;
@@ -1143,7 +1145,6 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 					TraceEvent(SevError, "TSSIdentityMappingEnabled");
 					tssMapDB.set(tr, server.id(), server.id());
-					tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 				}
 			}
 
@@ -1269,10 +1270,15 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 					TraceEvent(SevError, "TSSIdentityMappingEnabled");
 					tssMapDB.erase(tr, serverID);
-					tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 				} else if (tssPairID.present()) {
+					// remove the TSS from the mapping
 					tssMapDB.erase(tr, tssPairID.get());
-					tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
+					// remove the TSS from quarantine, if it was in quarantine
+					Key tssQuarantineKey = tssQuarantineKeyFor(serverID);
+					Optional<Value> tssInQuarantine = wait(tr->get(tssQuarantineKey));
+					if (tssInQuarantine.present()) {
+						tr->clear(tssQuarantineKeyFor(serverID));
+					}
 				}
 
 				retry = true;
@@ -1374,11 +1380,20 @@ ACTOR Future<Void> moveKeys(Database cx,
                             const DDEnabledState* ddEnabledState) {
 	ASSERT(destinationTeam.size());
 	std::sort(destinationTeam.begin(), destinationTeam.end());
-	wait(startMoveKeys(
-	    cx, keys, destinationTeam, lock, startMoveKeysParallelismLock, relocationIntervalId, ddEnabledState));
+
+	state std::map<UID, StorageServerInterface> tssMapping;
+
+	wait(startMoveKeys(cx,
+	                   keys,
+	                   destinationTeam,
+	                   lock,
+	                   startMoveKeysParallelismLock,
+	                   relocationIntervalId,
+	                   &tssMapping,
+	                   ddEnabledState));
 
 	state Future<Void> completionSignaller =
-	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId);
+	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
 
 	wait(finishMoveKeys(cx,
 	                    keys,
@@ -1387,6 +1402,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 	                    finishMoveKeysParallelismLock,
 	                    hasRemote,
 	                    relocationIntervalId,
+	                    tssMapping,
 	                    ddEnabledState));
 
 	// This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
@@ -1428,8 +1444,6 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 			// hack key-backed map here since we can't really change CommitTransactionRef to a RYW transaction
 			Key uidRef = Codec<UID>::pack(s.id()).pack();
 			tr.set(arena, uidRef.withPrefix(tssMappingKeys.begin), uidRef);
-			// tssMapDB.set(tr, server.id(), server.id());
-			tr.set(arena, tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 		}
 	}
 

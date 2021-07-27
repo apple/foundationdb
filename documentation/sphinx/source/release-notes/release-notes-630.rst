@@ -2,6 +2,19 @@
 Release Notes
 #############
 
+6.3.18
+======
+* The multi-version client API would not propagate errors that occurred when creating databases on external clients. This could result in a invalid memory accesses. `(PR #5221) <https://github.com/apple/foundationdb/pull/5221>`_
+* Fixed a race between the multi-version client connecting to a cluster and destroying the database that could cause an assertion failure. `(PR #5221) <https://github.com/apple/foundationdb/pull/5221>`_
+
+
+6.3.15
+======
+* Added several counters to the ``MasterMetrics`` trace event to count the number of requests of each type received. `(PR #4829) <https://github.com/apple/foundationdb/pull/4829>`_
+* Added ``RecoveryCount`` to trace events when a transaction log begins. `(PR #4944) <https://github.com/apple/foundationdb/pull/4944>`_
+* Added metrics to compare the bandwidth used by data distributions and updates. `(PR #4907) <https://github.com/apple/foundationdb/pull/4907>`_
+* Batch transactions could be throttled with an error when the latency between ratekeeper and some proxies was high. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
+* Fix accounting issue that could cause higher priority GRV requests to be rejected after many batch priority requests have been rejected on a proxy. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
 
 6.3.14
 ======

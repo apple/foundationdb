@@ -54,7 +54,9 @@ StringRef radix_join(const StringRef& key1, const StringRef& key2, Arena& arena)
 	uint8_t* s = new (arena) uint8_t[rsize];
 
 	memcpy(s, key1.begin(), key1.size());
-	memcpy(s + key1.size(), key2.begin(), key2.size());
+	if (key2.size() > 0) {
+		memcpy(s + key1.size(), key2.begin(), key2.size());
+	}
 
 	return StringRef(s, rsize);
 }
@@ -591,7 +593,9 @@ StringRef radix_tree::iterator::getKey(uint8_t* content) const {
 	auto node = m_pointee;
 	uint32_t pos = m_pointee->m_depth;
 	while (true) {
-		memcpy(content + pos, node->getKey().begin(), node->getKeySize());
+		if (node->getKeySize() > 0) {
+			memcpy(content + pos, node->getKey().begin(), node->getKeySize());
+		}
 		node = node->m_parent;
 		if (node == nullptr || pos <= 0)
 			break;

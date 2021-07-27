@@ -43,6 +43,7 @@ bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
 vector<std::string> getOption(VectorRef<KeyValueRef> options,
                               Key key,
                               vector<std::string> defaultValue); // comma-separated strings
+bool hasOption(VectorRef<KeyValueRef> options, Key key);
 
 struct WorkloadContext {
 	Standalone<VectorRef<KeyValueRef>> options;
@@ -53,9 +54,7 @@ struct WorkloadContext {
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
 	~WorkloadContext();
-
-private:
-	void operator=(const WorkloadContext&);
+	WorkloadContext& operator=(const WorkloadContext&) = delete;
 };
 
 struct TestWorkload : NonCopyable, WorkloadContext {
@@ -159,6 +158,7 @@ public:
 		simConnectionFailuresDisableDuration = 0;
 		simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		restorePerpetualWiggleSetting = true;
 	}
 	TestSpec(StringRef title,
 	         bool dump,
@@ -169,8 +169,8 @@ public:
 	  : title(title), dumpAfterTest(dump), clearAfterTest(clear), startDelay(startDelay), useDB(useDB), timeout(600),
 	    databasePingDelay(databasePingDelay), runConsistencyCheck(g_network->isSimulated()),
 	    runConsistencyCheckOnCache(false), runConsistencyCheckOnTSS(false), waitForQuiescenceBegin(true),
-	    waitForQuiescenceEnd(true), simCheckRelocationDuration(false), simConnectionFailuresDisableDuration(0),
-	    simBackupAgents(ISimulator::BackupAgentType::NoBackupAgents),
+	    waitForQuiescenceEnd(true), restorePerpetualWiggleSetting(true), simCheckRelocationDuration(false),
+	    simConnectionFailuresDisableDuration(0), simBackupAgents(ISimulator::BackupAgentType::NoBackupAgents),
 	    simDrAgents(ISimulator::BackupAgentType::NoBackupAgents) {
 		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		if (databasePingDelay < 0)
@@ -191,6 +191,11 @@ public:
 	bool runConsistencyCheckOnTSS;
 	bool waitForQuiescenceBegin;
 	bool waitForQuiescenceEnd;
+	bool restorePerpetualWiggleSetting; // whether set perpetual_storage_wiggle as the value after run
+	                                      // QuietDatabase. QuietDatabase always disables perpetual storage wiggle on
+	                                      // purpose. If waitForQuiescenceBegin == true and we want to keep perpetual
+	                                      // storage wiggle the same setting as before during testing, this value should
+	                                      // be set true.
 
 	bool simCheckRelocationDuration; // If set to true, then long duration relocations generate SevWarnAlways messages.
 	                                 // Once any workload sets this to true, it will be true for the duration of the
@@ -217,7 +222,7 @@ double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
 ACTOR Future<Void> databaseWarmer(Database cx);
 
 Future<Void> quietDatabase(Database const& cx,
-                           Reference<AsyncVar<struct ServerDBInfo>> const&,
+                           Reference<AsyncVar<struct ServerDBInfo> const> const&,
                            std::string phase,
                            int64_t dataInFlightGate = 2e6,
                            int64_t maxTLogQueueGate = 5e6,

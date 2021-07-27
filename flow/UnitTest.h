@@ -47,7 +47,10 @@
 
 #include <cinttypes>
 
-struct UnitTestParameters {
+class UnitTestParameters {
+	Optional<std::string> dataDir;
+
+public:
 	// Map of named case-sensitive parameters
 	std::map<std::string, std::string> params;
 
@@ -68,6 +71,12 @@ struct UnitTestParameters {
 
 	// Get a parameter's value parsed as a double, will return !present() if parameter was not set
 	Optional<double> getDouble(const std::string& name) const;
+
+	// This is separate because it assumes data directory has already been set, and doesn't return an optional
+	std::string getDataDir() const;
+
+	// Set the data directory used to persist data for this test
+	void setDataDir(std::string const&);
 };
 
 // Unit test definition structured as a linked list item
@@ -89,6 +98,9 @@ struct UnitTestCollection {
 };
 
 extern UnitTestCollection g_unittests;
+
+// Set this to `true` to disable RNG state checking after simulation runs.
+ extern bool noUnseed;
 
 #define APPEND(a, b) a##b
 

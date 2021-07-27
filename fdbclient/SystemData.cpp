@@ -346,8 +346,25 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 	return idx;
 }
 
-const KeyRef tssMappingChangeKey = LiteralStringRef("\xff\x02/tssMappingChangeKey");
 const KeyRangeRef tssMappingKeys(LiteralStringRef("\xff/tss/"), LiteralStringRef("\xff/tss0"));
+
+const KeyRangeRef tssQuarantineKeys(LiteralStringRef("\xff/tssQ/"), LiteralStringRef("\xff/tssQ0"));
+
+const Key tssQuarantineKeyFor(UID serverID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(tssQuarantineKeys.begin);
+	wr << serverID;
+	return wr.toValue();
+}
+
+UID decodeTssQuarantineKey(KeyRef const& key) {
+	UID serverID;
+	BinaryReader rd(key.removePrefix(tssQuarantineKeys.begin), Unversioned());
+	rd >> serverID;
+	return serverID;
+}
+
+const KeyRangeRef tssMismatchKeys(LiteralStringRef("\xff/tssMismatch/"), LiteralStringRef("\xff/tssMismatch0"));
 
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
 
@@ -619,7 +636,7 @@ const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoP
 const KeyRangeRef excludedServersKeys(LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0"));
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;
 const KeyRef excludedServersVersionKey = LiteralStringRef("\xff/conf/excluded");
-const AddressExclusion decodeExcludedServersKey(KeyRef const& key) {
+AddressExclusion decodeExcludedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(excludedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
@@ -633,10 +650,22 @@ std::string encodeExcludedServersKey(AddressExclusion const& addr) {
 	return excludedServersPrefix.toString() + addr.toString();
 }
 
+const KeyRangeRef excludedLocalityKeys(LiteralStringRef("\xff/conf/excluded_locality/"),
+                                       LiteralStringRef("\xff/conf/excluded_locality0"));
+const KeyRef excludedLocalityPrefix = excludedLocalityKeys.begin;
+const KeyRef excludedLocalityVersionKey = LiteralStringRef("\xff/conf/excluded_locality");
+std::string decodeExcludedLocalityKey(KeyRef const& key) {
+	ASSERT(key.startsWith(excludedLocalityPrefix));
+	return key.removePrefix(excludedLocalityPrefix).toString();
+}
+std::string encodeExcludedLocalityKey(std::string const& locality) {
+	return excludedLocalityPrefix.toString() + locality;
+}
+
 const KeyRangeRef failedServersKeys(LiteralStringRef("\xff/conf/failed/"), LiteralStringRef("\xff/conf/failed0"));
 const KeyRef failedServersPrefix = failedServersKeys.begin;
 const KeyRef failedServersVersionKey = LiteralStringRef("\xff/conf/failed");
-const AddressExclusion decodeFailedServersKey(KeyRef const& key) {
+AddressExclusion decodeFailedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(failedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
@@ -648,6 +677,18 @@ const AddressExclusion decodeFailedServersKey(KeyRef const& key) {
 std::string encodeFailedServersKey(AddressExclusion const& addr) {
 	// FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
 	return failedServersPrefix.toString() + addr.toString();
+}
+
+const KeyRangeRef failedLocalityKeys(LiteralStringRef("\xff/conf/failed_locality/"),
+                                     LiteralStringRef("\xff/conf/failed_locality0"));
+const KeyRef failedLocalityPrefix = failedLocalityKeys.begin;
+const KeyRef failedLocalityVersionKey = LiteralStringRef("\xff/conf/failed_locality");
+std::string decodeFailedLocalityKey(KeyRef const& key) {
+	ASSERT(key.startsWith(failedLocalityPrefix));
+	return key.removePrefix(failedLocalityPrefix).toString();
+}
+std::string encodeFailedLocalityKey(std::string const& locality) {
+	return failedLocalityPrefix.toString() + locality;
 }
 
 // const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
@@ -961,124 +1002,8 @@ const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainS
 
 const KeyRangeRef monitorConfKeys(LiteralStringRef("\xff\x02/monitorConf/"), LiteralStringRef("\xff\x02/monitorConf0"));
 
-const KeyRef restoreLeaderKey = LiteralStringRef("\xff\x02/restoreLeader");
-const KeyRangeRef restoreWorkersKeys(LiteralStringRef("\xff\x02/restoreWorkers/"),
-                                     LiteralStringRef("\xff\x02/restoreWorkers0"));
-const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus/");
-
-const KeyRef restoreRequestTriggerKey = LiteralStringRef("\xff\x02/restoreRequestTrigger");
 const KeyRef restoreRequestDoneKey = LiteralStringRef("\xff\x02/restoreRequestDone");
-const KeyRangeRef restoreRequestKeys(LiteralStringRef("\xff\x02/restoreRequests/"),
-                                     LiteralStringRef("\xff\x02/restoreRequests0"));
 
-const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"),
-                                     LiteralStringRef("\xff\x02/restoreApplier0"));
-const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
-
-// restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
-// Version and batchIndex are passed in as LittleEndian,
-// they must be converted to BigEndian to maintain ordering in lexical order
-const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(restoreApplierKeys.begin);
-	wr << applierID << bigEndian64(batchIndex) << bigEndian64(version);
-	return wr.toValue();
-}
-
-std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key) {
-	BinaryReader rd(key, Unversioned());
-	UID applierID;
-	int64_t batchIndex;
-	Version version;
-	rd >> applierID >> batchIndex >> version;
-	return std::make_tuple(applierID, bigEndian64(batchIndex), bigEndian64(version));
-}
-
-// Encode restore worker key for workerID
-const Key restoreWorkerKeyFor(UID const& workerID) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(restoreWorkersKeys.begin);
-	wr << workerID;
-	return wr.toValue();
-}
-
-// Encode restore agent value
-const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreWorkerInterfaceValue()));
-	wr << cmdInterf;
-	return wr.toValue();
-}
-
-RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value) {
-	RestoreWorkerInterface s;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> s;
-	return s;
-}
-
-// Encode and decode restore request value
-// restoreRequestTrigger key
-const Value restoreRequestTriggerValue(UID randomID, int const numRequests) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestTriggerValue()));
-	wr << numRequests;
-	wr << randomID;
-	return wr.toValue();
-}
-int decodeRestoreRequestTriggerValue(ValueRef const& value) {
-	int s;
-	UID randomID;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> s;
-	reader >> randomID;
-	return s;
-}
-
-// restoreRequestDone key
-const Value restoreRequestDoneVersionValue(Version readVersion) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestDoneVersionValue()));
-	wr << readVersion;
-	return wr.toValue();
-}
-Version decodeRestoreRequestDoneVersionValue(ValueRef const& value) {
-	Version v;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> v;
-	return v;
-}
-
-const Key restoreRequestKeyFor(int const& index) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(restoreRequestKeys.begin);
-	wr << index;
-	return wr.toValue();
-}
-
-const Value restoreRequestValue(RestoreRequest const& request) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestValue()));
-	wr << request;
-	return wr.toValue();
-}
-
-RestoreRequest decodeRestoreRequestValue(ValueRef const& value) {
-	RestoreRequest s;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> s;
-	return s;
-}
-
-// TODO: Register restore performance data to restoreStatus key
-const Key restoreStatusKeyFor(StringRef statusType) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(restoreStatusKey);
-	wr << statusType;
-	return wr.toValue();
-}
-
-const Value restoreStatusValue(double val) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreStatusValue()));
-	wr << StringRef(std::to_string(val));
-	return wr.toValue();
-}
 const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");
 const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures");
 const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");
@@ -1104,6 +1029,11 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTON
 const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
+
+const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
+const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
+const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
+const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

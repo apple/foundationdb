@@ -79,6 +79,8 @@ struct FlowReceiver : public NetworkMessageReceiver {
 		FlowTransport::transport().addWellKnownEndpoint(endpoint, this, taskID);
 	}
 
+	const Endpoint& getRawEndpoint() { return endpoint; }
+
 private:
 	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
 	Endpoint endpoint;
@@ -251,6 +253,323 @@ void setReplyPriority(const ReplyPromise<Reply>& p, TaskPriority taskID) {
 	p.getEndpoint(taskID);
 }
 
+struct ReplyPromiseStreamReply {
+	Optional<UID> acknowledgeToken;
+	ReplyPromiseStreamReply() {}
+};
+
+struct AcknowledgementReply {
+	constexpr static FileIdentifier file_identifier = 1389929;
+	int64_t bytes;
+
+	AcknowledgementReply() : bytes(0) {}
+	explicit AcknowledgementReply(int64_t bytes) : bytes(bytes) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, bytes);
+	}
+};
+
+// Registered on the server to recieve acknowledgements that the client has received stream data. This prevents the
+// server from sending too much data to the client if the client is not consuming it.
+struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<AcknowledgementReceiver> {
+	using FastAllocated<AcknowledgementReceiver>::operator new;
+	using FastAllocated<AcknowledgementReceiver>::operator delete;
+
+	int64_t bytesSent;
+	int64_t bytesAcknowledged;
+	int64_t bytesLimit;
+	Promise<Void> ready;
+	Future<Void> failures;
+
+	AcknowledgementReceiver() : bytesSent(0), bytesAcknowledged(0), bytesLimit(0), ready(nullptr) {}
+	AcknowledgementReceiver(const Endpoint& remoteEndpoint)
+	  : FlowReceiver(remoteEndpoint, false), bytesSent(0), bytesAcknowledged(0), bytesLimit(0), ready(nullptr) {}
+
+	void receive(ArenaObjectReader& reader) override {
+		ErrorOr<AcknowledgementReply> message;
+		reader.deserialize(message);
+		if (message.isError()) {
+			// The client will send an operation_obsolete error on the acknowledgement stream when it cancels the
+			// ReplyPromiseStream
+			if (!ready.isValid()) {
+				ready = Promise<Void>();
+			}
+			// Sending the error can lead to the destruction of the acknowledgementReceiver so we keep a local copy
+			Promise<Void> hold = ready;
+			hold.sendError(message.getError());
+		} else {
+			ASSERT(message.get().bytes > bytesAcknowledged);
+			bytesAcknowledged = message.get().bytes;
+			if (ready.isValid() && bytesSent - bytesAcknowledged < bytesLimit) {
+				Promise<Void> hold = ready;
+				ready = Promise<Void>(nullptr);
+				// Sending to this promise could cause the ready to be replaced, so we need to hold a local copy
+				hold.send(Void());
+			}
+		}
+	}
+};
+
+// A version of NetNotifiedQueue which adds support for acknowledgments.
+template <class T>
+struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
+                                                    FlowReceiver,
+                                                    FastAllocated<NetNotifiedQueueWithAcknowledgements<T>> {
+	using FastAllocated<NetNotifiedQueueWithAcknowledgements<T>>::operator new;
+	using FastAllocated<NetNotifiedQueueWithAcknowledgements<T>>::operator delete;
+
+	AcknowledgementReceiver acknowledgements;
+	Endpoint requestStreamEndpoint;
+	bool sentError = false;
+
+	NetNotifiedQueueWithAcknowledgements(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
+	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
+	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
+		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
+		acknowledgements.failures = tagError<Void>(
+		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint.getPrimaryAddress()),
+		    operation_obsolete());
+	}
+
+	void destroy() override { delete this; }
+	void receive(ArenaObjectReader& reader) override {
+		this->addPromiseRef();
+		ErrorOr<EnsureTable<T>> message;
+		reader.deserialize(message);
+
+		if (message.isError()) {
+			if (message.getError().code() == error_code_broken_promise) {
+				ASSERT(requestStreamEndpoint.isValid());
+				// We will get a broken_promise on the client side only if the ReplyPromiseStream was cancelled without
+				// sending an error. In this case the storage server actor must have been cancelled so future
+				// GetKeyValuesStream requests on the same endpoint will fail
+				IFailureMonitor::failureMonitor().endpointNotFound(requestStreamEndpoint);
+			}
+			this->sendError(message.getError());
+		} else {
+			if (message.get().asUnderlyingType().acknowledgeToken.present()) {
+				acknowledgements = AcknowledgementReceiver(
+				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
+			}
+			if (this->shouldFireImmediately()) {
+				// This message is going to be consumed by the client immediately (and therefore will not call pop()) so
+				// send an ack immediately
+				if (acknowledgements.getRawEndpoint().isValid()) {
+					acknowledgements.bytesAcknowledged += message.get().asUnderlyingType().expectedSize();
+					FlowTransport::transport().sendUnreliable(
+					    SerializeSource<ErrorOr<AcknowledgementReply>>(
+					        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
+					    acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay),
+					    false);
+				}
+			}
+
+			this->send(std::move(message.get().asUnderlyingType()));
+		}
+		this->delPromiseRef();
+	}
+
+	T pop() override {
+		T res = this->popImpl();
+		// A reply that has been queued up is being consumed, so send an ack to the server
+		if (acknowledgements.getRawEndpoint().isValid()) {
+			acknowledgements.bytesAcknowledged += res.expectedSize();
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(
+			                                              AcknowledgementReply(acknowledgements.bytesAcknowledged)),
+			                                          acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay),
+			                                          false);
+		}
+		return res;
+	}
+
+	~NetNotifiedQueueWithAcknowledgements() {
+		if (acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
+			// Notify the server that a client is not using this ReplyPromiseStream anymore
+			FlowTransport::transport().sendUnreliable(
+			    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
+			    acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay),
+			    false);
+		}
+		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
+			// The ReplyPromiseStream was cancelled before sending an error, so the storage server must have died
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(broken_promise()),
+			                                          getEndpoint(TaskPriority::NoDeliverDelay),
+			                                          false);
+		}
+	}
+
+	bool isStream() const override { return true; }
+};
+
+template <class T>
+class ReplyPromiseStream {
+public:
+	// The endpoints of a ReplyPromiseStream must be initialized at Task::NoDeliverDelay, because a
+	// delay(0) in FlowTransport deliver can cause out of order delivery.
+
+	// stream.send( request )
+	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
+
+	template <class U>
+	void send(U&& value) const {
+		if (queue->isRemoteEndpoint()) {
+			if (!queue->acknowledgements.getRawEndpoint().isValid()) {
+				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay).token;
+			}
+			queue->acknowledgements.bytesSent += value.expectedSize();
+			FlowTransport::transport().sendUnreliable(
+			    SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
+		} else {
+			queue->send(std::forward<U>(value));
+		}
+	}
+
+	template <class E>
+	void sendError(const E& exc) const {
+		if (queue->isRemoteEndpoint() && !queue->sentError) {
+			queue->sentError = true;
+			FlowTransport::transport().sendUnreliable(
+			    SerializeSource<ErrorOr<EnsureTable<T>>>(exc), getEndpoint(), false);
+		} else {
+			queue->sendError(exc);
+			if (errors && errors->canBeSet()) {
+				errors->sendError(exc);
+			}
+		}
+	}
+
+	FutureStream<T> getFuture() const {
+		queue->addFutureRef();
+		return FutureStream<T>(queue);
+	}
+	ReplyPromiseStream() : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1)), errors(new SAV<Void>(0, 1)) {}
+	ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
+		queue->addPromiseRef();
+		if (errors) {
+			errors->addPromiseRef();
+		}
+	}
+	ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
+		rhs.queue = nullptr;
+		rhs.errors = nullptr;
+	}
+	explicit ReplyPromiseStream(const Endpoint& endpoint)
+	  : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1, endpoint)), errors(nullptr) {}
+
+	// Used by endStreamOnDisconnect to detect when all references to the ReplyPromiseStream have been dropped
+	Future<Void> getErrorFutureAndDelPromiseRef() {
+		ASSERT(errors && errors->getPromiseReferenceCount() > 1);
+		errors->addFutureRef();
+		errors->delPromiseRef();
+		Future<Void> res(errors);
+		errors = nullptr;
+		return res;
+	}
+
+	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
+
+	~ReplyPromiseStream() {
+		if (queue)
+			queue->delPromiseRef();
+		if (errors)
+			errors->delPromiseRef();
+	}
+
+	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::NoDeliverDelay); }
+
+	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
+	bool isEmpty() const { return !queue->isReady(); }
+	uint32_t size() const { return queue->size(); }
+
+	// Must be called on the server before sending results on the stream to ratelimit the amount of data outstanding to
+	// the client
+	Future<Void> onReady() {
+		ASSERT(queue->acknowledgements.bytesLimit > 0);
+		if (queue->acknowledgements.failures.isError()) {
+			return queue->acknowledgements.failures.getError();
+		}
+		if (queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet()) {
+			return queue->acknowledgements.ready.getFuture().getError();
+		}
+		if (queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged <
+		    queue->acknowledgements.bytesLimit) {
+			return Void();
+		}
+		if (!queue->acknowledgements.ready.isValid()) {
+			queue->acknowledgements.ready = Promise<Void>();
+		}
+		return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
+	}
+
+	// Must be called on the server before using a ReplyPromiseStream to limit the amount of outstanding bytes to the
+	// client
+	void setByteLimit(int64_t byteLimit) { queue->acknowledgements.bytesLimit = byteLimit; }
+
+	void operator=(const ReplyPromiseStream& rhs) {
+		rhs.queue->addPromiseRef();
+		if (queue)
+			queue->delPromiseRef();
+		queue = rhs.queue;
+		if (rhs.errors)
+			rhs.errors->addPromiseRef();
+		if (errors)
+			errors->delPromiseRef();
+		errors = rhs.errors;
+	}
+	void operator=(ReplyPromiseStream&& rhs) noexcept {
+		if (queue != rhs.queue) {
+			if (queue)
+				queue->delPromiseRef();
+			queue = rhs.queue;
+			rhs.queue = 0;
+		}
+		if (errors != rhs.errors) {
+			if (errors)
+				errors->delPromiseRef();
+			errors = rhs.errors;
+			rhs.errors = 0;
+		}
+	}
+
+	void reset() { *this = ReplyPromiseStream<T>(); }
+
+private:
+	NetNotifiedQueueWithAcknowledgements<T>* queue;
+	SAV<Void>* errors;
+};
+
+template <class Ar, class T>
+void save(Ar& ar, const ReplyPromiseStream<T>& value) {
+	auto const& ep = value.getEndpoint().token;
+	ar << ep;
+}
+
+template <class Ar, class T>
+void load(Ar& ar, ReplyPromiseStream<T>& value) {
+	UID token;
+	ar >> token;
+	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
+	value = ReplyPromiseStream<T>(endpoint);
+}
+
+template <class T>
+struct serializable_traits<ReplyPromiseStream<T>> : std::true_type {
+	template <class Archiver>
+	static void serialize(Archiver& ar, ReplyPromiseStream<T>& p) {
+		if constexpr (Archiver::isDeserializing) {
+			UID token;
+			serializer(ar, token);
+			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
+			p = ReplyPromiseStream<T>(endpoint);
+		} else {
+			const auto& ep = p.getEndpoint().token;
+			serializer(ar, ep);
+		}
+	}
+};
+
 template <class T>
 struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T>> {
 	using FastAllocated<NetNotifiedQueue<T>>::operator new;
@@ -366,6 +685,30 @@ public:
 		}
 	}
 
+	// stream.getReplyStream( request )
+	//   Unreliable at most once delivery.
+	//   Registers the request with the remote endpoint which sends back a stream of replies, followed by an
+	//   end_of_stream error. If the connection is ever broken the remote endpoint will stop attempting to send replies.
+	//   The caller sends acknowledgements to the remote endpoint so that at most 2MB of replies is ever inflight.
+
+	template <class X>
+	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
+		if (queue->isRemoteEndpoint()) {
+			Future<Void> disc =
+			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
+			auto& p = getReplyPromiseStream(value);
+			Reference<Peer> peer =
+			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+			// FIXME: defer sending the message until we know the connection is established
+			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+			return p;
+		} else {
+			send(value);
+			auto& p = getReplyPromiseStream(value);
+			return p;
+		}
+	}
+
 	// stream.getReplyUnlessFailedFor( request, double sustainedFailureDuration, double sustainedFailureSlope )
 	//   Reliable at least once delivery: Like getReply, delivers request at least once and returns one of the replies.
 	//   However, if
@@ -435,7 +778,7 @@ public:
 		// queue = (NetNotifiedQueue<T>*)0xdeadbeef;
 	}
 
-	Endpoint getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
+	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
 		return queue->getEndpoint(taskID);
 	}
 	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {

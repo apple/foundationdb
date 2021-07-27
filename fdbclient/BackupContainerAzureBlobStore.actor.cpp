@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BackupContainerAzureBlobStore.h"
+#include "fdbrpc/AsyncFileEncrypted.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -167,8 +168,14 @@ public:
 		if (!exists) {
 			throw file_not_found();
 		}
-		return Reference<IAsyncFile>(
-		    new ReadFile(self->asyncTaskThread, self->containerName, fileName, self->client.get()));
+		Reference<IAsyncFile> f =
+		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+#if ENCRYPTION_ENABLED
+		if (self->usesEncryption()) {
+			f = makeReference<AsyncFileEncrypted>(f, false);
+		}
+#endif
+		return f;
 	}
 
 	ACTOR static Future<Reference<IBackupFile>> writeFile(BackupContainerAzureBlobStore* self, std::string fileName) {
@@ -177,10 +184,13 @@ public:
 			    auto outcome = client->create_append_blob(containerName, fileName).get();
 			    return Void();
 		    }));
-		return Reference<IBackupFile>(
-		    new BackupFile(fileName,
-		                   Reference<IAsyncFile>(new WriteFile(
-		                       self->asyncTaskThread, self->containerName, fileName, self->client.get()))));
+		auto f = makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client.get());
+#if ENCRYPTION_ENABLED
+		if (self->usesEncryption()) {
+			f = makeReference<AsyncFileEncrypted>(f, true);
+		}
+#endif
+		return makeReference<BackupFile>(fileName, f);
 	}
 
 	static void listFiles(AzureClient* client,
@@ -213,6 +223,16 @@ public:
 		}
 		return Void();
 	}
+
+	ACTOR static Future<Void> create(BackupContainerAzureBlobStore* self) {
+		state Future<Void> f1 =
+		    self->asyncTaskThread.execAsync([containerName = self->containerName, client = self->client.get()] {
+			    client->create_container(containerName).wait();
+			    return Void();
+		    });
+		state Future<Void> f2 = self->usesEncryption() ? self->encryptionSetupComplete() : Void();
+		return f1 && f2;
+	}
 };
 
 Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileName) {
@@ -225,10 +245,11 @@ Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileNa
 
 BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const NetworkAddress& address,
                                                              const std::string& accountName,
-                                                             const std::string& containerName)
+                                                             const std::string& containerName,
+                                                             const Optional<std::string>& encryptionKeyFileName)
   : containerName(containerName) {
+	setEncryptionKey(encryptionKeyFileName);
 	std::string accountKey = std::getenv("AZURE_KEY");
-
 	auto credential = std::make_shared<azure::storage_lite::shared_key_credential>(accountName, accountKey);
 	auto storageAccount = std::make_shared<azure::storage_lite::storage_account>(
 	    accountName, credential, false, format("http://%s/%s", address.toString().c_str(), accountName.c_str()));
@@ -244,10 +265,7 @@ void BackupContainerAzureBlobStore::delref() {
 }
 
 Future<Void> BackupContainerAzureBlobStore::create() {
-	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
-		client->create_container(containerName).wait();
-		return Void();
-	});
+	return BackupContainerAzureBlobStoreImpl::create(this);
 }
 Future<bool> BackupContainerAzureBlobStore::exists() {
 	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {

@@ -37,7 +37,7 @@ To make commits available to storage servers efficiently, a transaction log
 maintains a copy of the commit in-memory, and maintains one queue per tag that
 indexes the location of each mutation in each commit with the specific tag,
 sequentially.  This way, responding to a peek from a storage server only
-requires sequentailly walking through the queue, and copying each mutation
+requires sequentially walking through the queue, and copying each mutation
 referenced into the response buffer.
 
 Transaction logs internally handle commits via performing two operations
@@ -352,7 +352,7 @@ API for random reads to the DiskQueue.  That ability is now required for
 peeking, and thus, `IDiskQueue`'s API has been enhanced correspondingly:
 
 ``` CPP
-enum class CheckHashes { NO, YES };
+BOOLEAN_PARAM(CheckHashes);
 
 class IDiskQueue {
     // ...
@@ -366,12 +366,12 @@ from the returned data.  Therefore, the length of the result will not be the
 same as `end-start`, intentionally.  For this reason, the API is `(start, end)`
 and not `(start, length)`.
 
-Spilled data, when using spill-by-value, was resistent to bitrot via data being
+Spilled data, when using spill-by-value, was resistant to bitrot via data being
 checksummed interally within SQLite's B-tree.  Now that reads can be done
-directly, the responsibility for verifing data integrity falls upon the
-DiskQueue.  `CheckHashes::YES` will cause the DiskQueue to use the checksum in
+directly, the responsibility for verifying data integrity falls upon the
+DiskQueue.  `CheckHashes::TRUE` will cause the DiskQueue to use the checksum in
 each DiskQueue page to verify data integrity.  If an externally maintained
-checksums exists to verify the returned data, then `CheckHashes::NO` can be
+checksums exists to verify the returned data, then `CheckHashes::FALSE` can be
 used to elide the checksumming.  A page failing its checksum will cause the
 transaction log to die with an `io_error()`.  
 
@@ -467,7 +467,7 @@ recovery.
 
 In spill-by-value, the DiskQueue only ever contained commits that were also
 held in memory, and thus recovery would need to read up to 1.5GB of data.  With
-spill-by-reference, the DiskQueue could theoretically contain terrabytes of
+spill-by-reference, the DiskQueue could theoretically contain terabytes of
 data. To keep recovery times boundedly low, FDB must still only read the
 commits that need to be loaded back into memory.
 
@@ -560,7 +560,7 @@ minor impacts on recovery times:
 
 1.  Larger disk queue file means more file to zero out in the case of recovery.
 
-    This should be negligable when fallocate `ZERO_RANGE` is available, because then it's only a metadata operation.
+    This should be negligible when fallocate `ZERO_RANGE` is available, because then it's only a metadata operation.
 
 2.  A larger file means more bisection iterations to find the first page.
 

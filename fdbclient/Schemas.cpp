@@ -20,6 +20,7 @@
 
 #include "fdbclient/Schemas.h"
 
+// NOTE: also change mr-status-json-schemas.rst.inc
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
@@ -746,7 +747,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "coordinators_count":1,
          "excluded_servers":[
             {
-               "address":"10.0.4.1"
+               "address":"10.0.4.1",
+               "locality":"locality_processid:e9816ca4a89ff64ddb7ba2a5ec10b75b"
             }
          ],
          "auto_commit_proxies":3,
@@ -755,6 +757,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "auto_logs":3,
          "commit_proxies":5,
          "grv_proxies":1,
+         "proxies":6,
          "backup_worker_enabled":1,
          "perpetual_storage_wiggle":0
       },

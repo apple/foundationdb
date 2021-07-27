@@ -556,7 +556,7 @@ private:
 						LogEvent(EVENTLOG_INFORMATION_TYPE,
 						         format("Found new configuration for process (ID %d)", sp->id));
 					stop_processes.push_back(sp);
-					start_ids.push_back(std::make_pair(sp->id, cmd));
+					start_ids.emplace_back(sp->id, cmd);
 				} else if (cmd.quiet != sp->command.quiet || cmd.restartDelay != sp->command.restartDelay) {
 					// Update restartDelay and quiet but do not restart running processes
 					if (!cmd.quiet || !sp->command.quiet)
@@ -585,7 +585,7 @@ private:
 						std::string section(it->pItem, dot - it->pItem);
 						Command cmd = makeCommand(ini, section, id);
 						if (cmd.valid) {
-							start_ids.push_back(std::make_pair(id, cmd));
+							start_ids.emplace_back(id, cmd);
 						} else {
 							LogEvent(
 							    EVENTLOG_ERROR_TYPE,

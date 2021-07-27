@@ -463,18 +463,18 @@ struct MakoWorkload : TestWorkload {
 						if (i == OP_GETREADVERSION) {
 							wait(logLatency(tr.getReadVersion(), &self->opLatencies[i]));
 						} else if (i == OP_GET) {
-							wait(logLatency(tr.get(rkey, false), &self->opLatencies[i]));
+							wait(logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[i]));
 						} else if (i == OP_GETRANGE) {
-							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, false),
+							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::False),
 							                &self->opLatencies[i]));
 						} else if (i == OP_SGET) {
-							wait(logLatency(tr.get(rkey, true), &self->opLatencies[i]));
+							wait(logLatency(tr.get(rkey, Snapshot::True), &self->opLatencies[i]));
 						} else if (i == OP_SGETRANGE) {
 							// do snapshot get range here
-							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, true),
+							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::True),
 							                &self->opLatencies[i]));
 						} else if (i == OP_UPDATE) {
-							wait(logLatency(tr.get(rkey, false), &self->opLatencies[OP_GET]));
+							wait(logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[OP_GET]));
 							if (self->latencyForLocalOperation) {
 								double opBegin = timer();
 								tr.set(rkey, rval);

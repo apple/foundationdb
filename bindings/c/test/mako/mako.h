@@ -69,6 +69,7 @@ enum Arguments {
 	ARG_KNOBS,
 	ARG_FLATBUFFERS,
 	ARG_LOGGROUP,
+	ARG_PREFIXPADDING,
 	ARG_TRACE,
 	ARG_TRACEPATH,
 	ARG_TRACEFORMAT,
@@ -125,6 +126,7 @@ typedef struct {
 	mako_txnspec_t txnspec;
 	char cluster_file[PATH_MAX];
 	char log_group[LOGGROUP_MAX];
+	int prefixpadding;
 	int trace;
 	char tracepath[PATH_MAX];
 	int traceformat; /* 0 - XML, 1 - JSON */

@@ -174,7 +174,7 @@ struct PopulateTPCC : TestWorkload {
 						item.i_data = self->dataString(item.arena);
 						BinaryWriter w(IncludeVersion());
 						serializer(w, item);
-						tr.set(item.key(), w.toValue(), false);
+						tr.set(item.key(), w.toValue(), AddConflictRange::False);
 					}
 					wait(tr.commit());
 					break;
@@ -242,11 +242,11 @@ struct PopulateTPCC : TestWorkload {
 					{
 						BinaryWriter w(IncludeVersion());
 						serializer(w, c);
-						tr.set(c.key(), w.toValue(), false);
+						tr.set(c.key(), w.toValue(), AddConflictRange::False);
 					}
 					{
 						// Write index
-						tr.set(c.indexLastKey(), c.key(), false);
+						tr.set(c.indexLastKey(), c.key(), AddConflictRange::False);
 					}
 					{
 						BinaryWriter w(IncludeVersion());
@@ -255,7 +255,7 @@ struct PopulateTPCC : TestWorkload {
 						BinaryWriter kW(Unversioned());
 						serializer(kW, k);
 						auto key = kW.toValue().withPrefix(LiteralStringRef("History/"));
-						tr.set(key, w.toValue(), false);
+						tr.set(key, w.toValue(), AddConflictRange::False);
 					}
 				}
 				try {
@@ -315,11 +315,11 @@ struct PopulateTPCC : TestWorkload {
 						ol.ol_dist_info = self->aString(ol.arena, 24, 24);
 						BinaryWriter w(IncludeVersion());
 						serializer(w, ol);
-						tr.set(ol.key(), w.toValue(), false);
+						tr.set(ol.key(), w.toValue(), AddConflictRange::False);
 					}
 					BinaryWriter w(IncludeVersion());
 					serializer(w, o);
-					tr.set(o.key(), w.toValue(), false);
+					tr.set(o.key(), w.toValue(), AddConflictRange::False);
 				}
 				try {
 					wait(tr.commit());
@@ -346,7 +346,7 @@ struct PopulateTPCC : TestWorkload {
 				no.no_w_id = w_id;
 				BinaryWriter w(IncludeVersion());
 				serializer(w, no);
-				tr.set(no.key(), w.toValue(), false);
+				tr.set(no.key(), w.toValue(), AddConflictRange::False);
 			}
 			try {
 				wait(tr.commit());
@@ -381,7 +381,7 @@ struct PopulateTPCC : TestWorkload {
 				d.d_next_o_id = 3000;
 				BinaryWriter w(IncludeVersion());
 				serializer(w, d);
-				tr.set(d.key(), w.toValue(), false);
+				tr.set(d.key(), w.toValue(), AddConflictRange::False);
 				try {
 					wait(tr.commit());
 					wait(populateCustomers(self, cx, w_id, d_id));
@@ -426,7 +426,7 @@ struct PopulateTPCC : TestWorkload {
 					s.s_data = self->dataString(s.arena);
 					BinaryWriter w(IncludeVersion());
 					serializer(w, s);
-					tr.set(s.key(), w.toValue(), false);
+					tr.set(s.key(), w.toValue(), AddConflictRange::False);
 				}
 				try {
 					wait(tr.commit());
@@ -458,7 +458,7 @@ struct PopulateTPCC : TestWorkload {
 				w.w_ytd = 300000;
 				BinaryWriter writer(IncludeVersion());
 				serializer(writer, w);
-				tr.set(w.key(), writer.toValue(), false);
+				tr.set(w.key(), writer.toValue(), AddConflictRange::False);
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {

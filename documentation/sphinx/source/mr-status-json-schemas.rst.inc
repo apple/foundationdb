@@ -530,7 +530,7 @@
                "hz":0.0,
                "counter":0,
                "roughness":0.0
-            }, 
+            },
              "low_priority_reads":{ // measures number of incoming low priority read requests
                "hz":0.0,
                "counter":0,
@@ -695,14 +695,17 @@
          "coordinators_count":1,
          "excluded_servers":[
             {
-               "address":"10.0.4.1"
+               "address":"10.0.4.1",
+               "locality":"locality_processid:e9816ca4a89ff64ddb7ba2a5ec10b75b"
             }
          ],
          "auto_commit_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
          "backup_worker_enabled":1,
-         "commit_proxies":5 // this field will be absent if a value has not been explicitly set
+         "commit_proxies":5, // this field will be absent if a value has not been explicitly set
+         "proxies":6, // this field will be absent if a value has not been explicitly set
+         "perpetual_storage_wiggle": 0
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

@@ -74,10 +74,41 @@ def write_unix_asm(asmfile, functions, prefix):
     for f in functions:
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
         asmfile.write("%s%s:\n" % (prefix, f))
+
+        # These assembly implementations of versioned fdb c api functions must have the following properties.
+        #
+        # 1. Don't require dynamic relocation.
+        #
+        # 2. Perform a tail-call to the function pointer that works for a
+        #    function with any number of arguments. For example, since registers x0-x7 are used
+        #    to pass arguments in the Arm calling convention we must not use x0-x7
+        #    here.
+        #
+        # You can compile this example c program to get a rough idea of how to
+        # load the extern symbol and make a tail call.
+        #
+        # $ cat test.c
+        # typedef int (*function)();
+        # extern function f;
+        # int g() { return f(); }
+        # $ cc -S -O3 -fPIC test.c && grep -A 10 '^g:' test.[sS]
+        # g:
+        # .LFB0:
+        # 	.cfi_startproc
+        # 	adrp	x0, :got:f
+        # 	ldr	x0, [x0, #:got_lo12:f]
+        # 	ldr	x0, [x0]
+        # 	br	x0
+        # 	.cfi_endproc
+        # .LFE0:
+        # 	.size	g, .-g
+        # 	.ident	"GCC: (GNU) 8.3.1 20190311 (Red Hat 8.3.1-3)"
+
         if platform == "linux-aarch64":
-            asmfile.write("\tldr x16, =fdb_api_ptr_%s\n" % (f))
-            asmfile.write("\tldr x16, [x16]\n")
-            asmfile.write("\tbr x16\n")
+            asmfile.write("\tadrp x8, :got:fdb_api_ptr_%s\n" % (f))
+            asmfile.write("\tldr x8, [x8, #:got_lo12:fdb_api_ptr_%s]\n" % (f))
+            asmfile.write("\tldr x8, [x8]\n")
+            asmfile.write("\tbr x8\n")
         else:
             asmfile.write(
                 "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f))

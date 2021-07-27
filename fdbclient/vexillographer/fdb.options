@@ -129,7 +129,7 @@ description is not currently required but encouraged.
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
             description="Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated" />
     <Option name="distributed_client_tracer" code="90"
-            paramType="String" paramDescription="Distributed tracer type. Choose from none, log_file, network_async, or network_lossy"
+            paramType="String" paramDescription="Distributed tracer type. Choose from none, log_file, or network_lossy"
             description="Set a tracer to run on the client. Should be set to the same value as the tracer set on the server." />
     <Option name="supported_client_versions" code="1000"
             paramType="String" paramDescription="[release version],[source version],[protocol version];..."
@@ -195,6 +195,8 @@ description is not currently required but encouraged.
     <Option name="transaction_bypass_unreadable" code="700"
             description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
             defaultFor="1100"/>
+    <Option name="use_config_database" code="800"
+            description="Use configuration database." />
   </Scope>
   
   <Scope name="TransactionOption">

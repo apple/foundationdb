@@ -690,7 +690,7 @@ public:
 	AsyncTrigger() {}
 	AsyncTrigger(AsyncTrigger&& at) : v(std::move(at.v)) {}
 	void operator=(AsyncTrigger&& at) { v = std::move(at.v); }
-	Future<Void> onTrigger() { return v.onChange(); }
+	Future<Void> onTrigger() const { return v.onChange(); }
 	void trigger() { v.trigger(); }
 
 private:
@@ -700,7 +700,7 @@ private:
 // Binds an AsyncTrigger object to an AsyncVar, so when the AsyncVar changes
 // the AsyncTrigger is triggered.
 ACTOR template <class T>
-void forward(Reference<AsyncVar<T>> from, AsyncTrigger* to) {
+void forward(Reference<AsyncVar<T> const> from, AsyncTrigger* to) {
 	loop {
 		wait(from->onChange());
 		to->trigger();
@@ -1271,6 +1271,51 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	}
 }
 
+// A low-overhead FIFO mutex made with no internal queue structure (no list, deque, vector, etc)
+// The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
+// called Lock.
+//
+// Usage:
+//   Lock lock = wait(mutex.take());
+//   lock.release();  // Next waiter will get the lock, OR
+//   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise
+//   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
+struct FlowMutex {
+	FlowMutex() { lastPromise.send(Void()); }
+
+	bool available() { return lastPromise.isSet(); }
+
+	struct Lock {
+		void release() { promise.send(Void()); }
+
+		void error(Error e = broken_promise()) { promise.sendError(e); }
+
+		// This is exposed in case the caller wants to use/copy it directly
+		Promise<Void> promise;
+	};
+
+	Future<Lock> take() {
+		Lock newLock;
+		Future<Lock> f = lastPromise.isSet() ? newLock : tag(lastPromise.getFuture(), newLock);
+		lastPromise = newLock.promise;
+		return f;
+	}
+
+private:
+	Promise<Void> lastPromise;
+};
+
+ACTOR template <class T, class V>
+Future<T> forwardErrors(Future<T> f, PromiseStream<V> output) {
+	try {
+		T val = wait(f);
+		return val;
+	} catch (Error& e) {
+		output.sendError(e);
+		throw;
+	}
+}
+
 struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	// FlowLock implements a nonblocking critical section: there can be only a limited number of clients executing code
 	// between wait(take()) and release(). Not thread safe. take() returns only when the number of holders of the lock
@@ -1348,7 +1393,9 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	// Only works if broken_on_destruct.canBeSet()
 	void kill(Error e = broken_promise()) {
 		if (broken_on_destruct.canBeSet()) {
-			broken_on_destruct.sendError(e);
+			auto local = broken_on_destruct;
+			// It could be the case that calling broken_on_destruct destroys this FlowLock
+			local.sendError(e);
 		}
 	}
 
@@ -1905,14 +1952,64 @@ Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
 	return res;
 }
 
-template <class T, class Res>
-Future<Res> operator>>=(Future<T> lhs, std::function<Future<Res>(T const&)> rhs) {
-	return runAfter(lhs, rhs);
+template <class T, class Fun>
+auto operator>>=(Future<T> lhs, Fun&& rhs) -> Future<decltype(rhs(std::declval<T>()))> {
+	return runAfter(lhs, std::forward<Fun>(rhs));
 }
 
 template <class T, class U>
 Future<U> operator>>(Future<T> const& lhs, Future<U> const& rhs) {
 	return runAfter(lhs, rhs);
+}
+
+/*
+ * IAsyncListener is similar to AsyncVar, but it decouples the input and output, so the translation unit
+ * responsible for handling the output does not need to have knowledge of how the output is generated
+ */
+template <class Output>
+class IAsyncListener : public ReferenceCounted<IAsyncListener<Output>> {
+public:
+	virtual ~IAsyncListener() = default;
+	virtual Output const& get() const = 0;
+	virtual Future<Void> onChange() const = 0;
+	template <class Input, class F>
+	static Reference<IAsyncListener> create(Reference<AsyncVar<Input>> const& input, F const& f);
+	static Reference<IAsyncListener> create(Reference<AsyncVar<Output>> const& output);
+};
+
+namespace IAsyncListenerImpl {
+
+template <class Input, class Output, class F>
+class AsyncListener final : public IAsyncListener<Output> {
+	// Order matters here, output must outlive monitorActor
+	AsyncVar<Output> output;
+	Future<Void> monitorActor;
+	ACTOR static Future<Void> monitor(Reference<AsyncVar<Input> const> input, AsyncVar<Output>* output, F f) {
+		loop {
+			wait(input->onChange());
+			output->set(f(input->get()));
+		}
+	}
+
+public:
+	AsyncListener(Reference<AsyncVar<Input> const> const& input, F const& f)
+	  : output(f(input->get())), monitorActor(monitor(input, &output, f)) {}
+	Output const& get() const override { return output.get(); }
+	Future<Void> onChange() const override { return output.onChange(); }
+};
+
+} // namespace IAsyncListenerImpl
+
+template <class Output>
+template <class Input, class F>
+Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Input>> const& input, F const& f) {
+	return makeReference<IAsyncListenerImpl::AsyncListener<Input, Output, F>>(input, f);
+}
+
+template <class Output>
+Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Output>> const& input) {
+	auto identity = [](const auto& x) { return x; };
+	return makeReference<IAsyncListenerImpl::AsyncListener<Output, Output, decltype(identity)>>(input, identity);
 }
 
 // A weak reference type to wrap a future Reference<T> object.

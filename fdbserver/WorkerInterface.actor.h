@@ -31,6 +31,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ResolverInterface.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -151,16 +152,18 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct RegisterMasterRequest> registerMaster;
 	RequestStream<struct GetServerDBInfoRequest>
 	    getServerDBInfo; // only used by testers; the cluster controller will send the serverDBInfo to workers
+	RequestStream<struct UpdateWorkerHealthRequest> updateWorkerHealth;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterControllerFullInterface const& r) const { return id() != r.id(); }
 
-	bool hasMessage() {
+	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
-		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady();
+		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
+		       updateWorkerHealth.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -172,6 +175,7 @@ struct ClusterControllerFullInterface {
 		getWorkers.getEndpoint(TaskPriority::ClusterController);
 		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
 		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
+		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -187,7 +191,8 @@ struct ClusterControllerFullInterface {
 		           registerWorker,
 		           getWorkers,
 		           registerMaster,
-		           getServerDBInfo);
+		           getServerDBInfo,
+		           updateWorkerHealth);
 	}
 };
 
@@ -415,6 +420,20 @@ struct GetWorkersRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, flags, reply);
+	}
+};
+
+struct UpdateWorkerHealthRequest {
+	constexpr static FileIdentifier file_identifier = 5789927;
+	NetworkAddress address;
+	std::vector<NetworkAddress> degradedPeers;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, address, degradedPeers);
 	}
 };
 
@@ -847,10 +866,10 @@ ACTOR Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
 
-class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
+class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
-                              bool enableLocalityLoadBalance = true,
-                              bool lockAware = false);
+                              LockAware = LockAware::False,
+                              EnableLocalityLoadBalance = EnableLocalityLoadBalance::True);
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 
@@ -863,13 +882,17 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         std::string metricsConnFile,
                         std::string metricsPrefix,
                         int64_t memoryProfilingThreshold,
-                        std::string whitelistBinPaths);
+                        std::string whitelistBinPaths,
+                        std::string configPath,
+                        std::map<std::string, std::string> manualKnobOverrides,
+                        UseConfigDB useConfigDB);
 
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
-                                     LocalityData locality);
+                                     LocalityData locality,
+                                     UseConfigDB useConfigDB);
 
 // These servers are started by workerServer
 class IKeyValueStore;
@@ -880,32 +903,32 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Tag seedTag,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo>> db,
+                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
-    Reference<AsyncVar<ServerDBInfo>> db,
+    Reference<AsyncVar<ServerDBInfo> const> db,
     std::string folder,
     Promise<Void> recovered,
     Reference<ClusterConnectionFile>
         connFile); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo>> db,
+                                Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators serverCoordinators,
                                 LifetimeToken lifetime,
                                 bool forceRecovery);
 ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo>> db,
+                                     Reference<AsyncVar<ServerDBInfo> const> db,
                                      std::string whitelistBinPaths);
 ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
                                   InitializeGrvProxyRequest req,
-                                  Reference<AsyncVar<ServerDBInfo>> db);
+                                  Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
                         UID tlogId,
@@ -918,14 +941,18 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Reference<AsyncVar<UID>> activeSharedTLog);
 ACTOR Future<Void> resolver(ResolverInterface resolver,
                             InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo>> db);
+                            Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> logRouter(TLogInterface interf,
                              InitializeLogRouterRequest req,
-                             Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> storageCacheServer(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> backupWorker(BackupInterface bi, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo>> db);
+                             Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
+                                      uint16_t id,
+                                      Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> backupWorker(BackupInterface bi,
+                                InitializeBackupRequest req,
+                                Reference<AsyncVar<ServerDBInfo> const> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
@@ -933,7 +960,7 @@ void updateCpuProfiler(ProfilerRequest req);
 namespace oldTLog_4_6 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         UID tlogId,
                         UID workerID);
@@ -941,7 +968,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 namespace oldTLog_6_0 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
                         UID tlogId,
@@ -956,7 +983,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 namespace oldTLog_6_2 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
                         UID tlogId,

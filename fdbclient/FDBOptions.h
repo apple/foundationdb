@@ -95,7 +95,7 @@ public:
 		if (itr != optionsIndexMap.end()) {
 			options.erase(itr->second);
 		}
-		options.push_back(std::make_pair(option, value));
+		options.emplace_back(option, value);
 		optionsIndexMap[option] = --options.end();
 	}
 

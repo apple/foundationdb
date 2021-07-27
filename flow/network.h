@@ -46,6 +46,7 @@ enum class TaskPriority {
 	WriteSocket = 10000,
 	PollEIO = 9900,
 	DiskIOComplete = 9150,
+	NoDeliverDelay = 9100,
 	LoadBalancedEndpoint = 9000,
 	ReadSocket = 9000,
 	AcceptSocket = 8950,
@@ -151,7 +152,7 @@ public:
 	const IPAddressStore& toV6() const { return std::get<IPAddressStore>(addr); }
 
 	std::string toString() const;
-	static Optional<IPAddress> parse(std::string str);
+	static Optional<IPAddress> parse(std::string const& str);
 
 	bool operator==(const IPAddress& addr) const;
 	bool operator!=(const IPAddress& addr) const;
@@ -307,6 +308,10 @@ struct NetworkAddressList {
 		return address.toString() + ", " + secondaryAddress.get().toString();
 	}
 
+	bool contains(const NetworkAddress& r) const {
+		return address == r || (secondaryAddress.present() && secondaryAddress.get() == r);
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, address, secondaryAddress);
@@ -344,7 +349,8 @@ struct NetworkMetrics {
 
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
 	double lastRunLoopBusyness; // network thread busyness (measured every 5s by default)
-	std::atomic<double> networkBusyness; // network thread busyness which is returned to the the client (measured every 1s by default)
+	std::atomic<double>
+	    networkBusyness; // network thread busyness which is returned to the the client (measured every 1s by default)
 
 	// starvation trackers which keeps track of different task priorities
 	std::vector<struct PriorityStats> starvationTrackers;
@@ -533,7 +539,10 @@ public:
 	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) = 0;
 	// Executes signal.send(Void()) on a/the thread belonging to this network
 
-	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) = 0;
+	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*),
+	                                  void* arg,
+	                                  int stackSize = 0,
+	                                  const char* name = nullptr) = 0;
 	// Starts a thread and returns a handle to it
 
 	virtual void run() = 0;

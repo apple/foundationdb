@@ -6,6 +6,7 @@ set(FLOW_SRCS
   Arena.cpp
   Arena.h
   AsioReactor.h
+  BooleanParam.h
   CompressedInt.actor.cpp
   CompressedInt.h
   Deque.cpp
@@ -28,6 +29,7 @@ set(FLOW_SRCS
   Histogram.h
   IDispatched.h
   IRandom.h
+  IThreadPoolTest.actor.cpp
   IThreadPool.cpp
   IThreadPool.h
   ITrace.h
@@ -51,6 +53,7 @@ set(FLOW_SRCS
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
+  StreamCipher.h
   SystemMonitor.cpp
   SystemMonitor.h
   TDMetric.actor.h
@@ -67,6 +70,7 @@ set(FLOW_SRCS
   Tracing.h
   Tracing.actor.cpp
   TreeBenchmark.h
+  TypeTraits.h
   UnitTest.cpp
   UnitTest.h
   WriteOnlySet.actor.cpp
@@ -94,6 +98,12 @@ set(FLOW_SRCS
   version.cpp
   xxhash.c
   xxhash.h)
+
+if(WITH_TLS AND NOT WIN32)
+  set(FLOW_SRCS
+    ${FLOW_SRCS}
+    StreamCipher.cpp)
+endif()
 
 add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)
 if (USE_ASAN)
@@ -142,8 +152,7 @@ if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
   target_link_libraries(flow_sampling PUBLIC Valgrind)
 endif()
-# TODO(atn34) Re-enable TLS for OPEN_FOR_IDE build once #2201 is resolved
-if(NOT WITH_TLS OR OPEN_FOR_IDE)
+if(NOT WITH_TLS)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
   target_compile_definitions(flow_sampling PUBLIC TLS_DISABLED)
 else()

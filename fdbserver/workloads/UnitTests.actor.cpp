@@ -28,13 +28,19 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+void forceLinkStreamCipherTests();
+#endif
+void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
+void forceLinkIThreadPoolTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
 	std::string testPattern;
 	int testRunLimit;
 	UnitTestParameters testParams;
+	bool cleanupAfterTests;
 
 	PerfIntCounter testsAvailable, testsExecuted, testsFailed;
 	PerfDoubleCounter totalWallTime, totalSimTime;
@@ -44,8 +50,14 @@ struct UnitTestWorkload : TestWorkload {
 	    testsFailed("Test Cases Failed"), totalWallTime("Total wall clock time (s)"),
 	    totalSimTime("Total flow time (s)") {
 		enabled = !clientId; // only do this on the "first" client
-		testPattern = getOption(options, LiteralStringRef("testsMatching"), Value()).toString();
-		testRunLimit = getOption(options, LiteralStringRef("maxTestCases"), -1);
+		testPattern = getOption(options, "testsMatching"_sr, Value()).toString();
+		testRunLimit = getOption(options, "maxTestCases"_sr, -1);
+		if (g_network->isSimulated()) {
+			testParams.setDataDir(getOption(options, "dataDir"_sr, "simfdb/unittests/"_sr).toString());
+		} else {
+			testParams.setDataDir(getOption(options, "dataDir"_sr, "unittests/"_sr).toString());
+		}
+		cleanupAfterTests = getOption(options, "cleanupAfterTests"_sr, true);
 
 		// Consume all remaining options as testParams which the unit test can access
 		for (auto& kv : options) {
@@ -60,11 +72,19 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+		forceLinkStreamCipherTests();
+#endif
+		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
+		forceLinkIThreadPoolTests();
 	}
 
 	std::string description() const override { return "UnitTests"; }
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> setup(Database const& cx) override {
+		platform::eraseDirectoryRecursive(testParams.getDataDir());
+		return Void();
+	}
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
 			return runUnitTests(this);
@@ -102,11 +122,15 @@ struct UnitTestWorkload : TestWorkload {
 			state double start_now = now();
 			state double start_timer = timer();
 
+			platform::createDirectory(self->testParams.getDataDir());
 			try {
 				wait(test->func(self->testParams));
 			} catch (Error& e) {
 				++self->testsFailed;
 				result = e;
+			}
+			if (self->cleanupAfterTests) {
+				platform::eraseDirectoryRecursive(self->testParams.getDataDir());
 			}
 			++self->testsExecuted;
 			double wallTime = timer() - start_timer;

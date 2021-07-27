@@ -21,6 +21,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iterator>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -33,8 +34,6 @@
 #include <vector>
 #include <cstring>
 #include <array>
-#include <typeinfo>
-#include <typeindex>
 #include <unordered_map>
 #include <deque>
 #include "flow/FileIdentifier.h"

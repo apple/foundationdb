@@ -59,7 +59,7 @@ It can be stopped and prevented from starting at boot as follows::
 Start, stop and restart behavior
 =================================
 
-These commands above start and stop the master ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
+These commands above start and stop the ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
 
 After any child process has terminated by any reason, ``fdbmonitor`` tries to restart it. See :ref:`restarting parameters <configuration-restarting>`.
 
@@ -182,7 +182,7 @@ You can add new machines to a cluster at any time:
 
     user@host2$ sudo service foundationdb restart
 
-5) If you have previously :ref:`excluded <removing-machines-from-a-cluster>` a machine from the cluster, you will need to take it off the exclusion list using the ``include <ip>`` command of fdbcli before it can be a full participant in the cluster.
+5) If you have previously :ref:`excluded <removing-machines-from-a-cluster>` a machine from the cluster, you will need to take it off the exclusion list using the ``include <ip>`` or ``include <locality>`` command of fdbcli before it can be a full participant in the cluster.
 
 .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
@@ -207,12 +207,12 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
     The database is available.
 
     Welcome to the fdbcli. For help, type `help'.
-    fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6
+    fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6 locality_dcid:primary-satellite locality_zoneid:primary-satellite-log-2 locality_machineid:primary-stateless-1 locality_processid:223be2da244ca0182375364e4d122c30 or any locality
     Waiting for state to be removed from all excluded servers.  This may take a while.
     It is now safe to remove these machines or processes from the cluster.
 
 
-``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
+``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair or by specifying a locality match).
 
 .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 

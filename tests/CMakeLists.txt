@@ -87,6 +87,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES SlowTask.txt IGNORE)
   add_fdb_test(TEST_FILES SpecificUnitTest.txt IGNORE)
   add_fdb_test(TEST_FILES StorageMetricsSampleTests.txt IGNORE)
+  add_fdb_test(TEST_FILES WorkerTests.txt IGNORE)
+  add_fdb_test(TEST_FILES ClusterControllerTests.txt IGNORE)
   add_fdb_test(TEST_FILES StorageServerInterface.txt)
   add_fdb_test(TEST_FILES StreamingWrite.txt IGNORE)
   add_fdb_test(TEST_FILES SystemData.txt)
@@ -132,6 +134,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LocalRatekeeper.toml)
   add_fdb_test(TEST_FILES fast/LongStackWriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/LowLatency.toml)
+  # TODO: Fix failures and reenable this test:
+  add_fdb_test(TEST_FILES fast/LowLatencySingleClog.toml IGNORE)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
@@ -155,6 +159,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/Watches.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
+  add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
@@ -270,10 +275,12 @@ if(WITH_PYTHON)
       NAME multiversion_client/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
     )
+    set_tests_properties("multiversion_client/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
     add_test(
       NAME threadsafe_threadfuture_to_future/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
     )
+    set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
   endif()
 
   verify_testing()

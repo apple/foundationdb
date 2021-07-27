@@ -30,6 +30,9 @@
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#include "flow/StreamCipher.h"
+#endif
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
@@ -1486,7 +1489,7 @@ void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
 }
 #endif
 
-SystemStatistics getSystemStatistics(std::string dataFolder,
+SystemStatistics getSystemStatistics(std::string const& dataFolder,
                                      const IPAddress* ip,
                                      SystemStatisticsState** statState,
                                      bool logDetails) {
@@ -2644,7 +2647,7 @@ Future<vector<std::string>> listDirectoriesAsync(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, true);
 }
 
-void findFilesRecursively(std::string path, std::vector<std::string>& out) {
+void findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
 	// Add files to output, prefixing path
 	std::vector<std::string> files = platform::listFiles(path);
 	for (auto const& f : files)
@@ -3002,7 +3005,7 @@ void outOfMemory() {
 		else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
 			s = s.substr(LiteralStringRef("struct ").size());
 #endif
-		typeNames.push_back(std::make_pair(s, i->first));
+		typeNames.emplace_back(s, i->first);
 	}
 	std::sort(typeNames.begin(), typeNames.end());
 	for (int i = 0; i < typeNames.size(); i++) {
@@ -3414,6 +3417,8 @@ void platformInit() {
 #endif
 }
 
+// The crashHandler function is registered to handle signals before the process terminates.
+// Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
 #ifdef __linux__
 	// Pretty much all of this handler is risking undefined behavior and hangs,
@@ -3422,11 +3427,18 @@ void crashHandler(int sig) {
 
 	bool error = (sig != SIGUSR2);
 
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+	StreamCipher::cleanup();
+#endif
+
 	fflush(stdout);
-	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
-	    .detail("Signal", sig)
-	    .detail("Name", strsignal(sig))
-	    .detail("Trace", backtrace);
+	{
+		TraceEvent te(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated");
+		te.detail("Signal", sig).detail("Name", strsignal(sig)).detail("Trace", backtrace);
+		if (error) {
+			te.setErrorKind(ErrorKind::BugDetected);
+		}
+	}
 	flushTraceFileVoid();
 
 	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);

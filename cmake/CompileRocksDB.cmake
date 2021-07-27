@@ -22,6 +22,9 @@ if (RocksDB_FOUND)
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DWITH_TSAN=${USE_TSAN}
+               -DWITH_ASAN=${USE_ASAN}
+               -DWITH_UBSAN=${USE_UBSAN}
                -DROCKSDB_BUILD_SHARED=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a
@@ -49,6 +52,9 @@ else()
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DWITH_TSAN=${USE_TSAN}
+               -DWITH_ASAN=${USE_ASAN}
+               -DWITH_UBSAN=${USE_UBSAN}
                -DROCKSDB_BUILD_SHARED=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a

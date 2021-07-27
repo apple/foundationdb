@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -37,39 +38,43 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	std::vector<Standalone<KeyRangeRef>> skippedRestoreRanges;
 	Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 	static int backupAgentRequests;
-	bool locked;
+	LockDB locked{ false };
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
+	Optional<std::string> encryptionKeyFileName;
 
 	BackupAndRestoreCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		locked = sharedRandomNumber % 2;
-		backupAfter = getOption(options, LiteralStringRef("backupAfter"), 10.0);
-		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 35.0);
-		performRestore = getOption(options, LiteralStringRef("performRestore"), true);
-		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
-		backupRangesCount = getOption(options, LiteralStringRef("backupRangesCount"), 5);
-		backupRangeLengthMax = getOption(options, LiteralStringRef("backupRangeLengthMax"), 1);
+		locked.set(sharedRandomNumber % 2);
+		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
+		restoreAfter = getOption(options, "restoreAfter"_sr, 35.0);
+		performRestore = getOption(options, "performRestore"_sr, true);
+		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
+		backupRangesCount = getOption(options, "backupRangesCount"_sr, 5);
+		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);
 		abortAndRestartAfter =
 		    getOption(options,
-		              LiteralStringRef("abortAndRestartAfter"),
+		              "abortAndRestartAfter"_sr,
 		              deterministicRandom()->random01() < 0.5
 		                  ? deterministicRandom()->random01() * (restoreAfter - backupAfter) + backupAfter
 		                  : 0.0);
-		differentialBackup = getOption(
-		    options, LiteralStringRef("differentialBackup"), deterministicRandom()->random01() < 0.5 ? true : false);
+		differentialBackup =
+		    getOption(options, "differentialBackup"_sr, deterministicRandom()->random01() < 0.5 ? true : false);
 		stopDifferentialAfter =
 		    getOption(options,
-		              LiteralStringRef("stopDifferentialAfter"),
+		              "stopDifferentialAfter"_sr,
 		              differentialBackup ? deterministicRandom()->random01() *
 		                                           (restoreAfter - std::max(abortAndRestartAfter, backupAfter)) +
 		                                       std::max(abortAndRestartAfter, backupAfter)
 		                                 : 0.0);
-		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
-		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
-		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
-		restorePrefixesToInclude = getOption(options, LiteralStringRef("restorePrefixesToInclude"), std::vector<std::string>());
+		agentRequest = getOption(options, "simBackupAgents"_sr, true);
+		allowPauses = getOption(options, "allowPauses"_sr, true);
+		shareLogRange = getOption(options, "shareLogRange"_sr, false);
+		restorePrefixesToInclude = getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
 		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.1)) {
+			encryptionKeyFileName = "simfdb/test_encryption_key_file";
+		}
 
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
 		UID randomID = nondeterministicRandom()->randomUniqueID();
@@ -77,11 +82,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		if (shareLogRange) {
 			bool beforePrefix = sharedRandomNumber & 1;
 			if (beforePrefix)
-				backupRanges.push_back_deep(backupRanges.arena(),
-				                            KeyRangeRef(normalKeys.begin, LiteralStringRef("\xfe\xff\xfe")));
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, "\xfe\xff\xfe"_sr));
 			else
 				backupRanges.push_back_deep(backupRanges.arena(),
-				                            KeyRangeRef(strinc(LiteralStringRef("\x00\x00\x01")), normalKeys.end));
+				                            KeyRangeRef(strinc("\x00\x00\x01"_sr), normalKeys.end));
 		} else if (backupRangesCount <= 0) {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		} else {
@@ -168,6 +172,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "BARW_Param").detail("DifferentialBackup", differentialBackup);
 		TraceEvent(SevInfo, "BARW_Param").detail("StopDifferentialAfter", stopDifferentialAfter);
 		TraceEvent(SevInfo, "BARW_Param").detail("AgentRequest", agentRequest);
+		TraceEvent(SevInfo, "BARW_Param").detail("Encrypted", encryptionKeyFileName.present());
 
 		return _start(cx, this);
 	}
@@ -215,7 +220,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
 		state FileBackupAgent agent;
 		loop {
-			std::string status = wait(agent.getStatus(cx, true, tag));
+			std::string status = wait(agent.getStatus(cx, ShowErrors::True, tag));
 			puts(status.c_str());
 			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
 			puts(statusJSON.c_str());
@@ -265,7 +270,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               stopDifferentialDelay ? false : true));
+			                               StopWhenDone{ !stopDifferentialDelay },
+			                               UsePartitionedLog::False,
+			                               IncrementalBackupOnly::False,
+			                               self->encryptionKeyFileName));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -290,8 +298,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					// Wait until the backup is in a restorable state and get the status, URL, and UID atomically
 					state Reference<IBackupContainer> lastBackupContainer;
 					state UID lastBackupUID;
-					state EBackupState resultWait = wait(
-					    backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
+					state EBackupState resultWait = wait(backupAgent->waitBackup(
+					    cx, backupTag.tagName, StopWhenDone::False, &lastBackupContainer, &lastBackupUID));
 
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID)
 					    .detail("Tag", backupTag.tagName)
@@ -372,11 +380,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BARW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
-		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
+		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True));
 
 		state std::string statusText;
 
-		std::string _statusText = wait(backupAgent->getStatus(cx, 5, tag.toString()));
+		std::string _statusText = wait(backupAgent->getStatus(cx, ShowErrors::True, tag.toString()));
 		statusText = _statusText;
 		// Can we validate anything about status?
 
@@ -415,9 +423,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                  cx,
 				                                  self->backupTag,
 				                                  KeyRef(lastBackupContainer),
-				                                  true,
-				                                  -1,
-				                                  true,
+				                                  WaitForComplete::True,
+				                                  ::invalidVersion,
+				                                  Verbose::True,
 				                                  normalKeys,
 				                                  Key(),
 				                                  Key(),
@@ -454,6 +462,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		// Increment the backup agent requests
 		if (self->agentRequest) {
 			BackupAndRestoreCorrectnessWorkload::backupAgentRequests++;
+		}
+
+		if (self->encryptionKeyFileName.present()) {
+			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
 		}
 
 		try {
@@ -510,12 +522,12 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
 					extraBackup = backupAgent.submitBackup(cx,
-					                                       LiteralStringRef("file://simfdb/backups/"),
+					                                       "file://simfdb/backups/"_sr,
 					                                       deterministicRandom()->randomInt(0, 60),
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       true);
+					                                       StopWhenDone::True);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
@@ -581,13 +593,17 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						                                       cx,
 						                                       restoreTag,
 						                                       KeyRef(lastBackupContainer->getURL()),
-						                                       true,
+						                                       WaitForComplete::True,
 						                                       targetVersion,
-						                                       true,
+						                                       Verbose::True,
 						                                       range,
 						                                       Key(),
 						                                       Key(),
-						                                       self->locked));
+						                                       self->locked,
+						                                       OnlyApplyMutationLogs::False,
+						                                       InconsistentSnapshotOnly::False,
+						                                       ::invalidVersion,
+						                                       self->encryptionKeyFileName));
 					}
 				} else {
 					multipleRangesInOneTag = true;
@@ -601,12 +617,16 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       restoreTag,
 					                                       KeyRef(lastBackupContainer->getURL()),
 					                                       self->restoreRanges,
-					                                       true,
+					                                       WaitForComplete::True,
 					                                       targetVersion,
-					                                       true,
+					                                       Verbose::True,
 					                                       Key(),
 					                                       Key(),
-					                                       self->locked));
+					                                       self->locked,
+					                                       OnlyApplyMutationLogs::False,
+					                                       InconsistentSnapshotOnly::False,
+					                                       ::invalidVersion,
+					                                       self->encryptionKeyFileName));
 				}
 
 				// Sometimes kill and restart the restore
@@ -627,12 +647,16 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 							                                             restoreTags[restoreIndex],
 							                                             KeyRef(lastBackupContainer->getURL()),
 							                                             self->restoreRanges,
-							                                             true,
-							                                             -1,
-							                                             true,
+							                                             WaitForComplete::True,
+							                                             ::invalidVersion,
+							                                             Verbose::True,
 							                                             Key(),
 							                                             Key(),
-							                                             self->locked);
+							                                             self->locked,
+							                                             OnlyApplyMutationLogs::False,
+							                                             InconsistentSnapshotOnly::False,
+							                                             ::invalidVersion,
+							                                             self->encryptionKeyFileName);
 						}
 					} else {
 						for (restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
@@ -651,13 +675,17 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 								                                             cx,
 								                                             restoreTags[restoreIndex],
 								                                             KeyRef(lastBackupContainer->getURL()),
-								                                             true,
-								                                             -1,
-								                                             true,
+								                                             WaitForComplete::True,
+								                                             ::invalidVersion,
+								                                             Verbose::True,
 								                                             self->restoreRanges[restoreIndex],
 								                                             Key(),
 								                                             Key(),
-								                                             self->locked);
+								                                             self->locked,
+																			 OnlyApplyMutationLogs::False,
+																			 InconsistentSnapshotOnly::False,
+								                                             ::invalidVersion,
+								                                             self->encryptionKeyFileName);
 							}
 						}
 					}
@@ -721,7 +749,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						    .detail("TaskCount", taskCount)
 						    .detail("WaitCycles", waitCycles);
 						printf("EndingNonZeroTasks: %ld\n", (long)taskCount);
-						wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+						wait(TaskBucket::debugPrintRange(cx, normalKeys.end, StringRef()));
 					}
 
 					loop {
@@ -820,7 +848,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			}
 
 			if (displaySystemKeys) {
-				wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+				wait(TaskBucket::debugPrintRange(cx, normalKeys.end, StringRef()));
 			}
 
 			TraceEvent("BARW_Complete", randomID).detail("BackupTag", printable(self->backupTag));

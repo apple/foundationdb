@@ -19,6 +19,7 @@
  */
 
 #include "flow/flow.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<bool> allTrue(std::vector<Future<bool>> all) {
@@ -134,5 +135,48 @@ ACTOR Future<Void> lowPriorityDelay(double waitTime) {
 		wait(delay(waitTime / totalLoops, TaskPriority::Low));
 		loopCount++;
 	}
+	return Void();
+}
+
+namespace {
+
+struct DummyState {
+	int changed{ 0 };
+	int unchanged{ 0 };
+	bool operator==(DummyState const& rhs) const { return changed == rhs.changed && unchanged == rhs.unchanged; }
+	bool operator!=(DummyState const& rhs) const { return !(*this == rhs); }
+};
+
+ACTOR Future<Void> testPublisher(Reference<AsyncVar<DummyState>> input) {
+	state int i = 0;
+	for (; i < 100; ++i) {
+		wait(delay(deterministicRandom()->random01()));
+		auto var = input->get();
+		++var.changed;
+		input->set(var);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> testSubscriber(Reference<IAsyncListener<int>> output, Optional<int> expected) {
+	loop {
+		wait(output->onChange());
+		ASSERT(expected.present());
+		if (output->get() == expected.get()) {
+			return Void();
+		}
+	}
+}
+
+} // namespace
+
+TEST_CASE("/flow/genericactors/AsyncListener") {
+	auto input = makeReference<AsyncVar<DummyState>>();
+	state Future<Void> subscriber1 =
+	    testSubscriber(IAsyncListener<int>::create(input, [](auto const& var) { return var.changed; }), 100);
+	state Future<Void> subscriber2 =
+	    testSubscriber(IAsyncListener<int>::create(input, [](auto const& var) { return var.unchanged; }), {});
+	wait(subscriber1 && testPublisher(input));
+	ASSERT(!subscriber2.isReady());
 	return Void();
 }

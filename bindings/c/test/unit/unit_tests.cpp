@@ -219,7 +219,7 @@ GetRangeResult get_range(fdb::Transaction& tr,
 	for (int i = 0; i < out_count; ++i) {
 		std::string key((const char*)out_kv[i].key, out_kv[i].key_length);
 		std::string value((const char*)out_kv[i].value, out_kv[i].value_length);
-		results.push_back(std::make_pair(key, value));
+		results.emplace_back(key, value);
 	}
 	return GetRangeResult{ results, out_more != 0, 0 };
 }

@@ -6,6 +6,11 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.h
   BackupWorker.actor.cpp
   ClusterController.actor.cpp
+  ConfigBroadcaster.actor.cpp
+  ConfigBroadcaster.h
+  ConfigDatabaseUnitTests.actor.cpp
+  ConfigFollowerInterface.cpp
+  ConfigFollowerInterface.h
   ConflictSet.h
   CoordinatedState.actor.cpp
   CoordinatedState.h
@@ -23,21 +28,25 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
+  IConfigDatabaseNode.cpp
+  IConfigDatabaseNode.h
+  IConfigConsumer.cpp
+  IConfigConsumer.h
   IDiskQueue.h
   IKeyValueContainer.h
   IKeyValueStore.h
   IPager.h
-  IVersionedStore.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
-  Knobs.cpp
   Knobs.h
   LatencyBandConfig.cpp
   LatencyBandConfig.h
   LeaderElection.actor.cpp
   LeaderElection.h
+  LocalConfiguration.actor.cpp
+  LocalConfiguration.h
   LogProtocolMessage.h
   LogRouter.actor.cpp
   LogSystem.h
@@ -59,7 +68,12 @@ set(FDBSERVER_SRCS
   OldTLogServer_4_6.actor.cpp
   OldTLogServer_6_0.actor.cpp
   OldTLogServer_6_2.actor.cpp
-  Orderer.actor.h
+  OnDemandStore.actor.cpp
+  OnDemandStore.h
+  PaxosConfigConsumer.actor.cpp
+  PaxosConfigConsumer.h
+  PaxosConfigDatabaseNode.actor.cpp
+  PaxosConfigDatabaseNode.h
   ProxyCommitData.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -83,6 +97,8 @@ set(FDBSERVER_SRCS
   RestoreLoader.actor.cpp
   RestoreWorker.actor.h
   RestoreWorker.actor.cpp
+  RestoreWorkerInterface.actor.cpp
+  RestoreWorkerInterface.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
   RoleLineage.actor.h
@@ -90,6 +106,9 @@ set(FDBSERVER_SRCS
   ServerDBInfo.actor.h
   ServerDBInfo.h
   SigStack.cpp
+  SimpleConfigConsumer.actor.cpp
+  SimpleConfigConsumer.h
+  SimpleConfigDatabaseNode.actor.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
@@ -106,6 +125,8 @@ set(FDBSERVER_SRCS
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
+  TSSMappingUtil.actor.h
+  TSSMappingUtil.actor.cpp
   VersionedBTree.actor.cpp
   VFSAsync.h
   VFSAsync.cpp
@@ -128,7 +149,7 @@ set(FDBSERVER_SRCS
   workloads/BackgroundSelectors.actor.cpp
   workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
-  workloads/ParallelRestore.actor.cpp
+  workloads/ClogSingleConnection.actor.cpp
   workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
@@ -160,6 +181,7 @@ set(FDBSERVER_SRCS
   workloads/FileSystem.actor.cpp
   workloads/Fuzz.cpp
   workloads/FuzzApiCorrectness.actor.cpp
+  workloads/GetRangeStream.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
   workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
@@ -178,6 +200,7 @@ set(FDBSERVER_SRCS
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
+  workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
   workloads/PopulateTPCC.actor.cpp

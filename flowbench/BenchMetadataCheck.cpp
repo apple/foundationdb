@@ -20,6 +20,7 @@
 
 #include "benchmark/benchmark.h"
 
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 

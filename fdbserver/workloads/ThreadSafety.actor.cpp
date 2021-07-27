@@ -100,8 +100,6 @@ private:
 	}
 };
 
-extern bool noUnseed;
-
 // A workload which uses the thread safe API from multiple threads
 struct ThreadSafetyWorkload : TestWorkload {
 	int threadsPerClient;

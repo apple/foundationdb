@@ -20,6 +20,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"

@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -46,7 +45,9 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	return Reference<ITransaction>(new ThreadSafeTransaction(db));
+	auto type =
+		isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
 }
 
 void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -56,6 +57,9 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 	} else {
 		TraceEvent("UnknownDatabaseOption").detail("Option", option);
 		throw invalid_option();
+	}
+	if (itr->first == FDBDatabaseOptions::USE_CONFIG_DATABASE) {
+		isConfigDB = true;
 	}
 
 	DatabaseContext* db = this->db;
@@ -118,7 +122,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	    [db, connFile, apiVersion]() {
 		    try {
 			    Database::createDatabase(
-			        Reference<ClusterConnectionFile>(connFile), apiVersion, false, LocalityData(), db)
+			        Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::False, LocalityData(), db)
 			        .extractPtr();
 		    } catch (Error& e) {
 			    new (db) DatabaseContext(e);
@@ -134,7 +138,7 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 	onMainThreadVoid([db]() { db->delref(); }, nullptr);
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
+ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -142,12 +146,12 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 	// because the reference count of the DatabaseContext is solely managed from the main thread.  If cx is destructed
 	// immediately after this call, it will defer the DatabaseContext::delref (and onMainThread preserves the order of
 	// these operations).
-	ReadYourWritesTransaction* tr = this->tr = ReadYourWritesTransaction::allocateOnForeignThread();
+	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
 	onMainThreadVoid(
 	    [tr, cx]() {
 		    cx->addref();
-		    new (tr) ReadYourWritesTransaction(Database(cx));
+		    tr->setDatabase(Database(cx));
 	    },
 	    nullptr);
 }
@@ -159,23 +163,23 @@ ThreadSafeTransaction::ThreadSafeTransaction(ReadYourWritesTransaction* ryw) : t
 }
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	if (tr)
 		onMainThreadVoid([tr]() { tr->delref(); }, nullptr);
 }
 
 void ThreadSafeTransaction::cancel() {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr]() { tr->cancel(); }, nullptr);
 }
 
 void ThreadSafeTransaction::setVersion(Version v) {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr, v]() { tr->setVersion(v); }, &tr->deferredError);
 }
 
 ThreadFuture<Version> ThreadSafeTransaction::getReadVersion() {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<Version> {
 		tr->checkDeferredError();
 		return tr->getReadVersion();
@@ -185,27 +189,27 @@ ThreadFuture<Version> ThreadSafeTransaction::getReadVersion() {
 ThreadFuture<Optional<Value>> ThreadSafeTransaction::get(const KeyRef& key, bool snapshot) {
 	Key k = key;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, k, snapshot]() -> Future<Optional<Value>> {
 		tr->checkDeferredError();
-		return tr->get(k, snapshot);
+		return tr->get(k, Snapshot{ snapshot });
 	});
 }
 
 ThreadFuture<Key> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	KeySelector k = key;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, k, snapshot]() -> Future<Key> {
 		tr->checkDeferredError();
-		return tr->getKey(k, snapshot);
+		return tr->getKey(k, Snapshot{ snapshot });
 	});
 }
 
 ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
 	KeyRange r = keys;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, r]() -> Future<int64_t> {
 		tr->checkDeferredError();
 		return tr->getEstimatedRangeSizeBytes(r);
@@ -216,7 +220,7 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplit
                                                                                        int64_t chunkSize) {
 	KeyRange r = range;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, r, chunkSize]() -> Future<Standalone<VectorRef<KeyRef>>> {
 		tr->checkDeferredError();
 		return tr->getRangeSplitPoints(r, chunkSize);
@@ -231,10 +235,10 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	KeySelector b = begin;
 	KeySelector e = end;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
-		return tr->getRange(b, e, limit, snapshot, reverse);
+		return tr->getRange(b, e, limit, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 
@@ -246,17 +250,17 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	KeySelector b = begin;
 	KeySelector e = end;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
-		return tr->getRange(b, e, limits, snapshot, reverse);
+		return tr->getRange(b, e, limits, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 
 ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddressesForKey(const KeyRef& key) {
 	Key k = key;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, k]() -> Future<Standalone<VectorRef<const char*>>> {
 		tr->checkDeferredError();
 		return tr->getAddressesForKey(k);
@@ -266,12 +270,12 @@ ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddre
 void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	KeyRange r = keys;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr, r]() { tr->addReadConflictRange(r); }, &tr->deferredError);
 }
 
 void ThreadSafeTransaction::makeSelfConflicting() {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr]() { tr->makeSelfConflicting(); }, &tr->deferredError);
 }
 
@@ -279,7 +283,7 @@ void ThreadSafeTransaction::atomicOp(const KeyRef& key, const ValueRef& value, u
 	Key k = key;
 	Value v = value;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr, k, v, operationType]() { tr->atomicOp(k, v, operationType); }, &tr->deferredError);
 }
 
@@ -287,14 +291,14 @@ void ThreadSafeTransaction::set(const KeyRef& key, const ValueRef& value) {
 	Key k = key;
 	Value v = value;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr, k, v]() { tr->set(k, v); }, &tr->deferredError);
 }
 
 void ThreadSafeTransaction::clear(const KeyRangeRef& range) {
 	KeyRange r = range;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr, r]() { tr->clear(r); }, &tr->deferredError);
 }
 
@@ -302,7 +306,7 @@ void ThreadSafeTransaction::clear(const KeyRef& begin, const KeyRef& end) {
 	Key b = begin;
 	Key e = end;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid(
 	    [tr, b, e]() {
 		    if (b > e)
@@ -316,14 +320,14 @@ void ThreadSafeTransaction::clear(const KeyRef& begin, const KeyRef& end) {
 void ThreadSafeTransaction::clear(const KeyRef& key) {
 	Key k = key;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr, k]() { tr->clear(k); }, &tr->deferredError);
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::watch(const KeyRef& key) {
 	Key k = key;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, k]() -> Future<Void> {
 		tr->checkDeferredError();
 		return tr->watch(k);
@@ -333,12 +337,12 @@ ThreadFuture<Void> ThreadSafeTransaction::watch(const KeyRef& key) {
 void ThreadSafeTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
 	KeyRange r = keys;
 
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr, r]() { tr->addWriteConflictRange(r); }, &tr->deferredError);
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::commit() {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<Void> {
 		tr->checkDeferredError();
 		return tr->commit();
@@ -351,12 +355,12 @@ Version ThreadSafeTransaction::getCommittedVersion() {
 }
 
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<int64_t> { return tr->getApproximateSize(); });
 }
 
 ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<Standalone<StringRef>> { return tr->getVersionstamp(); });
 }
 
@@ -366,8 +370,7 @@ void ThreadSafeTransaction::setOption(FDBTransactionOptions::Option option, Opti
 		TraceEvent("UnknownTransactionOption").detail("Option", option);
 		throw invalid_option();
 	}
-
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	Standalone<Optional<StringRef>> passValue = value;
 
 	// ThreadSafeTransaction is not allowed to do anything with options except pass them through to RYW.
@@ -375,7 +378,7 @@ void ThreadSafeTransaction::setOption(FDBTransactionOptions::Option option, Opti
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::checkDeferredError() {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() {
 		try {
 			tr->checkDeferredError();
@@ -388,7 +391,7 @@ ThreadFuture<Void> ThreadSafeTransaction::checkDeferredError() {
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::onError(Error const& e) {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, e]() { return tr->onError(e); });
 }
 
@@ -403,7 +406,7 @@ ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept
 }
 
 void ThreadSafeTransaction::reset() {
-	ReadYourWritesTransaction* tr = this->tr;
+	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr]() { tr->reset(); }, nullptr);
 }
 
@@ -474,7 +477,7 @@ void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* ho
 
 	MutexHolder holder(lock); // We could use the network thread to protect this action, but then we can't guarantee
 	                          // upon return that the hook is set.
-	threadCompletionHooks.push_back(std::make_pair(hook, hookParameter));
+	threadCompletionHooks.emplace_back(hook, hookParameter);
 }
 
 IClientApi* ThreadSafeApi::api = new ThreadSafeApi();

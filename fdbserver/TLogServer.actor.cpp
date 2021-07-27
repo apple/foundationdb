@@ -329,7 +329,7 @@ struct TLogData : NonCopyable {
 	AsyncVar<bool>
 	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
 
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	Database cx;
 
 	NotifiedVersion queueCommitEnd;
@@ -372,7 +372,7 @@ struct TLogData : NonCopyable {
 	         UID workerID,
 	         IKeyValueStore* persistentData,
 	         IDiskQueue* persistentQueue,
-	         Reference<AsyncVar<ServerDBInfo>> dbInfo,
+	         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	         Reference<AsyncVar<bool>> degraded,
 	         std::string folder)
 	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
@@ -386,7 +386,7 @@ struct TLogData : NonCopyable {
 	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
 	                                              LiteralStringRef("commit"),
 	                                              Histogram::Unit::microseconds)) {
-		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
+		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
 
@@ -1166,6 +1166,19 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 			}
 		}
 
+		uint64_t PoppedVersionLag = logData->persistentDataDurableVersion - logData->queuePoppedVersion;
+		if ( SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
+			(logData->queuePoppedVersion > 0) && //avoid generating massive events at beginning 
+			(tagData->unpoppedRecovered || PoppedVersionLag >= SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { //when recovery or long lag
+			TraceEvent("TLogPopDetails", logData->logId)
+				.detail("Tag", tagData->tag.toString())
+				.detail("UpTo", upTo)
+				.detail("PoppedVersionLag", PoppedVersionLag)
+				.detail("MinPoppedTag", logData->minPoppedTag.toString())
+				.detail("QueuePoppedVersion", logData->queuePoppedVersion)
+				.detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
+				.detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
+		}
 		if (upTo > logData->persistentDataDurableVersion)
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
 		//TraceEvent("TLogPop", logData->logId).detail("Tag", tag.toString()).detail("To", upTo);
@@ -1785,7 +1798,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 			state std::vector<Future<Standalone<StringRef>>> messageReads;
 			messageReads.reserve(commitLocations.size());
 			for (const auto& pair : commitLocations) {
-				messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::YES));
+				messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::True));
 			}
 			commitLocations.clear();
 			wait(waitForAll(messageReads));
@@ -2884,7 +2897,10 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		removed.push_back(errorOr(logData->removed));
 		logsByVersion.emplace_back(ver, id1);
 
-		TraceEvent("TLogPersistentStateRestore", self->dbgid).detail("LogId", logData->logId).detail("Ver", ver);
+		TraceEvent("TLogPersistentStateRestore", self->dbgid)
+			.detail("LogId", logData->logId)
+			.detail("Ver", ver)
+			.detail("RecoveryCount", logData->recoveryCount);
 		// Restore popped keys.  Pop operations that took place after the last (committed) updatePersistentDataVersion
 		// might be lost, but that is fine because we will get the corresponding data back, too.
 		tagKeys = prefixRange(rawId.withPrefix(persistTagPoppedKeys.begin));
@@ -3129,7 +3145,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->popOrder.push_back(recruited.id());
 	self->spillOrder.push_back(recruited.id());
 
-	TraceEvent("TLogStart", logData->logId);
+	TraceEvent("TLogStart", logData->logId).detail("RecoveryCount", logData->recoveryCount);
 
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;
@@ -3264,7 +3280,7 @@ ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Referen
 // New tLog (if !recoverFrom.size()) or restore from network
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
                         UID tlogId,

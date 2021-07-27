@@ -74,3 +74,22 @@ add_custom_command(OUTPUT ${package_file}
 add_custom_target(python_package DEPENDS ${package_file})
 add_dependencies(python_package python_binding)
 add_dependencies(packages python_package)
+
+if (NOT WIN32 AND NOT OPEN_FOR_IDE)
+  add_fdbclient_test(
+    NAME fdbcli_tests
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
+            ${CMAKE_BINARY_DIR}/bin/fdbcli
+            @CLUSTER_FILE@
+            1
+            )
+  add_fdbclient_test(
+    NAME multi_process_fdbcli_tests
+    PROCESS_NUMBER 5
+    TEST_TIMEOUT 120 # The test can take near to 1 minutes sometime, set timeout to 2 minutes to be safe
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
+            ${CMAKE_BINARY_DIR}/bin/fdbcli
+            @CLUSTER_FILE@
+            5
+            )
+endif()

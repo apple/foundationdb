@@ -24,7 +24,7 @@
 
 void HealthMonitor::reportPeerClosed(const NetworkAddress& peerAddress) {
 	purgeOutdatedHistory();
-	peerClosedHistory.push_back(std::make_pair(now(), peerAddress));
+	peerClosedHistory.emplace_back(now(), peerAddress);
 	peerClosedNum[peerAddress] += 1;
 }
 

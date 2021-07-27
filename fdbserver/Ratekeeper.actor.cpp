@@ -1394,9 +1394,10 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 
 				self->configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
 
-				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) ||
-				                                 tr.watch(excludedServersVersionKey) ||
-				                                 tr.watch(failedServersVersionKey);
+				state Future<Void> watchFuture =
+				    tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) ||
+				    tr.watch(failedServersVersionKey) || tr.watch(excludedLocalityVersionKey) ||
+				    tr.watch(failedLocalityVersionKey);
 				wait(tr.commit());
 				wait(watchFuture);
 				break;
@@ -1407,8 +1408,8 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 	}
 }
 
-ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true));
+ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Future<Void> timeout = Void();
 	state std::vector<Future<Void>> tlogTrackers;
 	state std::vector<TLogInterface> tlogInterfs;

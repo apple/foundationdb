@@ -136,6 +136,7 @@ function(add_fdb_test)
     ${VALGRIND_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+  set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
   get_filename_component(test_dir_full ${first_file} DIRECTORY)
   if(NOT ${test_dir_full} STREQUAL "")
     get_filename_component(test_dir ${test_dir_full} NAME)
@@ -261,6 +262,14 @@ function(create_correctness_package)
     )
   add_custom_target(package_tests ALL DEPENDS ${tar_file})
   add_dependencies(package_tests strip_only_fdbserver TestHarness)
+  set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/correctness.tar.gz")
+  add_custom_command(
+    OUTPUT "${unversioned_tar_file}"
+    DEPENDS "${tar_file}"
+    COMMAND ${CMAKE_COMMAND} -E copy "${tar_file}" "${unversioned_tar_file}"
+    COMMENT "Copy correctness package to ${unversioned_tar_file}")
+  add_custom_target(package_tests_u DEPENDS "${unversioned_tar_file}")
+  add_dependencies(package_tests_u package_tests)
 endfunction()
 
 function(create_valgrind_correctness_package)
@@ -288,6 +297,14 @@ function(create_valgrind_correctness_package)
       )
     add_custom_target(package_valgrind_tests ALL DEPENDS ${tar_file})
     add_dependencies(package_valgrind_tests strip_only_fdbserver TestHarness)
+    set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/valgrind.tar.gz")
+    add_custom_command(
+      OUTPUT "${unversioned_tar_file}"
+      DEPENDS "${tar_file}"
+      COMMAND ${CMAKE_COMMAND} -E copy "${tar_file}" "${unversioned_tar_file}"
+      COMMENT "Copy valgrind package to ${unversioned_tar_file}")
+    add_custom_target(package_valgrind_tests_u DEPENDS "${unversioned_tar_file}")
+    add_dependencies(package_valgrind_tests_u package_valgrind_tests)
   endif()
 endfunction()
 
@@ -378,9 +395,10 @@ function(package_bindingtester)
   add_dependencies(bindingtester copy_bindingtester_binaries)
 endfunction()
 
+# Creates a single cluster before running the specified command (usually a ctest test)
 function(add_fdbclient_test)
   set(options DISABLED ENABLED)
-  set(oneValueArgs NAME)
+  set(oneValueArgs NAME PROCESS_NUMBER TEST_TIMEOUT)
   set(multiValueArgs COMMAND)
   cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   if(OPEN_FOR_IDE)
@@ -396,12 +414,57 @@ function(add_fdbclient_test)
     message(FATAL_ERROR "COMMAND is a required argument for add_fdbclient_test")
   endif()
   message(STATUS "Adding Client test ${T_NAME}")
-  add_test(NAME "${T_NAME}"
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
+  if (T_PROCESS_NUMBER)
+    add_test(NAME "${T_NAME}"
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --process-number ${T_PROCESS_NUMBER}
+            --
+            ${T_COMMAND})
+  else()
+    add_test(NAME "${T_NAME}"
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --
             ${T_COMMAND})
-  set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60) 
+  endif()
+  if (T_TEST_TIMEOUT)
+    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
+  else()
+    # default timeout
+    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+  endif()
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+endfunction()
+
+# Creates 3 distinct clusters before running the specified command.
+# This is useful for testing features that require multiple clusters (like the
+# multi-cluster FDB client)
+function(add_multi_fdbclient_test)
+  set(options DISABLED ENABLED)
+  set(oneValueArgs NAME)
+  set(multiValueArgs COMMAND)
+  cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  if(OPEN_FOR_IDE)
+    return()
+  endif()
+  if(NOT T_ENABLED AND T_DISABLED)
+    return()
+  endif()
+  if(NOT T_NAME)
+    message(FATAL_ERROR "NAME is a required argument for add_multi_fdbclient_test")
+  endif()
+  if(NOT T_COMMAND)
+    message(FATAL_ERROR "COMMAND is a required argument for add_multi_fdbclient_test")
+  endif()
+  message(STATUS "Adding Client test ${T_NAME}")
+  add_test(NAME "${T_NAME}"
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --clusters 3
+            --
+            ${T_COMMAND})
+  set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
 endfunction()
 
 function(add_java_test)

@@ -26,6 +26,28 @@
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+namespace {
+
+std::string trim(std::string const& connectionString) {
+	// Strip out whitespace
+	// Strip out characters between a # and a newline
+	std::string trimmed;
+	auto end = connectionString.end();
+	for (auto c = connectionString.begin(); c != end; ++c) {
+		if (*c == '#') {
+			++c;
+			while (c != end && *c != '\n' && *c != '\r')
+				++c;
+			if (c == end)
+				break;
+		} else if (*c != ' ' && *c != '\n' && *c != '\r' && *c != '\t')
+			trimmed += *c;
+	}
+	return trimmed;
+}
+
+} // namespace
+
 std::pair<std::string, bool> ClusterConnectionFile::lookupClusterFileName(std::string const& filename) {
 	if (filename.length())
 		return std::make_pair(filename, false);
@@ -152,24 +174,6 @@ std::string ClusterConnectionString::getErrorString(std::string const& source, E
 	} else {
 		return format("Unexpected error parsing connection string `%s: %d %s", source.c_str(), e.code(), e.what());
 	}
-}
-
-std::string trim(std::string const& connectionString) {
-	// Strip out whitespace
-	// Strip out characters between a # and a newline
-	std::string trimmed;
-	auto end = connectionString.end();
-	for (auto c = connectionString.begin(); c != end; ++c) {
-		if (*c == '#') {
-			++c;
-			while (c != end && *c != '\n' && *c != '\r')
-				++c;
-			if (c == end)
-				break;
-		} else if (*c != ' ' && *c != '\n' && *c != '\r' && *c != '\t')
-			trimmed += *c;
-	}
-	return trimmed;
 }
 
 ClusterConnectionString::ClusterConnectionString(std::string const& connectionString) {
@@ -434,9 +438,9 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const vector<Optional<LeaderInfo
 	maskedNominees.reserve(nominees.size());
 	for (int i = 0; i < nominees.size(); i++) {
 		if (nominees[i].present()) {
-			maskedNominees.push_back(std::make_pair(
+			maskedNominees.emplace_back(
 			    UID(nominees[i].get().changeID.first() & LeaderInfo::changeIDMask, nominees[i].get().changeID.second()),
-			    i));
+			    i);
 		}
 	}
 
@@ -586,7 +590,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 			auto& entry = issueMap[it];
 			entry.count++;
 			if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+				entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
 			}
 		}
 		if (ci.second.versions.size()) {
@@ -597,19 +601,19 @@ OpenDatabaseRequest ClientData::getRequest() {
 				auto& entry = versionMap[it];
 				entry.count++;
 				if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-					entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+					entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
 				}
 			}
 			auto& maxEntry = maxProtocolMap[maxProtocol];
 			maxEntry.count++;
 			if (maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				maxEntry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+				maxEntry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
 			}
 		} else {
 			auto& entry = versionMap[ClientVersionRef()];
 			entry.count++;
 			if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+				entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
 			}
 		}
 	}
@@ -838,6 +842,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			clientInfo->set(ni);
 			successIdx = idx;
 		} else {
+			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cannot talk to cluster controller
 			idx = (idx + 1) % addrs.size();
 			if (idx == successIdx) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));

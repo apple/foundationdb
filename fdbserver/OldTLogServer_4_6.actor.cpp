@@ -291,7 +291,7 @@ struct TLogData : NonCopyable {
 	AsyncVar<bool>
 	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
 
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 
 	NotifiedVersion queueCommitEnd;
 	Version queueCommitBegin;
@@ -321,7 +321,7 @@ struct TLogData : NonCopyable {
 	         UID workerID,
 	         IKeyValueStore* persistentData,
 	         IDiskQueue* persistentQueue,
-	         Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
+	         Reference<AsyncVar<ServerDBInfo> const> const& dbInfo)
 	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
 	    persistentData(persistentData), rawPersistentQueue(persistentQueue),
 	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0),
@@ -838,7 +838,7 @@ void commitMessages(Reference<LogData> self,
 			TEST(true); // Splitting commit messages across multiple blocks
 			messages1 = StringRef(block.end(), bytes);
 			block.append(block.arena(), messages.begin(), bytes);
-			self->messageBlocks.push_back(std::make_pair(version, block));
+			self->messageBlocks.emplace_back(version, block);
 			addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 			messages = messages.substr(bytes);
 		}
@@ -851,7 +851,7 @@ void commitMessages(Reference<LogData> self,
 	// Copy messages into block
 	ASSERT(messages.size() <= block.capacity() - block.size());
 	block.append(block.arena(), messages.begin(), messages.size());
-	self->messageBlocks.push_back(std::make_pair(version, block));
+	self->messageBlocks.emplace_back(version, block);
 	addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	messages = StringRef(block.end() - messages.size(), messages.size());
 
@@ -869,7 +869,7 @@ void commitMessages(Reference<LogData> self,
 				int offs = tag->messageOffsets[m];
 				uint8_t const* p =
 				    offs < messages1.size() ? messages1.begin() + offs : messages.begin() + offs - messages1.size();
-				tsm->value.version_messages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)p)));
+				tsm->value.version_messages.emplace_back(version, LengthPrefixedStringRef((uint32_t*)p));
 				if (tsm->value.version_messages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 					TraceEvent(SevWarnAlways, "LargeMessage")
 					    .detail("Size", tsm->value.version_messages.back().second.expectedSize());
@@ -1568,7 +1568,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         UID tlogId,
                         UID workerID) {

@@ -27,6 +27,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -565,6 +566,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				vector<Future<Void>> tLogCommitResults;
 				for (int loc = 0; loc < it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
+					data.recordEmptyMessage(location, msg);
 					allReplies.push_back(recordPushMetrics(
 					    it->connectionResetTrackers[loc],
 					    it->logServers[loc]->get().interf().address(),
@@ -1527,11 +1529,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
+		state UID dbgid = self->dbgid;
 		state Future<Void> maxGetPoppedDuration = delay(SERVER_KNOBS->TXS_POPPED_MAX_DELAY);
 		wait(waitForAll(poppedReady) || maxGetPoppedDuration);
 
 		if (maxGetPoppedDuration.isReady()) {
-			TraceEvent(SevWarnAlways, "PoppedTxsNotReady", self->dbgid);
+			TraceEvent(SevWarnAlways, "PoppedTxsNotReady", dbgid);
 		}
 
 		Version maxPopped = 1;
@@ -2117,7 +2120,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			std::vector<Reference<AsyncVar<bool>>> failed;
 
 			for (const auto& logVar : logServers.back()->logServers) {
-				allLogServers.push_back(std::make_pair(logVar, coreSet.tLogPolicy));
+				allLogServers.emplace_back(logVar, coreSet.tLogPolicy);
 				failed.push_back(makeReference<AsyncVar<bool>>());
 				failureTrackers.push_back(monitorLog(logVar, failed.back()));
 			}
@@ -2129,7 +2132,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			for (const auto& logSet : oldLogData.back().tLogs) {
 				for (const auto& logVar : logSet->logServers) {
-					allLogServers.push_back(std::make_pair(logVar, logSet->tLogPolicy));
+					allLogServers.emplace_back(logVar, logSet->tLogPolicy);
 				}
 			}
 		}

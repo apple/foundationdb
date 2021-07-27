@@ -22,6 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -212,12 +213,15 @@ std::string generateRegions() {
 struct ConfigureDatabaseWorkload : TestWorkload {
 	double testDuration;
 	int additionalDBs;
-
+	bool allowDescriptorChange;
 	vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
 	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 200.0);
+		allowDescriptorChange =
+		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
+
 		g_simulator.usableRegions = 1;
 	}
 
@@ -315,10 +319,10 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewConfig", newConfig);
 			} else if (randomChoice == 4) {
-				//TraceEvent("ConfigureTestQuorumBegin").detail("NewQuorum", s);
+				//TraceEvent("ConfigureTestQuorumBegin");
 				auto ch = autoQuorumChange();
 				std::string desiredClusterName = "NewName%d";
-				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT) {
+				if (!self->allowDescriptorChange) {
 					// if configuration does not allow changing the descriptor, pass empty string (keep old descriptor)
 					desiredClusterName = "";
 				}

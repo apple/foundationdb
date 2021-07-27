@@ -90,6 +90,12 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "failed",
 	  KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "excludedlocality",
+	  KeyRangeRef(LiteralStringRef("excluded_locality/"), LiteralStringRef("excluded_locality0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "failedlocality",
+	  KeyRangeRef(LiteralStringRef("failed_locality/"), LiteralStringRef("failed_locality0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "consistencycheck",
 	  singleKeyRange(LiteralStringRef("consistency_check_suspended"))
@@ -120,7 +126,10 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiComman
 	      .withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) }
 };
 
-std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
+std::set<std::string> SpecialKeySpace::options = { "excluded/force",
+	                                               "failed/force",
+	                                               "excluded_locality/force",
+	                                               "failed_locality/force" };
 
 std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
 
@@ -290,7 +299,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
                                                          KeySelector begin,
                                                          KeySelector end,
                                                          GetRangeLimits limits,
-                                                         bool reverse) {
+                                                         Reverse reverse) {
 	ASSERT(ryw);
 	choose {
 		when(RangeResult result =
@@ -306,7 +315,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
                                                                     KeySelector begin,
                                                                     KeySelector end,
                                                                     GetRangeLimits limits,
-                                                                    bool reverse) {
+                                                                    Reverse reverse) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state RangeResult result;
@@ -426,7 +435,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
                                               KeySelector begin,
                                               KeySelector end,
                                               GetRangeLimits limits,
-                                              bool reverse) {
+                                              Reverse reverse) {
 	// validate limits here
 	if (!limits.isValid())
 		return range_limits_invalid();
@@ -454,7 +463,7 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks,
 	                                        KeySelector(firstGreaterOrEqual(key)),
 	                                        KeySelector(firstGreaterOrEqual(keyAfter(key))),
 	                                        GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                        false));
+	                                        Reverse::False));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
 		return Optional<Value>(result[0].value);
@@ -2412,4 +2421,159 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 		}
 	}
 	return msg;
+}
+
+// Clears the special management api keys excludeLocality and failedLocality.
+void includeLocalities(ReadYourWritesTransaction* ryw) {
+	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
+	// includeLocalities might be used in an emergency transaction, so make sure it is retry-self-conflicting and
+	// CAUSAL_WRITE_RISKY
+	ryw->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
+	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
+	// for excluded localities
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
+	    SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
+	Transaction& tr = ryw->getTransaction();
+	for (auto& iter : ranges) {
+		auto entry = iter.value();
+		if (entry.first && !entry.second.present()) {
+			tr.addReadConflictRange(singleKeyRange(excludedLocalityVersionKey));
+			tr.set(excludedLocalityVersionKey, versionKey);
+			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter.range()));
+		}
+	}
+	// for failed localities
+	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
+	    SpecialKeySpace::getManamentApiCommandRange("failedlocality"));
+	for (auto& iter : ranges) {
+		auto entry = iter.value();
+		if (entry.first && !entry.second.present()) {
+			tr.addReadConflictRange(singleKeyRange(failedLocalityVersionKey));
+			tr.set(failedLocalityVersionKey, versionKey);
+			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter.range()));
+		}
+	}
+}
+
+// Reads the excludedlocality and failed locality keys using managment api,
+// parses them and returns the list.
+bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
+                             bool failed,
+                             std::unordered_set<std::string>& localities,
+                             std::vector<AddressExclusion>& addresses,
+                             std::set<AddressExclusion>& exclusions,
+                             std::vector<ProcessData>& workers,
+                             Optional<std::string>& msg) {
+	KeyRangeRef range = failed ? SpecialKeySpace::getManamentApiCommandRange("failedlocality")
+	                           : SpecialKeySpace::getManamentApiCommandRange("excludedlocality");
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
+	auto iter = ranges.begin();
+	while (iter != ranges.end()) {
+		auto entry = iter->value();
+		// only check for exclude(set) operation, include(clear) are not checked
+		TraceEvent(SevDebug, "ParseLocalities")
+		    .detail("Valid", entry.first)
+		    .detail("Set", entry.second.present())
+		    .detail("Key", iter->begin().toString());
+		if (entry.first && entry.second.present()) {
+			Key locality = iter->begin().removePrefix(range.begin);
+			if (locality.startsWith(LocalityData::ExcludeLocalityPrefix) &&
+			    locality.toString().find(':') != std::string::npos) {
+				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality.toString());
+				if (!localityAddresses.empty()) {
+					std::copy(localityAddresses.begin(), localityAddresses.end(), back_inserter(addresses));
+					exclusions.insert(localityAddresses.begin(), localityAddresses.end());
+				}
+
+				localities.insert(locality.toString());
+			} else {
+				std::string error = "ERROR: \'" + locality.toString() + "\' is not a valid locality\n";
+				msg = ManagementAPIError::toJsonString(
+				    false, entry.second.present() ? (failed ? "exclude failed" : "exclude") : "include", error);
+				return false;
+			}
+		}
+		++iter;
+	}
+	return true;
+}
+
+// On commit, parses the special exclusion keys and get the localities to be excluded, check for exclusions
+// and add them to the exclusion list. Also, clears the special management api keys with includeLocalities.
+ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTransaction* ryw, bool failed) {
+	state Optional<std::string> result;
+	state std::unordered_set<std::string> localities;
+	state std::vector<AddressExclusion> addresses;
+	state std::set<AddressExclusion> exclusions;
+	state std::vector<ProcessData> workers = wait(getWorkers(&ryw->getTransaction()));
+	if (!parseLocalitiesFromKeys(ryw, failed, localities, addresses, exclusions, workers, result))
+		return result;
+	// If force option is not set, we need to do safety check
+	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
+	    failed ? "failed_locality" : "excluded_locality", "force")];
+	// only do safety check when we have localities to be excluded and the force option key is not set
+	if (localities.size() && !(force.first && force.second.present())) {
+		bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, failed, &result));
+		if (!safe)
+			return result;
+	}
+
+	excludeLocalities(ryw->getTransaction(), localities, failed);
+	includeLocalities(ryw);
+
+	return result;
+}
+
+ExcludedLocalitiesRangeImpl::ExcludedLocalitiesRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> ExcludedLocalitiesRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
+}
+
+void ExcludedLocalitiesRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	// ignore value
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(ValueRef())));
+}
+
+Key ExcludedLocalitiesRangeImpl::decode(const KeyRef& key) const {
+	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
+	    .withPrefix(LiteralStringRef("\xff/conf/"));
+}
+
+Key ExcludedLocalitiesRangeImpl::encode(const KeyRef& key) const {
+	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+}
+
+Future<Optional<std::string>> ExcludedLocalitiesRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	// exclude locality with failed option as false.
+	return excludeLocalityCommitActor(ryw, false);
+}
+
+FailedLocalitiesRangeImpl::FailedLocalitiesRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> FailedLocalitiesRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
+}
+
+void FailedLocalitiesRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	// ignore value
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(ValueRef())));
+}
+
+Key FailedLocalitiesRangeImpl::decode(const KeyRef& key) const {
+	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
+	    .withPrefix(LiteralStringRef("\xff/conf/"));
+}
+
+Key FailedLocalitiesRangeImpl::encode(const KeyRef& key) const {
+	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+}
+
+Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	// exclude locality with failed option as true.
+	return excludeLocalityCommitActor(ryw, true);
 }

@@ -32,6 +32,7 @@
 #include "fdbserver/StorageMetrics.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/QuietDatabase.h"
+#include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -209,11 +210,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		if (self->firstClient || self->distributed) {
 			try {
 				state DatabaseConfiguration configuration;
+				state std::map<UID, StorageServerInterface> tssMapping;
 
 				state Transaction tr(cx);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				loop {
 					try {
+						if (self->performTSSCheck) {
+							tssMapping.clear();
+							wait(readTSSMapping(&tr, &tssMapping));
+						}
 						RangeResult res = wait(tr.getRange(configKeys, 1000));
 						if (res.size() == 1000) {
 							TraceEvent("ConsistencyCheck_TooManyConfigOptions");
@@ -286,7 +292,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							throw;
 					}
 
-					wait(::success(self->checkForStorage(cx, configuration, self)));
+					wait(::success(self->checkForStorage(cx, configuration, tssMapping, self)));
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					// Check that each machine is operating as its desired class
@@ -317,7 +323,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						state Standalone<VectorRef<KeyValueRef>> keyLocations = keyLocationPromise.getFuture().get();
 
 						// Check that each shard has the same data on all storage servers that it resides on
-						wait(::success(self->checkDataConsistency(cx, keyLocations, configuration, self)));
+						wait(::success(self->checkDataConsistency(cx, keyLocations, configuration, tssMapping, self)));
 
 						// Cache consistency check
 						if (self->performCacheCheck)
@@ -1124,6 +1130,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<bool> checkDataConsistency(Database cx,
 	                                        VectorRef<KeyValueRef> keyLocations,
 	                                        DatabaseConfiguration configuration,
+	                                        std::map<UID, StorageServerInterface> tssMapping,
 	                                        ConsistencyCheckWorkload* self) {
 		// Stores the total number of bytes on each storage server
 		// In a distributed test, this will be an estimated size
@@ -1250,10 +1257,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (!isRelocating && self->performTSSCheck) {
 				int initialSize = storageServers.size();
 				for (int i = 0; i < initialSize; i++) {
-					Optional<StorageServerInterface> tssPair = cx->clientInfo->get().getTssPair(storageServers[i]);
-					if (tssPair.present()) {
-						storageServers.push_back(tssPair.get().id());
-						storageServerInterfaces.push_back(tssPair.get());
+					auto tssPair = tssMapping.find(storageServers[i]);
+					if (tssPair != tssMapping.end()) {
+						TEST(true); // TSS checked in consistency check
+						storageServers.push_back(tssPair->second.id());
+						storageServerInterfaces.push_back(tssPair->second);
 					}
 				}
 			}
@@ -1490,8 +1498,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .error(e);
 
 								// All shards should be available in quiscence
-								if (self->performQuiescentChecks &&
-								    (g_network->isSimulated() || !storageServerInterfaces[j].isTss())) {
+								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
 									self->testFailure("Storage server unavailable");
 									return false;
 								}
@@ -1746,6 +1753,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Returns false if any worker that should have a storage server does not have one
 	ACTOR Future<bool> checkForStorage(Database cx,
 	                                   DatabaseConfiguration configuration,
+	                                   std::map<UID, StorageServerInterface> tssMapping,
 	                                   ConsistencyCheckWorkload* self) {
 		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
@@ -1766,6 +1774,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				if (!found) {
 					TraceEvent("ConsistencyCheck_NoStorage")
 					    .detail("Address", addr)
+					    .detail("ProcessId", workers[i].interf.locality.processId())
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
 					missingStorage.push_back(workers[i].interf.locality.dcId());
@@ -1786,8 +1795,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		    (configuration.regions.size() == 2 && configuration.usableRegions > 1 && (missingDc0 || missingDc1))) {
 
 			// TODO could improve this check by also ensuring DD is currently recruiting a TSS by using quietdb?
-			bool couldExpectMissingTss =
-			    (configuration.desiredTSSCount - self->dbInfo->get().client.tssMapping.size()) > 0;
+			bool couldExpectMissingTss = (configuration.desiredTSSCount - tssMapping.size()) > 0;
 
 			int countMissing = missingStorage.size();
 			int acceptableTssMissing = 1;

@@ -18,10 +18,21 @@ set(FDBCLIENT_SRCS
   BackupContainerLocalDirectory.h
   BackupContainerS3BlobStore.actor.cpp
   BackupContainerS3BlobStore.h
+  ClientBooleanParams.cpp
+  ClientBooleanParams.h
+  ClientKnobCollection.cpp
+  ClientKnobCollection.h
+  ClientKnobs.cpp
+  ClientKnobs.h
   ClientLogEvents.h
   ClientWorkerInterface.h
   ClusterInterface.h
+  CommitProxyInterface.h
   CommitTransaction.h
+  ConfigKnobs.cpp
+  ConfigKnobs.h
+  ConfigTransactionInterface.cpp
+  ConfigTransactionInterface.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp
   DatabaseConfiguration.cpp
@@ -29,6 +40,7 @@ set(FDBCLIENT_SRCS
   DatabaseContext.h
   EventTypes.actor.h
   FDBOptions.h
+  FDBTypes.cpp
   FDBTypes.h
   FluentDSampleIngestor.cpp
   FileBackupAgent.actor.cpp
@@ -38,16 +50,20 @@ set(FDBCLIENT_SRCS
   GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
+  IConfigTransaction.cpp
+  IConfigTransaction.h
+  ISingleThreadTransaction.cpp
+  ISingleThreadTransaction.h
   JsonBuilder.cpp
   JsonBuilder.h
   KeyBackedTypes.h
   KeyRangeMap.actor.cpp
   KeyRangeMap.h
-  Knobs.cpp
   Knobs.h
+  IKnobCollection.cpp
+  IKnobCollection.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
-  CommitProxyInterface.h
   MonitorLeader.actor.cpp
   MonitorLeader.h
   MultiVersionAssignmentVars.h
@@ -59,18 +75,31 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
+  ParallelStream.actor.cpp
+  ParallelStream.actor.h
+  PaxosConfigTransaction.actor.cpp
+  PaxosConfigTransaction.h
+  SimpleConfigTransaction.actor.cpp
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
-  RestoreWorkerInterface.actor.h
+  RestoreInterface.cpp
+  RestoreInterface.h
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h
   S3BlobStore.actor.cpp
   Schemas.cpp
   Schemas.h
+  ServerKnobCollection.cpp
+  ServerKnobCollection.h
+  ServerKnobs.cpp
+  ServerKnobs.h
+  SimpleConfigTransaction.h
   SnapshotCache.h
+  SpecialKeySpace.actor.cpp
+  SpecialKeySpace.actor.h
   Status.h
   StatusClient.actor.cpp
   StatusClient.h
@@ -86,6 +115,8 @@ set(FDBCLIENT_SRCS
   TagThrottle.h
   TaskBucket.actor.cpp
   TaskBucket.h
+  TestKnobCollection.cpp
+  TestKnobCollection.h
   ThreadSafeTransaction.cpp
   ThreadSafeTransaction.h
   Tuple.cpp
@@ -148,14 +179,14 @@ if(BUILD_AZURE_BACKUP)
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
-add_dependencies(fdbclient fdboptions)
+add_dependencies(fdbclient fdboptions fdb_c_options)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
 
 # Create a separate fdbclient library with sampling enabled. This lets
 # fdbserver retain sampling functionality in client code while disabling
 # sampling for pure clients.
 add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
-add_dependencies(fdbclient_sampling fdboptions)
+add_dependencies(fdbclient_sampling fdboptions fdb_c_options)
 target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
 
