@@ -42,7 +42,7 @@ class BackupContainerAzureBlobStore final : public BackupContainerFileSystem,
 	friend class BackupContainerAzureBlobStoreImpl;
 
 public:
-	BackupContainerAzureBlobStore(const NetworkAddress& address,
+	BackupContainerAzureBlobStore(const std::string& endpoint,
 	                              const std::string& accountName,
 	                              const std::string& containerName,
 	                              const Optional<std::string>& encryptionKeyFileName);

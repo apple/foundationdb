@@ -239,7 +239,7 @@ Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileNa
 	});
 }
 
-BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const NetworkAddress& address,
+BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const std::string& endpoint,
                                                              const std::string& accountName,
                                                              const std::string& containerName,
                                                              const Optional<std::string>& encryptionKeyFileName)
@@ -248,8 +248,7 @@ BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const NetworkAddres
 	std::string accountKey = std::getenv("AZURE_KEY");
 	auto credential = std::make_shared<azure::storage_lite::shared_key_credential>(accountName, accountKey);
 	auto storageAccount = std::make_shared<azure::storage_lite::storage_account>(
-	    accountName, credential, false, format("http://%s/%s", address.toString().c_str(), accountName.c_str()));
-
+	    accountName, credential, true, format("https://%s", endpoint.c_str()));
 	client = std::make_unique<AzureClient>(storageAccount, 1);
 }
 
@@ -263,7 +262,18 @@ void BackupContainerAzureBlobStore::delref() {
 Future<Void> BackupContainerAzureBlobStore::create() {
 	Future<Void> createContainerFuture =
 	    asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
-		    client->create_container(containerName).wait();
+		    auto f = client->create_container(containerName);
+		    f.wait();
+		    auto outcome = f.get();
+		    if (!outcome.success()) {
+			    // TODO: Trace error?
+			    auto const err = outcome.error();
+			    printf("Error creating backup container: %s (%s) : %s\n",
+			           err.code_name.c_str(),
+			           err.code.c_str(),
+			           err.message.c_str());
+			    throw backup_error();
+		    }
 		    return Void();
 	    });
 	Future<Void> encryptionSetupFuture = usesEncryption() ? encryptionSetupComplete() : Void();
