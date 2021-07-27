@@ -78,15 +78,19 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	Version getEnd() const final;
 	Version getBackupStartVersion() const final;
 	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const final;
-	Future<Reference<ILogSystem>> newEpoch(const RecruitFromConfigurationReply& recr,
-	                                       const Future<struct RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
-	                                       const DatabaseConfiguration& config,
-	                                       LogEpoch recoveryCount,
-	                                       int8_t primaryLocality,
-	                                       int8_t remoteLocality,
-	                                       const vector<Tag>& allTags,
-	                                       TLogGroupCollectionRef tLogGroupCollection,
-	                                       const Reference<AsyncVar<bool>>& recruitmentStalled) final;
+
+	Future<Reference<ILogSystem>> newEpoch(
+	    const RecruitFromConfigurationReply& recr,
+	    const Future<struct RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
+	    const DatabaseConfiguration& config,
+	    LogEpoch recoveryCount,
+	    int8_t primaryLocality,
+	    int8_t remoteLocality,
+	    const vector<Tag>& allTags,
+	    const Reference<AsyncVar<bool>>& recruitmentStalled,
+	    TLogGroupCollectionRef tLogGroupCollection,
+	    std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
+	    std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) final;
 	LogSystemConfig getLogSystemConfig() const final;
 	Standalone<StringRef> getLogsValue() const final;
 	Future<Void> onLogSystemConfigChange() final;

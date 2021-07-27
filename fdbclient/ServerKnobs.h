@@ -103,6 +103,7 @@ public:
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
 	bool TLOG_SERVER_TEAM_PARTITIONED;
+	bool TLOG_NEW_INTERFACE;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;

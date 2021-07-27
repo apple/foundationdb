@@ -19,6 +19,7 @@
  */
 
 #include <iterator>
+#include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -208,6 +209,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	int64_t memoryLimit;
 	std::map<Optional<Value>, int8_t> dcId_locality;
 	std::vector<Tag> allTags;
+	std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups;
+	std::unordered_map<UID, std::vector<UID>> tlogGroupIdToTlogServerIds;
 
 	int8_t getNextLocality() {
 		int8_t maxLocality = -1;
@@ -353,10 +356,35 @@ ACTOR Future<Void> newResolvers(Reference<MasterData> self, RecruitFromConfigura
 	return Void();
 }
 
+std::unordered_map<UID, std::vector<UID>> getTlogGroupIdToTlogServerIds(Reference<MasterData> self) {
+	std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds;
+	std::vector<TLogGroupRef> groups = self->tLogGroupCollection->groups();
+	for (const TLogGroupRef group : groups) {
+		UID groupId = group->id();
+		tLogGroupIdToServerIds[groupId] = group->serverIds();
+	}
+	return tLogGroupIdToServerIds;
+}
+
+std::unordered_map<UID, std::vector<TLogGroupRef>> getTlogServerIdToTlogGroups(Reference<MasterData> self) {
+	std::unordered_map<UID, std::vector<TLogGroupRef>> tLogServerIdtoTLogGroups;
+	std::vector<TLogGroupRef> groups = self->tLogGroupCollection->groups();
+	for (const TLogGroupRef group : groups) {
+		std::vector<UID> ids = group->serverIds();
+		for (UID id : ids) {
+			tLogServerIdtoTLogGroups[id].push_back(group);
+		}
+	}
+	return tLogServerIdtoTLogGroups;
+}
+
 ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
                                   RecruitFromConfigurationReply recr,
                                   Reference<ILogSystem> oldLogSystem,
                                   vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
+
+	self->tlogGroupIdToTlogServerIds = getTlogGroupIdToTlogServerIds(self);
+	self->tlogServerIdToTlogGroups = getTlogServerIdToTlogGroups(self);
 	if (self->configuration.usableRegions > 1) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
 		if (!self->dcId_locality.count(recr.dcId)) {
@@ -396,6 +424,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 
 		self->primaryLocality = self->dcId_locality[recr.dcId];
 		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
+
 		Reference<ILogSystem> newLogSystem = wait(oldLogSystem->newEpoch(recr,
 		                                                                 fRemoteWorkers,
 		                                                                 self->configuration,
@@ -403,8 +432,10 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
+		                                                                 self->recruitmentStalled,
 		                                                                 self->tLogGroupCollection,
-		                                                                 self->recruitmentStalled));
+		                                                                 self->tlogGroupIdToTlogServerIds,
+		                                                                 self->tlogServerIdToTlogGroups));
 		self->logSystem = newLogSystem;
 	} else {
 		self->primaryLocality = tagLocalitySpecial;
@@ -416,8 +447,10 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
+		                                                                 self->recruitmentStalled,
 		                                                                 self->tLogGroupCollection,
-		                                                                 self->recruitmentStalled));
+		                                                                 self->tlogGroupIdToTlogServerIds,
+		                                                                 self->tlogServerIdToTlogGroups));
 		self->logSystem = newLogSystem;
 	}
 	return Void();
@@ -1006,8 +1039,10 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 		req.prevVersion = -1;
 		req.version = self->lastEpochEnd;
 		req.lastReceivedVersion = -1;
-		// TODO: add all team IDs to the request
-
+		req.newGroups.reserve(self->tLogGroupCollection->groups().size());
+		for (const auto& tLogGroup : self->tLogGroupCollection->groups()) {
+			req.newGroups.push_back(tLogGroup->id());
+		}
 		replies.push_back(brokenPromiseToNever(r.resolve.getReply(req)));
 	}
 

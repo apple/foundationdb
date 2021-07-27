@@ -172,8 +172,11 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	auto& tLogSet = dbInfoBuilder.logSystemConfig.tLogs.back();
 	tLogSet.locality = locality;
 	for (auto tLogGroup : pContext->tLogGroupLeaders) {
-		tLogSet.ptxnTLogGroups[tLogGroup.first].push_back(OptionalInterface<ptxn::TLogInterface_PassivelyPull>(
-		    *std::dynamic_pointer_cast<ptxn::TLogInterface_PassivelyPull>(tLogGroup.second)));
+		OptionalInterface<ptxn::TLogInterface_PassivelyPull> optionalInterface =
+		    OptionalInterface<ptxn::TLogInterface_PassivelyPull>(
+		        *std::dynamic_pointer_cast<ptxn::TLogInterface_PassivelyPull>(tLogGroup.second));
+		tLogSet.ptxnTLogGroups[tLogGroup.first].push_back(
+		    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(optionalInterface));
 	}
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
 	state Version tssSeedVersion = 0;

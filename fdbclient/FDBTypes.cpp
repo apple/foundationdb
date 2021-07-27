@@ -65,3 +65,11 @@ std::string KeySelectorRef::toString() const {
 			return format("%d+lastLessThan(%s)", offset, printable(key).c_str());
 	}
 }
+
+namespace ptxn {
+
+TLogGroupID tLogGroupByStorageTeamID(const std::vector<TLogGroupID>& tLogGroups, const StorageTeamID& storageTeamID) {
+	return tLogGroups[std::hash<StorageTeamID>{}(storageTeamID) % tLogGroups.size()];
+}
+
+} // namespace ptxn
