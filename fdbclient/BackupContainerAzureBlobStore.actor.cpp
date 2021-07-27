@@ -245,7 +245,13 @@ BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const std::string& 
                                                              const Optional<std::string>& encryptionKeyFileName)
   : containerName(containerName) {
 	setEncryptionKey(encryptionKeyFileName);
-	std::string accountKey = std::getenv("AZURE_KEY");
+	const char* _accountKey = std::getenv("AZURE_KEY");
+	if (!_accountKey) {
+		TraceEvent(SevError, "EnvironmentVariableNotFound").detail("EnvVariable", "AZURE_KEY");
+		// TODO: More descriptive error?
+		throw backup_error();
+	}
+	std::string accountKey = _accountKey;
 	auto credential = std::make_shared<azure::storage_lite::shared_key_credential>(accountName, accountKey);
 	auto storageAccount = std::make_shared<azure::storage_lite::storage_account>(
 	    accountName, credential, true, format("https://%s", endpoint.c_str()));
