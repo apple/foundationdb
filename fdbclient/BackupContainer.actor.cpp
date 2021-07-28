@@ -55,6 +55,7 @@ namespace IBackupFile_impl {
 
 #if ENCRYPTION_ENABLED
 ACTOR Future<Void> setupEncryption(std::string encryptionKeyFileName) {
+	TraceEvent(SevDebug, "SettingUpBackupEncryption").detail("EncryptionKeyFileName", encryptionKeyFileName);
 	state Reference<IAsyncFile> keyFile;
 	state StreamCipher::Key::RawKeyType key;
 	try {
