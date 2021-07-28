@@ -71,6 +71,9 @@ public:
 	// intended to  be used by CommitProxy.
 	explicit TLogGroupCollection(Reference<AsyncVar<ServerDBInfo>> serverDbInfo);
 
+	// Sets the policy for TLogGroupCollection.
+	void setPolicy(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize);
+
 	// Returns list of groups recruited by this collection.
 	const std::vector<TLogGroupRef>& groups() const;
 

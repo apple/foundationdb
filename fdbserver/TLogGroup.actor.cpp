@@ -65,6 +65,12 @@ TLogGroupCollection::TLogGroupCollection(Reference<AsyncVar<ServerDBInfo>> dbInf
 	}
 }
 
+void TLogGroupCollection::setPolicy(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize) {
+	this->policy = policy;
+	this->GROUP_SIZE = groupSize;
+	this->targetNumGroups = numGroups;
+}
+
 const std::vector<TLogGroupRef>& TLogGroupCollection::groups() const {
 	return recruitedGroups;
 }
@@ -165,6 +171,7 @@ void TLogGroupCollection::addTLogGroup(TLogGroupRef group) {
 }
 
 TLogGroupRef TLogGroupCollection::selectFreeGroup(int seed) {
+	ASSERT(recruitedGroups.size() > 0);
 	return recruitedGroups[seed % recruitedGroups.size()];
 }
 
