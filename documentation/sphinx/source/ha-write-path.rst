@@ -43,7 +43,7 @@ Tag is an overloaded term in FDB. In the early history of FDB, a tag is a number
 
 * As FDB scales and we work to reduce the recovery time, a special tag for transaction state store (txnStateStore) is introduced;
 
-* and so on.
+* FDB also have transaction tags which are used for transaction throttling, not for the tag-partitioned log system mentioned in this article. See :ref:`transaction-tagging`
 
 To distinguish the types of tags used for different purposes at different locations (primary DC or remote DC), we introduce Tag structure, which has two fields:
 
@@ -86,7 +86,7 @@ At Proxy
 
 * 1 tag for log router. Assume it is (-2, 3), where -2 is the locality value for all log router tags. The tag id is randomly chosen by proxy as well.
 
-* No tag for satellite tLog. The "satellite TLog locality" -5 in the code is used when recruiting a satellite TLog to tell it that it is a satellite TLog. This causes the TLog to only index log router tags (-2) and not bother indexing any of the >0 tags.
+* No tag for satellite tLog. The "satellite TLog locality" -5 in the code is used when recruiting a satellite TLog to tell it that it is a satellite TLog. This causes the satellite TLog to only index log router tags (-2) and not bother indexing any of the >0 tags.
 
 Why do we need log routers? Why cannot we let remote tLog directly pull data from primary tLogs?
 
@@ -98,7 +98,7 @@ Another alternative is to use remote SSes’ tags to decide which satellite tLog
 
 Proxy groups mutations with the same tag as messages. Proxy then synchronously pushes these mutation messages to tLogs based on the tags. Proxy cannot acknowledge that the transaction is committed until the message has been durable on all primary and satellite tLogs. 
 
-**Commit empty messages to tLogs.** When a proxy commits a tagged mutation message at version V1 to tLogs, it also has to commit an empty message at the same version V1 to the rest of tLogs. This makes sure every tLog has the same versions of messages, even though some messages are empty. This is a trick used in FDB to let all tLogs march at the same versions. The reason why FDB does the trick is because the master hands out segments of versions as 'from v1 to v2', and the TLogs need to be able to piece all of them back together into one consistent timeline. It may or may not be a good design decision, because a slow tLog can delay other tLogs of the same kind. We may want to revisit the design later.
+**Commit empty messages to tLogs.** When a proxy commits a tagged mutation message at version V1 to tLogs, it also has to commit an empty message at the same version V1 to the rest of tLogs. This makes sure every tLog has the same versions of messages, even though some messages are empty. This is a trick used in FDB to let all tLogs march at the same versions. The reason why FDB does the trick is that the master hands out segments of versions as 'from v1 to v2', and the TLogs need to be able to piece all of them back together into one consistent timeline. It may or may not be a good design decision, because a slow tLog can delay other tLogs of the same kind. We may want to revisit the design later.
 
 
 At primary tLogs and satellite tLogs
