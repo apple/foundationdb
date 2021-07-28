@@ -566,9 +566,9 @@ void CommitBatchContext::evaluateBatchSize() {
 }
 
 void CommitBatchContext::trackStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams) {
-	ASSERT(pProxyCommitData->tLogGroups.size());
+	ASSERT(!pProxyCommitData->tLogGroupCollection->groups().empty());
 	ASSERT(storageTeams.size() == 1);
-	auto tLogGroupId = ptxn::tLogGroupByStorageTeamID(pProxyCommitData->tLogGroups, *storageTeams.begin());
+	auto tLogGroupId = pProxyCommitData->tLogGroupCollection->selectFreeGroup(storageTeams.begin()->hash())->id();
 	if (!pGroupMessageBuilders.count(tLogGroupId)) {
 		pGroupMessageBuilders.emplace(tLogGroupId,
 		                              std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
@@ -590,8 +590,6 @@ void CommitBatchContext::findOverlappingTLogGroups() {
 				auto firstRange = ranges.begin();
 				++firstRange;
 				if (firstRange == ranges.end()) {
-					// should we remove this line?
-					ranges.begin().value().populateTags();
 					trackStorageTeams(ranges.begin().value().storageTeams);
 				} else {
 					for (auto r : ranges) {
@@ -608,9 +606,9 @@ void CommitBatchContext::findOverlappingTLogGroups() {
 
 void CommitBatchContext::writeToStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams, MutationRef m) {
 	for (const auto& team : storageTeams) {
-		auto tLogGroup = ptxn::tLogGroupByStorageTeamID(pProxyCommitData->tLogGroups, team);
-		ASSERT(pGroupMessageBuilders.count(tLogGroup));
-		pGroupMessageBuilders[tLogGroup]->write(m, team);
+		auto groupID = pProxyCommitData->tLogGroupCollection->selectFreeGroup(team.hash())->id();
+		ASSERT(pGroupMessageBuilders.count(groupID));
+		pGroupMessageBuilders[groupID]->write(m, team);
 	}
 }
 
@@ -1988,17 +1986,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		r->value().emplace_back(0, 0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
-	// retrieve TLog group ids info from ServerDBInfo
-	// TODO: change it to retrieve from master through txnStateStore
-	for (const auto& tLogSet : commitData.db->get().logSystemConfig.tLogs) {
-		if (tLogSet.isLocal && !tLogSet.tLogGroupIDs.empty()) {
-			commitData.tLogGroups = tLogSet.tLogGroupIDs;
-			break;
-		}
-	}
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-		ASSERT(commitData.tLogGroups.size()); // we should have at least 1 TLogGroup if ptxn mode is enabled.
-	}
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
@@ -2165,6 +2152,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					commitData.metadataVersion = commitData.txnStateStore->readValue(metadataVersionKey).get();
 
 					commitData.txnStateStore->enableSnapshot();
+
+					if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+						ASSERT(!commitData.tLogGroupCollection->groups().empty());
+					}
 				}
 			}
 			addActor.send(broadcastTxnRequest(req, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));

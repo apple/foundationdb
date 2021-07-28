@@ -29,22 +29,11 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
-#include "fdbserver/LogProtocolMessage.h"
 #include <fdbserver/ptxn/TLogPeekCursor.actor.h>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<ptxn::TLogCommitReply>> replies) {
-	wait(f);
-	Version minVersion = std::numeric_limits<Version>::max();
-	for (auto& reply : replies) {
-		if (reply.isReady() && !reply.isError()) {
-			minVersion = std::min(minVersion, reply.get().version);
-		}
-	}
-	return minVersion;
-}
-
-ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<TLogCommitReply>> replies) {
+ACTOR template <class T>
+Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<T>> replies) {
 	wait(f);
 	Version minVersion = std::numeric_limits<Version>::max();
 	for (auto& reply : replies) {
@@ -1282,6 +1271,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					for (auto& [tLogGroup, _] : tLogSet->groupIdToInterfaces) {
 						tLogGroups.push_back(tLogGroup);
 					}
+					// TODO: remove this once tlog group collection is inside ILogSystem
 					tLogGroup = ptxn::tLogGroupByStorageTeamID(tLogGroups, storageTeam.get());
 				}
 			}

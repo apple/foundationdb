@@ -135,7 +135,6 @@ struct ProxyCommitData {
 	vector<ResolverInterface> resolvers;
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
-	std::vector<ptxn::TLogGroupID> tLogGroups;
 	IKeyValueStore* txnStateStore;
 	NotifiedVersion committedVersion; // Provided that this recovery has succeeded or will succeed, this version is
 	                                  // fully committed (durable)

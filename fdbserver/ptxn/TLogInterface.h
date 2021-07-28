@@ -363,11 +363,11 @@ struct TLogInterfaceBase {
 
 	constexpr static FileIdentifier file_identifier = 4121433;
 
-	RequestStream<struct TLogCommitRequest> commit;
-	RequestStream<struct TLogPeekRequest> peek;
-	RequestStream<struct TLogPopRequest> pop;
+	RequestStream<TLogCommitRequest> commit;
+	RequestStream<TLogPeekRequest> peek;
+	RequestStream<TLogPopRequest> pop;
 	RequestStream<ReplyPromise<TLogLockResult>> lock; // first stage of database recovery
-	RequestStream<struct TLogQueuingMetricsRequest> getQueuingMetrics;
+	RequestStream<TLogQueuingMetricsRequest> getQueuingMetrics;
 	RequestStream<TLogConfirmRunningRequest> confirmRunning; // used for getReadVersion requests from client
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<TLogRecoveryFinishedRequest> recoveryFinished;
