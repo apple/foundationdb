@@ -191,6 +191,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 				serializer(w, x);
 				tr.set(self->keyToRead, w.toValue());
 				wait(tr.commit());
+				tr.reset();
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
