@@ -134,7 +134,7 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext) {
 
 	printTiming << "AA" << std::endl;
 
-	state TLogPeekRequest request(debugID, beginVersion, endVersion, false, false, storageTeamID);
+	state TLogPeekRequest request(debugID, beginVersion, endVersion, false, false, storageTeamID, TLogGroupID());
 	print::print(request);
 
 	state TLogPeekReply reply = wait(pContext->pTLogInterface->peek.getReply(request));

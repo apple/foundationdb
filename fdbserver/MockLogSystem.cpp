@@ -93,7 +93,8 @@ Future<Version> MockLogSystem::push(Version prevVersion,
                                     Version minKnownCommittedVersion,
                                     struct LogPushData& data,
                                     const SpanID& spanContext,
-                                    Optional<UID> debugID) {
+                                    Optional<UID> debugID,
+                                    Optional<ptxn::TLogGroupID> tLogGroup) {
 	logMethodName(__func__);
 	return Future<Version>();
 }
@@ -197,9 +198,7 @@ Future<Reference<ILogSystem>> MockLogSystem::newEpoch(
     int8_t remoteLocality,
     const vector<Tag>& allTags,
     const Reference<AsyncVar<bool>>& recruitmentStalled,
-    TLogGroupCollectionRef tLogGroupCollection,
-    std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
-    std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) {
+    Reference<TLogGroupCollection> tLogGroupCollection) {
 	logMethodName(__func__);
 	return Future<Reference<ILogSystem>>();
 }

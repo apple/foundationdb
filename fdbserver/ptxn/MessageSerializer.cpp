@@ -222,12 +222,13 @@ Standalone<StringRef> ProxySubsequencedMessageSerializer::getSerialized(const St
 	return serializer.getSerialized();
 }
 
-std::unordered_map<StorageTeamID, Standalone<StringRef>> ProxySubsequencedMessageSerializer::getAllSerialized() {
-	std::unordered_map<StorageTeamID, Standalone<StringRef>> result;
+std::pair<Arena, std::unordered_map<StorageTeamID, StringRef>> ProxySubsequencedMessageSerializer::getAllSerialized() {
+	std::unordered_map<StorageTeamID, StringRef> result;
+	Arena sharedArena;
 	for (auto& [storageTeamID, serializer] : serializers) {
-		result[storageTeamID] = getSerialized(storageTeamID);
+		result[storageTeamID] = StringRef(sharedArena, getSerialized(storageTeamID));
 	}
-	return result;
+	return { sharedArena, result };
 }
 
 namespace details {

@@ -68,9 +68,10 @@ void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
 	}
 }
 
-void prepareProxySerializedMessages(const CommitRecord& commitRecord,
-                                    const Version& version,
-                                    ProxySubsequencedMessageSerializer& serializer) {
+void prepareProxySerializedMessages(
+    const CommitRecord& commitRecord,
+    const Version& version,
+    std::function<std::shared_ptr<ProxySubsequencedMessageSerializer>(StorageTeamID)> serializer) {
 	if (commitRecord.messages.find(version) == commitRecord.messages.end()) {
 		// Version not found, skips the serialization
 		return;
@@ -79,10 +80,10 @@ void prepareProxySerializedMessages(const CommitRecord& commitRecord,
 		for (const auto& [subsequence, message] : messages) {
 			switch (message.getType()) {
 			case Message::Type::MUTATION_REF:
-				serializer.write(std::get<MutationRef>(message), storageTeamID);
+				serializer(storageTeamID)->write(std::get<MutationRef>(message), storageTeamID);
 				break;
 			case Message::Type::SPAN_CONTEXT_MESSAGE:
-				serializer.broadcastSpanContext(std::get<SpanContextMessage>(message));
+				serializer(storageTeamID)->broadcastSpanContext(std::get<SpanContextMessage>(message));
 				break;
 			default:
 				throw internal_error_msg("Unsupported type");

@@ -209,8 +209,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	int64_t memoryLimit;
 	std::map<Optional<Value>, int8_t> dcId_locality;
 	std::vector<Tag> allTags;
-	std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups;
-	std::unordered_map<UID, std::vector<UID>> tlogGroupIdToTlogServerIds;
 
 	int8_t getNextLocality() {
 		int8_t maxLocality = -1;
@@ -356,35 +354,10 @@ ACTOR Future<Void> newResolvers(Reference<MasterData> self, RecruitFromConfigura
 	return Void();
 }
 
-std::unordered_map<UID, std::vector<UID>> getTlogGroupIdToTlogServerIds(Reference<MasterData> self) {
-	std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds;
-	std::vector<TLogGroupRef> groups = self->tLogGroupCollection->groups();
-	for (const TLogGroupRef group : groups) {
-		UID groupId = group->id();
-		tLogGroupIdToServerIds[groupId] = group->serverIds();
-	}
-	return tLogGroupIdToServerIds;
-}
-
-std::unordered_map<UID, std::vector<TLogGroupRef>> getTlogServerIdToTlogGroups(Reference<MasterData> self) {
-	std::unordered_map<UID, std::vector<TLogGroupRef>> tLogServerIdtoTLogGroups;
-	std::vector<TLogGroupRef> groups = self->tLogGroupCollection->groups();
-	for (const TLogGroupRef group : groups) {
-		std::vector<UID> ids = group->serverIds();
-		for (UID id : ids) {
-			tLogServerIdtoTLogGroups[id].push_back(group);
-		}
-	}
-	return tLogServerIdtoTLogGroups;
-}
-
 ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
                                   RecruitFromConfigurationReply recr,
                                   Reference<ILogSystem> oldLogSystem,
                                   vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
-
-	self->tlogGroupIdToTlogServerIds = getTlogGroupIdToTlogServerIds(self);
-	self->tlogServerIdToTlogGroups = getTlogServerIdToTlogGroups(self);
 	if (self->configuration.usableRegions > 1) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
 		if (!self->dcId_locality.count(recr.dcId)) {
@@ -433,9 +406,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
 		                                                                 self->recruitmentStalled,
-		                                                                 self->tLogGroupCollection,
-		                                                                 self->tlogGroupIdToTlogServerIds,
-		                                                                 self->tlogServerIdToTlogGroups));
+		                                                                 self->tLogGroupCollection));
 		self->logSystem = newLogSystem;
 	} else {
 		self->primaryLocality = tagLocalitySpecial;
@@ -448,9 +419,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
 		                                                                 self->recruitmentStalled,
-		                                                                 self->tLogGroupCollection,
-		                                                                 self->tlogGroupIdToTlogServerIds,
-		                                                                 self->tlogServerIdToTlogGroups));
+		                                                                 self->tLogGroupCollection));
 		self->logSystem = newLogSystem;
 	}
 	return Void();
@@ -1970,6 +1939,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		}
 	}
 
+	// after recovery and recruitment
 	self->tLogGroupCollection->storeState(&recoveryCommitRequest);
 
 	applyMetadataMutations(SpanID(),

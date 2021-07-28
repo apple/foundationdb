@@ -24,6 +24,7 @@
 #include <set>
 #include <vector>
 #include <unordered_map>
+#include <fdbserver/ptxn/MessageSerializer.h>
 
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
@@ -58,7 +59,8 @@ class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
 	std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>> logServersPtxn;
-	std::unordered_map<UID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
+	std::vector<ptxn::TLogGroupID> tLogGroupIDs;
+	std::map<ptxn::TLogGroupID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
 	    groupIdToInterfaces;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
@@ -746,7 +748,8 @@ struct ILogSystem {
 	                             Version minKnownCommittedVersion,
 	                             struct LogPushData& data,
 	                             SpanID const& spanContext,
-	                             Optional<UID> debugID = Optional<UID>()) = 0;
+	                             Optional<UID> debugID = Optional<UID>(),
+	                             Optional<ptxn::TLogGroupID> tLogGroup = Optional<ptxn::TLogGroupID>()) = 0;
 	// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered
 	// earlier) Puts the given messages into the bundle, each with the given tags, and with message versions (version,
 	// 0) - (version, N) Changes the version number of the bundle to be version (unblocking the next push) Returns when
@@ -873,9 +876,7 @@ struct ILogSystem {
 	    int8_t remoteLocality,
 	    std::vector<Tag> const& allTags,
 	    Reference<AsyncVar<bool>> const& recruitmentStalled,
-	    TLogGroupCollectionRef tLogGroupCollection,
-	    std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
-	    std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) = 0;
+	    TLogGroupCollectionRef tLogGroupCollection) = 0;
 	// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 	// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional
 	// until the caller updates the coordinated DBCoreState
@@ -1121,6 +1122,9 @@ struct LogPushData : NonCopyable {
 		ASSERT_WE_THINK(isEmptyMessage.size() > 0);
 		return 1.0 * count / isEmptyMessage.size();
 	}
+
+	std::unordered_map<ptxn::TLogGroupID, std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer>>*
+	    pGroupMessageBuilders;
 
 private:
 	Reference<ILogSystem> logSystem;

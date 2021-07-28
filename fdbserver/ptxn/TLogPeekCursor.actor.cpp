@@ -230,14 +230,16 @@ bool StorageTeamPeekCursor::hasRemainingImpl() const {
 ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> const& interf,
                                    Tag tag,
                                    StorageTeamID storageTeamId,
+                                   TLogGroupID tLogGroupID,
                                    Version begin,
                                    Version end,
                                    bool returnIfBlocked,
                                    bool parallelGetMore)
-  : interf(interf), tag(tag), storageTeamId(storageTeamId), messageVersion(begin), end(end), hasMsg(false),
-    rd(results.arena, results.data, Unversioned()), randomID(deterministicRandom()->randomUniqueID()), poppedVersion(0),
-    returnIfBlocked(returnIfBlocked), sequence(0), onlySpilled(false), parallelGetMore(parallelGetMore), lastReset(0),
-    slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void()) {
+  : interf(interf), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID), messageVersion(begin), end(end),
+    hasMsg(false), rd(results.arena, results.data, Unversioned()), randomID(deterministicRandom()->randomUniqueID()),
+    poppedVersion(0), returnIfBlocked(returnIfBlocked), sequence(0), onlySpilled(false),
+    parallelGetMore(parallelGetMore), lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0),
+    resetCheck(Void()) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	//TraceEvent("SPC_Starting", randomID).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).backtrace();
@@ -250,12 +252,13 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
                                    bool hasMsg,
                                    Version poppedVersion,
                                    Tag tag,
-                                   StorageTeamID storageTeamId)
-  : results(results), tag(tag), storageTeamId(storageTeamId), rd(results.arena, results.data, Unversioned()),
-    messageVersion(messageVersion), end(end), messageAndTags(message), hasMsg(hasMsg),
-    randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false),
-    sequence(0), onlySpilled(false), parallelGetMore(false), lastReset(0), slowReplies(0), fastReplies(0),
-    unknownReplies(0), resetCheck(Void()) {
+                                   StorageTeamID storageTeamId,
+                                   TLogGroupID tLogGroupID)
+  : results(results), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID),
+    rd(results.arena, results.data, Unversioned()), messageVersion(messageVersion), end(end), messageAndTags(message),
+    hasMsg(hasMsg), randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion),
+    returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false), lastReset(0), slowReplies(0),
+    fastReplies(0), unknownReplies(0), resetCheck(Void()) {
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
@@ -267,7 +270,7 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
 
 Reference<ILogSystem::IPeekCursor> ServerPeekCursor::cloneNoMore() {
 	return makeReference<ServerPeekCursor>(
-	    results, messageVersion, end, messageAndTags, hasMsg, poppedVersion, tag, storageTeamId);
+	    results, messageVersion, end, messageAndTags, hasMsg, poppedVersion, tag, storageTeamId, tLogGroupID);
 }
 
 void ServerPeekCursor::setProtocolVersion(ProtocolVersion version) {
@@ -438,7 +441,8 @@ ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriorit
 					                                                                       Optional<Version>(),
 					                                                                       self->returnIfBlocked,
 					                                                                       self->onlySpilled,
-					                                                                       self->storageTeamId),
+					                                                                       self->storageTeamId,
+					                                                                       self->tLogGroupID),
 					                                                       taskID)));
 				}
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
@@ -517,7 +521,8 @@ ACTOR Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID
 				                                        Optional<Version>(),
 				                                        self->returnIfBlocked,
 				                                        self->onlySpilled,
-				                                        self->storageTeamId),
+				                                        self->storageTeamId,
+				                                        self->tLogGroupID),
 				                        taskID))
 				                  : Never())) {
 					self->results = res;
