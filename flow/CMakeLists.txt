@@ -137,12 +137,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     target_link_libraries(flow PUBLIC ${EIO})
   endif()
 endif()
-
-# For Clang in Linux environment, libatomic is required
-if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
-	set (FLOW_LIBS ${FLOW_LIBS} atomic)
-endif ()
-
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
