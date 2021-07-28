@@ -2028,17 +2028,17 @@ public:
 		Standalone<VectorRef<LogicalPageID>> originalPageIDs;
 		Standalone<VectorRef<LogicalPageID>> newPageIDs;
 
-		static Type getTypeOf(Standalone<VectorRef<LogicalPageID>> newPageIDs) {
-			if (newPageIDs.front() == invalidLogicalPageID) {
+		static Type getTypeOf(LogicalPageID newPageID) {
+			if (newPageID == invalidLogicalPageID) {
 				return FREE;
 			}
-			if (newPageIDs.front() == 0) {
+			if (newPageID == 0) {
 				return DETACH;
 			}
 			return REMAP;
 		}
 
-		Type getType() const { return getTypeOf(newPageIDs); }
+		Type getType() const { return getTypeOf(newPageIDs.front()); }
 
 		bool operator<(const RemappedPage& rhs) const { return version < rhs.version; }
 
@@ -2279,8 +2279,9 @@ public:
 						             self->remapQueue.numEntries);
 						state int i = 0; 
 						for (auto& r : remaps) {
-							self->remappedPages[r.originalPageIDs[i]][r.version] = r.newPageIDs[i];
-							++i;
+							for(i = 0; i<r.originalPageIDs.size(); ++i){
+								self->remappedPages[r.originalPageIDs[i]][r.version] = r.newPageIDs[i];
+							}
 						}
 					}
 					when(wait(remapRecoverActor)) { remapRecoverActor = Never(); }
@@ -2720,7 +2721,8 @@ public:
 
 	Standalone<VectorRef<LogicalPageID>> detachRemappedPage(VectorRef<LogicalPageID> pageIDs, uint8_t level, Version v) override {
 		Standalone<VectorRef<LogicalPageID>> newIDs;
-		for(const auto& pageID:pageIDs){
+		Standalone<VectorRef<LogicalPageID>> mappedNewIDs;
+		for(auto pageID:pageIDs){
 			auto i = remappedPages.find(pageID);
 			if (i == remappedPages.end()) {
 				// Page is not remapped
@@ -2731,7 +2733,7 @@ public:
 			// Get the page that id was most recently remapped to
 			auto iLast = i->second.rbegin();
 			LogicalPageID newID = iLast->second;
-			ASSERT(RemappedPage::getTypeOf(VectorRef<LogicalPageID>(&newID,1)) == RemappedPage::REMAP);
+			ASSERT(RemappedPage::getTypeOf(newID) == RemappedPage::REMAP);
 
 			// If the last change remap was also at v then change the remap to a delete, as it's essentially
 			// the same as the original page being deleted at that version and newID being used from then on.
@@ -2744,7 +2746,8 @@ public:
 							v,
 							pLastCommittedHeader->oldestVersion);
 				iLast->second = invalidLogicalPageID;
-				newIDs.push_back(newIDs.arena(), invalidLogicalPageID);
+				mappedNewIDs.push_back(mappedNewIDs.arena(), invalidLogicalPageID);
+				
 			} else {
 				debug_printf("DWALPager(%s) op=detach originalID=%s newID=%s @%" PRId64 " oldestVersion=%" PRId64 "\n",
 							filename.c_str(),
@@ -2754,10 +2757,14 @@ public:
 							pLastCommittedHeader->oldestVersion);
 				// Mark id as converted to its last remapped location as of v
 				i->second[v] = 0;
-				newIDs.push_back(newIDs.arena(), 0);
+				mappedNewIDs.push_back(mappedNewIDs.arena(), 0);
 			}
+			newIDs.push_back(newIDs.arena(), newID);
 		}
-		remapQueue.pushBack( RemappedPage{ pageIDs, newIDs, level, v} );
+		if( mappedNewIDs.size() > 0){
+			ASSERT(mappedNewIDs.size() == pageIDs.size());
+			remapQueue.pushBack(RemappedPage{ pageIDs, mappedNewIDs, level, v });
+		}
 		return newIDs;
 	}
 
@@ -2765,6 +2772,8 @@ public:
 		// If pageID has been remapped, then it can't be freed until all existing remaps for that page have been undone,
 		// so queue it for later deletion
 		Standalone<VectorRef<LogicalPageID>> unmappedPageIDs;
+		Standalone<VectorRef<LogicalPageID>> remapOriginalPageIDs;
+		Standalone<VectorRef<LogicalPageID>> remapNewPageIDs;
 		for(auto pageID:pageIDs){
 			auto i = remappedPages.find(pageID);
 			if (i != remappedPages.end()) {
@@ -2773,8 +2782,8 @@ public:
 					toString(pageID).c_str(),
 					v,
 					pLastCommittedHeader->oldestVersion);
-				auto invalidPageID = invalidLogicalPageID;
-				remapQueue.pushBack(RemappedPage{ VectorRef<LogicalPageID>(&pageID,1), VectorRef<LogicalPageID>(&invalidPageID, 1), level,v });
+				remapOriginalPageIDs.push_back(remapOriginalPageIDs.arena(), pageID);
+				remapNewPageIDs.push_back(remapNewPageIDs.arena(), invalidLogicalPageID);
 
 				// A freed page is unlikely to be read again soon so prioritize its cache eviction
 				// If it is a superpage, only the first ID can found in the pageCache.
@@ -2789,7 +2798,11 @@ public:
 			}
 		}
 		if(unmappedPageIDs.size()>0) {
+			ASSERT(unmappedPageIDs.size() == pageIDs.size());
 			freeUnmappedPage(unmappedPageIDs, v);
+		}
+		else{
+			remapQueue.pushBack(RemappedPage{ remapOriginalPageIDs, remapNewPageIDs, level, v });
 		}
 	};
 
@@ -3148,7 +3161,7 @@ public:
 			if (nextEntry == iPageMapPair->second.end()) {
 				secondType = RemappedPage::NONE;
 			} else {
-				secondType = RemappedPage::getTypeOf(VectorRef<LogicalPageID>(&nextEntry->second, 1));
+				secondType = RemappedPage::getTypeOf(nextEntry->second);
 				secondAfterOldestRetainedVersion = nextEntry->first > oldestRetainedVersion;
 			}
 		} else {
@@ -3244,7 +3257,7 @@ public:
 				self->remappedPages.erase(iPageMapPair);
 			} else if (freeNewID && secondType == RemappedPage::NONE &&
 			           iVersionPagePair != iPageMapPair->second.end() &&
-			           RemappedPage::getTypeOf(VectorRef<LogicalPageID>(&iVersionPagePair->second, 1)) == RemappedPage::DETACH) {
+			           RemappedPage::getTypeOf(iVersionPagePair->second) == RemappedPage::DETACH) {
 				// If we intend to free the new ID and there was no map entry, one could have been added during the wait
 				// above. If so, and if it was a detach operation, then we can't free the new page ID as its lifetime
 				// will be managed by the client starting at some later version.
@@ -6523,8 +6536,8 @@ private:
 												++detached;
 											}
 										}
+										++index;
 									}
-									++index;
 								}
 								cursor.moveNext();
 							}
