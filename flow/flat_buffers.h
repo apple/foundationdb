@@ -21,6 +21,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iterator>
 #include <cstring>
 #include <functional>
 #include <map>

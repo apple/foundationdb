@@ -115,7 +115,7 @@ struct KVTest {
 	~KVTest() { close(); }
 	void close() {
 		if (store) {
-			TraceEvent("KVTestDestroy");
+			TraceEvent("KVTestDestroy").log();
 			if (dispose)
 				store->dispose();
 			else
@@ -373,7 +373,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	state Error err;
 
 	// wait( delay(1) );
-	TraceEvent("GO");
+	TraceEvent("GO").log();
 
 	UID id = deterministicRandom()->randomUniqueID();
 	std::string fn = workload->filename.size() ? workload->filename : id.toString();

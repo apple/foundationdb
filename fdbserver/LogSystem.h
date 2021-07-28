@@ -291,7 +291,7 @@ public:
 
 		if (allLocations) {
 			// special handling for allLocations
-			TraceEvent("AllLocationsSet");
+			TraceEvent("AllLocationsSet").log();
 			for (int i = 0; i < logServers.size(); i++) {
 				newLocations.push_back(i);
 			}

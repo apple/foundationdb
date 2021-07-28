@@ -638,6 +638,15 @@ namespace SummarizeTest
             {
                 if(!String.IsNullOrEmpty(errLine.Data))
                 {
+                    if (errLine.Data.EndsWith("WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!")) {
+                        // When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
+                        return;
+                    }
+                    if (errLine.Data.EndsWith("Warning: unimplemented fcntl command: 1036")) {
+                        // Valgrind produces this warning when F_SET_RW_HINT is used
+                        return;
+                    }
+
                     hasError = true;
                     if(Errors.Count < maxErrors) {
                         if(errLine.Data.Length > maxErrorLength) {
@@ -962,10 +971,6 @@ namespace SummarizeTest
                 int stderrBytes = 0;
                 foreach (string err in outputErrors)
                 {
-                    if (err.EndsWith("WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!")) {
-                        // When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
-                        continue;
-                    }
                     if (stderrSeverity == (int)Magnesium.Severity.SevError)
                     {
                         error = true;

@@ -727,7 +727,7 @@ struct RawCursor {
 			try {
 				db.checkError("BtreeCloseCursor", sqlite3BtreeCloseCursor(cursor));
 			} catch (...) {
-				TraceEvent(SevError, "RawCursorDestructionError");
+				TraceEvent(SevError, "RawCursorDestructionError").log();
 			}
 			delete[](char*) cursor;
 		}
@@ -1737,9 +1737,9 @@ private:
 		    diskBytesUsed(diskBytesUsed), freeListPages(freeListPages), dbgid(dbgid), readThreads(*pReadThreads),
 		    checkAllChecksumsOnOpen(checkAllChecksumsOnOpen), checkIntegrityOnOpen(checkIntegrityOnOpen) {}
 		~Writer() override {
-			TraceEvent("KVWriterDestroying", dbgid);
+			TraceEvent("KVWriterDestroying", dbgid).log();
 			delete cursor;
-			TraceEvent("KVWriterDestroyed", dbgid);
+			TraceEvent("KVWriterDestroyed", dbgid).log();
 		}
 		void init() override {
 			if (checkAllChecksumsOnOpen) {

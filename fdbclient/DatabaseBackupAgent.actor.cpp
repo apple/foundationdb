@@ -365,7 +365,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 						TEST(true); // range insert delayed because too versionMap is too large
 
 						if (rangeCount > CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT)
-							TraceEvent(SevWarnAlways, "DBA_KeyRangeMapTooLarge");
+							TraceEvent(SevWarnAlways, "DBA_KeyRangeMapTooLarge").log();
 
 						wait(delay(1));
 						task->params[BackupRangeTaskFunc::keyBackupRangeBeginKey] = rangeBegin;
@@ -1883,7 +1883,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 		state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 		if (task->params[BackupAgentBase::destUid].size() == 0) {
-			TraceEvent("DBA_CopyDiffLogsUpgradeTaskFuncAbortInUpgrade");
+			TraceEvent("DBA_CopyDiffLogsUpgradeTaskFuncAbortInUpgrade").log();
 			wait(success(AbortOldBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::signal(onDone))));
 		} else {
 			Version beginVersion =
@@ -2378,11 +2378,11 @@ void checkAtomicSwitchOverConfig(StatusObjectReader srcStatus, StatusObjectReade
 	try {
 		// Check if src is unlocked and dest is locked
 		if (getLockedStatus(srcStatus) != false) {
-			TraceEvent(SevWarn, "DBA_AtomicSwitchOverSrcLocked");
+			TraceEvent(SevWarn, "DBA_AtomicSwitchOverSrcLocked").log();
 			throw backup_error();
 		}
 		if (getLockedStatus(destStatus) != true) {
-			TraceEvent(SevWarn, "DBA_AtomicSwitchOverDestUnlocked");
+			TraceEvent(SevWarn, "DBA_AtomicSwitchOverDestUnlocked").log();
 			throw backup_error();
 		}
 		// Check if mutation-stream-id matches
@@ -2403,7 +2403,7 @@ void checkAtomicSwitchOverConfig(StatusObjectReader srcStatus, StatusObjectReade
 		                      destDRAgents.end(),
 		                      std::inserter(intersectingAgents, intersectingAgents.begin()));
 		if (intersectingAgents.empty()) {
-			TraceEvent(SevWarn, "DBA_SwitchOverPossibleDRAgentsIncorrectSetup");
+			TraceEvent(SevWarn, "DBA_SwitchOverPossibleDRAgentsIncorrectSetup").log();
 			throw backup_error();
 		}
 	} catch (std::runtime_error& e) {
@@ -2758,7 +2758,7 @@ public:
 			}
 		}
 
-		TraceEvent("DBA_SwitchoverReady");
+		TraceEvent("DBA_SwitchoverReady").log();
 
 		try {
 			wait(backupAgent->discontinueBackup(dest, tagName));
@@ -2769,7 +2769,7 @@ public:
 
 		wait(success(backupAgent->waitBackup(dest, tagName, StopWhenDone::True)));
 
-		TraceEvent("DBA_SwitchoverStopped");
+		TraceEvent("DBA_SwitchoverStopped").log();
 
 		state ReadYourWritesTransaction tr3(dest);
 		loop {
@@ -2790,7 +2790,7 @@ public:
 			}
 		}
 
-		TraceEvent("DBA_SwitchoverVersionUpgraded");
+		TraceEvent("DBA_SwitchoverVersionUpgraded").log();
 
 		try {
 			wait(drAgent.submitBackup(backupAgent->taskBucket->src,
@@ -2806,15 +2806,15 @@ public:
 				throw;
 		}
 
-		TraceEvent("DBA_SwitchoverSubmitted");
+		TraceEvent("DBA_SwitchoverSubmitted").log();
 
 		wait(success(drAgent.waitSubmitted(backupAgent->taskBucket->src, tagName)));
 
-		TraceEvent("DBA_SwitchoverStarted");
+		TraceEvent("DBA_SwitchoverStarted").log();
 
 		wait(backupAgent->unlockBackup(dest, tagName));
 
-		TraceEvent("DBA_SwitchoverUnlocked");
+		TraceEvent("DBA_SwitchoverUnlocked").log();
 
 		return Void();
 	}

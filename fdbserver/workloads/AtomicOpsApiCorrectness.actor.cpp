@@ -480,7 +480,7 @@ public:
 		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("OpType", "MIN");
 		// API Version 500
 		setApiVersion(&cx, 500);
-		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Test Api Version 500");
+		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Test Api Version 500").log();
 		wait(self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::Min, key));
 		wait(self->testAtomicOpApi(
 		    cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; }));
@@ -513,7 +513,7 @@ public:
 	ACTOR Future<Void> testMax(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		state Key key = self->getTestKey("test_key_max_");
 
-		TraceEvent(SevInfo, "Running Atomic Op MAX Correctness Current Api Version");
+		TraceEvent(SevInfo, "Running Atomic Op MAX Correctness Current Api Version").log();
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Max, key));
 		wait(self->testAtomicOpApi(
 		    cx, self, MutationRef::Max, key, [](uint64_t val1, uint64_t val2) { return val1 > val2 ? val1 : val2; }));
@@ -530,7 +530,7 @@ public:
 		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("OpType", "AND");
 		// API Version 500
 		setApiVersion(&cx, 500);
-		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Test Api Version 500");
+		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Test Api Version 500").log();
 		wait(self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::And, key));
 		wait(self->testAtomicOpApi(
 		    cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2; }));
@@ -563,7 +563,7 @@ public:
 	ACTOR Future<Void> testOr(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		state Key key = self->getTestKey("test_key_or_");
 
-		TraceEvent(SevInfo, "Running Atomic Op OR Correctness Current Api Version");
+		TraceEvent(SevInfo, "Running Atomic Op OR Correctness Current Api Version").log();
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Or, key));
 		wait(self->testAtomicOpApi(
 		    cx, self, MutationRef::Or, key, [](uint64_t val1, uint64_t val2) { return val1 | val2; }));
@@ -576,7 +576,7 @@ public:
 	ACTOR Future<Void> testXor(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		state Key key = self->getTestKey("test_key_xor_");
 
-		TraceEvent(SevInfo, "Running Atomic Op XOR Correctness Current Api Version");
+		TraceEvent(SevInfo, "Running Atomic Op XOR Correctness Current Api Version").log();
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Xor, key));
 		wait(self->testAtomicOpApi(
 		    cx, self, MutationRef::Xor, key, [](uint64_t val1, uint64_t val2) { return val1 ^ val2; }));
@@ -588,7 +588,7 @@ public:
 
 	ACTOR Future<Void> testAdd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		state Key key = self->getTestKey("test_key_add_");
-		TraceEvent(SevInfo, "Running Atomic Op ADD Correctness Current Api Version");
+		TraceEvent(SevInfo, "Running Atomic Op ADD Correctness Current Api Version").log();
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::AddValue, key));
 		wait(self->testAtomicOpApi(
 		    cx, self, MutationRef::AddValue, key, [](uint64_t val1, uint64_t val2) { return val1 + val2; }));
@@ -601,7 +601,7 @@ public:
 
 	ACTOR Future<Void> testCompareAndClear(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		state Key key = self->getTestKey("test_key_compare_and_clear_");
-		TraceEvent(SevInfo, "Running Atomic Op COMPARE_AND_CLEAR Correctness Current Api Version");
+		TraceEvent(SevInfo, "Running Atomic Op COMPARE_AND_CLEAR Correctness Current Api Version").log();
 		wait(self->testCompareAndClearAtomicOpApi(cx, self, key, true));
 		wait(self->testCompareAndClearAtomicOpApi(cx, self, key, false));
 		return Void();
@@ -610,7 +610,7 @@ public:
 	ACTOR Future<Void> testByteMin(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		state Key key = self->getTestKey("test_key_byte_min_");
 
-		TraceEvent(SevInfo, "Running Atomic Op BYTE_MIN Correctness Current Api Version");
+		TraceEvent(SevInfo, "Running Atomic Op BYTE_MIN Correctness Current Api Version").log();
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMin, key));
 		wait(self->testAtomicOpApi(cx, self, MutationRef::ByteMin, key, [](uint64_t val1, uint64_t val2) {
 			return StringRef((const uint8_t*)&val1, sizeof(val1)) < StringRef((const uint8_t*)&val2, sizeof(val2))
@@ -626,7 +626,7 @@ public:
 	ACTOR Future<Void> testByteMax(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		state Key key = self->getTestKey("test_key_byte_max_");
 
-		TraceEvent(SevInfo, "Running Atomic Op BYTE_MAX Correctness Current Api Version");
+		TraceEvent(SevInfo, "Running Atomic Op BYTE_MAX Correctness Current Api Version").log();
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMax, key));
 		wait(self->testAtomicOpApi(cx, self, MutationRef::ByteMax, key, [](uint64_t val1, uint64_t val2) {
 			return StringRef((const uint8_t*)&val1, sizeof(val1)) > StringRef((const uint8_t*)&val2, sizeof(val2))

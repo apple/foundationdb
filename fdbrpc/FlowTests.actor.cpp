@@ -234,6 +234,8 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 
 	Future<class Void> delay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
 
+	Future<class Void> orderedDelay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
+
 	Future<class Void> yield(TaskPriority taskID) override {
 		if (check_yield(taskID))
 			return delay(0, taskID);

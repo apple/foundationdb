@@ -316,7 +316,7 @@ struct MovableCoordinatedStateImpl {
 		Value oldQuorumState = wait(cs.read());
 		if (oldQuorumState != self->lastCSValue.get()) {
 			TEST(true); // Quorum change aborted by concurrent write to old coordination state
-			TraceEvent("QuorumChangeAbortedByConcurrency");
+			TraceEvent("QuorumChangeAbortedByConcurrency").log();
 			throw coordinated_state_conflict();
 		}
 

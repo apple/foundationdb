@@ -161,6 +161,7 @@ public:
 	double timer() override { return ::timer(); };
 	double timer_monotonic() override { return ::timer_monotonic(); };
 	Future<Void> delay(double seconds, TaskPriority taskId) override;
+	Future<Void> orderedDelay(double seconds, TaskPriority taskId) override;
 	Future<class Void> yield(TaskPriority taskID) override;
 	bool check_yield(TaskPriority taskId) override;
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
@@ -1179,7 +1180,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
     currentTaskID(TaskPriority::DefaultYield), tasksIssued(0), stopped(false), started(false), numYields(0),
     lastPriorityStats(nullptr), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE) {
 	// Until run() is called, yield() will always yield
-	TraceEvent("Net2Starting");
+	TraceEvent("Net2Starting").log();
 
 	// Set the global members
 	if (useMetrics) {
@@ -1254,13 +1255,13 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 	lifetimes.push_back(watchFileForChanges(config.getCAPathSync(), &fileChanged));
 	loop {
 		wait(fileChanged.onTrigger());
-		TraceEvent("TLSCertificateRefreshBegin");
+		TraceEvent("TLSCertificateRefreshBegin").log();
 
 		try {
 			LoadedTLSConfig loaded = wait(config.loadAsync());
 			boost::asio::ssl::context context(boost::asio::ssl::context::tls);
 			ConfigureSSLContext(loaded, &context, onPolicyFailure);
-			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded");
+			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded").log();
 			mismatches = 0;
 			contextVar->set(ReferencedObject<boost::asio::ssl::context>::from(std::move(context)));
 		} catch (Error& e) {
@@ -1382,13 +1383,13 @@ bool Net2::checkRunnable() {
 
 void Net2::run() {
 	TraceEvent::setNetworkThread();
-	TraceEvent("Net2Running");
+	TraceEvent("Net2Running").log();
 
 	thread_network = this;
 
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
-		TraceEvent(SevError, "TimeBeginPeriodError");
+		TraceEvent(SevError, "TimeBeginPeriodError").log();
 #endif
 
 	timeOffsetLogger = logTimeOffset();
@@ -1745,6 +1746,11 @@ Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 	PromiseTask* t = new PromiseTask;
 	this->timers.push(DelayedTask(at, (int64_t(taskId) << 32) - (++tasksIssued), taskId, t));
 	return t->promise.getFuture();
+}
+
+Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
+	// The regular delay already provides the required ordering property
+	return delay(seconds, taskId);
 }
 
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {

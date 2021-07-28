@@ -477,7 +477,7 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present
 					if (present || !watch)
 						return true;
 				} else {
-					TraceEvent("BackupWorkerEmptyStartKey", self->myId);
+					TraceEvent("BackupWorkerEmptyStartKey", self->myId).log();
 					self->onBackupChanges(uidVersions);
 
 					self->exitEarly = shouldExit;
@@ -887,7 +887,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Version tagAt = std::max(self->pulledVersion.get(), std::max(self->startVersion, self->savedVersion));
 	state Arena prev;
 
-	TraceEvent("BackupWorkerPull", self->myId);
+	TraceEvent("BackupWorkerPull", self->myId).log();
 	loop {
 		while (self->paused.get()) {
 			wait(self->paused.onChange());
@@ -1017,7 +1017,7 @@ ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
 			Optional<Value> value = wait(tr->get(backupPausedKey));
 			bool paused = value.present() && value.get() == LiteralStringRef("1");
 			if (self->paused.get() != paused) {
-				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId);
+				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId).log();
 				self->paused.set(paused);
 			}
 

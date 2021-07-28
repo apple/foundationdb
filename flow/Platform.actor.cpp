@@ -1227,19 +1227,19 @@ void getDiskStatistics(std::string const& directory,
 	CFMutableDictionaryRef match = IOBSDNameMatching(kIOMasterPortDefault, kNilOptions, dev);
 
 	if (!match) {
-		TraceEvent(SevError, "IOBSDNameMatching");
+		TraceEvent(SevError, "IOBSDNameMatching").log();
 		throw platform_error();
 	}
 
 	if (IOServiceGetMatchingServices(kIOMasterPortDefault, match, &disk_list) != kIOReturnSuccess) {
-		TraceEvent(SevError, "IOServiceGetMatchingServices");
+		TraceEvent(SevError, "IOServiceGetMatchingServices").log();
 		throw platform_error();
 	}
 
 	io_registry_entry_t disk = IOIteratorNext(disk_list);
 	if (!disk) {
 		IOObjectRelease(disk_list);
-		TraceEvent(SevError, "IOIteratorNext");
+		TraceEvent(SevError, "IOIteratorNext").log();
 		throw platform_error();
 	}
 
@@ -1255,7 +1255,7 @@ void getDiskStatistics(std::string const& directory,
 	        disk, (CFMutableDictionaryRef*)&disk_dict, kCFAllocatorDefault, kNilOptions) != kIOReturnSuccess) {
 		IOObjectRelease(disk);
 		IOObjectRelease(disk_list);
-		TraceEvent(SevError, "IORegistryEntryCreateCFProperties");
+		TraceEvent(SevError, "IORegistryEntryCreateCFProperties").log();
 		throw platform_error();
 	}
 
@@ -1268,7 +1268,7 @@ void getDiskStatistics(std::string const& directory,
 		CFRelease(disk_dict);
 		IOObjectRelease(disk);
 		IOObjectRelease(disk_list);
-		TraceEvent(SevError, "CFDictionaryGetValue");
+		TraceEvent(SevError, "CFDictionaryGetValue").log();
 		throw platform_error();
 	}
 
@@ -1524,7 +1524,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	if ((*statState)->Query == nullptr) {
 		initPdhStrings(*statState, dataFolder);
 
-		TraceEvent("SetupQuery");
+		TraceEvent("SetupQuery").log();
 		handlePdhStatus(PdhOpenQuery(nullptr, NULL, &(*statState)->Query), "PdhOpenQuery");
 
 		if (!(*statState)->pdhStrings.diskDevice.empty()) {
@@ -2073,7 +2073,7 @@ int getRandomSeed() {
 	do {
 		retryCount++;
 		if (rand_s((unsigned int*)&randomSeed) != 0) {
-			TraceEvent(SevError, "WindowsRandomSeedError");
+			TraceEvent(SevError, "WindowsRandomSeedError").log();
 			throw platform_error();
 		}
 	} while (randomSeed == 0 &&
@@ -2093,7 +2093,7 @@ int getRandomSeed() {
 #endif
 
 	if (randomSeed == 0) {
-		TraceEvent(SevError, "RandomSeedZeroError");
+		TraceEvent(SevError, "RandomSeedZeroError").log();
 		throw platform_error();
 	}
 	return randomSeed;
