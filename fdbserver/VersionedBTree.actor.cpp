@@ -252,7 +252,8 @@ private:
 	}
 
 	std::string toString() const {
-		std::string s = format("{ concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d ",
+		std::string s = format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d ",
+		                       this,
 		                       concurrency,
 		                       available,
 		                       concurrency - available,
@@ -2152,8 +2153,7 @@ public:
 			wait(store(fileSize, self->pageFile->size()));
 		}
 
-		self->lastTruncate = Void();
-		self->lastTruncatePageCount = 0;
+		self->fileExtension = Void();
 
 		debug_printf(
 		    "DWALPager(%s) recover exists=%d fileSize=%" PRId64 "\n", self->filename.c_str(), exists, fileSize);
@@ -2201,6 +2201,9 @@ public:
 			}
 
 			self->setPageSize(self->pHeader->pageSize);
+			self->filePageCount = fileSize / self->physicalPageSize;
+			self->filePageCountPending = self->filePageCount;
+
 			if (self->logicalPageSize != self->desiredPageSize) {
 				TraceEvent(SevWarn, "RedwoodPageSizeNotDesired")
 				    .detail("Filename", self->filename)
@@ -2288,7 +2291,7 @@ public:
 
 			self->remapCleanupFuture = remapCleanup(self);
 			TraceEvent(SevInfo, "RedwoodRecovered")
-			    .detail("FileName", self->filename.c_str())
+			    .detail("Filename", self->filename.c_str())
 			    .detail("CommittedVersion", self->pHeader->committedVersion)
 			    .detail("LogicalPageSize", self->logicalPageSize)
 			    .detail("PhysicalPageSize", self->physicalPageSize)
@@ -2305,6 +2308,8 @@ public:
 
 			// Now that the header page has been allocated, set page size to desired
 			self->setPageSize(self->desiredPageSize);
+			self->filePageCount = 0;
+			self->filePageCountPending = 0;
 
 			// Now set the extent size, do this always after setting the page size as
 			// extent size is a multiple of page size
@@ -2356,11 +2361,15 @@ public:
 			wait(self->commit());
 		}
 
-		debug_printf("DWALPager(%s) recovered.  committedVersion=%" PRId64 " logicalPageSize=%d physicalPageSize=%d\n",
+		debug_printf("DWALPager(%s) recovered.  committedVersion=%" PRId64
+		             " logicalPageSize=%d physicalPageSize=%d headerPageCount=%" PRId64 " filePageCount=%" PRId64 "\n",
 		             self->filename.c_str(),
 		             self->pHeader->committedVersion,
 		             self->logicalPageSize,
-		             self->physicalPageSize);
+		             self->physicalPageSize,
+		             self->pHeader->pageCount,
+		             self->filePageCount);
+
 		return Void();
 	}
 
@@ -2457,21 +2466,7 @@ public:
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
 
-	void growPager(int64_t pages) {
-		pHeader->pageCount += pages;
-
-		if (!memoryOnly && pHeader->pageCount > lastTruncatePageCount) {
-			// Round up to the nearest growth-size multiple
-			lastTruncatePageCount =
-			    pHeader->pageCount + (SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES -
-			                          (pHeader->pageCount % SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES));
-
-			lastTruncate = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-			    lastTruncate, [=](Void) { return pageFile->truncate(lastTruncatePageCount * physicalPageSize); });
-
-			operations.add(lastTruncate);
-		}
-	}
+	void growPager(int64_t pages) { pHeader->pageCount += pages; }
 
 	// Get a new, previously available extent and it's first page ID.  The page will be considered in-use after the next
 	// commit regardless of whether or not it was written to, until it is returned to the pager via freePage()
@@ -2537,6 +2532,18 @@ public:
 			return Void();
 		}
 
+		// If a truncation up to include pageID has not yet been completed
+		if (pageID >= self->filePageCount) {
+			// And no extension pending will include pageID
+			if (pageID >= self->filePageCountPending) {
+				// Then start an extension that will include pageID
+				self->fileExtension = extendToCover(self, pageID);
+			}
+
+			// Wait for extension that covers pageID to complete;
+			wait(self->fileExtension);
+		}
+
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		wait(self->pageFile->write(page->begin(), blockSize, (int64_t)pageID * blockSize));
@@ -2547,6 +2554,26 @@ public:
 		             toString(pageID).c_str(),
 		             page->begin(),
 		             (pageID * blockSize));
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> extendToCover(DWALPager* self, uint64_t pageID) {
+		// Calculate new page count, round up to nearest multiple of growth size > pageID
+		state int64_t newPageCount = pageID + SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES -
+		                             (pageID % SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES);
+
+		// Indicate that extension to this new count has been started
+		self->filePageCountPending = newPageCount;
+
+		// Wait for any previous extensions to complete
+		wait(self->fileExtension);
+
+		// Grow the file
+		wait(self->pageFile->truncate(newPageCount * self->physicalPageSize));
+
+		// Indicate that extension to the new count has been completed
+		self->filePageCount = newPageCount;
 
 		return Void();
 	}
@@ -3535,8 +3562,13 @@ private:
 	// The header will be written to / read from disk as a smallestPhysicalBlock sized chunk.
 	Reference<ArenaPage> headerPage;
 	Header* pHeader;
-	Future<Void> lastTruncate;
-	int64_t lastTruncatePageCount;
+
+	// Pages - pages known to be in the file, truncations complete to that size
+	int64_t filePageCount;
+	// Pages that will be in file once fileExtension is ready
+	int64_t filePageCountPending;
+	// Future representing the end of all pending truncations
+	Future<Void> fileExtension;
 
 	int desiredPageSize;
 	int desiredExtentSize;
@@ -6976,7 +7008,7 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID)
-	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
+	  : m_filename(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
 	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
@@ -7005,16 +7037,16 @@ public:
 	Future<Void> init() override { return m_init; }
 
 	ACTOR Future<Void> init_impl(KeyValueStoreRedwoodUnversioned* self) {
-		TraceEvent(SevInfo, "RedwoodInit").detail("FilePrefix", self->m_filePrefix);
+		TraceEvent(SevInfo, "RedwoodInit").detail("Filename", self->m_filename);
 		wait(self->m_tree->init());
 		Version v = self->m_tree->getLatestVersion();
 		self->m_tree->setWriteVersion(v + 1);
-		TraceEvent(SevInfo, "RedwoodInitComplete").detail("FilePrefix", self->m_filePrefix);
+		TraceEvent(SevInfo, "RedwoodInitComplete").detail("Filename", self->m_filename);
 		return Void();
 	}
 
 	ACTOR void shutdown(KeyValueStoreRedwoodUnversioned* self, bool dispose) {
-		TraceEvent(SevInfo, "RedwoodShutdown").detail("FilePrefix", self->m_filePrefix).detail("Dispose", dispose);
+		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
 		if (self->m_error.canBeSet()) {
 			self->m_error.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
 		}
@@ -7026,9 +7058,7 @@ public:
 			self->m_tree->close();
 		wait(closedFuture);
 		self->m_closed.send(Void());
-		TraceEvent(SevInfo, "RedwoodShutdownComplete")
-		    .detail("FilePrefix", self->m_filePrefix)
-		    .detail("Dispose", dispose);
+		TraceEvent(SevInfo, "RedwoodShutdownComplete").detail("Filename", self->m_filename).detail("Dispose", dispose);
 		delete self;
 	}
 
@@ -7231,7 +7261,7 @@ public:
 	~KeyValueStoreRedwoodUnversioned() override{};
 
 private:
-	std::string m_filePrefix;
+	std::string m_filename;
 	VersionedBTree* m_tree;
 	Future<Void> m_init;
 	Promise<Void> m_closed;
@@ -8866,7 +8896,7 @@ TEST_CASE("/redwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	state std::string fileName = params.get("fileName").orDefault("unittest_pageFile.redwood");
+	state std::string fileName = params.get("Filename").orDefault("unittest_pageFile.redwood");
 	IPager2* pager;
 
 	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
@@ -9456,7 +9486,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 TEST_CASE(":/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
-	state std::string fileName = params.get("fileName").orDefault("unittest.redwood");
+	state std::string fileName = params.get("Filename").orDefault("unittest.redwood");
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
 	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
 	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
