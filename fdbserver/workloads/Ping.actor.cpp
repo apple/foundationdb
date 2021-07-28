@@ -259,7 +259,7 @@ struct PingWorkload : TestWorkload {
 			// peers[i].payloadPing.getEndpoint().getPrimaryAddress(), pingId ) ); peers[i].payloadPing.send( req );
 			// replies.push_back( self->payloadDelayer( req, peers[i].payloadPing ) );
 		}
-		TraceEvent("PayloadPingSent", pingId);
+		TraceEvent("PayloadPingSent", pingId).log();
 		wait(waitForAll(replies));
 		double elapsed = now() - start;
 		TraceEvent("PayloadPingDone", pingId).detail("Elapsed", elapsed);

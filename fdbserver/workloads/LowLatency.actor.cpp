@@ -77,7 +77,7 @@ struct LowLatencyWorkload : TestWorkload {
 				++self->operations;
 				loop {
 					try {
-						TraceEvent("StartLowLatencyTransaction");
+						TraceEvent("StartLowLatencyTransaction").log();
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						if (doCommit) {

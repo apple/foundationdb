@@ -1464,7 +1464,7 @@ ACTOR Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData
 	// timeout check for ignorePopRequest
 	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
 
-		TraceEvent("EnableTLogPlayAllIgnoredPops");
+		TraceEvent("EnableTLogPlayAllIgnoredPops").log();
 		// use toBePopped and issue all the pops
 		std::map<Tag, Version>::iterator it;
 		vector<Future<Void>> ignoredPops;
@@ -1871,7 +1871,7 @@ ACTOR Future<Void> watchDegraded(TLogData* self) {
 
 	wait(lowPriorityDelay(SERVER_KNOBS->TLOG_DEGRADED_DURATION));
 
-	TraceEvent(SevWarnAlways, "TLogDegraded", self->dbgid);
+	TraceEvent(SevWarnAlways, "TLogDegraded", self->dbgid).log();
 	TEST(true); // TLog degraded
 	self->degraded->set(true);
 	return Void();
@@ -2109,7 +2109,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 		updatePersistentPopped(self, logData, logData->getTagData(tag));
 	}
 
-	TraceEvent("TLogInitCommit", logData->logId);
+	TraceEvent("TLogInitCommit", logData->logId).log();
 	wait(self->persistentData->commit());
 	return Void();
 }
@@ -2312,7 +2312,7 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 		enablePopReq.reply.sendError(operation_failed());
 		return Void();
 	}
-	TraceEvent("EnableTLogPlayAllIgnoredPops2");
+	TraceEvent("EnableTLogPlayAllIgnoredPops2").log();
 	// use toBePopped and issue all the pops
 	std::map<Tag, Version>::iterator it;
 	state vector<Future<Void>> ignoredPops;
@@ -2657,7 +2657,7 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 }
 
 ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
-	TraceEvent("TLogCheckEmptyQueueBegin", self->dbgid);
+	TraceEvent("TLogCheckEmptyQueueBegin", self->dbgid).log();
 	try {
 		bool recoveryFinished = wait(self->persistentQueue->initializeRecovery(0));
 		if (recoveryFinished)
@@ -2667,15 +2667,15 @@ ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream)
 			throw;
-		TraceEvent("TLogCheckEmptyQueueEnd", self->dbgid);
+		TraceEvent("TLogCheckEmptyQueueEnd", self->dbgid).log();
 		return Void();
 	}
 }
 
 ACTOR Future<Void> checkRecovered(TLogData* self) {
-	TraceEvent("TLogCheckRecoveredBegin", self->dbgid);
+	TraceEvent("TLogCheckRecoveredBegin", self->dbgid).log();
 	Optional<Value> v = wait(self->persistentData->readValue(StringRef()));
-	TraceEvent("TLogCheckRecoveredEnd", self->dbgid);
+	TraceEvent("TLogCheckRecoveredEnd", self->dbgid).log();
 	return Void();
 }
 
@@ -2690,7 +2690,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	state KeyRange tagKeys;
 	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
 
-	TraceEvent("TLogRestorePersistentState", self->dbgid);
+	TraceEvent("TLogRestorePersistentState", self->dbgid).log();
 
 	state IKeyValueStore* storage = self->persistentData;
 	wait(storage->init());
@@ -3219,7 +3219,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	state TLogData self(tlogId, workerID, persistentData, persistentQueue, db, degraded, folder);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
-	TraceEvent("SharedTlog", tlogId);
+	TraceEvent("SharedTlog", tlogId).log();
 	try {
 		if (restoreFromDisk) {
 			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
