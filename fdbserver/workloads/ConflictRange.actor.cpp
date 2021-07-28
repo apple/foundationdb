@@ -100,7 +100,7 @@ struct ConflictRangeWorkload : TestWorkload {
 			loop {
 				state Transaction tr0(cx);
 				try {
-					TraceEvent("ConflictRangeReset");
+					TraceEvent("ConflictRangeReset").log();
 					insertedSet.clear();
 
 					if (self->testReadYourWrites) {

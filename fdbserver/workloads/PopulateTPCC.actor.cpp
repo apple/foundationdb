@@ -184,7 +184,7 @@ struct PopulateTPCC : TestWorkload {
 				}
 			}
 		}
-		TraceEvent("PopulateItemsDone");
+		TraceEvent("PopulateItemsDone").log();
 		return Void();
 	}
 

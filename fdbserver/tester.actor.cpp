@@ -817,7 +817,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 		}
 
 		state std::vector<Future<ErrorOr<CheckReply>>> checks;
-		TraceEvent("CheckingResults");
+		TraceEvent("CheckingResults").log();
 
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
 
@@ -1016,7 +1016,7 @@ ACTOR Future<bool> runTest(Database cx,
 
 	if (spec.useDB && spec.clearAfterTest) {
 		try {
-			TraceEvent("TesterClearingDatabase");
+			TraceEvent("TesterClearingDatabase").log();
 			wait(timeoutError(clearData(cx), 1000.0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "ErrorClearingDatabaseAfterTest").error(e);
@@ -1559,7 +1559,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			}
 			when(wait(cc->onChange())) {}
 			when(wait(testerTimeout)) {
-				TraceEvent(SevError, "TesterRecruitmentTimeout");
+				TraceEvent(SevError, "TesterRecruitmentTimeout").log();
 				throw timed_out();
 			}
 		}

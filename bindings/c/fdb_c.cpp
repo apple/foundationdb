@@ -162,7 +162,7 @@ extern "C" DLLEXPORT fdb_bool_t fdb_future_is_ready(FDBFuture* f) {
 	return TSAVB(f)->isReady();
 }
 
-class CAPICallback : public ThreadCallback {
+class CAPICallback final : public ThreadCallback {
 public:
 	CAPICallback(void (*callbackf)(FDBFuture*, void*), FDBFuture* f, void* userdata)
 	  : callbackf(callbackf), f(f), userdata(userdata) {}
