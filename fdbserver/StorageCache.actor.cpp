@@ -2156,6 +2156,7 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 					tr.set(storageKey, storageCacheServerValue(ssi));
 					wait(tr.commit());
 				}
+				tr.reset();
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));

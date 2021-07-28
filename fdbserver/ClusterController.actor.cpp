@@ -195,6 +195,8 @@ public:
 			}
 
 			loop {
+				tr.reset();
+
 				// Wait for some changes
 				while (!self->anyDelta.get())
 					wait(self->anyDelta.onChange());
