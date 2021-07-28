@@ -785,7 +785,9 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
 	// Recruit TLog groups
-	self->tLogGroupCollection->recruitEverything();
+	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		self->tLogGroupCollection->recruitEverything();
+	}
 
 	// Assign storage teams to tLogGroups.
 	for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {

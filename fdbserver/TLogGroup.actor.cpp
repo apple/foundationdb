@@ -41,6 +41,7 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
@@ -106,9 +107,12 @@ void TLogGroupCollection::addWorkers(const std::vector<ptxn::TLogInterface_Passi
 }
 
 void TLogGroupCollection::recruitEverything() {
-	std::unordered_set<UID> selectedServers;
+	ASSERT(recruitMap.size() >= groupSize());
+
 	std::vector<TLogWorkerData*> bestSet;
-	auto localityMap = buildLocalityMap(selectedServers);
+	auto localityMap = buildLocalityMap({});
+
+	TraceEvent("TLogGroupRecruit").detail("TargetNumGroup", targetNumGroups).detail("Servers", recruitMap.size());
 
 	while (recruitedGroups.size() < targetNumGroups) {
 		bestSet.clear();
@@ -124,8 +128,13 @@ void TLogGroupCollection::recruitEverything() {
 			}
 
 			recruitedGroups.push_back(group);
-			TraceEvent("TLogGroupAdd").detail("GroupID", group->id()).detail("Servers", describe(group->servers()));
+			TraceEvent("TLogGroupAdd")
+			    .detail("GroupID", group->id())
+			    .detail("Servers", describe(group->servers()))
+			    .detail("TotalGroups", recruitedGroups.size());
 		} else {
+			TraceEvent(SevWarn, "TLogGroupAdd").detail("TotalGroups", recruitedGroups.size());
+			break;
 			// TODO: We may have scenarios (simulation), with recruits/zone's < RF. Handle that case.
 		}
 	}
