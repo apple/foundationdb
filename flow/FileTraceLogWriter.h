@@ -45,7 +45,7 @@ private:
 	std::unique_ptr<IssuesListImpl> impl;
 };
 
-class FileTraceLogWriter : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
+class FileTraceLogWriter final : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
 private:
 	std::string directory;
 	std::string processName;

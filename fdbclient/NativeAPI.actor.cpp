@@ -5244,7 +5244,10 @@ ACTOR Future<Void> commitAndWatch(Transaction* self) {
 			self->setupWatches();
 		}
 
-		self->reset();
+		if (!self->apiVersionAtLeast(700)) {
+			self->reset();
+		}
+
 		return Void();
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
@@ -5253,7 +5256,10 @@ ACTOR Future<Void> commitAndWatch(Transaction* self) {
 			}
 
 			self->versionstampPromise.sendError(transaction_invalid_version());
-			self->reset();
+
+			if (!self->apiVersionAtLeast(700)) {
+				self->reset();
+			}
 		}
 
 		throw;

@@ -161,6 +161,7 @@ public:
 	double timer() override { return ::timer(); };
 	double timer_monotonic() override { return ::timer_monotonic(); };
 	Future<Void> delay(double seconds, TaskPriority taskId) override;
+	Future<Void> orderedDelay(double seconds, TaskPriority taskId) override;
 	Future<class Void> yield(TaskPriority taskID) override;
 	bool check_yield(TaskPriority taskId) override;
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
@@ -1155,7 +1156,7 @@ private:
 };
 #endif
 
-struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
+struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
 	PromiseTask() {}
 	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
@@ -1748,6 +1749,11 @@ Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 	PromiseTask* t = new PromiseTask;
 	this->timers.push(DelayedTask(at, (int64_t(taskId) << 32) - (++tasksIssued), taskId, t));
 	return t->promise.getFuture();
+}
+
+Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
+	// The regular delay already provides the required ordering property
+	return delay(seconds, taskId);
 }
 
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {

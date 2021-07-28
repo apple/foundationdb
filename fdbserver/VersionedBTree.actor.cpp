@@ -2002,7 +2002,7 @@ class DWALPagerSnapshot;
 // This process basically describes a "Delayed" Write-Ahead-Log (DWAL) because the remap queue and the newly allocated
 // alternate pages it references basically serve as a write ahead log for pages that will eventially be copied
 // back to their original location once the original version is no longer needed.
-class DWALPager : public IPager2 {
+class DWALPager final : public IPager2 {
 public:
 	typedef FIFOQueue<LogicalPageID> LogicalPageQueueT;
 	typedef std::map<Version, LogicalPageID> VersionToPageMapT;
