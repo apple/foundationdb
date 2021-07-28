@@ -39,7 +39,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> _start(Database cx, TimeKeeperCorrectnessWorkload* self) {
-		TraceEvent(SevInfo, "TKCorrectness_Start");
+		TraceEvent(SevInfo, "TKCorrectness_Start").log();
 
 		state double start = now();
 		while (now() - start > self->testDuration) {
@@ -60,7 +60,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 			wait(delay(std::min(SERVER_KNOBS->TIME_KEEPER_DELAY / 10, (int64_t)1L)));
 		}
 
-		TraceEvent(SevInfo, "TKCorrectness_Completed");
+		TraceEvent(SevInfo, "TKCorrectness_Completed").log();
 		return Void();
 	}
 
@@ -111,7 +111,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				TraceEvent(SevInfo, "TKCorrectness_Passed");
+				TraceEvent(SevInfo, "TKCorrectness_Passed").log();
 				return true;
 			} catch (Error& e) {
 				wait(tr->onError(e));

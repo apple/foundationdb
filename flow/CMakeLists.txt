@@ -53,6 +53,7 @@ set(FLOW_SRCS
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
+  StreamCipher.h
   SystemMonitor.cpp
   SystemMonitor.h
   TDMetric.actor.h
@@ -100,8 +101,7 @@ set(FLOW_SRCS
 if(WITH_TLS AND NOT WIN32)
   set(FLOW_SRCS
     ${FLOW_SRCS}
-    StreamCipher.cpp
-    StreamCipher.h)
+    StreamCipher.cpp)
 endif()
 
 add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)
@@ -137,6 +137,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     target_link_libraries(flow PUBLIC ${EIO})
   endif()
 endif()
+
+# For Clang in Linux environment, libatomic is required
+if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
+	set (FLOW_LIBS ${FLOW_LIBS} atomic)
+endif ()
+
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)

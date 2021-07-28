@@ -1,6 +1,6 @@
-##############################
+###################################################
 FDB HA Write Path: How a mutation travels in FDB HA
-##############################
+###################################################
 
 | Author: Meng Xu
 | Reviewer: Alex Miller, Jingyu Zhou, Lukas Joswiak, Trevor Clinkenbeard
@@ -15,15 +15,15 @@ To simplify the description, we assume the HA cluster has the following configur
 * Replication factor = 3 for transaction logs (tLogs). It means each mutation is synchronously replicated to 3 primary tLogs and 1 satellite tLog. 
 
 * Satellite replication factor = 1 satellite single replication. It means each mutation must be synchronously replicated to 1 satellite tLog before it can be committed. 
-	
-	* The satellite replication factor can be configured with one or two satellites and single, double or triple replicas as described here. We typically use only 1 satellite single replica config.
+  
+    * The satellite replication factor can be configured with one or two satellites and single, double or triple replicas as described here. We typically use only 1 satellite single replica config.
 
 * Only 1 satellite is configured in the primary DC.
 
 We describe the background knowledge -- Sharding and Tag structure -- before we discuss how a mutation travels in a FDB HA cluster.
 
 Sharding: Which shard goes to which servers?
-=================
+============================================
 
 A shard is a continuous key range. FDB divides the entire keyspace to thousands of shards. A mutation’s key decides which shard it belongs to.
 
@@ -35,7 +35,7 @@ Shard-to-tLog mapping is decided by shard-to-SS mapping and tLog’s replication
 
 
 Tag structure
-=================
+=============
 
 Tag is an overloaded term in FDB. In the early history of FDB, a tag is a number used in SS-to-tag mapping. As FDB evolves, tags are used by different components for different purposes: 
 
@@ -50,29 +50,29 @@ To distinguish the types of tags used for different purposes at different locati
 * locality (int8_t): When it is non-negative value, it decides which DC id the tag is used in. For example, if it is 0, it means the tag is used in primary DC and the tag’s id represents a storage server and is used for primary tLogs to index by storage servers. When it is negative, it decides which types of tags the tag belongs to. For example, if it is -2, it is a log router tag, and its id is used to decide which log router the tagged mutation should be sent to. The definition of all localities are in FDBTypes.h and you can easily find it if you search tagLocalitySpecial in the file.
 
 * id (uint16_t): Once locality decides which FDB components will the tag be applied to, id decides which process in the component type will be used for the tagged mutation.
-	
-	* FDB components in this context means (i) which DC of tLogs, and (ii) which types of tLogs.
+  
+    * FDB components in this context means (i) which DC of tLogs, and (ii) which types of tLogs.
 
 To simplify our discussion in the document, we use “tag.id” to represent a tag’s id, and tag as the Tag structure that has both locality and id. We represent a Tag as (locality, id).
 
 
 
 How does a mutation travel in FDB?
-=================
+==================================
 
 To simplify the description, we ignore the batching mechanisms happening in each component in the data path that are used to improve the system’s performance. 
 
 Figure 1 illustrates how a mutation is routed inside FDB. The solid lines are asynchronous pull operations, while the dotted lines are synchronous push operations.
 
-.. image:: /images/FDB_ha_write_path.png
+.. image:: images/FDB_ha_write_path.png
 
 At Client
------------------
+---------
 
 When an application creates a transaction and writes mutations, its FDB client sends the set of mutations to a proxy, say proxy 0. Now let’s focus on one of the normal mutations, say m1, whose key is in the normal keyspace.
 
 At Proxy
------------------
+--------
 
 **Sequencing.** *It first asks the master for the commit version of this transaction batch*. The master acts like a sequencer for FDB transactions to determine the order of transactions to commit by assigning a new commit version and the last assigned commit version as the previous commit version. The transaction log system will use the [previous commit version, commit version] pair to determine its commit order, i.e., only make this transaction durable after the transaction with the previous commit version is made durable.
 
@@ -102,21 +102,21 @@ Proxy groups mutations with the same tag as messages. Proxy then synchronously p
 
 
 At primary tLogs and satellite tLogs
------------------
+------------------------------------
 
 Once it receives mutations pushed by proxies, it builds indexes for each tag’s mutations. Primary TLogs index both log router tags and the primary DC's SS tags. Satellite tLogs only index log router tags.
 
 If tLogs’ mutations cannot be peeked and popped by its consumers (i.e., SSes and log routers) quickly enough, tLogs’ memory usage will increase. When buffered mutations exceed 1.5GB (configurable by knob), their in-memory index will be spilled into a “Tag,version->disk location” B-tree.
 
 tLogs also maintain two properties:
-	
+  
 * It will not make a mutation at version V1 durable until mutations before V1 has been made durable;
 
 * It will not pop (i.e., delete) mutations at version V2, until mutations before V2 have been popped.
 
 
 At primary SS
------------------
+-------------
 
 **Primary tLog of a SS.** Since a SS’s tag is identically mapped to one tLog. The tLog has all mutations for the SS and is the primary tLog for the SS. When the SS peeks data from tLogs, it will prefer to peek data from its primary tLog. If the primary tLog crashes, it will contact the rest of tLogs, ask for mutations with the SS’s tag, and merge them together. This complex merge operation is abstracted in the TagPartitionedLogSystem interface.
 
@@ -128,7 +128,7 @@ Now let’s look at how the mutation m1 is routed to the remote DC.
 
 
 At log router
------------------
+-------------
 
 Log routers are consumers of satellite tLogs or primary tLogs, controlled by a knob LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED. By default, the knob is configured for log routers to use satellite tLogs. This relationship is similar to primary SSes to primary tLogs. 
 
@@ -138,7 +138,7 @@ Log router buffers its mutations in memory and waits for the remote tLogs to pee
 
 
 At remote tLogs
------------------
+---------------
 
 Remote tLogs are consumers of log routers. Each remote tLog keeps pulling mutations, which have the remote tLog’s tag, from log routers. Because log router tags are randomly chosen for mutations, a remote tLog’s mutations can spread across all log routers. So each remote tLog must contact all log routers for its data and merge these mutations in increasing order of versions on the remote tLog. 
 
@@ -147,34 +147,34 @@ Once a remote tLog collects and merge mutations from all log routers, it makes t
 Now the mutation m1 has arrived at the remote tLog, which is similar as when it arrives at the primary tLog.
 
 
-At remote SSes.
------------------
+At remote SSes
+--------------
 
 Similar to how primary SSes pull mutations from primary tLogs, each remote SS keeps pulling mutations, which have its tag, from remote tLogs. Once a remote SS makes mutations up to a version V1 durable, the SS pops its tag to the version V1 from all remote tLogs.
 
 
 Implementation
-=================
+==============
 
 * proxy assigns tags to a mutation: 
 
-https://github.com/xumengpanda/foundationdb/blob/063700e4d60cd44c1f32413761e3fe7571fab9c0/fdbserver/MasterProxyServer.actor.cpp#L824
+https://github.com/apple/foundationdb/blob/7eabdf784a21bca102f84e7eaf14bafc54605dff/fdbserver/MasterProxyServer.actor.cpp#L1410
 
 
 Mutation Serialization (WiP)
-=================
+============================
 
 This section will go into detail on how mutations are serialized as preparation for ingestion into the TagPartitionedLogSystem. This has also been covered at:
 
-https://drive.google.com/file/d/1OaP5bqH2kst1VxD6RWj8h2cdr9rhhBHy/view.
+https://drive.google.com/file/d/1OaP5bqH2kst1VxD6RWj8h2cdr9rhhBHy/view
 
 The proxy handles splitting transactions into their individual mutations. These mutations are then serialized and synchronously sent to multiple transaction logs.
 
-The process starts in *commitBatch*. Eventually, *assignMutationsToStorageServers* is called to assign mutations to storage servers and serialize them. This function loops over each mutation in each transaction, determining the set of tags for the mutation (which storage servers it will be sent to), and then calling *LogPushData::writeTypedMessage* on the mutation.
+The process starts in *commitBatch*. Eventually, *assignMutationsToStorageServers* is called to assign mutations to storage servers and serialize them. This function loops over each mutation in each transaction, determining the set of tags for the mutation (which storage servers it will be sent to), and then calling *LogPushData.writeTypedMessage* on the mutation.
 
 The *LogPushData* class is used to hold serialized mutations on a per transaction log basis. It’s *messagesWriter* field holds one *BinaryWriter* per transaction log.
 
-*LogPushData::writeTypedMessage* is the function that serializes each mutation and writes it to the correct binary stream to be sent to the corresponding transaction log. Each serialized mutation contains additional metadata about the message, with the format:
+*LogPushData.writeTypedMessage* is the function that serializes each mutation and writes it to the correct binary stream to be sent to the corresponding transaction log. Each serialized mutation contains additional metadata about the message, with the format:
 
 .. image:: /images/serialized_mutation_metadata_format.png
 

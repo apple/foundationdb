@@ -162,7 +162,7 @@ public:
 	ProtocolVersion logProtocol;
 	Reference<ILogSystem> logSystem;
 	Key ck; // cacheKey
-	Reference<AsyncVar<ServerDBInfo>> const& db;
+	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
 	StorageCacheUpdater* updater;
 
@@ -238,7 +238,7 @@ public:
 		}
 	} counters;
 
-	explicit StorageCacheData(UID thisServerID, uint16_t index, Reference<AsyncVar<ServerDBInfo>> const& db)
+	explicit StorageCacheData(UID thisServerID, uint16_t index, Reference<AsyncVar<ServerDBInfo> const> const& db)
 	  : /*versionedData(FastAllocPTree<KeyRef>{std::make_shared<int>(0)}), */
 	    thisServerID(thisServerID), index(index), logProtocol(0), db(db), cacheRangeChangeCounter(0),
 	    lastTLogVersion(0), lastVersionWithData(0), peekVersion(0), compactionInProgress(Void()),
@@ -425,7 +425,7 @@ ACTOR Future<Version> waitForVersion(StorageCacheData* data, Version version) {
 	}
 
 	if (deterministicRandom()->random01() < 0.001)
-		TraceEvent("WaitForVersion1000x");
+		TraceEvent("WaitForVersion1000x").log();
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
@@ -1363,7 +1363,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 				// doesn't fit on this cache. For now, we can just fail this cache role. In future, we should think
 				// about evicting some data to make room for the remaining keys
 				if (this_block.more) {
-					TraceEvent(SevDebug, "CacheWarmupMoreDataThanLimit", data->thisServerID);
+					TraceEvent(SevDebug, "CacheWarmupMoreDataThanLimit", data->thisServerID).log();
 					throw please_reboot();
 				}
 
@@ -1780,7 +1780,7 @@ private:
 				rollback(data, rollbackVersion, currentVersion);
 			}
 		} else {
-			TraceEvent(SevWarn, "SCPrivateCacheMutation: Unknown private mutation");
+			TraceEvent(SevWarn, "SCPrivateCacheMutation: Unknown private mutation").log();
 			// ASSERT(false);  // Unknown private mutation
 		}
 	}
@@ -2156,6 +2156,7 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 					tr.set(storageKey, storageCacheServerValue(ssi));
 					wait(tr.commit());
 				}
+				tr.reset();
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -2165,7 +2166,9 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 	}
 }
 
-ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db) {
+ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
+                                      uint16_t id,
+                                      Reference<AsyncVar<ServerDBInfo> const> db) {
 	state StorageCacheData self(ssi.id(), id, db);
 	state ActorCollection actors(false);
 	state Future<Void> dbInfoChange = Void();

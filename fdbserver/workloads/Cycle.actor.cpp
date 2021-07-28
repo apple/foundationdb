@@ -104,7 +104,7 @@ struct CycleWorkload : TestWorkload {
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() >= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
-					TraceEvent("CycleTracingTransaction", span.context);
+					TraceEvent("CycleTracingTransaction", span.context).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
 					             BinaryWriter::toValue(span.context, Unversioned()));
 				}
@@ -154,7 +154,7 @@ struct CycleWorkload : TestWorkload {
 	}
 
 	void logTestData(const VectorRef<KeyValueRef>& data) {
-		TraceEvent("TestFailureDetail");
+		TraceEvent("TestFailureDetail").log();
 		int index = 0;
 		for (auto& entry : data) {
 			TraceEvent("CurrentDataEntry")
