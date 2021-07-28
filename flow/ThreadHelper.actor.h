@@ -574,7 +574,7 @@ private:
 	void* userdata;
 };
 
-// The underlying actor that converts ThreadFuture from Future
+// The underlying actor that converts ThreadFuture to Future
 // Note: should be used from main thread
 // The cancellation here works both way
 // If the underlying "threadFuture" is cancelled, this actor will get actor_cancelled.
