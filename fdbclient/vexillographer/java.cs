@@ -171,28 +171,7 @@ namespace vexillographer
 
 import com.apple.foundationdb.async.CloneableException;
 
-/**
- * An Error from the native layers of FoundationDB.  Each {@code FDBException} sets
- *  the {@code message} of the underlying Java {@link Exception}. FDB exceptions expose
- *  a number of functions including, for example, {@link #isRetryable()} that
- *  evaluate predicates on the internal FDB error. Most clients should use those methods
- *  in order to implement special handling for certain errors if their application
- *  requires it.
- *
- * <p>
- * Errors in FDB should generally be retried if they match the {@link #isRetryable()}
- *  predicate. In addition, as with any distributed system, certain classes of errors
- *  may fail in such a way that it is unclear whether the transaction succeeded (they
- *  {@link #isMaybeCommitted() may be committed} or not). To handle these cases, clients
- *  are generally advised to make their database operations idempotent and to place
- *  their operations within retry loops. The FDB Java API provides some default retry loops
- *  within the {@link Database} interface. See the discussion within the documentation of
- *  {@link Database#runAsync(Function) Database.runAsync()} for more details.
- *
- * @see com.apple.foundationdb.Transaction#onError(Throwable) Transaction.onError()
- * @see com.apple.foundationdb.Database#runAsync(Function) Database.runAsync()
- */
-public class FDBException extends AbstractFDBException {
+public class FDBExceptionImpl extends FDBException {
     private static final long serialVersionUID = 1L;
 
     /**
@@ -201,7 +180,7 @@ public class FDBException extends AbstractFDBException {
      * @param message error message of this exception
      * @param code internal FDB error code of this exception
      */
-    public FDBException(String message, int code) {
+    public FDBExceptionImpl(String message, int code) {
         super(message, code);
     }
 
@@ -212,7 +191,7 @@ public class FDBException extends AbstractFDBException {
 
     @Override
     public Exception retargetClone() {
-        FDBException exception = new FDBException(getMessage(), code);
+        FDBExceptionImpl exception = new FDBExceptionImpl(getMessage(), code);
         exception.initCause(this);
         return exception;
     }
@@ -228,7 +207,7 @@ public class FDBException extends AbstractFDBException {
                             comment += ".";
                         if (option.paramDesc != null)
                             comment += "\n\n@param value " + option.paramDesc;
-                        comment += "\n\n@return {@code true} if this {@code FDBException} is {@code " + option.name + "}";
+                        comment += "\n\n@return {@code true} if this {@code FDBExceptionImpl} is {@code " + option.name + "}";
                         outFile.WriteLine(formatComment(1, replaceTicks(comment)));
                     }
                     if (option.isDeprecated())
