@@ -74,6 +74,15 @@ struct ProxyStats {
 	int64_t maxComputeNS;
 	int64_t minComputeNS;
 
+	Reference<Histogram> commitBatchQueuingDist;
+	Reference<Histogram> getCommitVersionDist;
+	std::vector<Reference<Histogram>> resolverDist;
+	Reference<Histogram> resolutionDist;
+	Reference<Histogram> postResolutionDist;
+	Reference<Histogram> processingMutationDist;
+	Reference<Histogram> tlogLoggingDist;
+	Reference<Histogram> replyCommitDist;
+
 	int64_t getAndResetMaxCompute() {
 		int64_t r = maxComputeNS;
 		maxComputeNS = 0;
@@ -112,7 +121,28 @@ struct ProxyStats {
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    commitBatchQueuingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
+	                                                   LiteralStringRef("commitBatchQueuing"),
+	                                                   Histogram::Unit::microseconds)),
+	    getCommitVersionDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
+	                                                 LiteralStringRef("getCommitVersion"),
+	                                                 Histogram::Unit::microseconds)),
+	    resolutionDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
+	                                           LiteralStringRef("resolution"),
+	                                           Histogram::Unit::microseconds)),
+	    postResolutionDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
+	                                               LiteralStringRef("postResolutionQueuing"),
+	                                               Histogram::Unit::microseconds)),
+	    processingMutationDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
+	                                                   LiteralStringRef("processingMutation"),
+	                                                   Histogram::Unit::microseconds)),
+	    tlogLoggingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
+	                                            LiteralStringRef("tlogLogging"),
+	                                            Histogram::Unit::microseconds)),
+	    replyCommitDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
+	                                            LiteralStringRef("replyCommit"),
+	                                            Histogram::Unit::microseconds)) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
