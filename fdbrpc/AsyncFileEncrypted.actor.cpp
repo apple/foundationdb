@@ -249,23 +249,27 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	state std::vector<unsigned char> readBuffer(bytes, 0);
 	ASSERT(g_network->isSimulated());
 	StreamCipher::Key::initializeRandomTestKey();
-	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
-	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
-	            IAsyncFile::OPEN_NO_AIO;
-	state Reference<IAsyncFile> file =
-	    wait(IAsyncFileSystem::filesystem()->open(joinPath(params.getDataDir(), "test-encrypted-file"), flags, 0600));
+	auto writeFlags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
+	                  IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
+	                  IAsyncFile::OPEN_NO_AIO;
+	state Reference<IAsyncFile> writeFile = wait(
+	    IAsyncFileSystem::filesystem()->open(joinPath(params.getDataDir(), "test-encrypted-file"), writeFlags, 0600));
 	state int bytesWritten = 0;
 	while (bytesWritten < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesWritten);
-		wait(file->write(&writeBuffer[bytesWritten], chunkSize, bytesWritten));
+		wait(writeFile->write(&writeBuffer[bytesWritten], chunkSize, bytesWritten));
 		bytesWritten += chunkSize;
 	}
-	wait(file->sync());
+	wait(writeFile->sync());
+	auto readFlags = IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED |
+	                 IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
+	state Reference<IAsyncFile> readFile = wait(
+	    IAsyncFileSystem::filesystem()->open(joinPath(params.getDataDir(), "test-encrypted-file"), readFlags, 0400));
 	state int bytesRead = 0;
 	state int chunkSize;
 	while (bytesRead < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesRead);
-		int bytesReadInChunk = wait(file->read(&readBuffer[bytesRead], chunkSize, bytesRead));
+		int bytesReadInChunk = wait(readFile->read(&readBuffer[bytesRead], chunkSize, bytesRead));
 		ASSERT_EQ(bytesReadInChunk, chunkSize);
 		bytesRead += bytesReadInChunk;
 	}
