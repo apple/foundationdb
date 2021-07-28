@@ -564,7 +564,7 @@ void FastAllocator<Size>::releaseThreadMagazines() {
 		if (thr.freelist || thr.alternate) {
 			if (thr.freelist) {
 				ASSERT(thr.count > 0 && thr.count <= magazine_size);
-				globalData()->partial_magazines.push_back(std::make_pair(thr.count, thr.freelist));
+				globalData()->partial_magazines.emplace_back(thr.count, thr.freelist);
 				globalData()->partialMagazineUnallocatedMemory += thr.count * Size;
 			}
 			if (thr.alternate) {

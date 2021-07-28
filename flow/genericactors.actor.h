@@ -1271,6 +1271,40 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	}
 }
 
+// A low-overhead FIFO mutex made with no internal queue structure (no list, deque, vector, etc)
+// The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
+// called Lock.
+//
+// Usage:
+//   Lock lock = wait(mutex.take());
+//   lock.release();  // Next waiter will get the lock, OR
+//   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise
+//   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
+struct FlowMutex {
+	FlowMutex() { lastPromise.send(Void()); }
+
+	bool available() { return lastPromise.isSet(); }
+
+	struct Lock {
+		void release() { promise.send(Void()); }
+
+		void error(Error e = broken_promise()) { promise.sendError(e); }
+
+		// This is exposed in case the caller wants to use/copy it directly
+		Promise<Void> promise;
+	};
+
+	Future<Lock> take() {
+		Lock newLock;
+		Future<Lock> f = lastPromise.isSet() ? newLock : tag(lastPromise.getFuture(), newLock);
+		lastPromise = newLock.promise;
+		return f;
+	}
+
+private:
+	Promise<Void> lastPromise;
+};
+
 ACTOR template <class T, class V>
 Future<T> forwardErrors(Future<T> f, PromiseStream<V> output) {
 	try {
