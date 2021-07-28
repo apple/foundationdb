@@ -58,7 +58,7 @@ struct GrvProxyStats {
 	double lastBucketBegin;
 	double bucketInterval;
 	Reference<Histogram> grvConfirmEpochLiveDist;
-	Reference<Histogram> grvRawDist;
+	Reference<Histogram> grvGetCommittedVersionRpcDist;
 
 	void updateRequestBuckets() {
 		while (now() - lastBucketBegin > bucketInterval) {
@@ -114,12 +114,12 @@ struct GrvProxyStats {
 	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    recentRequests(0), lastBucketBegin(now()),
-	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS) {
+	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
 	    grvConfirmEpochLiveDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
 	                                                    LiteralStringRef("grvConfirmEpochLive"),
 	                                                    Histogram::Unit::microseconds)),
-	    grvRawDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                       LiteralStringRef("grvRawRpc"),
+	    grvGetCommittedVersionRpcDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
+	                                       LiteralStringRef("grvGetCommittedVersionRpc"),
 	                                       Histogram::Unit::microseconds)) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
@@ -558,7 +558,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
 
-	grvProxyData->stats.grvRawDist->sampleSeconds(now() - grvConfirmEpochLive);
+	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
 	rep.locked = repFromMaster.locked;
