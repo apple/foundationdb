@@ -136,6 +136,9 @@ void Histogram::writeToLog() {
 			case Unit::count:
 				e.detail(format("LessThan%f", (i + 1) * ((upperBound - lowerBound) / 31.0)), buckets[i]);
 				break;
+			case Unit::MAXHISTOGRAMUNIT:
+				e.detail(format("Default%u", i), buckets[i]);
+				break;
 			default:
 				ASSERT(false);
 			}
