@@ -191,12 +191,11 @@ private:
 	                    Reference<DiskParameters> diskParameters,
 	                    NetworkAddress openedAddress,
 	                    bool aio)
-		: filename(filename), initialFilename(initialFilename), file(file), diskParameters(diskParameters),
-		  openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false),
-		  aio(aio)
-		{
+	  : filename(filename), initialFilename(initialFilename), file(file), diskParameters(diskParameters),
+	    openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false),
+	    aio(aio) {
 
-			// This is only designed to work in simulation
+		// This is only designed to work in simulation
 		ASSERT(g_network->isSimulated());
 		this->id = deterministicRandom()->randomUniqueID();
 
@@ -458,7 +457,7 @@ private:
 	                         Future<Future<Void>> ownFuture,
 	                         void const* data,
 	                         int length,
-							 int64_t offset) {
+	                         int64_t offset) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait(g_simulator.onMachine(currentProcess));
