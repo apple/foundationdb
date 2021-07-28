@@ -28,7 +28,10 @@
 #include "flow/flow.h"
 
 struct ConfigGeneration {
+	// The live version of each node is monotonically increasing
 	Version liveVersion{ 0 };
+	// The committedVersion of each node is the version of the last commit made durable.
+	// Each committedVersion was previously given to clients as a liveVersion, prior to commit.
 	Version committedVersion{ 0 };
 
 	bool operator==(ConfigGeneration const&) const;
