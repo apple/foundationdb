@@ -26,10 +26,10 @@
 # Listing of unit tests. These are tests that don't require a running database to complete.
 # make sure that they are in the src/junit folder
 set(JAVA_JUNIT_TESTS
-  src/junit/com/apple/foundationdb/tuple/ArrayUtilSortTest.java
-  src/junit/com/apple/foundationdb/tuple/ArrayUtilTest.java
-  src/junit/com/apple/foundationdb/tuple/ByteArrayUtilTest.java
-  src/junit/com/apple/foundationdb/tuple/TupleComparisonTest.java
-  src/junit/com/apple/foundationdb/tuple/TuplePackingTest.java
-  src/junit/com/apple/foundationdb/tuple/TupleSerializationTest.java
+  api/src/junit/com/apple/foundationdb/tuple/ArrayUtilSortTest.java
+  api/src/junit/com/apple/foundationdb/tuple/ArrayUtilTest.java
+  api/src/junit/com/apple/foundationdb/tuple/ByteArrayUtilTest.java
+  api/src/junit/com/apple/foundationdb/tuple/TupleComparisonTest.java
+  api/src/junit/com/apple/foundationdb/tuple/TuplePackingTest.java
+  api/src/junit/com/apple/foundationdb/tuple/TupleSerializationTest.java
   )

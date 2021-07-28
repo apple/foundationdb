@@ -26,33 +26,33 @@
 # Listing of unit tests. These are tests that don't require a running database to complete.
 # make sure that they are in the src/junit folder
 set(JAVA_JUNIT_TESTS
-  src/junit/com/apple/foundationdb/RangeQueryTest.java
-  src/junit/com/apple/foundationdb/EventKeeperTest.java
+  impl/src/junit/com/apple/foundationdb/RangeQueryTest.java
+  impl/src/junit/com/apple/foundationdb/EventKeeperTest.java
   )
 
 # Resources that are used in unit testing, but are not explicitly test files (JUnit rules, utility
 # classes, and so on)
 set(JUNIT_RESOURCES
-  src/junit/com/apple/foundationdb/FakeFDBTransaction.java
-  src/junit/com/apple/foundationdb/FDBLibraryRule.java
+  impl/src/junit/com/apple/foundationdb/FakeFDBTransaction.java
+  impl/src/junit/com/apple/foundationdb/FDBLibraryRule.java
 )
 
 # Integration tests. These are tests that require a running FDB instance to complete
 # successfully. Make sure that they are in the src/integration folder
 set(JAVA_INTEGRATION_TESTS
-  src/integration/com/apple/foundationdb/DirectoryTest.java
-  src/integration/com/apple/foundationdb/RangeQueryIntegrationTest.java
-  src/integration/com/apple/foundationdb/BasicMultiClientIntegrationTest.java
-  src/integration/com/apple/foundationdb/CycleMultiClientIntegrationTest.java
-  src/integration/com/apple/foundationdb/SidebandMultiThreadClientTest.java
-  src/integration/com/apple/foundationdb/RepeatableReadMultiThreadClientTest.java
+  impl/src/integration/com/apple/foundationdb/DirectoryTest.java
+  impl/src/integration/com/apple/foundationdb/RangeQueryIntegrationTest.java
+  impl/src/integration/com/apple/foundationdb/BasicMultiClientIntegrationTest.java
+  impl/src/integration/com/apple/foundationdb/CycleMultiClientIntegrationTest.java
+  impl/src/integration/com/apple/foundationdb/SidebandMultiThreadClientTest.java
+  impl/src/integration/com/apple/foundationdb/RepeatableReadMultiThreadClientTest.java
 )
 
 # Resources that are used in integration testing, but are not explicitly test files (JUnit rules,
 # utility classes, and so forth)
 set(JAVA_INTEGRATION_RESOURCES
-  src/integration/com/apple/foundationdb/RequiresDatabase.java
-  src/integration/com/apple/foundationdb/MultiClientHelper.java
+  impl/src/integration/com/apple/foundationdb/RequiresDatabase.java
+  impl/src/integration/com/apple/foundationdb/MultiClientHelper.java
 )
 
 
