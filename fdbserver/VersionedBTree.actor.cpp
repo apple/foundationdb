@@ -5268,8 +5268,6 @@ private:
 				    .detail("BytesWritten", written);
 				ASSERT(false);
 			}
-			// should be btree level event
-			ASSERT(height!=0);
 			auto& metrics = g_redwoodMetrics.level(height);
 			metrics.metrics.pageBuild += 1;
 			metrics.metrics.pageBuildExt += p.blockCount - 1;
@@ -5602,8 +5600,7 @@ private:
 		// Page was updated in-place through edits and written to maybeNewID
 		void updatedInPlace(BTreePageIDRef maybeNewID, BTreePage* btPage, int capacity) {
 			inPlaceUpdate = true;
-			// should be btree level event
-			ASSERT(btPage->height!=0);
+			
 			auto& metrics = g_redwoodMetrics.level(btPage->height);
 			metrics.metrics.pageModify += 1;
 			metrics.metrics.pageModifyExt += (maybeNewID.size() - 1);
