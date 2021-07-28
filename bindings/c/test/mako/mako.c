@@ -189,18 +189,18 @@ int cleanup(FDBTransaction* transaction, mako_args_t* args) {
 	free(prefixstr);
 	len += 1;
 
-	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
-	int rc;
 retryTxn:
-	rc = run_op_clearrange(transaction, beginstr, endstr);
-	rc = commit_transaction(transaction);
-	if (rc != FDB_SUCCESS) {
-		if (rc == FDB_ERROR_RETRY) {
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
+
+	fdb_transaction_clear_range(transaction, (uint8_t*)beginstr, len + 1, (uint8_t*)endstr, len + 1);
+	switch (commit_transaction(transaction)) {
+		case (FDB_SUCCESS):
+			break;
+		case (FDB_ERROR_RETRY):
 			fdb_transaction_reset(transaction);
 			goto retryTxn;
-		} else {
+		default:
 			goto failExit;
-		}
 	}
 
 	fdb_transaction_reset(transaction);
@@ -316,19 +316,19 @@ int populate(FDBTransaction* transaction,
 		stats->ops[OP_INSERT]++;
 
 		/* commit every 100 inserts (default) */
-		int rc;
 		if (i % args->txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
+		retryTxn:
 			if (stats->xacts % args->sampling == 0) {
 				clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
 			}
-		retryTxn:
-			rc = commit_transaction(transaction);
-			if (rc != FDB_SUCCESS) {
-				if (rc == FDB_ERROR_RETRY) {
+
+			switch (commit_transaction(transaction)) {
+				case (FDB_SUCCESS):
+					break;
+				case (FDB_ERROR_RETRY):
 					goto retryTxn;
-				} else {
+				default:
 					goto failExit;
-				}
 			}
 
 			/* xact latency stats */
@@ -354,20 +354,31 @@ int populate(FDBTransaction* transaction,
 			xacts++; /* for throttling */
 		}
 	}
+	bool retriedTxnOnce = false;
+	// might hit FDB_ERROR_RETRY if running mako with multi-version client
+	while (!retriedTxnOnce) {
+		if (stats->xacts % args->sampling == 0) {
+			clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+		}
+		int rc;
+		if ((rc = commit_transaction(transaction) != FDB_SUCCESS)) {
+			if (rc == FDB_ERROR_RETRY && !retriedTxnOnce) {
+				retriedTxnOnce = true;
+				continue;
+			} else {
+				goto failExit;
+			}
+		}
 
-	if (stats->xacts % args->sampling == 0) {
-		clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
-	}
-	if (commit_transaction(transaction) != FDB_SUCCESS)
-		goto failExit;
-
-	/* xact latency stats */
-	if (stats->xacts % args->sampling == 0) {
-		clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-		update_op_lat_stats(
-		    &timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
-		update_op_lat_stats(
-		    &timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
+		/* xact latency stats */
+		if (stats->xacts % args->sampling == 0) {
+			clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
+			update_op_lat_stats(
+				&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
+			update_op_lat_stats(
+				&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
+		}
+		break;
 	}
 
 	clock_gettime(CLOCK_MONOTONIC, &timer_end);
