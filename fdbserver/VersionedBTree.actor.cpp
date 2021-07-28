@@ -1528,12 +1528,12 @@ struct RedwoodMetrics {
 
 		Level() {
 			metrics = {};
-			buildFillPctSketch = Reference<Histogram>();
-			modifyFillPctSketch = Reference<Histogram>();
-			buildStoredPctSketch = Reference<Histogram>();
-			modifyStoredPctSketch = Reference<Histogram>();
-			buildItemCountSketch = Reference<Histogram>();
-			modifyItemCountSketch = Reference<Histogram>();
+			buildFillPctSketch = Reference<Histogram>(new Histogram());
+			modifyFillPctSketch = Reference<Histogram>(new Histogram());
+			buildStoredPctSketch = Reference<Histogram>(new Histogram());
+			modifyStoredPctSketch = Reference<Histogram>(new Histogram());
+			buildItemCountSketch = Reference<Histogram>(new Histogram());
+			modifyItemCountSketch = Reference<Histogram>(new Histogram());
 			clear();
 		}
 
@@ -1629,19 +1629,6 @@ struct RedwoodMetrics {
 		kvSizeReadByGetRange->clear();
 	}
 
-	~RedwoodMetrics() {
-		kvSizeWritten.clear();
-		kvSizeReadByGet.clear();
-		kvSizeReadByGetRange.clear();
-		for (RedwoodMetrics::Level& level : levels) {
-			level.buildFillPctSketch.clear();
-			level.modifyFillPctSketch.clear();
-			level.buildStoredPctSketch.clear();
-			level.modifyStoredPctSketch.clear();
-			level.buildItemCountSketch.clear();
-			level.modifyItemCountSketch.clear();
-		}
-	}
 	// btree levels and one extra level for non btree level.
 	Level levels[btreeLevels + 1];
 	metrics metric;

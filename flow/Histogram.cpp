@@ -100,7 +100,8 @@ const char* const Histogram::UnitToStringMapper[] = { "microseconds",
 	                                                  "bytes",
 	                                                  "bytes_per_second",
 	                                                  "percentage",
-	                                                  "count" };
+	                                                  "count", 
+													  "none"};
 
 void Histogram::writeToLog() {
 	bool active = false;

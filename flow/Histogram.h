@@ -62,16 +62,16 @@ public:
 	enum class Unit { microseconds = 0, bytes, bytes_per_second, percentage, count, MAXHISTOGRAMUNIT };
 	static const char* const UnitToStringMapper[];
 
-	Histogram(std::string const& group,
-	          std::string const& op,
-	          Unit unit,
+	Histogram(std::string const& group = "",
+	          std::string const& op = "",
+	          Unit unit = Unit::MAXHISTOGRAMUNIT,
 	          uint32_t lower = 0,
 	          uint32_t upper = UINT32_MAX,
-			  Reference<HistogramRegistry> registry = Reference<HistogramRegistry>())
-	  : group(group), op(op), unit(unit), registry(registry), lowerBound(lower),
+			  Reference<HistogramRegistry> regis= Reference<HistogramRegistry>(new HistogramRegistry() ))
+	  : group(group), op(op), unit(unit), registry(regis), lowerBound(lower),
 	    upperBound(upper), ReferenceCounted<Histogram>() {
 
-		ASSERT(unit < Unit::MAXHISTOGRAMUNIT);
+		ASSERT(unit <= Unit::MAXHISTOGRAMUNIT);
 		ASSERT(upperBound >= lowerBound);
 
 		clear();
@@ -81,24 +81,25 @@ private:
 
 public:
 	~Histogram() { 
-		if (registry.isValid())
+		if (registry.isValid() && unit != Unit::MAXHISTOGRAMUNIT) {
 			registry->unregisterHistogram(this); 
+		}
+		registry.clear();
 	}
 
 	static Reference<Histogram> getHistogram(StringRef group,
 	                                         StringRef op,
 	                                         Unit unit,
-	                                         Reference<HistogramRegistry> regis = Reference<HistogramRegistry>(),
 	                                         uint32_t lower = 0,
 	                                         uint32_t upper = UINT32_MAX) {
 		std::string group_str = group.toString();
 		std::string op_str = op.toString();
 		std::string name = generateName(group_str, op_str);
-		Reference<HistogramRegistry> registry = (regis.isValid()) ? regis : Reference<HistogramRegistry>(&GetHistogramRegistry());
-		Histogram* h = registry->lookupHistogram(name);
+		HistogramRegistry& registry = GetHistogramRegistry();
+		Histogram* h = registry.lookupHistogram(name);
 		if (!h) {
-			h = new Histogram(group_str, op_str, unit, lower, upper, registry);
-			registry->registerHistogram(h);
+			h = new Histogram(group_str, op_str, unit, lower, upper,  Reference<HistogramRegistry>::addRef(&registry));
+			registry.registerHistogram(h);
 			return Reference<Histogram>(h);
 		} else {
 			return Reference<Histogram>::addRef(h);
