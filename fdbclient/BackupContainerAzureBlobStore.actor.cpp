@@ -26,18 +26,23 @@
 
 namespace {
 
+std::string const notFoundErrorCode = "404";
+
+void printAzureError(std::string const& operationName, azure::storage_lite::storage_error const& err) {
+	printf("(%s) : Error from Azure SDK : %s (%s) : %s",
+	       operationName.c_str(),
+	       err.code_name.c_str(),
+	       err.code.c_str(),
+	       err.message.c_str());
+}
+
 template <class T>
 T waitAzureFuture(std::future<azure::storage_lite::storage_outcome<T>>&& f, std::string const& operationName) {
 	auto outcome = f.get();
 	if (outcome.success()) {
 		return outcome.response();
 	} else {
-		auto const& err = outcome.error();
-		printf("(%s) : Error from Azure SDK : %s (%s) : %s",
-		       operationName.c_str(),
-		       err.code_name.c_str(),
-		       err.code.c_str(),
-		       err.message.c_str());
+		printAzureError(operationName, outcome.error());
 		throw backup_error();
 	}
 }
@@ -286,8 +291,18 @@ Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileNa
 	    .detail("FileName", fileName)
 	    .detail("ContainerName", containerName);
 	return asyncTaskThread.execAsync([client = this->client, containerName = this->containerName, fileName = fileName] {
-		auto resp = waitAzureFuture(client->get_blob_properties(containerName, fileName), "get_blob_properties");
-		return resp.valid();
+		auto outcome = client->get_blob_properties(containerName, fileName).get();
+		if (outcome.success()) {
+			return true;
+		} else {
+			auto const& err = outcome.error();
+			if (err.code == notFoundErrorCode) {
+				return false;
+			} else {
+				printAzureError("get_blob_properties", err);
+				throw backup_error();
+			}
+		}
 	});
 }
 
@@ -330,8 +345,18 @@ Future<Void> BackupContainerAzureBlobStore::create() {
 Future<bool> BackupContainerAzureBlobStore::exists() {
 	TraceEvent(SevDebug, "BCAzureBlobStoreCheckContainerExists").detail("ContainerName", containerName);
 	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
-		auto resp = waitAzureFuture(client->get_container_properties(containerName), "get_container_properties");
-		return resp.valid();
+		auto outcome = client->get_container_properties(containerName).get();
+		if (outcome.success()) {
+			return true;
+		} else {
+			auto const& err = outcome.error();
+			if (err.code == notFoundErrorCode) {
+				return false;
+			} else {
+				printAzureError("got_container_properties", err);
+				throw backup_error();
+			}
+		}
 	});
 }
 
