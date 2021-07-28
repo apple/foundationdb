@@ -44,8 +44,7 @@ class BackupContainerAzureBlobStore final : public BackupContainerFileSystem,
 public:
 	BackupContainerAzureBlobStore(const NetworkAddress& address,
 	                              const std::string& accountName,
-	                              const std::string& containerName,
-	                              const Optional<std::string>& encryptionKeyFileName);
+	                              const std::string& containerName);
 
 	void addref() override;
 	void delref() override;

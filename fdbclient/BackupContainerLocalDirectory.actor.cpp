@@ -131,10 +131,7 @@ std::string BackupContainerLocalDirectory::getURLFormat() {
 	return "file://</path/to/base/dir/>";
 }
 
-BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url,
-                                                             const Optional<std::string>& encryptionKeyFileName) {
-	setEncryptionKey(encryptionKeyFileName);
-
+BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url) {
 	std::string path;
 	if (url.find("file://") != 0) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
@@ -196,9 +193,6 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 }
 
 Future<Void> BackupContainerLocalDirectory::create() {
-	if (usesEncryption()) {
-		return encryptionSetupComplete();
-	}
 	// No directory should be created here because create() can be called by any process working with the container URL,
 	// such as fdbbackup. Since "local directory" containers are by definition local to the machine they are
 	// accessed from, the container's creation (in this case the creation of a directory) must be ensured prior to

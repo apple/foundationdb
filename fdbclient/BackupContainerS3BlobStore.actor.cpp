@@ -106,10 +106,6 @@ public:
 			wait(bc->m_bstore->writeEntireFile(bc->m_bucket, bc->indexEntry(), ""));
 		}
 
-		if (bc->usesEncryption()) {
-			wait(bc->encryptionSetupComplete());
-		}
-
 		return Void();
 	}
 
@@ -144,10 +140,8 @@ std::string BackupContainerS3BlobStore::indexEntry() {
 
 BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore,
                                                        const std::string& name,
-                                                       const S3BlobStoreEndpoint::ParametersT& params,
-                                                       const Optional<std::string>& encryptionKeyFileName)
+                                                       const S3BlobStoreEndpoint::ParametersT& params)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
-	setEncryptionKey(encryptionKeyFileName);
 	// Currently only one parameter is supported, "bucket"
 	for (const auto& [name, value] : params) {
 		if (name == "bucket") {

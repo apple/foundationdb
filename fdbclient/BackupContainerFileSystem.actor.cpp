@@ -1139,31 +1139,6 @@ public:
 		wait(keyFile->sync());
 		return Void();
 	}
-
-	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
-		state Reference<IAsyncFile> keyFile;
-		state StreamCipher::Key::RawKeyType key;
-		try {
-			Reference<IAsyncFile> _keyFile =
-			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
-			keyFile = _keyFile;
-		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
-			    .detail("FileName", encryptionKeyFileName)
-			    .error(e);
-			throw e;
-		}
-		int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
-		if (bytesRead != key.size()) {
-			TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")
-			    .detail("ExpectedSize", key.size())
-			    .detail("ActualSize", bytesRead);
-			throw invalid_encryption_key_file();
-		}
-		ASSERT_EQ(bytesRead, key.size());
-		StreamCipher::Key::initializeKey(std::move(key));
-		return Void();
-	}
 #endif // ENCRYPTION_ENABLED
 
 }; // class BackupContainerFileSystemImpl
@@ -1472,22 +1447,7 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::unreliable
 BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() {
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
-bool BackupContainerFileSystem::usesEncryption() const {
-	return encryptionSetupFuture.isValid();
-}
-Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
-	return encryptionSetupFuture;
-}
 
-void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
-	if (encryptionKeyFileName.present()) {
-#if ENCRYPTION_ENABLED
-		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
-#else
-		encryptionSetupFuture = Void();
-#endif
-	}
-}
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const &filename) {
 #if ENCRYPTION_ENABLED
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);

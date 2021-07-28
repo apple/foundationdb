@@ -4581,6 +4581,8 @@ public:
 			throw backup_error();
 		}
 
+		wait(bc->setupEncryption());
+
 		Optional<Value> lastBackupTimestamp = wait(backupAgent->lastBackupTimestamp().get(tr));
 
 		if ((lastBackupTimestamp.present()) && (lastBackupTimestamp.get() >= nowStr)) {

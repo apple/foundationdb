@@ -300,8 +300,12 @@ public:
 
 	std::string const &getURL() const { return URL; }
 	Optional<std::string> const &getEncryptionKeyFileName() const { return encryptionKeyFileName; }
+	Future<Void> setupEncryption();
 
 	static std::string lastOpenError;
+
+protected:
+	bool usesEncryption() const;
 
 private:
 	std::string URL;

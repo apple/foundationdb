@@ -241,10 +241,8 @@ Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileNa
 
 BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const NetworkAddress& address,
                                                              const std::string& accountName,
-                                                             const std::string& containerName,
-                                                             const Optional<std::string>& encryptionKeyFileName)
+                                                             const std::string& containerName)
   : containerName(containerName) {
-	setEncryptionKey(encryptionKeyFileName);
 	std::string accountKey = std::getenv("AZURE_KEY");
 	auto credential = std::make_shared<azure::storage_lite::shared_key_credential>(accountName, accountKey);
 	auto storageAccount = std::make_shared<azure::storage_lite::storage_account>(
@@ -261,12 +259,10 @@ void BackupContainerAzureBlobStore::delref() {
 }
 
 Future<Void> BackupContainerAzureBlobStore::create() {
-	Future<Void> f1 = asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
+	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
 		client->create_container(containerName).wait();
 		return Void();
 	});
-	Future<Void> f2 = usesEncryption() ? encryptionSetupComplete() : Void();
-	return f1 && f2;
 }
 
 Future<bool> BackupContainerAzureBlobStore::exists() {
