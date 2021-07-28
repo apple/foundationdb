@@ -39,9 +39,7 @@ struct ClearSingleRange : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override {
-		return clientId != 0 ? Void() : fdbClientClearRange(cx, this);
-	}
+	Future<Void> start(Database const& cx) override { return clientId != 0 ? Void() : fdbClientClearRange(cx, this); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 

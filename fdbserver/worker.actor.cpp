@@ -1165,6 +1165,28 @@ struct SharedLogsValue {
 	  : actor(actor), uid(uid), requests(requests) {}
 };
 
+ACTOR Future<Void> chaosMetricsLogger() {
+
+	auto res = g_network->global(INetwork::enChaosMetrics);
+	if (!res)
+		return Void();
+
+	state ChaosMetrics* chaosMetrics = static_cast<ChaosMetrics*>(res);
+	chaosMetrics->clear();
+
+	loop {
+		wait(delay(FLOW_KNOBS->CHAOS_LOGGING_INTERVAL));
+
+		TraceEvent e("ChaosMetrics");
+		// double elapsed = now() - chaosMetrics->startTime;
+		double elapsed = timer_monotonic() - chaosMetrics->startTime;
+		e.detail("Elapsed", elapsed);
+		chaosMetrics->getFields(&e);
+		e.trackLatest("ChaosMetrics");
+		chaosMetrics->clear();
+	}
+}
+
 ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 LocalityData locality,
@@ -1191,6 +1213,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	state Promise<Void> stopping;
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Future<Void> metricsLogger;
+	state Future<Void> chaosMetricsActor;
 	state Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
 	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
 	// TLogVersion represents.  This can be done if the newer TLog doesn't support a requested option.
@@ -1211,6 +1234,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		TraceEvent(SevWarnAlways, "ChaosFeaturesEnabled");
+		chaosMetricsActor = chaosMetricsLogger();
 	}
 
 	folder = abspath(folder);
@@ -1436,15 +1460,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
-		errorForwarders.add(registrationClient(ccInterface,
-		                                       interf,
-		                                       asyncPriorityInfo,
-		                                       initialClass,
-		                                       ddInterf,
-		                                       rkInterf,
-		                                       degraded,
-		                                       connFile,
-		                                       issues));
+		errorForwarders.add(registrationClient(
+		    ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded, connFile, issues));
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
 			errorForwarders.add(healthMonitor(ccInterface, interf, locality, dbInfo));
@@ -1515,19 +1532,14 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			}
 			when(SetFailureInjection req = waitNext(interf.clientInterface.setFailureInjection.getFuture())) {
 				if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
-					if (req.throttleDisk.present()) {
-						TraceEvent("DiskThrottleRequest").detail("DelayFrequency",req.throttleDisk.get().delayFrequency).
-						detail("DelayMin", req.throttleDisk.get().delayMin).
-						detail("DelayMax", req.throttleDisk.get().delayMax);
+					if (req.diskFailure.present()) {
 						auto diskFailureInjector = DiskFailureInjector::injector();
-						diskFailureInjector->throttleFor(req.throttleDisk.get().delayFrequency,
-														 req.throttleDisk.get().delayMin,
-														 req.throttleDisk.get().delayMax);
+						diskFailureInjector->setDiskFailure(req.diskFailure.get().stallInterval,
+						                                    req.diskFailure.get().stallPeriod,
+						                                    req.diskFailure.get().throttlePeriod);
 					} else if (req.flipBits.present()) {
-						TraceEvent("FlipBitsRequest").
-						detail("Percent", req.flipBits.get().percentBitFlips);
 						auto bitFlipper = BitFlipper::flipper();
-						bitFlipper->setPercentBitFlips(req.flipBits.get().percentBitFlips);
+						bitFlipper->setBitFlipPercentage(req.flipBits.get().percentBitFlips);
 					}
 					req.reply.send(Void());
 				} else {

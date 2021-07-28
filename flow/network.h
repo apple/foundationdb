@@ -347,7 +347,8 @@ struct NetworkMetrics {
 
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
 	double lastRunLoopBusyness; // network thread busyness (measured every 5s by default)
-	std::atomic<double> networkBusyness; // network thread busyness which is returned to the the client (measured every 1s by default)
+	std::atomic<double>
+	    networkBusyness; // network thread busyness which is returned to the the client (measured every 1s by default)
 
 	// starvation trackers which keeps track of different task priorities
 	std::vector<struct PriorityStats> starvationTrackers;
@@ -487,8 +488,9 @@ public:
 		enClientFailureMonitor = 12,
 		enSQLiteInjectedError = 13,
 		enGlobalConfig = 14,
-		enDiskFailureInjector = 15,
-		enBitFlipper = 16
+		enChaosMetrics = 15,
+		enDiskFailureInjector = 16,
+		enBitFlipper = 17
 	};
 
 	virtual void longTaskCheck(const char* name) {}
@@ -648,45 +650,40 @@ public:
 	// Returns the interface that should be used to make and accept socket connections
 };
 
-struct DelayGenerator : FastAllocated<DelayGenerator> {
+// Chaos Metrics - We periodically log chaosMetrics to make sure that chaos events are happening
+// Only includes DiskDelays which encapsulates all type delays and BitFlips for now
+// Expand as per need
+struct ChaosMetrics {
 
-	void setDelay(double frequency, double min, double max) {
-		delayFrequency = frequency;
-		delayMin = min;
-		delayMax = max;
-		delayFor = (delayMin == delayMax) ? delayMin : deterministicRandom()->randomInt(delayMin, delayMax);
-		delayUntil = std::max(delayUntil, timer_monotonic() + delayFor);
-		TraceEvent("DelayGeneratorSetDelay").detail("DelayFrequency", frequency).detail("DelayMin", min).
-			detail("DelayMax", max).detail("DelayFor", delayFor).detail("DelayUntil", delayUntil);
+	ChaosMetrics() { clear(); }
+
+	void clear() {
+		memset(this, 0, sizeof(ChaosMetrics));
+		startTime = timer_monotonic();
 	}
-	
-	double getDelay() {
-		// If a delayFrequency was specified, this logic determins the delay to be inserted at any point in time
-		if (delayFrequency) {
-			auto timeElapsed =  fmod(timer_monotonic(), delayFrequency);
-			TraceEvent("DelayGeneratorGetDelay").detail("DelayFrequency", delayFrequency).
-				detail("TimeElapsed", timeElapsed).detail("DelayFor", delayFor);
-			return std::max(0.0, delayFor - timeElapsed);
+
+	unsigned int diskDelays;
+	unsigned int bitFlips;
+	double startTime;
+
+	void getFields(TraceEvent* e) {
+		std::pair<const char*, unsigned int> metrics[] = { { "DiskDelays", diskDelays }, { "BitFlips", bitFlips } };
+		if (e != nullptr) {
+			for (auto& m : metrics) {
+				char c = m.first[0];
+				if (c != 0) {
+					e->detail(m.first, m.second);
+				}
+			}
 		}
-		TraceEvent("DelayGeneratorGetDelay").detail("DelayFrequency", delayFrequency).
-			detail("CurTime", timer_monotonic()).detail("DelayUntil", delayUntil);
-		return std::max(0.0, delayUntil - timer_monotonic());
 	}
-
-private: //members
-	double delayFrequency = 0.0; // how often should the delay be inserted (0 meaning once, 10 meaning every 10 secs)
-	double delayMin; // min delay to be inserted
-	double delayMax; // max delay to be inserted
-	double delayFor = 0.0; // randomly chosen delay between min and max
-	double delayUntil = 0.0; // used when the delayFrequency is 0
-
-public: // construction
-	DelayGenerator() = default;
-	DelayGenerator(DelayGenerator const&) = delete;
-
 };
 
-struct DiskFailureInjector : FastAllocated<DiskFailureInjector> {
+// This class supports injecting two type of disk failures
+// 1. Stalls: Every interval seconds, the disk will stall and no IO will complete for x seconds, where x is a randomly
+// chosen interval
+// 2. Slowdown: Random slowdown is injected to each disk operation for specified period of time
+struct DiskFailureInjector {
 	static DiskFailureInjector* injector() {
 		auto res = g_network->global(INetwork::enDiskFailureInjector);
 		if (!res) {
@@ -696,26 +693,56 @@ struct DiskFailureInjector : FastAllocated<DiskFailureInjector> {
 		return static_cast<DiskFailureInjector*>(res);
 	}
 
-	void throttleFor(double frequency, double delayMin, double delayMax) {
-		delayGenerator.setDelay(frequency, delayMin, delayMax);
+	void setDiskFailure(double interval, double stallFor, double throttleFor) {
+		stallInterval = interval;
+		stallPeriod = stallFor;
+		stallUntil = std::max(stallUntil, timer_monotonic() + stallFor);
+		// random stall duration in ms (chosen once)
+		stallDuration = 0.001 * deterministicRandom()->randomInt(1, 5);
+		throttlePeriod = throttleFor;
+		throttleUntil = std::max(throttleUntil, timer_monotonic() + throttleFor);
+		TraceEvent("SetDiskFailure")
+		    .detail("StallInterval", interval)
+		    .detail("StallPeriod", stallFor)
+		    .detail("StallUntil", stallUntil)
+		    .detail("ThrottlePeriod", throttleFor)
+		    .detail("ThrottleUntil", throttleUntil);
 	}
 
-	double getDiskDelay() {
-		if (!FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
-			return 0.0;
+	double getStallDelay() {
+		// If we are in a stall period and a stallInterval was specified, determine the
+		// delay to be inserted
+		if (((stallUntil - timer_monotonic()) > 0.0) && stallInterval) {
+			auto timeElapsed = fmod(timer_monotonic(), stallInterval);
+			return std::max(0.0, stallDuration - timeElapsed);
 		}
-		return delayGenerator.getDelay();
+		return 0.0;
 	}
+
+	double getThrottleDelay() {
+		// If we are in the throttle period, insert a random delay (in ms)
+		if ((throttleUntil - timer_monotonic()) > 0.0)
+			return (0.001 * deterministicRandom()->randomInt(1, 3));
+
+		return 0.0;
+	}
+
+	double getDiskDelay() { return getStallDelay() + getThrottleDelay(); }
 
 private: // members
-	DelayGenerator delayGenerator;
+	double stallInterval = 0.0; // how often should the disk be stalled (0 meaning once, 10 meaning every 10 secs)
+	double stallPeriod; // Period of time disk stalls will be injected for
+	double stallUntil; // End of disk stall period
+	double stallDuration; // Duration of each stall
+	double throttlePeriod; // Period of time the disk will be slowed down for
+	double throttleUntil; // End of disk slowdown period
 
 private: // construction
 	DiskFailureInjector() = default;
 	DiskFailureInjector(DiskFailureInjector const&) = delete;
 };
 
-struct BitFlipper : FastAllocated<BitFlipper> {
+struct BitFlipper {
 	static BitFlipper* flipper() {
 		auto res = g_network->global(INetwork::enBitFlipper);
 		if (!res) {
@@ -725,43 +752,12 @@ struct BitFlipper : FastAllocated<BitFlipper> {
 		return static_cast<BitFlipper*>(res);
 	}
 
-	//uint8_t toggleNthBit(uint8_t b, uint8_t n) {
-	//	auto singleBitMask = uint8(1) << (n);
-	//	return b ^ singleBitMask;
-	//}
+	double getBitFlipPercentage() { return bitFlipPercentage; }
 
-	//void flipBitAtOffset(int64_t byteOffset, uint8_t bitOffset) {
-		//auto oneByte = make([]byte, 1);
-	//	uint8_t oneByte[1];
-	//	int readBytes = wait(file->Read(oneByte, 1, byteOffset));
-
-	//	oneByte[0] = toggleNthBit(oneByte[0], bitOffset);
-	//	file->write(oneByte, 1, byteOffset);
-	//}
-
-	//void flipBits(Reference<IAsyncFile> fileName, double percent) {
-	//	file = fileName;
-	//	auto toFlip = int(float64(file->size()*8) * percent / 100);
-	//	for (auto i = 0; i < toFlip; i++) {
-	//		auto byteOffset = deterministicRandom()->randomInt64(0, file->size());
-	//		auto bitOffset = uint8_t(deterministicRandom()->randomInt(0, 8));
-	//		flipBitAtOffset(byteOffset, bitOffset);
-	//	}
-	//}
-
-	double getPercentBitFlips() {
-		TraceEvent("BitFlipperGetPercentBitFlips").detail("PercentBitFlips", percentBitFlips);
-		return percentBitFlips;
-	}
-
-	void setPercentBitFlips(double percentFlips) {
-		percentBitFlips = percentFlips;
-		TraceEvent("BitFlipperSetPercentBitFlips").detail("PercentBitFlips", percentBitFlips);
-	}
+	void setBitFlipPercentage(double percentage) { bitFlipPercentage = percentage; }
 
 private: // members
-	double percentBitFlips = 0.0;
-	//Reference<IAsyncFile> file;
+	double bitFlipPercentage = 0.0;
 
 private: // construction
 	BitFlipper() = default;

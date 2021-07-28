@@ -1,5 +1,5 @@
 /*
- * VersionedBTree.actor.cpp
+ * AsyncFileChaos.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,94 +26,103 @@
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h"
 
-
-//template <class AsyncFileType>
+// template <class AsyncFileType>
 class AsyncFileChaos final : public IAsyncFile, public ReferenceCounted<AsyncFileChaos> {
 private:
 	Reference<IAsyncFile> file;
+	Arena arena;
+
 public:
 	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {}
 
 	void addref() override { ReferenceCounted<AsyncFileChaos>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileChaos>::delref(); }
 
-	uint8_t toggleNthBit(uint8_t b, uint8_t n) {
-		auto singleBitMask = uint8_t(1) << (n);
-		return b ^ singleBitMask;
-	}
+	static double getDelay() {
+		double delayFor = 0.0;
+		auto res = g_network->global(INetwork::enDiskFailureInjector);
+		if (res) {
+			DiskFailureInjector* delayInjector = static_cast<DiskFailureInjector*>(res);
+			delayFor = delayInjector->getDiskDelay();
 
-	void flipBits(void* data, int length, double percentBitFlips) {
-		auto toFlip = int(float(length*8) * percentBitFlips / 100);
-		TraceEvent("AsyncFileFlipBits").detail("ToFlip", toFlip);
-		for (auto i = 0; i < toFlip; i++) {
-			auto byteOffset = deterministicRandom()->randomInt64(0, length);
-			auto bitOffset = uint8_t(deterministicRandom()->randomInt(0, 8));
-			((uint8_t *)data)[byteOffset] = toggleNthBit(((uint8_t *)data)[byteOffset], bitOffset);
+			// increment the metric for disk delays
+			if (delayFor > 0.0) {
+				auto res = g_network->global(INetwork::enChaosMetrics);
+				if (res) {
+					ChaosMetrics* chaosMetrics = static_cast<ChaosMetrics*>(res);
+					chaosMetrics->diskDelays++;
+				}
+			}
 		}
+		return delayFor;
 	}
 
 	Future<int> read(void* data, int length, int64_t offset) override {
-		double delay = 0.0;
-		auto res = g_network->global(INetwork::enDiskFailureInjector);
-		if (res)
-			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
-		TraceEvent("AsyncFileChaosRead").detail("ThrottleDelay", delay);
-		return delayed(file->read(data, length, offset), delay);
+		double diskDelay = getDelay();
+
+		// Wait for diskDelay before submitting the I/O
+		// Template types are being provided explicitly because they can't be automatically deduced for some reason.
+		return mapAsync<Void, std::function<Future<int>(Void)>, int>(
+		    delay(diskDelay), [=](Void _) -> Future<int> { return file->read(data, length, offset); });
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
-		double delay = 0.0;
 		char* pdata = nullptr;
+
+		// Check if a bit flip event was injected, if so, copy the buffer contents
+		// with a random bit flipped in a new buffer and use that for the write
 		auto res = g_network->global(INetwork::enBitFlipper);
 		if (res) {
-			auto percentBitFlips = static_cast<BitFlipper*>(res)->getPercentBitFlips();
-			if (percentBitFlips > 0.0) {
-				TraceEvent("AsyncFileCorruptWrite").detail("PercentBitFlips", percentBitFlips);
-				pdata = new char[length];
+			auto bitFlipPercentage = static_cast<BitFlipper*>(res)->getBitFlipPercentage();
+			if (bitFlipPercentage > 0.0) {
+				pdata = (char*)arena.allocate4kAlignedBuffer(length);
 				memcpy(pdata, data, length);
-				flipBits(pdata, length, percentBitFlips);
-				auto diff = memcmp(pdata, data, length);
-				if (diff)
-					TraceEvent("AsyncFileCorruptWriteDiff").detail("Diff", diff);
+				if (deterministicRandom()->random01() < bitFlipPercentage) {
+					// copy buffer with a flipped bit
+					pdata[deterministicRandom()->randomInt(0, length)] ^= (1 << deterministicRandom()->randomInt(0, 8));
+
+					// increment the metric for bit flips
+					auto res = g_network->global(INetwork::enChaosMetrics);
+					if (res) {
+						ChaosMetrics* chaosMetrics = static_cast<ChaosMetrics*>(res);
+						chaosMetrics->bitFlips++;
+					}
+				}
 			}
 		}
 
-		res = g_network->global(INetwork::enDiskFailureInjector);
-		if (res)
-			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
-		TraceEvent("AsyncFileChaosWrite").detail("ThrottleDelay", delay);
-		return delayed(file->write((pdata != nullptr) ? pdata : data, length, offset), delay);
+		double diskDelay = getDelay();
+		// Wait for diskDelay before submitting the I/O
+		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(diskDelay), [=](Void _) -> Future<Void> {
+			if (pdata)
+				return holdWhile(pdata, file->write(pdata, length, offset));
+
+			return file->write(data, length, offset);
+		});
 	}
 
 	Future<Void> truncate(int64_t size) override {
-		double delay = 0.0;
-		auto res = g_network->global(INetwork::enDiskFailureInjector);
-		if (res)
-			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
-		return delayed(file->truncate(size), delay);
+		double diskDelay = getDelay();
+		// Wait for diskDelay before submitting the I/O
+		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
+		    delay(diskDelay), [=](Void _) -> Future<Void> { return file->truncate(size); });
 	}
 
 	Future<Void> sync() override {
-		double delay = 0.0;
-		auto res = g_network->global(INetwork::enDiskFailureInjector);
-		if (res)
-			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
-		return delayed(file->sync(), delay);
+		double diskDelay = getDelay();
+		// Wait for diskDelay before submitting the I/O
+		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
+		    delay(diskDelay), [=](Void _) -> Future<Void> { return file->sync(); });
 	}
 
 	Future<int64_t> size() const override {
-		double delay = 0.0;
-		auto res = g_network->global(INetwork::enDiskFailureInjector);
-		if (res)
-			delay = static_cast<DiskFailureInjector*>(res)->getDiskDelay();
-		return delayed(file->size(), delay);
+		double diskDelay = getDelay();
+		// Wait for diskDelay before submitting the I/O
+		return mapAsync<Void, std::function<Future<int64_t>(Void)>, int64_t>(
+		    delay(diskDelay), [=](Void _) -> Future<int64_t> { return file->size(); });
 	}
 
-	int64_t debugFD() const override {
-		return file->debugFD();
-	}
+	int64_t debugFD() const override { return file->debugFD(); }
 
-	std::string getFilename() const override {
-		return file->getFilename();
-	}
+	std::string getFilename() const override { return file->getFilename(); }
 };
