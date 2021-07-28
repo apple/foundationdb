@@ -160,7 +160,7 @@ public:
 	static Key getPauseKey();
 
 	// parallel restore
-	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB = UnlockDB::TRUE);
+	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB = UnlockDB::True);
 	Future<Void> submitParallelRestore(Database cx,
 	                                   Key backupTag,
 	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -188,29 +188,29 @@ public:
 	                        Key tagName,
 	                        Key url,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges,
-	                        WaitForComplete = WaitForComplete::TRUE,
+	                        WaitForComplete = WaitForComplete::True,
 	                        Version targetVersion = ::invalidVersion,
-	                        Verbose = Verbose::TRUE,
+	                        Verbose = Verbose::True,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
-	                        LockDB = LockDB::TRUE,
-	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::FALSE,
-	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::FALSE,
+	                        LockDB = LockDB::True,
+	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
+	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
 	                        Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
-	                        WaitForComplete waitForComplete = WaitForComplete::TRUE,
+	                        WaitForComplete waitForComplete = WaitForComplete::True,
 	                        Version targetVersion = ::invalidVersion,
-	                        Verbose verbose = Verbose::TRUE,
+	                        Verbose verbose = Verbose::True,
 	                        KeyRange range = normalKeys,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
-	                        LockDB lockDB = LockDB::TRUE,
-	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::FALSE,
-	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::FALSE,
+	                        LockDB lockDB = LockDB::True,
+	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
+	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
 	                        Optional<std::string> const& encryptionKeyFileName = {}) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
@@ -267,9 +267,9 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          StopWhenDone = StopWhenDone::TRUE,
-	                          UsePartitionedLog = UsePartitionedLog::FALSE,
-	                          IncrementalBackupOnly = IncrementalBackupOnly::FALSE,
+	                          StopWhenDone = StopWhenDone::True,
+	                          UsePartitionedLog = UsePartitionedLog::False,
+	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
@@ -277,9 +277,9 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
-	                          UsePartitionedLog partitionedLog = UsePartitionedLog::FALSE,
-	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::FALSE,
+	                          StopWhenDone stopWhenDone = StopWhenDone::True,
+	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
+	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {}) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
@@ -318,14 +318,14 @@ public:
 
 	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	                                            Key tagName,
-	                                            Snapshot = Snapshot::FALSE);
+	                                            Snapshot = Snapshot::False);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
 	Future<EnumState> waitBackup(Database cx,
 	                             std::string tagName,
-	                             StopWhenDone = StopWhenDone::TRUE,
+	                             StopWhenDone = StopWhenDone::True,
 	                             Reference<IBackupContainer>* pContainer = nullptr,
 	                             UID* pUID = nullptr);
 
@@ -397,7 +397,7 @@ public:
 	                              Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                              Key addPrefix,
 	                              Key removePrefix,
-	                              ForceAction = ForceAction::FALSE);
+	                              ForceAction = ForceAction::False);
 
 	Future<Void> unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> unlockBackup(Database cx, Key tagName) {
@@ -416,18 +416,18 @@ public:
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          StopWhenDone = StopWhenDone::TRUE,
+	                          StopWhenDone = StopWhenDone::True,
 	                          Key addPrefix = StringRef(),
 	                          Key removePrefix = StringRef(),
-	                          LockDB lockDatabase = LockDB::FALSE,
+	                          LockDB lockDatabase = LockDB::False,
 	                          PreBackupAction backupAction = PreBackupAction::VERIFY);
 	Future<Void> submitBackup(Database cx,
 	                          Key tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          StopWhenDone stopWhenDone = StopWhenDone::TRUE,
+	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          Key addPrefix = StringRef(),
 	                          Key removePrefix = StringRef(),
-	                          LockDB lockDatabase = LockDB::FALSE,
+	                          LockDB lockDatabase = LockDB::False,
 	                          PreBackupAction backupAction = PreBackupAction::VERIFY) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(
@@ -443,36 +443,36 @@ public:
 
 	Future<Void> abortBackup(Database cx,
 	                         Key tagName,
-	                         PartialBackup = PartialBackup::FALSE,
-	                         AbortOldBackup = AbortOldBackup::FALSE,
-	                         DstOnly = DstOnly::FALSE,
-	                         WaitForDestUID = WaitForDestUID::FALSE);
+	                         PartialBackup = PartialBackup::False,
+	                         AbortOldBackup = AbortOldBackup::False,
+	                         DstOnly = DstOnly::False,
+	                         WaitForDestUID = WaitForDestUID::False);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
-	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::FALSE);
+	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	Future<EnumState> getStateValue(Database cx, UID logUid) {
 		return runRYWTransaction(cx,
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return getStateValue(tr, logUid); });
 	}
 
-	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::FALSE);
+	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	Future<UID> getDestUid(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return getDestUid(tr, logUid); });
 	}
 
-	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, Snapshot = Snapshot::FALSE);
+	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, Snapshot = Snapshot::False);
 	Future<UID> getLogUid(Database cx, Key tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return getLogUid(tr, tagName); });
 	}
 
 	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr,
 	                                     UID logUid,
-	                                     Snapshot = Snapshot::FALSE);
-	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::FALSE);
+	                                     Snapshot = Snapshot::False);
+	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<EnumState> waitBackup(Database cx, Key tagName, StopWhenDone = StopWhenDone::TRUE);
+	Future<EnumState> waitBackup(Database cx, Key tagName, StopWhenDone = StopWhenDone::True);
 	Future<EnumState> waitSubmitted(Database cx, Key tagName);
 	Future<Void> waitUpgradeToLatestDrVersion(Database cx, Key tagName);
 
@@ -530,7 +530,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
                           Key logUidValue,
                           Key destUidValue,
                           Optional<Version> endVersion = Optional<Version>(),
-                          CheckBackupUID = CheckBackupUID::FALSE,
+                          CheckBackupUID = CheckBackupUID::False,
                           Version backupUid = 0);
 Key getApplyKey(Version version, Key backupUid);
 Version getLogKeyVersion(Key key);
@@ -542,18 +542,18 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RangeResultWithVersion> results,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
-                                 Terminator terminator = Terminator::TRUE,
-                                 AccessSystemKeys systemAccess = AccessSystemKeys::FALSE,
-                                 LockAware lockAware = LockAware::FALSE);
+                                 Terminator terminator = Terminator::True,
+                                 AccessSystemKeys systemAccess = AccessSystemKeys::False,
+                                 LockAware lockAware = LockAware::False);
 ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RCGroup> results,
                                  Future<Void> active,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
-                                 Terminator terminator = Terminator::TRUE,
-                                 AccessSystemKeys systemAccess = AccessSystemKeys::FALSE,
-                                 LockAware lockAware = LockAware::FALSE);
+                                 Terminator terminator = Terminator::True,
+                                 AccessSystemKeys systemAccess = AccessSystemKeys::False,
+                                 LockAware lockAware = LockAware::False);
 ACTOR Future<Void> applyMutations(Database cx,
                                   Key uid,
                                   Key addPrefix,
@@ -614,7 +614,7 @@ public:
 	TagUidMap(const StringRef& prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
 
 	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr,
-	                                         Snapshot snapshot = Snapshot::FALSE) {
+	                                         Snapshot snapshot = Snapshot::False) {
 		return getAll_impl(this, tr, snapshot);
 	}
 
@@ -630,12 +630,12 @@ static inline KeyBackedTag makeBackupTag(std::string tagName) {
 }
 
 static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr,
-                                                                  Snapshot snapshot = Snapshot::FALSE) {
+                                                                  Snapshot snapshot = Snapshot::False) {
 	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr, snapshot);
 }
 
 static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr,
-                                                                 Snapshot snapshot = Snapshot::FALSE) {
+                                                                 Snapshot snapshot = Snapshot::False) {
 	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr, snapshot);
 }
 
@@ -652,7 +652,7 @@ public:
 
 	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr,
 	                    Reference<Task> task,
-	                    SetValidation setValidation = SetValidation::TRUE) {
+	                    SetValidation setValidation = SetValidation::True) {
 		// Set the uid task parameter
 		TaskParams.uid().set(task, uid);
 

@@ -1470,7 +1470,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
                                          std::string id,
                                          ProgramExe exe,
                                          Database dest,
-                                         Snapshot snapshot = Snapshot::FALSE) {
+                                         Snapshot snapshot = Snapshot::False) {
 	// This process will write a document that looks like this:
 	// { backup : { $expires : {<subdoc>}, version: <version from approximately 30 seconds from now> }
 	// so that the value under 'backup' will eventually expire to null and thus be ignored by
@@ -1646,7 +1646,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
                                  std::string name,
                                  std::string id,
                                  int limit = 1) {
-	state RangeResult docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::TRUE));
+	state RangeResult docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::True));
 	state bool readMore = false;
 	state int i;
 	for (i = 0; i < docs.size(); ++i) {
@@ -1675,7 +1675,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 		}
 		if (readMore) {
 			limit = 10000;
-			RangeResult docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::TRUE));
+			RangeResult docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::True));
 			docs = std::move(docs2);
 			readMore = false;
 		}
@@ -1768,7 +1768,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					state Future<std::string> futureStatusDoc =
-					    getLayerStatus(tr, name, id, exe, taskDest, Snapshot::TRUE);
+					    getLayerStatus(tr, name, id, exe, taskDest, Snapshot::True);
 					wait(cleanupStatus(tr, rootKey, name, id));
 					std::string statusdoc = wait(futureStatusDoc);
 					tr->set(instanceKey, statusdoc);
@@ -1858,7 +1858,7 @@ ACTOR Future<Void> submitDBBackup(Database src,
 		}
 
 		wait(backupAgent.submitBackup(
-		    dest, KeyRef(tagName), backupRanges, StopWhenDone::FALSE, StringRef(), StringRef(), LockDB::TRUE));
+		    dest, KeyRef(tagName), backupRanges, StopWhenDone::False, StringRef(), StringRef(), LockDB::True));
 
 		// Check if a backup agent is running
 		bool agentRunning = wait(backupAgent.checkActive(dest));
@@ -2083,7 +2083,7 @@ ACTOR Future<Void> abortDBBackup(Database src,
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
-		wait(backupAgent.abortBackup(dest, Key(tagName), partial, AbortOldBackup::FALSE, dstOnly));
+		wait(backupAgent.abortBackup(dest, Key(tagName), partial, AbortOldBackup::False, dstOnly));
 		wait(backupAgent.unlockBackup(dest, Key(tagName)));
 
 		printf("The DR on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
@@ -2350,7 +2350,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   verbose,
 			                                                   KeyRef(addPrefix),
 			                                                   KeyRef(removePrefix),
-			                                                   LockDB::TRUE,
+			                                                   LockDB::True,
 			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion,
@@ -2434,7 +2434,7 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 			                                       ranges,
 			                                       KeyRef(container),
 			                                       dbVersion,
-			                                       LockDB::TRUE,
+			                                       LockDB::True,
 			                                       randomUID,
 			                                       LiteralStringRef(""),
 			                                       LiteralStringRef("")));
@@ -2861,7 +2861,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			}
 
 			state BackupConfig config(uidFlag.get().first);
-			EBackupState s = wait(config.stateEnum().getOrThrow(tr, Snapshot::FALSE, backup_invalid_info()));
+			EBackupState s = wait(config.stateEnum().getOrThrow(tr, Snapshot::False, backup_invalid_info()));
 			if (!FileBackupAgent::isRunnable(s)) {
 				fprintf(stderr, "Backup on tag '%s' is not runnable.\n", tagName.c_str());
 				throw backup_error();
@@ -2881,7 +2881,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			}
 
 			if (options.activeSnapshotIntervalSeconds.present()) {
-				Version begin = wait(config.snapshotBeginVersion().getOrThrow(tr, Snapshot::FALSE, backup_error()));
+				Version begin = wait(config.snapshotBeginVersion().getOrThrow(tr, Snapshot::False, backup_error()));
 				config.snapshotTargetEndVersion().set(tr,
 				                                      begin + ((int64_t)options.activeSnapshotIntervalSeconds.get() *
 				                                               CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
@@ -3731,7 +3731,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::FALSE, IsSimulated::FALSE);
+		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
@@ -3758,7 +3758,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::FALSE, IsSimulated::FALSE);
+		g_knobs.initialize(Randomize::False, IsSimulated::False);
 
 		if (trace) {
 			if (!traceLogGroup.empty())
@@ -3796,7 +3796,7 @@ int main(int argc, char* argv[]) {
 		Reference<IBackupContainer> c;
 
 		try {
-			setupNetwork(0, UseMetrics::TRUE);
+			setupNetwork(0, UseMetrics::True);
 		} catch (Error& e) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
 			return FDB_EXIT_ERROR;
@@ -3840,7 +3840,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				db = Database::createDatabase(ccf, -1, IsInternal::TRUE, localities);
+				db = Database::createDatabase(ccf, -1, IsInternal::True, localities);
 			} catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
 				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
@@ -3860,7 +3860,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				sourceDb = Database::createDatabase(sourceCcf, -1, IsInternal::TRUE, localities);
+				sourceDb = Database::createDatabase(sourceCcf, -1, IsInternal::True, localities);
 			} catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
 				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", sourceCcf->getFilename().c_str());
@@ -3906,7 +3906,7 @@ int main(int argc, char* argv[]) {
 			case BackupType::STATUS:
 				if (!initCluster())
 					return FDB_EXIT_ERROR;
-				f = stopAfter(statusBackup(db, tagName, ShowErrors::TRUE, jsonOutput));
+				f = stopAfter(statusBackup(db, tagName, ShowErrors::True, jsonOutput));
 				break;
 
 			case BackupType::ABORT:
@@ -4067,7 +4067,7 @@ int main(int argc, char* argv[]) {
 				                         encryptionKeyFile));
 				break;
 			case RestoreType::WAIT:
-				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), Verbose::TRUE)));
+				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), Verbose::True)));
 				break;
 			case RestoreType::ABORT:
 				f = stopAfter(

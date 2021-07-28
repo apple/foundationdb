@@ -40,12 +40,10 @@ public:
 	virtual ~IConfigTransaction() = default;
 
 	static Reference<IConfigTransaction> createTestSimple(ConfigTransactionInterface const&);
-	static Reference<IConfigTransaction> createSimple(Database const&);
-	static Reference<IConfigTransaction> createPaxos(Database const&);
 
 	// Not implemented:
 	void setVersion(Version) override { throw client_invalid_operation(); }
-	Future<Key> getKey(KeySelector const& key, Snapshot snapshot = Snapshot::FALSE) override {
+	Future<Key> getKey(KeySelector const& key, Snapshot snapshot = Snapshot::False) override {
 		throw client_invalid_operation();
 	}
 	Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) override {

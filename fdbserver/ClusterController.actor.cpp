@@ -133,9 +133,9 @@ public:
 		    serverInfo(new AsyncVar<ServerDBInfo>()), db(DatabaseContext::create(clientInfo,
 		                                                                         Future<Void>(),
 		                                                                         LocalityData(),
-		                                                                         EnableLocalityLoadBalance::TRUE,
+		                                                                         EnableLocalityLoadBalance::True,
 		                                                                         TaskPriority::DefaultEndpoint,
-		                                                                         LockAware::TRUE)) // SOMEDAY: Locality!
+		                                                                         LockAware::True)) // SOMEDAY: Locality!
 		{}
 
 		void setDistributor(const DataDistributorInterface& interf) {
@@ -1578,6 +1578,20 @@ public:
 		return result;
 	}
 
+	// Given datacenter ID, returns the primary and remote regions.
+	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(const std::vector<RegionInfo>& regions, Key dcId) {
+		RegionInfo region;
+		RegionInfo remoteRegion;
+		for (const auto& r : regions) {
+			if (r.dcId == dcId) {
+				region = r;
+			} else {
+				remoteRegion = r;
+			}
+		}
+		return std::make_pair(region, remoteRegion);
+	}
+
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(RecruitFromConfigurationRequest const& req,
 	                                                                         Optional<Key> dcId) {
 		RecruitFromConfigurationReply result;
@@ -1590,15 +1604,7 @@ public:
 		primaryDC.insert(dcId);
 		result.dcId = dcId;
 
-		RegionInfo region;
-		RegionInfo remoteRegion;
-		for (auto& r : req.configuration.regions) {
-			if (r.dcId == dcId.get()) {
-				region = r;
-			} else {
-				remoteRegion = r;
-			}
-		}
+		auto [region, remoteRegion] = getPrimaryAndRemoteRegion(req.configuration.regions, dcId.get());
 
 		if (req.recruitSeedServers) {
 			auto primaryStorageServers =
@@ -1956,7 +1962,7 @@ public:
 			}
 
 			if (bestDC != clusterControllerDcId) {
-				TraceEvent("BestDCIsNotClusterDC");
+				TraceEvent("BestDCIsNotClusterDC").log();
 				vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(bestDC);
 				desiredDcIds.set(dcPriority);
@@ -2043,67 +2049,82 @@ public:
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
 		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req);
 		if (g_network->isSimulated()) {
-			RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
+			// FIXME: The logic to pick a satellite in a remote region is not
+			// deterministic and can therefore break this nondeterminism check.
+			// Since satellites will generally be in the primary region,
+			// disable the determinism check for remote region satellites.
+			bool remoteDCUsedAsSatellite = false;
+			if (req.configuration.regions.size() > 1) {
+				auto [region, remoteRegion] = getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
+				for (const auto& satellite : region.satellites) {
+					if (satellite.dcId == remoteRegion.dcId) {
+						remoteDCUsedAsSatellite = true;
+					}
+				}
+			}
+			if (!remoteDCUsedAsSatellite) {
+				RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
 
-			std::map<Optional<Standalone<StringRef>>, int> firstUsed;
-			std::map<Optional<Standalone<StringRef>>, int> secondUsed;
-			updateKnownIds(&firstUsed);
-			updateKnownIds(&secondUsed);
+				std::map<Optional<Standalone<StringRef>>, int> firstUsed;
+				std::map<Optional<Standalone<StringRef>>, int> secondUsed;
+				updateKnownIds(&firstUsed);
+				updateKnownIds(&secondUsed);
 
-			// auto mworker = id_worker.find(masterProcessId);
-			//TraceEvent("CompareAddressesMaster")
-			//    .detail("Master",
-			//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
+				// auto mworker = id_worker.find(masterProcessId);
+				//TraceEvent("CompareAddressesMaster")
+				//    .detail("Master",
+				//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
 
-			updateIdUsed(rep.tLogs, firstUsed);
-			updateIdUsed(compare.tLogs, secondUsed);
-			compareWorkers(
-			    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
-			updateIdUsed(rep.satelliteTLogs, firstUsed);
-			updateIdUsed(compare.satelliteTLogs, secondUsed);
-			compareWorkers(req.configuration,
-			               rep.satelliteTLogs,
-			               firstUsed,
-			               compare.satelliteTLogs,
-			               secondUsed,
-			               ProcessClass::TLog,
-			               "Satellite");
-			updateIdUsed(rep.commitProxies, firstUsed);
-			updateIdUsed(compare.commitProxies, secondUsed);
-			updateIdUsed(rep.grvProxies, firstUsed);
-			updateIdUsed(compare.grvProxies, secondUsed);
-			updateIdUsed(rep.resolvers, firstUsed);
-			updateIdUsed(compare.resolvers, secondUsed);
-			compareWorkers(req.configuration,
-			               rep.commitProxies,
-			               firstUsed,
-			               compare.commitProxies,
-			               secondUsed,
-			               ProcessClass::CommitProxy,
-			               "CommitProxy");
-			compareWorkers(req.configuration,
-			               rep.grvProxies,
-			               firstUsed,
-			               compare.grvProxies,
-			               secondUsed,
-			               ProcessClass::GrvProxy,
-			               "GrvProxy");
-			compareWorkers(req.configuration,
-			               rep.resolvers,
-			               firstUsed,
-			               compare.resolvers,
-			               secondUsed,
-			               ProcessClass::Resolver,
-			               "Resolver");
-			updateIdUsed(rep.backupWorkers, firstUsed);
-			updateIdUsed(compare.backupWorkers, secondUsed);
-			compareWorkers(req.configuration,
-			               rep.backupWorkers,
-			               firstUsed,
-			               compare.backupWorkers,
-			               secondUsed,
-			               ProcessClass::Backup,
-			               "Backup");
+				updateIdUsed(rep.tLogs, firstUsed);
+				updateIdUsed(compare.tLogs, secondUsed);
+				compareWorkers(
+				    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
+				updateIdUsed(rep.satelliteTLogs, firstUsed);
+				updateIdUsed(compare.satelliteTLogs, secondUsed);
+				compareWorkers(req.configuration,
+				               rep.satelliteTLogs,
+				               firstUsed,
+				               compare.satelliteTLogs,
+				               secondUsed,
+				               ProcessClass::TLog,
+				               "Satellite");
+				updateIdUsed(rep.commitProxies, firstUsed);
+				updateIdUsed(compare.commitProxies, secondUsed);
+				updateIdUsed(rep.grvProxies, firstUsed);
+				updateIdUsed(compare.grvProxies, secondUsed);
+				updateIdUsed(rep.resolvers, firstUsed);
+				updateIdUsed(compare.resolvers, secondUsed);
+				compareWorkers(req.configuration,
+				               rep.commitProxies,
+				               firstUsed,
+				               compare.commitProxies,
+				               secondUsed,
+				               ProcessClass::CommitProxy,
+				               "CommitProxy");
+				compareWorkers(req.configuration,
+				               rep.grvProxies,
+				               firstUsed,
+				               compare.grvProxies,
+				               secondUsed,
+				               ProcessClass::GrvProxy,
+				               "GrvProxy");
+				compareWorkers(req.configuration,
+				               rep.resolvers,
+				               firstUsed,
+				               compare.resolvers,
+				               secondUsed,
+				               ProcessClass::Resolver,
+				               "Resolver");
+				updateIdUsed(rep.backupWorkers, firstUsed);
+				updateIdUsed(compare.backupWorkers, secondUsed);
+				compareWorkers(req.configuration,
+				               rep.backupWorkers,
+				               firstUsed,
+				               compare.backupWorkers,
+				               secondUsed,
+				               ProcessClass::Backup,
+				               "Backup");
+			}
 		}
 		return rep;
 	}
@@ -3057,7 +3078,7 @@ public:
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
 		db.serverInfo->set(serverInfo);
-		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::TRUE);
+		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 
 	~ClusterControllerData() {
@@ -3073,7 +3094,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
 
 	loop {
-		TraceEvent("CCWDB", cluster->id);
+		TraceEvent("CCWDB", cluster->id).log();
 		try {
 			state double recoveryStart = now();
 			TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
@@ -3894,7 +3915,7 @@ ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
 ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
-	TraceEvent("TimeKeeperStarted");
+	TraceEvent("TimeKeeperStarted").log();
 
 	wait(timeKeeperSetVersion(self));
 
@@ -3908,7 +3929,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 					//       how long it is taking to hear responses from each other component.
 
 					UID debugID = deterministicRandom()->randomUniqueID();
-					TraceEvent("TimeKeeperCommit", debugID);
+					TraceEvent("TimeKeeperCommit", debugID).log();
 					tr->debugTransaction(debugID);
 				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -4059,7 +4080,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 			}
 
 			wait(trVer.commit());
-			TraceEvent("ProcessClassUpgrade");
+			TraceEvent("ProcessClassUpgrade").log();
 			break;
 		} catch (Error& e) {
 			wait(trVer.onError(e));
@@ -4488,7 +4509,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 			}
 			wait(fCommit);
 		}
-		TraceEvent("ForcedRecoveryFinish", self->id);
+		TraceEvent("ForcedRecoveryFinish", self->id).log();
 		self->db.forceRecovery = false;
 		req.reply.send(Void());
 	}
@@ -4497,7 +4518,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 ACTOR Future<DataDistributorInterface> startDataDistributor(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 
-	TraceEvent("CCStartDataDistributor", self->id);
+	TraceEvent("CCStartDataDistributor", self->id).log();
 	loop {
 		try {
 			state bool no_distributor = !self->db.serverInfo->get().distributor.present();
@@ -4564,7 +4585,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 
-	TraceEvent("CCStartRatekeeper", self->id);
+	TraceEvent("CCStartRatekeeper", self->id).log();
 	loop {
 		try {
 			state bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
@@ -4681,7 +4702,7 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 		req.serializedDbInfo =
 		    BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(g_network->protocolVersion()));
 
-		TraceEvent("DBInfoStartBroadcast", self->id);
+		TraceEvent("DBInfoStartBroadcast", self->id).log();
 		choose {
 			when(std::vector<Endpoint> notUpdated =
 			         wait(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false))) {
@@ -4701,7 +4722,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 	loop {
 		try {
 			while (!self->goodRecruitmentTime.isReady()) {
-				wait(self->goodRecruitmentTime);
+				wait(lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
 			}
 
 			self->degradedServers = self->getServersWithDegradedLink();
@@ -4736,7 +4757,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						}
 					} else {
 						self->excludedDegradedServers.clear();
-						TraceEvent("DegradedServerDetectedAndSuggestRecovery");
+						TraceEvent("DegradedServerDetectedAndSuggestRecovery").log();
 					}
 				}
 			}

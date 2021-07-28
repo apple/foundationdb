@@ -173,7 +173,7 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 					}
 				}
 
-				TraceEvent("CoroStop");
+				TraceEvent("CoroStop").log();
 				delete userData;
 				stopped.send(Void());
 				return;
@@ -181,14 +181,14 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 				TraceEvent("WorkPoolError").error(e, true);
 				error.sendError(e);
 			} catch (...) {
-				TraceEvent("WorkPoolError");
+				TraceEvent("WorkPoolError").log();
 				error.sendError(unknown_error());
 			}
 
 			try {
 				delete userData;
 			} catch (...) {
-				TraceEvent(SevError, "WorkPoolErrorShutdownError");
+				TraceEvent(SevError, "WorkPoolErrorShutdownError").log();
 			}
 			stopped.send(Void());
 		}

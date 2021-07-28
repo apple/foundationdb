@@ -290,10 +290,13 @@ void SimpleConfigTransaction::checkDeferredError() const {
 	impl().checkDeferredError(deferredError);
 }
 
-SimpleConfigTransaction::SimpleConfigTransaction(Database const& cx)
-  : _impl(std::make_unique<SimpleConfigTransactionImpl>(cx)) {}
+void SimpleConfigTransaction::setDatabase(Database const& cx) {
+	_impl = std::make_unique<SimpleConfigTransactionImpl>(cx);
+}
 
 SimpleConfigTransaction::SimpleConfigTransaction(ConfigTransactionInterface const& cti)
   : _impl(std::make_unique<SimpleConfigTransactionImpl>(cti)) {}
+
+SimpleConfigTransaction::SimpleConfigTransaction() = default;
 
 SimpleConfigTransaction::~SimpleConfigTransaction() = default;

@@ -3152,7 +3152,7 @@ struct CLIOptions {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::FALSE, IsSimulated::FALSE);
+		g_knobs.initialize(Randomize::False, IsSimulated::False);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -3323,7 +3323,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		db = Database::createDatabase(ccf, -1, IsInternal::FALSE);
+		db = Database::createDatabase(ccf, -1, IsInternal::False);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
@@ -4009,6 +4009,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
+						wait(makeInterruptable(GlobalConfig::globalConfig().onInitialized()));
 						if (tokencmp(tokens[2], "get")) {
 							if (tokens.size() != 3) {
 								fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
@@ -4973,7 +4974,7 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::FALSE, IsSimulated::FALSE);
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
 
 #ifdef __unixish__
 	struct sigaction act;

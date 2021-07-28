@@ -230,11 +230,11 @@ class LocalConfigurationImpl {
 	void updateInMemoryState(Version lastSeenVersion) {
 		this->lastSeenVersion = lastSeenVersion;
 		// TODO: Support randomization?
-		getKnobs().reset(Randomize::FALSE, g_network->isSimulated() ? IsSimulated::TRUE : IsSimulated::FALSE);
+		getKnobs().reset(Randomize::False, g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 		configKnobOverrides.update(getKnobs());
 		manualKnobOverrides.update(getKnobs());
 		// Must reinitialize in order to update dependent knobs
-		getKnobs().initialize(Randomize::FALSE, g_network->isSimulated() ? IsSimulated::TRUE : IsSimulated::FALSE);
+		getKnobs().initialize(Randomize::False, g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 	}
 
 	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
@@ -309,9 +309,8 @@ class LocalConfigurationImpl {
 		}
 	}
 
-	ACTOR static Future<Void> consume(
-	    LocalConfigurationImpl* self,
-	    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> broadcaster) {
+	ACTOR static Future<Void> consume(LocalConfigurationImpl* self,
+	                                  Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> broadcaster) {
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			choose {
@@ -334,8 +333,8 @@ public:
 		if (isTest) {
 			testKnobCollection =
 			    IKnobCollection::create(IKnobCollection::Type::TEST,
-			                            Randomize::FALSE,
-			                            g_network->isSimulated() ? IsSimulated::TRUE : IsSimulated::FALSE);
+			                            Randomize::False,
+			                            g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 		}
 		logger = traceCounters(
 		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
@@ -371,7 +370,7 @@ public:
 		return getKnobs().getTestKnobs();
 	}
 
-	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+	Future<Void> consume(Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
 		return consume(this, broadcaster);
 	}
 
@@ -405,7 +404,7 @@ public:
 		configKnobOverrides.set(
 		    {}, "knob_name_that_does_not_exist"_sr, KnobValueRef::create(ParsedKnobValue(int{ 1 })));
 		auto testKnobCollection =
-		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::FALSE, IsSimulated::FALSE);
+		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::False, IsSimulated::False);
 		// Should only trace and not throw an error:
 		configKnobOverrides.update(*testKnobCollection);
 	}
@@ -414,7 +413,7 @@ public:
 		ConfigKnobOverrides configKnobOverrides;
 		configKnobOverrides.set({}, "test_int"_sr, KnobValueRef::create(ParsedKnobValue("not_an_int")));
 		auto testKnobCollection =
-		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::FALSE, IsSimulated::FALSE);
+		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::False, IsSimulated::False);
 		// Should only trace and not throw an error:
 		configKnobOverrides.update(*testKnobCollection);
 	}
@@ -453,7 +452,7 @@ TestKnobs const& LocalConfiguration::getTestKnobs() const {
 }
 
 Future<Void> LocalConfiguration::consume(
-    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+    Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
 	return impl().consume(broadcaster);
 }
 

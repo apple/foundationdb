@@ -122,7 +122,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	    [db, connFile, apiVersion]() {
 		    try {
 			    Database::createDatabase(
-			        Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::FALSE, LocalityData(), db)
+			        Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::False, LocalityData(), db)
 			        .extractPtr();
 		    } catch (Error& e) {
 			    new (db) DatabaseContext(e);
@@ -149,9 +149,9 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadT
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
 	onMainThreadVoid(
-	    [tr, type, cx]() {
+	    [tr, cx]() {
 		    cx->addref();
-		    ISingleThreadTransaction::create(tr, type, Database(cx));
+		    tr->setDatabase(Database(cx));
 	    },
 	    nullptr);
 }

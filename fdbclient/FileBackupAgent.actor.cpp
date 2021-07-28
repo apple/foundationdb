@@ -252,8 +252,8 @@ public:
 
 	ACTOR static Future<int64_t> getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
 		state Future<Optional<Value>> beginVal =
-		    tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), Snapshot::TRUE);
-		state Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), Snapshot::TRUE);
+		    tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), Snapshot::True);
+		state Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), Snapshot::True);
 		wait(success(beginVal) && success(endVal));
 
 		if (!beginVal.get().present() || !endVal.get().present())
@@ -444,10 +444,10 @@ FileBackupAgent::FileBackupAgent()
     ,
     config(subspace.get(BackupAgentBase::keyConfig)), lastRestorable(subspace.get(FileBackupAgent::keyLastRestorable)),
     taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks),
-                              AccessSystemKeys::TRUE,
-                              PriorityBatch::FALSE,
-                              LockAware::TRUE)),
-    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::TRUE, LockAware::TRUE)) {
+                              AccessSystemKeys::True,
+                              PriorityBatch::False,
+                              LockAware::True)),
+    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::True, LockAware::True)) {
 }
 
 namespace fileBackup {
@@ -870,10 +870,10 @@ ACTOR static Future<Void> abortFiveOneBackup(FileBackupAgent* backupAgent,
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state KeyBackedTag tag = makeBackupTag(tagName);
-	state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, Snapshot::FALSE, backup_unneeded()));
+	state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, Snapshot::False, backup_unneeded()));
 
 	state BackupConfig config(current.first);
-	EBackupState status = wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
+	EBackupState status = wait(config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN));
 
 	if (!backupAgent->isRunnable(status)) {
 		throw backup_unneeded();
@@ -959,7 +959,7 @@ ACTOR static Future<Key> addBackupTask(StringRef name,
                                        Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
                                        std::function<void(Reference<Task>)> setupTaskFn = NOP_SETUP_TASK_FN,
                                        int priority = 0,
-                                       SetValidation setValidation = SetValidation::TRUE) {
+                                       SetValidation setValidation = SetValidation::True) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -1114,7 +1114,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				Params.beginKey().set(task, range.end);
 
 				// Save and extend the task with the new begin parameter
-				state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, UpdateParams::TRUE));
+				state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, UpdateParams::True));
 
 				// Update the range bytes written in the backup config
 				backup.rangeBytesWritten().atomicOp(tr, file->size(), MutationRef::AddValue);
@@ -1212,9 +1212,9 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		                                      results,
 		                                      lock,
 		                                      KeyRangeRef(beginKey, endKey),
-		                                      Terminator::TRUE,
-		                                      AccessSystemKeys::TRUE,
-		                                      LockAware::TRUE);
+		                                      Terminator::True,
+		                                      AccessSystemKeys::True,
+		                                      LockAware::True);
 		state RangeFileWriter rangeFile;
 		state BackupConfig backup(task);
 
@@ -2058,7 +2058,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 
 		for (auto& range : ranges) {
 			rc.push_back(
-			    readCommitted(cx, results, lock, range, Terminator::FALSE, AccessSystemKeys::TRUE, LockAware::TRUE));
+			    readCommitted(cx, results, lock, range, Terminator::False, AccessSystemKeys::True, LockAware::True));
 		}
 
 		state Future<Void> sendEOS = map(errorOr(waitForAll(rc)), [=](ErrorOr<Void> const& result) {
@@ -2236,7 +2236,7 @@ struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
 			    Params.destUidValue().set(task, destUidValue);
 		    },
 		    0,
-		    SetValidation::FALSE));
+		    SetValidation::False));
 
 		return key;
 	}
@@ -4072,13 +4072,13 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::FALSE, ::invalidVersion)));
+				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion)));
 
 				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
-				wait(store(logsOnly, restore.onlyApplyMutationLogs().getD(tr, Snapshot::FALSE, false)));
+				wait(store(logsOnly, restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false)));
 				wait(store(inconsistentSnapshotOnly,
-				           restore.inconsistentSnapshotOnly().getD(tr, Snapshot::FALSE, false)));
+				           restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false)));
 
 				wait(taskBucket->keepRunning(tr, task));
 
@@ -4329,7 +4329,7 @@ public:
 	static constexpr int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	// Parallel restore
-	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB unlockDB = UnlockDB::TRUE) {
+	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB unlockDB = UnlockDB::True) {
 		state ReadYourWritesTransaction tr(cx);
 		state Optional<Value> restoreRequestDoneKeyValue;
 		TraceEvent("FastRestoreToolWaitForRestoreToFinish").detail("DBLock", randomUID);
@@ -4492,7 +4492,7 @@ public:
 
 				state BackupConfig config(oldUidAndAborted.get().first);
 				state EBackupState status =
-				    wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
+				    wait(config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN));
 
 				// Break, if one of the following is true
 				//  - no longer runnable
@@ -4502,7 +4502,7 @@ public:
 
 					if (pContainer != nullptr) {
 						Reference<IBackupContainer> c =
-						    wait(config.backupContainer().getOrThrow(tr, Snapshot::FALSE, backup_invalid_info()));
+						    wait(config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info()));
 						*pContainer = c;
 					}
 
@@ -4549,7 +4549,7 @@ public:
 		if (uidAndAbortedFlag.present()) {
 			state BackupConfig prevConfig(uidAndAbortedFlag.get().first);
 			state EBackupState prevBackupStatus =
-			    wait(prevConfig.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
+			    wait(prevConfig.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN));
 			if (FileBackupAgent::isRunnable(prevBackupStatus)) {
 				throw backup_duplicate();
 			}
@@ -4812,9 +4812,9 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state KeyBackedTag tag = makeBackupTag(tagName.toString());
-		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, Snapshot::FALSE, backup_unneeded()));
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, Snapshot::False, backup_unneeded()));
 		state BackupConfig config(current.first);
-		state EBackupState status = wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
+		state EBackupState status = wait(config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN));
 
 		if (!FileBackupAgent::isRunnable(status)) {
 			throw backup_unneeded();
@@ -4863,11 +4863,11 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state KeyBackedTag tag = makeBackupTag(tagName);
-		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, Snapshot::FALSE, backup_unneeded()));
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, Snapshot::False, backup_unneeded()));
 
 		state BackupConfig config(current.first);
 		state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-		EBackupState status = wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
+		EBackupState status = wait(config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN));
 
 		if (!backupAgent->isRunnable(status)) {
 			throw backup_unneeded();
@@ -4969,7 +4969,7 @@ public:
 					state BackupConfig config(uidAndAbortedFlag.get().first);
 
 					state EBackupState backupState =
-					    wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
+					    wait(config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN));
 					JsonBuilderObject statusDoc;
 					statusDoc.setKey("Name", BackupAgentBase::getStateName(backupState));
 					statusDoc.setKey("Description", BackupAgentBase::getStateText(backupState));
@@ -5114,7 +5114,7 @@ public:
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
 					EBackupState status =
-					    wait(config.stateEnum().getD(tr, Snapshot::FALSE, EBackupState::STATE_NEVERRAN));
+					    wait(config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN));
 					backupState = status;
 				}
 
@@ -5478,7 +5478,7 @@ public:
 			try {
 				wait(discontinueBackup(backupAgent, ryw_tr, tagName));
 				wait(ryw_tr->commit());
-				TraceEvent("AS_DiscontinuedBackup");
+				TraceEvent("AS_DiscontinuedBackup").log();
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_backup_unneeded || e.code() == error_code_backup_duplicate) {
@@ -5488,8 +5488,8 @@ public:
 			}
 		}
 
-		wait(success(waitBackup(backupAgent, cx, tagName.toString(), StopWhenDone::TRUE)));
-		TraceEvent("AS_BackupStopped");
+		wait(success(waitBackup(backupAgent, cx, tagName.toString(), StopWhenDone::True)));
+		TraceEvent("AS_BackupStopped").log();
 
 		ryw_tr->reset();
 		loop {
@@ -5502,7 +5502,7 @@ public:
 					ryw_tr->clear(range);
 				}
 				wait(ryw_tr->commit());
-				TraceEvent("AS_ClearedRange");
+				TraceEvent("AS_ClearedRange").log();
 				break;
 			} catch (Error& e) {
 				wait(ryw_tr->onError(e));
@@ -5512,14 +5512,14 @@ public:
 		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
 
 		if (fastRestore) {
-			TraceEvent("AtomicParallelRestoreStartRestore");
+			TraceEvent("AtomicParallelRestoreStartRestore").log();
 			Version targetVersion = ::invalidVersion;
 			wait(submitParallelRestore(cx,
 			                           tagName,
 			                           ranges,
 			                           KeyRef(bc->getURL()),
 			                           targetVersion,
-			                           LockDB::TRUE,
+			                           LockDB::True,
 			                           randomUid,
 			                           addPrefix,
 			                           removePrefix));
@@ -5533,21 +5533,21 @@ public:
 			}
 			return -1;
 		} else {
-			TraceEvent("AS_StartRestore");
+			TraceEvent("AS_StartRestore").log();
 			Version ver = wait(restore(backupAgent,
 			                           cx,
 			                           cx,
 			                           tagName,
 			                           KeyRef(bc->getURL()),
 			                           ranges,
-			                           WaitForComplete::TRUE,
+			                           WaitForComplete::True,
 			                           ::invalidVersion,
-			                           Verbose::TRUE,
+			                           Verbose::True,
 			                           addPrefix,
 			                           removePrefix,
-			                           LockDB::TRUE,
-			                           OnlyApplyMutationLogs::FALSE,
-			                           InconsistentSnapshotOnly::FALSE,
+			                           LockDB::True,
+			                           OnlyApplyMutationLogs::False,
+			                           InconsistentSnapshotOnly::False,
 			                           ::invalidVersion,
 			                           {},
 			                           randomUid));
@@ -5565,7 +5565,7 @@ public:
 	                                          Key addPrefix,
 	                                          Key removePrefix) {
 		return success(
-		    atomicRestore(backupAgent, cx, tagName, ranges, addPrefix, removePrefix, UsePartitionedLog::TRUE));
+		    atomicRestore(backupAgent, cx, tagName, ranges, addPrefix, removePrefix, UsePartitionedLog::True));
 	}
 };
 
@@ -5637,7 +5637,7 @@ Future<Version> FileBackupAgent::atomicRestore(Database cx,
                                                Key addPrefix,
                                                Key removePrefix) {
 	return FileBackupAgentImpl::atomicRestore(
-	    this, cx, tagName, ranges, addPrefix, removePrefix, UsePartitionedLog::FALSE);
+	    this, cx, tagName, ranges, addPrefix, removePrefix, UsePartitionedLog::False);
 }
 
 Future<ERestoreState> FileBackupAgent::abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {

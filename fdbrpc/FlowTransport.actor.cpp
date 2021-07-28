@@ -919,11 +919,11 @@ ACTOR static void deliver(TransportData* self,
                           TaskPriority priority,
                           ArenaReader reader,
                           bool inReadSocket) {
-	// We want to run the task at the right priority. If the priority
-	// is higher than the current priority (which is ReadSocket) we
-	// can just upgrade. Otherwise we'll context switch so that we
-	// don't block other tasks that might run with a higher priority.
-	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
+	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
+	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
+	// with a higher priority. ReplyPromiseStream needs to guarentee that messages are recieved in the order they were
+	// sent, so even in the case of local delivery those messages need to skip this delay.
+	if (priority < TaskPriority::ReadSocket || (priority != TaskPriority::NoDeliverDelay && !inReadSocket)) {
 		wait(delay(0, priority));
 	} else {
 		g_network->setCurrentTask(priority);
@@ -1019,7 +1019,7 @@ static void scanPackets(TransportData* transport,
 			    BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
-				TraceEvent(SevInfo, "BitsFlip");
+				TraceEvent(SevInfo, "BitsFlip").log();
 				int flipBits = 32 - (int)floor(log2(deterministicRandom()->randomUInt32()));
 
 				uint32_t firstFlipByteLocation = deterministicRandom()->randomUInt32() % packetLen;
@@ -1698,7 +1698,7 @@ Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 //
 // Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
 // version, some other mechanism should be used to connect to that peer.
-Reference<AsyncVar<Optional<ProtocolVersion>>> FlowTransport::getPeerProtocolAsyncVar(NetworkAddress addr) {
+Reference<AsyncVar<Optional<ProtocolVersion>> const> FlowTransport::getPeerProtocolAsyncVar(NetworkAddress addr) {
 	return self->peers.at(addr)->protocolVersion;
 }
 

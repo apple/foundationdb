@@ -222,7 +222,7 @@ struct GrvProxyData {
 	Reference<ILogSystem> logSystem;
 
 	Database cx;
-	Reference<AsyncVar<ServerDBInfo>> db;
+	Reference<AsyncVar<ServerDBInfo> const> db;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
@@ -251,9 +251,9 @@ struct GrvProxyData {
 	GrvProxyData(UID dbgid,
 	             MasterInterface master,
 	             RequestStream<GetReadVersionRequest> getConsistentReadVersion,
-	             Reference<AsyncVar<ServerDBInfo>> db)
+	             Reference<AsyncVar<ServerDBInfo> const> db)
 	  : dbgid(dbgid), stats(dbgid), master(master), getConsistentReadVersion(getConsistentReadVersion),
-	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::TRUE)), db(db), lastStartCommit(0),
+	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), updateCommitRequests(0), lastCommitTime(0),
 	    minKnownCommittedVersion(invalidVersion) {}
 };
@@ -275,7 +275,7 @@ ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
 
 // Get transaction rate info from RateKeeper.
 ACTOR Future<Void> getRate(UID myID,
-                           Reference<AsyncVar<ServerDBInfo>> db,
+                           Reference<AsyncVar<ServerDBInfo> const> db,
                            int64_t* inTransactionCount,
                            int64_t* inBatchTransactionCount,
                            GrvTransactionRateInfo* transactionRateInfo,
@@ -300,7 +300,7 @@ ACTOR Future<Void> getRate(UID myID,
 				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
 				nextRequestTimer = Void(); // trigger GetRate request
 			} else {
-				TraceEvent("ProxyRatekeeperDied", myID);
+				TraceEvent("ProxyRatekeeperDied", myID).log();
 				nextRequestTimer = Never();
 				reply = Never();
 			}
@@ -375,7 +375,7 @@ void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue, GrvProxyStats* st
 }
 
 // Put a GetReadVersion request into the queue corresponding to its priority.
-ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const> db,
                                                SpannedDeque<GetReadVersionRequest>* systemQueue,
                                                SpannedDeque<GetReadVersionRequest>* defaultQueue,
                                                SpannedDeque<GetReadVersionRequest>* batchQueue,
@@ -634,7 +634,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 	return Void();
 }
 
-ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<ServerDBInfo>> db) {
+ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<GetDataDistributorMetricsReply> nextReply = Never();
 
@@ -680,7 +680,7 @@ ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<Asyn
 }
 
 ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
-                                             Reference<AsyncVar<ServerDBInfo>> db,
+                                             Reference<AsyncVar<ServerDBInfo> const> db,
                                              PromiseStream<Future<Void>> addActor,
                                              GrvProxyData* grvProxyData,
                                              GetHealthMetricsReply* healthMetricsReply,
@@ -898,7 +898,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
                                       MasterInterface master,
-                                      Reference<AsyncVar<ServerDBInfo>> db) {
+                                      Reference<AsyncVar<ServerDBInfo> const> db) {
 	state GrvProxyData grvProxyData(proxy.id(), master, proxy.getConsistentReadVersion, db);
 
 	state PromiseStream<Future<Void>> addActor;
@@ -945,7 +945,7 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 uint64_t recoveryCount,
                                 GrvProxyInterface myInterface) {
 	loop {
@@ -959,7 +959,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
 
 ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
                                   InitializeGrvProxyRequest req,
-                                  Reference<AsyncVar<ServerDBInfo>> db) {
+                                  Reference<AsyncVar<ServerDBInfo> const> db) {
 	try {
 		state Future<Void> core = grvProxyServerCore(proxy, req.master, db);
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));

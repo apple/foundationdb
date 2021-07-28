@@ -404,7 +404,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 				confChange = true;
 				TEST(true); // Recovering at a higher version.
 			} else if (m.param1 == writeRecoveryKey) {
-				TraceEvent("WriteRecoveryKeySet", dbgid);
+				TraceEvent("WriteRecoveryKeySet", dbgid).log();
 				if (!initialCommit)
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore

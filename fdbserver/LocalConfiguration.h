@@ -51,7 +51,7 @@ public:
 	LocalConfiguration(std::string const& dataFolder,
 	                   std::string const& configPath,
 	                   std::map<std::string, std::string> const& manualKnobOverrides,
-	                   IsTest = IsTest::FALSE);
+	                   IsTest = IsTest::False);
 	LocalConfiguration(LocalConfiguration&&);
 	LocalConfiguration& operator=(LocalConfiguration&&);
 	~LocalConfiguration();
@@ -60,7 +60,7 @@ public:
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;
 	TestKnobs const& getTestKnobs() const;
-	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster);
+	Future<Void> consume(Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster);
 	UID getID() const;
 
 public: // Testing

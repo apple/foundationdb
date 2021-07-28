@@ -73,7 +73,7 @@ struct RestoreBackupWorkload final : TestWorkload {
 				    .detail("TargetVersion", waitForVersion);
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() >= waitForVersion) {
 					try {
-						TraceEvent("DiscontinuingBackup");
+						TraceEvent("DiscontinuingBackup").log();
 						wait(self->backupAgent.discontinueBackup(cx, self->tag));
 					} catch (Error& e) {
 						TraceEvent("ErrorDiscontinuingBackup").error(e);
@@ -114,9 +114,9 @@ struct RestoreBackupWorkload final : TestWorkload {
 		                                       cx,
 		                                       self->tag,
 		                                       Key(self->backupContainer->getURL()),
-		                                       WaitForComplete::TRUE,
+		                                       WaitForComplete::True,
 		                                       ::invalidVersion,
-		                                       Verbose::TRUE)));
+		                                       Verbose::True)));
 		return Void();
 	}
 

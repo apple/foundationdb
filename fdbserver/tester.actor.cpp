@@ -234,6 +234,15 @@ vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, vector<st
 	return defaultValue;
 }
 
+bool hasOption(VectorRef<KeyValueRef> options, Key key) {
+	for (const auto& option : options) {
+		if (option.key == key) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // returns unconsumed options
 Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef> options) {
 	static StringRef nothing = LiteralStringRef("");
@@ -607,7 +616,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
-			cx = Database::createDatabase(ccf, -1, IsInternal::TRUE, locality);
+			cx = Database::createDatabase(ccf, -1, IsInternal::True, locality);
 			wait(delay(1.0));
 		}
 
@@ -808,7 +817,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 		}
 
 		state std::vector<Future<ErrorOr<CheckReply>>> checks;
-		TraceEvent("CheckingResults");
+		TraceEvent("CheckingResults").log();
 
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
 
@@ -1007,7 +1016,7 @@ ACTOR Future<bool> runTest(Database cx,
 
 	if (spec.useDB && spec.clearAfterTest) {
 		try {
-			TraceEvent("TesterClearingDatabase");
+			TraceEvent("TesterClearingDatabase").log();
 			wait(timeoutError(clearData(cx), 1000.0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "ErrorClearingDatabaseAfterTest").error(e);
@@ -1472,7 +1481,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
-			wait(setPerpetualStorageWiggle(cx, true, LockAware::TRUE));
+			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 		}
 	}
 
@@ -1550,7 +1559,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			}
 			when(wait(cc->onChange())) {}
 			when(wait(testerTimeout)) {
-				TraceEvent(SevError, "TesterRecruitmentTimeout");
+				TraceEvent(SevError, "TesterRecruitmentTimeout").log();
 				throw timed_out();
 			}
 		}

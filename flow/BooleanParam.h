@@ -29,7 +29,7 @@
 	public:                                                                                                            \
 		explicit constexpr ParamName(bool value) : value(value) {}                                                     \
 		constexpr operator bool() const { return value; }                                                              \
-		static ParamName const TRUE, FALSE;                                                                            \
+		static ParamName const True, False;                                                                            \
 		constexpr void set(bool value) { this->value = value; }                                                        \
 	};                                                                                                                 \
 	template <>                                                                                                        \
@@ -38,8 +38,8 @@
 	}
 
 #define FDB_DEFINE_BOOLEAN_PARAM(ParamName)                                                                            \
-	ParamName const ParamName::TRUE = ParamName(true);                                                                 \
-	ParamName const ParamName::FALSE = ParamName(false)
+	ParamName const ParamName::True = ParamName(true);                                                                 \
+	ParamName const ParamName::False = ParamName(false)
 
 #define FDB_BOOLEAN_PARAM(ParamName)                                                                                   \
 	FDB_DECLARE_BOOLEAN_PARAM(ParamName);                                                                              \

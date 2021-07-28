@@ -114,7 +114,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		}
 		loop {
 			try {
-				TraceEvent("SAACheckKey");
+				TraceEvent("SAACheckKey").log();
 				Optional<Value> actualValue = wait(tr.get(self->sumKey));
 				uint64_t actualValueInt = 0;
 				if (actualValue.present()) {

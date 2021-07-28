@@ -90,7 +90,7 @@ public: // variables
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), numSnaps(0), maxSnapDelay(0.0), testID(0), snapUID() {
-		TraceEvent("SnapTestWorkloadConstructor");
+		TraceEvent("SnapTestWorkloadConstructor").log();
 		std::string workloadName = "SnapTest";
 		maxRetryCntToRetrieveMessage = 10;
 
@@ -107,11 +107,11 @@ public: // ctor & dtor
 public: // workload functions
 	std::string description() const override { return "SnapTest"; }
 	Future<Void> setup(Database const& cx) override {
-		TraceEvent("SnapTestWorkloadSetup");
+		TraceEvent("SnapTestWorkloadSetup").log();
 		return Void();
 	}
 	Future<Void> start(Database const& cx) override {
-		TraceEvent("SnapTestWorkloadStart");
+		TraceEvent("SnapTestWorkloadStart").log();
 		if (clientId == 0) {
 			return _start(cx, this);
 		}
@@ -120,7 +120,7 @@ public: // workload functions
 
 	ACTOR Future<bool> _check(Database cx, SnapTestWorkload* self) {
 		if (self->skipCheck) {
-			TraceEvent(SevWarnAlways, "SnapCheckIgnored");
+			TraceEvent(SevWarnAlways, "SnapCheckIgnored").log();
 			return true;
 		}
 		state Transaction tr(cx);
@@ -183,7 +183,7 @@ public: // workload functions
 					Key key1Ref(Key1);
 					std::string Val1 = std::to_string(id);
 					Value val1Ref(Val1);
-					tr.set(key1Ref, val1Ref, AddConflictRange::FALSE);
+					tr.set(key1Ref, val1Ref, AddConflictRange::False);
 				}
 				wait(tr.commit());
 				break;
@@ -250,7 +250,7 @@ public: // workload functions
 			bool backupFailed = atoi(ini.GetValue("RESTORE", "BackupFailed"));
 			if (backupFailed) {
 				// since backup failed, skip the restore checking
-				TraceEvent(SevWarnAlways, "BackupFailedSkippingRestoreCheck");
+				TraceEvent(SevWarnAlways, "BackupFailedSkippingRestoreCheck").log();
 				return Void();
 			}
 			state KeySelector begin = firstGreaterOrEqual(normalKeys.begin);
@@ -265,7 +265,7 @@ public: // workload functions
 				try {
 					RangeResult kvRange = wait(tr.getRange(begin, end, 1000));
 					if (!kvRange.more && kvRange.size() == 0) {
-						TraceEvent("SnapTestNoMoreEntries");
+						TraceEvent("SnapTestNoMoreEntries").log();
 						break;
 					}
 

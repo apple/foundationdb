@@ -141,7 +141,7 @@ public:
 
 	Future<Void> commit(bool sequential) override {
 		if (getAvailableSize() <= 0) {
-			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id);
+			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id).log();
 			return Never();
 		}
 
@@ -605,7 +605,7 @@ private:
 
 				if (zeroFillSize) {
 					if (exactRecovery) {
-						TraceEvent(SevError, "KVSMemExpectedExact", self->id);
+						TraceEvent(SevError, "KVSMemExpectedExact", self->id).log();
 						ASSERT(false);
 					}
 

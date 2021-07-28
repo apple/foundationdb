@@ -33,9 +33,7 @@
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "fdbrpc/AsyncFileEncrypted.h"
-#endif
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
@@ -48,10 +46,11 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
-	if (!g_network->isSimulated())
+	if (!g_network->isSimulated() || !faultInjectionActivated)
 		return false;
 
 	auto p = g_simulator.getCurrentProcess();
@@ -471,12 +470,12 @@ public:
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
 		if (++openCount >= 3000) {
-			TraceEvent(SevError, "TooManyFiles");
+			TraceEvent(SevError, "TooManyFiles").log();
 			ASSERT(false);
 		}
 
 		if (openCount == 2000) {
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles");
+			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles").log();
 			g_simulator.speedUpSimulation = true;
 			g_simulator.connectionFailuresDisableDuration = 1e6;
 		}
@@ -1950,6 +1949,7 @@ public:
 			g_clogging.clogRecvFor(ip, seconds);
 	}
 	void clogPair(const IPAddress& from, const IPAddress& to, double seconds) override {
+		TraceEvent("CloggingPair").detail("From", from).detail("To", to).detail("Seconds", seconds);
 		g_clogging.clogPairFor(from, to, seconds);
 	}
 	std::vector<ProcessInfo*> getAllProcesses() const override {
@@ -2476,14 +2476,14 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if ENCRYPTION_ENABLED
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {
 				auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
 				                                               : AsyncFileEncrypted::Mode::READ_ONLY;
 				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
 			});
-#endif
+#endif // ENCRYPTION_ENABLED
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);
