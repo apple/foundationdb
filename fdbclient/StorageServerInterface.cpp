@@ -296,6 +296,27 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
+// split range
+template <>
+bool TSS_doCompare(const RangeFeedReply& src, const RangeFeedReply& tss) {
+	ASSERT(false);
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const RangeFeedRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const RangeFeedRequest& req,
+                       const RangeFeedReply& src,
+                       const RangeFeedReply& tss) {
+	ASSERT(false);
+}
+
 // only record metrics for data reads
 
 template <>
@@ -333,6 +354,9 @@ void TSSMetrics::recordLatency(const SplitRangeRequest& req, double ssLatency, d
 
 template <>
 void TSSMetrics::recordLatency(const GetKeyValuesStreamRequest& req, double ssLatency, double tssLatency) {}
+
+template <>
+void TSSMetrics::recordLatency(const RangeFeedRequest& req, double ssLatency, double tssLatency) {}
 
 // -------------------
 

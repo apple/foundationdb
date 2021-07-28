@@ -6532,7 +6532,7 @@ ACTOR Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutations
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
 	                              100,
-	                              false,
+	                              Reverse::False,
 	                              &StorageServerInterface::rangeFeed,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
@@ -6548,7 +6548,7 @@ ACTOR Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutations
 	                                      &StorageServerInterface::rangeFeed,
 	                                      req,
 	                                      TaskPriority::DefaultPromiseEndpoint,
-	                                      false,
+	                                      AtMostOnce::False,
 	                                      cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 	return Standalone<VectorRef<MutationRefAndVersion>>(rep.mutations, rep.arena);
 }
@@ -6571,7 +6571,7 @@ ACTOR Future<Void> popRangeFeedMutationsActor(Reference<DatabaseContext> db, Str
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
 	                              100,
-	                              false,
+	                              Reverse::False,
 	                              &StorageServerInterface::rangeFeed,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
