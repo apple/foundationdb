@@ -85,6 +85,9 @@ LogSet::LogSet(const TLogSet& tLogSet)
 	for (const auto& log : tLogSet.tLogs) {
 		logServers.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(log));
 	}
+	for (const auto& log : tLogSet.tLogsPtxn) {
+		logServersPtxn.push_back(makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(log));
+	}
 	tLogGroupIDs = tLogSet.tLogGroupIDs;
 	for (int i = 0; tLogGroupIDs.size(); i++) {
 		for (const OptionalInterface<ptxn::TLogInterface_PassivelyPull>& interface : tLogSet.ptxnTLogGroups[i]) {

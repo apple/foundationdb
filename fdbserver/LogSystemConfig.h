@@ -146,11 +146,6 @@ struct TLogSet {
 			}
 		}
 
-		for (int j = 0; j < tLogGroupIDs.size(); j++) {
-			if (tLogGroupIDs[j] != rhs.tLogGroupIDs[j]) {
-				return false;
-			}
-		}
 		for (int j = 0; j < logRouters.size(); j++) {
 			if (logRouters[j].id() != rhs.logRouters[j].id() ||
 			    logRouters[j].present() != rhs.logRouters[j].present() ||
@@ -197,6 +192,7 @@ struct TLogSet {
 	void serialize(Ar& ar) {
 		serializer(ar,
 		           tLogs,
+		           tLogsPtxn,
 		           tLogGroupIDs,
 		           ptxnTLogGroups,
 		           logRouters,
