@@ -19,6 +19,7 @@
  */
 
 #include <iterator>
+#include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -50,6 +51,7 @@
 #include "flow/Trace.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/serialize.h"
 
 using std::max;
 using std::min;
@@ -199,7 +201,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Reference<ILogSystem> logSystem;
 	Reference<TLogGroupCollection> tLogGroupCollection;
-	Optional<Standalone<RangeResultRef>> tLogGroupRecoveredState;
 
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
@@ -300,8 +301,8 @@ ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfi
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
 		TraceEvent("CommitProxyReplies", self->dbgid)
-			.detail("WorkerID", recr.commitProxies[i].id())
-			.detail("FirstProxy", req.firstProxy ? "True" : "False");
+		    .detail("WorkerID", recr.commitProxies[i].id())
+		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -396,6 +397,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 
 		self->primaryLocality = self->dcId_locality[recr.dcId];
 		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
+
 		Reference<ILogSystem> newLogSystem = wait(oldLogSystem->newEpoch(recr,
 		                                                                 fRemoteWorkers,
 		                                                                 self->configuration,
@@ -403,7 +405,8 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
-		                                                                 self->recruitmentStalled));
+		                                                                 self->recruitmentStalled,
+		                                                                 self->tLogGroupCollection));
 		self->logSystem = newLogSystem;
 	} else {
 		self->primaryLocality = tagLocalitySpecial;
@@ -415,7 +418,8 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		                                                                 self->primaryLocality,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
-		                                                                 self->recruitmentStalled));
+		                                                                 self->recruitmentStalled,
+		                                                                 self->tLogGroupCollection));
 		self->logSystem = newLogSystem;
 	}
 	return Void();
@@ -773,10 +777,14 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .trackLatest("MasterRecoveryState");
 
 	// Recruit TLog groups
-	ASSERT(self->tLogGroupRecoveredState.present());
 	self->tLogGroupCollection->addWorkers(recruits.tLogs);
-	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get());
 	self->tLogGroupCollection->recruitEverything();
+
+	// Assign storage teams to tLogGroups.
+	for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {
+		auto group = self->tLogGroupCollection->selectFreeGroup();
+		self->tLogGroupCollection->assignStorageTeam(teamId, group);
+	}
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
@@ -909,12 +917,20 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 
 	uniquify(self->allTags);
 
-	// Load TLogGroupCollection
-	Standalone<RangeResultRef> tLogGroupState = wait(self->txnStateStore->readRange(tLogGroupKeys));
+	// Clear previous TLogGroupCollection state
+	self->txnStateStore->clear(tLogGroupKeys);
+	self->txnStateStore->clear(storageTeamIdToTLogGroupRange);
+
 	self->tLogGroupCollection = makeReference<TLogGroupCollection>(self->configuration.tLogPolicy,
 	                                                               SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
 	                                                               self->configuration.tLogReplicationFactor);
-	self->tLogGroupRecoveredState = tLogGroupState;
+
+	// Load storage teams from \xff keyspace to tLogGroupCollection.
+	RangeResult ssTeams = wait(self->txnStateStore->readRange(storageTeamIdKeyRange));
+	for (auto& r : ssTeams) {
+		auto teamId = storageTeamIdKeyDecode(r.key);
+		self->tLogGroupCollection->tryAddStorageTeam(teamId, decodeStorageTeams(r.value));
+	}
 
 	// auto kvs = self->txnStateStore->readRange( systemKeys );
 	// for( auto & kv : kvs.get() )
@@ -979,9 +995,9 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 	}
 	wait(waitForAll(txnReplies));
 	TraceEvent("RecoveryInternal", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::recovery_transaction)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.detail("Step", "SentTxnStateStoreToCommitProxies");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "SentTxnStateStoreToCommitProxies");
 
 	// To avoid race of recovery transaction with the above broadcast,
 	// resolvers are initialized after the broadcast is done. This ensures
@@ -992,16 +1008,18 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 		req.prevVersion = -1;
 		req.version = self->lastEpochEnd;
 		req.lastReceivedVersion = -1;
-		// TODO: add all team IDs to the request
-
+		req.newGroups.reserve(self->tLogGroupCollection->groups().size());
+		for (const auto& tLogGroup : self->tLogGroupCollection->groups()) {
+			req.newGroups.push_back(tLogGroup->id());
+		}
 		replies.push_back(brokenPromiseToNever(r.resolve.getReply(req)));
 	}
 
 	wait(waitForAll(replies));
 	TraceEvent("RecoveryInternal", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::recovery_transaction)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.detail("Step", "InitializedAllResolvers");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "InitializedAllResolvers");
 	return Void();
 }
 
@@ -1891,6 +1909,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
+		self->tLogGroupCollection->seedTLogGroupAssignment(recoveryCommitRequest.arena, tr, seedServers);
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely
@@ -1920,13 +1939,15 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		}
 	}
 
+	// after recovery and recruitment
 	self->tLogGroupCollection->storeState(&recoveryCommitRequest);
 
 	applyMetadataMutations(SpanID(),
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),
-	                       self->txnStateStore);
+	                       self->txnStateStore,
+	                       self->tLogGroupCollection);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial

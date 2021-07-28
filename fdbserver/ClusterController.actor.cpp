@@ -3407,6 +3407,15 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration(ClusterControllerData* 
 	}
 }
 
+void printGroupsToServersMapping(LogSystemConfig logSystemConfig) {
+	const auto& tLogGroupIDs = logSystemConfig.tLogs[0].tLogGroupIDs;
+	const auto& ptxnTLogGroups = logSystemConfig.tLogs[0].ptxnTLogGroups;
+	for (int i = 0; i < tLogGroupIDs.size(); i++) {
+		auto serverIds = tLogGroupIDs[i];
+		TraceEvent("tLogGroupToLogServerIds:Group ID: ", serverIds).detail("group size : ", ptxnTLogGroups[i].size());
+	}
+}
+
 void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest const& req) {
 	req.reply.send(Void());
 

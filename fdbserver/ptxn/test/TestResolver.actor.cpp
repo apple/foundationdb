@@ -28,7 +28,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/Config.h"
-#include "fdbserver/ptxn/TeamVersionTracker.h"
+#include "fdbserver/ptxn/TLogGroupVersionTracker.h"
 #include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/Utils.h"
@@ -38,12 +38,12 @@
 
 namespace {
 
-// Returns a randomly picked subset of "teams".
-std::vector<ptxn::StorageTeamID> getRandomTeams(const std::vector<ptxn::StorageTeamID>& teams) {
-	std::vector<ptxn::StorageTeamID> results;
-	for (const auto& team : teams) {
+// Returns a randomly picked subset of "groups".
+std::vector<ptxn::TLogGroupID> getRandomGroups(const std::vector<ptxn::TLogGroupID>& groups) {
+	std::vector<ptxn::TLogGroupID> results;
+	for (const auto& group : groups) {
 		if (deterministicRandom()->coinflip()) {
-			results.push_back(team);
+			results.push_back(group);
 		}
 	}
 	return results;
@@ -55,7 +55,7 @@ std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
                                                          Version beginVersion,
                                                          int n,
                                                          int64_t increment,
-                                                         const std::vector<ptxn::StorageTeamID>& teams) {
+                                                         const std::vector<ptxn::TLogGroupID>& groups) {
 	std::vector<ResolveTransactionBatchRequest> batch(n);
 
 	Version current = beginVersion;
@@ -64,7 +64,7 @@ std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
 		r.prevVersion = pv;
 		r.version = current;
 		r.lastReceivedVersion = prevVersion;
-		r.updatedTeams = getRandomTeams(teams);
+		r.updatedGroups = getRandomGroups(groups);
 
 		pv = current;
 		current += increment;
@@ -84,38 +84,38 @@ int findBatch(std::vector<ResolveTransactionBatchRequest> batches, Version v) {
 }
 
 bool trackerTest() {
-	ptxn::TeamVersionTracker tracker;
-	std::vector<ptxn::StorageTeamID> teams;
-	const int totalTeams = 10;
-	for (int i = 0; i < totalTeams; i++) {
-		teams.emplace_back(0, i);
+	ptxn::TLogGroupVersionTracker tracker;
+	std::vector<ptxn::TLogGroupID> groups;
+	const int totalGroups = 10;
+	for (int i = 0; i < totalGroups; i++) {
+		groups.emplace_back(0, i);
 	}
 	const Version initialVersion = 100;
-	tracker.addTeams(teams, initialVersion);
+	tracker.addGroups(groups, initialVersion);
 	ASSERT_EQ(tracker.getCommitVersion({0, 1}), initialVersion);
 	ASSERT_EQ(tracker.getMaxCommitVersion(), initialVersion);
 
-	std::vector<ptxn::StorageTeamID> updatedTeams, newTeams, removedTeams;
-	for (int i = 0; i < totalTeams/2; i++) {
-		updatedTeams.emplace_back(0, i);
-		newTeams.emplace_back(0, totalTeams + i);
-		removedTeams.emplace_back(0, totalTeams - i - 1);
+	std::vector<ptxn::TLogGroupID> updatedGroups, newGroups, removedGroups;
+	for (int i = 0; i < totalGroups / 2; i++) {
+		updatedGroups.emplace_back(0, i);
+		newGroups.emplace_back(0, totalGroups + i);
+		removedGroups.emplace_back(0, totalGroups - i - 1);
 	}
 	const Version cv1 = 200, cv2 = 200;
-	tracker.updateTeams(updatedTeams, cv1);
-	tracker.addTeams(newTeams, cv2);
-	tracker.removeTeams(removedTeams);
+	tracker.updateGroups(updatedGroups, cv1);
+	tracker.addGroups(newGroups, cv2);
+	tracker.removeGroups(removedGroups);
 
-	for (const auto team : updatedTeams) {
-		ASSERT_EQ(tracker.getCommitVersion(team), cv1);
+	for (const auto group : updatedGroups) {
+		ASSERT_EQ(tracker.getCommitVersion(group), cv1);
 	}
-	for (const auto team : newTeams) {
-		ASSERT_EQ(tracker.getCommitVersion(team), cv2);
+	for (const auto group : newGroups) {
+		ASSERT_EQ(tracker.getCommitVersion(group), cv2);
 	}
-	for (const auto team : removedTeams) {
-		ASSERT_EQ(tracker.getCommitVersion(team), invalidVersion);
+	for (const auto group : removedGroups) {
+		ASSERT_EQ(tracker.getCommitVersion(group), invalidVersion);
 	}
-	std::pair<ptxn::StorageTeamID, Version> p = tracker.mostLaggingTeam();
+	std::pair<ptxn::TLogGroupID, Version> p = tracker.mostLaggingGroup();
 	ASSERT_EQ(p.second, cv1);
 
 	return true;
@@ -123,26 +123,26 @@ bool trackerTest() {
 
 } // anonymous namespace
 
-// Creates a random set of teams, sends 10 batches in random order to Resolvers,
+// Creates a random set of groups, sends 10 batches in random order to Resolvers,
 // and verifies the correct previous commit version (PCV) is returned back.
 TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state const Version lastEpochEnd = 100;
 	state const int totalRequests = 10;
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<ptxn::test::TestDriverContext> context;
-	state std::vector<ptxn::StorageTeamID> teams;
-	state const int totalTeams = deterministicRandom()->randomInt(10, 1000);
+	state std::vector<ptxn::TLogGroupID> groups;
+	state const int totalGroups = deterministicRandom()->randomInt(10, 1000);
 
 	ptxn::test::TestDriverOptions options(params);
 	ptxn::test::print::print(options);
 
-	for (int i = 0; i < totalTeams; i++) {
-		teams.emplace_back(0, i);
+	for (int i = 0; i < totalGroups; i++) {
+		groups.emplace_back(0, i);
 	}
 
 	context = ptxn::test::initTestDriverContext(options);
 	startFakeResolver(actors, context);
-	std::cout << "Started " << context->numResolvers << " Resolvers with " << totalTeams << " teams\n";
+	std::cout << "Started " << context->numResolvers << " Resolvers with " << totalGroups << " groups\n";
 
 	state std::vector<Future<ResolveTransactionBatchReply>> replies;
 	// Imitates resolver initialization from the master server
@@ -153,7 +153,7 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 		req.lastReceivedVersion = -1;
 		// triggers debugging trace events at Resolvers
 		req.debugID = deterministicRandom()->randomUniqueID();
-		req.newTeams = teams;
+		req.newGroups = groups;
 
 		replies.push_back(brokenPromiseToNever(r->resolve.getReply(req)));
 	}
@@ -169,7 +169,7 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state int64_t increment = 7;
 
 	state std::vector<ResolveTransactionBatchRequest> batches =
-	    makeTxnBatch(lastEpochEnd, beginVersion, totalRequests, increment, teams);
+	    makeTxnBatch(lastEpochEnd, beginVersion, totalRequests, increment, groups);
 	std::mt19937 g(deterministicRandom()->randomUInt32());
 	std::shuffle(batches.begin(), batches.end(), g);
 
@@ -185,22 +185,22 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 		ASSERT(f.isReady() && f.isValid());
 	}
 
-	// Verify team's previous commit versions (PCVs) are correct.
-	std::map<ptxn::StorageTeamID, Version> pcv; // previous commit version
-	for (const auto& team : teams) {
-		pcv[team] = lastEpochEnd;
+	// Verify group's previous commit versions (PCVs) are correct.
+	std::map<ptxn::TLogGroupID, Version> pcv; // previous commit version
+	for (const auto& group : groups) {
+		pcv[group] = lastEpochEnd;
 	}
 	for (int i = 0; i < totalRequests; i++) {
 		Version v = beginVersion + i * increment;
 		int idx = findBatch(batches, v); // the i'th request
 
 		auto& pcvGot = replies[idx].get().previousCommitVersions;
-		ASSERT_EQ(batches[idx].updatedTeams.size(), pcvGot.size());
-		for (const auto& team : batches[idx].updatedTeams) {
-			auto it = pcvGot.find(team);
+		ASSERT_EQ(batches[idx].updatedGroups.size(), pcvGot.size());
+		for (const auto& group : batches[idx].updatedGroups) {
+			auto it = pcvGot.find(group);
 			ASSERT(it != pcvGot.end());
-			ASSERT_EQ(pcv[team], it->second);
-			pcv[team] = batches[idx].version;
+			ASSERT_EQ(pcv[group], it->second);
+			pcv[group] = batches[idx].version;
 		}
 	}
 

@@ -209,6 +209,9 @@ public:
 // Each serializer servers a single storage team ID. The serializer will only seriaize one version
 // (SubsequencedMessageSerializer supports serializing multiple versions).
 // This is useful for CommitProxies to serialize one commit into multiple storage team IDs.
+// TODO: introduce TLogGroupID into serializer for a two level serialization:
+// 		tloggroup1 : version, [team 1 header], team 1 mutations, [team 2 header], team 2 mutations
+//      tloggroup2 : version, [team 1 header], team 1 mutations, [team 3 header], team 3 mutations
 class ProxySubsequencedMessageSerializer {
 private:
 	// Mapper between StorageTeamID and SubsequencedMessageSerializer
@@ -276,7 +279,7 @@ public:
 	Standalone<StringRef> getSerialized(const StorageTeamID& storageTeamID);
 
 	// Get all serialized data
-	std::unordered_map<StorageTeamID, Standalone<StringRef>> getAllSerialized();
+	std::pair<Arena, std::unordered_map<StorageTeamID, StringRef>> getAllSerialized();
 };
 
 template <typename T>

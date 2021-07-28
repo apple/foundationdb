@@ -150,11 +150,11 @@ std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerI
 	return storageTeamIDStorageServerInterfaceMapper.at(storageTeamID);
 }
 
-std::pair<Version, Version> TestDriverContext::getCommitVersionPair(const StorageTeamID& storageTeamId, const Version& currentVersion) {
-	ASSERT(storageTeamIDTLogGroupIDMapper.count(storageTeamId));
-	Version prevVersion = tLogGroupVersion[storageTeamIDTLogGroupIDMapper.at(storageTeamId)];
+std::pair<Version, Version> TestDriverContext::getCommitVersionPair(const TLogGroupID& tLogGroupID,
+                                                                    const Version& currentVersion) {
+	Version prevVersion = tLogGroupVersion[tLogGroupID];
 	Version commitVersion = currentVersion;
-	tLogGroupVersion[storageTeamIDTLogGroupIDMapper.at(storageTeamId)] = commitVersion;
+	tLogGroupVersion[tLogGroupID] = commitVersion;
 	return { prevVersion, commitVersion };
 }
 

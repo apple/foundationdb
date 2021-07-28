@@ -1046,6 +1046,12 @@ Future<std::vector<T>> getAll(std::vector<Future<T>> input) {
 }
 
 ACTOR template <class T>
+Future<T> getAll(std::vector<Future<T>> input, std::function<T(const std::vector<T>&)> reduce) {
+	std::vector<T> res = wait(getAll(input));
+	return reduce(res);
+}
+
+ACTOR template <class T>
 Future<std::vector<T>> appendAll(std::vector<Future<std::vector<T>>> input) {
 	wait(quorum(input, input.size()));
 

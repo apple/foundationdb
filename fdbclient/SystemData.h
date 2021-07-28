@@ -95,17 +95,27 @@ const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 
+// TODO (Vishesh) add prefix as examples
 // Creates a map from teamId to list of storage servers in that team.
 extern const KeyRef storageTeamIdKeyPrefix;
+extern const KeyRangeRef storageTeamIdKeyRange;
 const Key storageTeamIdKey(ptxn::StorageTeamID teamId);
 ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key);
 std::vector<UID> decodeStorageTeams(const ValueRef& value);
 const Value encodeStorageTeams(const std::vector<UID>& value);
 
+// Map from storage teamId to TLogGroup
+extern const KeyRef storageTeamIdToTLogGroupPrefix;
+extern const KeyRangeRef storageTeamIdToTLogGroupRange;
+const ptxn::StorageTeamID decodeStorageTeamIdToTLogGroupKey(const KeyRef& k);
+const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId);
+
 // Create a map from storage server ID to list of teams associated with that
 // team.
 extern const KeyRef storageServerToTeamIdKeyPrefix;
 const Key storageServerToTeamIdKey(UID serverId);
+const Value encodeStorageServerToTeamIdValue(const std::set<UID>& teamIds);
+const std::set<UID> decodeStorageServerToTeamIdValue(const ValueRef& value);
 
 // Create a map from list of storage servers to teamId. The list of server ID in
 // key is stored in sorted order.

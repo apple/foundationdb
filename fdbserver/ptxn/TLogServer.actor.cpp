@@ -59,23 +59,34 @@ namespace ptxn {
 
 struct TLogQueueEntryRef {
 	UID id;
-	StorageTeamID storageTeamId;
+	std::vector<StorageTeamID> storageTeams;
+	std::vector<StringRef> messages;
 	Version version;
 	Version knownCommittedVersion;
-	StringRef messages;
 
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
 	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id),
-	    storageTeamId(from.storageTeamId), messages(a, from.messages) {}
+	    storageTeams(from.storageTeams) {
+		messages.reserve(from.messages.size());
+		for (const auto& message : from.messages) {
+			messages.emplace_back(a, message);
+		}
+	}
 
 	// To change this serialization, ProtocolVersion::TLogQueueEntryRef must be updated, and downgrades need to be
 	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, messages, knownCommittedVersion, id, storageTeamId);
+		serializer(ar, version, messages, knownCommittedVersion, id, storageTeams, messages);
 	}
-	size_t expectedSize() const { return messages.expectedSize(); }
+	size_t expectedSize() const {
+		size_t total = 0;
+		for (const auto& message : messages) {
+			total += message.expectedSize();
+		}
+		return total;
+	}
 };
 
 typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
@@ -687,6 +698,7 @@ void TLogQueue::updateVersionSizes(const TLogQueueEntry& result,
 	}
 }
 
+// TODO: should deserialize messages to pairs of storage team -> message
 void commitMessages(Reference<TLogGroupData> self,
                     Reference<LogGenerationData> logData,
                     Version version,
@@ -926,7 +938,9 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
-		commitMessages(self, logData, req.version, req.messages, req.storageTeamID);
+		for (auto& message : req.messages) {
+			commitMessages(self, logData, req.version, message.second, message.first);
+		}
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 
@@ -934,9 +948,13 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 		// Log the changes to the persistent queue, to be committed by commitQueue()
 		qe.version = req.version;
 		qe.knownCommittedVersion = logData->knownCommittedVersion;
-		qe.messages = req.messages;
 		qe.id = logData->logId;
-		qe.storageTeamId = req.storageTeamID;
+		qe.storageTeams.reserve(req.messages.size());
+		qe.messages.reserve(req.messages.size());
+		for (auto& message : req.messages) {
+			qe.storageTeams.push_back(message.first);
+			qe.messages.push_back(message.second);
+		}
 		// Currently only store commit messages in memory and not using persistent queue
 		// self->persistentQueue->push(qe, logData);
 
@@ -1131,7 +1149,7 @@ ACTOR Future<Void> rejoinMasters(Reference<TLogServerData> self,
 ACTOR Future<Void> serveTLogInterface_PassivelyPull(
     Reference<TLogServerData> self,
     TLogInterface_PassivelyPull tli,
-    std::shared_ptr<std::unordered_map<StorageTeamID, Reference<LogGenerationData>>> activeGeneration) {
+    std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration) {
 	ASSERT(activeGeneration->size());
 
 	state UID recruitmentID = activeGeneration->begin()->second->recruitmentID;
@@ -1159,7 +1177,7 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			}
 		}
 		when(TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
-			auto tlogGroup = activeGeneration->find(req.storageTeamID);
+			auto tlogGroup = activeGeneration->find(req.tLogGroupID);
 			TEST(tlogGroup == activeGeneration->end()); // TLog group not found
 			if (tlogGroup == activeGeneration->end()) {
 				req.reply.sendError(tlog_group_not_found());
@@ -1174,7 +1192,7 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			}
 		}
 		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {
-			auto tlogGroup = activeGeneration->find(req.storageTeamID);
+			auto tlogGroup = activeGeneration->find(req.tLogGroupID);
 			TEST(tlogGroup == activeGeneration->end()); // TLog peek: group not found
 			if (tlogGroup == activeGeneration->end()) {
 				req.reply.sendError(tlog_group_not_found());
@@ -1210,7 +1228,7 @@ void removeLog(Reference<LogGenerationData> logData) {
 
 ACTOR Future<Void> tLogCore(
     Reference<TLogServerData> self,
-    std::shared_ptr<std::unordered_map<StorageTeamID, Reference<LogGenerationData>>> activeGeneration,
+    std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration,
     TLogInterface_PassivelyPull tli) {
 	if (self->removed.isReady()) {
 		wait(delay(0)); // to avoid iterator invalidation in restorePersistentState when removed is already ready
@@ -1418,8 +1436,8 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 	self->removed = rejoinMasters(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 
 	state std::vector<Future<Void>> tlogGroupStarts;
-	state std::shared_ptr<std::unordered_map<StorageTeamID, Reference<LogGenerationData>>> activeGeneration =
-	    std::make_shared<std::unordered_map<StorageTeamID, Reference<LogGenerationData>>>();
+	state std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration =
+	    std::make_shared<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>>();
 	for (auto& group : req.tlogGroups) {
 		ASSERT(self->tlogGroups.count(group.logGroupId));
 		Reference<TLogGroupData> tlogGroupData = self->tlogGroups[group.logGroupId];
@@ -1436,9 +1454,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 
 		tlogGroupData->id_data[recruited.id()] = newGenerationData;
 		newGenerationData->removed = self->removed;
-		for (auto& storageTeam : group.storageTeams) {
-			activeGeneration->emplace(storageTeam.first, newGenerationData);
-		}
+		activeGeneration->emplace(group.logGroupId, newGenerationData);
 		tlogGroupStarts.push_back(tlogGroupStart(tlogGroupData, newGenerationData));
 	}
 
