@@ -73,6 +73,7 @@ public:
 
 	// Chaos testing
 	bool ENABLE_CHAOS_FEATURES;
+	double CHAOS_LOGGING_INTERVAL;
 
 	bool WRITE_TRACING_ENABLED;
 	int TRACING_UDP_LISTENER_PORT;

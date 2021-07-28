@@ -93,23 +93,21 @@ struct ProfilerRequest {
 struct SetFailureInjection {
 	constexpr static FileIdentifier file_identifier = 15439864;
 	ReplyPromise<Void> reply;
-	struct ThrottleDiskCommand {
-		// how often should the delay be inserted (0 meaning once, 10 meaning every 10 secs)
-		double delayFrequency;
-		// min delay to be inserted
-		double delayMin;
-		//max delay to be inserted
-		double delayMax;
+	struct DiskFailureCommand {
+		// how often should the disk be stalled (0 meaning once, 10 meaning every 10 secs)
+		double stallInterval;
+		// Period of time disk stalls will be injected for
+		double stallPeriod;
+		// Period of time the disk will be slowed down for
+		double throttlePeriod;
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			serializer(ar, delayFrequency, delayMin, delayMax);
+			serializer(ar, stallInterval, stallPeriod, throttlePeriod);
 		}
 	};
 
 	struct FlipBitsCommand {
-		// File that the bit flips are requested for
-		//Reference<IAsyncFile> filename;
 		// percent of bits to flip in the given file
 		double percentBitFlips;
 
@@ -119,12 +117,12 @@ struct SetFailureInjection {
 		}
 	};
 
-	Optional<ThrottleDiskCommand> throttleDisk;
+	Optional<DiskFailureCommand> diskFailure;
 	Optional<FlipBitsCommand> flipBits;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply, throttleDisk, flipBits);
+		serializer(ar, reply, diskFailure, flipBits);
 	}
 };
 #endif
