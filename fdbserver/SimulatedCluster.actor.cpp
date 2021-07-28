@@ -41,6 +41,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
+#include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -407,7 +408,7 @@ ACTOR Future<Void> runDr(Reference<ClusterConnectionFile> connFile) {
 			wait(delay(1.0));
 		}
 
-		TraceEvent("StoppingDrAgents");
+		TraceEvent("StoppingDrAgents").log();
 
 		for (auto it : agentFutures) {
 			it.cancel();
@@ -1647,7 +1648,7 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 	tssCount =
 	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
 
-	if (!testConfig.config.present() && tssCount > 0) {
+	if (!testConfig.config.present() && tssCount > 0 && faultInjectionActivated) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
 		set_config(confStr);
 		double tssRandom = deterministicRandom()->random01();
@@ -2204,7 +2205,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
 
-	TraceEvent("SimulatedSystemDestruct");
+	TraceEvent("SimulatedSystemDestruct").log();
 	g_simulator.stop();
 	destructed = true;
 	wait(Never());

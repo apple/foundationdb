@@ -1019,7 +1019,7 @@ static void scanPackets(TransportData* transport,
 			    BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
-				TraceEvent(SevInfo, "BitsFlip");
+				TraceEvent(SevInfo, "BitsFlip").log();
 				int flipBits = 32 - (int)floor(log2(deterministicRandom()->randomUInt32()));
 
 				uint32_t firstFlipByteLocation = deterministicRandom()->randomUInt32() % packetLen;

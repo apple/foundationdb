@@ -990,7 +990,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 			when(T t = wait(what)) { return t; }
 			when(wait(degradedEnd)) {
 				TEST(true); // TLog degraded
-				TraceEvent(SevWarnAlways, "IoDegraded");
+				TraceEvent(SevWarnAlways, "IoDegraded").log();
 				degraded->set(true);
 			}
 		}
