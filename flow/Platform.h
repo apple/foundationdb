@@ -239,11 +239,20 @@ struct ThreadStatisticsState {
 	double lastClockThread;
 	double lastTime;
 	std::string name;
+#if defined(_WIN32)
+	HANDLE hThread;
+#elif defined(__linux__) || defined(__FreeBSD__)
+	int who;
+#elif defined(__APPLE__)
+	mach_port_t thread_port;
+#endif
 
 	ThreadStatisticsState(std::string name) : lastClockThread(0), lastTime(0), name(name) {}
 };
 
 ThreadStatistics getThreadStatistics(ThreadStatisticsState& threadStatState);
+
+ThreadStatisticsState getThreadStatisticsState(std::string name);
 
 struct SystemStatisticsState;
 

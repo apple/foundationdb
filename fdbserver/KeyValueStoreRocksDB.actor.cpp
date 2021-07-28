@@ -11,6 +11,7 @@
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
 #include "flow/SystemMonitor.h"
+#include "flow/ThreadHelper.actor.h"
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -90,6 +91,13 @@ rocksdb::ReadOptions getReadOptions() {
 	return options;
 }
 
+ACTOR Future<Void> rocksDBThreadMetrics(ThreadStatisticsState threadStatState) {
+	loop {
+ 		wait(delay(1.0, TaskPriority::FlushTrace));
+		threadMonitor(threadStatState);
+	}
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -97,9 +105,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	struct Writer : IThreadPoolReceiver {
 		DB& db;
 		UID id;
-		ThreadStatisticsState threadStatState;
+		std::string name;
 
-		explicit Writer(DB& db, UID id, std::string name) : db(db), id(id), threadStatState(name) {}
+		explicit Writer(DB& db, UID id, std::string name) : db(db), id(id), name(name) {}
 
 		~Writer() override {
 			if (db) {
@@ -108,8 +116,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		void init() override {
-			threadMonitor(threadStatState);
-			uncancellable(recurring([this]() { threadMonitor(threadStatState); }, SERVER_KNOBS->ROCKSDB_THREADS_MONITOR_FREQUENCY, TaskPriority::FlushTrace));
+			ThreadStatisticsState threadStatState = getThreadStatisticsState(name);
+			onMainThread([=] {
+				Future<Void> ret = rocksDBThreadMetrics(threadStatState);
+				return Future<bool>(true);
+			}).blockUntilReady();
 		}
 
 		Error statusToError(const rocksdb::Status& s) {
@@ -225,13 +236,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	struct Reader : IThreadPoolReceiver {
 		DB& db;
-		ThreadStatisticsState threadStatState;
+		std::string name;
 
-		explicit Reader(DB& db, std::string name) : db(db), threadStatState(name) {}
+		explicit Reader(DB& db, std::string name) : db(db), name(name) {}
 
 		void init() override {
-			threadMonitor(threadStatState);
-			uncancellable(recurring([this]() { threadMonitor(threadStatState); }, SERVER_KNOBS->ROCKSDB_THREADS_MONITOR_FREQUENCY, TaskPriority::FlushTrace));
+			ThreadStatisticsState threadStatState = getThreadStatisticsState(name);
+			onMainThread([=] {
+				Future<Void> ret = rocksDBThreadMetrics(threadStatState);
+				return Future<bool>(true);
+			}).blockUntilReady();
 		}
 
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {

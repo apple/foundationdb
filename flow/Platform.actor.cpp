@@ -261,6 +261,48 @@ double getProcessorTimeThread() {
 #endif
 }
 
+ThreadStatisticsState getThreadStatisticsState(std::string name) {
+	ThreadStatisticsState threadStatState(name);
+#if defined(_WIN32)
+	threadStatState.hThread = GetCurrentThread();
+#elif defined(__linux__) || defined(__FreeBSD__)
+	threadStatState.who = RUSAGE_THREAD;
+#elif defined(__APPLE__)
+	threadStatState.thread_port = mach_thread_self();
+#else
+#warning getThreadStatisticsState thread related attributes unimplemented on this platform
+#endif
+
+	return threadStatState;
+}
+
+double getProcessorTimeThread(ThreadStatisticsState& threadStatState) {
+	INJECT_FAULT(platform_error, "getProcessorTimeThread from main thread"); // Get Thread CPU Time failed called in mainThread
+#if defined(_WIN32)
+	FILETIME ftCreate, ftExit, ftKernel, ftUser;
+	if (!GetThreadTimes(threadStatState.hThread, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+		TraceEvent(SevError, "GetThreadCPUTime").GetLastError();
+		throw platform_error();
+	}
+	return FiletimeAsInt64(ftKernel) / double(1e7) + FiletimeAsInt64(ftUser) / double(1e7);
+#elif defined(__linux__) || defined(__FreeBSD__)
+	return getProcessorTimeGeneric(threadStatState.who);
+#elif defined(__APPLE__)
+	/* No RUSAGE_THREAD so we use the lower level interface */
+	struct thread_basic_info info;
+	mach_msg_type_number_t info_count = THREAD_BASIC_INFO_COUNT;
+	if (KERN_SUCCESS != thread_info(threadStatState.thread_port, THREAD_BASIC_INFO, (thread_info_t)&info, &info_count)) {
+		TraceEvent(SevError, "GetThreadCPUTime").GetLastError();
+		throw platform_error();
+	}
+	return (info.user_time.seconds + (info.user_time.microseconds / double(1e6)) + info.system_time.seconds +
+	        (info.system_time.microseconds / double(1e6)));
+#else
+#warning getProcessorTimeThread unimplemented on this platform
+	return 0.0;
+#endif
+}
+
 double getProcessorTimeProcess() {
 	INJECT_FAULT(platform_error, "getProcessorTimeProcess"); // Get CPU Process Time failed
 #if defined(_WIN32)
@@ -1724,7 +1766,7 @@ ThreadStatistics getThreadStatistics(ThreadStatisticsState& threadStatState) {
 	ThreadStatistics returnStats;
 
 	double nowTime = timer_monotonic();
-	double nowClockThread = getProcessorTimeThread();
+	double nowClockThread = getProcessorTimeThread(threadStatState);
 
 	if (threadStatState.lastTime != 0) {
 		returnStats.cpuSeconds = nowClockThread - threadStatState.lastClockThread;
