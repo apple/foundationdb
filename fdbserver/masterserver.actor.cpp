@@ -425,6 +425,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 	return Void();
 }
 
+// recruit seed storage servers and probably assign teams here?
 ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
                                   RecruitFromConfigurationReply recruits,
                                   vector<StorageServerInterface>* servers) {
@@ -447,6 +448,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		isr.storeType = self->configuration.storageServerStoreType;
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
+		// TODO: isr.storageTeamID =
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
@@ -738,6 +740,9 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    wait(brokenPromiseToNever(self->clusterController.recruitFromConfiguration.getReply(
 	        RecruitFromConfigurationRequest(self->configuration, self->lastEpochEnd == 0, maxLogRouters))));
 
+	// Now we get storage worker information
+	// we should be able to assign worker -> storage team
+	// probably through tlogGroupCollection->seedTLogGroupAssignment or a new function
 	std::string primaryDcIds, remoteDcIds;
 
 	self->primaryDcId.clear();
@@ -780,6 +785,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	self->tLogGroupCollection->addWorkers(recruits.tLogs);
 	self->tLogGroupCollection->recruitEverything();
 
+	// we should have added storage teams before this
 	// Assign storage teams to tLogGroups.
 	for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {
 		auto group = self->tLogGroupCollection->selectFreeGroup();
@@ -1909,7 +1915,26 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
+		// here we assign storage teams
 		self->tLogGroupCollection->seedTLogGroupAssignment(recoveryCommitRequest.arena, tr, seedServers);
+	}
+
+	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		auto storageTeams = self->tLogGroupCollection->getStorageTeams();
+		std::unordered_map<UID, ptxn::StorageTeamID> storageTeamByStorageServer;
+		for (auto it : storageTeams) {
+			for (auto& storageServerID : it.second) {
+				// For demo purpose, a storage server can only belong to single storage team
+				ASSERT(storageTeamByStorageServer.count(storageServerID) == 0);
+				storageTeamByStorageServer[storageServerID] = it.first;
+			}
+		}
+		std::vector<Future<Void>> assignStorageTeamReplies(seedServers.size());
+		for (auto& storageServerInterface : seedServers) {
+			assignStorageTeamReplies.push_back(storageServerInterface.assignStorageTeam.getReply(
+			    AssignStorageTeamRequest(storageTeamByStorageServer[storageServerInterface.id()])));
+		}
+		wait(waitForAll(assignStorageTeamReplies));
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely

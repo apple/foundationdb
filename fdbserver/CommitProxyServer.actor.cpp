@@ -2099,6 +2099,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 						MutationsVec mutations;
 						std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
 						vector<UID> src, dest;
+						// TODO: Add storage teams to ServerCacheInfo here
 						ServerCacheInfo info;
 						for (auto& kv : data) {
 							if (kv.key.startsWith(keyServersPrefix)) {

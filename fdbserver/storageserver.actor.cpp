@@ -5038,6 +5038,13 @@ ACTOR Future<Void> storageServerCore(StorageServer* self,
 					    delay(std::max(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION - (now() - self->lastUpdate), 0.1));
 				}
 			}
+			// trigger db info change to regenerate the cursor like this?
+			when(AssignStorageTeamRequest req = waitNext(ssi.assignStorageTeam.getFuture())) {
+				ASSERT(!self->storageTeamID.present());
+				self->storageTeamID = req.storageTeamId;
+				self->db->trigger();
+				req.reply.send(Void());
+			}
 			when(wait(dbInfoChange)) {
 				TEST(self->logSystem); // shardServer dbInfo changed
 				dbInfoChange = self->db->onChange();

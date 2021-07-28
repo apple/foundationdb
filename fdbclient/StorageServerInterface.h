@@ -77,6 +77,7 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
+	RequestStream<struct AssignStorageTeamRequest> assignStorageTeam;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -119,6 +120,7 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+				assignStorageTeam = RequestStream<struct Assign>(getValue.getEndpoint().getAdjustedEndpoint(13));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -687,6 +689,20 @@ struct StorageQueuingMetricsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
+	}
+};
+
+struct AssignStorageTeamRequest {
+	constexpr static FileIdentifier file_identifier = 16785641;
+	ptxn::StorageTeamID storageTeamId;
+	ReplyPromise<Void> reply;
+
+	AssignStorageTeamRequest() = default;
+	AssignStorageTeamRequest(ptxn::StorageTeamID storageTeamId) : storageTeamId(storageTeamId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, storageTeamId, reply);
 	}
 };
 

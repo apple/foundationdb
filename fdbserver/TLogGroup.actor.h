@@ -90,6 +90,9 @@ public:
 	void addWorkers(const std::vector<WorkerInterface>& logWorkers);
 	void addWorkers(const std::vector<OptionalInterface<TLogInterface>>& logWorkers);
 
+	// Add 'storageWorkers' to current collection of workers that can be recruited into a StorageTeam.
+	void addStorageWorkers(const std::vector<WorkerInterface>& storageWorkers);
+
 	// Build a collection of groups and recruit workers into each group as per the ReplicationPolicy
 	// and group size set in the parent class.
 	void recruitEverything();
@@ -153,7 +156,7 @@ private:
 	// This map contains both recruited and unrecruited workers.
 	std::unordered_map<UID, TLogWorkerDataRef> recruitMap;
 
-	// Map from storage TeamID to list of list of storage servers in that team.
+	// Map from storage TeamID to list of list of storage server IDs in that team.
 	std::map<ptxn::StorageTeamID, vector<UID>> storageTeams;
 
 	// Map from storage TeamID to the TLogGroup managing that team.
