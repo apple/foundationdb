@@ -270,10 +270,6 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	init( DD_REMOVE_STORE_ENGINE_DELAY,                         60.0 ); if( randomize && BUGGIFY ) DD_REMOVE_STORE_ENGINE_DELAY =  deterministicRandom()->random01() * 60.0;
 
-	// Redwood Storage Engine
-	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT,                   30 );
-	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN,                      0 );
-
 	// KeyValueStore SQLITE
 	init( CLEAR_BUFFER_SIZE,                                   20000 );
 	init( READ_VALUE_TIME_ESTIMATE,                           .00005 );
@@ -717,8 +713,11 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( FASTRESTORE_RATE_UPDATE_SECONDS,                       1.0 ); if( randomize && BUGGIFY ) { FASTRESTORE_RATE_UPDATE_SECONDS = deterministicRandom()->random01() < 0.5 ? 0.1 : 2;}
 
 	init( REDWOOD_DEFAULT_PAGE_SIZE,                            4096 );
+	init( REDWOOD_DEFAULT_EXTENT_SIZE,              32 * 1024 * 1024 );
+	init( REDWOOD_DEFAULT_EXTENT_READ_SIZE,              1024 * 1024 );
+	init( REDWOOD_EXTENT_CONCURRENT_READS,                         4 );
 	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
-	init( REDWOOD_COMMIT_CONCURRENT_READS,                        64 );
+	init( REDWOOD_KVSTORE_RANGE_PREFETCH,                       true );
 	init( REDWOOD_PAGE_REBUILD_MAX_SLACK,                       0.33 );
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );
