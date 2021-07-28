@@ -635,9 +635,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 	state int retries = 0;
 	state FlowLock::Releaser releaser;
 
-	state std::vector<std::pair<UID, UID>> tssToKill;
 	state std::unordered_set<UID> tssToIgnore;
-	// try waiting for tss for a 2 loops, give up if they're stuck to not affect the rest of the cluster
+	// try waiting for tss for a 2 loops, give up if they're behind to not affect the rest of the cluster
 	state int waitForTSSCounter = 2;
 
 	ASSERT(!destinationTeam.empty());
@@ -657,22 +656,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 			// printf("finishMoveKeys( '%s'-'%s' )\n", begin.toString().c_str(), keys.end.toString().c_str());
 			loop {
 				try {
-					if (tssToKill.size()) {
-						TEST(true); // killing TSS because they were unavailable for movekeys
-
-						// Kill tss BEFORE committing main txn so that client requests don't make it to the tss when it
-						// has a different shard set than its pair use a different RYW transaction since i'm too lazy
-						// (and don't want to add bugs) by changing whole method to RYW. Also, using a different
-						// transaction makes it commit earlier which we may need to guarantee causality of tss getting
-						// removed before client sends a request to this key range on the new SS
-						wait(removeTSSPairsFromCluster(occ, tssToKill));
-
-						for (auto& tssPair : tssToKill) {
-							TraceEvent(SevWarnAlways, "TSS_KillMoveKeys").detail("TSSID", tssPair.second);
-							tssToIgnore.insert(tssPair.second);
-						}
-						tssToKill.clear();
-					}
 
 					tr.info.taskID = TaskPriority::MoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -877,8 +860,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					             TaskPriority::MoveKeys));
 
 					// Check to see if we're waiting only on tss. If so, decrement the waiting counter.
-					// If the waiting counter is zero, kill the slow/non-responsive tss processes before finalizing the
-					// data move.
+					// If the waiting counter is zero, ignore the slow/non-responsive tss processes before finalizing
+					// the data move.
 					if (tssReady.size()) {
 						bool allSSDone = true;
 						for (auto& f : serverReady) {
@@ -902,12 +885,9 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							if (anyTssNotDone && waitForTSSCounter == 0) {
 								for (int i = 0; i < tssReady.size(); i++) {
 									if (!tssReady[i].isReady() || tssReady[i].isError()) {
-										tssToKill.push_back(
-										    std::pair(tssReadyInterfs[i].tssPairID.get(), tssReadyInterfs[i].id()));
+										tssToIgnore.insert(tssReadyInterfs[i].id());
 									}
 								}
-								// repeat loop and go back to start to kill tss' before continuing on
-								continue;
 							}
 						}
 					}
@@ -920,22 +900,11 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					for (int s = 0; s < tssReady.size(); s++)
 						tssCount += tssReady[s].isReady() && !tssReady[s].isError();
 
-					/*if (tssReady.size()) {
-					    printf("  fMK: [%s - %s) moved data to %d/%d servers and %d/%d tss\n",
-					           begin.toString().c_str(),
-					           keys.end.toString().c_str(),
-					           count,
-					           serverReady.size(),
-					           tssCount,
-					           tssReady.size());
-					} else {
-					    printf("  fMK: [%s - %s) moved data to %d/%d servers\n",
-					           begin.toString().c_str(),
-					           keys.end.toString().c_str(),
-					           count,
-					           serverReady.size());
-					}*/
-					TraceEvent(SevDebug, waitInterval.end(), relocationIntervalId).detail("ReadyServers", count);
+					TraceEvent readyServersEv(SevDebug, waitInterval.end(), relocationIntervalId);
+					readyServersEv.detail("ReadyServers", count);
+					if (tssReady.size()) {
+						readyServersEv.detail("ReadyTSS", tssCount);
+					}
 
 					if (count == dest.size()) {
 						// update keyServers, serverKeys
