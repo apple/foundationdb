@@ -58,4 +58,6 @@ TEST_CASE("noSim/IThreadPool/NamedThread") {
 	return Void();
 }
 
+#else
+void forceLinkIThreadPoolTests() {}
 #endif
