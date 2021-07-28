@@ -363,7 +363,7 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 					FlowTransport::transport().sendUnreliable(
 					    SerializeSource<ErrorOr<AcknowledgementReply>>(
 					        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
-					    acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay),
+					    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 					    false);
 				}
 			}
@@ -382,7 +382,7 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			acknowledgements.bytesAcknowledged += res.expectedSize();
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(
 			                                              AcknowledgementReply(acknowledgements.bytesAcknowledged)),
-			                                          acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay),
+			                                          acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 			                                          false);
 		}
 		return res;
@@ -393,14 +393,14 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			// Notify the server that a client is not using this ReplyPromiseStream anymore
 			FlowTransport::transport().sendUnreliable(
 			    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
-			    acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay),
+			    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 			    false);
 		}
 		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
 			// Notify the client ReplyPromiseStream was cancelled before sending an error, so the storage server must
 			// have died
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(broken_promise()),
-			                                          getEndpoint(TaskPriority::NoDeliverDelay),
+			                                          getEndpoint(TaskPriority::ReadSocket),
 			                                          false);
 		}
 	}
@@ -411,9 +411,6 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 template <class T>
 class ReplyPromiseStream {
 public:
-	// The endpoints of a ReplyPromiseStream must be initialized at Task::NoDeliverDelay, because a
-	// delay(0) in FlowTransport deliver can cause out of order delivery.
-
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
@@ -422,7 +419,7 @@ public:
 		if (queue->isRemoteEndpoint()) {
 			if (!queue->acknowledgements.getRawEndpoint().isValid()) {
 				// register acknowledge receiver on sender and tell the receiver where to send acknowledge messages
-				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::NoDeliverDelay).token;
+				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::ReadSocket).token;
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
 			FlowTransport::transport().sendUnreliable(
@@ -483,9 +480,9 @@ public:
 			errors->delPromiseRef();
 	}
 
-	// The endpoints of a ReplyPromiseStream must be initialized at Task::NoDeliverDelay, because with lower priorities
+	// The endpoints of a ReplyPromiseStream must be initialized at Task::ReadSocket, because with lower priorities
 	// a delay(0) in FlowTransport deliver can cause out of order delivery.
-	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::NoDeliverDelay); }
+	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::ReadSocket); }
 
 	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }

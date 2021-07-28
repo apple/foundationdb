@@ -111,7 +111,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 					else
 						tr.set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
 				}
-				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll");
+				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll").log();
 				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));

@@ -591,7 +591,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
-		api->createDatabase(clusterFilePath, &db);
+		throwIfError(api->createDatabase(clusterFilePath, &db));
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	} else {
 		return DLApi::createDatabase609(clusterFilePath);
@@ -895,22 +895,43 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 
 		api->runOnExternalClients(threadIdx, [this](Reference<ClientInfo> client) { dbState->addClient(client); });
 
-		if (!externalClientsInitialized.test_and_set()) {
-			api->runOnExternalClientsAllThreads([&clusterFilePath](Reference<ClientInfo> client) {
-				// This creates a database to initialize some client state on the external library
-				// We only do this on 6.2+ clients to avoid some bugs associated with older versions
-				// This deletes the new database immediately to discard its connections
-				if (client->protocolVersion.hasCloseUnusedConnection()) {
+		api->runOnExternalClientsAllThreads([&clusterFilePath](Reference<ClientInfo> client) {
+			// This creates a database to initialize some client state on the external library.
+			// We only do this on 6.2+ clients to avoid some bugs associated with older versions.
+			// This deletes the new database immediately to discard its connections.
+			//
+			// Simultaneous attempts to create a database could result in us running this initialization
+			// code in multiple threads simultaneously. It is necessary that each attempt have a chance
+			// to run this initialization in case the other fails, and it's safe to run them in parallel.
+			if (client->protocolVersion.hasCloseUnusedConnection() && !client->initialized) {
+				try {
 					Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+					client->initialized = true;
+				} catch (Error& e) {
+					// This connection is not initialized. It is still possible to connect with it,
+					// but we may not see trace logs from this client until a successful connection
+					// is established.
+					TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
+					    .detail("LibraryPath", client->libPath)
+					    .detail("ClusterFilePath", clusterFilePath)
+					    .error(e);
 				}
-			});
-		}
+			}
+		});
 
 		// For clients older than 6.2 we create and maintain our database connection
 		api->runOnExternalClients(threadIdx, [this, &clusterFilePath](Reference<ClientInfo> client) {
 			if (!client->protocolVersion.hasCloseUnusedConnection()) {
-				dbState->legacyDatabaseConnections[client->protocolVersion] =
-				    client->api->createDatabase(clusterFilePath.c_str());
+				try {
+					dbState->legacyDatabaseConnections[client->protocolVersion] =
+					    client->api->createDatabase(clusterFilePath.c_str());
+				} catch (Error& e) {
+					// This connection is discarded
+					TraceEvent(SevWarnAlways, "FailedToCreateLegacyDatabaseConnection")
+					    .detail("LibraryPath", client->libPath)
+					    .detail("ClusterFilePath", clusterFilePath)
+					    .error(e);
+				}
 			}
 		});
 
@@ -994,7 +1015,7 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 
 MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)
   : clusterFilePath(clusterFilePath), versionMonitorDb(versionMonitorDb),
-    dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))) {}
+    dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))), closed(false) {}
 
 // Adds a client (local or externally loaded) that can be used to connect to the cluster
 void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client) {
@@ -1058,6 +1079,10 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 // Called when a change to the protocol version of the cluster has been detected.
 // Must be called from the main thread
 void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion protocolVersion) {
+	if (closed) {
+		return;
+	}
+
 	// If the protocol version changed but is still compatible, update our local version but keep the same connection
 	if (dbProtocolVersion.present() &&
 	    protocolVersion.normalizedVersion() == dbProtocolVersion.get().normalizedVersion()) {
@@ -1084,7 +1109,20 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 			    .detail("Failed", client->failed)
 			    .detail("External", client->external);
 
-			Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+			Reference<IDatabase> newDb;
+			try {
+				newDb = client->api->createDatabase(clusterFilePath.c_str());
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "MultiVersionClientFailedToCreateDatabase")
+				    .detail("LibraryPath", client->libPath)
+				    .detail("External", client->external)
+				    .detail("ClusterFilePath", clusterFilePath)
+				    .error(e);
+
+				// Put the client in a disconnected state until the version changes again
+				updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
+				return;
+			}
 
 			if (client->external && !MultiVersionApi::apiVersionAtLeast(610)) {
 				// Old API versions return a future when creating the database, so we need to wait for it
@@ -1112,6 +1150,10 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 
 // Replaces the active database connection with a new one. Must be called from the main thread.
 void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> newDb, Reference<ClientInfo> client) {
+	if (closed) {
+		return;
+	}
+
 	if (newDb) {
 		optionLock.enter();
 		for (auto option : options) {
@@ -1143,12 +1185,28 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			versionMonitorDb = db;
 		} else {
 			// For older clients that don't have an API to get the protocol version, we have to monitor it locally
-			versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+			try {
+				versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+			} catch (Error& e) {
+				// We can't create a new database to monitor the cluster version. This means we will continue using the
+				// previous one, which should hopefully continue to work.
+				TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
+				    .detail("ClusterFilePath", clusterFilePath)
+				    .error(e);
+			}
 		}
 	} else {
 		// We don't have a database connection, so use the local client to monitor the protocol version
 		db = Reference<IDatabase>();
-		versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+		try {
+			versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+		} catch (Error& e) {
+			// We can't create a new database to monitor the cluster version. This means we will continue using the
+			// previous one, which should hopefully continue to work.
+			TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
+			    .detail("ClusterFilePath", clusterFilePath)
+			    .error(e);
+		}
 	}
 
 	dbVar->set(db);
@@ -1178,6 +1236,7 @@ void MultiVersionDatabase::DatabaseState::close() {
 	Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
 	onMainThreadVoid(
 	    [self]() {
+		    self->closed = true;
 		    if (self->protocolVersionMonitor.isValid()) {
 			    self->protocolVersionMonitor.cancel();
 		    }
@@ -1254,8 +1313,6 @@ void MultiVersionDatabase::LegacyVersionMonitor::close() {
 		versionMonitor.cancel();
 	}
 }
-
-std::atomic_flag MultiVersionDatabase::externalClientsInitialized = ATOMIC_FLAG_INIT;
 
 // MultiVersionApi
 bool MultiVersionApi::apiVersionAtLeast(int minVersion) {
@@ -1464,7 +1521,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 #else
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	if (threadCount > 1) {
-		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows");
+		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows").log();
 		throw unsupported_operation();
 	}
 	std::vector<std::pair<std::string, bool>> paths;

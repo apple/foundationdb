@@ -374,7 +374,7 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
 	// Never log to an empty prefix, it's pretty much always a bad idea.
 	if (prefix.size() == 0) {
-		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix");
+		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix").log();
 		return Void();
 	}
 

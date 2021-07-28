@@ -135,7 +135,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 			return true;
 		if (writeThrottle) {
 			if (!badActorThrottleRetries && !goodActorThrottleRetries) {
-				TraceEvent(SevWarn, "NoThrottleTriggered");
+				TraceEvent(SevWarn, "NoThrottleTriggered").log();
 			}
 			if (badActorThrottleRetries < goodActorThrottleRetries) {
 				TraceEvent(SevWarnAlways, "IncorrectThrottle")

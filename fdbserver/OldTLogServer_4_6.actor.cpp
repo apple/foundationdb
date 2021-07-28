@@ -108,7 +108,7 @@ struct TLogQueueEntryRef {
 
 typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
 
-struct TLogQueue : public IClosable {
+struct TLogQueue final : public IClosable {
 public:
 	TLogQueue(IDiskQueue* queue, UID dbgid) : queue(queue), dbgid(dbgid) {}
 
@@ -1442,7 +1442,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 	state KeyRange tagKeys;
 	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
 
-	TraceEvent("TLogRestorePersistentState", self->dbgid);
+	TraceEvent("TLogRestorePersistentState", self->dbgid).log();
 
 	IKeyValueStore* storage = self->persistentData;
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
