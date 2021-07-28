@@ -152,7 +152,7 @@ OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
 	}
 }
 
-struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
+struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
 	const UID dbgid;
 	LogSystemType logSystemType;
 	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, or remote
