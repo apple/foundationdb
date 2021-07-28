@@ -117,12 +117,12 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 
 	generateMutations(beginVersion, COMMIT_PEEK_CHECK_MUTATIONS, { storageTeamID }, pContext->commitRecord);
 	auto serialized = serializeMutations(beginVersion, storageTeamID, pContext->commitRecord);
-
+	std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
 	// Commit
 	ptxn::TLogCommitRequest commitRequest(ptxn::test::randomUID(),
-	                                      storageTeamID,
+	                                      pContext->storageTeamIDTLogGroupIDMapper[storageTeamID],
 	                                      serialized.arena(),
-	                                      serialized,
+	                                      messages,
 	                                      prevVersion,
 	                                      beginVersion,
 	                                      0,
@@ -134,7 +134,13 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	ptxn::test::print::print(commitReply);
 
 	// Peek
-	ptxn::TLogPeekRequest peekRequest(debugID, beginVersion, endVersion, false, false, storageTeamID);
+	ptxn::TLogPeekRequest peekRequest(debugID,
+	                                  beginVersion,
+	                                  endVersion,
+	                                  false,
+	                                  false,
+	                                  storageTeamID,
+	                                  pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]);
 	ptxn::test::print::print(peekRequest);
 
 	ptxn::TLogPeekReply peekReply = wait(tli->peek.getReply(peekRequest));
@@ -175,8 +181,9 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 		OptionalInterface<ptxn::TLogInterface_PassivelyPull> optionalInterface =
 		    OptionalInterface<ptxn::TLogInterface_PassivelyPull>(
 		        *std::dynamic_pointer_cast<ptxn::TLogInterface_PassivelyPull>(tLogGroup.second));
-		tLogSet.ptxnTLogGroups[tLogGroup.first].push_back(
-		    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(optionalInterface));
+		tLogSet.tLogGroupIDs.push_back(tLogGroup.first);
+		tLogSet.ptxnTLogGroups.emplace_back();
+		tLogSet.ptxnTLogGroups.back().push_back(optionalInterface);
 	}
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
 	state Version tssSeedVersion = 0;
@@ -302,11 +309,11 @@ ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> p
 	for (auto i = 0; i < numCommits; ++i) {
 		generateMutations(currVersion, 16, { storageTeamID }, pContext->commitRecord);
 		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
-
+		std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
 		requests.emplace_back(ptxn::test::randomUID(),
-		                      storageTeamID,
+		                      pContext->storageTeamIDTLogGroupIDMapper[storageTeamID],
 		                      serialized.arena(),
-		                      serialized,
+		                      messages,
 		                      prevVersion,
 		                      currVersion,
 		                      0,
@@ -348,7 +355,13 @@ ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pCo
 
 	state int receivedVersions = 0;
 	loop {
-		ptxn::TLogPeekRequest request(Optional<UID>(), version, 0, false, false, storageTeamID);
+		ptxn::TLogPeekRequest request(Optional<UID>(),
+		                              version,
+		                              0,
+		                              false,
+		                              false,
+		                              storageTeamID,
+		                              pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]);
 		request.endVersion.reset();
 		ptxn::TLogPeekReply reply = wait(pInterface->peek.getReply(request));
 

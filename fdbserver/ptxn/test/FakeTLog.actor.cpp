@@ -34,11 +34,11 @@
 
 namespace ptxn::test {
 
-void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
-                              const TLogCommitRequest& commitRequest) {
-	const Version& version = commitRequest.version;
-	const StorageTeamID& storageTeamID = commitRequest.storageTeamID;
-	SubsequencedMessageDeserializer deserializer(commitRequest.messages);
+void processTLogCommitRequestByStorageTeam(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
+                                           const Version& version,
+                                           const StorageTeamID& storageTeamID,
+                                           const StringRef& messages) {
+	SubsequencedMessageDeserializer deserializer(messages);
 
 	// Check the committed data matches the record
 	{
@@ -58,7 +58,7 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 			const auto& version = vsm.version;
 			const auto& subsequence = vsm.subsequence;
 			const auto& mutation = std::get<MutationRef>(vsm.message);
-			pFakeTLogContext->storageTeamMessages[commitRequest.storageTeamID].push_back(
+			pFakeTLogContext->storageTeamMessages[storageTeamID].push_back(
 			    pFakeTLogContext->persistenceArena,
 			    { version,
 			      subsequence,
@@ -67,11 +67,16 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 			                          mutation.param1,
 			                          mutation.param2)) });
 		} else {
-			pFakeTLogContext->storageTeamMessages[commitRequest.storageTeamID].push_back(
-			    pFakeTLogContext->persistenceArena, vsm);
+			pFakeTLogContext->storageTeamMessages[storageTeamID].push_back(pFakeTLogContext->persistenceArena, vsm);
 		}
 	}
+}
 
+void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
+                              const TLogCommitRequest& commitRequest) {
+	for (const auto& message : commitRequest.messages) {
+		processTLogCommitRequestByStorageTeam(pFakeTLogContext, commitRequest.version, message.first, message.second);
+	}
 	commitRequest.reply.send(TLogCommitReply{ 0 });
 }
 
@@ -154,15 +159,16 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 }
 
 Future<StorageServerPushReply> forwardTLogCommitToStorageServer(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
-                                                                const TLogCommitRequest& commitRequest) {
+                                                                const TLogCommitRequest& commitRequest,
+                                                                const StorageTeamID& storageTeamID,
+                                                                const StringRef messages) {
 
-	const StorageTeamID& storageTeamID = commitRequest.storageTeamID;
 	StorageServerPushRequest request;
 	request.spanID = commitRequest.spanID;
 	request.storageTeamID = storageTeamID;
 	request.version = commitRequest.version;
 	request.arena = commitRequest.arena;
-	request.messages = commitRequest.messages;
+	request.messages = messages;
 
 	std::shared_ptr<StorageServerInterface_PassivelyReceive> storageServerInterface =
 	    std::dynamic_pointer_cast<StorageServerInterface_PassivelyReceive>(
@@ -182,15 +188,21 @@ ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeT
 
 	loop choose {
 		when(TLogCommitRequest commitRequest = waitNext(pTLogInterface->commit.getFuture())) {
-			state StorageTeamID storageTeamID(commitRequest.storageTeamID);
+			state TLogGroupID tLogGroupID(commitRequest.tLogGroupID);
 			printTiming << "Received commitRequest version = " << commitRequest.version << std::endl;
 			processTLogCommitRequest(pFakeTLogContext, commitRequest);
 
-			printTiming << concatToString("Push the message to storage servers, storage team id = ", storageTeamID)
+			printTiming << concatToString("Push the message to storage servers, log group id = ", tLogGroupID)
 			            << std::endl;
-			StorageServerPushReply reply = wait(forwardTLogCommitToStorageServer(pFakeTLogContext, commitRequest));
+			std::vector<Future<StorageServerPushReply>> replies;
+			replies.reserve(commitRequest.messages.size());
+			for (const auto& message : commitRequest.messages) {
+				replies.push_back(
+				    forwardTLogCommitToStorageServer(pFakeTLogContext, commitRequest, message.first, message.second));
+			}
+			wait(waitForAll(replies));
 
-			printTiming << concatToString("Complete push, storage team id = ", storageTeamID) << std::endl;
+			printTiming << concatToString("Complete push, log group id = ", tLogGroupID) << std::endl;
 		}
 		when(TLogPeekRequest peekRequest = waitNext(pTLogInterface->peek.getFuture())) {
 			fakeTLogPeek(peekRequest, pFakeTLogContext);

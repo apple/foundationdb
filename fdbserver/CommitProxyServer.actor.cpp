@@ -307,22 +307,26 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
-ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
-                                      const std::map<Key, MutationListRef>* logRangeMutations,
-                                      LogPushData* toCommit,
-                                      std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer> pTeamMessageBuilder,
-                                      Version commitVersion,
-                                      double* computeDuration,
-                                      double* computeStart) {
+ACTOR Future<Void> addBackupMutations(
+    ProxyCommitData* self,
+    const std::map<Key, MutationListRef>* logRangeMutations,
+    LogPushData* toCommit,
+    std::unordered_map<ptxn::TLogGroupID, std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer>>
+        pGroupMessageBuilders,
+    Version commitVersion,
+    double* computeDuration,
+    double* computeStart) {
 	state std::map<Key, MutationListRef>::const_iterator logRangeMutation = logRangeMutations->cbegin();
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
 
 	toCommit->addTransactionInfo(SpanID());
-	pTeamMessageBuilder->broadcastSpanContext(SpanID());
+	for (auto& pair : pGroupMessageBuilders) {
+		pair.second->broadcastSpanContext(SpanID());
+	}
 
-	// TODO: write mutations in pTeamMessageBuilder for each team
+	// TODO: write mutations in pGroupMessageBuilder for each team
 	// Note: a clear range mutation may appear multiple times in different teams.
 
 	// Serialize the log range mutations within the map
@@ -414,9 +418,6 @@ struct CommitBatchContext {
 
 	ProxyCommitData* const pProxyCommitData;
 	std::vector<CommitTransactionRequest> trs;
-	// tlog groups overlapping with this batch txn
-	// TODO: should be updated when assignMutationsToStorageServers
-	std::unordered_set<ptxn::TLogGroupID> overlappingTLogGroups;
 	int currentBatchMemBytesCount;
 
 	double startTime;
@@ -431,8 +432,8 @@ struct CommitBatchContext {
 
 	// Serializer for buffering teams' mutation messages to TLog Groups
 	// Each TLogGroup corresponds to a serializer
-	std::unordered_map<ptxn::TLogGroupID, ptxn::ProxySubsequencedMessageSerializer> pTeamMessageBuilders;
-	std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer> pTeamMessageBuilder;
+	std::unordered_map<ptxn::TLogGroupID, std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer>>
+	    pGroupMessageBuilders;
 
 	int batchOperations = 0;
 
@@ -500,7 +501,11 @@ struct CommitBatchContext {
 
 	void setupTraceBatch();
 
-	void trackStorageTeam(const ptxn::StorageTeamID& storageTeam);
+	void findOverlappingTLogGroups();
+
+	void trackStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams);
+
+	void writeToStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams, MutationRef m);
 
 private:
 	void evaluateBatchSize();
@@ -560,9 +565,50 @@ void CommitBatchContext::evaluateBatchSize() {
 	}
 }
 
-void CommitBatchContext::trackStorageTeam(const ptxn::StorageTeamID& storageTeam) {
-	if (!pProxyCommitData->tLogGroups.empty()) {
-		overlappingTLogGroups.insert(ptxn::tLogGroupByStorageTeamID(pProxyCommitData->tLogGroups, storageTeam));
+void CommitBatchContext::trackStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams) {
+	ASSERT(!pProxyCommitData->tLogGroupCollection->groups().empty());
+	ASSERT(storageTeams.size() == 1);
+	auto tLogGroupId = pProxyCommitData->tLogGroupCollection->selectFreeGroup(storageTeams.begin()->hash())->id();
+	if (!pGroupMessageBuilders.count(tLogGroupId)) {
+		pGroupMessageBuilders.emplace(tLogGroupId,
+		                              std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
+	}
+}
+
+void CommitBatchContext::findOverlappingTLogGroups() {
+	pGroupMessageBuilders.clear();
+	for (transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
+		int mutationNum = 0;
+		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
+		for (; mutationNum < pMutations->size(); mutationNum++) {
+			auto& m = (*pMutations)[mutationNum];
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				trackStorageTeams(pProxyCommitData->keyInfo[m.param1].storageTeams);
+			} else if (m.type == MutationRef::ClearRange) {
+				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
+				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
+				auto firstRange = ranges.begin();
+				++firstRange;
+				if (firstRange == ranges.end()) {
+					trackStorageTeams(ranges.begin().value().storageTeams);
+				} else {
+					for (auto r : ranges) {
+						r.value().populateTags();
+						trackStorageTeams(r.value().storageTeams);
+					}
+				}
+			} else {
+				UNREACHABLE();
+			}
+		}
+	}
+}
+
+void CommitBatchContext::writeToStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams, MutationRef m) {
+	for (const auto& team : storageTeams) {
+		auto groupID = pProxyCommitData->tLogGroupCollection->selectFreeGroup(team.hash())->id();
+		ASSERT(pGroupMessageBuilders.count(groupID));
+		pGroupMessageBuilders[groupID]->write(m, team);
 	}
 }
 
@@ -656,7 +702,9 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	self->commitVersion = versionReply.version;
 	self->prevVersion = versionReply.prevVersion;
 
-	self->pTeamMessageBuilder.reset(new ptxn::ProxySubsequencedMessageSerializer(self->commitVersion));
+	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		self->findOverlappingTLogGroups();
+	}
 
 	for (auto it : versionReply.resolverChanges) {
 		auto rs = pProxyCommitData->keyResolvers.modify(it.range);
@@ -702,8 +750,10 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	std::vector<Future<ResolveTransactionBatchReply>> replies;
 	for (int r = 0; r < pProxyCommitData->resolvers.size(); r++) {
 		requests.requests[r].debugID = self->debugID;
-		requests.requests[r].updatedGroups.assign(self->overlappingTLogGroups.begin(),
-		                                          self->overlappingTLogGroups.end());
+		requests.requests[r].updatedGroups.reserve(self->pGroupMessageBuilders.size());
+		for (const auto& p : self->pGroupMessageBuilders) {
+			requests.requests[r].updatedGroups.push_back(p.first);
+		}
 		replies.push_back(brokenPromiseToNever(
 		    pProxyCommitData->resolvers[r].resolve.getReply(requests.requests[r], TaskPriority::ProxyResolverReply)));
 	}
@@ -857,7 +907,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
-			// TODO: pass self->pTeamMessageBuilder in as well?
+			// TODO: pass self->pGroupMessageBuilder in as well?
 			applyMetadataMutations(trs[t].spanContext,
 			                       *pProxyCommitData,
 			                       self->arena,
@@ -908,7 +958,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
 
-	for (; self->transactionNum < trs.size(); self->transactionNum++) {
+	for (self->transactionNum = 0; self->transactionNum < trs.size(); self->transactionNum++) {
 		if (!(self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted &&
 		      (!self->locked || trs[self->transactionNum].isLockAware()))) {
 			continue;
@@ -920,7 +970,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
 
 		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
-		self->pTeamMessageBuilder->broadcastSpanContext(trs[self->transactionNum].spanContext);
+		// TODO: figure out why we may want to override span context for a serializer
+		for (auto& pair : self->pGroupMessageBuilders) {
+			pair.second->broadcastSpanContext(trs[self->transactionNum].spanContext);
+		}
 
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			if (self->yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
@@ -980,13 +1033,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-
-				auto& storageTeams = pProxyCommitData->keyInfo[m.param1].storageTeams;
-				for (auto& team : storageTeams) {
-					self->trackStorageTeam(team);
-				}
-				// TODO: pTeamMessageBuilder needs to take a tlog group parameter
-				self->pTeamMessageBuilder->write(m, storageTeams);
+				self->writeToStorageTeams(pProxyCommitData->keyInfo[m.param1].storageTeams, m);
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
@@ -1049,11 +1096,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				for (auto& team : storageTeams) {
-					self->trackStorageTeam(team);
-				}
-				// TODO: need to take tlog group information as parameter
-				self->pTeamMessageBuilder->write(m, storageTeams);
+				self->writeToStorageTeams(storageTeams, m);
 			} else {
 				UNREACHABLE();
 			}
@@ -1145,10 +1188,11 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	// Serialize and backup the mutations as a single mutation
 	if ((pProxyCommitData->vecBackupKeys.size() > 1) && self->logRangeMutations.size()) {
+		// TODO: handle back up mutations in pGroupMessageBuilder
 		wait(addBackupMutations(pProxyCommitData,
 		                        &self->logRangeMutations,
 		                        &self->toCommit,
-		                        self->pTeamMessageBuilder,
+		                        self->pGroupMessageBuilders,
 		                        self->commitVersion,
 		                        &self->computeDuration,
 		                        &self->computeStart));
@@ -1212,7 +1256,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		}
 		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
 		// FIXME(rdar://78341241)
-		// self->pTeamMessageBuilder.writeMessage(StringRef(m.begin(), m.size()), ptxn::txsTeam);
+		// self->writeToStorageTeams({ptxn::txsTeam}, StringRef(m.begin(), m.size()));
 		firstMessage = false;
 	}
 
@@ -1232,17 +1276,35 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
 
-	// TODO:
-	// new code will push each LogPushData into each individual TLog group with its own previous commit version
-	// and commit version in this batch
+	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		self->toCommit.pGroupMessageBuilders = &self->pGroupMessageBuilders;
+		std::vector<Future<Version>> pushResults;
+		pushResults.reserve(self->pGroupMessageBuilders.size());
+		for (auto& groupMessageBuilder : self->pGroupMessageBuilders) {
+			pushResults.push_back(
+			    pProxyCommitData->logSystem->push(self->resolution[0].previousCommitVersions[groupMessageBuilder.first],
+			                                      self->commitVersion,
+			                                      pProxyCommitData->committedVersion.get(),
+			                                      pProxyCommitData->minKnownCommittedVersion,
+			                                      self->toCommit,
+			                                      span.context,
+			                                      self->debugID));
+		}
 
-	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
-	                                                          self->commitVersion,
-	                                                          pProxyCommitData->committedVersion.get(),
-	                                                          pProxyCommitData->minKnownCommittedVersion,
-	                                                          self->toCommit,
-	                                                          span.context,
-	                                                          self->debugID);
+		std::function<Version(const std::vector<Version>&)> reduce =
+		    [](const std::vector<Version>& versions) -> Version {
+			return *std::min_element(versions.begin(), versions.end());
+		};
+		self->loggingComplete = getAll(pushResults, reduce);
+	} else {
+		self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
+		                                                          self->commitVersion,
+		                                                          pProxyCommitData->committedVersion.get(),
+		                                                          pProxyCommitData->minKnownCommittedVersion,
+		                                                          self->toCommit,
+		                                                          span.context,
+		                                                          self->debugID);
+	}
 
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
@@ -1924,15 +1986,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		r->value().emplace_back(0, 0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
-	// retrieve TLog group ids info from ServerDBInfo
-	// TODO: change it to retrieve from master through txnStateStore
-	for (const auto& tLogSet : commitData.db->get().logSystemConfig.tLogs) {
-		if (tLogSet.isLocal) {
-			TEST(tLogSet.tLogGroups.empty()); // primary DC should have recruited ptxn TLog groups
-			commitData.tLogGroups = tLogSet.tLogGroups;
-			break;
-		}
-	}
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
@@ -2099,6 +2152,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					commitData.metadataVersion = commitData.txnStateStore->readValue(metadataVersionKey).get();
 
 					commitData.txnStateStore->enableSnapshot();
+
+					if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+						ASSERT(!commitData.tLogGroupCollection->groups().empty());
+					}
 				}
 			}
 			addActor.send(broadcastTxnRequest(req, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));

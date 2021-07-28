@@ -50,7 +50,8 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	                     Version minKnownCommittedVersion,
 	                     struct LogPushData& data,
 	                     const SpanID& spanContext,
-	                     Optional<UID> debugID) final;
+	                     Optional<UID> debugID,
+	                     Optional<ptxn::TLogGroupID> tLogGroup) final;
 	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) final;
 	Reference<IPeekCursor> peek(UID dbgid,
 	                            Version begin,
@@ -78,17 +79,15 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	Version getEnd() const final;
 	Version getBackupStartVersion() const final;
 	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const final;
-	Future<Reference<ILogSystem>> newEpoch(
-	    const RecruitFromConfigurationReply& recr,
-	    const Future<struct RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
-	    const DatabaseConfiguration& config,
-	    LogEpoch recoveryCount,
-	    int8_t primaryLocality,
-	    int8_t remoteLocality,
-	    const vector<Tag>& allTags,
-	    const Reference<AsyncVar<bool>>& recruitmentStalled,
-	    std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
-	    std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) final;
+	Future<Reference<ILogSystem>> newEpoch(const RecruitFromConfigurationReply& recr,
+	                                       const Future<struct RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
+	                                       const DatabaseConfiguration& config,
+	                                       LogEpoch recoveryCount,
+	                                       int8_t primaryLocality,
+	                                       int8_t remoteLocality,
+	                                       const vector<Tag>& allTags,
+	                                       const Reference<AsyncVar<bool>>& recruitmentStalled,
+	                                       Reference<TLogGroupCollection> tLogGroupCollection) final;
 	LogSystemConfig getLogSystemConfig() const final;
 	Standalone<StringRef> getLogsValue() const final;
 	Future<Void> onLogSystemConfigChange() final;

@@ -29,11 +29,11 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
-#include "fdbserver/LogProtocolMessage.h"
 #include <fdbserver/ptxn/TLogPeekCursor.actor.h>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<TLogCommitReply>> replies) {
+ACTOR template <class T>
+Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<T>> replies) {
 	wait(f);
 	Version minVersion = std::numeric_limits<Version>::max();
 	for (auto& reply : replies) {
@@ -85,9 +85,11 @@ LogSet::LogSet(const TLogSet& tLogSet)
 	for (const auto& log : tLogSet.tLogs) {
 		logServers.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(log));
 	}
-	for (const auto& log : tLogSet.ptxnTLogGroups) {
-		for (const Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>& interface : log.second) {
-			groupIdToInterfaces[log.first].push_back(interface);
+	tLogGroupIDs = tLogSet.tLogGroupIDs;
+	for (int i = 0; tLogGroupIDs.size(); i++) {
+		for (const OptionalInterface<ptxn::TLogInterface_PassivelyPull>& interface : tLogSet.ptxnTLogGroups[i]) {
+			groupIdToInterfaces[tLogSet.tLogGroupIDs[i]].push_back(
+			    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(interface));
 		}
 	}
 	for (const auto& log : tLogSet.logRouters) {
@@ -121,9 +123,11 @@ TLogSet::TLogSet(const LogSet& rhs)
 	for (const auto& tlog : rhs.logServers) {
 		tLogs.push_back(tlog->get());
 	}
-	for (const auto& log : rhs.groupIdToInterfaces) {
-		for (const Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>& interface : log.second) {
-			ptxnTLogGroups[log.first].push_back(interface);
+	tLogGroupIDs = rhs.tLogGroupIDs;
+	for (const auto& logGroupId : tLogGroupIDs) {
+		ptxnTLogGroups.emplace_back();
+		for (const auto& interface : rhs.groupIdToInterfaces.find(logGroupId)->second) {
+			ptxnTLogGroups.back().push_back(interface->get());
 		}
 	}
 	for (const auto& logRouter : rhs.logRouters) {
@@ -555,13 +559,67 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return t;
 	}
 
+	Future<Version> pushTLogGroup(Version prevVersion,
+	                              Version version,
+	                              Version knownCommittedVersion,
+	                              Version minKnownCommittedVersion,
+	                              LogPushData& data,
+	                              SpanID const& spanContext,
+	                              Optional<UID> debugID,
+	                              ptxn::TLogGroupID tLogGroup) {
+		vector<Future<Void>> quorumResults;
+		vector<Future<ptxn::TLogCommitReply>> allReplies;
+		int location = 0;
+		Span span("TPLS:push"_loc, spanContext);
+		for (auto& it : tLogs) {
+			if (it->isLocal && it->groupIdToInterfaces.size()) {
+				ASSERT(it->groupIdToInterfaces.count(tLogGroup));
+				const auto& logServers = it->groupIdToInterfaces[tLogGroup];
+				vector<Future<Void>> tLogCommitResults;
+				for (int loc = 0; loc < logServers.size(); loc++) {
+					auto serialized = data.pGroupMessageBuilders->find(tLogGroup)->second->getAllSerialized();
+					allReplies.push_back(logServers[loc]->get().interf().commit.getReply(
+					    ptxn::TLogCommitRequest(spanContext,
+					                            tLogGroup,
+					                            serialized.first,
+					                            serialized.second,
+					                            prevVersion,
+					                            version,
+					                            knownCommittedVersion,
+					                            minKnownCommittedVersion,
+					                            debugID),
+					    TaskPriority::ProxyTLogCommitReply));
+					Future<Void> commitSuccess = success(allReplies.back());
+					addActor.get().send(commitSuccess);
+					tLogCommitResults.push_back(commitSuccess);
+					location++;
+				}
+				quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size()));
+			}
+		}
+		return minVersionWhenReady(waitForAll(quorumResults), allReplies);
+	}
+
 	Future<Version> push(Version prevVersion,
 	                     Version version,
 	                     Version knownCommittedVersion,
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
 	                     SpanID const& spanContext,
-	                     Optional<UID> debugID) final {
+	                     Optional<UID> debugID,
+	                     Optional<ptxn::TLogGroupID> tLogGroup) final {
+		// commit to ptxn tlog system
+		if (tLogGroup.present()) {
+			return pushTLogGroup(prevVersion,
+			                     version,
+			                     knownCommittedVersion,
+			                     minKnownCommittedVersion,
+			                     data,
+			                     spanContext,
+			                     debugID,
+			                     tLogGroup.get());
+		}
+
 		// FIXME: Randomize request order as in LegacyLogSystem?
 		vector<Future<Void>> quorumResults;
 		vector<Future<TLogCommitReply>> allReplies;
@@ -1205,12 +1263,24 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                  Tag tag,
 	                                  Optional<ptxn::StorageTeamID> storageTeam,
 	                                  std::vector<std::pair<Version, Tag>> history) final {
-		// TODO: look up tlog interface by storage team id, supported by ss team - tlog mapping
 		if (storageTeam.present()) {
+			Optional<ptxn::TLogGroupID> tLogGroup;
+			for (auto& tLogSet : tLogs) {
+				if (tLogSet->isLocal && !tLogSet->groupIdToInterfaces.empty()) {
+					std::vector<ptxn::TLogGroupID> tLogGroups;
+					for (auto& [tLogGroup, _] : tLogSet->groupIdToInterfaces) {
+						tLogGroups.push_back(tLogGroup);
+					}
+					// TODO: remove this once tlog group collection is inside ILogSystem
+					tLogGroup = ptxn::tLogGroupByStorageTeamID(tLogGroups, storageTeam.get());
+				}
+			}
+			ASSERT(tLogGroup.present());
 			return makeReference<ptxn::ServerPeekCursor>(
 			    Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(),
 			    tag,
 			    storageTeam.get(),
+			    tLogGroup.get(),
 			    begin,
 			    invalidVersion,
 			    false,
@@ -1646,17 +1716,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.
 	// The new epoch is only provisional until the caller updates the coordinated DBCoreState.
-	Future<Reference<ILogSystem>> newEpoch(
-	    RecruitFromConfigurationReply const& recr,
-	    Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
-	    DatabaseConfiguration const& config,
-	    LogEpoch recoveryCount,
-	    int8_t primaryLocality,
-	    int8_t remoteLocality,
-	    std::vector<Tag> const& allTags,
-	    Reference<AsyncVar<bool>> const& recruitmentStalled,
-	    std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
-	    std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) final {
+	Future<Reference<ILogSystem>> newEpoch(RecruitFromConfigurationReply const& recr,
+	                                       Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+	                                       DatabaseConfiguration const& config,
+	                                       LogEpoch recoveryCount,
+	                                       int8_t primaryLocality,
+	                                       int8_t remoteLocality,
+	                                       std::vector<Tag> const& allTags,
+	                                       Reference<AsyncVar<bool>> const& recruitmentStalled,
+	                                       Reference<TLogGroupCollection> tLogGroupCollection) final {
 		return newEpoch(Reference<TagPartitionedLogSystem>::addRef(this),
 		                recr,
 		                fRemoteWorkers,
@@ -1666,8 +1734,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		                remoteLocality,
 		                allTags,
 		                recruitmentStalled,
-		                tLogGroupIdToServerIds,
-		                tlogServerIdToTlogGroups);
+		                tLogGroupCollection);
 	}
 
 	LogSystemConfig getLogSystemConfig() const final {
@@ -2692,18 +2759,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Void();
 	}
 
-	ACTOR static Future<Reference<ILogSystem>> newEpoch(
-	    Reference<TagPartitionedLogSystem> oldLogSystem,
-	    RecruitFromConfigurationReply recr,
-	    Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
-	    DatabaseConfiguration configuration,
-	    LogEpoch recoveryCount,
-	    int8_t primaryLocality,
-	    int8_t remoteLocality,
-	    std::vector<Tag> allTags,
-	    Reference<AsyncVar<bool>> recruitmentStalled,
-	    std::unordered_map<UID, std::vector<UID>> tLogGroupIdToServerIds,
-	    std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups) {
+	ACTOR static Future<Reference<ILogSystem>> newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
+	                                                    RecruitFromConfigurationReply recr,
+	                                                    Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                                                    DatabaseConfiguration configuration,
+	                                                    LogEpoch recoveryCount,
+	                                                    int8_t primaryLocality,
+	                                                    int8_t remoteLocality,
+	                                                    std::vector<Tag> allTags,
+	                                                    Reference<AsyncVar<bool>> recruitmentStalled,
+	                                                    Reference<TLogGroupCollection> tLogGroupCollection) {
 		state double startTime = now();
 		state Reference<TagPartitionedLogSystem> logSystem(
 		    new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality, recoveryCount));
@@ -2904,6 +2969,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
+		state std::unordered_map<UID, std::vector<UID>> tlogGroupIdToTlogServerIds;
+		state std::unordered_map<UID, std::vector<TLogGroupRef>> tlogServerIdToTlogGroups;
+		for (const TLogGroupRef& group : tLogGroupCollection->groups()) {
+			UID groupId = group->id();
+			tlogGroupIdToTlogServerIds[groupId] = group->serverIds();
+			std::vector<UID> ids = group->serverIds();
+			for (UID id : ids) {
+				tlogServerIdToTlogGroups[id].push_back(group);
+			}
+		}
+
 		for (int i = 0; i < recr.tLogs.size(); i++) {
 			InitializeTLogRequest& req = reqs[i];
 			req.recruitmentID = logSystem->recruitmentID;
@@ -2937,9 +3013,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			initializationReplies.reserve(recr.tLogs.size());
 			for (int i = 0; i < recr.tLogs.size(); i++)
 				initializationReplies.push_back(transformErrors(
-				    throwErrorOr(recr.tLogs[i].tLog.getReplyUnlessFailedFor(
-				        reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-				    master_recovery_failed()));
+					throwErrorOr(recr.tLogs[i].tLog.getReplyUnlessFailedFor(
+						reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+					master_recovery_failed()));
 		}
 
 		state std::vector<Future<Void>> recoveryComplete;
@@ -3039,23 +3115,25 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				id2Interface[recr.tLogs[i].id()] = serverNew;
 			}
 
-			for (auto it : tLogGroupIdToServerIds) {
-				for (UID serverId : it.second) {
-					UID groupId = it.first;
+			for (const TLogGroupRef& group : tLogGroupCollection->groups()) {
+				logSystem->tLogs[0]->tLogGroupIDs.push_back(group->id());
+			}
+			for (auto it : tlogGroupIdToTlogServerIds) {
+				const UID& groupId = it.first;
+				for (const UID& serverId : it.second) {
 					// from group_id -> list of server_id, to group_id -> list of interfaces
-					logSystem->tLogs[0]->groupIdToInterfaces[groupId].push_back(
-					    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
-					        OptionalInterface<ptxn::TLogInterface_PassivelyPull>(id2Interface[serverId])));
+					logSystem->tLogs[0]->groupIdToInterfaces[groupId].push_back(makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
+						OptionalInterface<ptxn::TLogInterface_PassivelyPull>(id2Interface[serverId])));
 				}
 			}
 		} else {
 			for (int i = 0; i < initializationReplies.size(); i++) {
 				logSystem->tLogs[0]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
-				    OptionalInterface<TLogInterface>(initializationReplies[i].get()));
+					OptionalInterface<TLogInterface>(initializationReplies[i].get()));
 				logSystem->tLogs[0]->tLogLocalities[i] = recr.tLogs[i].locality;
 			}
 		}
-
+		
 		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);
 
 		// Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running
