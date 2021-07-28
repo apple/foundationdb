@@ -229,16 +229,6 @@ public:
 		}
 		return Void();
 	}
-
-	ACTOR static Future<Void> create(BackupContainerAzureBlobStore* self) {
-		state Future<Void> f1 =
-		    self->asyncTaskThread.execAsync([containerName = self->containerName, client = self->client.get()] {
-			    client->create_container(containerName).wait();
-			    return Void();
-		    });
-		state Future<Void> f2 = self->usesEncryption() ? self->encryptionSetupComplete() : Void();
-		return f1 && f2;
-	}
 };
 
 Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileName) {
@@ -271,8 +261,14 @@ void BackupContainerAzureBlobStore::delref() {
 }
 
 Future<Void> BackupContainerAzureBlobStore::create() {
-	return BackupContainerAzureBlobStoreImpl::create(this);
+	Future<Void> f1 = asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
+		client->create_container(containerName).wait();
+		return Void();
+	});
+	Future<Void> f2 = usesEncryption() ? encryptionSetupComplete() : Void();
+	return f1 && f2;
 }
+
 Future<bool> BackupContainerAzureBlobStore::exists() {
 	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
 		auto resp = client->get_container_properties(containerName).get().response();
