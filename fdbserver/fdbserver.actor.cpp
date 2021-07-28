@@ -68,6 +68,7 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/Tracing.h"
 #include "flow/UnitTest.h"
+#include "flow/FaultInjection.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -92,7 +93,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -177,6 +178,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config_path",               SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use_test_config_db",        SO_NONE },
+	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
+	{ OPT_FAULT_INJECTION,       "--fault_injection",           SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -646,6 +649,7 @@ static void printUsage(const char* name, bool devhelp) {
 		    "--kvfile FILE",
 		    "Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.");
 		printOptionUsage("-b [on,off], --buggify [on,off]", " Sets Buggify system state, defaults to `off'.");
+		printOptionUsage("-fi [on,off], --fault_injection [on,off]", " Sets fault injection, defaults to `on'.");
 		printOptionUsage("--crash", "Crash on serious errors instead of continuing.");
 		printOptionUsage("-N NETWORKIMPL, --network NETWORKIMPL",
 		                 " Select network implementation, `net2' (default),"
@@ -960,7 +964,7 @@ struct CLIOptions {
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 	uint64_t storageMemLimit = 1LL << 30;
-	bool buggifyEnabled = false, restarting = false;
+	bool buggifyEnabled = false, faultInjectionEnabled = true, restarting = false;
 	Optional<Standalone<StringRef>> zoneId;
 	Optional<Standalone<StringRef>> dcId;
 	ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
@@ -1382,6 +1386,17 @@ private:
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				break;
+			case OPT_FAULT_INJECTION:
+				if (!strcmp(args.OptionArg(), "on"))
+					faultInjectionEnabled = true;
+				else if (!strcmp(args.OptionArg(), "off"))
+					faultInjectionEnabled = false;
+				else {
+					fprintf(stderr, "ERROR: Unknown fault injection state `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
 			case OPT_CRASHONERROR:
 				g_crashOnError = true;
 				break;
@@ -1638,6 +1653,7 @@ int main(int argc, char* argv[]) {
 		setThreadLocalDeterministicRandomSeed(opts.randomSeed);
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
+		enableFaultInjection(opts.faultInjectionEnabled);
 
 		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,
 		                                         Randomize::True,
@@ -1795,6 +1811,7 @@ int main(int argc, char* argv[]) {
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
+			.detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
 		    .trackLatest("ProgramStart");
 
@@ -1815,18 +1832,23 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			for (int i = 0; i < directories.size(); i++)
-				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
-				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
+			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests" };
+
+			for (const auto& dir : directories) {
+				if (dir.size() != 32 && allowedDirectories.count(dir) == 0 && dir.find("snap") == std::string::npos) {
+
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
 					    .detail("DataFolder", dataFolder)
-					    .detail("SuspiciousFile", directories[i]);
+					    .detail("SuspiciousFile", dir);
+
 					fprintf(stderr,
 					        "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n",
 					        dataFolder.c_str(),
-					        directories[i].c_str());
+					        dir.c_str());
+
 					flushAndExit(FDB_EXIT_ERROR);
 				}
+			}
 			std::vector<std::string> files = platform::listFiles(dataFolder);
 			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);

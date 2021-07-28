@@ -122,7 +122,7 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 	return notUpdated;
 }
 
-ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> db,
                                             Reference<AsyncVar<ClientDBInfo>> info) {
 	state std::vector<UID> lastCommitProxyUIDs;
 	state std::vector<CommitProxyInterface> lastCommitProxies;
@@ -136,7 +136,7 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo>> db
 	}
 }
 
-Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
+Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                         TaskPriority taskID,
                         LockAware lockAware,
                         EnableLocalityLoadBalance enableLocalityLoadBalance) {
@@ -502,15 +502,15 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 
 // Register the worker interf to cluster controller (cc) and
 // re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
-ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                       WorkerInterface interf,
                                       Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                       ProcessClass initialClass,
-                                      Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
-                                      Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
-                                      Reference<AsyncVar<bool>> degraded,
+                                      Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
+                                      Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                      Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
-                                      Reference<AsyncVar<std::set<std::string>>> issues) {
+                                      Reference<AsyncVar<std::set<std::string>> const> issues) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -848,7 +848,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 	uint64_t page_size = sysconf(_SC_PAGESIZE);
 	int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
-		TraceEvent("OpenStatmFileFailure");
+		TraceEvent("OpenStatmFileFailure").log();
 		*error = true;
 		return false;
 	}
@@ -857,7 +857,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 	char stat_buf[buf_sz];
 	ssize_t stat_nread = read(fd, stat_buf, buf_sz);
 	if (stat_nread < 0) {
-		TraceEvent("ReadStatmFileFailure");
+		TraceEvent("ReadStatmFileFailure").log();
 		*error = true;
 		return false;
 	}
@@ -869,7 +869,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 		return true;
 	}
 #else
-	TraceEvent("CheckHighMemoryUnsupported");
+	TraceEvent("CheckHighMemoryUnsupported").log();
 	*error = true;
 #endif
 	return false;
@@ -926,7 +926,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		else if (e.getError().code() != error_code_please_reboot)
 			throw e.getError();
 
-		TraceEvent("StorageServerRequestedReboot", id);
+		TraceEvent("StorageServerRequestedReboot", id).log();
 
 		StorageServerInterface recruited;
 		recruited.uniqueID = id;
@@ -964,7 +964,7 @@ ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageCache));
 		if (!e.isError()) {
-			TraceEvent("StorageCacheRequestedReboot1", id);
+			TraceEvent("StorageCacheRequestedReboot1", id).log();
 			return Void();
 		} else if (e.getError().code() != error_code_please_reboot &&
 		           e.getError().code() != error_code_worker_removed) {
@@ -972,7 +972,7 @@ ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
 			throw e.getError();
 		}
 
-		TraceEvent("StorageCacheRequestedReboot", id);
+		TraceEvent("StorageCacheRequestedReboot", id).log();
 
 		StorageServerInterface recruited;
 		recruited.uniqueID = deterministicRandom()->randomUniqueID(); // id;
@@ -1504,7 +1504,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					}
 					throw please_reboot();
 				} else {
-					TraceEvent("ProcessReboot");
+					TraceEvent("ProcessReboot").log();
 					ASSERT(!rebootReq.deleteData);
 					flushAndExit(0);
 				}
@@ -2017,7 +2017,7 @@ ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInte
 			                                    ci->get().get().openDatabase.getEndpoint(), FailureStatus(false))
 			                              : Never())) {
 				printf("FDBD joined cluster.\n");
-				TraceEvent("FDBDConnected");
+				TraceEvent("FDBDConnected").log();
 				return Void();
 			}
 			when(wait(ci->onChange())) {}
@@ -2303,10 +2303,9 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 
 		if (useConfigDB != UseConfigDB::DISABLED) {
-			actors.push_back(
-			    reportErrors(localConfig.consume(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(
-			                     dbInfo, [](auto const& info) { return info.configBroadcaster; })),
-			                 "LocalConfiguration"));
+			actors.push_back(reportErrors(localConfig.consume(IAsyncListener<ConfigBroadcastFollowerInterface>::create(
+			                                  dbInfo, [](auto const& info) { return info.configBroadcaster; })),
+			                              "LocalConfiguration"));
 		}
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));

@@ -473,7 +473,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		}
 	}
 
-	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysWaitOn", applierID);
+	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysWaitOn", applierID).log();
 	wait(waitForAll(fGetAndComputeKeys));
 
 	// Sanity check all stagingKeys have been precomputed

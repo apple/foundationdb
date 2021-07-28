@@ -73,7 +73,7 @@ FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy,
 
 	if (is_client) {
 		if ((tls_ctx = tls_client()) == nullptr) {
-			TraceEvent(SevError, "FDBLibTLSClientError", uid);
+			TraceEvent(SevError, "FDBLibTLSClientError", uid).log();
 			throw std::runtime_error("FDBLibTLSClientError");
 		}
 		if (tls_configure(tls_ctx, policy->tls_cfg) == -1) {
@@ -88,7 +88,7 @@ FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy,
 		}
 	} else {
 		if ((tls_sctx = tls_server()) == nullptr) {
-			TraceEvent(SevError, "FDBLibTLSServerError", uid);
+			TraceEvent(SevError, "FDBLibTLSServerError", uid).log();
 			throw std::runtime_error("FDBLibTLSServerError");
 		}
 		if (tls_configure(tls_sctx, policy->tls_cfg) == -1) {
@@ -250,7 +250,7 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 
 	// Verify the certificate.
 	if ((store_ctx = X509_STORE_CTX_new()) == nullptr) {
-		TraceEvent(SevError, "FDBLibTLSOutOfMemory", uid);
+		TraceEvent(SevError, "FDBLibTLSOutOfMemory", uid).log();
 		reason = "Out of memory";
 		goto err;
 	}
@@ -333,7 +333,7 @@ bool FDBLibTLSSession::verify_peer() {
 		return true;
 
 	if ((cert_pem = tls_peer_cert_chain_pem(tls_ctx, &cert_pem_len)) == nullptr) {
-		TraceEvent(SevError, "FDBLibTLSNoCertError", uid);
+		TraceEvent(SevError, "FDBLibTLSNoCertError", uid).log();
 		goto err;
 	}
 	if ((certs = policy->parse_cert_pem(cert_pem, cert_pem_len)) == nullptr)
@@ -388,14 +388,14 @@ int FDBLibTLSSession::handshake() {
 
 int FDBLibTLSSession::read(uint8_t* data, int length) {
 	if (!handshake_completed) {
-		TraceEvent(SevError, "FDBLibTLSReadHandshakeError");
+		TraceEvent(SevError, "FDBLibTLSReadHandshakeError").log();
 		return FAILED;
 	}
 
 	ssize_t n = tls_read(tls_ctx, data, length);
 	if (n > 0) {
 		if (n > INT_MAX) {
-			TraceEvent(SevError, "FDBLibTLSReadOverflow");
+			TraceEvent(SevError, "FDBLibTLSReadOverflow").log();
 			return FAILED;
 		}
 		return (int)n;
@@ -415,14 +415,14 @@ int FDBLibTLSSession::read(uint8_t* data, int length) {
 
 int FDBLibTLSSession::write(const uint8_t* data, int length) {
 	if (!handshake_completed) {
-		TraceEvent(SevError, "FDBLibTLSWriteHandshakeError", uid);
+		TraceEvent(SevError, "FDBLibTLSWriteHandshakeError", uid).log();
 		return FAILED;
 	}
 
 	ssize_t n = tls_write(tls_ctx, data, length);
 	if (n > 0) {
 		if (n > INT_MAX) {
-			TraceEvent(SevError, "FDBLibTLSWriteOverflow", uid);
+			TraceEvent(SevError, "FDBLibTLSWriteOverflow", uid).log();
 			return FAILED;
 		}
 		return (int)n;

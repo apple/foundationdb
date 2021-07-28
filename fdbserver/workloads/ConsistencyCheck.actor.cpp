@@ -142,7 +142,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		TraceEvent("ConsistencyCheck");
+		TraceEvent("ConsistencyCheck").log();
 		return _start(cx, this);
 	}
 
@@ -186,10 +186,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload* self) {
 		loop {
 			while (self->suspendConsistencyCheck.get()) {
-				TraceEvent("ConsistencyCheck_Suspended");
+				TraceEvent("ConsistencyCheck_Suspended").log();
 				wait(self->suspendConsistencyCheck.onChange());
 			}
-			TraceEvent("ConsistencyCheck_StartingOrResuming");
+			TraceEvent("ConsistencyCheck_StartingOrResuming").log();
 			choose {
 				when(wait(self->runCheck(cx, self))) {
 					if (!self->indefinite)
@@ -222,7 +222,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						}
 						RangeResult res = wait(tr.getRange(configKeys, 1000));
 						if (res.size() == 1000) {
-							TraceEvent("ConsistencyCheck_TooManyConfigOptions");
+							TraceEvent("ConsistencyCheck_TooManyConfigOptions").log();
 							self->testFailure("Read too many configuration options");
 						}
 						for (int i = 0; i < res.size(); i++)
@@ -251,7 +251,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					// the allowed maximum number of teams
 					bool teamCollectionValid = wait(getTeamCollectionValid(cx, self->dbInfo));
 					if (!teamCollectionValid) {
-						TraceEvent(SevError, "ConsistencyCheck_TooManyTeams");
+						TraceEvent(SevError, "ConsistencyCheck_TooManyTeams").log();
 						self->testFailure("The number of process or machine teams is larger than the allowed maximum "
 						                  "number of teams");
 					}
@@ -1817,7 +1817,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				self->testFailure("No storage server on worker");
 				return false;
 			} else {
-				TraceEvent(SevWarn, "ConsistencyCheck_TSSMissing");
+				TraceEvent(SevWarn, "ConsistencyCheck_TSSMissing").log();
 			}
 		}
 
@@ -1992,7 +1992,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
 
 				if (!currentKey.present()) {
-					TraceEvent("ConsistencyCheck_NoCoordinatorKey");
+					TraceEvent("ConsistencyCheck_NoCoordinatorKey").log();
 					return false;
 				}
 

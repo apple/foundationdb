@@ -801,14 +801,14 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData* self) {
 				    autoThrottlingEnabled.get().get() == LiteralStringRef("0")) {
 					TEST(true); // Auto-throttling disabled
 					if (self->autoThrottlingEnabled) {
-						TraceEvent("AutoTagThrottlingDisabled", self->id);
+						TraceEvent("AutoTagThrottlingDisabled", self->id).log();
 					}
 					self->autoThrottlingEnabled = false;
 				} else if (autoThrottlingEnabled.get().present() &&
 				           autoThrottlingEnabled.get().get() == LiteralStringRef("1")) {
 					TEST(true); // Auto-throttling enabled
 					if (!self->autoThrottlingEnabled) {
-						TraceEvent("AutoTagThrottlingEnabled", self->id);
+						TraceEvent("AutoTagThrottlingEnabled", self->id).log();
 					}
 					self->autoThrottlingEnabled = true;
 				} else {
@@ -870,7 +870,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData* self) {
 				committed = true;
 
 				wait(watchFuture);
-				TraceEvent("RatekeeperThrottleSignaled", self->id);
+				TraceEvent("RatekeeperThrottleSignaled", self->id).log();
 				TEST(true); // Tag throttle changes detected
 				break;
 			} catch (Error& e) {
@@ -1408,7 +1408,7 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 	}
 }
 
-ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Future<Void> timeout = Void();
 	state std::vector<Future<Void>> tlogTrackers;

@@ -309,9 +309,8 @@ class LocalConfigurationImpl {
 		}
 	}
 
-	ACTOR static Future<Void> consume(
-	    LocalConfigurationImpl* self,
-	    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> broadcaster) {
+	ACTOR static Future<Void> consume(LocalConfigurationImpl* self,
+	                                  Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> broadcaster) {
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			choose {
@@ -371,7 +370,7 @@ public:
 		return getKnobs().getTestKnobs();
 	}
 
-	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+	Future<Void> consume(Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
 		return consume(this, broadcaster);
 	}
 
@@ -453,7 +452,7 @@ TestKnobs const& LocalConfiguration::getTestKnobs() const {
 }
 
 Future<Void> LocalConfiguration::consume(
-    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+    Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
 	return impl().consume(broadcaster);
 }
 

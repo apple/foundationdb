@@ -73,7 +73,7 @@ struct RestoreBackupWorkload final : TestWorkload {
 				    .detail("TargetVersion", waitForVersion);
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() >= waitForVersion) {
 					try {
-						TraceEvent("DiscontinuingBackup");
+						TraceEvent("DiscontinuingBackup").log();
 						wait(self->backupAgent.discontinueBackup(cx, self->tag));
 					} catch (Error& e) {
 						TraceEvent("ErrorDiscontinuingBackup").error(e);

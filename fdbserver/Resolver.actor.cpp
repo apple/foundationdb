@@ -354,7 +354,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver, InitializeResolverRe
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 uint64_t recoveryCount,
                                 ResolverInterface myInterface) {
 	loop {
@@ -367,7 +367,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
 
 ACTOR Future<Void> resolver(ResolverInterface resolver,
                             InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo>> db) {
+                            Reference<AsyncVar<ServerDBInfo> const> db) {
 	try {
 		state Future<Void> core = resolverCore(resolver, initReq);
 		loop choose {
