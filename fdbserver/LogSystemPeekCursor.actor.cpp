@@ -358,7 +358,7 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 
 					// NOTE: delay is needed here since TLog need to be scheduled to response if there are TLog and SS
 					// on the same machine
-					wait(delay(0));
+					wait(delay(0, taskID));
 					return Void();
 				}
 			}
@@ -417,12 +417,14 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		more = serverPeekStreamGetMore(this, taskID);
-		/*if (parallelGetMore || onlySpilled || futureResults.size()) {
-		    more = serverPeekParallelGetMore(this, taskID);
+		// TODO: remove locality check when log router support streaming peek
+		if (usePeekStream && tag.locality >= 0) {
+			more = serverPeekStreamGetMore(this, taskID);
+		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
+			more = serverPeekParallelGetMore(this, taskID);
 		} else {
-		    more = serverPeekGetMore(this, taskID);
-		}*/
+			more = serverPeekGetMore(this, taskID);
+		}
 	}
 	return more;
 }

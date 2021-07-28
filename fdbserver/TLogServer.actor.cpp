@@ -1935,7 +1935,11 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			req.reply.send(reply);
 			begin = reply.rep.end;
 			onlySpilled = reply.rep.onlySpilled;
-			wait(delay(0, g_network->getCurrentTask()));
+			if (reply.rep.end > logData->version.get()) {
+				wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+			} else {
+				wait(delay(0, g_network->getCurrentTask()));
+			}
 		} catch (Error& e) {
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId).error(e, true);

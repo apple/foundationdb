@@ -446,6 +446,7 @@ ACTOR Future<TLogPeekReply> peekLogRouter(LogRouterData* self,
                                           Tag tag,
                                           bool returnIfBlocked = false,
                                           bool reqOnlySpilled = false,
+                                          bool streamReply = false,
                                           Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>()) {
 	state BinaryWriter messages(Unversioned());
 	state int sequenceNum = -1;
@@ -518,7 +519,12 @@ ACTOR Future<TLogPeekReply> peekLogRouter(LogRouterData* self,
 				sequenceData.send(std::make_pair(begin, reqOnlySpilled));
 			}
 		}
-		throw no_action_needed(); // we've already replied in the past
+		if (streamReply) {
+			// for streaming reply, we skip the popped part
+			begin = std::min(poppedVer, self->startVersion);
+		} else {
+			throw no_action_needed(); // we've already replied in the past
+		}
 	}
 
 	Version endVersion = self->version.get() + 1;
@@ -568,18 +574,20 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 		state TLogPeekStreamReply reply;
 		try {
 			wait(req.reply.onReady() &&
-			     store(reply.rep, peekLogRouter(self, req.begin, req.tag, req.returnIfBlocked, onlySpilled)));
+			     store(reply.rep, peekLogRouter(self, req.begin, req.tag, req.returnIfBlocked, onlySpilled, true)));
 			req.reply.send(reply);
 			begin = reply.rep.end;
 			onlySpilled = reply.rep.onlySpilled;
-			wait(delay(0, g_network->getCurrentTask()));
+			if (reply.rep.end > self->version.get()) {
+				wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+			} else {
+				wait(delay(0, g_network->getCurrentTask()));
+			}
 		} catch (Error& e) {
 			self->activePeekStreams--;
-			TraceEvent(SevDebug, "LogRouterPeekStreamEnd", self->dbgid).error(e, true);
 
-			if (e.code() == error_code_no_action_needed) {
-				req.reply.sendError(end_of_stream());
-			} else if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
+			TraceEvent(SevDebug, "LogRouterPeekStreamEnd", self->dbgid).error(e, true);
+			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
 				return Void();
 			} else {
@@ -592,7 +600,7 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 ACTOR Future<Void> logRouterPeekMessages(LogRouterData* self, TLogPeekRequest req) {
 	try {
 		TLogPeekReply reply =
-		    wait(peekLogRouter(self, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
+		    wait(peekLogRouter(self, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, false, req.sequence));
 		req.reply.send(reply);
 	} catch (Error& e) {
 		if (e.code() == error_code_no_action_needed) {
@@ -689,9 +697,11 @@ ACTOR Future<Void> logRouterCore(TLogInterface interf,
 			addActor.send(logRouterPeekMessages(&logRouterData, req));
 		}
 		when(TLogPeekStreamRequest req = waitNext(interf.peekStreamMessages.getFuture())) {
-			TraceEvent(SevDebug, "LogRouterPeekStream", logRouterData.dbgid)
+			// addActor.send(logRouterPeekStream(&logRouterData, req));
+			// FIXME: temporarily disable streaming peek from LogRouter
+			TraceEvent(SevError, "LogRouterPeekStream", logRouterData.dbgid)
 			    .detail("Token", interf.peekStreamMessages.getEndpoint().token);
-			addActor.send(logRouterPeekStream(&logRouterData, req));
+			req.reply.sendError(operation_failed());
 		}
 		when(TLogPopRequest req = waitNext(interf.popMessages.getFuture())) {
 			// Request from remote tLog to pop data from LR
