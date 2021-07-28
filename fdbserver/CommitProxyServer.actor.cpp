@@ -1756,7 +1756,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 
 ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> const> db,
                                            ExclusionSafetyCheckRequest req) {
-	TraceEvent("SafetyCheckCommitProxyBegin");
+	TraceEvent("SafetyCheckCommitProxyBegin").log();
 	state ExclusionSafetyCheckReply reply(false);
 	if (!db->get().distributor.present()) {
 		TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "ExclusionSafetyCheck");
@@ -1778,7 +1778,7 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> cons
 			throw e;
 		}
 	}
-	TraceEvent("SafetyCheckCommitProxyFinish");
+	TraceEvent("SafetyCheckCommitProxyFinish").log();
 	req.reply.send(reply);
 	return Void();
 }
@@ -1796,7 +1796,7 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
 				nextRequestTimer = Void();
 			} else {
-				TraceEvent("ProxyRatekeeperDied", myID);
+				TraceEvent("ProxyRatekeeperDied", myID).log();
 				nextRequestTimer = Never();
 			}
 		}
@@ -1936,7 +1936,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			}
 		}
 		when(ProxySnapRequest snapReq = waitNext(proxy.proxySnapReq.getFuture())) {
-			TraceEvent(SevDebug, "SnapMasterEnqueue");
+			TraceEvent(SevDebug, "SnapMasterEnqueue").log();
 			addActor.send(proxySnapCreate(snapReq, &commitData));
 		}
 		when(ExclusionSafetyCheckRequest exclCheckReq = waitNext(proxy.exclusionSafetyCheckReq.getFuture())) {

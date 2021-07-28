@@ -99,7 +99,7 @@ typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
 struct LogData;
 struct TLogData;
 
-struct TLogQueue : public IClosable {
+struct TLogQueue final : public IClosable {
 public:
 	TLogQueue(IDiskQueue* queue, UID dbgid) : queue(queue), dbgid(dbgid) {}
 
@@ -876,7 +876,7 @@ ACTOR Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData
 	// timeout check for ignorePopRequest
 	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
 
-		TraceEvent("EnableTLogPlayAllIgnoredPops");
+		TraceEvent("EnableTLogPlayAllIgnoredPops").log();
 		// use toBePopped and issue all the pops
 		state std::map<Tag, Version>::iterator it;
 		state vector<Future<Void>> ignoredPops;
@@ -1666,7 +1666,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 		updatePersistentPopped(self, logData, logData->getTagData(tag));
 	}
 
-	TraceEvent("TLogInitCommit", logData->logId);
+	TraceEvent("TLogInitCommit", logData->logId).log();
 	wait(ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 	return Void();
 }
@@ -1869,7 +1869,7 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 		enablePopReq.reply.sendError(operation_failed());
 		return Void();
 	}
-	TraceEvent("EnableTLogPlayAllIgnoredPops2");
+	TraceEvent("EnableTLogPlayAllIgnoredPops2").log();
 	// use toBePopped and issue all the pops
 	std::map<Tag, Version>::iterator it;
 	vector<Future<Void>> ignoredPops;
@@ -1923,7 +1923,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				}
 
 				if (!logData->isPrimary && logData->stopped) {
-					TraceEvent("TLogAlreadyStopped", self->dbgid);
+					TraceEvent("TLogAlreadyStopped", self->dbgid).log();
 					logData->removed = logData->removed && logData->logSystem->get()->endEpoch();
 				}
 			} else {
@@ -2198,22 +2198,22 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 }
 
 ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
-	TraceEvent("TLogCheckEmptyQueueBegin", self->dbgid);
+	TraceEvent("TLogCheckEmptyQueueBegin", self->dbgid).log();
 	try {
 		TLogQueueEntry r = wait(self->persistentQueue->readNext(self));
 		throw internal_error();
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream)
 			throw;
-		TraceEvent("TLogCheckEmptyQueueEnd", self->dbgid);
+		TraceEvent("TLogCheckEmptyQueueEnd", self->dbgid).log();
 		return Void();
 	}
 }
 
 ACTOR Future<Void> checkRecovered(TLogData* self) {
-	TraceEvent("TLogCheckRecoveredBegin", self->dbgid);
+	TraceEvent("TLogCheckRecoveredBegin", self->dbgid).log();
 	Optional<Value> v = wait(self->persistentData->readValue(StringRef()));
-	TraceEvent("TLogCheckRecoveredEnd", self->dbgid);
+	TraceEvent("TLogCheckRecoveredEnd", self->dbgid).log();
 	return Void();
 }
 
@@ -2227,7 +2227,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	state KeyRange tagKeys;
 	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
 
-	TraceEvent("TLogRestorePersistentState", self->dbgid);
+	TraceEvent("TLogRestorePersistentState", self->dbgid).log();
 
 	state IKeyValueStore* storage = self->persistentData;
 	wait(storage->init());
@@ -2585,7 +2585,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	logData->removed = rejoinMasters(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 	self->queueOrder.push_back(recruited.id());
 
-	TraceEvent("TLogStart", logData->logId);
+	TraceEvent("TLogStart", logData->logId).log();
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;
 	try {
@@ -2730,7 +2730,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	state TLogData self(tlogId, workerID, persistentData, persistentQueue, db, degraded, folder);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
-	TraceEvent("SharedTlog", tlogId);
+	TraceEvent("SharedTlog", tlogId).log();
 	try {
 		if (restoreFromDisk) {
 			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));

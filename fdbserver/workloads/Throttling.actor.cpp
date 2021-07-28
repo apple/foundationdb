@@ -112,7 +112,7 @@ struct ThrottlingWorkload : KVWorkload {
 				}
 				wait(tr.commit());
 				if (deterministicRandom()->randomInt(0, 1000) == 0)
-					TraceEvent("TransactionCommittedx1000");
+					TraceEvent("TransactionCommittedx1000").log();
 				++self->transactionsCommitted;
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)

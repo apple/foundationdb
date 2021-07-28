@@ -93,6 +93,7 @@ Other Changes
 * Capture output of forked snapshot processes in trace events. `(PR #4254) <https://github.com/apple/foundationdb/pull/4254/files>`_
 * Add ErrorKind field to Severity 40 trace events. `(PR #4741) <https://github.com/apple/foundationdb/pull/4741/files>`_
 * Added histograms for the storage server write path components. `(PR #5021) <https://github.com/apple/foundationdb/pull/5021/files>`_
+* Committing a transaction will no longer partially reset it as of API version 700. `(PR #5271) <https://github.com/apple/foundationdb/pull/5271/files>`_
 
 Earlier release notes
 ---------------------
