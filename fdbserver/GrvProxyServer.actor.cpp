@@ -300,7 +300,7 @@ ACTOR Future<Void> getRate(UID myID,
 				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
 				nextRequestTimer = Void(); // trigger GetRate request
 			} else {
-				TraceEvent("ProxyRatekeeperDied", myID);
+				TraceEvent("ProxyRatekeeperDied", myID).log();
 				nextRequestTimer = Never();
 				reply = Never();
 			}

@@ -30,7 +30,7 @@
 struct RunRestoreWorkerWorkload : TestWorkload {
 	Future<Void> worker;
 	RunRestoreWorkerWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		TraceEvent("RunRestoreWorkerWorkloadMX");
+		TraceEvent("RunRestoreWorkerWorkloadMX").log();
 	}
 
 	std::string description() const override { return "RunRestoreWorkerWorkload"; }

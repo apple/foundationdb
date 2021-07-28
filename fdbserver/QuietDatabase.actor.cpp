@@ -576,7 +576,7 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
 		if (primaryDead && remoteDead) {
-			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration");
+			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration").log();
 			return Void();
 		}
 		if (primaryDead || remoteDead) {
@@ -647,7 +647,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 
 	loop {
 		try {
-			TraceEvent("QuietDatabaseWaitingOnDataDistributor");
+			TraceEvent("QuietDatabaseWaitingOnDataDistributor").log();
 			WorkerInterface distributorWorker = wait(getDataDistributorWorker(cx, dbInfo));
 			UID distributorUID = dbInfo->get().distributor.get().id();
 			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID)

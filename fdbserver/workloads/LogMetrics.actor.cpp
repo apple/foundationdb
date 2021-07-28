@@ -54,7 +54,7 @@ struct LogMetricsWorkload : TestWorkload {
 		state BinaryWriter br(Unversioned());
 		vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		// vector<Future<Void>> replies;
-		TraceEvent("RateChangeTrigger");
+		TraceEvent("RateChangeTrigger").log();
 		SetMetricsLogRateRequest req(rate);
 		for (int i = 0; i < workers.size(); i++) {
 			workers[i].interf.setMetricsRate.send(req);

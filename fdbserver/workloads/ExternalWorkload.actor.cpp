@@ -142,19 +142,19 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		    .detail("WorkloadName", wName);
 		library = loadLibrary(fullPath.c_str());
 		if (library == nullptr) {
-			TraceEvent(SevError, "ExternalWorkloadLoadError");
+			TraceEvent(SevError, "ExternalWorkloadLoadError").log();
 			success = false;
 			return;
 		}
 		workloadFactory = reinterpret_cast<decltype(workloadFactory)>(loadFunction(library, "workloadFactory"));
 		if (workloadFactory == nullptr) {
-			TraceEvent(SevError, "ExternalFactoryNotFound");
+			TraceEvent(SevError, "ExternalFactoryNotFound").log();
 			success = false;
 			return;
 		}
 		workloadImpl = (*workloadFactory)(FDBLoggerImpl::instance())->create(wName.toString());
 		if (!workloadImpl) {
-			TraceEvent(SevError, "WorkloadNotFound");
+			TraceEvent(SevError, "WorkloadNotFound").log();
 			success = false;
 		}
 		workloadImpl->init(this);
