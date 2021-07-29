@@ -48,6 +48,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -425,9 +426,10 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 	return Void();
 }
 
-ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
-                                  RecruitFromConfigurationReply recruits,
-                                  vector<StorageServerInterface>* servers) {
+ACTOR Future<Void> newSeedServers(
+    Reference<MasterData> self,
+    RecruitFromConfigurationReply recruits,
+    std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>* servers) {
 	// This is only necessary if the database is at version 0
 	servers->clear();
 	if (self->lastEpochEnd)
@@ -436,8 +438,12 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	state int idx = 0;
 	state std::map<Optional<Value>, Tag> dcId_tags;
 	state int8_t nextLocality = 0;
+	state UID teamId;
+	state std::vector<StorageServerInterface> ssInterfaces;
 	while (idx < recruits.storageServers.size()) {
 		TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
+		    .detail("Idx", idx)
+		    .detail("Total", recruits.storageServers.size())
 		    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
 
 		InitializeStorageRequest isr;
@@ -447,6 +453,10 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		isr.storeType = self->configuration.storageServerStoreType;
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			// XXX: each storage server belongs to a unique team
+			isr.storageTeamId = teamId = deterministicRandom()->randomUniqueID();
+		}
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
@@ -467,7 +477,8 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 			tag.id++;
 			idx++;
 
-			servers->push_back(newServer.get().interf);
+			servers->emplace_back(newServer.get().interf, teamId);
+			ssInterfaces.push_back(newServer.get().interf);
 		}
 	}
 
@@ -478,7 +489,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 
 	TraceEvent("MasterRecruitedInitialStorageServers", self->dbgid)
 	    .detail("TargetCount", self->configuration.storageTeamSize)
-	    .detail("Servers", describe(*servers));
+	    .detail("Servers", describe(ssInterfaces));
 
 	return Void();
 }
@@ -696,9 +707,10 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Maste
 	}
 }
 
-ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Reference<MasterData> self,
-                                                                         vector<StorageServerInterface>* seedServers,
-                                                                         Reference<ILogSystem> oldLogSystem) {
+ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(
+    Reference<MasterData> self,
+    std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>* seedServers,
+    Reference<ILogSystem> oldLogSystem) {
 	if (!self->configuration.isValid()) {
 		RecoveryStatus::RecoveryStatus status;
 		if (self->configuration.initialized) {
@@ -1089,8 +1101,8 @@ void updateConfigForForcedRecovery(Reference<MasterData> self,
 // recruitment with different database configurations.
 ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
                                Reference<ILogSystem> oldLogSystem,
-                               vector<StorageServerInterface>* seedServers,
-                               vector<Standalone<CommitTransactionRef>>* initialConfChanges,
+                               std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>* seedServers,
+                               std::vector<Standalone<CommitTransactionRef>>* initialConfChanges,
                                Future<Version> poppedTxsVersion) {
 	TraceEvent("MasterRecoveryState", self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
@@ -1807,7 +1819,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 
 	self->recoveryState = RecoveryState::RECRUITING;
 
-	state vector<StorageServerInterface> seedServers;
+	state std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> seedServers;
 	state vector<Standalone<CommitTransactionRef>> initialConfChanges;
 	state Future<Void> logChanges;
 	state Future<Void> minRecoveryDuration;
