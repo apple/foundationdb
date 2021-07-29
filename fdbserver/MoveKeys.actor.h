@@ -62,10 +62,14 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 // This does not modify the moveKeysLock
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState);
 
-void seedShardServers(Arena& trArena, CommitTransactionRef& tr, vector<StorageServerInterface> servers);
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
+void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers);
 
+// Eventually moves the given keys to the given destination team
+// Caller is responsible for cancelling it before issuing an overlapping move,
+// for restarting the remainder, and for not otherwise cancelling it before
+// it returns (since it needs to execute the finishMoveKeys transaction).
 ACTOR Future<Void> moveKeys(Database occ,
                             KeyRange keys,
                             vector<UID> destinationTeam,
@@ -77,41 +81,38 @@ ACTOR Future<Void> moveKeys(Database occ,
                             bool hasRemote,
                             UID relocationIntervalId, // for logging only
                             const DDEnabledState* ddEnabledState);
-// Eventually moves the given keys to the given destination team
-// Caller is responsible for cancelling it before issuing an overlapping move,
-// for restarting the remainder, and for not otherwise cancelling it before
-// it returns (since it needs to execute the finishMoveKeys transaction).
 
-ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
 // Adds a newly recruited storage server to a database (e.g. adding it to FF/serverList)
 // Returns a Version in which the storage server is in the database
 // This doesn't need to be called for the "seed" storage servers (see seedShardServers above)
+ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
 
+// Removes the given storage server permanently from the database.  It must already
+// have no shards assigned to it.  The storage server MUST NOT be added again after this
+// (though a new storage server with a new unique ID may be recruited from the same fdbserver).
 ACTOR Future<Void> removeStorageServer(Database cx,
                                        UID serverID,
                                        Optional<UID> tssPairID, // if serverID is a tss, set to its ss pair id
                                        MoveKeysLock lock,
                                        const DDEnabledState* ddEnabledState);
-// Removes the given storage server permanently from the database.  It must already
-// have no shards assigned to it.  The storage server MUST NOT be added again after this
-// (though a new storage server with a new unique ID may be recruited from the same fdbserver).
 
-ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> tr, UID serverID);
 // Returns true if the given storage server has no keys assigned to it and may be safely removed
 // Obviously that could change later!
+ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> tr, UID serverID);
+
+// Directly removes serverID from serverKeys and keyServers system keyspace.
+// Performed when a storage server is marked as permanently failed.
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               UID serverID,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState);
-// Directly removes serverID from serverKeys and keyServers system keyspace.
-// Performed when a storage server is marked as permanently failed.
 
-ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> team);
 // Gives a unique ID for each storage team and creates three maps for storage teams. `team` is list
 // of strage servers in the storage team:
 // (1) List of Storage Servers (Team) -> TeamID
 // (2) TeamID -> List of Storage Servers (Team)
 // (3) Storage Server -> List of TeamsIDs
+ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> team);
 
 #include "flow/unactorcompiler.h"
 #endif

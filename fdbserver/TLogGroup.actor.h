@@ -129,7 +129,7 @@ public:
 	// Called by the master server to write the very first transaction to the database establishing
 	// the first storage team to tLogGroup mapping. TLogGroups should be created by the time this is
 	// called during recovery. Gives ID to first storage server team, and assigns a TLogGroup to it.
-	void seedTLogGroupAssignment(Arena& arena, CommitTransactionRef& tr, vector<StorageServerInterface> servers);
+	void seedTLogGroupAssignment(Arena& arena, CommitTransactionRef& tr, std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers);
 
 private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers

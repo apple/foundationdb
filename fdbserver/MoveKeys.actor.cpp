@@ -1379,6 +1379,7 @@ ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, vector<UID> t
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			Optional<Value> _teamId = wait(tr.get(teamListKey));
 			if (_teamId.present()) {
@@ -1474,11 +1475,11 @@ ACTOR Future<Void> moveKeys(Database cx,
 
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
-void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServerInterface> servers) {
+void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
 	int8_t nextLocality = 0;
-	for (auto& s : servers) {
+	for (const auto& [s, _] : servers) {
 		if (!dcId_locality.count(s.locality.dcId())) {
 			tr.set(arena, tagLocalityListKeyFor(s.locality.dcId()), tagLocalityListValue(nextLocality));
 			dcId_locality[s.locality.dcId()] = Tag(nextLocality, 0);
@@ -1494,7 +1495,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 	tr.read_snapshot = 0;
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 
-	for (auto& s : servers) {
+	for (const auto& [s, _] : servers) {
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
 		if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
@@ -1509,7 +1510,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 	std::vector<Tag> serverTags;
 	std::vector<UID> serverSrcUID;
 	serverTags.reserve(servers.size());
-	for (auto& s : servers) {
+	for (const auto& [s, _] : servers) {
 		serverTags.push_back(server_tag[s.id()]);
 		serverSrcUID.push_back(s.id());
 	}
@@ -1521,7 +1522,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 	//   key (keyServersKeyServersKey)
 	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
-	for (auto& s : servers) {
+	for (const auto& [s, _] : servers) {
 		krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
 	}
 }
