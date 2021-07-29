@@ -165,6 +165,7 @@ Future<Void> AsyncFileEncrypted::truncate(int64_t size) {
 }
 
 Future<Void> AsyncFileEncrypted::sync() {
+	TraceEvent("HERE_Syncing");
 	ASSERT(mode == Mode::APPEND_ONLY);
 	return AsyncFileEncryptedImpl::sync(this);
 }
@@ -243,7 +244,7 @@ Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint16_t bl
 // then reads this data back from the file in random increments, then confirms that
 // the bytes read match the bytes written.
 TEST_CASE("fdbrpc/AsyncFileEncrypted") {
-	state const int bytes = FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * deterministicRandom()->randomInt(0, 1000);
+	state const int bytes = deterministicRandom()->randomInt(0, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * 1000);
 	state std::vector<unsigned char> writeBuffer(bytes, 0);
 	generateRandomData(&writeBuffer.front(), bytes);
 	state std::vector<unsigned char> readBuffer(bytes, 0);
@@ -258,6 +259,9 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	while (bytesWritten < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesWritten);
 		wait(writeFile->write(&writeBuffer[bytesWritten], chunkSize, bytesWritten));
+		if (deterministicRandom()->random01() < 0.1) {
+			wait(writeFile->sync());
+		}
 		bytesWritten += chunkSize;
 	}
 	wait(writeFile->sync());
