@@ -424,15 +424,16 @@ namespace SummarizeTest
                     process.StartInfo.RedirectStandardOutput = true;
                     string role = (noSim) ? "test" : "simulation";
                     var args = "";
+                    string faultInjectionArg = string.IsNullOrEmpty(oldBinaryName) ? string.Format("-fi {0}", faultInjectionEnabled ? "on" : "off") : "";
                     if (willRestart && oldBinaryName.EndsWith("alpha6"))
                     {
-                        args = string.Format("-Rs 1000000000 -r {0} {1} -s {2} -f \"{3}\" -b {4} -fi {5} {6} --crash",
-                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", faultInjectionEnabled ? "on" : "off", tlsPluginArg);
+                        args = string.Format("-Rs 1000000000 -r {0} {1} -s {2} -f \"{3}\" -b {4} {5} {6} --crash",
+                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", faultInjectionArg, tlsPluginArg);
                     }
                     else
                     {
-                        args = string.Format("-Rs 1GB -r {0} {1} -s {2} -f \"{3}\" -b {4} -fi {5} {6} --crash",
-                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", faultInjectionEnabled ? "on" : "off", tlsPluginArg);
+                        args = string.Format("-Rs 1GB -r {0} {1} -s {2} -f \"{3}\" -b {4} {5} {6} --crash",
+                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", faultInjectionArg, tlsPluginArg);
                     }
                     if (restarting) args = args + " --restarting";
                     if (useValgrind && !willRestart)
@@ -790,10 +791,11 @@ namespace SummarizeTest
                                     new XAttribute("SourceVersion", ev.Details.SourceVersion),
                                     new XAttribute("Time", ev.Details.ActualTime),
                                     new XAttribute("BuggifyEnabled", ev.Details.BuggifyEnabled),
-                                    new XAttribute("FaultInjectionEnabled", ev.Details.FaultInjectionEnabled),
                                     new XAttribute("DeterminismCheck", expectedUnseed != -1 ? "1" : "0"),
                                     new XAttribute("OldBinary", Path.GetFileName(oldBinaryName)));
                                 testBeginFound = true;
+                                if (ev.DDetails.ContainsKey("FaultInjectionEnabled"))
+                                    xout.Add(new XAttribute("FaultInjectionEnabled", ev.Details.FaultInjectionEnabled));
                             }
                             if (ev.Type == "Simulation")
                             {
