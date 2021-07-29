@@ -67,7 +67,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
 	// Chaos testing
-	init( ENABLE_CHAOS_FEATURES,                             true );
+	init( ENABLE_CHAOS_FEATURES,                             false );
 	init( CHAOS_LOGGING_INTERVAL,                             5.0 );
 
 
