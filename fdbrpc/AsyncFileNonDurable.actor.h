@@ -31,7 +31,6 @@
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/ActorCollection.h"
-#include "flow/network.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "fdbrpc/RangeMap.h"
