@@ -52,8 +52,8 @@ struct MakoWorkload : TestWorkload {
 		                                              "CLEAR",     "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE",
 		                                              "COMMIT" };
 	MakoWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), xacts("Transactions"), retries("Retries"), conflicts("Conflicts"), commits("Commits"),
-	    totalOps("Operations"), loadTime(0.0) {
+	  : TestWorkload(wcx), loadTime(0.0), xacts("Transactions"), retries("Retries"), conflicts("Conflicts"),
+	    commits("Commits"), totalOps("Operations") {
 		// init parameters from test file
 		// Number of rows populated
 		rowCount = getOption(options, LiteralStringRef("rows"), 10000);

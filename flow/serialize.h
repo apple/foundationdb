@@ -527,7 +527,7 @@ public:
 	typedef OverWriter WRITER;
 
 	template <class VersionOptions>
-	explicit OverWriter(SplitBuffer buf, VersionOptions vo) : buf(buf), len(std::numeric_limits<int>::max()) {
+	explicit OverWriter(SplitBuffer buf, VersionOptions vo) : len(std::numeric_limits<int>::max()), buf(buf) {
 		vo.write(*this);
 	}
 
