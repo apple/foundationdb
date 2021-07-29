@@ -102,12 +102,14 @@ TLogGroupRef TLogGroupCollection::getGroup(UID groupId, bool create) {
 void TLogGroupCollection::addWorkers(
     const std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>& logWorkers) {
 	for (const auto& worker : logWorkers) {
+		TraceEvent("TLogGroupAddWorker").detail("ID", worker.id());
 		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
 	}
 }
 
 void TLogGroupCollection::addWorkers(const std::vector<ptxn::TLogInterface_PassivelyPull>& logWorkers) {
 	for (const auto& worker : logWorkers) {
+		TraceEvent("TLogGroupAddWorker").detail("ID", worker.id()).detail("Address", worker.address());
 		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
 	}
 }
@@ -182,7 +184,7 @@ bool TLogGroupCollection::tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<U
 		return false;
 	}
 	storageTeams[teamId] = servers;
-	TraceEvent("TLogGroupAddStorageTeam").detail("StorageTeamIdW", teamId).detail("Servers", describe(servers));
+	TraceEvent("TLogGroupAddStorageTeam").detail("StorageTeamId", teamId).detail("Servers", describe(servers));
 	return true;
 }
 

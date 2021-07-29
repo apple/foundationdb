@@ -791,12 +791,12 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 		                                     SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
 		                                     self->configuration.tLogReplicationFactor);
 		self->tLogGroupCollection->recruitEverything();
-	}
 
-	// Assign storage teams to tLogGroups.
-	for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {
-		auto group = self->tLogGroupCollection->selectFreeGroup();
-		self->tLogGroupCollection->assignStorageTeam(teamId, group);
+		// Assign storage teams to tLogGroups.
+		for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {
+			auto group = self->tLogGroupCollection->selectFreeGroup();
+			self->tLogGroupCollection->assignStorageTeam(teamId, group);
+		}
 	}
 
 	return confChanges;
