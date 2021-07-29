@@ -28,6 +28,7 @@
 
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
+#include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/MutationTracking.h"
@@ -57,6 +58,7 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
+	std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>> logServersPtxn;
 	std::vector<ptxn::TLogGroupID> tLogGroupIDs;
 	std::map<ptxn::TLogGroupID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
 	    groupIdToInterfaces;
@@ -874,7 +876,7 @@ struct ILogSystem {
 	    int8_t remoteLocality,
 	    std::vector<Tag> const& allTags,
 	    Reference<AsyncVar<bool>> const& recruitmentStalled,
-	    Reference<TLogGroupCollection> tLogGroupCollection) = 0;
+	    TLogGroupCollectionRef tLogGroupCollection) = 0;
 	// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 	// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional
 	// until the caller updates the coordinated DBCoreState

@@ -95,7 +95,6 @@ const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 
-// TODO (Vishesh) add prefix as examples
 // Creates a map from teamId to list of storage servers in that team.
 extern const KeyRef storageTeamIdKeyPrefix;
 extern const KeyRangeRef storageTeamIdKeyRange;

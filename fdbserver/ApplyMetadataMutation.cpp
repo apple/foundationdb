@@ -25,6 +25,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogProtocolMessage.h"
 
@@ -192,7 +193,9 @@ void applyMetadataMutations(
 			} else if (m.param1.startsWith(storageTeamIdKeyPrefix)) {
 				ASSERT_WE_THINK(tLogGroupCollection.isValid());
 				auto teamid = storageTeamIdKeyDecode(m.param1);
-				if (tLogGroupCollection->tryAddStorageTeam(teamid, decodeStorageTeams(m.param2))) {
+
+				if (SERVER_KNOBS->TLOG_NEW_INTERFACE &&
+				    tLogGroupCollection->tryAddStorageTeam(teamid, decodeStorageTeams(m.param2))) {
 					auto group = tLogGroupCollection->selectFreeGroup(teamid.hash());
 					// TODO: This may be unnessary, as ApplyMetadataMutation case for this key-range
 					//     should do the assignment.

@@ -280,7 +280,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
-	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
+	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+	    tLogGroupCollection(makeReference<TLogGroupCollection>()) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID");
@@ -788,16 +789,6 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    .detail("RemoteDcIds", remoteDcIds)
 	    .trackLatest("MasterRecoveryState");
 
-	// Recruit TLog groups
-	self->tLogGroupCollection->addWorkers(recruits.tLogs);
-	self->tLogGroupCollection->recruitEverything();
-
-	// Assign storage teams to tLogGroups.
-	for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {
-		auto group = self->tLogGroupCollection->selectFreeGroup();
-		self->tLogGroupCollection->assignStorageTeam(teamId, group);
-	}
-
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
@@ -805,6 +796,21 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	state vector<Standalone<CommitTransactionRef>> confChanges;
 	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
+
+	// Recruit TLog groups
+	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		self->tLogGroupCollection->setPolicy(self->configuration.tLogPolicy,
+		                                     SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
+		                                     self->configuration.tLogReplicationFactor);
+		self->tLogGroupCollection->recruitEverything();
+
+		// Assign storage teams to tLogGroups.
+		for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {
+			auto group = self->tLogGroupCollection->selectFreeGroup();
+			self->tLogGroupCollection->assignStorageTeam(teamId, group);
+		}
+	}
+
 	return confChanges;
 }
 
@@ -932,10 +938,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	// Clear previous TLogGroupCollection state
 	self->txnStateStore->clear(tLogGroupKeys);
 	self->txnStateStore->clear(storageTeamIdToTLogGroupRange);
-
-	self->tLogGroupCollection = makeReference<TLogGroupCollection>(self->configuration.tLogPolicy,
-	                                                               SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
-	                                                               self->configuration.tLogReplicationFactor);
 
 	// Load storage teams from \xff keyspace to tLogGroupCollection.
 	RangeResult ssTeams = wait(self->txnStateStore->readRange(storageTeamIdKeyRange));
@@ -1921,7 +1923,10 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
-		self->tLogGroupCollection->seedTLogGroupAssignment(recoveryCommitRequest.arena, tr, seedServers);
+
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			self->tLogGroupCollection->seedTLogGroupAssignment(recoveryCommitRequest.arena, tr, seedServers);
+		}
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely

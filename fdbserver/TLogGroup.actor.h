@@ -23,6 +23,7 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of
 // this file. In intellisense use the source version.
 #include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/ptxn/TLogInterface.h"
 #include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TLOGROUP_ACTOR_G_H)
 #define FDBSERVER_TLOGROUP_ACTOR_G_H
@@ -37,6 +38,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Replication.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
@@ -65,12 +67,12 @@ public:
 	// the contraints set by ReplicaitonPolicy 'policy'
 	explicit TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize);
 
-	// Construct a TLogGroupCollection, where each group has 'groupSize' servers and satifies
-	// the contraints set by ReplicaitonPolicy 'policy'
-	explicit TLogGroupCollection(const Reference<IReplicationPolicy>& policy,
-	                             int numGroups,
-	                             int groupSize,
-	                             Reference<AsyncVar<ServerDBInfo>> serverDbInfo);
+	// Construct a TLogGroupCollection from `serverDbInfo`. This object would not be able to recruit TLogGroup, and is
+	// intended to  be used by CommitProxy.
+	explicit TLogGroupCollection(Reference<AsyncVar<ServerDBInfo>> serverDbInfo);
+
+	// Sets the policy for TLogGroupCollection.
+	void setPolicy(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize);
 
 	// Returns list of groups recruited by this collection.
 	const std::vector<TLogGroupRef>& groups() const;
@@ -87,8 +89,8 @@ public:
 	int targetGroupSize() const;
 
 	// Add 'logWorkers' to current collection of workers that can be recruited into a TLogGroup.
-	void addWorkers(const std::vector<WorkerInterface>& logWorkers);
-	void addWorkers(const std::vector<OptionalInterface<TLogInterface>>& logWorkers);
+	void addWorkers(const std::vector<ptxn::TLogInterface_PassivelyPull>& logWorkers);
+	void addWorkers(const std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>& logWorkers);
 
 	// Build a collection of groups and recruit workers into each group as per the ReplicationPolicy
 	// and group size set in the parent class.
@@ -138,10 +140,10 @@ private:
 
 	// ReplicationPolicy defined for this collection. The members of group must satisfy
 	// this replication policy, or else will not be part of a group.
-	const Reference<IReplicationPolicy> policy;
+	Reference<IReplicationPolicy> policy;
 
 	// Size of each group, set once during intialization.
-	const int GROUP_SIZE;
+	int GROUP_SIZE;
 
 	// Number of groups the collection is configured to recruit.
 	int targetNumGroups;
@@ -220,15 +222,15 @@ struct TLogWorkerData : public ReferenceCounted<TLogWorkerData> {
 	TLogWorkerData(const UID& id, const NetworkAddress& addr, const LocalityData& locality)
 	  : id(id), address(addr), locality(locality) {}
 
-	// Converts a WorkerInterface to TLogWorkerData.
-	static TLogWorkerDataRef fromInterface(const WorkerInterface& interf) {
-		return makeReference<TLogWorkerData>(interf.id(), interf.address(), interf.locality);
+	// Converts a TLogInterface to TLogWorkerData.
+	static TLogWorkerDataRef fromInterface(const ptxn::TLogInterface_PassivelyPull& interf) {
+		return makeReference<TLogWorkerData>(interf.id(), interf.address(), interf.getLocality());
 	}
 	// Converts a WorkerInterface to TLogWorkerData.
-	static TLogWorkerDataRef fromInterface(const OptionalInterface<TLogInterface>& interf) {
+	static TLogWorkerDataRef fromInterface(const OptionalInterface<ptxn::TLogInterface_PassivelyPull>& interf) {
 		if (interf.present()) {
 			auto inf = interf.interf();
-			return makeReference<TLogWorkerData>(inf.id(), inf.address(), inf.filteredLocality);
+			return makeReference<TLogWorkerData>(inf.id(), inf.address(), inf.getLocality());
 		} else {
 			// TODO (Vishesh) Figure out how to find out locality later?
 			return makeReference<TLogWorkerData>(interf.id());

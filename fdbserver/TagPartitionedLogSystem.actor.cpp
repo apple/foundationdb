@@ -85,6 +85,9 @@ LogSet::LogSet(const TLogSet& tLogSet)
 	for (const auto& log : tLogSet.tLogs) {
 		logServers.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(log));
 	}
+	for (const auto& log : tLogSet.tLogsPtxn) {
+		logServersPtxn.push_back(makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(log));
+	}
 	tLogGroupIDs = tLogSet.tLogGroupIDs;
 	for (int i = 0; tLogGroupIDs.size(); i++) {
 		for (const OptionalInterface<ptxn::TLogInterface_PassivelyPull>& interface : tLogSet.ptxnTLogGroups[i]) {
@@ -2931,12 +2934,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state LogSystemConfig oldLogSystemConfig = oldLogSystem->getLogSystemConfig();
 
 		state vector<Future<TLogInterface>> initializationReplies;
-		state vector<Future<ptxn::TLogInterface_PassivelyPull>> initializationRepliesPtxn;
 		state vector<InitializeTLogRequest> reqs = vector<InitializeTLogRequest>(recr.tLogs.size());
 
 		logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
 		logSystem->tLogs[0]->logServers.resize(
 		    recr.tLogs.size()); // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
+		logSystem->tLogs[0]->logServersPtxn.resize(recr.tLogs.size());
 		logSystem->tLogs[0]->updateLocalitySet(localities);
 
 		std::vector<int> locations;
@@ -3013,9 +3016,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			initializationReplies.reserve(recr.tLogs.size());
 			for (int i = 0; i < recr.tLogs.size(); i++)
 				initializationReplies.push_back(transformErrors(
-					throwErrorOr(recr.tLogs[i].tLog.getReplyUnlessFailedFor(
-						reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-					master_recovery_failed()));
+				    throwErrorOr(recr.tLogs[i].tLog.getReplyUnlessFailedFor(
+				        reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+				    master_recovery_failed()));
 		}
 
 		state std::vector<Future<Void>> recoveryComplete;
@@ -3112,6 +3115,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				// cannot use more standard `getReplyUnlessFailedFor`, because it is waiting on `reply` field, here we
 				// have ptxn.reply
 				state ptxn::TLogInterface_PassivelyPull serverNew = wait(reqs[i].ptxnReply.getFuture());
+				tLogGroupCollection->addWorkers({ serverNew });
+				logSystem->tLogs[0]->logServersPtxn[i] =
+				    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
+				        OptionalInterface<ptxn::TLogInterface_PassivelyPull>(serverNew));
 				id2Interface[recr.tLogs[i].id()] = serverNew;
 			}
 
@@ -3122,18 +3129,19 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				const UID& groupId = it.first;
 				for (const UID& serverId : it.second) {
 					// from group_id -> list of server_id, to group_id -> list of interfaces
-					logSystem->tLogs[0]->groupIdToInterfaces[groupId].push_back(makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
-						OptionalInterface<ptxn::TLogInterface_PassivelyPull>(id2Interface[serverId])));
+					logSystem->tLogs[0]->groupIdToInterfaces[groupId].push_back(
+					    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
+					        OptionalInterface<ptxn::TLogInterface_PassivelyPull>(id2Interface[serverId])));
 				}
 			}
 		} else {
 			for (int i = 0; i < initializationReplies.size(); i++) {
 				logSystem->tLogs[0]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
-					OptionalInterface<TLogInterface>(initializationReplies[i].get()));
+				    OptionalInterface<TLogInterface>(initializationReplies[i].get()));
 				logSystem->tLogs[0]->tLogLocalities[i] = recr.tLogs[i].locality;
 			}
 		}
-		
+
 		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);
 
 		// Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running

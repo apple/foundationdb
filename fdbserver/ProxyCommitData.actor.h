@@ -255,7 +255,7 @@ struct ProxyCommitData {
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),
 	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
-	    lastMasterReset(now()), lastResolverReset(now()), tLogGroupCollection(makeReference<TLogGroupCollection>()) {
+	    lastMasterReset(now()), lastResolverReset(now()), tLogGroupCollection(makeReference<TLogGroupCollection>(db)) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };
