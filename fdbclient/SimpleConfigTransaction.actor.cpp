@@ -221,23 +221,23 @@ Optional<Version> SimpleConfigTransaction::getCachedReadVersion() const {
 	return impl().getCachedReadVersion();
 }
 
-Future<Optional<Value>> SimpleConfigTransaction::get(Key const& key, bool snapshot) {
+Future<Optional<Value>> SimpleConfigTransaction::get(Key const& key, Snapshot snapshot) {
 	return impl().get(key);
 }
 
 Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector const& begin,
                                                                      KeySelector const& end,
                                                                      int limit,
-                                                                     bool snapshot,
-                                                                     bool reverse) {
+                                                                     Snapshot snapshot,
+                                                                     Reverse reverse) {
 	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
 Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector begin,
                                                                      KeySelector end,
                                                                      GetRangeLimits limits,
-                                                                     bool snapshot,
-                                                                     bool reverse) {
+                                                                     Snapshot snapshot,
+                                                                     Reverse reverse) {
 	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
@@ -290,10 +290,13 @@ void SimpleConfigTransaction::checkDeferredError() const {
 	impl().checkDeferredError(deferredError);
 }
 
-SimpleConfigTransaction::SimpleConfigTransaction(Database const& cx)
-  : _impl(std::make_unique<SimpleConfigTransactionImpl>(cx)) {}
+void SimpleConfigTransaction::setDatabase(Database const& cx) {
+	_impl = std::make_unique<SimpleConfigTransactionImpl>(cx);
+}
 
 SimpleConfigTransaction::SimpleConfigTransaction(ConfigTransactionInterface const& cti)
   : _impl(std::make_unique<SimpleConfigTransactionImpl>(cti)) {}
+
+SimpleConfigTransaction::SimpleConfigTransaction() = default;
 
 SimpleConfigTransaction::~SimpleConfigTransaction() = default;

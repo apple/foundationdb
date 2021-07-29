@@ -277,7 +277,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
                                                          KeySelector begin,
                                                          KeySelector end,
                                                          GetRangeLimits limits,
-                                                         bool reverse) {
+                                                         Reverse reverse) {
 	ASSERT(ryw);
 	choose {
 		when(RangeResult result =
@@ -293,7 +293,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
                                                                     KeySelector begin,
                                                                     KeySelector end,
                                                                     GetRangeLimits limits,
-                                                                    bool reverse) {
+                                                                    Reverse reverse) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state RangeResult result;
@@ -413,7 +413,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
                                               KeySelector begin,
                                               KeySelector end,
                                               GetRangeLimits limits,
-                                              bool reverse) {
+                                              Reverse reverse) {
 	// validate limits here
 	if (!limits.isValid())
 		return range_limits_invalid();
@@ -441,7 +441,7 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks,
 	                                        KeySelector(firstGreaterOrEqual(key)),
 	                                        KeySelector(firstGreaterOrEqual(keyAfter(key))),
 	                                        GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                        false));
+	                                        Reverse::False));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
 		return Optional<Value>(result[0].value);

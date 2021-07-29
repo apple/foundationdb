@@ -133,22 +133,21 @@ class Never {};
 
 template <class T>
 class ErrorOr : public ComposedIdentifier<T, 2> {
+	std::variant<Error, T> value;
+
 public:
 	ErrorOr() : ErrorOr(default_error_or()) {}
-	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }
-	ErrorOr(const ErrorOr<T>& o) : error(o.error) {
-		if (present())
-			new (&value) T(o.get());
-	}
+	ErrorOr(Error const& error) : value(std::in_place_type<Error>, error) {}
 
 	template <class U>
-	ErrorOr(const U& t) : error() {
-		new (&value) T(t);
-	}
+	ErrorOr(U const& t) : value(std::in_place_type<T>, t) {}
 
-	ErrorOr(Arena& a, const ErrorOr<T>& o) : error(o.error) {
-		if (present())
-			new (&value) T(a, o.get());
+	ErrorOr(Arena& a, ErrorOr<T> const& o) {
+		if (o.present()) {
+			value = std::variant<Error, T>(std::in_place_type<T>, a, o.get());
+		} else {
+			value = std::variant<Error, T>(std::in_place_type<Error>, o.getError());
+		}
 	}
 	int expectedSize() const { return present() ? get().expectedSize() : 0; }
 
@@ -158,68 +157,66 @@ public:
 	}
 
 	template <class R>
-	ErrorOr<R> map(std::function<R(T)> f) const {
-		if (present()) {
-			return ErrorOr<R>(f(get()));
-		} else {
-			return ErrorOr<R>(error);
-		}
+	ErrorOr<R> map(std::function<R(T)> f) const& {
+		return present() ? ErrorOr<R>(f(get())) : ErrorOr<R>(getError());
+	}
+	template <class R>
+	ErrorOr<R> map(std::function<R(T)> f) && {
+		return present() ? ErrorOr<R>(f(std::move(*this).get())) : ErrorOr<R>(getError());
 	}
 
-	~ErrorOr() {
-		if (present())
-			((T*)&value)->~T();
-	}
-
-	ErrorOr& operator=(ErrorOr const& o) {
-		if (present()) {
-			((T*)&value)->~T();
-		}
-		if (o.present()) {
-			new (&value) T(o.get());
-		}
-		error = o.error;
-		return *this;
-	}
-
-	bool present() const { return error.code() == invalid_error_code; }
-	T& get() {
+	bool present() const { return std::holds_alternative<T>(value); }
+	T& get() & {
 		UNSTOPPABLE_ASSERT(present());
-		return *(T*)&value;
+		return std::get<T>(value);
 	}
-	T const& get() const {
+	T const& get() const& {
 		UNSTOPPABLE_ASSERT(present());
-		return *(T const*)&value;
+		return std::get<T>(value);
 	}
-	T orDefault(T const& default_value) const {
-		if (present())
-			return get();
-		else
-			return default_value;
+	T&& get() && {
+		UNSTOPPABLE_ASSERT(present());
+		return std::get<T>(std::move(value));
 	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		// SOMEDAY: specialize for space efficiency?
-		serializer(ar, error);
-		if (present()) {
-			if (Ar::isDeserializing)
-				new (&value) T();
-			serializer(ar, *(T*)&value);
-		}
+	template <class U>
+	T orDefault(U&& defaultValue) const& {
+		return present() ? get() : std::forward<U>(defaultValue);
+	}
+	template <class U>
+	T orDefault(U&& defaultValue) && {
+		return present() ? std::move(*this).get() : std::forward<U>(defaultValue);
 	}
 
-	bool isError() const { return error.code() != invalid_error_code; }
-	bool isError(int code) const { return error.code() == code; }
-	const Error& getError() const {
+	bool isError() const { return std::holds_alternative<Error>(value); }
+	bool isError(int code) const { return isError() && getError().code() == code; }
+	Error const& getError() const {
 		ASSERT(isError());
-		return error;
+		return std::get<Error>(value);
 	}
-
-private:
-	typename std::aligned_storage<sizeof(T), __alignof(T)>::type value;
-	Error error;
 };
+
+template <class Archive, class T>
+void load(Archive& ar, ErrorOr<T>& value) {
+	Error error;
+	ar >> error;
+	if (error.code() != invalid_error_code) {
+		T t;
+		ar >> t;
+		value = ErrorOr<T>(t);
+	} else {
+		value = ErrorOr<T>(error);
+	}
+}
+
+template <class Archive, class T>
+void save(Archive& ar, ErrorOr<T> const& value) {
+	if (value.present()) {
+		ar << Error{}; // invalid error code
+		ar << value.get();
+	} else {
+		ar << value.getError();
+	}
+}
 
 template <class T>
 struct union_like_traits<ErrorOr<T>> : std::true_type {
@@ -1089,6 +1086,9 @@ inline double now() {
 }
 inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(seconds, taskID);
+}
+inline Future<Void> orderedDelay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	return g_network->orderedDelay(seconds, taskID);
 }
 inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(std::max(0.0, time - g_network->now()), taskID);

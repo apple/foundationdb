@@ -152,7 +152,7 @@ OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
 	}
 }
 
-struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
+struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
 	const UID dbgid;
 	LogSystemType logSystemType;
 	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, or remote
@@ -415,7 +415,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		for (auto& t : newState.tLogs) {
 			if (!t.isLocal) {
-				TraceEvent("RemoteLogsWritten", dbgid);
+				TraceEvent("RemoteLogsWritten", dbgid).log();
 				remoteLogsWrittenToCoreState = true;
 				break;
 			}
@@ -1101,7 +1101,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                               bool canDiscardPopped) final {
 		Version end = getEnd();
 		if (!tLogs.size()) {
-			TraceEvent("TLogPeekTxsNoLogs", dbgid);
+			TraceEvent("TLogPeekTxsNoLogs", dbgid).log();
 			return makeReference<ILogSystem::ServerPeekCursor>(
 			    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), txsTag, begin, end, false, false);
 		}
@@ -1529,11 +1529,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
+		state UID dbgid = self->dbgid;
 		state Future<Void> maxGetPoppedDuration = delay(SERVER_KNOBS->TXS_POPPED_MAX_DELAY);
 		wait(waitForAll(poppedReady) || maxGetPoppedDuration);
 
 		if (maxGetPoppedDuration.isReady()) {
-			TraceEvent(SevWarnAlways, "PoppedTxsNotReady", self->dbgid);
+			TraceEvent(SevWarnAlways, "PoppedTxsNotReady", dbgid).log();
 		}
 
 		Version maxPopped = 1;
@@ -2479,7 +2480,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                         LogEpoch recoveryCount,
 	                                         int8_t remoteLocality,
 	                                         std::vector<Tag> allTags) {
-		TraceEvent("RemoteLogRecruitment_WaitingForWorkers");
+		TraceEvent("RemoteLogRecruitment_WaitingForWorkers").log();
 		state RecruitRemoteFromConfigurationReply remoteWorkers = wait(fRemoteWorkers);
 
 		state Reference<LogSet> logSet(new LogSet());
@@ -2654,7 +2655,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		self->remoteRecoveryComplete = waitForAll(recoveryComplete);
 		self->tLogs.push_back(logSet);
-		TraceEvent("RemoteLogRecruitment_CompletingRecovery");
+		TraceEvent("RemoteLogRecruitment_CompletingRecovery").log();
 		return Void();
 	}
 
@@ -3148,7 +3149,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	    // Step 1: Verify that if all the failed TLogs come back, they can't form a quorum.
 	    if (can_obtain_quorum(locking_failed)) {
-	        TraceEvent(SevInfo, "MasterRecoveryTLogLockingImpossible", dbgid);
+	        TraceEvent(SevInfo, "MasterRecoveryTLogLockingImpossible", dbgid).log();
 	        return;
 	    }
 

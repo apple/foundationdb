@@ -33,6 +33,7 @@
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbrpc/AsyncFileChaos.actor.h"
 #include "flow/crc32c.h"
@@ -46,10 +47,11 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
-	if (!g_network->isSimulated())
+	if (!g_network->isSimulated() || !faultInjectionActivated)
 		return false;
 
 	auto p = g_simulator.getCurrentProcess();
@@ -469,12 +471,12 @@ public:
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
 		if (++openCount >= 3000) {
-			TraceEvent(SevError, "TooManyFiles");
+			TraceEvent(SevError, "TooManyFiles").log();
 			ASSERT(false);
 		}
 
 		if (openCount == 2000) {
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles");
+			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles").log();
 			g_simulator.speedUpSimulation = true;
 			g_simulator.connectionFailuresDisableDuration = 1e6;
 		}
@@ -858,13 +860,17 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess);
 	}
-	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine) {
+	Future<class Void> orderedDelay(double seconds, TaskPriority taskID) override {
+		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
+		return delay(seconds, taskID, currentProcess, true);
+	}
+	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		if (!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() &&
-		    FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
+		if (!ordered && !currentProcess->rebooting && machine == currentProcess &&
+		    !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
 		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
 		}
@@ -1005,9 +1011,9 @@ public:
 		THREAD_RETURN;
 	}
 
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
 		SimThreadArgs* simArgs = new SimThreadArgs(func, arg);
-		return ::startThread(simStartThread, simArgs);
+		return ::startThread(simStartThread, simArgs, stackSize, name);
 	}
 
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
@@ -1951,6 +1957,7 @@ public:
 			g_clogging.clogRecvFor(ip, seconds);
 	}
 	void clogPair(const IPAddress& from, const IPAddress& to, double seconds) override {
+		TraceEvent("CloggingPair").detail("From", from).detail("To", to).detail("Seconds", seconds);
 		g_clogging.clogPairFor(from, to, seconds);
 	}
 	std::vector<ProcessInfo*> getAllProcesses() const override {
@@ -2479,6 +2486,14 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
+#if ENCRYPTION_ENABLED
+		if (flags & IAsyncFile::OPEN_ENCRYPTED)
+			f = map(f, [flags](Reference<IAsyncFile> r) {
+				auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
+				                                               : AsyncFileEncrypted::Mode::READ_ONLY;
+				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
+			});
+#endif // ENCRYPTION_ENABLED
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);

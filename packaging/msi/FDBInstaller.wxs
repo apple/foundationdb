@@ -134,13 +134,13 @@
             </Component>
 
             <Component Id='FDBCRegistryValue' Guid='{6ED940F3-75C8-4385-97D9-D7D0F211B17D}'>
-              <RegistryKey Root='HKLM' Key='SOFTWARE\$(var.Manufacturer)\KeyValue\Client' Action='createAndRemoveOnUninstall'>
+              <RegistryKey Root='HKLM' Key='SOFTWARE\$(var.Manufacturer)\KeyValue\Client' >
                 <RegistryValue Name='Version' Type='string' Value='$(var.Version)' KeyPath='yes' />
               </RegistryKey>
             </Component>
 
             <Component Id='FDBSRegistryValue' Guid='{361A9B4A-A06F-4BFB-AFEA-B5F733C8BFDF}'>
-              <RegistryKey Root='HKLM' Key='SOFTWARE\$(var.Manufacturer)\KeyValue\Server' Action='createAndRemoveOnUninstall'>
+              <RegistryKey Root='HKLM' Key='SOFTWARE\$(var.Manufacturer)\KeyValue\Server' >
                 <RegistryValue Name='Version' Type='string' Value='$(var.Version)' KeyPath='yes' />
               </RegistryKey>
             </Component>

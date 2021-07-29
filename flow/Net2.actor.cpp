@@ -161,6 +161,7 @@ public:
 	double timer() override { return ::timer(); };
 	double timer_monotonic() override { return ::timer_monotonic(); };
 	Future<Void> delay(double seconds, TaskPriority taskId) override;
+	Future<Void> orderedDelay(double seconds, TaskPriority taskId) override;
 	Future<class Void> yield(TaskPriority taskID) override;
 	bool check_yield(TaskPriority taskId) override;
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
@@ -184,7 +185,7 @@ public:
 	}
 
 	bool isSimulated() const override { return false; }
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override;
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override;
 
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override;
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override;
@@ -1156,7 +1157,7 @@ private:
 };
 #endif
 
-struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
+struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
 	PromiseTask() {}
 	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
@@ -1183,7 +1184,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 #endif
 
 {
-	TraceEvent("Net2Starting");
+	TraceEvent("Net2Starting").log();
 
 	// Set the global members
 	if (useMetrics) {
@@ -1261,13 +1262,13 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 	lifetimes.push_back(watchFileForChanges(config.getCAPathSync(), &fileChanged));
 	loop {
 		wait(fileChanged.onTrigger());
-		TraceEvent("TLSCertificateRefreshBegin");
+		TraceEvent("TLSCertificateRefreshBegin").log();
 
 		try {
 			LoadedTLSConfig loaded = wait(config.loadAsync());
 			boost::asio::ssl::context context(boost::asio::ssl::context::tls);
 			ConfigureSSLContext(loaded, &context, onPolicyFailure);
-			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded");
+			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded").log();
 			mismatches = 0;
 			contextVar->set(ReferencedObject<boost::asio::ssl::context>::from(std::move(context)));
 		} catch (Error& e) {
@@ -1389,13 +1390,13 @@ bool Net2::checkRunnable() {
 
 void Net2::run() {
 	TraceEvent::setNetworkThread();
-	TraceEvent("Net2Running");
+	TraceEvent("Net2Running").log();
 
 	thread_network = this;
 
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
-		TraceEvent(SevError, "TimeBeginPeriodError");
+		TraceEvent(SevError, "TimeBeginPeriodError").log();
 #endif
 
 	timeOffsetLogger = logTimeOffset();
@@ -1754,6 +1755,11 @@ Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 	return t->promise.getFuture();
 }
 
+Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
+	// The regular delay already provides the required ordering property
+	return delay(seconds, taskId);
+}
+
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	if (stopped)
 		return;
@@ -1769,8 +1775,8 @@ void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	}
 }
 
-THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) {
-	return ::startThread(func, arg);
+THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) {
+	return ::startThread(func, arg, stackSize, name);
 }
 
 Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::string& host) {

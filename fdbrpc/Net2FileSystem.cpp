@@ -33,6 +33,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileChaos.actor.h"
 #include "fdbrpc/AsyncFileEIO.actor.h"
+#include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileWinASIO.actor.h"
 #include "fdbrpc/AsyncFileKAIO.actor.h"
 #include "flow/AsioReactor.h"
@@ -79,6 +80,14 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
+#if ENCRYPTION_ENABLED
+	if (flags & IAsyncFile::OPEN_ENCRYPTED)
+		f = map(f, [flags](Reference<IAsyncFile> r) {
+			auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
+			                                               : AsyncFileEncrypted::Mode::READ_ONLY;
+			return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
+		});
+#endif // ENCRYPTION_ENABLED
 	return f;
 }
 

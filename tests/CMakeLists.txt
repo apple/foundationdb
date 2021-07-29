@@ -2,6 +2,7 @@ include(AddFdbTest)
 
 # We need some variables to configure the test setup
 set(ENABLE_BUGGIFY ON CACHE BOOL "Enable buggify for tests")
+set(ENABLE_SIMULATION_TESTS OFF CACHE BOOL "Enable simulation tests (useful if you can't run Joshua)")
 set(RUN_IGNORED_TESTS OFF CACHE BOOL "Run tests that are marked for ignore")
 set(TEST_KEEP_LOGS "FAILED" CACHE STRING "Which logs to keep (NONE, FAILED, ALL)")
 set(TEST_KEEP_SIMDIR "NONE" CACHE STRING "Which simfdb directories to keep (NONE, FAILED, ALL)")
@@ -29,7 +30,7 @@ if(WITH_PYTHON)
 
   set(TestRunner "${PROJECT_SOURCE_DIR}/tests/TestRunner/TestRunner.py")
 
-  configure_file(${PROJECT_SOURCE_DIR}/tests/CTestCustom.ctest ${PROJECT_BINARY_DIR}/CTestCustom.ctest @ONLY)
+  configure_file(${PROJECT_SOURCE_DIR}/tests/CTestCustom.ctest.cmake ${PROJECT_BINARY_DIR}/CTestCustom.ctest @ONLY)
 
   configure_testing(TEST_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
                     ERROR_ON_ADDITIONAL_FILES
@@ -136,6 +137,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LocalRatekeeper.toml)
   add_fdb_test(TEST_FILES fast/LongStackWriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/LowLatency.toml)
+  # TODO: Fix failures and reenable this test:
+  add_fdb_test(TEST_FILES fast/LowLatencySingleClog.toml IGNORE)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
@@ -275,10 +278,12 @@ if(WITH_PYTHON)
       NAME multiversion_client/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
     )
+    set_tests_properties("multiversion_client/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
     add_test(
       NAME threadsafe_threadfuture_to_future/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
     )
+    set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
   endif()
 
   verify_testing()

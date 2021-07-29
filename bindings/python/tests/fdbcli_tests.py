@@ -332,22 +332,124 @@ def transaction(logger):
     output7 = run_fdbcli_command('get', 'key')
     assert output7 == "`key': not found"
 
+def get_fdb_process_addresses():
+    # get all processes' network addresses
+    output = run_fdbcli_command('kill')
+    # except the first line, each line is one process
+    addresses = output.split('\n')[1:]
+    assert len(addresses) == process_number
+    return addresses
+
+@enable_logging()
+def coordinators(logger):
+    # we should only have one coordinator for now
+    output1 = run_fdbcli_command('coordinators')
+    assert len(output1.split('\n')) > 2
+    cluster_description = output1.split('\n')[0].split(': ')[-1]
+    logger.debug("Cluster description: {}".format(cluster_description))
+    coordinators = output1.split('\n')[1].split(': ')[-1]
+    # verify the coordinator
+    coordinator_list = get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')
+    assert len(coordinator_list) == 1
+    assert coordinator_list[0]['address'] == coordinators
+    # verify the cluster description
+    assert get_value_from_status_json(True, 'cluster', 'connection_string').startswith('{}:'.format(cluster_description))
+    addresses = get_fdb_process_addresses()
+    # set all 5 processes as coordinators and update the cluster description
+    new_cluster_description = 'a_simple_description'
+    run_fdbcli_command('coordinators', *addresses, 'description={}'.format(new_cluster_description))
+    # verify now we have 5 coordinators and the description is updated
+    output2 = run_fdbcli_command('coordinators')
+    assert output2.split('\n')[0].split(': ')[-1] == new_cluster_description
+    assert output2.split('\n')[1] == 'Cluster coordinators ({}): {}'.format(5, ','.join(addresses))
+    # auto change should go back to 1 coordinator
+    run_fdbcli_command('coordinators', 'auto')
+    assert len(get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')) == 1
+
+@enable_logging()
+def exclude(logger):
+    # get all processes' network addresses
+    addresses = get_fdb_process_addresses()
+    logger.debug("Cluster processes: {}".format(' '.join(addresses)))
+    # There should be no excluded process for now
+    no_excluded_process_output = 'There are currently no servers or localities excluded from the database.'
+    output1 = run_fdbcli_command('exclude')
+    assert no_excluded_process_output in output1
+    # randomly pick one and exclude the process
+    excluded_address = random.choice(addresses)
+    # sometimes we need to retry the exclude
+    while True:
+        logger.debug("Excluding process: {}".format(excluded_address))
+        error_message = run_fdbcli_command_and_get_error('exclude', excluded_address)
+        if error_message == 'WARNING: {} is a coordinator!'.format(excluded_address):
+            # exclude coordinator will print the warning, verify the randomly selected process is the coordinator
+            coordinator_list = get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')
+            assert len(coordinator_list) == 1
+            assert coordinator_list[0]['address'] == excluded_address
+            break
+        elif not error_message:
+            break
+        else:
+            logger.debug("Error message: {}\n".format(error_message))
+        logger.debug("Retry exclude after 1 second")
+        time.sleep(1)
+    output2 = run_fdbcli_command('exclude')
+    assert 'There are currently 1 servers or localities being excluded from the database' in output2
+    assert excluded_address in output2
+    run_fdbcli_command('include', excluded_address)
+    # check the include is successful
+    output4 = run_fdbcli_command('exclude')
+    assert no_excluded_process_output in output4
+
+# read the system key 'k', need to enable the option first
+def read_system_key(k):
+    output = run_fdbcli_command('option', 'on', 'READ_SYSTEM_KEYS;', 'get', k)
+    if 'is' not in output:
+        # key not present
+        return None
+    _, value = output.split(' is ')
+    return value
+
+@enable_logging()
+def throttle(logger):
+    # no throttled tags at the beginning
+    no_throttle_tags_output = 'There are no throttled tags'
+    assert run_fdbcli_command('throttle', 'list') == no_throttle_tags_output
+    # test 'throttle enable auto'
+    run_fdbcli_command('throttle', 'enable', 'auto')
+    # verify the change is applied by reading the system key
+    # not an elegant way, may change later
+    enable_flag = read_system_key('\\xff\\x02/throttledTags/autoThrottlingEnabled')
+    assert enable_flag == "`1'"
+    run_fdbcli_command('throttle', 'disable', 'auto')
+    enable_flag = read_system_key('\\xff\\x02/throttledTags/autoThrottlingEnabled')
+    # verify disabled
+    assert enable_flag == "`0'"
+    # TODO : test manual throttling, not easy to do now
 
 if __name__ == '__main__':
-    # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file>
-    assert len(sys.argv) == 3, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file>"
+    # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>
+    assert len(sys.argv) == 4, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>"
     # shell command template
     command_template = [sys.argv[1], '-C', sys.argv[2], '--exec']
     # tests for fdbcli commands
     # assertions will fail if fdbcli does not work as expected
-    advanceversion()
-    cache_range()
-    consistencycheck()
-    datadistribution()
-    kill()
-    lockAndUnlock()
-    maintenance()
-    setclass()
-    suspend()
-    transaction()
+    process_number = int(sys.argv[3])
+    if process_number == 1:
+        advanceversion()
+        cache_range()
+        consistencycheck()
+        datadistribution()
+        kill()
+        lockAndUnlock()
+        maintenance()
+        setclass()
+        suspend()
+        transaction()
+        throttle()
+    else:
+        assert process_number > 1, "Process number should be positive"
+        coordinators()
+        exclude()
+
     

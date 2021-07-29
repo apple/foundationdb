@@ -690,7 +690,7 @@ public:
 	AsyncTrigger() {}
 	AsyncTrigger(AsyncTrigger&& at) : v(std::move(at.v)) {}
 	void operator=(AsyncTrigger&& at) { v = std::move(at.v); }
-	Future<Void> onTrigger() { return v.onChange(); }
+	Future<Void> onTrigger() const { return v.onChange(); }
 	void trigger() { v.trigger(); }
 
 private:
@@ -700,7 +700,7 @@ private:
 // Binds an AsyncTrigger object to an AsyncVar, so when the AsyncVar changes
 // the AsyncTrigger is triggered.
 ACTOR template <class T>
-void forward(Reference<AsyncVar<T>> from, AsyncTrigger* to) {
+void forward(Reference<AsyncVar<T> const> from, AsyncTrigger* to) {
 	loop {
 		wait(from->onChange());
 		to->trigger();
@@ -868,7 +868,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 			when(T t = wait(what)) { return t; }
 			when(wait(degradedEnd)) {
 				TEST(true); // TLog degraded
-				TraceEvent(SevWarnAlways, "IoDegraded");
+				TraceEvent(SevWarnAlways, "IoDegraded").log();
 				degraded->set(true);
 			}
 		}
@@ -1957,25 +1957,28 @@ Future<U> operator>>(Future<T> const& lhs, Future<U> const& rhs) {
 }
 
 /*
- * IDependentAsyncVar is similar to AsyncVar, but it decouples the input and output, so the translation unit
+ * IAsyncListener is similar to AsyncVar, but it decouples the input and output, so the translation unit
  * responsible for handling the output does not need to have knowledge of how the output is generated
  */
 template <class Output>
-class IDependentAsyncVar : public ReferenceCounted<IDependentAsyncVar<Output>> {
+class IAsyncListener : public ReferenceCounted<IAsyncListener<Output>> {
 public:
-	virtual ~IDependentAsyncVar() = default;
+	virtual ~IAsyncListener() = default;
 	virtual Output const& get() const = 0;
 	virtual Future<Void> onChange() const = 0;
 	template <class Input, class F>
-	static Reference<IDependentAsyncVar> create(Reference<AsyncVar<Input>> const& input, F const& f);
-	static Reference<IDependentAsyncVar> create(Reference<AsyncVar<Output>> const& output);
+	static Reference<IAsyncListener> create(Reference<AsyncVar<Input>> const& input, F const& f);
+	static Reference<IAsyncListener> create(Reference<AsyncVar<Output>> const& output);
 };
 
+namespace IAsyncListenerImpl {
+
 template <class Input, class Output, class F>
-class DependentAsyncVar final : public IDependentAsyncVar<Output> {
-	Reference<AsyncVar<Output>> output;
+class AsyncListener final : public IAsyncListener<Output> {
+	// Order matters here, output must outlive monitorActor
+	AsyncVar<Output> output;
 	Future<Void> monitorActor;
-	ACTOR static Future<Void> monitor(Reference<AsyncVar<Input>> input, Reference<AsyncVar<Output>> output, F f) {
+	ACTOR static Future<Void> monitor(Reference<AsyncVar<Input> const> input, AsyncVar<Output>* output, F f) {
 		loop {
 			wait(input->onChange());
 			output->set(f(input->get()));
@@ -1983,23 +1986,24 @@ class DependentAsyncVar final : public IDependentAsyncVar<Output> {
 	}
 
 public:
-	DependentAsyncVar(Reference<AsyncVar<Input>> const& input, F const& f)
-	  : output(makeReference<AsyncVar<Output>>(f(input->get()))), monitorActor(monitor(input, output, f)) {}
-	Output const& get() const override { return output->get(); }
-	Future<Void> onChange() const override { return output->onChange(); }
+	AsyncListener(Reference<AsyncVar<Input> const> const& input, F const& f)
+	  : output(f(input->get())), monitorActor(monitor(input, &output, f)) {}
+	Output const& get() const override { return output.get(); }
+	Future<Void> onChange() const override { return output.onChange(); }
 };
+
+} // namespace IAsyncListenerImpl
 
 template <class Output>
 template <class Input, class F>
-Reference<IDependentAsyncVar<Output>> IDependentAsyncVar<Output>::create(Reference<AsyncVar<Input>> const& input,
-                                                                         F const& f) {
-	return makeReference<DependentAsyncVar<Input, Output, F>>(input, f);
+Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Input>> const& input, F const& f) {
+	return makeReference<IAsyncListenerImpl::AsyncListener<Input, Output, F>>(input, f);
 }
 
 template <class Output>
-Reference<IDependentAsyncVar<Output>> IDependentAsyncVar<Output>::create(Reference<AsyncVar<Output>> const& input) {
+Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Output>> const& input) {
 	auto identity = [](const auto& x) { return x; };
-	return makeReference<DependentAsyncVar<Output, Output, decltype(identity)>>(input, identity);
+	return makeReference<IAsyncListenerImpl::AsyncListener<Output, Output, decltype(identity)>>(input, identity);
 }
 
 // A weak reference type to wrap a future Reference<T> object.

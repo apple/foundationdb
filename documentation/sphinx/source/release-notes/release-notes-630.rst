@@ -2,6 +2,21 @@
 Release Notes
 #############
 
+6.3.18
+======
+* The multi-version client API would not propagate errors that occurred when creating databases on external clients. This could result in a invalid memory accesses. `(PR #5221) <https://github.com/apple/foundationdb/pull/5221>`_
+* Fixed a race between the multi-version client connecting to a cluster and destroying the database that could cause an assertion failure. `(PR #5221) <https://github.com/apple/foundationdb/pull/5221>`_
+
+6.3.17
+======
+* Made readValuePrefix consistent regarding error messages. `(PR #5160) <https://github.com/apple/foundationdb/pull/5160>`_
+* Added ``TLogPopDetails`` trace event to tLog pop. `(PR #5134) <https://github.com/apple/foundationdb/pull/5134>`_
+* Added ``CommitBatchingEmptyMessageRatio`` metric to track the ratio of empty messages to tlogs. `(PR #5087) <https://github.com/apple/foundationdb/pull/5087>`_
+* Observability improvements in ProxyStats. `(PR #5046) <https://github.com/apple/foundationdb/pull/5046>`_
+* Added ``RecoveryInternal`` and ``ProxyReplies`` trace events to recovery_transaction step in recovery. `(PR #5038) <https://github.com/apple/foundationdb/pull/5038>`_
+* Multi-threaded client documentation improvements. `(PR #5033) <https://github.com/apple/foundationdb/pull/5033>`_
+* Added ``ClusterControllerWorkerFailed`` trace event when a worker is removed from cluster controller. `(PR #5035) <https://github.com/apple/foundationdb/pull/5035>`_
+* Added histograms for storage server write path components. `(PR #5019) <https://github.com/apple/foundationdb/pull/5019>`_
 
 6.3.15
 ======

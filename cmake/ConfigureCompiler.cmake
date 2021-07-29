@@ -100,8 +100,7 @@ if(WIN32)
   endif()
   add_compile_options(/W0 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /FC /Gm-)
   add_compile_definitions(NOMINMAX)
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 else()
   set(GCC NO)
   set(CLANG NO)
@@ -286,7 +285,7 @@ else()
       -Wpessimizing-move
       -Woverloaded-virtual
       -Wshift-sign-overflow
-      # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 10
+      # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
       -Wno-comment
       -Wno-dangling-else
       -Wno-delete-non-virtual-dtor
@@ -298,13 +297,11 @@ else()
       -Wno-sign-compare
       -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
-      -Wno-tautological-pointer-compare
       -Wno-unknown-pragmas
       -Wno-unknown-warning-option
       -Wno-unused-function
       -Wno-unused-local-typedef
       -Wno-unused-parameter
-      -Wno-self-assign
       )
     if (USE_CCACHE)
       add_compile_options(

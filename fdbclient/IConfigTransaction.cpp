@@ -25,11 +25,3 @@
 Reference<IConfigTransaction> IConfigTransaction::createTestSimple(ConfigTransactionInterface const& cti) {
 	return makeReference<SimpleConfigTransaction>(cti);
 }
-
-Reference<IConfigTransaction> IConfigTransaction::createSimple(Database const& cx) {
-	return makeReference<SimpleConfigTransaction>(cx);
-}
-
-Reference<IConfigTransaction> IConfigTransaction::createPaxos(Database const& cx) {
-	return makeReference<PaxosConfigTransaction>(cx);
-}

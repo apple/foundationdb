@@ -28,6 +28,7 @@ Features
 * Added the Testing Storage Server (TSS), which allows FoundationDB to run an "untrusted" storage engine with identical workload to the current storage engine, with zero impact on durability or correctness, and minimal impact on performance. `(Documentation) <https://github.com/apple/foundationdb/blob/master/documentation/sphinx/source/tss.rst>`_ `(PR #4556) <https://github.com/apple/foundationdb/pull/4556>`_
 * Added perpetual storage wiggle that supports less impactful B-trees recreation and data migration. These will also be used for deploying the Testing Storage Server which compares 2 storage engines' results. See :ref:`Documentation <perpetual-storage-wiggle>` for details. `(PR #4838) <https://github.com/apple/foundationdb/pull/4838>`_
 * Improved the efficiency with which storage servers replicate data between themselves. `(PR #5017) <https://github.com/apple/foundationdb/pull/5017>`_
+* Added support to ``exclude command`` to exclude based on locality match. `(PR #5113) <https://github.com/apple/foundationdb/pull/5113>`_
 
 Performance
 -----------
@@ -60,6 +61,8 @@ Fixes
 * Added a new pre-backup action when creating a backup. Backups can now either verify the range data is being saved to is empty before the backup begins (current behavior) or clear the range where data is being saved to. Fixes a ``restore_destination_not_empty`` failure after a backup retry due to ``commit_unknown_failure``. `(PR #4595) <https://github.com/apple/foundationdb/pull/4595>`_
 * When configured with ``usable_regions=2``, a cluster would not fail over to a region which contained only storage class processes. `(PR #4599) <https://github.com/apple/foundationdb/pull/4599>`_ 
 * If a restore is done using a prefix to remove and specific key ranges to restore, the key range boundaries must begin with the prefix to remove. `(PR #4684) <https://github.com/apple/foundationdb/pull/4684>`_
+* The multi-version client API would not propagate errors that occurred when creating databases on external clients. This could result in a invalid memory accesses. `(PR #5220) <https://github.com/apple/foundationdb/pull/5220>`_
+* Fixed a race between the multi-version client connecting to a cluster and destroying the database that could cause an assertion failure. `(PR #5220) <https://github.com/apple/foundationdb/pull/5220>`_
 
 Status
 ------
@@ -89,6 +92,8 @@ Other Changes
 * The ``foundationdb`` service installed by the RPM packages will now automatically restart ``fdbmonitor`` after 60 seconds when it fails. `(PR #3841) <https://github.com/apple/foundationdb/pull/3841>`_
 * Capture output of forked snapshot processes in trace events. `(PR #4254) <https://github.com/apple/foundationdb/pull/4254/files>`_
 * Add ErrorKind field to Severity 40 trace events. `(PR #4741) <https://github.com/apple/foundationdb/pull/4741/files>`_
+* Added histograms for the storage server write path components. `(PR #5021) <https://github.com/apple/foundationdb/pull/5021/files>`_
+* Committing a transaction will no longer partially reset it as of API version 700. `(PR #5271) <https://github.com/apple/foundationdb/pull/5271/files>`_
 
 Earlier release notes
 ---------------------

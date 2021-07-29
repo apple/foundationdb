@@ -28,6 +28,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+FDB_DEFINE_BOOLEAN_PARAM(IsTest);
+
 namespace {
 
 const KeyRef configPathKey = "configPath"_sr;
@@ -228,11 +230,11 @@ class LocalConfigurationImpl {
 	void updateInMemoryState(Version lastSeenVersion) {
 		this->lastSeenVersion = lastSeenVersion;
 		// TODO: Support randomization?
-		getKnobs().reset(Randomize::NO, g_network->isSimulated() ? IsSimulated::YES : IsSimulated::NO);
+		getKnobs().reset(Randomize::False, g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 		configKnobOverrides.update(getKnobs());
 		manualKnobOverrides.update(getKnobs());
 		// Must reinitialize in order to update dependent knobs
-		getKnobs().initialize(Randomize::NO, g_network->isSimulated() ? IsSimulated::YES : IsSimulated::NO);
+		getKnobs().initialize(Randomize::False, g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 	}
 
 	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
@@ -307,9 +309,8 @@ class LocalConfigurationImpl {
 		}
 	}
 
-	ACTOR static Future<Void> consume(
-	    LocalConfigurationImpl* self,
-	    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> broadcaster) {
+	ACTOR static Future<Void> consume(LocalConfigurationImpl* self,
+	                                  Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> broadcaster) {
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			choose {
@@ -329,10 +330,11 @@ public:
 	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
 	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
 	    manualKnobOverrides(manualKnobOverrides) {
-		if (isTest == IsTest::YES) {
-			testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST,
-			                                             Randomize::NO,
-			                                             g_network->isSimulated() ? IsSimulated::YES : IsSimulated::NO);
+		if (isTest) {
+			testKnobCollection =
+			    IKnobCollection::create(IKnobCollection::Type::TEST,
+			                            Randomize::False,
+			                            g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 		}
 		logger = traceCounters(
 		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
@@ -368,7 +370,7 @@ public:
 		return getKnobs().getTestKnobs();
 	}
 
-	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+	Future<Void> consume(Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
 		return consume(this, broadcaster);
 	}
 
@@ -401,7 +403,8 @@ public:
 		ConfigKnobOverrides configKnobOverrides;
 		configKnobOverrides.set(
 		    {}, "knob_name_that_does_not_exist"_sr, KnobValueRef::create(ParsedKnobValue(int{ 1 })));
-		auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
+		auto testKnobCollection =
+		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::False, IsSimulated::False);
 		// Should only trace and not throw an error:
 		configKnobOverrides.update(*testKnobCollection);
 	}
@@ -409,7 +412,8 @@ public:
 	static void testConfigKnobOverridesInvalidValue() {
 		ConfigKnobOverrides configKnobOverrides;
 		configKnobOverrides.set({}, "test_int"_sr, KnobValueRef::create(ParsedKnobValue("not_an_int")));
-		auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
+		auto testKnobCollection =
+		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::False, IsSimulated::False);
 		// Should only trace and not throw an error:
 		configKnobOverrides.update(*testKnobCollection);
 	}
@@ -448,7 +452,7 @@ TestKnobs const& LocalConfiguration::getTestKnobs() const {
 }
 
 Future<Void> LocalConfiguration::consume(
-    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+    Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
 	return impl().consume(broadcaster);
 }
 

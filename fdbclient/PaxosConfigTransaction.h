@@ -33,22 +33,23 @@ class PaxosConfigTransaction final : public IConfigTransaction, public FastAlloc
 	PaxosConfigTransactionImpl& impl() { return *_impl; }
 
 public:
-	PaxosConfigTransaction(Database const&);
+	PaxosConfigTransaction();
 	~PaxosConfigTransaction();
+	void setDatabase(Database const&) override;
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
-	Future<Optional<Value>> get(Key const& key, bool snapshot = false) override;
+	Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::False) override;
 	Future<Standalone<RangeResultRef>> getRange(KeySelector const& begin,
 	                                            KeySelector const& end,
 	                                            int limit,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
+	                                            Snapshot = Snapshot::False,
+	                                            Reverse = Reverse::False) override;
 	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
 	                                            KeySelector end,
 	                                            GetRangeLimits limits,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
+	                                            Snapshot = Snapshot::False,
+	                                            Reverse = Reverse::False) override;
 	void set(KeyRef const& key, ValueRef const& value) override;
 	void clear(KeyRangeRef const&) override { throw client_invalid_operation(); }
 	void clear(KeyRef const&) override;

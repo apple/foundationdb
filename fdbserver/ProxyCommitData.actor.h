@@ -161,7 +161,7 @@ struct ProxyCommitData {
 	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
 	RequestStream<CommitTransactionRequest> commit;
 	Database cx;
-	Reference<AsyncVar<ServerDBInfo>> db;
+	Reference<AsyncVar<ServerDBInfo> const> db;
 	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
@@ -239,7 +239,7 @@ struct ProxyCommitData {
 	                RequestStream<GetReadVersionRequest> getConsistentReadVersion,
 	                Version recoveryTransactionVersion,
 	                RequestStream<CommitTransactionRequest> commit,
-	                Reference<AsyncVar<ServerDBInfo>> db,
+	                Reference<AsyncVar<ServerDBInfo> const> db,
 	                bool firstProxy)
 	  : dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
 	    logAdapter(nullptr), txnStateStore(nullptr), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),
@@ -247,7 +247,7 @@ struct ProxyCommitData {
 	    mostRecentProcessedRequestNumber(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),
 	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), firstProxy(firstProxy),
-	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
+	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),
 	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
 	    lastMasterReset(now()), lastResolverReset(now()) {

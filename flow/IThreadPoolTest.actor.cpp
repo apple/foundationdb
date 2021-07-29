@@ -1,3 +1,6 @@
+// Thread naming only works on Linux.
+#if defined(__linux__)
+
 #include "flow/IThreadPool.h"
 
 #include <pthread.h>
@@ -6,15 +9,12 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-// Thread naming only works on Linux.
-#if defined(__linux__)
-
 void forceLinkIThreadPoolTests() {}
 
-struct ThreadNameReceiver : IThreadPoolReceiver {
+struct ThreadNameReceiver final : IThreadPoolReceiver {
 	void init() override {}
 
-	struct GetNameAction : TypedAction<ThreadNameReceiver, GetNameAction> {
+	struct GetNameAction final : TypedAction<ThreadNameReceiver, GetNameAction> {
 		ThreadReturnPromise<std::string> name;
 
 		double getTimeEstimate() const override { return 3.; }
@@ -36,6 +36,8 @@ struct ThreadNameReceiver : IThreadPoolReceiver {
 };
 
 TEST_CASE("/flow/IThreadPool/NamedThread") {
+	noUnseed = true;
+
 	state Reference<IThreadPool> pool = createGenericThreadPool();
 	pool->addThread(new ThreadNameReceiver(), "thread-foo");
 
@@ -58,4 +60,6 @@ TEST_CASE("/flow/IThreadPool/NamedThread") {
 	return Void();
 }
 
+#else
+void forceLinkIThreadPoolTests() {}
 #endif

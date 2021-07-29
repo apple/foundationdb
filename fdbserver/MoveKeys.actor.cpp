@@ -100,7 +100,7 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
                                             const DDEnabledState* ddEnabledState,
                                             bool isWrite = true) {
 	if (!ddEnabledState->isDDEnabled()) {
-		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck");
+		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
 		throw movekeys_conflict();
 	}
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
@@ -1039,8 +1039,9 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				    LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second))));
 			}
 
-			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
-			state Future<RangeResult> fHistoryTags = tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
+			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
+			state Future<RangeResult> fHistoryTags =
+			    tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
 
 			wait(success(fTagLocalities) && success(fv) && success(fTags) && success(fHistoryTags) &&
 			     success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) &&
@@ -1142,7 +1143,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
-					TraceEvent(SevError, "TSSIdentityMappingEnabled");
+					TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 					tssMapDB.set(tr, server.id(), server.id());
 				}
 			}
@@ -1267,7 +1268,7 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
-					TraceEvent(SevError, "TSSIdentityMappingEnabled");
+					TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 					tssMapDB.erase(tr, serverID);
 				} else if (tssPairID.present()) {
 					// remove the TSS from the mapping
@@ -1439,7 +1440,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
 		if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 			// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
-			TraceEvent(SevError, "TSSIdentityMappingEnabled");
+			TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 			// hack key-backed map here since we can't really change CommitTransactionRef to a RYW transaction
 			Key uidRef = Codec<UID>::pack(s.id()).pack();
 			tr.set(arena, uidRef.withPrefix(tssMappingKeys.begin), uidRef);

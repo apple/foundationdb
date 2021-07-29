@@ -23,6 +23,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/JsonBuilder.h"
+#include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 
 #include <algorithm>
@@ -290,13 +291,13 @@ public:
 
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
 		for (int i = 0; i < logs.size(); i++) {
-			ASSERT(logs[i].tagId >= 0);
-			ASSERT(logs[i].tagId < logs[i].totalTags);
+			ASSERT_GE(logs[i].tagId, 0);
+			ASSERT_LT(logs[i].tagId, logs[i].totalTags);
 			auto& indices = tagIndices[logs[i].tagId];
 			// filter out if indices.back() is subset of files[i] or vice versa
 			if (!indices.empty()) {
 				if (logs[indices.back()].isSubset(logs[i])) {
-					ASSERT(logs[indices.back()].fileSize <= logs[i].fileSize);
+					ASSERT_LE(logs[indices.back()].fileSize, logs[i].fileSize);
 					indices.back() = i;
 				} else if (!logs[i].isSubset(logs[indices.back()])) {
 					indices.push_back(i);
@@ -864,7 +865,7 @@ public:
 		int i = 0;
 		for (int j = 1; j < logs.size(); j++) {
 			if (logs[j].isSubset(logs[i])) {
-				ASSERT(logs[j].fileSize <= logs[i].fileSize);
+				ASSERT_LE(logs[j].fileSize, logs[i].fileSize);
 				continue;
 			}
 
@@ -1032,10 +1033,10 @@ public:
 	}
 
 	static std::string versionFolderString(Version v, int smallestBucket) {
-		ASSERT(smallestBucket < 14);
+		ASSERT_LT(smallestBucket, 14);
 		// Get a 0-padded fixed size representation of v
 		std::string vFixedPrecision = format("%019lld", v);
-		ASSERT(vFixedPrecision.size() == 19);
+		ASSERT_EQ(vFixedPrecision.size(), 19);
 		// Truncate smallestBucket from the fixed length representation
 		vFixedPrecision.resize(vFixedPrecision.size() - smallestBucket);
 
@@ -1125,6 +1126,45 @@ public:
 		}
 		return false;
 	}
+
+#if ENCRYPTION_ENABLED
+	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
+		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
+		    filename,
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
+		    0600));
+		StreamCipher::Key::RawKeyType testKey;
+		generateRandomData(testKey.data(), testKey.size());
+		keyFile->write(testKey.data(), testKey.size(), 0);
+		wait(keyFile->sync());
+		return Void();
+	}
+
+	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
+		state Reference<IAsyncFile> keyFile;
+		state StreamCipher::Key::RawKeyType key;
+		try {
+			Reference<IAsyncFile> _keyFile =
+			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
+			keyFile = _keyFile;
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
+			    .detail("FileName", encryptionKeyFileName)
+			    .error(e);
+			throw e;
+		}
+		int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
+		if (bytesRead != key.size()) {
+			TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")
+			    .detail("ExpectedSize", key.size())
+			    .detail("ActualSize", bytesRead);
+			throw invalid_encryption_key_file();
+		}
+		ASSERT_EQ(bytesRead, key.size());
+		StreamCipher::Key::initializeKey(std::move(key));
+		return Void();
+	}
+#endif // ENCRYPTION_ENABLED
 
 }; // class BackupContainerFileSystemImpl
 
@@ -1432,6 +1472,29 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::unreliable
 BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() {
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
+bool BackupContainerFileSystem::usesEncryption() const {
+	return encryptionSetupFuture.isValid();
+}
+Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
+	return encryptionSetupFuture;
+}
+
+void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
+	if (encryptionKeyFileName.present()) {
+#if ENCRYPTION_ENABLED
+		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
+#else
+		encryptionSetupFuture = Void();
+#endif
+	}
+}
+Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const &filename) {
+#if ENCRYPTION_ENABLED
+	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
+#else
+	return Void();
+#endif
+}
 
 namespace backup_test {
 
@@ -1466,12 +1529,12 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 
 	state Reference<IAsyncFile> inputFile = wait(c->readFile(f->getFileName()));
 	int64_t fileSize = wait(inputFile->size());
-	ASSERT(size == fileSize);
+	ASSERT_EQ(size, fileSize);
 	if (size > 0) {
 		state Standalone<VectorRef<uint8_t>> buf;
 		buf.resize(buf.arena(), fileSize);
 		int b = wait(inputFile->read(buf.begin(), buf.size(), 0));
-		ASSERT(b == buf.size());
+		ASSERT_EQ(b, buf.size());
 		ASSERT(buf == content);
 	}
 	return Void();
@@ -1485,7 +1548,7 @@ Version nextVersion(Version v) {
 
 // Write a snapshot file with only begin & end key
 ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key begin, Key end, uint32_t blockSize) {
-	ASSERT(blockSize > 3 * sizeof(uint32_t) + begin.size() + end.size());
+	ASSERT_GT(blockSize, 3 * sizeof(uint32_t) + begin.size() + end.size());
 
 	uint32_t fileVersion = BACKUP_AGENT_SNAPSHOT_FILE_VERSION;
 	// write Header
@@ -1506,12 +1569,16 @@ ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key
 	return Void();
 }
 
-ACTOR static Future<Void> testBackupContainer(std::string url) {
+ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> encryptionKeyFileName) {
 	state FlowLock lock(100e6);
+
+	if (encryptionKeyFileName.present()) {
+		wait(BackupContainerFileSystem::createTestEncryptionKeyFile(encryptionKeyFileName.get()));
+	}
 
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
-	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, encryptionKeyFileName);
 
 	// Make sure container doesn't exist, then create it.
 	try {
@@ -1597,9 +1664,9 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 	wait(waitForAll(writes));
 
 	state BackupFileList listing = wait(c->dumpFileList());
-	ASSERT(listing.ranges.size() == nRangeFiles);
-	ASSERT(listing.logs.size() == logs.size());
-	ASSERT(listing.snapshots.size() == snapshots.size());
+	ASSERT_EQ(listing.ranges.size(), nRangeFiles);
+	ASSERT_EQ(listing.logs.size(), logs.size());
+	ASSERT_EQ(listing.snapshots.size(), snapshots.size());
 
 	state BackupDescription desc = wait(c->describeBackup());
 	printf("\n%s\n", desc.toString().c_str());
@@ -1629,8 +1696,8 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 
 		// If there is an error, it must be backup_cannot_expire and we have to be on the last snapshot
 		if (f.isError()) {
-			ASSERT(f.getError().code() == error_code_backup_cannot_expire);
-			ASSERT(i == listing.snapshots.size() - 1);
+			ASSERT_EQ(f.getError().code(), error_code_backup_cannot_expire);
+			ASSERT_EQ(i, listing.snapshots.size() - 1);
 			wait(c->expireData(expireVersion, true));
 		}
 
@@ -1646,31 +1713,34 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 	ASSERT(d.isError() && d.getError().code() == error_code_backup_does_not_exist);
 
 	BackupFileList empty = wait(c->dumpFileList());
-	ASSERT(empty.ranges.size() == 0);
-	ASSERT(empty.logs.size() == 0);
-	ASSERT(empty.snapshots.size() == 0);
+	ASSERT_EQ(empty.ranges.size(), 0);
+	ASSERT_EQ(empty.logs.size(), 0);
+	ASSERT_EQ(empty.snapshots.size(), 0);
 
 	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
 
 	return Void();
 }
 
-TEST_CASE("/backup/containers/localdir") {
-	if (g_network->isSimulated())
-		wait(testBackupContainer(format("file://simfdb/backups/%llx", timer_int())));
-	else
-		wait(testBackupContainer(format("file:///private/tmp/fdb_backups/%llx", timer_int())));
+TEST_CASE("/backup/containers/localdir/unencrypted") {
+	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}));
 	return Void();
-};
+}
+
+TEST_CASE("/backup/containers/localdir/encrypted") {
+	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                         format("%s/test_encryption_key", params.getDataDir().c_str())));
+	return Void();
+}
 
 TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
-		wait(testBackupContainer(url));
+		wait(testBackupContainer(url, {}));
 	}
 	return Void();
-};
+}
 
 TEST_CASE("/backup/containers_list") {
 	if (!g_network->isSimulated()) {
@@ -1683,7 +1753,7 @@ TEST_CASE("/backup/containers_list") {
 		}
 	}
 	return Void();
-};
+}
 
 TEST_CASE("/backup/time") {
 	// test formatTime()

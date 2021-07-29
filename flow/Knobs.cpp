@@ -18,24 +18,26 @@
  * limitations under the License.
  */
 
-#include "flow/Knobs.h"
 #include "flow/flow.h"
+#include "flow/Knobs.h"
+#include "flow/BooleanParam.h"
 #include <cmath>
 #include <cinttypes>
+
+FDB_BOOLEAN_PARAM(IsSimulated);
+FDB_BOOLEAN_PARAM(Randomize);
 
 FlowKnobs::FlowKnobs(Randomize randomize, IsSimulated isSimulated) {
 	initialize(randomize, isSimulated);
 }
 
-FlowKnobs bootstrapGlobalFlowKnobs(Randomize::NO, IsSimulated::NO);
+FlowKnobs bootstrapGlobalFlowKnobs(Randomize::False, IsSimulated::False);
 FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 
 #define init(knob, value) initKnob(knob, value, #knob)
 
 // clang-format off
-void FlowKnobs::initialize(Randomize _randomize, IsSimulated _isSimulated) {
-	bool const randomize = _randomize == Randomize::YES;
-	bool const isSimulated = _isSimulated == IsSimulated::YES;
+void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
@@ -133,6 +135,10 @@ void FlowKnobs::initialize(Randomize _randomize, IsSimulated _isSimulated) {
 	//AsyncFileEIO
 	init( EIO_MAX_PARALLELISM,                                  4  );
 	init( EIO_USE_ODIRECT,                                      0  );
+
+	//AsyncFileEncrypted
+	init( ENCRYPTION_BLOCK_SIZE,                              4096 );
+	init( MAX_DECRYPTED_BLOCKS,                                 10 );
 
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
@@ -244,6 +250,7 @@ void FlowKnobs::initialize(Randomize _randomize, IsSimulated _isSimulated) {
 	init( LOAD_BALANCE_TSS_TIMEOUT,                            5.0 );
 	init( LOAD_BALANCE_TSS_MISMATCH_VERIFY_SS,                true ); if( randomize && BUGGIFY ) LOAD_BALANCE_TSS_MISMATCH_VERIFY_SS = false; // Whether the client should validate the SS teams all agree on TSS mismatch
 	init( LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,              false ); if( randomize && BUGGIFY ) LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL = true; // If true, saves the full details of the mismatch in a trace event. If false, saves them in the DB and the trace event references the DB row.
+	init( TSS_LARGE_TRACE_SIZE,                              50000 );
 
 	// Health Monitor
 	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;

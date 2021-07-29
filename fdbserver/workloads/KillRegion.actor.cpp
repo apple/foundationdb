@@ -56,11 +56,11 @@ struct KillRegionWorkload : TestWorkload {
 	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> _setup(KillRegionWorkload* self, Database cx) {
-		TraceEvent("ForceRecovery_DisablePrimaryBegin");
+		TraceEvent("ForceRecovery_DisablePrimaryBegin").log();
 		wait(success(changeConfig(cx, g_simulator.disablePrimary, true)));
-		TraceEvent("ForceRecovery_WaitForRemote");
+		TraceEvent("ForceRecovery_WaitForRemote").log();
 		wait(waitForPrimaryDC(cx, LiteralStringRef("1")));
-		TraceEvent("ForceRecovery_DisablePrimaryComplete");
+		TraceEvent("ForceRecovery_DisablePrimaryComplete").log();
 		return Void();
 	}
 
@@ -74,14 +74,14 @@ struct KillRegionWorkload : TestWorkload {
 	ACTOR static Future<Void> killRegion(KillRegionWorkload* self, Database cx) {
 		ASSERT(g_network->isSimulated());
 		if (deterministicRandom()->random01() < 0.5) {
-			TraceEvent("ForceRecovery_DisableRemoteBegin");
+			TraceEvent("ForceRecovery_DisableRemoteBegin").log();
 			wait(success(changeConfig(cx, g_simulator.disableRemote, true)));
-			TraceEvent("ForceRecovery_WaitForPrimary");
+			TraceEvent("ForceRecovery_WaitForPrimary").log();
 			wait(waitForPrimaryDC(cx, LiteralStringRef("0")));
-			TraceEvent("ForceRecovery_DisableRemoteComplete");
+			TraceEvent("ForceRecovery_DisableRemoteComplete").log();
 			wait(success(changeConfig(cx, g_simulator.originalRegions, true)));
 		}
-		TraceEvent("ForceRecovery_Wait");
+		TraceEvent("ForceRecovery_Wait").log();
 		wait(delay(deterministicRandom()->random01() * self->testDuration));
 
 		g_simulator.killDataCenter(LiteralStringRef("0"),
@@ -97,11 +97,11 @@ struct KillRegionWorkload : TestWorkload {
 		                                                                   : ISimulator::RebootAndDelete,
 		                           true);
 
-		TraceEvent("ForceRecovery_Begin");
+		TraceEvent("ForceRecovery_Begin").log();
 
 		wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
 
-		TraceEvent("ForceRecovery_UsableRegions");
+		TraceEvent("ForceRecovery_UsableRegions").log();
 
 		DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
 
@@ -119,7 +119,7 @@ struct KillRegionWorkload : TestWorkload {
 			wait(success(changeConfig(cx, "usable_regions=1", true)));
 		}
 
-		TraceEvent("ForceRecovery_Complete");
+		TraceEvent("ForceRecovery_Complete").log();
 
 		return Void();
 	}
