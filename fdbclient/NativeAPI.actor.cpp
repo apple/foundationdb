@@ -6517,8 +6517,8 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-ACTOR Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutationsActor(Reference<DatabaseContext> db,
-                                                                                      StringRef rangeID) {
+ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutationsActor(Reference<DatabaseContext> db,
+                                                                                       StringRef rangeID) {
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
@@ -6550,10 +6550,10 @@ ACTOR Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutations
 	                                      TaskPriority::DefaultPromiseEndpoint,
 	                                      AtMostOnce::False,
 	                                      cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
-	return Standalone<VectorRef<MutationRefAndVersion>>(rep.mutations, rep.arena);
+	return Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena);
 }
 
-Future<Standalone<VectorRef<MutationRefAndVersion>>> DatabaseContext::getRangeFeedMutations(StringRef rangeID) {
+Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getRangeFeedMutations(StringRef rangeID) {
 	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID);
 }
 

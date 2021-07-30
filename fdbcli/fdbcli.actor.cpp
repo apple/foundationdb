@@ -3585,9 +3585,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
-						Standalone<VectorRef<MutationRefAndVersion>> res = wait(db->getRangeFeedMutations(tokens[2]));
+						Standalone<VectorRef<MutationsAndVersionRef>> res = wait(db->getRangeFeedMutations(tokens[2]));
 						for (auto& it : res) {
-							printf("%lld %s\n", it.version, it.mutation.toString().c_str());
+							for (auto& it2 : it.mutations) {
+								printf("%lld %s\n", it.version, it2.toString().c_str());
+							}
 						}
 					} else if (tokencmp(tokens[1], "pop")) {
 						if (tokens.size() != 4) {

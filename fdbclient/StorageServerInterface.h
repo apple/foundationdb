@@ -623,27 +623,29 @@ struct SplitRangeRequest {
 	}
 };
 
-struct MutationRefAndVersion {
-	MutationRef mutation;
+struct MutationsAndVersionRef {
+	VectorRef<MutationRef> mutations;
 	Version version;
 
-	MutationRefAndVersion() {}
-	MutationRefAndVersion(MutationRef mutation, Version version) : mutation(mutation), version(version) {}
-	MutationRefAndVersion(Arena& to, MutationRef mutation, Version version)
-	  : mutation(to, mutation), version(version) {}
-	MutationRefAndVersion(Arena& to, const MutationRefAndVersion& from)
-	  : mutation(to, from.mutation), version(from.version) {}
-	int expectedSize() const { return mutation.expectedSize(); }
+	MutationsAndVersionRef() {}
+	explicit MutationsAndVersionRef(Version version) : version(version) {}
+	MutationsAndVersionRef(VectorRef<MutationRef> mutations, Version version)
+	  : mutations(mutations), version(version) {}
+	MutationsAndVersionRef(Arena& to, VectorRef<MutationRef> mutations, Version version)
+	  : mutations(to, mutations), version(version) {}
+	MutationsAndVersionRef(Arena& to, const MutationsAndVersionRef& from)
+	  : mutations(to, from.mutations), version(from.version) {}
+	int expectedSize() const { return mutations.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, mutation, version);
+		serializer(ar, mutations, version);
 	}
 };
 
 struct RangeFeedReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
-	VectorRef<MutationRefAndVersion> mutations;
+	VectorRef<MutationsAndVersionRef> mutations;
 	bool cached;
 	Arena arena;
 

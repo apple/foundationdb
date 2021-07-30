@@ -1046,6 +1046,36 @@ KeyRange decodeRangeFeedValue(ValueRef const& value) {
 	return range;
 }
 
+const KeyRangeRef rangeFeedDurableKeys(LiteralStringRef("\xff\xff/rf/"), LiteralStringRef("\xff\xff/rf0"));
+const KeyRef rangeFeedDurablePrefix = rangeFeedDurableKeys.begin;
+
+const Value rangeFeedDurableKey(Key const& feed, Version const& version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(rangeFeedDurablePrefix);
+	wr << feed;
+	wr << version;
+	return wr.toValue();
+}
+std::pair<Key, Version> decodeRangeFeedDurableKey(ValueRef const& key) {
+	Key feed;
+	Version version;
+	BinaryReader reader(key.removePrefix(rangeFeedDurablePrefix), Unversioned());
+	reader >> feed;
+	reader >> version;
+	return std::make_pair(feed, version);
+}
+const Value rangeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
+	wr << mutations;
+	return wr.toValue();
+}
+Standalone<VectorRef<MutationRef>> decodeRangeFeedDurableValue(ValueRef const& value) {
+	Standalone<VectorRef<MutationRef>> mutations;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> mutations;
+	return mutations;
+}
+
 const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
 const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);

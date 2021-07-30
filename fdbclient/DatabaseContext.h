@@ -252,7 +252,7 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutations(StringRef rangeID);
+	Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutations(StringRef rangeID);
 	Future<Void> popRangeFeedMutations(StringRef rangeID, Version version);
 
 	// private:
