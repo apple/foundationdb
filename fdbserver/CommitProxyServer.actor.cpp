@@ -2082,6 +2082,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					state KeyRange txnKeys = allKeys;
 					RangeResult UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
 					state std::map<Tag, UID> tag_uid;
+					state std::unordered_map<UID, ptxn::StorageTeamID> storageServerToStorageTeam;
+					state std::unordered_map<KeyRef, ValueRef> keyServers;
 					for (const KeyValueRef kv : UIDtoTagMap) {
 						tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 					}
@@ -2097,42 +2099,21 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 						((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
 
 						MutationsVec mutations;
-						std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
-						vector<UID> src, dest;
-						ServerCacheInfo info;
 						for (auto& kv : data) {
 							if (kv.key.startsWith(keyServersPrefix)) {
+								keyServers.emplace(kv.key.removePrefix(keyServersPrefix), kv.value);
+							} else if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 								KeyRef k = kv.key.removePrefix(keyServersPrefix);
-								if (k != allKeys.end) {
-									decodeKeyServersValue(tag_uid, kv.value, src, dest);
-									info.tags.clear();
-									info.src_info.clear();
-									info.dest_info.clear();
-									for (const auto& id : src) {
-										auto storageInfo =
-										    getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
-										ASSERT(storageInfo->tag != invalidTag);
-										info.tags.push_back(storageInfo->tag);
-										info.src_info.push_back(storageInfo);
-									}
-									for (const auto& id : dest) {
-										auto storageInfo =
-										    getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
-										ASSERT(storageInfo->tag != invalidTag);
-										info.tags.push_back(storageInfo->tag);
-										info.dest_info.push_back(storageInfo);
-									}
-									uniquify(info.tags);
-									keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
-								}
+								std::set<ptxn::StorageTeamID> storageTeamIDs =
+								    decodeStorageServerToTeamIdValue(kv.value);
+								// For demo purpose, each storage server can only belong to single storage team.
+								ASSERT(storageTeamIDs.size() == 1);
+								storageServerToStorageTeam.emplace(UID::fromString(k.toString()),
+								                                   *storageTeamIDs.begin());
 							} else {
 								mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 							}
 						}
-
-						// insert keyTag data separately from metadata mutations so that we can do one bulk insert which
-						// avoids a lot of map lookups.
-						commitData.keyInfo.rawInsert(keyInfoData);
 
 						Arena arena;
 						bool confChanges;
@@ -2146,6 +2127,49 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 						                       /* popVersion= */ 0,
 						                       /* initialCommit= */ true);
 					}
+
+					// Populate ServerCacheInfo for each shard
+					std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
+					vector<UID> src, dest;
+					ServerCacheInfo info;
+					for (auto& it : keyServers) {
+						KeyRef k = it.first;
+						if (k != allKeys.end) {
+							decodeKeyServersValue(tag_uid, it.second, src, dest);
+							info.tags.clear();
+							info.src_info.clear();
+							info.dest_info.clear();
+							for (const auto& id : src) {
+								auto storageInfo =
+								    getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
+								ASSERT(storageInfo->tag != invalidTag);
+								info.tags.push_back(storageInfo->tag);
+								info.src_info.push_back(storageInfo);
+								if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+									// Add storage teams of storage servers
+									ASSERT(storageServerToStorageTeam.count(id));
+									info.storageTeams.insert(storageServerToStorageTeam[id]);
+								}
+							}
+							if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+								// A shard can only correspond to single storage team in the primary DC for now
+								ASSERT(info.storageTeams.size() == 1);
+							}
+
+							for (const auto& id : dest) {
+								auto storageInfo =
+								    getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
+								ASSERT(storageInfo->tag != invalidTag);
+								info.tags.push_back(storageInfo->tag);
+								info.dest_info.push_back(storageInfo);
+							}
+							uniquify(info.tags);
+							keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
+						}
+					}
+					// insert keyTag data separately from metadata mutations so that we can do one bulk insert which
+					// avoids a lot of map lookups.
+					commitData.keyInfo.rawInsert(keyInfoData);
 
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();
 					commitData.locked = lockedKey.present() && lockedKey.get().size();
