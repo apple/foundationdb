@@ -434,6 +434,8 @@ struct CommitBatchContext {
 	// Each TLogGroup corresponds to a serializer
 	std::unordered_map<ptxn::TLogGroupID, std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer>>
 	    pGroupMessageBuilders;
+	// Each group's previous commit version
+	std::map<ptxn::TLogGroupID, Version> previousCommitVersionByGroup;
 
 	int batchOperations = 0;
 
@@ -779,6 +781,15 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// Wait for the final resolution
 	std::vector<ResolveTransactionBatchReply> resolutionResp = wait(getAll(replies));
 	self->resolution.swap(*const_cast<std::vector<ResolveTransactionBatchReply>*>(&resolutionResp));
+	// add empty txn here
+	ASSERT(self->resolution.size());
+	self->previousCommitVersionByGroup.swap(self->resolution[0].previousCommitVersions);
+	for (auto& it : self->previousCommitVersionByGroup) {
+		if (self->pGroupMessageBuilders.count(it.first) == 0) {
+			self->pGroupMessageBuilders[it.first] =
+			    std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(self->commitVersion);
+		}
+	}
 
 	if (self->debugID.present()) {
 		g_traceBatch.addEvent(
@@ -1033,7 +1044,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				self->writeToStorageTeams(pProxyCommitData->keyInfo[m.param1].storageTeams, m);
+				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+					self->writeToStorageTeams(pProxyCommitData->keyInfo[m.param1].storageTeams, m);
+				}
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
@@ -1096,7 +1109,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				self->writeToStorageTeams(storageTeams, m);
+				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+					self->writeToStorageTeams(storageTeams, m);
+				}
 			} else {
 				UNREACHABLE();
 			}
@@ -1282,7 +1297,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		pushResults.reserve(self->pGroupMessageBuilders.size());
 		for (auto& groupMessageBuilder : self->pGroupMessageBuilders) {
 			pushResults.push_back(
-			    pProxyCommitData->logSystem->push(self->resolution[0].previousCommitVersions[groupMessageBuilder.first],
+			    pProxyCommitData->logSystem->push(self->previousCommitVersionByGroup[groupMessageBuilder.first],
 			                                      self->commitVersion,
 			                                      pProxyCommitData->committedVersion.get(),
 			                                      pProxyCommitData->minKnownCommittedVersion,

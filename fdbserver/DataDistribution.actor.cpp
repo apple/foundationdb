@@ -6464,11 +6464,6 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 
-	loop {
-		wait(delay(1.0));
-	}
-
-/*
 	try {
 		TraceEvent("DataDistributorRunning", di.id());
 		self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
@@ -6508,7 +6503,6 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		TraceEvent("DataDistributorDied", di.id()).error(err, true);
 	}
 	return Void();
-*/
 }
 
 std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
