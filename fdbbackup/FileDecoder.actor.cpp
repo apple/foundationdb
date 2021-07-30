@@ -29,6 +29,8 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbbackup/FileConverter.h"
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/MutationList.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -155,7 +157,7 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case OPT_KEY_PREFIX:
-			ASSERT(false); // TODO
+			param->prefix = args->OptionArg();
 			break;
 
 		case OPT_BEGIN_VERSION_FILTER:
@@ -577,7 +579,23 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 		while (!progress.finished()) {
 			VersionedMutations vms = wait(progress.getNextBatch());
 			for (const auto& m : vms.mutations) {
-				std::cout << vms.version << " " << m.toString() << "\n";
+				if (params.prefix.empty()) { // no filtering
+					std::cout << vms.version << " " << m.toString() << "\n";
+					continue;
+				}
+
+				if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+					if (m.param1.startsWith(params.prefix)) {
+						std::cout << vms.version << " " << m.toString() << "\n";
+					}
+				} else if (m.type == MutationRef::ClearRange) {
+					KeyRange range(KeyRangeRef(m.param1, m.param2));
+					if (range.contains(params.prefix)) {
+						std::cout << vms.version << " " << m.toString() << "\n";
+					}
+				} else {
+					ASSERT(false);
+				}
 			}
 		}
 		left = std::move(progress).getUnfinishedBuffer();
