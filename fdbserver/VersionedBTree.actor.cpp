@@ -2714,7 +2714,8 @@ public:
 			             v,
 			             pLastCommittedHeader->oldestVersion);
 			for(PhysicalPageID pageID : pageIDs){
-				delayedFreeList.pushBack({ v, pageID });
+				if(pageID!=invalidLogicalPageID)
+					delayedFreeList.pushBack({ v, pageID });
 			}
 		}
 
