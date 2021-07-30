@@ -1245,7 +1245,7 @@ namespace SummarizeTest
             if(buggify != null)
                 test.Add(new XAttribute("BuggifyEnabled", buggify.Value ? "1" : "0"));
             if(faultInjectionEnabled != null)
-                test.Add(new XAttribute("FaultInjectionEnabled", buggify.Value ? "1" : "0"));
+                test.Add(new XAttribute("FaultInjectionEnabled", faultInjectionEnabled.Value ? "1" : "0"));
             if(determinismCheck != null)
                 test.Add(new XAttribute("DeterminismCheck", determinismCheck.Value ? "1" : "0"));
             if(oldBinaryName != null)
