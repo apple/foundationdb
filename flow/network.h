@@ -663,7 +663,7 @@ struct ChaosMetrics {
 
 	void clear() {
 		memset(this, 0, sizeof(ChaosMetrics));
-		startTime = timer_monotonic();
+		startTime = g_network ? g_network->now() : 0;
 	}
 
 	unsigned int diskDelays;
@@ -700,11 +700,11 @@ struct DiskFailureInjector {
 	void setDiskFailure(double interval, double stallFor, double throttleFor) {
 		stallInterval = interval;
 		stallPeriod = stallFor;
-		stallUntil = std::max(stallUntil, timer_monotonic() + stallFor);
+		stallUntil = std::max(stallUntil, g_network->now() + stallFor);
 		// random stall duration in ms (chosen once)
 		stallDuration = 0.001 * deterministicRandom()->randomInt(1, 5);
 		throttlePeriod = throttleFor;
-		throttleUntil = std::max(throttleUntil, timer_monotonic() + throttleFor);
+		throttleUntil = std::max(throttleUntil, g_network->now() + throttleFor);
 		TraceEvent("SetDiskFailure")
 		    .detail("StallInterval", interval)
 		    .detail("StallPeriod", stallFor)
@@ -716,8 +716,8 @@ struct DiskFailureInjector {
 	double getStallDelay() {
 		// If we are in a stall period and a stallInterval was specified, determine the
 		// delay to be inserted
-		if (((stallUntil - timer_monotonic()) > 0.0) && stallInterval) {
-			auto timeElapsed = fmod(timer_monotonic(), stallInterval);
+		if (((stallUntil - g_network->now()) > 0.0) && stallInterval) {
+			auto timeElapsed = fmod(g_network->now(), stallInterval);
 			return std::max(0.0, stallDuration - timeElapsed);
 		}
 		return 0.0;
@@ -725,7 +725,7 @@ struct DiskFailureInjector {
 
 	double getThrottleDelay() {
 		// If we are in the throttle period, insert a random delay (in ms)
-		if ((throttleUntil - timer_monotonic()) > 0.0)
+		if ((throttleUntil - g_network->now()) > 0.0)
 			return (0.001 * deterministicRandom()->randomInt(1, 3));
 
 		return 0.0;

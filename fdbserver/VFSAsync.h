@@ -22,6 +22,7 @@
 #include <string>
 #include <map>
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/simulator.h"
 
 /*
 ** When using this VFS, the sqlite3_file* handles that SQLite uses are
@@ -71,7 +72,7 @@ struct VFSAsyncFile {
 		    .detail("Found", e)
 		    .detail("ErrorCode", (int64_t)g_network->global(INetwork::enSQLiteInjectedError))
 		    .backtrace();
-		return e;
+		return e || (g_network->isSimulated() && g_simulator.checkInjectedCorruption());
 	}
 
 	uint32_t* const pLockCount; // +1 for each SHARED_LOCK, or 1+X_COUNT for lock level X

@@ -30,16 +30,22 @@
 class AsyncFileChaos final : public IAsyncFile, public ReferenceCounted<AsyncFileChaos> {
 private:
 	Reference<IAsyncFile> file;
-	Arena arena;
+	bool enabled;
 
 public:
-	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {}
+	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {
+		// We onlyl allow chaod events on storage files
+		enabled = StringRef(file->getFilename()).startsWith(LiteralStringRef("storage-"));
+	}
 
 	void addref() override { ReferenceCounted<AsyncFileChaos>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileChaos>::delref(); }
 
-	static double getDelay() {
+	double getDelay() const {
 		double delayFor = 0.0;
+		if (!enabled)
+			return delayFor;
+	
 		auto res = g_network->global(INetwork::enDiskFailureInjector);
 		if (res) {
 			DiskFailureInjector* delayInjector = static_cast<DiskFailureInjector*>(res);
@@ -60,6 +66,9 @@ public:
 	Future<int> read(void* data, int length, int64_t offset) override {
 		double diskDelay = getDelay();
 
+		if (diskDelay == 0.0)
+			return file->read(data, length, offset);
+
 		// Wait for diskDelay before submitting the I/O
 		// Template types are being provided explicitly because they can't be automatically deduced for some reason.
 		return mapAsync<Void, std::function<Future<int>(Void)>, int>(
@@ -67,18 +76,19 @@ public:
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
+		Arena arena;
 		char* pdata = nullptr;
 
 		// Check if a bit flip event was injected, if so, copy the buffer contents
 		// with a random bit flipped in a new buffer and use that for the write
 		auto res = g_network->global(INetwork::enBitFlipper);
-		if (res) {
+		if (enabled && res) {
 			auto bitFlipPercentage = static_cast<BitFlipper*>(res)->getBitFlipPercentage();
 			if (bitFlipPercentage > 0.0) {
-				pdata = (char*)arena.allocate4kAlignedBuffer(length);
-				memcpy(pdata, data, length);
 				if (deterministicRandom()->random01() < bitFlipPercentage) {
-					// copy buffer with a flipped bit
+					pdata = (char*)arena.allocate4kAlignedBuffer(length);
+					memcpy(pdata, data, length);
+					// flip a random bit in the copied buffer
 					pdata[deterministicRandom()->randomInt(0, length)] ^= (1 << deterministicRandom()->randomInt(0, 8));
 
 					// increment the metric for bit flips
@@ -92,6 +102,13 @@ public:
 		}
 
 		double diskDelay = getDelay();
+		if (diskDelay == 0.0) {
+			if (pdata)
+				return holdWhile(arena, file->write(pdata, length, offset));
+
+			return file->write(data, length, offset);
+		}
+
 		// Wait for diskDelay before submitting the I/O
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(diskDelay), [=](Void _) -> Future<Void> {
 			if (pdata)
@@ -103,6 +120,9 @@ public:
 
 	Future<Void> truncate(int64_t size) override {
 		double diskDelay = getDelay();
+		if (diskDelay == 0.0)
+			return file->truncate(size);
+
 		// Wait for diskDelay before submitting the I/O
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
 		    delay(diskDelay), [=](Void _) -> Future<Void> { return file->truncate(size); });
@@ -110,6 +130,9 @@ public:
 
 	Future<Void> sync() override {
 		double diskDelay = getDelay();
+		if (diskDelay == 0.0)
+			return file->sync();
+
 		// Wait for diskDelay before submitting the I/O
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
 		    delay(diskDelay), [=](Void _) -> Future<Void> { return file->sync(); });
@@ -117,6 +140,9 @@ public:
 
 	Future<int64_t> size() const override {
 		double diskDelay = getDelay();
+		if (diskDelay == 0.0)
+			return file->size();
+
 		// Wait for diskDelay before submitting the I/O
 		return mapAsync<Void, std::function<Future<int64_t>(Void)>, int64_t>(
 		    delay(diskDelay), [=](Void _) -> Future<int64_t> { return file->size(); });

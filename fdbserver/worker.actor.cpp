@@ -1198,8 +1198,7 @@ ACTOR Future<Void> chaosMetricsLogger() {
 		wait(delay(FLOW_KNOBS->CHAOS_LOGGING_INTERVAL));
 
 		TraceEvent e("ChaosMetrics");
-		// double elapsed = now() - chaosMetrics->startTime;
-		double elapsed = timer_monotonic() - chaosMetrics->startTime;
+		double elapsed = now() - chaosMetrics->startTime;
 		e.detail("Elapsed", elapsed);
 		chaosMetrics->getFields(&e);
 		e.trackLatest("ChaosMetrics");
