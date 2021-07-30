@@ -120,7 +120,7 @@ endif()
 set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
 # RocksDB is currently enabled by default for GCC but does not build with the latest
 # Clang.
-if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
+if (SSD_ROCKSDB_EXPERIMENTAL)
   set(WITH_ROCKSDB_EXPERIMENTAL ON)
 else()
   set(WITH_ROCKSDB_EXPERIMENTAL OFF)
