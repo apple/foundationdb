@@ -18,14 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 #include "flow/Histogram.h"
-#include <_types/_uint32_t.h>
-#include <_types/_uint8_t.h>
 #include <limits>
 #include <random>
 #include "fdbrpc/ContinuousSample.h"
@@ -834,6 +831,7 @@ public:
 			    "FIFOQueue::Cursor(%s) write(%s) writing\n", self->toString().c_str(), ::toString(item).c_str());
 			auto p = self->raw();
 			Codec::writeToBytes(p->begin() + self->offset, item);
+			debug_printf("FIFOQueue::Cursor(%s) write complete\n", self->toString().c_str());
 			self->offset += bytesNeeded;
 			p->endOffset = self->offset;
 			++self->queue->numEntries;
@@ -1467,7 +1465,7 @@ struct RedwoodMetrics {
 			return eventReasons[(size_t)event][(size_t)reason];
 		}
 
-		std::string toString(int level, double elapsed) const {
+		std::string toString(uint8_t level, double elapsed) const {
 			std::string result;
 
 			const auto& pairs = (level == 0 ? L0PossibleEventReasonPairs : possibleEventReasonPairs);
@@ -1491,7 +1489,7 @@ struct RedwoodMetrics {
 			return result;
 		}
 
-		void toTraceEvent(TraceEvent* t, int level) const {
+		void toTraceEvent(TraceEvent* t, uint8_t level) const {
 			const auto& pairs = (level == 0 ? L0PossibleEventReasonPairs : possibleEventReasonPairs);
 			for (const auto& p : pairs) {
 				std::string name =
@@ -1531,7 +1529,7 @@ struct RedwoodMetrics {
 
 		Level() { clear(); }
 
-		void clear(int level = 0) {
+		void clear(uint8_t level = 0) {
 			metrics = {};
 
 			if (level > 0) {
@@ -1624,12 +1622,12 @@ struct RedwoodMetrics {
 		return metric.pagerDiskWrite + metric.pagerDiskRead + metric.pagerCacheHit + metric.pagerProbeHit;
 	}
 
-	Level& level(unsigned int level) {
+	Level& level(uint8_t level) {
 		// Valid levels are from 0 - btreeLevels
 		// Level 0 is for operations that are not BTree level specific, as many of the metrics are the same
 		// Level 0 - btreeLevels correspond to BTree node height, however heights above btreeLevels are combined
 		//           into the level at btreeLevels
-		return levels[std::min(level, btreeLevels)];
+		return levels[std::min((unsigned int)level, btreeLevels)];
 	}
 
 	void updateMaxRecordCount(int maxRecords) {
@@ -2049,7 +2047,7 @@ public:
 			src += sizeof(Version);
 			int count = *src++;
 			originalPageIDs = Standalone(VectorRef<LogicalPageID>((LogicalPageID*)src, count));
-			src += count;
+			src += count * sizeof(LogicalPageID);
 			count = *src++; 
 			newPageIDs = Standalone(VectorRef<LogicalPageID>((LogicalPageID*)src, count));
 			return bytesNeeded();
@@ -2066,7 +2064,7 @@ public:
 			dst += sizeof(Version);
 			*dst++ = originalPageIDs.size();
 			memcpy(dst, originalPageIDs.begin(), originalPageIDs.size() * sizeof(LogicalPageID));
-			dst += originalPageIDs.size();
+			dst += originalPageIDs.size() * sizeof(LogicalPageID);
 			*dst++ = newPageIDs.size();
 			memcpy(dst, newPageIDs.begin(), newPageIDs.size() * sizeof(LogicalPageID));
 			return bytesNeeded();
@@ -2280,6 +2278,9 @@ public:
 						state int i = 0; 
 						for (auto& r : remaps) {
 							for(i = 0; i<r.originalPageIDs.size(); ++i){
+								/*if (r.originalPageIDs[i] != invalidLogicalPageID){
+									ASSERT(r.newPageIDs[i] != invalidLogicalPageID);
+								}*/
 								self->remappedPages[r.originalPageIDs[i]][r.version] = r.newPageIDs[i];
 							}
 						}
@@ -2681,7 +2682,8 @@ public:
 				    // map.
 					if(i == 0)
 				    	pageCache.prioritizeEviction(versionedMap.empty() ? pageIDs[i] : versionedMap.rbegin()->second);
-				    versionedMap[v] = newIDs[i];
+				    ASSERT(newIDs[i] != invalidLogicalPageID);
+					versionedMap[v] = newIDs[i];
 
 				    debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
 			    }
@@ -2701,7 +2703,8 @@ public:
 			             v,
 			             pLastCommittedHeader->oldestVersion);
 			for(PhysicalPageID pageID : pageIDs){
-				freeList.pushBack(pageID);
+				if(pageID!=invalidLogicalPageID)
+					freeList.pushBack(pageID);
 			}
 		} else {
 			// Otherwise add it to the delayed free list
@@ -2719,9 +2722,12 @@ public:
 		pageCache.prioritizeEviction(pageIDs.front());
 	}
 
-	Standalone<VectorRef<LogicalPageID>> detachRemappedPage(VectorRef<LogicalPageID> pageIDs, uint8_t level, Version v) override {
+	Standalone<VectorRef<LogicalPageID>> detachRemappedPage(Standalone<VectorRef<LogicalPageID>> pageIDs, uint8_t level, Version v) override {
 		Standalone<VectorRef<LogicalPageID>> newIDs;
 		Standalone<VectorRef<LogicalPageID>> mappedNewIDs;
+		debug_printf("DWALPager(%s), detachRemappedPage pageIDs=%s\n", 
+				filename.c_str(),
+				toString(pageIDs).c_str());
 		for(auto pageID:pageIDs){
 			auto i = remappedPages.find(pageID);
 			if (i == remappedPages.end()) {
@@ -2765,6 +2771,9 @@ public:
 			ASSERT(mappedNewIDs.size() == pageIDs.size());
 			remapQueue.pushBack(RemappedPage{ pageIDs, mappedNewIDs, level, v });
 		}
+		debug_printf("Detach Remmpaed Page pageIDss=%s newIDs=%s \n",
+					toString(pageIDs).c_str(),
+					toString(newIDs).c_str());
 		return newIDs;
 	}
 
@@ -2801,9 +2810,14 @@ public:
 			ASSERT(unmappedPageIDs.size() == pageIDs.size());
 			freeUnmappedPage(unmappedPageIDs, v);
 		}
-		else{
+		else if(remapOriginalPageIDs.size()>0) {
 			remapQueue.pushBack(RemappedPage{ remapOriginalPageIDs, remapNewPageIDs, level, v });
 		}
+		debug_printf("DWALPager(%s)  unmappedPageIDs=%s remapOriginalPageIDs=%s remapNewPageIDs=%s\n",
+					filename.c_str(),
+					toString(unmappedPageIDs).c_str(),
+					toString(remapOriginalPageIDs).c_str(),
+					toString(remapNewPageIDs).c_str());
 	};
 
 	ACTOR static void freeExtent_impl(DWALPager* self, LogicalPageID pageID) {
@@ -3246,22 +3260,27 @@ public:
 		// erase the entry.
 		if (!deleteAtSameVersion) {
 			debug_printf(
-			    "DWALPager(%s) remapCleanup deleting map entry %s\n", self->filename.c_str(), p.toString().c_str());
-			// Erase the entry and set iVersionPagePair to the next entry or end
-			iVersionPagePair = iPageMapPair->second.erase(iVersionPagePair);
+					"DWALPager(%s) remapCleanup deleting map entry %s\n", self->filename.c_str(), p.toString().c_str());
+			for(auto pageID : p.originalPageIDs) {
+				iPageMapPair = self->remappedPages.find(pageID);
+				iVersionPagePair = iPageMapPair->second.find(p.version);
+				ASSERT(iVersionPagePair != iPageMapPair->second.end());
+				// Erase the entry and set iVersionPagePair to the next entry or end
+				iVersionPagePair = iPageMapPair->second.erase(iVersionPagePair);
 
-			// If the map is now empty, delete it
-			if (iPageMapPair->second.empty()) {
-				debug_printf(
-				    "DWALPager(%s) remapCleanup deleting empty map %s\n", self->filename.c_str(), p.toString().c_str());
-				self->remappedPages.erase(iPageMapPair);
-			} else if (freeNewID && secondType == RemappedPage::NONE &&
-			           iVersionPagePair != iPageMapPair->second.end() &&
-			           RemappedPage::getTypeOf(iVersionPagePair->second) == RemappedPage::DETACH) {
-				// If we intend to free the new ID and there was no map entry, one could have been added during the wait
-				// above. If so, and if it was a detach operation, then we can't free the new page ID as its lifetime
-				// will be managed by the client starting at some later version.
-				freeNewID = false;
+				// If the map is now empty, delete it
+				if (iPageMapPair->second.empty()) {
+					debug_printf(
+						"DWALPager(%s) remapCleanup deleting empty map %s\n", self->filename.c_str(), p.toString().c_str());
+					self->remappedPages.erase(iPageMapPair);
+				} else if (freeNewID && secondType == RemappedPage::NONE &&
+						iVersionPagePair != iPageMapPair->second.end() &&
+						RemappedPage::getTypeOf(iVersionPagePair->second) == RemappedPage::DETACH) {
+					// If we intend to free the new ID and there was no map entry, one could have been added during the wait
+					// above. If so, and if it was a detach operation, then we can't free the new page ID as its lifetime
+					// will be managed by the client starting at some later version.
+					freeNewID = false;
+				}
 			}
 		}
 
@@ -5218,7 +5237,7 @@ private:
 	                                           const RedwoodRecordRef* upperBound,
 	                                           int prefixLen,
 	                                           VectorRef<RedwoodRecordRef> records,
-	                                           int height,
+	                                           uint8_t height,
 	                                           int blockSize) {
 		debug_printf("splitPages height=%d records=%d lowerBound=%s upperBound=%s\n",
 		             height,
@@ -5476,7 +5495,7 @@ private:
 	}
 
 	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>>
-	buildNewRoot(VersionedBTree* self, Version version, Standalone<VectorRef<RedwoodRecordRef>> records, int height) {
+	buildNewRoot(VersionedBTree* self, Version version, Standalone<VectorRef<RedwoodRecordRef>> records, uint8_t height) {
 		debug_printf("buildNewRoot start version %" PRId64 ", %lu records\n", version, records.size());
 
 		// While there are multiple child pages for this version we must write new tree levels.
@@ -5571,6 +5590,7 @@ private:
 
 	void freeBTreePage( uint8_t level, Version v, BTreePageIDRef btPageID) {
 		// Free individual pages at v
+		debug_printf("freeBTreePage() btPageID=%s height=%u @%" PRId64 "\n", toString(btPageID).c_str(), (unsigned int)level, v);
 		m_pager->freePage(level, v, btPageID);
 	}
 
@@ -5593,7 +5613,7 @@ private:
 			        ? "<noDecodeCache>"
 			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
 		}
-		int height = ((BTreePage*)page->begin())->height;
+		uint8_t height = ((BTreePage*)page->begin())->height;
 		Future<BTreePageIDRef> newID =
 		    map(self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, oldID, page, writeVersion),
 		        [=](VectorRef<LogicalPageID> ids) {
@@ -5921,7 +5941,7 @@ private:
 	    Reference<IPagerSnapshot> snapshot,
 	    MutationBuffer* mutationBuffer,
 	    BTreePageIDRef rootID,
-	    int height,
+	    uint8_t height,
 	    MutationBuffer::const_iterator mBegin, // greatest mutation boundary <= subtreeLowerBound->key
 	    MutationBuffer::const_iterator mEnd, // least boundary >= subtreeUpperBound->key
 	    InternalPageSliceUpdate* update) {
@@ -6299,8 +6319,8 @@ private:
 					}
 				}
 
-				BTreePageIDRef pageID = cursor.get().getChildPage();
-				ASSERT(!pageID.empty());
+				BTreePageIDRef pageIDs = cursor.get().getChildPage();
+				ASSERT(!pageIDs.empty());
 
 				// The decode upper bound is always the next key after the child link, or the decode upper bound for
 				// this page
@@ -6429,7 +6449,7 @@ private:
 
 				// If this page has height of 2 then its children are leaf nodes
 				recursions.push_back(
-				    self->commitSubtree(self, snapshot, mutationBuffer, pageID, height - 1, mBegin, mEnd, &u));
+				    self->commitSubtree(self, snapshot, mutationBuffer, pageIDs, height - 1, mBegin, mEnd, &u));
 			}
 
 			debug_printf(
@@ -6524,19 +6544,23 @@ private:
 							auto& stats = g_redwoodMetrics.level(height);
 							while (cursor.valid()) {
 								if (cursor.get().value.present()) {
-									Standalone<VectorRef<LogicalPageID>> newIDs = 
-										self->m_pager->detachRemappedPage(cursor.get().getChildPage(), height-1, writeVersion);
-									state int index = 0;
-									for (auto& p : cursor.get().getChildPage()) {
-										if (parentInfo->maybeUpdated(p)) {
-											if (newIDs[index] != invalidLogicalPageID) {
-												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newIDs[index]);
-												p = newIDs[index];
+									if (cursor.get().getChildPage().size()>0 && parentInfo->maybeUpdated(cursor.get().getChildPage().front())) {
+										Standalone<VectorRef<LogicalPageID>> newIDs = 
+											self->m_pager->detachRemappedPage(cursor.get().getChildPage(), height-1, writeVersion);
+										int i = 0;
+										ASSERT(newIDs.size() == cursor.get().getChildPage().size());
+										debug_printf("%s finish detachRemappedPage newIDs=%s.\n",
+						             			context.c_str(),
+												toString(newIDs).c_str());
+										for(auto& p : cursor.get().getChildPage()){
+											if (newIDs[i] != invalidLogicalPageID) {
+												debug_printf("%s, updated in place, Detach updated %u -> %u\n", context.c_str(), p, newIDs[i]);
+												p = newIDs[i];
 												++stats.metrics.detachChild;
 												++detached;
 											}
+											++i;
 										}
-										++index;
 									}
 								}
 								cursor.moveNext();
@@ -6579,11 +6603,14 @@ private:
 								if (rec.value.present()) {
 									BTreePageIDRef oldPages = rec.getChildPage();
 									BTreePageIDRef newPages;
-									Standalone<VectorRef<LogicalPageID>> newIDs = 
-										self->m_pager->detachRemappedPage(oldPages, height-1, writeVersion);
-									for (int i = 0; i < oldPages.size(); ++i) {
-										LogicalPageID p = oldPages[i];
-										if (parentInfo->maybeUpdated(p)) {
+									if (oldPages.size()>0 && parentInfo->maybeUpdated(oldPages.front())) {
+										Standalone<VectorRef<LogicalPageID>> newIDs = 
+											self->m_pager->detachRemappedPage(oldPages, height-1, writeVersion);
+										ASSERT(newIDs.size() == oldPages.size());
+										debug_printf("%s finish detachRemappedPage newIDs=%s.\n",
+						             			context.c_str(),
+												toString(newIDs).c_str());
+										for (int i = 0; i < oldPages.size(); ++i) {
 											LogicalPageID newID = newIDs[i];
 											if (newID != invalidLogicalPageID) {
 												// Rebuild record values reference original page memory so make a copy
@@ -6591,7 +6618,7 @@ private:
 													newPages = BTreePageIDRef(modifier.rebuild.arena(), oldPages);
 													rec.setChildPage(newPages);
 												}
-												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
+												debug_printf("%s,rebuild replacement, Detach updated %u -> %u\n", context.c_str(), oldPages[i], newID);
 												newPages[i] = newID;
 												++stats.metrics.detachChild;
 											}
@@ -6919,7 +6946,7 @@ public:
 			// Note that only immediate siblings under the same parent are considered for prefetch so far.
 			BTreePage::BinaryTree::Cursor c = path[path.size() - 2].cursor;
 			ASSERT(path[path.size() - 2].btPage()->height == 2);
-			constexpr int level = 1;
+			constexpr uint8_t level = 1;
 
 			// The loop conditions are split apart into different if blocks for readability.
 			// While query limits are not exceeded
