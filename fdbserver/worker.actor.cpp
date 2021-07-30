@@ -613,7 +613,6 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		}
 	}
 
-
 	for (const auto& grvProxy : dbi.client.grvProxies) {
 		if (grvProxy.addresses().contains(address)) {
 			return true;
@@ -687,13 +686,15 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Last, tests that proxies included in the ClientDbInfo are considered as local.
 	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
 	GrvProxyInterface grvProxyInterf;
-	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	grvProxyInterf.getConsistentReadVersion =
+	    RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
 	CommitProxyInterface commitProxyInterf;
-	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	commitProxyInterf.commit =
+	    RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
@@ -1204,8 +1205,7 @@ ACTOR Future<Void> chaosMetricsLogger() {
 		wait(delay(FLOW_KNOBS->CHAOS_LOGGING_INTERVAL));
 
 		TraceEvent e("ChaosMetrics");
-		// double elapsed = now() - chaosMetrics->startTime;
-		double elapsed = timer_monotonic() - chaosMetrics->startTime;
+		double elapsed = now() - chaosMetrics->startTime;
 		e.detail("Elapsed", elapsed);
 		chaosMetrics->getFields(&e);
 		e.trackLatest("ChaosMetrics");

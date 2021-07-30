@@ -1,0 +1,30 @@
+[configuration]
+buggify = false
+minimumReplication = 3
+minimumRegions = 3
+logAntiQuorum = 0
+
+[[test]]
+testTitle = 'DiskFailureCycle'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 60.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'DiskFailureInjection'
+    testDuration = 20.0
+    startDelay = 20.0
+    throttleDisk = true
+    stallInterval = 10.0
+    stallPeriod = 20.0
+    throttlePeriod = 20.0
+
+    [[test.workload]]
+    testName = 'DiskFailureInjection'
+    testDuration = 20.0
+    startDelay = 40.0
+    corruptFile = true
+    percentBitFlips = 10

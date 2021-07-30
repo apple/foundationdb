@@ -26,6 +26,7 @@
 #include <limits>
 #include <random>
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/IPager.h"
 #include "fdbclient/Tuple.h"
 #include "flow/serialize.h"
@@ -2727,6 +2728,8 @@ public:
 				debug_printf(
 				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageID).c_str());
 				Error e = checksum_failed();
+				if (g_network->isSimulated() && g_simulator.checkInjectedCorruption())
+					e = e.asInjectedFault();
 				TraceEvent(SevError, "RedwoodChecksumFailed")
 				    .detail("Filename", self->filename.c_str())
 				    .detail("PageID", pageID)
