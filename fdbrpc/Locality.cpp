@@ -319,4 +319,5 @@ StringRef to_string(ProcessClass::ClusterRole role) {
 		return "NoRole"_sr;
 		break;
 	}
+	UNSTOPPABLE_ASSERT(false);
 }
