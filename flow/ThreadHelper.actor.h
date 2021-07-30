@@ -242,7 +242,7 @@ public:
 
 	void send(Never) {
 		if (TRACE_SAMPLE())
-			TraceEvent(SevSample, "Promise_sendNever");
+			TraceEvent(SevSample, "Promise_sendNever").log();
 		ThreadSpinLockHolder holder(mutex);
 		if (!canBeSetUnsafe())
 			ASSERT(false); // Promise fulfilled twice
@@ -399,7 +399,7 @@ public:
 
 	void send(const T& value) {
 		if (TRACE_SAMPLE())
-			TraceEvent(SevSample, "Promise_send");
+			TraceEvent(SevSample, "Promise_send").log();
 		this->mutex.enter();
 		if (!canBeSetUnsafe()) {
 			this->mutex.leave();
@@ -510,7 +510,7 @@ private:
 
 // A callback class used to convert a ThreadFuture into a Future
 template <class T>
-struct CompletionCallback : public ThreadCallback, ReferenceCounted<CompletionCallback<T>> {
+struct CompletionCallback final : public ThreadCallback, ReferenceCounted<CompletionCallback<T>> {
 	// The thread future being waited on
 	ThreadFuture<T> threadFuture;
 
@@ -554,7 +554,7 @@ Future<T> unsafeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 
 // A callback waiting on a thread future and will delete itself once fired
 template <class T>
-struct UtilCallback : public ThreadCallback {
+struct UtilCallback final : public ThreadCallback {
 public:
 	UtilCallback(ThreadFuture<T> f, void* userdata) : f(f), userdata(userdata) {}
 
@@ -574,7 +574,7 @@ private:
 	void* userdata;
 };
 
-// The underlying actor that converts ThreadFuture from Future
+// The underlying actor that converts ThreadFuture to Future
 // Note: should be used from main thread
 // The cancellation here works both way
 // If the underlying "threadFuture" is cancelled, this actor will get actor_cancelled.

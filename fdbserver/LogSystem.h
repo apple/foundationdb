@@ -47,7 +47,7 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	int slowReplies;
 	int fastReplies;
 
-	ConnectionResetInfo() : lastReset(now()), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
+	ConnectionResetInfo() : lastReset(now()), resetCheck(Void()), slowReplies(0), fastReplies(0) {}
 };
 
 // The set of tLog servers, logRouters and backupWorkers for a log tag
@@ -291,7 +291,7 @@ public:
 
 		if (allLocations) {
 			// special handling for allLocations
-			TraceEvent("AllLocationsSet");
+			TraceEvent("AllLocationsSet").log();
 			for (int i = 0; i < logServers.size(); i++) {
 				newLocations.push_back(i);
 			}

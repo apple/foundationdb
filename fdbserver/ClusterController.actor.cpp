@@ -128,15 +128,15 @@ public:
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
 		DBInfo()
-		  : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0),
-		    logGenerations(0), cachePopulated(false), clientInfo(new AsyncVar<ClientDBInfo>()), dbInfoCount(0),
-		    serverInfo(new AsyncVar<ServerDBInfo>()), db(DatabaseContext::create(clientInfo,
-		                                                                         Future<Void>(),
-		                                                                         LocalityData(),
-		                                                                         EnableLocalityLoadBalance::True,
-		                                                                         TaskPriority::DefaultEndpoint,
-		                                                                         LockAware::True)) // SOMEDAY: Locality!
-		{}
+		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
+		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
+		    db(DatabaseContext::create(clientInfo,
+		                               Future<Void>(),
+		                               LocalityData(),
+		                               EnableLocalityLoadBalance::True,
+		                               TaskPriority::DefaultEndpoint,
+		                               LockAware::True)), // SOMEDAY: Locality!
+		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false) {}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -195,6 +195,8 @@ public:
 			}
 
 			loop {
+				tr.reset();
+
 				// Wait for some changes
 				while (!self->anyDelta.get())
 					wait(self->anyDelta.onChange());
@@ -1431,12 +1433,12 @@ public:
 		bool degraded = false;
 
 		RoleFitness(int bestFit, int worstFit, int count, ProcessClass::ClusterRole role)
-		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), count(count),
-		    role(role) {}
+		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), role(role),
+		    count(count) {}
 
 		RoleFitness(int fitness, int count, ProcessClass::ClusterRole role)
-		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), count(count),
-		    role(role) {}
+		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), role(role),
+		    count(count) {}
 
 		RoleFitness()
 		  : bestFit(ProcessClass::NeverAssign), worstFit(ProcessClass::NeverAssign), role(ProcessClass::NoRole),
@@ -2002,7 +2004,7 @@ public:
 			}
 
 			if (bestDC != clusterControllerDcId) {
-				TraceEvent("BestDCIsNotClusterDC");
+				TraceEvent("BestDCIsNotClusterDC").log();
 				vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(bestDC);
 				desiredDcIds.set(dcPriority);
@@ -3160,9 +3162,9 @@ public:
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators)
-	  : clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
-	    gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
+	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), clusterControllerProcessId(locality.processId()),
+	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
+	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
 	    recruitingDistributor(false), recruitRatekeeper(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
@@ -3195,7 +3197,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
 
 	loop {
-		TraceEvent("CCWDB", cluster->id);
+		TraceEvent("CCWDB", cluster->id).log();
 		try {
 			state double recoveryStart = now();
 			TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
@@ -4022,7 +4024,7 @@ ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
 ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
-	TraceEvent("TimeKeeperStarted");
+	TraceEvent("TimeKeeperStarted").log();
 
 	wait(timeKeeperSetVersion(self));
 
@@ -4036,7 +4038,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 					//       how long it is taking to hear responses from each other component.
 
 					UID debugID = deterministicRandom()->randomUniqueID();
-					TraceEvent("TimeKeeperCommit", debugID);
+					TraceEvent("TimeKeeperCommit", debugID).log();
 					tr->debugTransaction(debugID);
 				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -4187,7 +4189,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 			}
 
 			wait(trVer.commit());
-			TraceEvent("ProcessClassUpgrade");
+			TraceEvent("ProcessClassUpgrade").log();
 			break;
 		} catch (Error& e) {
 			wait(trVer.onError(e));
@@ -4616,7 +4618,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 			}
 			wait(fCommit);
 		}
-		TraceEvent("ForcedRecoveryFinish", self->id);
+		TraceEvent("ForcedRecoveryFinish", self->id).log();
 		self->db.forceRecovery = false;
 		req.reply.send(Void());
 	}
@@ -4625,7 +4627,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 ACTOR Future<DataDistributorInterface> startDataDistributor(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 
-	TraceEvent("CCStartDataDistributor", self->id);
+	TraceEvent("CCStartDataDistributor", self->id).log();
 	loop {
 		try {
 			state bool no_distributor = !self->db.serverInfo->get().distributor.present();
@@ -4692,7 +4694,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 
-	TraceEvent("CCStartRatekeeper", self->id);
+	TraceEvent("CCStartRatekeeper", self->id).log();
 	loop {
 		try {
 			state bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
@@ -4809,7 +4811,7 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 		req.serializedDbInfo =
 		    BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(g_network->protocolVersion()));
 
-		TraceEvent("DBInfoStartBroadcast", self->id);
+		TraceEvent("DBInfoStartBroadcast", self->id).log();
 		choose {
 			when(std::vector<Endpoint> notUpdated =
 			         wait(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false))) {
@@ -4829,7 +4831,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 	loop {
 		try {
 			while (!self->goodRecruitmentTime.isReady()) {
-				wait(self->goodRecruitmentTime);
+				wait(lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
 			}
 
 			self->degradedServers = self->getServersWithDegradedLink();
@@ -4864,7 +4866,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						}
 					} else {
 						self->excludedDegradedServers.clear();
-						TraceEvent("DegradedServerDetectedAndSuggestRecovery");
+						TraceEvent("DegradedServerDetectedAndSuggestRecovery").log();
 					}
 				}
 			}

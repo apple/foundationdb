@@ -91,7 +91,7 @@ FileTraceLogWriter::FileTraceLogWriter(std::string const& directory,
                                        std::function<void()> const& onError,
                                        Reference<ITraceLogIssuesReporter> const& issues)
   : directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize),
-    traceFileFD(-1), index(0), onError(onError), issues(issues) {}
+    traceFileFD(-1), index(0), issues(issues), onError(onError) {}
 
 void FileTraceLogWriter::addref() {
 	ReferenceCounted<FileTraceLogWriter>::addref();

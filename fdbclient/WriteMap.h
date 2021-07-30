@@ -168,7 +168,7 @@ private:
 	typedef Reference<PTreeT> Tree;
 
 public:
-	explicit WriteMap(Arena* arena) : arena(arena), ver(-1), scratch_iterator(this), writeMapEmpty(true) {
+	explicit WriteMap(Arena* arena) : arena(arena), writeMapEmpty(true), ver(-1), scratch_iterator(this) {
 		PTreeImpl::insert(
 		    writes, ver, WriteMapEntry(allKeys.begin, OperationStack(), false, false, false, false, false));
 		PTreeImpl::insert(writes, ver, WriteMapEntry(allKeys.end, OperationStack(), false, false, false, false, false));
@@ -177,8 +177,8 @@ public:
 	}
 
 	WriteMap(WriteMap&& r) noexcept
-	  : writeMapEmpty(r.writeMapEmpty), writes(std::move(r.writes)), ver(r.ver),
-	    scratch_iterator(std::move(r.scratch_iterator)), arena(r.arena) {}
+	  : arena(r.arena), writeMapEmpty(r.writeMapEmpty), writes(std::move(r.writes)), ver(r.ver),
+	    scratch_iterator(std::move(r.scratch_iterator)) {}
 	WriteMap& operator=(WriteMap&& r) noexcept {
 		writeMapEmpty = r.writeMapEmpty;
 		writes = std::move(r.writes);

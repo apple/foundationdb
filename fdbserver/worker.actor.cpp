@@ -613,6 +613,19 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		}
 	}
 
+
+	for (const auto& grvProxy : dbi.client.grvProxies) {
+		if (grvProxy.addresses().contains(address)) {
+			return true;
+		}
+	}
+
+	for (const auto& commitProxy : dbi.client.commitProxies) {
+		if (commitProxy.addresses().contains(address)) {
+			return true;
+		}
+	}
+
 	auto localityIsInPrimaryDc = [&dbInfo](const LocalityData& locality) {
 		return locality.dcId() == dbInfo->get().master.locality.dcId();
 	};
@@ -667,9 +680,22 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(localTlog));
 	ASSERT(addressInDbAndPrimaryDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
-	// Last, use the master's address to test, which should be considered as in local DC.
+	// Use the master's address to test, which should be considered as in local DC.
 	testDbInfo.logSystemConfig.tLogs.clear();
 	ASSERT(addressInDbAndPrimaryDc(testAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Last, tests that proxies included in the ClientDbInfo are considered as local.
+	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
+	GrvProxyInterface grvProxyInterf;
+	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
+	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
+	CommitProxyInterface commitProxyInterf;
+	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
+	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	return Void();
 }
@@ -848,7 +874,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 	uint64_t page_size = sysconf(_SC_PAGESIZE);
 	int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
-		TraceEvent("OpenStatmFileFailure");
+		TraceEvent("OpenStatmFileFailure").log();
 		*error = true;
 		return false;
 	}
@@ -857,7 +883,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 	char stat_buf[buf_sz];
 	ssize_t stat_nread = read(fd, stat_buf, buf_sz);
 	if (stat_nread < 0) {
-		TraceEvent("ReadStatmFileFailure");
+		TraceEvent("ReadStatmFileFailure").log();
 		*error = true;
 		return false;
 	}
@@ -869,7 +895,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 		return true;
 	}
 #else
-	TraceEvent("CheckHighMemoryUnsupported");
+	TraceEvent("CheckHighMemoryUnsupported").log();
 	*error = true;
 #endif
 	return false;
@@ -926,7 +952,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		else if (e.getError().code() != error_code_please_reboot)
 			throw e.getError();
 
-		TraceEvent("StorageServerRequestedReboot", id);
+		TraceEvent("StorageServerRequestedReboot", id).log();
 
 		StorageServerInterface recruited;
 		recruited.uniqueID = id;
@@ -964,7 +990,7 @@ ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageCache));
 		if (!e.isError()) {
-			TraceEvent("StorageCacheRequestedReboot1", id);
+			TraceEvent("StorageCacheRequestedReboot1", id).log();
 			return Void();
 		} else if (e.getError().code() != error_code_please_reboot &&
 		           e.getError().code() != error_code_worker_removed) {
@@ -972,7 +998,7 @@ ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
 			throw e.getError();
 		}
 
-		TraceEvent("StorageCacheRequestedReboot", id);
+		TraceEvent("StorageCacheRequestedReboot", id).log();
 
 		StorageServerInterface recruited;
 		recruited.uniqueID = deterministicRandom()->randomUniqueID(); // id;
@@ -1504,7 +1530,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					}
 					throw please_reboot();
 				} else {
-					TraceEvent("ProcessReboot");
+					TraceEvent("ProcessReboot").log();
 					ASSERT(!rebootReq.deleteData);
 					flushAndExit(0);
 				}
@@ -2026,7 +2052,7 @@ ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInte
 			                                    ci->get().get().openDatabase.getEndpoint(), FailureStatus(false))
 			                              : Never())) {
 				printf("FDBD joined cluster.\n");
-				TraceEvent("FDBDConnected");
+				TraceEvent("FDBDConnected").log();
 				return Void();
 			}
 			when(wait(ci->onChange())) {}

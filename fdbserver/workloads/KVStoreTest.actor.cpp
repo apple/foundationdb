@@ -110,12 +110,12 @@ struct KVTest {
 	bool dispose;
 
 	explicit KVTest(int nodeCount, bool dispose, int keyBytes)
-	  : store(nullptr), dispose(dispose), startVersion(Version(time(nullptr)) << 30), lastSet(startVersion),
-	    lastCommit(startVersion), lastDurable(startVersion), nodeCount(nodeCount), keyBytes(keyBytes) {}
+	  : store(nullptr), startVersion(Version(time(nullptr)) << 30), lastSet(startVersion), lastCommit(startVersion),
+	    lastDurable(startVersion), nodeCount(nodeCount), keyBytes(keyBytes), dispose(dispose) {}
 	~KVTest() { close(); }
 	void close() {
 		if (store) {
-			TraceEvent("KVTestDestroy");
+			TraceEvent("KVTestDestroy").log();
 			if (dispose)
 				store->dispose();
 			else
@@ -373,7 +373,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	state Error err;
 
 	// wait( delay(1) );
-	TraceEvent("GO");
+	TraceEvent("GO").log();
 
 	UID id = deterministicRandom()->randomUniqueID();
 	std::string fn = workload->filename.size() ? workload->filename : id.toString();

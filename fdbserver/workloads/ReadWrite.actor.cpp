@@ -121,12 +121,12 @@ struct ReadWriteWorkload : KVWorkload {
 	bool doSetup;
 
 	ReadWriteWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), latencies(sampleSize), readLatencies(sampleSize), fullReadLatencies(sampleSize),
-	    commitLatencies(sampleSize), GRVLatencies(sampleSize), readLatencyTotal(0), readLatencyCount(0), loadTime(0.0),
-	    dependentReads(false), adjacentReads(false), adjacentWrites(false), clientBegin(0),
-	    aTransactions("A Transactions"), bTransactions("B Transactions"), retries("Retries"),
-	    totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
-	    totalRetriesMetric(LiteralStringRef("RWWorkload.TotalRetries")) {
+	  : KVWorkload(wcx), loadTime(0.0), clientBegin(0), dependentReads(false), adjacentReads(false),
+	    adjacentWrites(false), totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
+	    totalRetriesMetric(LiteralStringRef("RWWorkload.TotalRetries")), aTransactions("A Transactions"),
+	    bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize), readLatencies(sampleSize),
+	    commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize), readLatencyTotal(0),
+	    readLatencyCount(0) {
 		transactionSuccessMetric.init(LiteralStringRef("RWWorkload.SuccessfulTransaction"));
 		transactionFailureMetric.init(LiteralStringRef("RWWorkload.FailedTransaction"));
 		readMetric.init(LiteralStringRef("RWWorkload.Read"));

@@ -31,7 +31,8 @@ namespace {
 class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 public:
 	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
-	  : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath), m_writeOffset(0), m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
+	  : IBackupFile(fileName), m_file(file), m_writeOffset(0), m_finalFullPath(finalFullPath),
+	    m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
 		if (BUGGIFY) {
 			m_blockSize = deterministicRandom()->randomInt(100, 20000);
 		}
@@ -227,7 +228,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 		}
 
 		if (g_simulator.getCurrentProcess()->uid == UID()) {
-			TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID");
+			TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID").log();
 		}
 		std::string uniquePath = fullPath + "." + g_simulator.getCurrentProcess()->uid.toString() + ".lnk";
 		unlink(uniquePath.c_str());

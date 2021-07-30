@@ -766,7 +766,7 @@ struct EventLogRequest {
 	ReplyPromise<TraceEventFields> reply;
 
 	EventLogRequest() : getLastError(true) {}
-	explicit EventLogRequest(Standalone<StringRef> eventName) : eventName(eventName), getLastError(false) {}
+	explicit EventLogRequest(Standalone<StringRef> eventName) : getLastError(false), eventName(eventName) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -782,8 +782,8 @@ struct DebugEntryRef {
 	MutationRef mutation;
 	DebugEntryRef() {}
 	DebugEntryRef(const char* c, Version v, MutationRef const& m)
-	  : context((const uint8_t*)c, strlen(c)), version(v), mutation(m), time(now()),
-	    address(g_network->getLocalAddress()) {}
+	  : time(now()), address(g_network->getLocalAddress()), context((const uint8_t*)c, strlen(c)), version(v),
+	    mutation(m) {}
 	DebugEntryRef(Arena& a, DebugEntryRef const& d)
 	  : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
 

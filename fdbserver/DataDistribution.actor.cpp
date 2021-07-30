@@ -87,10 +87,10 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	             bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet,
 	             Version addedVersion = 0)
-	  : id(ssi.id()), collection(collection), lastKnownInterface(ssi), lastKnownClass(processClass),
-	    dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()),
-	    inDesiredDC(inDesiredDC), storeType(KeyValueStoreType::END), onTSSPairRemoved(Never()),
-	    addedVersion(addedVersion) {
+	  : id(ssi.id()), addedVersion(addedVersion), collection(collection), lastKnownInterface(ssi),
+	    lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()),
+	    onRemoved(removed.getFuture()), onTSSPairRemoved(Never()), inDesiredDC(inDesiredDC),
+	    storeType(KeyValueStoreType::END) {
 
 		if (!ssi.isTss()) {
 			localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -187,10 +187,10 @@ public:
 	Future<Void> tracker;
 
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
-	  : servers(servers), healthy(true), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), wrongConfiguration(false),
+	  : servers(servers), healthy(true), wrongConfiguration(false), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY),
 	    id(deterministicRandom()->randomUniqueID()) {
 		if (servers.empty()) {
-			TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers");
+			TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers").log();
 		}
 		serverIDs.reserve(servers.size());
 		for (int i = 0; i < servers.size(); i++) {
@@ -377,8 +377,8 @@ struct ServerStatus {
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
 	ServerStatus(bool isFailed, bool isUndesired, bool isWiggling, LocalityData const& locality)
-	  : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false),
-	    initialized(true), isWiggling(isWiggling) {}
+	  : isWiggling(isWiggling), isFailed(isFailed), isUndesired(isUndesired), isWrongConfiguration(false),
+	    initialized(true), locality(locality) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
 	const char* toString() const {
 		return isFailed ? "Failed" : isUndesired ? "Undesired" : isWiggling ? "Wiggling" : "Healthy";
@@ -445,7 +445,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			}
 			if (!result->mode || !ddEnabledState->isDDEnabled()) {
 				// DD can be disabled persistently (result->mode = 0) or transiently (isDDEnabled() = 0)
-				TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD");
+				TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
 				return result;
 			}
 
@@ -475,7 +475,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			wait(tr.onError(e));
 
 			ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this loop
-			TraceEvent("GetInitialTeamsRetry", distributorId);
+			TraceEvent("GetInitialTeamsRetry", distributorId).log();
 		}
 	}
 
@@ -737,22 +737,22 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 PromiseStream<GetMetricsRequest> getShardMetrics,
 	                 Promise<UID> removeFailedServer,
 	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount)
-	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false),
-	    teamBuilder(Void()), badTeamRemover(Void()), checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()),
-	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(true),
-	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
+	  : cx(cx), distributorId(distributorId), configuration(configuration), doBuildTeams(true),
+	    lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output), unhealthyServers(0),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
-	    healthyTeamCount(0), storageServerSet(new LocalityMap<UID>()),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
-	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
-	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
-	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), isTssRecruiting(false),
-	    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
-	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
-	    getShardMetrics(getShardMetrics), removeFailedServer(removeFailedServer),
-	    getUnhealthyRelocationCount(getUnhealthyRelocationCount) {
+	    recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
+	    zeroHealthyTeams(zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
+	    includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs), primary(primary),
+	    processingUnhealthy(processingUnhealthy), readyToStart(readyToStart),
+	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
+	    checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), storageServerSet(new LocalityMap<UID>()),
+	    clearHealthyZoneFuture(true), medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO),
+	    lastMedianAvailableSpaceUpdate(0), lowestUtilizationTeam(0), highestUtilizationTeam(0),
+	    getShardMetrics(getShardMetrics), getUnhealthyRelocationCount(getUnhealthyRelocationCount),
+	    removeFailedServer(removeFailedServer) {
 		if (!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest("DDTrackerStarting");
 		}
@@ -4160,14 +4160,14 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 					    &stopWiggleSignal, finishStorageWiggleSignal.getFuture(), teamCollection));
 					collection.add(perpetualStorageWiggler(
 					    &stopWiggleSignal, finishStorageWiggleSignal, teamCollection, ddEnabledState));
-					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId);
+					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId).log();
 				} else if (speed == 0) {
 					if (!stopWiggleSignal.get()) {
 						stopWiggleSignal.set(true);
 						wait(collection.signalAndReset());
 						teamCollection->pauseWiggle->set(true);
 					}
-					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId);
+					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId).log();
 				}
 				wait(watchFuture);
 				break;
@@ -4262,7 +4262,7 @@ ACTOR Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
 				auto p = decodeHealthyZoneValue(val.get());
 				if (p.first == ignoreSSFailuresZoneString) {
 					// healthyZone is now overloaded for DD diabling purpose, which does not timeout
-					TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId);
+					TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId).log();
 					healthyZoneTimeout = Never();
 				} else if (p.second > tr.getReadVersion().get()) {
 					double timeoutSeconds =
@@ -4277,15 +4277,15 @@ ACTOR Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
 					}
 				} else if (self->healthyZone.get().present()) {
 					// maintenance hits timeout
-					TraceEvent("MaintenanceZoneEndTimeout", self->distributorId);
+					TraceEvent("MaintenanceZoneEndTimeout", self->distributorId).log();
 					self->healthyZone.set(Optional<Key>());
 				}
 			} else if (self->healthyZone.get().present()) {
 				// `healthyZone` has been cleared
 				if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
-					TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId);
+					TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId).log();
 				} else {
-					TraceEvent("MaintenanceZoneEndManualClear", self->distributorId);
+					TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).log();
 				}
 				self->healthyZone.set(Optional<Key>());
 			}
@@ -4432,7 +4432,7 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 						status->isFailed = false;
 					} else if (self->clearHealthyZoneFuture.isReady()) {
 						self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
-						TraceEvent("MaintenanceZoneCleared", self->distributorId);
+						TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
 						self->healthyZone.set(Optional<Key>());
 					}
 				}
@@ -4987,7 +4987,7 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	TSSPairState() : active(false) {}
 
 	TSSPairState(const LocalityData& locality)
-	  : active(true), dcId(locality.dcId()), dataHallId(locality.dataHallId()) {}
+	  : dcId(locality.dcId()), dataHallId(locality.dataHallId()), active(true) {}
 
 	bool inDataZone(const LocalityData& locality) {
 		return locality.dcId() == dcId && locality.dataHallId() == dataHallId;
@@ -5491,7 +5491,7 @@ ACTOR Future<Void> serverGetTeamRequests(TeamCollectionInterface tci, DDTeamColl
 }
 
 ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
-	TraceEvent("DDTrackerStarting");
+	TraceEvent("DDTrackerStarting").log();
 	while (db->get().recoveryState < RecoveryState::ALL_LOGS_RECRUITED) {
 		TraceEvent("DDTrackerStarting").detail("RecoveryState", (int)db->get().recoveryState);
 		wait(db->onChange());
@@ -5625,7 +5625,7 @@ ACTOR Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledSt
 		try {
 			Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 			if (!mode.present() && ddEnabledState->isDDEnabled()) {
-				TraceEvent("WaitForDDEnabledSucceeded");
+				TraceEvent("WaitForDDEnabledSucceeded").log();
 				return Void();
 			}
 			if (mode.present()) {
@@ -5636,7 +5636,7 @@ ACTOR Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledSt
 				    .detail("Mode", m)
 				    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
 				if (m && ddEnabledState->isDDEnabled()) {
-					TraceEvent("WaitForDDEnabledSucceeded");
+					TraceEvent("WaitForDDEnabledSucceeded").log();
 					return Void();
 				}
 			}
@@ -5711,7 +5711,7 @@ ACTOR Future<Void> debugCheckCoalescing(Database cx) {
 						    .detail("Value", ranges[j].value);
 			}
 
-			TraceEvent("DoneCheckingCoalescing");
+			TraceEvent("DoneCheckingCoalescing").log();
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -5807,10 +5807,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 		state Promise<UID> removeFailedServer;
 		try {
 			loop {
-				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
+				TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
 				MoveKeysLock lock_ = wait(takeMoveKeysLock(cx, self->ddId));
 				lock = lock_;
-				TraceEvent("DDInitTookMoveKeysLock", self->ddId);
+				TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
 
 				DatabaseConfiguration configuration_ = wait(getDatabaseConfiguration(cx));
 				configuration = configuration_;
@@ -5854,7 +5854,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					}
 				}
 
-				TraceEvent("DDInitUpdatedReplicaKeys", self->ddId);
+				TraceEvent("DDInitUpdatedReplicaKeys", self->ddId).log();
 				Reference<InitialDataDistribution> initData_ = wait(getInitialDataDistribution(
 				    cx,
 				    self->ddId,
@@ -5882,7 +5882,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					// mode may be set true by system operator using fdbcli and isDDEnabled() set to true
 					break;
 				}
-				TraceEvent("DataDistributionDisabled", self->ddId);
+				TraceEvent("DataDistributionDisabled", self->ddId).log();
 
 				TraceEvent("MovingData", self->ddId)
 				    .detail("InFlight", 0)
@@ -5919,7 +5919,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				    .trackLatest("TotalDataInFlightRemote");
 
 				wait(waitForDataDistributionEnabled(cx, ddEnabledState));
-				TraceEvent("DataDistributionEnabled");
+				TraceEvent("DataDistributionEnabled").log();
 			}
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
@@ -6256,7 +6256,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 				}
 				wait(waitForAll(enablePops));
 			} catch (Error& error) {
-				TraceEvent(SevDebug, "IgnoreEnableTLogPopFailure");
+				TraceEvent(SevDebug, "IgnoreEnableTLogPopFailure").log();
 			}
 		}
 		throw e;
@@ -6271,7 +6271,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
 	if (!ddEnabledState->setDDEnabled(false, snapReq.snapUID)) {
 		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation fails
 		// here
-		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck");
+		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck").log();
 		snapReq.reply.sendError(operation_failed());
 		return Void();
 	}
@@ -6344,18 +6344,18 @@ bool _exclusionSafetyCheck(vector<UID>& excludeServerIDs, DDTeamCollection* team
 ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
                                           Reference<DataDistributorData> self,
                                           Database cx) {
-	TraceEvent("DDExclusionSafetyCheckBegin", self->ddId);
+	TraceEvent("DDExclusionSafetyCheckBegin", self->ddId).log();
 	vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
 	DistributorExclusionSafetyCheckReply reply(true);
 	if (!self->teamCollection) {
-		TraceEvent("DDExclusionSafetyCheckTeamCollectionInvalid", self->ddId);
+		TraceEvent("DDExclusionSafetyCheckTeamCollectionInvalid", self->ddId).log();
 		reply.safe = false;
 		req.reply.send(reply);
 		return Void();
 	}
 	// If there is only 1 team, unsafe to mark failed: team building can get stuck due to lack of servers left
 	if (self->teamCollection->teams.size() <= 1) {
-		TraceEvent("DDExclusionSafetyCheckNotEnoughTeams", self->ddId);
+		TraceEvent("DDExclusionSafetyCheckNotEnoughTeams", self->ddId).log();
 		reply.safe = false;
 		req.reply.send(reply);
 		return Void();
@@ -6371,7 +6371,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 		}
 	}
 	reply.safe = _exclusionSafetyCheck(excludeServerIDs, self->teamCollection);
-	TraceEvent("DDExclusionSafetyCheckFinish", self->ddId);
+	TraceEvent("DDExclusionSafetyCheckFinish", self->ddId).log();
 	req.reply.send(reply);
 	return Void();
 }
