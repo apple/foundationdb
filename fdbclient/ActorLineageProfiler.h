@@ -163,7 +163,7 @@ public:
 	void collect(const Reference<ActorLineage>& lineage);
 	const SampleCollector& collector() const { return _collector; }
 	SampleCollector& collector() { return _collector; }
-	Reference<ActorLineage> getCurrentLineage() { return _currentLineage; }
+	Reference<ActorLineage> getLineage() { return _currentLineage; }
 };
 
 using SampleCollection = crossbow::singleton<SampleCollection_t>;

@@ -44,12 +44,14 @@ ActorLineage::~ActorLineage() {
 	}
 }
 
+#ifdef ENABLE_SAMPLING
 LineageReference getCurrentLineage() {
 	if (!currentLineage->isValid() || !currentLineage->isAllocated()) {
 		currentLineage->allocate();
 	}
 	return *currentLineage;
 }
+#endif
 
 #ifdef ENABLE_SAMPLING
 void sample(LineageReference* lineagePtr);

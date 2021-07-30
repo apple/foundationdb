@@ -567,7 +567,11 @@ private:
 extern std::atomic<bool> startSampling;
 extern thread_local LineageReference* currentLineage;
 
+#ifdef ENABLE_SAMPLING
 LineageReference getCurrentLineage();
+#else
+#define getCurrentLineage() if (false) (*currentLineage)
+#endif
 void replaceLineage(LineageReference* lineage);
 
 struct StackLineage : LineageProperties<StackLineage> {

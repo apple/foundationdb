@@ -304,13 +304,13 @@ target_include_directories(fdbserver PRIVATE
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient_sampling fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
 else()
-  target_link_libraries(fdbserver PRIVATE fdbclient_sampling fdb_sqlite)
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
-target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
+# target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)

@@ -291,7 +291,7 @@ ActorLineageProfilerT::ActorLineageProfilerT() : impl(new ProfilerImpl()) {
 	//     WaitState::Disk,
 	//     std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet())));
 	collection->collector()->addGetter(WaitState::Running, []() {
-		return std::vector<Reference<ActorLineage>>({ SampleCollection::instance().getCurrentLineage() });
+		return std::vector<Reference<ActorLineage>>({ SampleCollection::instance().getLineage() });
 	});
 }
 
