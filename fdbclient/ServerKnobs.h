@@ -357,6 +357,8 @@ public:
 	double SAMPLE_EXPIRATION_TIME;
 	double SAMPLE_POLL_TIME;
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
+	bool INSERT_EMPTY_TRANSACTION;
+	int64_t LAGGING_TLOG_GROUP_VERSION_LIMIT;
 
 	// Backup Worker
 	double BACKUP_TIMEOUT; // master's reaction time for backup failure
