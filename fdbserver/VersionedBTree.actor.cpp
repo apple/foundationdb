@@ -2784,6 +2784,7 @@ public:
 		Standalone<VectorRef<LogicalPageID>> unmappedPageIDs;
 		Standalone<VectorRef<LogicalPageID>> remapOriginalPageIDs;
 		Standalone<VectorRef<LogicalPageID>> remapNewPageIDs;
+
 		for(auto pageID:pageIDs){
 			auto i = remappedPages.find(pageID);
 			if (i != remappedPages.end()) {
@@ -2807,6 +2808,7 @@ public:
 				unmappedPageIDs.push_back(unmappedPageIDs.arena(), pageID);
 			}
 		}
+
 		if(unmappedPageIDs.size()>0) {
 			ASSERT(unmappedPageIDs.size() == pageIDs.size());
 			freeUnmappedPage(unmappedPageIDs, v);
@@ -3250,7 +3252,7 @@ public:
 			self->updatePage(PagerEventReasons::MetaData,
 			                 nonBtreeLevel,
 			                 p.originalPageIDs,
-			                 data->subPage(0, self->physicalPageSize));
+			                 data);
 			++g_redwoodMetrics.metric.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
 			++g_redwoodMetrics.metric.pagerRemapSkip;
