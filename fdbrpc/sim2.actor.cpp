@@ -179,7 +179,7 @@ SimClogging g_clogging;
 
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn(ISimulator::ProcessInfo* process)
-	  : process(process), dbgid(deterministicRandom()->randomUniqueID()), opened(false), closedByCaller(false),
+	  : opened(false), closedByCaller(false), process(process), dbgid(deterministicRandom()->randomUniqueID()),
 	    stopReceive(Never()) {
 		pipes = sender(this) && receiver(this);
 	}
@@ -563,8 +563,8 @@ private:
 	           const std::string& filename,
 	           const std::string& actualFilename,
 	           int flags)
-	  : h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename),
-	    actualFilename(actualFilename), dbgId(deterministicRandom()->randomUniqueID()), flags(flags) {}
+	  : h(h), diskParameters(diskParameters), filename(filename), actualFilename(actualFilename), flags(flags),
+	    dbgId(deterministicRandom()->randomUniqueID()), delayOnWrite(delayOnWrite) {}
 
 	static int flagConversion(int flags) {
 		int outFlags = O_BINARY | O_CLOEXEC;
@@ -1993,7 +1993,7 @@ public:
 	}
 
 	Sim2()
-	  : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
+	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), taskCount(0), yielded(false), yield_limit(0) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",
@@ -2017,13 +2017,13 @@ public:
 		ProcessInfo* machine;
 		Promise<Void> action;
 		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action)
-		  : time(time), taskID(taskID), stable(stable), machine(machine), action(std::move(action)) {}
+		  : taskID(taskID), time(time), stable(stable), machine(machine), action(std::move(action)) {}
 		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future)
-		  : time(time), taskID(taskID), stable(stable), machine(machine) {
+		  : taskID(taskID), time(time), stable(stable), machine(machine) {
 			future = action.getFuture();
 		}
 		Task(Task&& rhs) noexcept
-		  : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine),
+		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
 		    action(std::move(rhs.action)) {}
 		void operator=(Task const& rhs) {
 			taskID = rhs.taskID;

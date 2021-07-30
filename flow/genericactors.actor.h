@@ -1543,10 +1543,10 @@ struct BoundedFlowLock : NonCopyable, public ReferenceCounted<BoundedFlowLock> {
 		}
 	};
 
-	BoundedFlowLock() : unrestrictedPermits(1), boundedPermits(0), nextPermitNumber(0), minOutstanding(0) {}
+	BoundedFlowLock() : minOutstanding(0), nextPermitNumber(0), unrestrictedPermits(1), boundedPermits(0) {}
 	explicit BoundedFlowLock(int64_t unrestrictedPermits, int64_t boundedPermits)
-	  : unrestrictedPermits(unrestrictedPermits), boundedPermits(boundedPermits), nextPermitNumber(0),
-	    minOutstanding(0) {}
+	  : minOutstanding(0), nextPermitNumber(0), unrestrictedPermits(unrestrictedPermits),
+	    boundedPermits(boundedPermits) {}
 
 	Future<int64_t> take() { return takeActor(this); }
 	void release(int64_t permitNumber) {

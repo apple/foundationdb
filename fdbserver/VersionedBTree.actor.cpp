@@ -2108,10 +2108,10 @@ public:
 	          int concurrentExtentReads,
 	          bool memoryOnly = false,
 	          Promise<Void> errorPromise = {})
-	  : desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize), filename(filename), pHeader(nullptr),
-	    pageCacheBytes(pageCacheSizeBytes), memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow),
-	    concurrentExtentReads(new FlowLock(concurrentExtentReads)), errorPromise(errorPromise),
-	    ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority) {
+	  : ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority), pageCacheBytes(pageCacheSizeBytes), pHeader(nullptr),
+	    desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize), filename(filename),
+	    memoryOnly(memoryOnly), errorPromise(errorPromise), remapCleanupWindow(remapCleanupWindow),
+	    concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
@@ -3728,7 +3728,7 @@ private:
 class DWALPagerSnapshot : public IPagerSnapshot, public ReferenceCounted<DWALPagerSnapshot> {
 public:
 	DWALPagerSnapshot(DWALPager* pager, Key meta, Version version, Future<Void> expiredFuture)
-	  : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {}
+	  : pager(pager), expired(expiredFuture), version(version), metaKey(meta) {}
 	~DWALPagerSnapshot() override {}
 
 	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
@@ -4655,7 +4655,7 @@ public:
 	Version getLastCommittedVersion() const { return m_lastCommittedVersion; }
 
 	VersionedBTree(IPager2* pager, std::string name)
-	  : m_pager(pager), m_writeVersion(invalidVersion), m_lastCommittedVersion(invalidVersion), m_pBuffer(nullptr),
+	  : m_pager(pager), m_pBuffer(nullptr), m_writeVersion(invalidVersion), m_lastCommittedVersion(invalidVersion),
 	    m_name(name), m_pHeader(nullptr), m_headerSpace(0) {
 
 		m_lazyClearActor = 0;
@@ -5778,7 +5778,7 @@ private:
 	struct InternalPageModifier {
 		InternalPageModifier() {}
 		InternalPageModifier(Reference<const ArenaPage> p, bool alreadyCloned, bool updating, ParentInfo* parentInfo)
-		  : page(p), clonedPage(alreadyCloned), updating(updating), changesMade(false), parentInfo(parentInfo) {}
+		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo) {}
 
 		// Whether updating the existing page is allowed
 		bool updating;
@@ -8894,7 +8894,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 }
 
 struct SimpleCounter {
-	SimpleCounter() : x(0), xt(0), t(timer()), start(t) {}
+	SimpleCounter() : x(0), t(timer()), start(t), xt(0) {}
 	void operator+=(int n) { x += n; }
 	void operator++() { x++; }
 	int64_t get() { return x; }

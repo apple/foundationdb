@@ -70,7 +70,7 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		// combinations, but still take advantage of move constructors when available (or required).
 		template <class T_, class Metric_>
 		Node(T_&& data, Metric_&& m, Node* parent = 0)
-		  : data(std::forward<T_>(data)), total(std::forward<Metric_>(m)), parent(parent), balance(0) {
+		  : data(std::forward<T_>(data)), balance(0), total(std::forward<Metric_>(m)), parent(parent) {
 			child[0] = child[1] = nullptr;
 		}
 		Node(Node const&) = delete;

@@ -281,7 +281,7 @@ template <class S, class T>
 class FlatMapSingleAssignmentVar final : public ThreadSingleAssignmentVar<T>, ThreadCallback {
 public:
 	FlatMapSingleAssignmentVar(ThreadFuture<S> source, std::function<ErrorOr<ThreadFuture<T>>(ErrorOr<S>)> mapValue)
-	  : source(source), mapValue(mapValue), cancelled(false), released(false) {
+	  : source(source), cancelled(false), released(false), mapValue(mapValue) {
 		ThreadSingleAssignmentVar<T>::addref();
 
 		int userParam;
