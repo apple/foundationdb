@@ -19,7 +19,10 @@
  */
 
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <string>
 #include <vector>
 
 #include "fdbbackup/BackupTLSConfig.h"
@@ -65,6 +68,12 @@ void printDecodeUsage() {
 	    TLS_HELP
 #endif
 	       "  --build_flags  Print build information and exit.\n"
+		   "  --list_only    Print file list and exit.\n"
+		   "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
+		   "  --begin_version_filter BEGIN_VERSION\n"
+		   "                 The version range's begin version (inclusive) for filtering.\n"
+		   "  --end_version_filter END_VERSION\n"
+		   "                 The version range's end version (exclusive) for filtering.\n"
 	       "\n";
 	return;
 }
@@ -79,6 +88,16 @@ struct DecodeParams {
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
+	bool list_only = false;
+	std::string prefix; // Key prefix for filtering
+	Version beginVersionFilter = 0;
+	Version endVersionFilter = std::numeric_limits<Version>::max();
+
+	// Returns if [begin, end) overlap with the filter range
+	bool overlap(Version begin, Version end) const {
+		// Filter [100, 200),  [50,75) [200, 300)
+		return !(begin >= endVersionFilter || end <= beginVersionFilter);
+	}
 
 	std::string toString() {
 		std::string s;
@@ -96,6 +115,13 @@ struct DecodeParams {
 			if (!trace_log_group.empty()) {
 				s.append(" LogGroup:").append(trace_log_group);
 			}
+		}
+		s.append(", list_only: ").append(list_only ? "true" : "false");
+		if (beginVersionFilter != 0) {
+			s.append(", beginVersionFilter: ").append(std::to_string(beginVersionFilter));
+		}
+		if (endVersionFilter < std::numeric_limits<Version>::max()) {
+			s.append(", endVersionFilter: ").append(std::to_string(endVersionFilter));
 		}
 		return s;
 	}
@@ -122,6 +148,22 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 
 		case OPT_CONTAINER:
 			param->container_url = args->OptionArg();
+			break;
+
+		case OPT_LIST_ONLY:
+			param->list_only = true;
+			break;
+
+		case OPT_KEY_PREFIX:
+			ASSERT(false); // TODO
+			break;
+
+		case OPT_BEGIN_VERSION_FILTER:
+			param->beginVersionFilter = std::atoll(args->OptionArg());
+			break;
+
+		case OPT_END_VERSION_FILTER:
+			param->endVersionFilter = std::atoll(args->OptionArg());
 			break;
 
 		case OPT_CRASHONERROR:
@@ -202,7 +244,8 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, const DecodeParams& params) {
 	std::vector<LogFile> filtered;
 	for (const auto& file : files) {
-		if (file.fileName.find(params.fileFilter) != std::string::npos) {
+		if (file.fileName.find(params.fileFilter) != std::string::npos &&
+		    params.overlap(file.beginVersion, file.endVersion + 1)) {
 			filtered.push_back(file);
 		}
 	}
@@ -519,6 +562,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 	state std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params);
 	printLogFiles("Relevant files are: ", logs);
+
+	if (params.list_only) return Void();
 
 	state int i = 0;
 	// Previous file's unfinished version data
