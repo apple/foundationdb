@@ -337,6 +337,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
 	init( ROCKSDB_PREFIX_LEN,                                      0 );
 	init( ROCKSDB_BLOCK_CACHE_SIZE,                                0 );
+	init( ROCKSDB_METRICS_DELAY,                                60.0 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
