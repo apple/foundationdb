@@ -141,7 +141,14 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 		state int corruptedWorkers = 0;
 		loop {
 			wait(poisson(&lastTime, 1));
-			wait(store(machines, getStorageWorkers(cx, self->dbInfo, false)));
+			try {
+				wait(store(machines, getStorageWorkers(cx, self->dbInfo, false)));
+			} catch (Error& e) {
+				// If we failed to get a list of storage servers, we can't inject failure events
+				// But don't throw the error in that case
+				TraceEvent("DiskFailureInjectionFailed");
+				return Void();
+			}
 			auto machine = deterministicRandom()->randomChoice(machines);
 
 			// If we have already chosen this worker, then just continue
