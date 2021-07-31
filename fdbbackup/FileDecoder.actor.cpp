@@ -578,6 +578,10 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 		wait(progress.openFile(container));
 		while (!progress.finished()) {
 			VersionedMutations vms = wait(progress.getNextBatch());
+			if (vms.version < params.beginVersionFilter || vms.version >= params.endVersionFilter) {
+				continue;
+			}
+
 			for (const auto& m : vms.mutations) {
 				if (params.prefix.empty()) { // no filtering
 					std::cout << vms.version << " " << m.toString() << "\n";
