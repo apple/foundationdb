@@ -4820,9 +4820,7 @@ namespace {
 // `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
     // Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-    state ClusterControllerData data(ClusterControllerFullInterface(),
-                                     LocalityData(),
-                                     ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+    state ClusterControllerData data(ClusterControllerFullInterface(), LocalityData());
     state NetworkAddress workerAddress(IPAddress(0x01010101), 1);
     state NetworkAddress badPeer1(IPAddress(0x02020202), 1);
     state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
@@ -4878,9 +4876,7 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 
 TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	ClusterControllerData data = ClusterControllerData(ClusterControllerFullInterface(), LocalityData());
 	NetworkAddress worker1(IPAddress(0x01010101), 1);
 	NetworkAddress worker2(IPAddress(0x11111111), 1);
 	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
@@ -4914,9 +4910,7 @@ TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
 
 TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	ClusterControllerData data = ClusterControllerData(ClusterControllerFullInterface(), LocalityData());
 	NetworkAddress worker(IPAddress(0x01010101), 1);
 	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
 	NetworkAddress badPeer2(IPAddress(0x03030303), 1);
@@ -5015,9 +5009,7 @@ TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 
 TEST_CASE("/fdbserver/clustercontroller/recentRecoveryCountDueToHealth") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	ClusterControllerData data = ClusterControllerData(ClusterControllerFullInterface(), LocalityData());
 
 	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 0);
 
@@ -5035,9 +5027,7 @@ TEST_CASE("/fdbserver/clustercontroller/recentRecoveryCountDueToHealth") {
 
 TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServers") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	ClusterControllerData data = ClusterControllerData(ClusterControllerFullInterface(), LocalityData());
 	NetworkAddress master(IPAddress(0x01010101), 1);
 	NetworkAddress tlog(IPAddress(0x02020202), 1);
 	NetworkAddress satelliteTlog(IPAddress(0x03030303), 1);
