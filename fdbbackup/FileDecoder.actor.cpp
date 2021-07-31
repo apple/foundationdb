@@ -32,6 +32,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MutationList.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
@@ -546,7 +547,7 @@ public:
 
 ACTOR Future<Void> decode_logs(DecodeParams params) {
 	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
-
+	state UID uid = deterministicRandom()->randomUniqueID();
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs
 	listing.logs.erase(std::remove_if(listing.logs.begin(),
@@ -557,7 +558,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	                                  }),
 	                   listing.logs.end());
 	std::sort(listing.logs.begin(), listing.logs.end());
-	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());
+	TraceEvent("Container", uid).detail("URL", params.container_url).detail("Logs", listing.logs.size());
+	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params.toString());
 
 	BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
@@ -598,7 +600,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 					}
 				}
 				if (print) {
-					TraceEvent(format("Mutation_%d_%d", vms.version, i).c_str())
+					TraceEvent(format("Mutation_%d_%d", vms.version, i).c_str(), uid)
 					    .detail("Version", vms.version)
 					    .setMaxFieldLength(10000)
 					    .detail("M", m.toString());
@@ -611,7 +613,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 			TraceEvent("UnfinishedFile").detail("File", logs[i].fileName).detail("Q", left.size());
 		}
 	}
-	TraceEvent("DecodeDone");
+	TraceEvent("DecodeDone", uid);
 	return Void();
 }
 
