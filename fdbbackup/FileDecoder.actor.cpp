@@ -88,7 +88,7 @@ void printBuildInformation() {
 struct DecodeParams {
 	std::string container_url;
 	std::string fileFilter; // only files match the filter will be decoded
-	bool log_enabled = false;
+	bool log_enabled = true;
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
@@ -189,7 +189,7 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case OPT_TRACE_FORMAT:
-			if (!validateTraceFormat(args->OptionArg())) {
+			if (!selectTraceFormatter(args->OptionArg())) {
 				std::cerr << "ERROR: Unrecognized trace format " << args->OptionArg() << "\n";
 				return FDB_EXIT_ERROR;
 			}
@@ -641,6 +641,8 @@ int main(int argc, char** argv) {
 			}
 			if (!param.trace_format.empty()) {
 				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(param.trace_format));
+			} else {
+				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, "json"_sr);
 			}
 			if (!param.trace_log_group.empty()) {
 				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(param.trace_log_group));
