@@ -53,7 +53,7 @@ public:
 		return Standalone<StringRef>(decrypted, arena);
 	}
 
-	ACTOR static Future<int> read(AsyncFileEncrypted* self, void* data, int length, int offset) {
+	ACTOR static Future<int> read(AsyncFileEncrypted* self, void* data, int length, int64_t offset) {
 		state const uint16_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
 		state const uint16_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
 		state uint16_t block;
@@ -61,15 +61,14 @@ public:
 		state int bytesRead = 0;
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
 		for (block = firstBlock; block <= lastBlock; ++block) {
-			state StringRef plaintext;
+			state Standalone<StringRef> plaintext;
 
 			auto cachedBlock = self->readBuffers.get(block);
 			if (cachedBlock.present()) {
 				plaintext = cachedBlock.get();
 			} else {
-				Standalone<StringRef> _plaintext = wait(readBlock(self, block));
-				self->readBuffers.insert(block, _plaintext);
-				plaintext = _plaintext;
+				wait(store(plaintext, readBlock(self, block)));
+				self->readBuffers.insert(block, plaintext);
 			}
 			auto start = (block == firstBlock) ? plaintext.begin() + (offset % FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)
 			                                   : plaintext.begin();
@@ -79,6 +78,14 @@ public:
 			if ((offset + length) % FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE == 0) {
 				end = plaintext.end();
 			}
+
+			// The block could be short if it includes or is after the end of the file.
+			end = std::min(end, plaintext.end());
+			// If the start position is at or after the end of the block, the read is complete.
+			if (start == end || start >= plaintext.end()) {
+				break;
+			}
+
 			std::copy(start, end, output);
 			output += (end - start);
 			bytesRead += (end - start);
