@@ -583,22 +583,21 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 			}
 
 			for (const auto& m : vms.mutations) {
-				if (params.prefix.empty()) { // no filtering
-					std::cout << vms.version << " " << m.toString() << "\n";
-					continue;
-				}
+				bool print = params.prefix.empty(); // no filtering
 
-				if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-					if (m.param1.startsWith(params.prefix)) {
-						std::cout << vms.version << " " << m.toString() << "\n";
+				if (!print) {
+					if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+						print = m.param1.startsWith(params.prefix);
+					} else if (m.type == MutationRef::ClearRange) {
+						KeyRange range(KeyRangeRef(m.param1, m.param2));
+						print = range.contains(params.prefix);
+					} else {
+						ASSERT(false);
 					}
-				} else if (m.type == MutationRef::ClearRange) {
-					KeyRange range(KeyRangeRef(m.param1, m.param2));
-					if (range.contains(params.prefix)) {
-						std::cout << vms.version << " " << m.toString() << "\n";
-					}
-				} else {
-					ASSERT(false);
+				}
+				if (print) {
+					TraceEvent("Mutation").detail("Version", vms.version).detail("M", m.toString());
+					std::cout << vms.version << " " << m.toString() << "\n";
 				}
 			}
 		}
@@ -607,6 +606,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 			TraceEvent("UnfinishedFile").detail("File", logs[i].fileName).detail("Q", left.size());
 		}
 	}
+	TraceEvent("DecodeDone");
 	return Void();
 }
 
