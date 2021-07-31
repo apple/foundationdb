@@ -596,7 +596,10 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 					}
 				}
 				if (print) {
-					TraceEvent("Mutation").detail("Version", vms.version).detail("M", m.toString());
+					TraceEvent("Mutation")
+					    .detail("Version", vms.version)
+					    .setMaxFieldLength(10000)
+					    .detail("M", m.toString());
 					std::cout << vms.version << " " << m.toString() << "\n";
 				}
 			}
@@ -655,6 +658,11 @@ int main(int argc, char** argv) {
 		auto f = stopAfter(decode_logs(param));
 
 		runNetwork();
+
+		flushTraceFileVoid();
+		fflush(stdout);
+		closeTraceFile();
+
 		return status;
 	} catch (Error& e) {
 		std::cerr << "ERROR: " << e.what() << "\n";
