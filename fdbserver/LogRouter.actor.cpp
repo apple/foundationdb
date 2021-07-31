@@ -441,153 +441,50 @@ Version poppedVersion(LogRouterData* self, Tag tag) {
 	return tagData->popped;
 }
 
-ACTOR Future<TLogPeekReply> peekLogRouter(LogRouterData* self,
-                                          Version begin,
-                                          Tag tag,
-                                          bool returnIfBlocked = false,
-                                          bool reqOnlySpilled = false,
-                                          bool streamReply = false,
-                                          Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>()) {
-	state BinaryWriter messages(Unversioned());
-	state int sequenceNum = -1;
-	state UID peekId;
-
-	if (sequence.present()) {
-		peekId = sequence.get().first;
-		sequenceNum = sequence.get().second;
-		if (sequenceNum >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
-		    self->peekTracker.find(peekId) == self->peekTracker.end()) {
-			throw operation_obsolete();
-		}
-		auto& trackerData = self->peekTracker[peekId];
-		if (sequenceNum == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
-			trackerData.sequence_version[0].send(std::make_pair(begin, reqOnlySpilled));
-		}
-		auto seqBegin = trackerData.sequence_version.begin();
-		// The peek cursor and this comparison need to agree about the maximum number of in-flight requests.
-		while (trackerData.sequence_version.size() &&
-		       seqBegin->first <= sequenceNum - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
-			if (seqBegin->second.canBeSet()) {
-				seqBegin->second.sendError(operation_obsolete());
-			}
-			trackerData.sequence_version.erase(seqBegin);
-			seqBegin = trackerData.sequence_version.begin();
-		}
-
-		if (trackerData.sequence_version.size() && sequenceNum < seqBegin->first) {
-			throw operation_obsolete();
-		}
-
-		trackerData.lastUpdate = now();
-		std::pair<Version, bool> prevPeekData = wait(trackerData.sequence_version[sequenceNum].getFuture());
-		begin = prevPeekData.first;
-		reqOnlySpilled = prevPeekData.second;
-		wait(yield());
-	}
-
-	//TraceEvent("LogRouterPeek1", self->dbgid).detail("From", req.reply.getEndpoint().getPrimaryAddress()).detail("Ver", self->version.get()).detail("Begin", req.begin);
-	if (returnIfBlocked && self->version.get() < begin) {
-		//TraceEvent("LogRouterPeek2", self->dbgid);
-		if (sequence.present()) {
-			auto& trackerData = self->peekTracker[peekId];
-			auto& sequenceData = trackerData.sequence_version[sequenceNum + 1];
-			if (!sequenceData.isSet()) {
-				sequenceData.send(std::make_pair(begin, reqOnlySpilled));
-			}
-		}
-		throw end_of_stream();
-	}
-
-	if (self->version.get() < begin) {
-		wait(self->version.whenAtLeast(begin));
-		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
-	}
-
-	Version poppedVer = poppedVersion(self, tag);
-
-	if (poppedVer > begin || begin < self->startVersion) {
-		// This should only happen if a packet is sent multiple times and the reply is not needed.
-		// Since we are using popped differently, do not send a reply.
-		TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid)
-		    .detail("Begin", begin)
-		    .detail("Popped", poppedVer)
-		    .detail("Start", self->startVersion);
-		if (sequence.present()) {
-			auto& trackerData = self->peekTracker[peekId];
-			auto& sequenceData = trackerData.sequence_version[sequenceNum + 1];
-			if (!sequenceData.isSet()) {
-				sequenceData.send(std::make_pair(begin, reqOnlySpilled));
-			}
-		}
-		if (streamReply) {
-			// for streaming reply, we skip the popped part
-			begin = std::min(poppedVer, self->startVersion);
-		} else {
-			throw no_action_needed(); // we've already replied in the past
-		}
-	}
-
-	Version endVersion = self->version.get() + 1;
-	peekMessagesFromMemory(self, tag, begin, messages, endVersion);
-
-	TLogPeekReply reply;
-	reply.maxKnownVersion = self->version.get();
-	reply.minKnownCommittedVersion = self->poppedVersion;
-	reply.messages = StringRef(reply.arena, messages.toValue());
-	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
-	reply.end = endVersion;
-	reply.onlySpilled = false;
-
-	if (sequence.present()) {
-		auto& trackerData = self->peekTracker[peekId];
-		trackerData.lastUpdate = now();
-		auto& sequenceData = trackerData.sequence_version[sequenceNum + 1];
-		if (trackerData.sequence_version.size() && sequenceNum + 1 < trackerData.sequence_version.begin()->first) {
-			if (!sequenceData.isSet())
-				sequenceData.sendError(operation_obsolete());
-			throw operation_obsolete();
-		}
-		if (sequenceData.isSet()) {
-			if (sequenceData.getFuture().get().first != reply.end) {
-				TEST(true); // tlog peek second attempt ended at a different version
-				throw operation_obsolete();
-			}
-		} else {
-			sequenceData.send(std::make_pair(reply.end, reply.onlySpilled));
-		}
-		reply.begin = begin;
-	}
-
-	//TraceEvent("LogRouterPeek4", self->dbgid);
-	return reply;
-}
-
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamRequest req) {
-	self->activePeekStreams++;
+	return Void();
+}
 
-	state Version begin = req.begin;
-	state bool onlySpilled = false;
+ACTOR Future<Void> logRouterPeekMessages(LogRouterData* self, TLogPeekRequest req) {
+	state BinaryWriter messages(Unversioned());
+	state int sequence = -1;
+	state UID peekId;
 
-	req.reply.setByteLimit(std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, req.limitBytes));
-	loop {
-		state TLogPeekStreamReply reply;
+	if (req.sequence.present()) {
 		try {
-			wait(req.reply.onReady() &&
-			     store(reply.rep, peekLogRouter(self, req.begin, req.tag, req.returnIfBlocked, onlySpilled, true)));
-			req.reply.send(reply);
-			begin = reply.rep.end;
-			onlySpilled = reply.rep.onlySpilled;
-			if (reply.rep.end > self->version.get()) {
-				wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
-			} else {
-				wait(delay(0, g_network->getCurrentTask()));
+			peekId = req.sequence.get().first;
+			sequence = req.sequence.get().second;
+			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
+			self->peekTracker.find(peekId) == self->peekTracker.end()) {
+				throw operation_obsolete();
 			}
-		} catch (Error& e) {
-			self->activePeekStreams--;
+			auto& trackerData = self->peekTracker[peekId];
+			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
+				trackerData.sequence_version[0].send(std::make_pair(req.begin, req.onlySpilled));
+			}
+			auto seqBegin = trackerData.sequence_version.begin();
+			// The peek cursor and this comparison need to agree about the maximum number of in-flight requests.
+			while (trackerData.sequence_version.size() &&
+			seqBegin->first <= sequence - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
+				if (seqBegin->second.canBeSet()) {
+					seqBegin->second.sendError(operation_obsolete());
+				}
+				trackerData.sequence_version.erase(seqBegin);
+				seqBegin = trackerData.sequence_version.begin();
+			}
 
-			TraceEvent(SevDebug, "LogRouterPeekStreamEnd", self->dbgid).error(e, true);
-			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
+			if (trackerData.sequence_version.size() && sequence < seqBegin->first) {
+				throw operation_obsolete();
+			}
+
+			trackerData.lastUpdate = now();
+			std::pair<Version, bool> prevPeekData = wait(trackerData.sequence_version[sequence].getFuture());
+			req.begin = prevPeekData.first;
+			req.onlySpilled = prevPeekData.second;
+			wait(yield());
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
 				return Void();
 			} else {
@@ -595,27 +492,84 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 			}
 		}
 	}
-}
 
-ACTOR Future<Void> logRouterPeekMessages(LogRouterData* self, TLogPeekRequest req) {
-	try {
-		TLogPeekReply reply =
-		    wait(peekLogRouter(self, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, false, req.sequence));
-		req.reply.send(reply);
-	} catch (Error& e) {
-		if (e.code() == error_code_no_action_needed) {
-			req.reply.send(Never());
-			return Void();
-		} else if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete ||
-		           e.code() == error_code_end_of_stream) {
-			req.reply.sendError(e);
-			return Void();
-		} else {
-			throw;
+	//TraceEvent("LogRouterPeek1", self->dbgid).detail("From", req.reply.getEndpoint().getPrimaryAddress()).detail("Ver", self->version.get()).detail("Begin", req.begin);
+	if (req.returnIfBlocked && self->version.get() < req.begin) {
+		//TraceEvent("LogRouterPeek2", self->dbgid);
+		req.reply.sendError(end_of_stream());
+		if (req.sequence.present()) {
+			auto& trackerData = self->peekTracker[peekId];
+			auto& sequenceData = trackerData.sequence_version[sequence + 1];
+			if (!sequenceData.isSet()) {
+				sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
+			}
 		}
+		return Void();
 	}
+
+	if (self->version.get() < req.begin) {
+		wait(self->version.whenAtLeast(req.begin));
+		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+	}
+
+	Version poppedVer = poppedVersion(self, req.tag);
+
+	if (poppedVer > req.begin || req.begin < self->startVersion) {
+		// This should only happen if a packet is sent multiple times and the reply is not needed.
+		// Since we are using popped differently, do not send a reply.
+		TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid)
+		.detail("Begin", req.begin)
+		.detail("Popped", poppedVer)
+		.detail("Start", self->startVersion);
+		req.reply.send(Never());
+		if (req.sequence.present()) {
+			auto& trackerData = self->peekTracker[peekId];
+			auto& sequenceData = trackerData.sequence_version[sequence + 1];
+			if (!sequenceData.isSet()) {
+				sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
+			}
+		}
+		return Void();
+	}
+
+	Version endVersion = self->version.get() + 1;
+	peekMessagesFromMemory(self, req.tag, req.begin, messages, endVersion);
+
+	TLogPeekReply reply;
+	reply.maxKnownVersion = self->version.get();
+	reply.minKnownCommittedVersion = self->poppedVersion;
+	reply.messages = messages.toValue();
+	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
+	reply.end = endVersion;
+	reply.onlySpilled = false;
+
+	if (req.sequence.present()) {
+		auto& trackerData = self->peekTracker[peekId];
+		trackerData.lastUpdate = now();
+		auto& sequenceData = trackerData.sequence_version[sequence + 1];
+		if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
+			req.reply.sendError(operation_obsolete());
+			if (!sequenceData.isSet())
+				sequenceData.sendError(operation_obsolete());
+			return Void();
+		}
+		if (sequenceData.isSet()) {
+			if (sequenceData.getFuture().get().first != reply.end) {
+				TEST(true); // tlog peek second attempt ended at a different version
+				req.reply.sendError(operation_obsolete());
+				return Void();
+			}
+		} else {
+			sequenceData.send(std::make_pair(reply.end, reply.onlySpilled));
+		}
+		reply.begin = req.begin;
+	}
+
+	req.reply.send(reply);
+	//TraceEvent("LogRouterPeek4", self->dbgid);
 	return Void();
 }
+
 
 ACTOR Future<Void> cleanupPeekTrackers(LogRouterData* self) {
 	loop {

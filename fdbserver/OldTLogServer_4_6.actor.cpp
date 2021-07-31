@@ -1157,21 +1157,158 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 	}
 }
 
+
 ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Reference<LogData> logData) {
-	try {
-		TLogPeekReply reply =
-		    wait(peekTLog(self, logData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
-		req.reply.send(reply);
-	} catch (Error& e) {
-		if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete ||
-		    e.code() == error_code_end_of_stream) {
-			req.reply.sendError(e);
-			return Void();
-		} else {
-			throw;
+	state BinaryWriter messages(Unversioned());
+	state BinaryWriter messages2(Unversioned());
+	state int sequence = -1;
+	state UID peekId;
+	state OldTag oldTag = convertTag(req.tag);
+
+	if (req.sequence.present()) {
+		try {
+			peekId = req.sequence.get().first;
+			sequence = req.sequence.get().second;
+			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
+			self->peekTracker.find(peekId) == self->peekTracker.end()) {
+				throw operation_obsolete();
+			}
+			if (sequence > 0) {
+				auto& trackerData = self->peekTracker[peekId];
+				trackerData.lastUpdate = now();
+				Version ver = wait(trackerData.sequence_version[sequence].getFuture());
+				req.begin = std::max(ver, req.begin);
+				wait(yield());
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
+				req.reply.sendError(e);
+				return Void();
+			} else {
+				throw;
+			}
 		}
 	}
 
+	if (req.returnIfBlocked && logData->version.get() < req.begin) {
+		req.reply.sendError(end_of_stream());
+		return Void();
+	}
+
+	//TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
+	// Wait until we have something to return that the caller doesn't already have
+	if (logData->version.get() < req.begin) {
+		wait(logData->version.whenAtLeast(req.begin));
+		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+	}
+
+	state Version endVersion = logData->version.get() + 1;
+
+	Version poppedVer = poppedVersion(logData, oldTag);
+	if (poppedVer > req.begin) {
+		TLogPeekReply rep;
+		rep.maxKnownVersion = logData->version.get();
+		rep.minKnownCommittedVersion = 0;
+		rep.popped = poppedVer;
+		rep.end = poppedVer;
+		rep.onlySpilled = false;
+
+		if (req.sequence.present()) {
+			auto& trackerData = self->peekTracker[peekId];
+			auto& sequenceData = trackerData.sequence_version[sequence + 1];
+			trackerData.lastUpdate = now();
+			if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
+				req.reply.sendError(operation_obsolete());
+				if (!sequenceData.isSet())
+					sequenceData.sendError(operation_obsolete());
+				return Void();
+			}
+			if (sequenceData.isSet()) {
+				if (sequenceData.getFuture().get() != rep.end) {
+					TEST(true); // tlog peek second attempt ended at a different version
+					req.reply.sendError(operation_obsolete());
+					return Void();
+				}
+			} else {
+				sequenceData.send(rep.end);
+			}
+			rep.begin = req.begin;
+		}
+
+		req.reply.send(rep);
+		return Void();
+	}
+
+	// grab messages from disk
+	//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
+	if (req.begin <= logData->persistentDataDurableVersion) {
+		// Just in case the durable version changes while we are waiting for the read, we grab this data from memory. We
+		// may or may not actually send it depending on whether we get enough data from disk. SOMEDAY: Only do this if
+		// an initial attempt to read from disk results in insufficient data and the required data is no longer in
+		// memory SOMEDAY: Should we only send part of the messages we collected, to actually limit the size of the
+		// result?
+
+		peekMessagesFromMemory(logData, req.tag, req.begin, messages2, endVersion);
+
+		RangeResult kvs = wait(self->persistentData->readRange(
+			KeyRangeRef(persistTagMessagesKey(logData->logId, oldTag, req.begin),
+						persistTagMessagesKey(logData->logId, oldTag, logData->persistentDataDurableVersion + 1)),
+						SERVER_KNOBS->DESIRED_TOTAL_BYTES,
+						SERVER_KNOBS->DESIRED_TOTAL_BYTES));
+
+		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
+
+		for (auto& kv : kvs) {
+			auto ver = decodeTagMessagesKey(kv.key);
+			messages << int32_t(-1) << ver;
+
+			BinaryReader rd(kv.value, Unversioned());
+			while (!rd.empty()) {
+				int32_t messageLength;
+				uint32_t subVersion;
+				rd >> messageLength >> subVersion;
+				messageLength += sizeof(uint16_t) + sizeof(Tag);
+				messages << messageLength << subVersion << uint16_t(1) << req.tag;
+				messageLength -= (sizeof(subVersion) + sizeof(uint16_t) + sizeof(Tag));
+				messages.serializeBytes(rd.readBytes(messageLength), messageLength);
+			}
+		}
+
+		if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
+			endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
+		else
+			messages.serializeBytes(messages2.toValue());
+	} else {
+		peekMessagesFromMemory(logData, req.tag, req.begin, messages, endVersion);
+		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
+	}
+
+	TLogPeekReply reply;
+	reply.maxKnownVersion = logData->version.get();
+	reply.minKnownCommittedVersion = 0;
+	reply.onlySpilled = false;
+	reply.messages = messages.toValue();
+	reply.end = endVersion;
+
+	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
+
+	if (req.sequence.present()) {
+		auto& trackerData = self->peekTracker[peekId];
+		trackerData.lastUpdate = now();
+		auto& sequenceData = trackerData.sequence_version[sequence + 1];
+		if (sequenceData.isSet()) {
+			if (sequenceData.getFuture().get() != reply.end) {
+				TEST(true); // tlog peek second attempt ended at a different version (2)
+				req.reply.sendError(operation_obsolete());
+				return Void();
+			}
+		} else {
+			sequenceData.send(reply.end);
+		}
+		reply.begin = req.begin;
+	}
+
+	req.reply.send(reply);
 	return Void();
 }
 

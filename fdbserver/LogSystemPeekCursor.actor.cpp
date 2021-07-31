@@ -418,7 +418,7 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 		return Void();
 	if (!more.isValid() || more.isReady()) {
 		// TODO: remove locality check when log router support streaming peek
-		if (usePeekStream && tag.locality >= 0) {
+		if (false && usePeekStream && tag.locality >= 0) {
 			more = serverPeekStreamGetMore(this, taskID);
 		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
 			more = serverPeekParallelGetMore(this, taskID);
