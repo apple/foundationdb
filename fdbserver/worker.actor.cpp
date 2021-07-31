@@ -511,7 +511,8 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       LocalityData locality,
                                       Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                       Reference<ClusterConnectionFile> connFile,
-                                      Reference<AsyncVar<std::set<std::string>>> issues) {
+                                      Reference<AsyncVar<std::set<std::string>>> issues,
+                                      Reference<AsyncVar<std::vector<NetworkAddress>>> degradedPeers) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -530,7 +531,8 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
-		                              degraded->get());
+		                              degraded->get(),
+		                              degradedPeers->get());
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
 		}
@@ -582,6 +584,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			when(wait(ddInterf->onChange())) { break; }
 			when(wait(rkInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
+			when(wait(degradedPeers->onChange())) { break; }
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
 			when(wait(issues->onChange())) { break; }
 		}
@@ -711,14 +714,15 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                  WorkerInterface interf,
                                  LocalityData locality,
-                                 Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                 Reference<AsyncVar<std::vector<NetworkAddress>>> degradedPeers) {
 	loop {
-		Future<Void> nextHealthCheckDelay = Never();
+		state Future<Void> nextHealthCheckDelay = Never();
 		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
 		    addressesInDbAndPrimaryDc(interf.addresses(), dbInfo) && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
-			UpdateWorkerHealthRequest req;
+			std::vector<NetworkAddress> currentDegradedPeers;
 			for (const auto& [address, peer] : allPeers) {
 				if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
 					// Ignore peers that don't have enough samples.
@@ -756,13 +760,12 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 					    .detail("Count", peer->pingLatencies.getPopulationSize())
 					    .detail("TimeoutCount", peer->timeoutCount);
 
-					req.degradedPeers.push_back(address);
+					currentDegradedPeers.push_back(address);
 				}
 			}
 
-			if (!req.degradedPeers.empty()) {
-				req.address = FlowTransport::transport().getLocalAddress();
-				ccInterface->get().get().updateWorkerHealth.send(req);
+			if (!currentDegradedPeers.empty()) {
+				degradedPeers->set(currentDegradedPeers);
 			}
 		}
 		choose {
@@ -1216,6 +1219,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	state std::map<SharedLogsKey, SharedLogsValue> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
+	state Reference<AsyncVar<std::vector<NetworkAddress>>> degradedPeers(new AsyncVar<std::vector<NetworkAddress>>);
 
 	state std::string coordFolder = abspath(_coordFolder);
 
@@ -1457,10 +1461,11 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		                                       locality,
 		                                       dbInfo,
 		                                       connFile,
-		                                       issues));
+		                                       issues,
+		                                       degradedPeers));
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
-			errorForwarders.add(healthMonitor(ccInterface, interf, locality, dbInfo));
+			errorForwarders.add(healthMonitor(ccInterface, interf, locality, dbInfo, degradedPeers));
 		}
 
 		TraceEvent("RecoveriesComplete", interf.id());
