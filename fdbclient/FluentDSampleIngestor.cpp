@@ -95,9 +95,9 @@ class SampleSender : public std::enable_shared_from_this<SampleSender<Protocol, 
 		unsigned size = 1; // 1 for fixmap identifier byte
 		auto waitState = to_string(iter->first);
 		if (waitState.size() < 32) {
-			size = waitState.size() + 1;
+			size += waitState.size() + 1;
 		} else {
-			size = waitState.size() + 2;
+			size += waitState.size() + 2;
 		}
 		size += iter->second.second;
 		// 2. allocate the buffer
