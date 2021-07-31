@@ -582,7 +582,9 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 				continue;
 			}
 
+			int i = 0;
 			for (const auto& m : vms.mutations) {
+				i++; // sub sequence number starts at 1
 				bool print = params.prefix.empty(); // no filtering
 
 				if (!print) {
@@ -596,7 +598,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 					}
 				}
 				if (print) {
-					TraceEvent("Mutation")
+					TraceEvent(format("Mutation_%d_%d", vms.version, i).c_str())
 					    .detail("Version", vms.version)
 					    .setMaxFieldLength(10000)
 					    .detail("M", m.toString());
@@ -652,7 +654,7 @@ int main(int argc, char** argv) {
 		setupNetwork(0, UseMetrics::True);
 
 		TraceEvent::setNetworkThread();
-		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "decode", param.trace_log_group);
+		openTraceFile(NetworkAddress(), 10 << 20, 500 << 20, param.log_dir, "decode", param.trace_log_group);
 		param.tlsConfig.setupBlobCredentials();
 
 		auto f = stopAfter(decode_logs(param));
