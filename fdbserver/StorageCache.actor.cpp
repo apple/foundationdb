@@ -224,14 +224,14 @@ public:
 		// LatencyBands readLatencyBands;
 
 		Counters(StorageCacheData* self)
-		  : cc("StorageCacheServer", self->thisServerID.toString()), getKeyQueries("GetKeyQueries", cc),
-		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
-		    allQueries("QueryQueue", cc), finishedQueries("FinishedQueries", cc), rowsQueried("RowsQueried", cc),
-		    bytesQueried("BytesQueried", cc), bytesInput("BytesInput", cc), bytesFetched("BytesFetched", cc),
-		    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
-		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
-		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
-		    readsRejected("ReadsRejected", cc) {
+		  : cc("StorageCacheServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
+		    getKeyQueries("GetKeyQueries", cc), getValueQueries("GetValueQueries", cc),
+		    getRangeQueries("GetRangeQueries", cc), finishedQueries("FinishedQueries", cc),
+		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), bytesInput("BytesInput", cc),
+		    bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
+		    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
+		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
+		    updateVersions("UpdateVersions", cc), loops("Loops", cc), readsRejected("ReadsRejected", cc) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
@@ -425,7 +425,7 @@ ACTOR Future<Version> waitForVersion(StorageCacheData* data, Version version) {
 	}
 
 	if (deterministicRandom()->random01() < 0.001)
-		TraceEvent("WaitForVersion1000x");
+		TraceEvent("WaitForVersion1000x").log();
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
@@ -1363,7 +1363,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 				// doesn't fit on this cache. For now, we can just fail this cache role. In future, we should think
 				// about evicting some data to make room for the remaining keys
 				if (this_block.more) {
-					TraceEvent(SevDebug, "CacheWarmupMoreDataThanLimit", data->thisServerID);
+					TraceEvent(SevDebug, "CacheWarmupMoreDataThanLimit", data->thisServerID).log();
 					throw please_reboot();
 				}
 
@@ -1542,7 +1542,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 };
 
 AddingCacheRange::AddingCacheRange(StorageCacheData* server, KeyRangeRef const& keys)
-  : server(server), keys(keys), transferredVersion(invalidVersion), phase(WaitPrevious) {
+  : keys(keys), server(server), transferredVersion(invalidVersion), phase(WaitPrevious) {
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -1704,9 +1704,9 @@ void cacheWarmup(StorageCacheData* data, const KeyRangeRef& keys, bool nowAssign
 class StorageCacheUpdater {
 public:
 	StorageCacheUpdater()
-	  : fromVersion(invalidVersion), currentVersion(invalidVersion), processedCacheStartKey(false) {}
+	  : currentVersion(invalidVersion), fromVersion(invalidVersion), processedCacheStartKey(false) {}
 	StorageCacheUpdater(Version currentVersion)
-	  : fromVersion(currentVersion), currentVersion(currentVersion), processedCacheStartKey(false) {}
+	  : currentVersion(invalidVersion), fromVersion(currentVersion), processedCacheStartKey(false) {}
 
 	void applyMutation(StorageCacheData* data, MutationRef const& m, Version ver) {
 		//TraceEvent("SCNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
@@ -1780,7 +1780,7 @@ private:
 				rollback(data, rollbackVersion, currentVersion);
 			}
 		} else {
-			TraceEvent(SevWarn, "SCPrivateCacheMutation: Unknown private mutation");
+			TraceEvent(SevWarn, "SCPrivateCacheMutation: Unknown private mutation").log();
 			// ASSERT(false);  // Unknown private mutation
 		}
 	}
@@ -2156,6 +2156,7 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 					tr.set(storageKey, storageCacheServerValue(ssi));
 					wait(tr.commit());
 				}
+				tr.reset();
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));

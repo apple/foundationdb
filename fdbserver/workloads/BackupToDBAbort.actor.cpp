@@ -52,7 +52,7 @@ struct BackupToDBAbort : TestWorkload {
 	ACTOR static Future<Void> _setup(BackupToDBAbort* self, Database cx) {
 		state DatabaseBackupAgent backupAgent(cx);
 		try {
-			TraceEvent("BDBA_Submit1");
+			TraceEvent("BDBA_Submit1").log();
 			wait(backupAgent.submitBackup(self->extraDB,
 			                              BackupAgentBase::getDefaultTag(),
 			                              self->backupRanges,
@@ -60,7 +60,7 @@ struct BackupToDBAbort : TestWorkload {
 			                              StringRef(),
 			                              StringRef(),
 			                              LockDB::True));
-			TraceEvent("BDBA_Submit2");
+			TraceEvent("BDBA_Submit2").log();
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_duplicate)
 				throw;
@@ -79,15 +79,15 @@ struct BackupToDBAbort : TestWorkload {
 
 		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
 		wait(delay(self->abortDelay));
-		TraceEvent("BDBA_Wait");
+		TraceEvent("BDBA_Wait").log();
 		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False)));
-		TraceEvent("BDBA_Lock");
+		TraceEvent("BDBA_Lock").log();
 		wait(lockDatabase(cx, self->lockid));
-		TraceEvent("BDBA_Abort");
+		TraceEvent("BDBA_Abort").log();
 		wait(backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag()));
-		TraceEvent("BDBA_Unlock");
+		TraceEvent("BDBA_Unlock").log();
 		wait(backupAgent.unlockBackup(self->extraDB, BackupAgentBase::getDefaultTag()));
-		TraceEvent("BDBA_End");
+		TraceEvent("BDBA_End").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
 		if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
@@ -98,7 +98,7 @@ struct BackupToDBAbort : TestWorkload {
 	}
 
 	ACTOR static Future<bool> _check(BackupToDBAbort* self, Database cx) {
-		TraceEvent("BDBA_UnlockPrimary");
+		TraceEvent("BDBA_UnlockPrimary").log();
 		// Too much of the tester framework expects the primary database to be unlocked, so we unlock it
 		// once all of the workloads have finished.
 		wait(unlockDatabase(cx, self->lockid));

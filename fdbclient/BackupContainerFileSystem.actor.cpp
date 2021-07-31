@@ -163,7 +163,6 @@ public:
 		state Version maxVer = 0;
 		state RangeFile rf;
 		state json_spirit::mArray fileArray;
-		state int i;
 
 		// Validate each filename, update version range
 		for (const auto& f : fileNames) {
@@ -1448,7 +1447,17 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() 
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
 
-Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const &filename) {
+void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
+	if (encryptionKeyFileName.present()) {
+#if ENCRYPTION_ENABLED
+		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
+#else
+		encryptionSetupFuture = Void();
+#endif
+	}
+}
+
+Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
 #if ENCRYPTION_ENABLED
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
 #else
@@ -1467,13 +1476,16 @@ int chooseFileSize(std::vector<int>& sizes) {
 	return deterministicRandom()->randomInt(0, 2e6);
 }
 
-ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size, FlowLock* lock) {
+ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c,
+                                      Reference<IBackupFile> f,
+                                      int size,
+                                      FlowLock* lock) {
 	state Standalone<VectorRef<uint8_t>> content;
 
 	wait(lock->take(TaskPriority::DefaultYield, size));
- 	state FlowLock::Releaser releaser(*lock, size);
+	state FlowLock::Releaser releaser(*lock, size);
 
- 	printf("writeAndVerify size=%d file=%s\n", size, f->getFileName().c_str());
+	printf("writeAndVerify size=%d file=%s\n", size, f->getFileName().c_str());
 	content.resize(content.arena(), size);
 	for (int i = 0; i < content.size(); ++i) {
 		content[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
@@ -1561,9 +1573,9 @@ ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> en
 	// List of sizes to use to test edge cases on underlying file implementations
 	state std::vector<int> fileSizes = { 0 };
 	if (StringRef(url).startsWith(LiteralStringRef("blob"))) {
- 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE);
- 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE + 10);
- 	}
+		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE);
+		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE + 10);
+	}
 
 	loop {
 		state Version logStart = v;

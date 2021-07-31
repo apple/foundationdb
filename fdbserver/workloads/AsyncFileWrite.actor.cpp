@@ -46,7 +46,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 	PerfIntCounter bytesWritten;
 
 	AsyncFileWriteWorkload(WorkloadContext const& wcx)
-	  : AsyncFileWorkload(wcx), bytesWritten("Bytes Written"), writeBuffer(nullptr) {
+	  : AsyncFileWorkload(wcx), writeBuffer(nullptr), bytesWritten("Bytes Written") {
 		numParallelWrites = getOption(options, LiteralStringRef("numParallelWrites"), 0);
 		writeSize = getOption(options, LiteralStringRef("writeSize"), _PAGE_SIZE);
 		fileSize = getOption(options, LiteralStringRef("fileSize"), 10002432);

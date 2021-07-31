@@ -64,8 +64,8 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	static constexpr int MIN_TRANSACTION_TAG_LENGTH = 2;
 
 	WriteTagThrottlingWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), badActorCommitLatency(SAMPLE_SIZE), badActorReadLatency(SAMPLE_SIZE),
-	    goodActorCommitLatency(SAMPLE_SIZE), goodActorReadLatency(SAMPLE_SIZE) {
+	  : KVWorkload(wcx), badActorReadLatency(SAMPLE_SIZE), goodActorReadLatency(SAMPLE_SIZE),
+	    badActorCommitLatency(SAMPLE_SIZE), goodActorCommitLatency(SAMPLE_SIZE) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
 		badOpRate = getOption(options, LiteralStringRef("badOpRate"), 0.9);
 		numWritePerTr = getOption(options, LiteralStringRef("numWritePerTr"), 1);
@@ -135,7 +135,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 			return true;
 		if (writeThrottle) {
 			if (!badActorThrottleRetries && !goodActorThrottleRetries) {
-				TraceEvent(SevWarn, "NoThrottleTriggered");
+				TraceEvent(SevWarn, "NoThrottleTriggered").log();
 			}
 			if (badActorThrottleRetries < goodActorThrottleRetries) {
 				TraceEvent(SevWarnAlways, "IncorrectThrottle")

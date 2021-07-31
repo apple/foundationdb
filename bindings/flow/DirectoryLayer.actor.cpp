@@ -36,8 +36,8 @@ const Subspace DirectoryLayer::DEFAULT_CONTENT_SUBSPACE = Subspace();
 const StringRef DirectoryLayer::PARTITION_LAYER = LiteralStringRef("partition");
 
 DirectoryLayer::DirectoryLayer(Subspace nodeSubspace, Subspace contentSubspace, bool allowManualPrefixes)
-  : nodeSubspace(nodeSubspace), contentSubspace(contentSubspace), allowManualPrefixes(allowManualPrefixes),
-    rootNode(nodeSubspace.get(nodeSubspace.key())), allocator(rootNode.get(HIGH_CONTENTION_KEY)) {}
+  : rootNode(nodeSubspace.get(nodeSubspace.key())), nodeSubspace(nodeSubspace), contentSubspace(contentSubspace),
+    allocator(rootNode.get(HIGH_CONTENTION_KEY)), allowManualPrefixes(allowManualPrefixes) {}
 
 Subspace DirectoryLayer::nodeWithPrefix(StringRef const& prefix) const {
 	return nodeSubspace.get(prefix);

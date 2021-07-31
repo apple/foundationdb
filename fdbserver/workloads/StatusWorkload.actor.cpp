@@ -101,7 +101,7 @@ struct StatusWorkload : TestWorkload {
 			TraceEvent(SevError, "SchemaCoverageRequirementsException").detail("What", e.what());
 			throw unknown_error();
 		} catch (...) {
-			TraceEvent(SevError, "SchemaCoverageRequirementsException");
+			TraceEvent(SevError, "SchemaCoverageRequirementsException").log();
 			throw unknown_error();
 		}
 	}
@@ -153,6 +153,7 @@ struct StatusWorkload : TestWorkload {
 
 					tr.set(latencyBandConfigKey, ValueRef(config));
 					wait(tr.commit());
+					tr.reset();
 
 					if (deterministicRandom()->random01() < 0.3) {
 						return Void();

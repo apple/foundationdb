@@ -81,7 +81,7 @@ public:
 		}
 	}
 
-	Deque(Deque&& r) noexcept : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
+	Deque(Deque&& r) noexcept : arr(r.arr), begin(r.begin), end(r.end), mask(r.mask) {
 		r.arr = nullptr;
 		r.begin = r.end = 0;
 		r.mask = -1;
