@@ -43,7 +43,7 @@ public:
 	}
 
 	// Read a single block of size ENCRYPTION_BLOCK_SIZE bytes, and decrypt.
-	ACTOR static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint16_t block) {
+	ACTOR static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint32_t block) {
 		state Arena arena;
 		state unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
 		int bytes = wait(
@@ -54,9 +54,9 @@ public:
 	}
 
 	ACTOR static Future<int> read(AsyncFileEncrypted* self, void* data, int length, int64_t offset) {
-		state const uint16_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
-		state const uint16_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
-		state uint16_t block;
+		state const uint32_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
+		state const uint32_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
+		state uint32_t block;
 		state unsigned char* output = reinterpret_cast<unsigned char*>(data);
 		state int bytesRead = 0;
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
@@ -110,7 +110,7 @@ public:
 			if (self->offsetInBlock == FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE) {
 				wait(self->writeLastBlockToFile());
 				self->offsetInBlock = 0;
-				ASSERT_LT(self->currentBlock, std::numeric_limits<uint16_t>::max());
+				ASSERT_LT(self->currentBlock, std::numeric_limits<uint32_t>::max());
 				++self->currentBlock;
 				self->encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipher::Key::getKey(),
 				                                                           self->getIV(self->currentBlock));
@@ -203,7 +203,7 @@ int64_t AsyncFileEncrypted::debugFD() const {
 	return file->debugFD();
 }
 
-StreamCipher::IV AsyncFileEncrypted::getIV(uint16_t block) const {
+StreamCipher::IV AsyncFileEncrypted::getIV(uint32_t block) const {
 	auto iv = firstBlockIV;
 	iv[14] = block / 256;
 	iv[15] = block % 256;
@@ -225,7 +225,7 @@ AsyncFileEncrypted::RandomCache::RandomCache(size_t maxSize) : maxSize(maxSize) 
 	vec.reserve(maxSize);
 }
 
-void AsyncFileEncrypted::RandomCache::insert(uint16_t block, const Standalone<StringRef>& value) {
+void AsyncFileEncrypted::RandomCache::insert(uint32_t block, const Standalone<StringRef>& value) {
 	auto [_, found] = hashMap.insert({ block, value });
 	if (found) {
 		return;
@@ -237,7 +237,7 @@ void AsyncFileEncrypted::RandomCache::insert(uint16_t block, const Standalone<St
 	}
 }
 
-Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint16_t block) const {
+Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint32_t block) const {
 	auto it = hashMap.find(block);
 	if (it == hashMap.end()) {
 		return {};

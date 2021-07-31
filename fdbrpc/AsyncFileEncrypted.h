@@ -40,7 +40,7 @@ public:
 private:
 	Reference<IAsyncFile> file;
 	StreamCipher::IV firstBlockIV;
-	StreamCipher::IV getIV(uint16_t block) const;
+	StreamCipher::IV getIV(uint32_t block) const;
 	Mode mode;
 	Future<Void> writeLastBlockToFile();
 	friend class AsyncFileEncryptedImpl;
@@ -48,19 +48,19 @@ private:
 	// Reading:
 	class RandomCache {
 		size_t maxSize;
-		std::vector<uint16_t> vec;
-		std::unordered_map<uint16_t, Standalone<StringRef>> hashMap;
+		std::vector<uint32_t> vec;
+		std::unordered_map<uint32_t, Standalone<StringRef>> hashMap;
 		size_t evict();
 
 	public:
 		RandomCache(size_t maxSize);
-		void insert(uint16_t block, const Standalone<StringRef>& value);
-		Optional<Standalone<StringRef>> get(uint16_t block) const;
+		void insert(uint32_t block, const Standalone<StringRef>& value);
+		Optional<Standalone<StringRef>> get(uint32_t block) const;
 	} readBuffers;
 
 	// Writing (append only):
 	std::unique_ptr<EncryptionStreamCipher> encryptor;
-	uint16_t currentBlock{ 0 };
+	uint32_t currentBlock{ 0 };
 	int offsetInBlock{ 0 };
 	std::vector<unsigned char> writeBuffer;
 	Future<Void> initialize();
