@@ -262,6 +262,7 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	state Reference<IAsyncFile> file =
 	    wait(IAsyncFileSystem::filesystem()->open(joinPath(params.getDataDir(), "test-encrypted-file"), flags, 0600));
 	state int bytesWritten = 0;
+	state int chunkSize;
 	while (bytesWritten < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesWritten);
 		wait(file->write(&writeBuffer[bytesWritten], chunkSize, bytesWritten));
@@ -269,7 +270,6 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	}
 	wait(file->sync());
 	state int bytesRead = 0;
-	state int chunkSize;
 	while (bytesRead < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesRead);
 		int bytesReadInChunk = wait(file->read(&readBuffer[bytesRead], chunkSize, bytesRead));
