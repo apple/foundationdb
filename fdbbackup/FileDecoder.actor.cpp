@@ -126,6 +126,9 @@ struct DecodeParams {
 		if (endVersionFilter < std::numeric_limits<Version>::max()) {
 			s.append(", endVersionFilter: ").append(std::to_string(endVersionFilter));
 		}
+		if (!prefix.empty()) {
+			s.append(", KeyPrefix: ").append(printable(prefix));
+		}
 		return s;
 	}
 
