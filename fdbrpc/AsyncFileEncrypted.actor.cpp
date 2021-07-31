@@ -34,11 +34,13 @@ public:
 		auto pos = salt.find('.');
 		salt = salt.substr(0, pos);
 		auto hash = XXH3_128bits(salt.c_str(), salt.size());
-		auto high = reinterpret_cast<unsigned char*>(&hash.high64);
-		auto low = reinterpret_cast<unsigned char*>(&hash.low64);
-		std::copy(high, high + 8, &iv[0]);
-		std::copy(low, low + 6, &iv[8]);
-		iv[14] = iv[15] = 0; // last 16 bits identify block
+		auto pHigh = reinterpret_cast<unsigned char*>(&hash.high64);
+		auto pLow = reinterpret_cast<unsigned char*>(&hash.low64);
+		std::copy(pHigh, pHigh + 8, &iv[0]);
+		std::copy(pLow, pLow + 4, &iv[8]);
+		uint32_t blockZero = 0;
+		auto pBlock = reinterpret_cast<unsigned char*>(&blockZero);
+		std::copy(pBlock, pBlock + 4, &iv[12]);
 		return iv;
 	}
 
@@ -205,8 +207,10 @@ int64_t AsyncFileEncrypted::debugFD() const {
 
 StreamCipher::IV AsyncFileEncrypted::getIV(uint32_t block) const {
 	auto iv = firstBlockIV;
-	iv[14] = block / 256;
-	iv[15] = block % 256;
+
+	auto pBlock = reinterpret_cast<unsigned char*>(&block);
+	std::copy(pBlock, pBlock + 4, &iv[12]);
+
 	return iv;
 }
 
