@@ -965,6 +965,11 @@ typedef decltype(&tLog) TLogFn;
 
 ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time) {
+	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
+	// to not end until at least time after simulation is sped up.
+	if(g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+		time += (FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
+	}
 	Future<Void> end = lowPriorityDelay(time);
 	choose {
 		when(T t = wait(what)) { return t; }
@@ -984,6 +989,14 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double errTime,
                                    Reference<AsyncVar<bool>> degraded,
                                    double degradedTime) {
+	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
+	// to not end until at least time after simulation is sped up.
+	if(g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+		double timeShift = FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now();
+		errTime += timeShift;
+		degradedTime += timeShift;
+	}
+
 	if (degradedTime < errTime) {
 		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
 		choose {
