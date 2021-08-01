@@ -32,6 +32,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MutationList.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
@@ -72,6 +73,8 @@ void printDecodeUsage() {
 	       "  --build_flags  Print build information and exit.\n"
 		   "  --list_only    Print file list and exit.\n"
 		   "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
+		   "  --hex_prefix   HEX_PREFIX\n"
+		   "                 The prefix specified in HEX format, e.g., \\x05\\x01.\n"
 		   "  --begin_version_filter BEGIN_VERSION\n"
 		   "                 The version range's begin version (inclusive) for filtering.\n"
 		   "  --end_version_filter END_VERSION\n"
@@ -87,7 +90,7 @@ void printBuildInformation() {
 struct DecodeParams {
 	std::string container_url;
 	std::string fileFilter; // only files match the filter will be decoded
-	bool log_enabled = false;
+	bool log_enabled = true;
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
@@ -125,11 +128,61 @@ struct DecodeParams {
 		if (endVersionFilter < std::numeric_limits<Version>::max()) {
 			s.append(", endVersionFilter: ").append(std::to_string(endVersionFilter));
 		}
+		if (!prefix.empty()) {
+			s.append(", KeyPrefix: ").append(printable(KeyRef(prefix)));
+		}
 		return s;
 	}
-
-
 };
+
+// Decode an ASCII string, e.g., "\x15\x1b\x19\x04\xaf\x0c\x28\x0a",
+// into the binary string.
+std::string decode_hex_string(std::string line) {
+	size_t i = 0;
+	std::string ret;
+
+	while (i <= line.length()) {
+		switch (line[i]) {
+		case '\\':
+			if (i + 2 > line.length()) {
+				std::cerr << "Invalid hex string at: " << i << "\n";
+				return ret;
+			}
+			switch (line[i + 1]) {
+				char ent, save;
+			case '"':
+			case '\\':
+			case ' ':
+			case ';':
+				line.erase(i, 1);
+				break;
+			case 'x':
+				if (i + 4 > line.length()) {
+					std::cerr << "Invalid hex string at: " << i << "\n";
+					return ret;
+				}
+				char* pEnd;
+				save = line[i + 4];
+				line[i + 4] = 0;
+				ent = char(strtoul(line.data() + i + 2, &pEnd, 16));
+				if (*pEnd) {
+					std::cerr << "Invalid hex string at: " << i << "\n";
+					return ret;
+				}
+				line[i + 4] = save;
+				line.replace(i, 4, 1, ent);
+				break;
+			default:
+				std::cerr << "Invalid hex string at: " << i << "\n";
+				return ret;
+			}
+		default:
+			i++;
+		}
+	}
+
+	return line.substr(0, i);
+}
 
 int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 	while (args->Next()) {
@@ -160,6 +213,10 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			param->prefix = args->OptionArg();
 			break;
 
+		case OPT_HEX_KEY_PREFIX:
+			param->prefix = decode_hex_string(args->OptionArg());
+			break;
+
 		case OPT_BEGIN_VERSION_FILTER:
 			param->beginVersionFilter = std::atoll(args->OptionArg());
 			break;
@@ -185,7 +242,7 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case OPT_TRACE_FORMAT:
-			if (!validateTraceFormat(args->OptionArg())) {
+			if (!selectTraceFormatter(args->OptionArg())) {
 				std::cerr << "ERROR: Unrecognized trace format " << args->OptionArg() << "\n";
 				return FDB_EXIT_ERROR;
 			}
@@ -546,7 +603,7 @@ public:
 
 ACTOR Future<Void> decode_logs(DecodeParams params) {
 	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
-
+	state UID uid = deterministicRandom()->randomUniqueID();
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs
 	listing.logs.erase(std::remove_if(listing.logs.begin(),
@@ -557,7 +614,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	                                  }),
 	                   listing.logs.end());
 	std::sort(listing.logs.begin(), listing.logs.end());
-	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());
+	TraceEvent("Container", uid).detail("URL", params.container_url).detail("Logs", listing.logs.size());
+	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params.toString());
 
 	BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
@@ -582,23 +640,27 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 				continue;
 			}
 
+			int i = 0;
 			for (const auto& m : vms.mutations) {
-				if (params.prefix.empty()) { // no filtering
-					std::cout << vms.version << " " << m.toString() << "\n";
-					continue;
-				}
+				i++; // sub sequence number starts at 1
+				bool print = params.prefix.empty(); // no filtering
 
-				if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-					if (m.param1.startsWith(params.prefix)) {
-						std::cout << vms.version << " " << m.toString() << "\n";
+				if (!print) {
+					if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+						print = m.param1.startsWith(StringRef(params.prefix));
+					} else if (m.type == MutationRef::ClearRange) {
+						KeyRange range(KeyRangeRef(m.param1, m.param2));
+						print = range.contains(StringRef(params.prefix));
+					} else {
+						ASSERT(false);
 					}
-				} else if (m.type == MutationRef::ClearRange) {
-					KeyRange range(KeyRangeRef(m.param1, m.param2));
-					if (range.contains(params.prefix)) {
-						std::cout << vms.version << " " << m.toString() << "\n";
-					}
-				} else {
-					ASSERT(false);
+				}
+				if (print) {
+					TraceEvent(format("Mutation_%d_%d", vms.version, i).c_str(), uid)
+					    .detail("Version", vms.version)
+					    .setMaxFieldLength(10000)
+					    .detail("M", m.toString());
+					std::cout << vms.version << " " << m.toString() << "\n";
 				}
 			}
 		}
@@ -607,6 +669,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 			TraceEvent("UnfinishedFile").detail("File", logs[i].fileName).detail("Q", left.size());
 		}
 	}
+	TraceEvent("DecodeDone", uid);
 	return Void();
 }
 
@@ -631,6 +694,8 @@ int main(int argc, char** argv) {
 			}
 			if (!param.trace_format.empty()) {
 				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(param.trace_format));
+			} else {
+				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, "json"_sr);
 			}
 			if (!param.trace_log_group.empty()) {
 				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(param.trace_log_group));
@@ -649,12 +714,17 @@ int main(int argc, char** argv) {
 		setupNetwork(0, UseMetrics::True);
 
 		TraceEvent::setNetworkThread();
-		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "decode", param.trace_log_group);
+		openTraceFile(NetworkAddress(), 10 << 20, 500 << 20, param.log_dir, "decode", param.trace_log_group);
 		param.tlsConfig.setupBlobCredentials();
 
 		auto f = stopAfter(decode_logs(param));
 
 		runNetwork();
+
+		flushTraceFileVoid();
+		fflush(stdout);
+		closeTraceFile();
+
 		return status;
 	} catch (Error& e) {
 		std::cerr << "ERROR: " << e.what() << "\n";
