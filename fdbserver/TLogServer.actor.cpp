@@ -1951,6 +1951,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			}
 
 			reply.rep = future.get();
+			reply.rep.begin = begin;
 			req.reply.send(reply);
 			begin = reply.rep.end;
 			onlySpilled = reply.rep.onlySpilled;
