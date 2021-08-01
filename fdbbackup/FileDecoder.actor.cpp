@@ -640,9 +640,9 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 				continue;
 			}
 
-			int i = 0;
+			int sub = 0;
 			for (const auto& m : vms.mutations) {
-				i++; // sub sequence number starts at 1
+				sub++; // sub sequence number starts at 1
 				bool print = params.prefix.empty(); // no filtering
 
 				if (!print) {
@@ -656,7 +656,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 					}
 				}
 				if (print) {
-					TraceEvent(format("Mutation_%d_%d", vms.version, i).c_str(), uid)
+					TraceEvent(format("Mutation_%d_%d", vms.version, sub).c_str(), uid)
 					    .detail("Version", vms.version)
 					    .setMaxFieldLength(10000)
 					    .detail("M", m.toString());
