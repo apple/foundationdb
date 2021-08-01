@@ -73,6 +73,8 @@ void printDecodeUsage() {
 	       "  --build_flags  Print build information and exit.\n"
 		   "  --list_only    Print file list and exit.\n"
 		   "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
+		   "  --hex_prefix   HEX_PREFIX\n"
+		   "                 The prefix specified in HEX format, e.g., \\x05\\x01.\n"
 		   "  --begin_version_filter BEGIN_VERSION\n"
 		   "                 The version range's begin version (inclusive) for filtering.\n"
 		   "  --end_version_filter END_VERSION\n"
@@ -131,9 +133,56 @@ struct DecodeParams {
 		}
 		return s;
 	}
-
-
 };
+
+// Decode an ASCII string, e.g., "\x15\x1b\x19\x04\xaf\x0c\x28\x0a",
+// into the binary string.
+std::string decode_hex_string(std::string line) {
+	size_t i = 0;
+	std::string ret;
+
+	while (i <= line.length()) {
+		switch (line[i]) {
+		case '\\':
+			if (i + 2 > line.length()) {
+				std::cerr << "Invalid hex string at: " << i << "\n";
+				return ret;
+			}
+			switch (line[i + 1]) {
+				char ent, save;
+			case '"':
+			case '\\':
+			case ' ':
+			case ';':
+				line.erase(i, 1);
+				break;
+			case 'x':
+				if (i + 4 > line.length()) {
+					std::cerr << "Invalid hex string at: " << i << "\n";
+					return ret;
+				}
+				char* pEnd;
+				save = line[i + 4];
+				line[i + 4] = 0;
+				ent = char(strtoul(line.data() + i + 2, &pEnd, 16));
+				if (*pEnd) {
+					std::cerr << "Invalid hex string at: " << i << "\n";
+					return ret;
+				}
+				line[i + 4] = save;
+				line.replace(i, 4, 1, ent);
+				break;
+			default:
+				std::cerr << "Invalid hex string at: " << i << "\n";
+				return ret;
+			}
+		default:
+			i++;
+		}
+	}
+
+	return line.substr(0, i);
+}
 
 int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 	while (args->Next()) {
@@ -162,6 +211,10 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 
 		case OPT_KEY_PREFIX:
 			param->prefix = args->OptionArg();
+			break;
+
+		case OPT_HEX_KEY_PREFIX:
+			param->prefix = decode_hex_string(args->OptionArg());
 			break;
 
 		case OPT_BEGIN_VERSION_FILTER:
