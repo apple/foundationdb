@@ -39,7 +39,7 @@ struct QueuePushWorkload : TestWorkload {
 	ContinuousSample<double> commitLatencies, GRVLatencies;
 
 	QueuePushWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), commitLatencies(2000), GRVLatencies(2000), transactions("Transactions"), retries("Retries") {
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), commitLatencies(2000), GRVLatencies(2000) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		actorCount = getOption(options, LiteralStringRef("actorCount"), 50);
 

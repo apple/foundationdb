@@ -393,7 +393,7 @@ public:
 
 	Command() : argv(nullptr) {}
 	Command(const CSimpleIni& ini, std::string _section, ProcessID id, fdb_fd_set fds, int* maxfd)
-	  : section(_section), argv(nullptr), fork_retry_time(-1), quiet(false), delete_envvars(nullptr), fds(fds),
+	  : fds(fds), argv(nullptr), section(_section), fork_retry_time(-1), quiet(false), delete_envvars(nullptr),
 	    deconfigured(false), kill_on_configuration_change(true) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s", id.c_str());

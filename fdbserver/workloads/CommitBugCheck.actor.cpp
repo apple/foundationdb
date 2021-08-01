@@ -45,6 +45,7 @@ struct CommitBugWorkload : TestWorkload {
 				try {
 					tr.set(key, val1);
 					wait(tr.commit());
+					tr.reset();
 					break;
 				} catch (Error& e) {
 					TraceEvent("CommitBugSetVal1Error").error(e);
@@ -57,6 +58,7 @@ struct CommitBugWorkload : TestWorkload {
 				try {
 					tr.set(key, val2);
 					wait(tr.commit());
+					tr.reset();
 					break;
 				} catch (Error& e) {
 					TraceEvent("CommitBugSetVal2Error").error(e);
@@ -85,6 +87,7 @@ struct CommitBugWorkload : TestWorkload {
 				try {
 					tr.clear(key);
 					wait(tr.commit());
+					tr.reset();
 					break;
 				} catch (Error& e) {
 					TraceEvent("CommitBugClearValError").error(e);
