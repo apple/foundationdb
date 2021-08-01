@@ -127,7 +127,7 @@ struct DecodeParams {
 			s.append(", endVersionFilter: ").append(std::to_string(endVersionFilter));
 		}
 		if (!prefix.empty()) {
-			s.append(", KeyPrefix: ").append(printable(prefix));
+			s.append(", KeyPrefix: ").append(printable(KeyRef(prefix)));
 		}
 		return s;
 	}
@@ -594,10 +594,10 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 				if (!print) {
 					if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-						print = m.param1.startsWith(params.prefix);
+						print = m.param1.startsWith(StringRef(params.prefix));
 					} else if (m.type == MutationRef::ClearRange) {
 						KeyRange range(KeyRangeRef(m.param1, m.param2));
-						print = range.contains(params.prefix);
+						print = range.contains(StringRef(params.prefix));
 					} else {
 						ASSERT(false);
 					}
