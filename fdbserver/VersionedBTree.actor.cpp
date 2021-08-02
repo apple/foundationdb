@@ -163,6 +163,31 @@ public:
 		return s.getFuture();
 	}
 
+	std::string toString() const {
+		int runnersDone = 0;
+		for(int i = 0; i < runners.size(); ++i) {
+			if(runners[i].isReady()) {
+				++runnersDone;
+			}
+		}
+
+		std::string s = format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d ",
+		                       this,
+		                       concurrency,
+		                       available,
+		                       concurrency - available,
+		                       waiting,
+		                       runners.size(),
+							   runnersDone);
+
+		for (int i = 0; i < waiters.size(); ++i) {
+			s += format("p%d_waiters=%u ", i, waiters[i].size());
+		}
+
+		s += "}";
+		return s;
+	}
+
 private:
 	void addRunner(Lock& lock) {
 		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
@@ -249,23 +274,6 @@ private:
 				lastPriorityCount = 0;
 			}
 		}
-	}
-
-	std::string toString() const {
-		std::string s = format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d ",
-		                       this,
-		                       concurrency,
-		                       available,
-		                       concurrency - available,
-		                       waiting,
-		                       runners.size());
-
-		for (int i = 0; i < waiters.size(); ++i) {
-			s += format("p%d_waiters=%u ", i, waiters[i].size());
-		}
-
-		s += "}";
-		return s;
 	}
 
 	int concurrency;
