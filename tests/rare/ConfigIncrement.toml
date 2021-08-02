@@ -1,0 +1,7 @@
+[[test]]
+testTitle = 'ConfigIncrement'
+
+  [[test.workload]]
+  testName = 'ConfigIncrement'
+  incrementActors = 10
+  incrementsPerActor = 10

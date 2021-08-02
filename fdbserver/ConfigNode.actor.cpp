@@ -188,7 +188,7 @@ class ConfigNodeImpl {
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
 		    wait(getAnnotations(self, req.lastSeenVersion + 1, committedVersion));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeSendingChanges", self->id)
+		TraceEvent(SevDebug, "ConfigNodeSendingChanges", self->id)
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 		    .detail("CommittedVersion", committedVersion)
 		    .detail("NumMutations", versionedMutations.size())
@@ -380,7 +380,7 @@ class ConfigNodeImpl {
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
 		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingSnapshot", self->id)
+		TraceEvent(SevDebug, "ConfigNodeGettingSnapshot", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
 		    .detail("ChangesSize", reply.changes.size())
@@ -394,7 +394,7 @@ class ConfigNodeImpl {
 	// However, commit annotations for compacted mutations are lost
 	ACTOR static Future<Void> compact(ConfigNodeImpl* self, ConfigFollowerCompactRequest req) {
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeCompacting", self->id)
+		TraceEvent(SevDebug, "ConfigNodeCompacting", self->id)
 		    .detail("Version", req.version)
 		    .detail("LastCompacted", lastCompactedVersion);
 		if (req.version <= lastCompactedVersion) {
@@ -413,7 +413,7 @@ class ConfigNodeImpl {
 			if (version > req.version) {
 				break;
 			} else {
-				TraceEvent(SevDebug, "ConfigDatabaseNodeCompactionApplyingMutation", self->id)
+				TraceEvent(SevDebug, "ConfigNodeCompactionApplyingMutation", self->id)
 				    .detail("IsSet", mutation.isSet())
 				    .detail("MutationVersion", version)
 				    .detail("LastCompactedVersion", lastCompactedVersion)
@@ -467,14 +467,13 @@ class ConfigNodeImpl {
 
 public:
 	ConfigNodeImpl(std::string const& folder)
-	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigDatabaseNode"),
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigNode"),
 	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
 	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), successfulCommits("SuccessfulCommits", cc),
 	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
 	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {
-		logger = traceCounters(
-		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
+		logger = traceCounters("ConfigNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigNode");
 		TraceEvent(SevDebug, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
 	}
 

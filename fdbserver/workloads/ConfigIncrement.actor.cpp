@@ -24,9 +24,10 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class ConfigIncrementWorkload : public TestWorkload {
-	int actorsPerClient{ 0 };
+	int incrementActors{ 0 };
 	int incrementsPerActor{ 0 };
-	Version lastKnownCommittedVersion{ 0 };
+	Version lastKnownCommittedVersion{ ::invalidVersion };
+	int lastKnownValue{ -1 };
 	bool useSimpleConfigDB{ true };
 
 	static KeyRef const testKnobName;
@@ -43,6 +44,7 @@ class ConfigIncrementWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<int> get(Reference<ISingleThreadTransaction> tr) {
+		TraceEvent(SevDebug, "ConfigIncrementGet");
 		Optional<Value> serializedValue = wait(tr->get(getConfigKey()));
 		if (!serializedValue.present()) {
 			return 0;
@@ -51,22 +53,32 @@ class ConfigIncrementWorkload : public TestWorkload {
 		}
 	}
 
-	static void set(Reference<ISingleThreadTransaction> tr, int value) { tr->set(getConfigKey(), format("%d", value)); }
+	static void set(Reference<ISingleThreadTransaction> tr, int value) {
+		TraceEvent(SevDebug, "ConfigIncrementSet").detail("Value", value);
+		tr->set(getConfigKey(), format("%d", value));
+	}
 
 	ACTOR static Future<Void> incrementActor(ConfigIncrementWorkload* self, Database cx) {
+		TraceEvent(SevDebug, "ConfigIncrementStartIncrementActor");
 		state int trsComplete = 0;
 		while (trsComplete < self->incrementsPerActor) {
-			try {
-				state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
-				int currentValue = wait(get(tr));
-				set(tr, currentValue + 1);
-				wait(tr->commit());
-				ASSERT_GT(tr->getCommittedVersion(), self->lastKnownCommittedVersion);
-				self->lastKnownCommittedVersion = tr->getCommittedVersion();
-				++self->transactions;
-			} catch (Error& e) {
-				// TODO: Increment error counters
-				wait(tr->onError(e));
+			loop {
+				try {
+					state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
+					state int currentValue = wait(get(tr));
+					set(tr, currentValue + 1);
+					wait(tr->commit());
+					ASSERT_GT(tr->getCommittedVersion(), self->lastKnownCommittedVersion);
+					ASSERT_GE(currentValue, self->lastKnownValue);
+					self->lastKnownCommittedVersion = tr->getCommittedVersion();
+					self->lastKnownValue = currentValue + 1;
+					++self->transactions;
+					++trsComplete;
+					break;
+				} catch (Error& e) {
+					// TODO: Increment error counters
+					wait(tr->onError(e));
+				}
 			}
 		}
 		return Void();
@@ -74,8 +86,17 @@ class ConfigIncrementWorkload : public TestWorkload {
 
 	ACTOR static Future<bool> check(ConfigIncrementWorkload* self, Database cx) {
 		state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
-		state int currentValue = wait(get(tr));
-		return currentValue > (self->actorsPerClient * self->incrementsPerActor);
+		loop {
+			try {
+				state int currentValue = wait(get(tr));
+				TraceEvent("ConfigIncrementCheck")
+				    .detail("CurrentValue", currentValue)
+				    .detail("ExpectedValue", self->incrementActors * self->incrementsPerActor);
+				return currentValue >= (self->incrementActors * self->incrementsPerActor);
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 	}
 
 	Reference<ISingleThreadTransaction> getTransaction(Database cx) const {
@@ -87,7 +108,9 @@ class ConfigIncrementWorkload : public TestWorkload {
 public:
 	ConfigIncrementWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency") {
-		// TODO: Read test params
+		incrementActors = getOption(options, "incrementActors"_sr, 10);
+		incrementsPerActor = getOption(options, "incrementsPerActor"_sr, 10);
+		useSimpleConfigDB = getOption(options, "useSimpleConfigDB"_sr, true);
 	}
 
 	std::string description() const override { return "ConfigIncrementWorkload"; }
@@ -99,7 +122,7 @@ public:
 			return Void();
 		}
 		std::vector<Future<Void>> actors;
-		for (int i = 0; i < actorsPerClient; ++i) {
+		for (int i = 0; i < incrementActors; ++i) {
 			actors.push_back(incrementActor(this, cx));
 		}
 		return waitForAll(actors);
