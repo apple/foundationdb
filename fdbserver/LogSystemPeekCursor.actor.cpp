@@ -51,9 +51,9 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterf
                                                bool parallelGetMore)
   : interf(interf), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(begin), end(end),
     poppedVersion(0), hasMsg(false), randomID(deterministicRandom()->randomUniqueID()),
-    returnIfBlocked(returnIfBlocked), onlySpilled(false), parallelGetMore(parallelGetMore), sequence(0), lastReset(0),
-    resetCheck(Void()), slowReplies(0), fastReplies(0), unknownReplies(0),
-    usePeekStream(SERVER_KNOBS->PEEK_USEING_STREAMING) {
+    returnIfBlocked(returnIfBlocked), onlySpilled(false), parallelGetMore(parallelGetMore),
+    usePeekStream(SERVER_KNOBS->PEEK_USEING_STREAMING), sequence(0), lastReset(0), resetCheck(Void()), slowReplies(0),
+    fastReplies(0), unknownReplies(0) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	TraceEvent("SPC_Starting", randomID)
@@ -73,8 +73,8 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
   : tag(tag), results(results), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion),
     end(end), poppedVersion(poppedVersion), messageAndTags(message), hasMsg(hasMsg),
     randomID(deterministicRandom()->randomUniqueID()), returnIfBlocked(false), onlySpilled(false),
-    parallelGetMore(false), sequence(0), lastReset(0), resetCheck(Void()), slowReplies(0), fastReplies(0),
-    unknownReplies(0), usePeekStream(false) {
+    parallelGetMore(false), usePeekStream(false), sequence(0), lastReset(0), resetCheck(Void()), slowReplies(0),
+    fastReplies(0), unknownReplies(0) {
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
