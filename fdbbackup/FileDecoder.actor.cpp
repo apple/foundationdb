@@ -314,7 +314,6 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, cons
 struct VersionedMutations {
 	Version version;
 	std::vector<MutationRef> mutations;
-	Arena arena; // The arena that contains the mutations.
 	std::string serializedMutations; // buffer that contains mutations
 };
 
@@ -335,7 +334,7 @@ struct VersionedMutations {
  * at any time this object might have two blocks of data in memory.
  */
 class DecodeProgress {
-	Standalone<VectorRef<KeyValueRef>> blocks;
+	std::vector<Standalone<VectorRef<KeyValueRef>>> blocks;
 	std::unordered_map<Version, fileBackup::AccumulatedMutations> mutationBlocksByVersion;
 
 public:
@@ -364,7 +363,6 @@ public:
 				std::vector<MutationRef> mutations = fileBackup::decodeMutationLogValue(m.serializedMutations);
 				TraceEvent("Decode").detail("Version", vms.version).detail("N", mutations.size());
 				vms.mutations.insert(vms.mutations.end(), mutations.begin(), mutations.end());
-				vms.arena = blocks.arena();
 				vms.serializedMutations = m.serializedMutations;
 				mutationBlocksByVersion.erase(version);
 				return vms;
@@ -386,9 +384,9 @@ public:
 		return Void();
 	}
 
-	// Add blocks to mutationBlocksByVersion
-	void addBlockKVPairs(VectorRef<KeyValueRef> blocks) {
-		for (auto& kv : blocks) {
+	// Add chunks to mutationBlocksByVersion
+	void addBlockKVPairs(VectorRef<KeyValueRef> chunks) {
+		for (auto& kv : chunks) {
 			auto versionAndChunkNumber = fileBackup::decodeMutationLogKey(kv.key);
 			mutationBlocksByVersion[versionAndChunkNumber.first].addChunk(versionAndChunkNumber.second, kv);
 		}
@@ -403,20 +401,16 @@ public:
 				return Void();
 			}
 
-			// Decode a file block into log_key and log_value pairs
-			Standalone<VectorRef<KeyValueRef>> blocks =
+			// Decode a file block into log_key and log_value chunks
+			Standalone<VectorRef<KeyValueRef>> chunks =
 			    wait(fileBackup::decodeMutationLogFileBlock(self->fd, self->offset, len));
-			// This is memory inefficient, but we don't know if blocks are complete version data
-			self->blocks.reserve(self->blocks.arena(), self->blocks.size() + blocks.size());
-			for (int i = 0; i < blocks.size(); i++) {
-				self->blocks.push_back_deep(self->blocks.arena(), blocks[i]);
-			}
+			self->blocks.push_back(chunks);
 
 			TraceEvent("ReadFile")
 			    .detail("Name", self->file.fileName)
 			    .detail("Len", len)
 			    .detail("Offset", self->offset);
-			self->addBlockKVPairs(blocks);
+			self->addBlockKVPairs(chunks);
 			self->offset += len;
 
 			return Void();
