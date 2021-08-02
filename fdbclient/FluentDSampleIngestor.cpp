@@ -124,9 +124,9 @@ public:
 	SampleSender(Socket& socket, Callback const& callback, std::shared_ptr<Sample> const& sample)
 	  : socket(socket),
 		callback(callback),
-		sample_(sample),
 		iter(sample->data.begin()),
-		end(sample->data.end()) {
+		end(sample->data.end()),
+		sample_(sample) {
 			sendNext();
 		}
 };
