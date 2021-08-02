@@ -51,7 +51,7 @@ public:
 private:
 	DatabaseContext* cx;
 	StorageServerInfo(DatabaseContext* cx, StorageServerInterface const& interf, LocalityData const& locality)
-	  : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
+	  : ReferencedInterface<StorageServerInterface>(interf, locality), cx(cx) {}
 };
 
 struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {

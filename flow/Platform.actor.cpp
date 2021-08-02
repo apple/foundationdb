@@ -1384,21 +1384,21 @@ struct SystemStatisticsState {
 	HCOUNTER ProcessorIdleCounter;
 	SystemStatisticsState()
 	  : Query(nullptr), QueueLengthCounter(nullptr), DiskTimeCounter(nullptr), ReadsCounter(nullptr),
-	    WritesCounter(nullptr), WriteBytesCounter(nullptr), ProcessorIdleCounter(nullptr),
+	    WritesCounter(nullptr), WriteBytesCounter(nullptr), ProcessorIdleCounter(nullptr), lastTime(0),
+	    lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0) {}
 #elif defined(__unixish__)
 	uint64_t machineLastSent, machineLastReceived;
 	uint64_t machineLastOutSegs, machineLastRetransSegs;
 	uint64_t lastBusyTicks, lastReads, lastWrites, lastWriteSectors, lastReadSectors;
 	uint64_t lastClockIdleTime, lastClockTotalTime;
 	SystemStatisticsState()
-	  : machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0), lastBusyTicks(0),
+	  : lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0),
+	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0), lastBusyTicks(0),
 	    lastReads(0), lastWrites(0), lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0),
-	    lastClockTotalTime(0),
+	    lastClockTotalTime(0) {}
 #else
 #error Port me!
 #endif
-	    lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0) {
-	}
 };
 
 #if defined(_WIN32)

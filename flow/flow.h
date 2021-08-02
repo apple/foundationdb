@@ -434,7 +434,7 @@ public:
 	T& value() { return *(T*)&value_storage; }
 
 	SAV(int futures, int promises)
-	  : futures(futures), promises(promises), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
+	  : promises(promises), futures(futures), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
 		Callback<T>::prev = Callback<T>::next = this;
 	}
 	~SAV() {
@@ -763,7 +763,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	Promise<Void> onEmpty;
 	Error error;
 
-	NotifiedQueue(int futures, int promises) : futures(futures), promises(promises), onEmpty(nullptr) {
+	NotifiedQueue(int futures, int promises) : promises(promises), futures(futures), onEmpty(nullptr) {
 		SingleCallback<T>::next = this;
 	}
 

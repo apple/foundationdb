@@ -50,16 +50,16 @@ public:
 	Optional<Version> getCachedReadVersion() const override;
 
 	Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::False) override;
-	Future<Standalone<RangeResultRef>> getRange(KeySelector const& begin,
-	                                            KeySelector const& end,
-	                                            int limit,
-	                                            Snapshot = Snapshot::False,
-	                                            Reverse = Reverse::False) override;
-	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
-	                                            KeySelector end,
-	                                            GetRangeLimits limits,
-	                                            Snapshot = Snapshot::False,
-	                                            Reverse = Reverse::False) override;
+	Future<RangeResult> getRange(KeySelector const& begin,
+	                             KeySelector const& end,
+	                             int limit,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
+	Future<RangeResult> getRange(KeySelector begin,
+	                             KeySelector end,
+	                             GetRangeLimits limits,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
 	Future<Void> commit() override;
 	Version getCommittedVersion() const override;
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;

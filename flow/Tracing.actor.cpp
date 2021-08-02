@@ -276,7 +276,7 @@ ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, in
 
 struct FastUDPTracer : public UDPTracer {
 	FastUDPTracer()
-	  : socket_fd_(-1), unready_socket_messages_(0), failed_messages_(0), total_messages_(0), send_error_(false) {
+	  : unready_socket_messages_(0), failed_messages_(0), total_messages_(0), socket_fd_(-1), send_error_(false) {
 		request_ = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 			                     .data_size = 0,
 			                     .buffer_size = kTraceBufferSize };
