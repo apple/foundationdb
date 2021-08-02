@@ -370,7 +370,9 @@ public:
 		}
 
 		// No complete versions
-		TraceEvent(SevWarn, "UnfishedBlocks").detail("NumberOfVersions", mutationBlocksByVersion.size());
+		if (!mutationBlocksByVersion.empty()) {
+			TraceEvent(SevWarn, "UnfishedBlocks").detail("NumberOfVersions", mutationBlocksByVersion.size());
+		}
 		done = true;
 		return vms;
 	}
