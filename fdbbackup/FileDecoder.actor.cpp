@@ -681,7 +681,6 @@ public:
 
 ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile file, UID uid, DecodeParams params) {
 	TraceEvent("ProcessFile").detail("Name", file.fileName);
-	std::cout << "ProcessFile " << file.fileName << "\n";
 	if (file.fileSize == 0) {
 		TraceEvent("SkipEmptyFile").detail("Name", file.fileName);
 		return Void();
@@ -721,7 +720,6 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 		}
 	}
 	TraceEvent("ProcessFileDone").detail("File", file.fileName);
-	std::cout << "ProcessFileDone " << file.fileName << "\n";
 	return Void();
 }
 
@@ -752,12 +750,10 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	state int idx = 0;
 	while (idx < logs.size()) {
 		TraceEvent("ProcessFileI").detail("Name", logs[idx].fileName).detail("I", idx);
-		std::cout << "ProcessFileI " << logs[idx].fileName << " " << idx << "\n";
 
 		wait(process_file(container, logs[idx], uid, params));
 
 		TraceEvent("ProcessFileIDone").detail("I", idx);
-		std::cout << "ProcessFileIDone " << idx << "\n";
 		idx++;
 	}
 	TraceEvent("DecodeDone", uid);
