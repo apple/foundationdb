@@ -311,59 +311,6 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, cons
 	return filtered;
 }
 
-std::pair<Version, int32_t> decode_key(const StringRef& key) {
-	ASSERT(key.size() == sizeof(uint8_t) + sizeof(Version) + sizeof(int32_t));
-
-	uint8_t hash;
-	Version version;
-	int32_t part;
-	BinaryReader rd(key, Unversioned());
-	rd >> hash >> version >> part;
-	version = bigEndian64(version);
-	part = bigEndian32(part);
-
-	int32_t v = version / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
-	ASSERT(((uint8_t)hashlittle(&v, sizeof(v), 0)) == hash);
-
-	return std::make_pair(version, part);
-}
-
-// Decodes an encoded list of mutations in the format of:
-//   [includeVersion:uint64_t][val_length:uint32_t][mutation_1][mutation_2]...[mutation_k],
-// where a mutation is encoded as:
-//   [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][key][value]
-std::vector<MutationRef> decode_value(const StringRef& value) {
-	StringRefReader reader(value, restore_corrupted_data());
-
-	reader.consume<uint64_t>(); // Consume the includeVersion
-	uint32_t val_length = reader.consume<uint32_t>();
-	if (val_length != value.size() - sizeof(uint64_t) - sizeof(uint32_t)) {
-		TraceEvent(SevError, "ValueError")
-		    .detail("ValueLen", val_length)
-		    .detail("ValueSize", value.size())
-		    .detail("Value", printable(value));
-	}
-
-	std::vector<MutationRef> mutations;
-	while (1) {
-		if (reader.eof())
-			break;
-
-		// Deserialization of a MutationRef, which was packed by MutationListRef::push_back_deep()
-		uint32_t type, p1len, p2len;
-		type = reader.consume<uint32_t>();
-		p1len = reader.consume<uint32_t>();
-		p2len = reader.consume<uint32_t>();
-
-		const uint8_t* key = reader.consume(p1len);
-		const uint8_t* val = reader.consume(p2len);
-
-		mutations.emplace_back((MutationRef::Type)type, StringRef(key, p1len), StringRef(val, p2len));
-	}
-	return mutations;
-}
-
-
 // Decodes a mutation log key, which contains (hash, commitVersion, chunkNumber) and
 // returns (commitVersion, chunkNumber)
 std::pair<Version, int32_t> decodeLogKey(const StringRef& key) {
@@ -488,8 +435,6 @@ struct AccumulatedMutations {
 	std::string serializedMutations;
 	int lastChunkNumber;
 };
-
-
 
 struct VersionedMutations {
 	Version version;
@@ -617,24 +562,11 @@ public:
 	}
 
 	// Add blocks to mutationBlocksByVersion
-	void filterLogMutationKVPairs(VectorRef<KeyValueRef> blocks) {
+	void addBlockKVPairs(VectorRef<KeyValueRef> blocks) {
 		for (auto& kv : blocks) {
 			auto versionAndChunkNumber = decodeLogKey(kv.key);
 			mutationBlocksByVersion[versionAndChunkNumber.first].addChunk(versionAndChunkNumber.second, kv);
 		}
-/*
-		std::vector<KeyValueRef> output;
-
-		for (auto& vb : mutationBlocksByVersion) {
-			AccumulatedMutations& m = vb.second;
-
-			// If the mutations are incomplete or match one of the ranges, include in results.
-			if (!m.isComplete() || m.matchesAnyRange(ranges)) {
-				output.insert(output.end(), m.kvs.begin(), m.kvs.end());
-			}
-		}
-
-		return output;*/
 	}
 
 	// Reads a file block, decodes it into key/value pairs, and stores these pairs.
@@ -658,7 +590,7 @@ public:
 			    .detail("Name", self->file.fileName)
 			    .detail("Len", len)
 			    .detail("Offset", self->offset);
-			self->filterLogMutationKVPairs(blocks);
+			self->addBlockKVPairs(blocks);
 			self->offset += len;
 
 			return Void();
@@ -680,9 +612,8 @@ public:
 };
 
 ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile file, UID uid, DecodeParams params) {
-	TraceEvent("ProcessFile").detail("Name", file.fileName);
 	if (file.fileSize == 0) {
-		TraceEvent("SkipEmptyFile").detail("Name", file.fileName);
+		TraceEvent("SkipEmptyFile", uid).detail("Name", file.fileName);
 		return Void();
 	}
 
@@ -719,7 +650,7 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 			}
 		}
 	}
-	TraceEvent("ProcessFileDone").detail("File", file.fileName);
+	TraceEvent("ProcessFileDone", uid).detail("File", file.fileName);
 	return Void();
 }
 
@@ -749,11 +680,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 	state int idx = 0;
 	while (idx < logs.size()) {
-		TraceEvent("ProcessFileI").detail("Name", logs[idx].fileName).detail("I", idx);
-
+		TraceEvent("ProcessFile").detail("Name", logs[idx].fileName).detail("I", idx);
 		wait(process_file(container, logs[idx], uid, params));
-
-		TraceEvent("ProcessFileIDone").detail("I", idx);
 		idx++;
 	}
 	TraceEvent("DecodeDone", uid);
