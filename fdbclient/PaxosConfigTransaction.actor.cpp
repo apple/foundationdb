@@ -192,15 +192,15 @@ public:
 };
 
 Future<Version> PaxosConfigTransaction::getReadVersion() {
-	return impl().getReadVersion();
+	return impl->getReadVersion();
 }
 
 Optional<Version> PaxosConfigTransaction::getCachedReadVersion() const {
-	return impl().getCachedReadVersion();
+	return impl->getCachedReadVersion();
 }
 
 Future<Optional<Value>> PaxosConfigTransaction::get(Key const& key, Snapshot) {
-	return impl().get(key);
+	return impl->get(key);
 }
 
 Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
@@ -211,7 +211,7 @@ Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
 	if (reverse) {
 		throw client_invalid_operation();
 	}
-	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
+	return impl->getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
 Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector begin,
@@ -222,27 +222,27 @@ Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector begin,
 	if (reverse) {
 		throw client_invalid_operation();
 	}
-	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
+	return impl->getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
 void PaxosConfigTransaction::set(KeyRef const& key, ValueRef const& value) {
-	return impl().set(key, value);
+	return impl->set(key, value);
 }
 
 void PaxosConfigTransaction::clear(KeyRef const& key) {
-	return impl().clear(key);
+	return impl->clear(key);
 }
 
 Future<Void> PaxosConfigTransaction::commit() {
-	return impl().commit();
+	return impl->commit();
 }
 
 Version PaxosConfigTransaction::getCommittedVersion() const {
-	return impl().getCommittedVersion();
+	return impl->getCommittedVersion();
 }
 
 int64_t PaxosConfigTransaction::getApproximateSize() const {
-	return impl().getApproximateSize();
+	return impl->getApproximateSize();
 }
 
 void PaxosConfigTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
@@ -250,7 +250,7 @@ void PaxosConfigTransaction::setOption(FDBTransactionOptions::Option option, Opt
 }
 
 Future<Void> PaxosConfigTransaction::onError(Error const& e) {
-	return impl().onError(e);
+	return impl->onError(e);
 }
 
 void PaxosConfigTransaction::cancel() {
@@ -259,28 +259,28 @@ void PaxosConfigTransaction::cancel() {
 }
 
 void PaxosConfigTransaction::reset() {
-	impl().reset();
+	impl->reset();
 }
 
 void PaxosConfigTransaction::fullReset() {
-	impl().fullReset();
+	impl->fullReset();
 }
 
 void PaxosConfigTransaction::debugTransaction(UID dID) {
-	impl().debugTransaction(dID);
+	impl->debugTransaction(dID);
 }
 
 void PaxosConfigTransaction::checkDeferredError() const {
-	impl().checkDeferredError(deferredError);
+	impl->checkDeferredError(deferredError);
 }
 
 PaxosConfigTransaction::PaxosConfigTransaction(std::vector<ConfigTransactionInterface> const& ctis)
-  : _impl(std::make_unique<PaxosConfigTransactionImpl>(ctis)) {}
+  : impl(PImpl<PaxosConfigTransactionImpl>::create(ctis)) {}
 
 PaxosConfigTransaction::PaxosConfigTransaction() = default;
 
 PaxosConfigTransaction::~PaxosConfigTransaction() = default;
 
 void PaxosConfigTransaction::setDatabase(Database const& cx) {
-	_impl = std::make_unique<PaxosConfigTransactionImpl>(cx);
+	impl = PImpl<PaxosConfigTransactionImpl>::create(cx);
 }

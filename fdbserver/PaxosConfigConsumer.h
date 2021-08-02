@@ -20,15 +20,14 @@
 
 #pragma once
 
+#include "fdbclient/PImpl.h"
 #include "fdbserver/IConfigConsumer.h"
 
 /*
  * A fault-tolerant configuration database consumer implementation
  */
 class PaxosConfigConsumer : public IConfigConsumer {
-	std::unique_ptr<class PaxosConfigConsumerImpl> _impl;
-	PaxosConfigConsumerImpl const& impl() const { return *_impl; }
-	PaxosConfigConsumerImpl& impl() { return *_impl; }
+	PImpl<class PaxosConfigConsumerImpl> impl;
 
 public:
 	PaxosConfigConsumer(ServerCoordinators const& coordinators,

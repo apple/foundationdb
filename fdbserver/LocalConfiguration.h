@@ -24,6 +24,7 @@
 
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbclient/IKnobCollection.h"
+#include "fdbclient/PImpl.h"
 #include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
@@ -43,9 +44,7 @@ FDB_DECLARE_BOOLEAN_PARAM(IsTest);
  *      - Persist these updates when received, and restart if necessary
  */
 class LocalConfiguration {
-	std::unique_ptr<class LocalConfigurationImpl> _impl;
-	LocalConfigurationImpl& impl() { return *_impl; }
-	LocalConfigurationImpl const& impl() const { return *_impl; }
+	PImpl<class LocalConfigurationImpl> impl;
 
 public:
 	LocalConfiguration(std::string const& dataFolder,

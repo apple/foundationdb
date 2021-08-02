@@ -367,10 +367,10 @@ public:
 };
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
-  : _impl(std::make_unique<ConfigBroadcasterImpl>(cfi)) {}
+  : impl(PImpl<ConfigBroadcasterImpl>::create(cfi)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, UseConfigDB useConfigDB)
-  : _impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, useConfigDB)) {}
+  : impl(PImpl<ConfigBroadcasterImpl>::create(coordinators, useConfigDB)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigBroadcaster&&) = default;
 
@@ -379,13 +379,13 @@ ConfigBroadcaster& ConfigBroadcaster::operator=(ConfigBroadcaster&&) = default;
 ConfigBroadcaster::~ConfigBroadcaster() = default;
 
 Future<Void> ConfigBroadcaster::serve(ConfigBroadcastFollowerInterface const& cbfi) {
-	return impl().serve(this, cbfi);
+	return impl->serve(this, cbfi);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
                                      Version mostRecentVersion,
                                      Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl().applyChanges(changes, mostRecentVersion, annotations);
+	impl->applyChanges(changes, mostRecentVersion, annotations);
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
@@ -394,7 +394,7 @@ void ConfigBroadcaster::applySnapshotAndChanges(
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl().applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion, annotations);
+	impl->applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion, annotations);
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
@@ -403,19 +403,19 @@ void ConfigBroadcaster::applySnapshotAndChanges(
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl().applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion, annotations);
+	impl->applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion, annotations);
 }
 
 UID ConfigBroadcaster::getID() const {
-	return impl().getID();
+	return impl->getID();
 }
 
 JsonBuilderObject ConfigBroadcaster::getStatus() const {
-	return impl().getStatus();
+	return impl->getStatus();
 }
 
 void ConfigBroadcaster::compact(Version compactionVersion) {
-	impl().compact(compactionVersion);
+	impl->compact(compactionVersion);
 }
 
 namespace {

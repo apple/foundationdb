@@ -483,14 +483,14 @@ public:
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
 };
 
-ConfigNode::ConfigNode(std::string const& folder) : _impl(std::make_unique<ConfigNodeImpl>(folder)) {}
+ConfigNode::ConfigNode(std::string const& folder) : impl(PImpl<ConfigNodeImpl>::create(folder)) {}
 
 ConfigNode::~ConfigNode() = default;
 
 Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {
-	return impl().serve(cti);
+	return impl->serve(cti);
 }
 
 Future<Void> ConfigNode::serve(ConfigFollowerInterface const& cfi) {
-	return impl().serve(cfi);
+	return impl->serve(cfi);
 }

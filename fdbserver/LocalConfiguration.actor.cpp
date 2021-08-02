@@ -423,7 +423,7 @@ LocalConfiguration::LocalConfiguration(std::string const& dataFolder,
                                        std::string const& configPath,
                                        std::map<std::string, std::string> const& manualKnobOverrides,
                                        IsTest isTest)
-  : _impl(std::make_unique<LocalConfigurationImpl>(dataFolder, configPath, manualKnobOverrides, isTest)) {}
+  : impl(PImpl<LocalConfigurationImpl>::create(dataFolder, configPath, manualKnobOverrides, isTest)) {}
 
 LocalConfiguration::LocalConfiguration(LocalConfiguration&&) = default;
 
@@ -432,37 +432,37 @@ LocalConfiguration& LocalConfiguration::operator=(LocalConfiguration&&) = defaul
 LocalConfiguration::~LocalConfiguration() = default;
 
 Future<Void> LocalConfiguration::initialize() {
-	return impl().initialize();
+	return impl->initialize();
 }
 
 FlowKnobs const& LocalConfiguration::getFlowKnobs() const {
-	return impl().getFlowKnobs();
+	return impl->getFlowKnobs();
 }
 
 ClientKnobs const& LocalConfiguration::getClientKnobs() const {
-	return impl().getClientKnobs();
+	return impl->getClientKnobs();
 }
 
 ServerKnobs const& LocalConfiguration::getServerKnobs() const {
-	return impl().getServerKnobs();
+	return impl->getServerKnobs();
 }
 
 TestKnobs const& LocalConfiguration::getTestKnobs() const {
-	return impl().getTestKnobs();
+	return impl->getTestKnobs();
 }
 
 Future<Void> LocalConfiguration::consume(
     Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
-	return impl().consume(broadcaster);
+	return impl->consume(broadcaster);
 }
 
 Future<Void> LocalConfiguration::addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes,
                                             Version mostRecentVersion) {
-	return impl().addChanges(changes, mostRecentVersion);
+	return impl->addChanges(changes, mostRecentVersion);
 }
 
 UID LocalConfiguration::getID() const {
-	return impl().getID();
+	return impl->getID();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ManualKnobOverrides/InvalidName") {
