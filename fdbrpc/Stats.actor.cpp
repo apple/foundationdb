@@ -22,8 +22,8 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
-  : name(name), interval_start(0), last_event(0), interval_sq_time(0), interval_start_value(0), interval_delta(0),
-    roughness_interval_start(0) {
+  : name(name), interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0), interval_delta(0),
+    interval_start_value(0) {
 	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);
 	collection.counters.push_back(this);
 }
