@@ -831,7 +831,9 @@ public:
 			    "FIFOQueue::Cursor(%s) write(%s) writing\n", self->toString().c_str(), ::toString(item).c_str());
 			auto p = self->raw();
 			Codec::writeToBytes(p->begin() + self->offset, item);
-			debug_printf("FIFOQueue::Cursor(%s) write complete\n", self->toString().c_str());
+			debug_printf("FIFOQueue::Cursor(%s) write complete, bytesNeeded=%d\n", 
+				self->toString().c_str(),
+				bytesNeeded);
 			self->offset += bytesNeeded;
 			p->endOffset = self->offset;
 			++self->queue->numEntries;
@@ -946,17 +948,19 @@ public:
 			}
 
 			auto p = raw();
-			debug_printf("FIFOQueue::Cursor(%s) readNext reading at current position\n", toString().c_str());
+			debug_printf("FIFOQueue::Cursor(%s) readNext reading at current position offset=%d p->endOffset=%u\n", 
+				toString().c_str(),
+				offset,
+				(uint32_t)p->endOffset);
 			ASSERT(offset < p->endOffset);
+
 			int bytesRead;
 			const T result = Codec::readFromBytes(p->begin() + offset, bytesRead);
-
 			if (upperBound.present() && upperBound.get() < result) {
 				debug_printf("FIFOQueue::Cursor(%s) not popping %s, exceeds upper bound %s\n",
-				             toString().c_str(),
-				             ::toString(result).c_str(),
-				             ::toString(upperBound.get()).c_str());
-
+							toString().c_str(),
+							::toString(result).c_str(),
+							::toString(upperBound.get()).c_str());
 				return Optional<T>();
 			}
 
@@ -1140,6 +1144,10 @@ public:
 
 				// Now loop over all entries inside the current page
 				loop {
+					debug_printf( "FIFOQueue::Cursor(%s) c.offset=%d p->endoffset=%u\n", 
+						c.toString().c_str(), 
+						c.offset,
+						(uint32_t)p->endOffset);
 					ASSERT(c.offset < p->endOffset);
 					T result = Codec::readFromBytes(p->begin() + c.offset, bytesRead);
 					debug_printf(
@@ -2278,9 +2286,6 @@ public:
 						state int i = 0; 
 						for (auto& r : remaps) {
 							for(i = 0; i<r.originalPageIDs.size(); ++i){
-								/*if (r.originalPageIDs[i] != invalidLogicalPageID){
-									ASSERT(r.newPageIDs[i] != invalidLogicalPageID);
-								}*/
 								self->remappedPages[r.originalPageIDs[i]][r.version] = r.newPageIDs[i];
 							}
 						}
@@ -2703,8 +2708,9 @@ public:
 			             v,
 			             pLastCommittedHeader->oldestVersion);
 			for(PhysicalPageID pageID : pageIDs){
-				if(pageID!=invalidLogicalPageID)
+				if(pageID!=invalidLogicalPageID){
 					freeList.pushBack(pageID);
+				}
 			}
 		} else {
 			// Otherwise add it to the delayed free list
@@ -2781,7 +2787,6 @@ public:
 	void freePage( uint8_t level, Version v, VectorRef<LogicalPageID> pageIDs ) override {
 		// If pageID has been remapped, then it can't be freed until all existing remaps for that page have been undone,
 		// so queue it for later deletion
-		Standalone<VectorRef<LogicalPageID>> unmappedPageIDs;
 		Standalone<VectorRef<LogicalPageID>> remapOriginalPageIDs;
 		Standalone<VectorRef<LogicalPageID>> remapNewPageIDs;
 
@@ -2793,7 +2798,6 @@ public:
 					toString(pageID).c_str(),
 					v,
 					pLastCommittedHeader->oldestVersion);
-				remapOriginalPageIDs.push_back(remapOriginalPageIDs.arena(), pageID);
 				remapNewPageIDs.push_back(remapNewPageIDs.arena(), invalidLogicalPageID);
 
 				// A freed page is unlikely to be read again soon so prioritize its cache eviction
@@ -2804,21 +2808,18 @@ public:
 				}
 				i->second[v] = invalidLogicalPageID;
 			}
-			else{
-				unmappedPageIDs.push_back(unmappedPageIDs.arena(), pageID);
-			}
+			remapOriginalPageIDs.push_back(remapOriginalPageIDs.arena(), pageID);
 		}
-
-		if(unmappedPageIDs.size()>0) {
-			ASSERT(unmappedPageIDs.size() == pageIDs.size());
-			freeUnmappedPage(unmappedPageIDs, v);
-		}
-		else if(remapOriginalPageIDs.size()>0) {
+		if(remapNewPageIDs.size()>0) {
+			ASSERT(remapOriginalPageIDs.size() == remapNewPageIDs.size());
 			remapQueue.pushBack(RemappedPage{ remapOriginalPageIDs, remapNewPageIDs, level, v });
 		}
-		debug_printf("DWALPager(%s)  unmappedPageIDs=%s remapOriginalPageIDs=%s remapNewPageIDs=%s\n",
+		else if (remapOriginalPageIDs.size()>0) {
+			ASSERT(remapOriginalPageIDs.size() == pageIDs.size());
+			freeUnmappedPage(remapOriginalPageIDs, v);
+		}
+		debug_printf("DWALPager(%s) remapOriginalPageIDs=%s remapNewPageIDs=%s\n",
 					filename.c_str(),
-					toString(unmappedPageIDs).c_str(),
 					toString(remapOriginalPageIDs).c_str(),
 					toString(remapNewPageIDs).c_str());
 	};
