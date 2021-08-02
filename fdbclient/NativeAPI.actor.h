@@ -179,6 +179,9 @@ struct TransactionInfo {
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
+	// Only available so that Transaction can have a default constructor, for use in state variables
+	TransactionInfo() : taskID(), spanID(), useProvisionalProxies() {}
+
 	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
 	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
 };

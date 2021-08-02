@@ -335,7 +335,7 @@ public:
 	void setCancel(Future<Void>&& cf) { cancelFuture = std::move(cf); }
 
 	virtual void cancel() {
-		// Cancels the action and decrements the reference count by 1 The if statement is just an optimization. It's ok
+		// Cancels the action and decrements the reference count by 1. The if statement is just an optimization. It's ok
 		// if we take the "wrong path" if we call this while someone else holds |mutex|. We can't take |mutex| since
 		// this is called from releaseMemory. Trying to avoid going to the network thread here is an important - without
 		// this we see lower throughput on the client for e.g. GRV workloads.
