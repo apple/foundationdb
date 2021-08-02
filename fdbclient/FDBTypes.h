@@ -74,6 +74,8 @@ struct Tag {
 
 	int toTagDataIndex() const { return locality >= 0 ? 2 * locality : 1 - (2 * locality); }
 
+	bool isNonPrimaryTLogType() const { return locality < 0; }
+
 	std::string toString() const { return format("%d:%d", locality, id); }
 
 	template <class Ar>
