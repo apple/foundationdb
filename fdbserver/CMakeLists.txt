@@ -144,6 +144,7 @@ set(FDBSERVER_SRCS
   workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
   workloads/ClogSingleConnection.actor.cpp
+  workloads/ConfigIncrement.actor.cpp
   workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
