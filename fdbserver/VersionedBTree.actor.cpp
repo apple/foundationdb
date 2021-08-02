@@ -952,8 +952,43 @@ public:
 				toString().c_str(),
 				offset,
 				(uint32_t)p->endOffset);
-			ASSERT(offset < p->endOffset);
 
+			if (offset == p->endOffset && offset == 0) {
+				debug_printf("FIFOQueue::Cursor(%s) Page exhausted\n", toString().c_str());
+				LogicalPageID oldPageID = pageID;
+				LogicalPageID extentCurPageID = p->extentCurPageID;
+				LogicalPageID extentEndPageID = p->extentEndPageID;
+				pageID = p->nextPageID;
+				offset = p->nextOffset;
+
+				// If pageID isn't the tail page and nextPageID isn't pageID then start loading the next page
+				if (pageID != endPageID && nextPageID != pageID) {
+					startNextPageLoad(pageID);
+				}
+
+				if (mode == POP) {
+					--queue->numPages;
+				}
+
+				page.clear();
+				debug_printf("FIFOQueue::Cursor(%s) readNext page exhausted, moved to new page\n", toString().c_str());
+				if (mode == POP) {
+					if (!queue->usesExtents) {
+						// Freeing the old page must happen after advancing the cursor and clearing the page reference
+						// because freePage() could cause a push onto a queue that causes a newPageID() call which could
+						// pop() from this very same queue. Queue pages are freed at version 0 because they can be
+						// reused after the next commit.
+						queue->pager->freePage(0, 0, VectorRef<LogicalPageID>(&oldPageID, 1));
+					} else if (extentCurPageID == extentEndPageID) {
+						// Figure out the beginning of the extent
+						int pagesPerExtent = queue->pagesPerExtent;
+						queue->pager->freeExtent(oldPageID - pagesPerExtent + 1);
+					}
+				}
+				return Optional<T>();
+			}
+
+			ASSERT(offset < p->endOffset);
 			int bytesRead;
 			const T result = Codec::readFromBytes(p->begin() + offset, bytesRead);
 			if (upperBound.present() && upperBound.get() < result) {
@@ -1148,6 +1183,17 @@ public:
 						c.toString().c_str(), 
 						c.offset,
 						(uint32_t)p->endOffset);
+					if (c.offset == p->endOffset && c.offset == 0) {
+						c.pageID = p->nextPageID;
+						c.offset = p->nextOffset;
+						debug_printf("FIFOQueue::Cursor(%s) peekAllExt page exhausted, moved to new page\n",
+						             c.toString().c_str());
+						debug_printf("FIFOQueue:: nextPageID=%s, extentCurPageID=%s, extentEndPageID=%s\n",
+						             ::toString(p->nextPageID).c_str(),
+						             ::toString(p->extentCurPageID).c_str(),
+						             ::toString(p->extentEndPageID).c_str());
+						break;
+					}
 					ASSERT(c.offset < p->endOffset);
 					T result = Codec::readFromBytes(p->begin() + c.offset, bytesRead);
 					debug_printf(
@@ -3234,8 +3280,10 @@ public:
 
 		if (copyNewToOriginal) {
 			if (g_network->isSimulated()) {
-				ASSERT(self->remapDestinationsSimOnly.count(p.originalPageIDs.front()) == 0);
-				self->remapDestinationsSimOnly.insert(p.originalPageIDs.front());	// TODO: check here, front() or all of the pageID?
+				for(auto originalPageID : p.originalPageIDs){
+					ASSERT(self->remapDestinationsSimOnly.count(originalPageID) == 0);
+					self->remapDestinationsSimOnly.insert(originalPageID);
+				}
 			}
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
