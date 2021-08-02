@@ -682,7 +682,7 @@ public:
 				             ::toString(newPageID).c_str(),
 				             newOffset);
 				writePage();
-				auto p = raw();
+				RawPage* p = raw();
 				prevExtentEndPageID = p->extentEndPageID;
 				if (pageID == prevExtentEndPageID)
 					newExtentPage = true;
@@ -713,7 +713,7 @@ public:
 				             initializeExtentInfo);
 				page = queue->pager->newPageBuffer();
 				setNext(0, 0);
-				auto p = raw();
+				RawPage* p = raw();
 				ASSERT(newOffset == 0);
 				p->endOffset = 0;
 				// For extent based queue, update the index of current page within the extent
@@ -806,7 +806,7 @@ public:
 				if (self->queue->usesExtents) {
 					bool allocateNewExtent = false;
 					if (self->pageID != invalidLogicalPageID) {
-						auto praw = self->raw();
+						RawPage* praw = self->raw();
 						if (praw->extentCurPageID < praw->extentEndPageID) {
 							newPageID = praw->extentCurPageID + 1;
 						} else {
@@ -829,7 +829,7 @@ public:
 
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) write(%s) writing\n", self->toString().c_str(), ::toString(item).c_str());
-			auto p = self->raw();
+			RawPage* p = self->raw();
 			Codec::writeToBytes(p->begin() + self->offset, item);
 			debug_printf("FIFOQueue::Cursor(%s) write complete, bytesNeeded=%d\n", 
 				self->toString().c_str(),
@@ -937,7 +937,7 @@ public:
 				page = nextPageReader.get();
 
 				// Start loading the next page if it's not the end page
-				auto p = raw();
+				RawPage* p = raw();
 				if (p->nextPageID != endPageID) {
 					startNextPageLoad(p->nextPageID);
 				} else {
@@ -947,7 +947,7 @@ public:
 				}
 			}
 
-			auto p = raw();
+			RawPage* p = raw();
 			debug_printf("FIFOQueue::Cursor(%s) readNext reading at current position offset=%d p->endOffset=%u\n", 
 				toString().c_str(),
 				offset,
@@ -1144,7 +1144,7 @@ public:
 
 				// Now loop over all entries inside the current page
 				loop {
-					debug_printf( "FIFOQueue::Cursor(%s) c.offset=%d p->endoffset=%u\n", 
+					debug_printf( "FIFOQueue::Cursor(%s) c.offset=%d p->endOffset=%u\n", 
 						c.toString().c_str(), 
 						c.offset,
 						(uint32_t)p->endOffset);
@@ -1323,7 +1323,7 @@ public:
 							self->tailPageNewExtent = true;
 							self->prevExtentEndPageID = invalidLogicalPageID;
 						} else {
-							auto p = self->tailWriter.raw();
+							RawPage* p = self->tailWriter.raw();
 							debug_printf(
 							    "FIFOQueue(%s) newTailPage tailWriterPage %u extentCurPageID %u, extentEndPageID %u\n",
 							    self->name.c_str(),
@@ -1351,7 +1351,7 @@ public:
 					workPending = true;
 				} else {
 					if (self->usesExtents) {
-						auto p = self->tailWriter.raw();
+						RawPage* p = self->tailWriter.raw();
 						self->prevExtentEndPageID = p->extentEndPageID;
 						self->tailPageNewExtent = false;
 						debug_printf("FIFOQueue(%s) newTailPage tailPageNewExtent: %d prevExtentEndPageID: %u "
@@ -2022,12 +2022,6 @@ public:
 		  : height(level), version(v) {
 			  originalPageIDs = Standalone(o);
 			  newPageIDs = Standalone(n);
-			  if (originalPageIDs.size() == 0){
-				  originalPageIDs.push_back(originalPageIDs.arena(), invalidLogicalPageID);
-			  }
-			  if (newPageIDs.size() == 0){
-				  newPageIDs.push_back(newPageIDs.arena(), invalidLogicalPageID);
-			  }
 		  }
 		uint8_t height;
 		Version version;
@@ -2044,7 +2038,10 @@ public:
 			return REMAP;
 		}
 
-		Type getType() const { return getTypeOf(newPageIDs.front()); }
+		Type getType() const { 
+			if (newPageIDs.size()==0){ return FREE;}
+			return getTypeOf(newPageIDs.front()); 
+		}
 
 		bool operator<(const RemappedPage& rhs) const { return version < rhs.version; }
 
@@ -2079,12 +2076,13 @@ public:
 		}
 
 		std::string toString() const {
-			return format("RemappedPage(%c: %s -> %s %s} at height %u",
+			return format("RemappedPage(%c: %s -> %s %s} at height %u, bytedNeeded=%u",
 			              getType(),
 			              ::toString(originalPageIDs).c_str(),
 			              ::toString(newPageIDs).c_str(),
 			              ::toString(version).c_str(),
-						  (unsigned int)height);
+						  (unsigned int)height,
+						  (unsigned int)bytesNeeded());
 		}
 	};
 
@@ -2676,8 +2674,6 @@ public:
 			    updatePage(reason, level, newIDs, data);
 			    // TODO:  Possibly limit size of remap queue since it must be recovered on cold start
 			    ASSERT(newIDs.size() == pageIDs.size());
-				RemappedPage r{ pageIDs, newIDs, level, v };
-				remapQueue.pushBack(r);
 			    for (size_t i = 0; i < pageIDs.size(); i++) {
 				    auto& versionedMap = remappedPages[pageIDs[i]];
 
@@ -2690,8 +2686,10 @@ public:
 				    ASSERT(newIDs[i] != invalidLogicalPageID);
 					versionedMap[v] = newIDs[i];
 
-				    debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
 			    }
+				RemappedPage r{ pageIDs, newIDs, level, v };
+				debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
+				remapQueue.pushBack(r);
 			    return pageIDs;
 		    });
 
