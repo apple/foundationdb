@@ -311,187 +311,12 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, cons
 	return filtered;
 }
 
-// Decodes a mutation log key, which contains (hash, commitVersion, chunkNumber) and
-// returns (commitVersion, chunkNumber)
-std::pair<Version, int32_t> decodeLogKey(const StringRef& key) {
-	ASSERT(key.size() == sizeof(uint8_t) + sizeof(Version) + sizeof(int32_t));
-
-	uint8_t hash;
-	Version version;
-	int32_t part;
-	BinaryReader rd(key, Unversioned());
-	rd >> hash >> version >> part;
-	version = bigEndian64(version);
-	part = bigEndian32(part);
-
-	int32_t v = version / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
-	ASSERT(((uint8_t)hashlittle(&v, sizeof(v), 0)) == hash);
-
-	return std::make_pair(version, part);
-}
-
-// Decodes an encoded list of mutations in the format of:
-//   [includeVersion:uint64_t][val_length:uint32_t][mutation_1][mutation_2]...[mutation_k],
-// where a mutation is encoded as:
-//   [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][param1][param2]
-std::vector<MutationRef> decodeLogValue(const StringRef& value) {
-	StringRefReader reader(value, restore_corrupted_data());
-
-	Version protocolVersion = reader.consume<uint64_t>();
-	if (protocolVersion <= 0x0FDB00A200090001) {
-		throw incompatible_protocol_version();
-	}
-
-	uint32_t val_length = reader.consume<uint32_t>();
-	if (val_length != value.size() - sizeof(uint64_t) - sizeof(uint32_t)) {
-		TraceEvent(SevError, "FileRestoreLogValueError")
-		    .detail("ValueLen", val_length)
-		    .detail("ValueSize", value.size())
-		    .detail("Value", printable(value));
-	}
-
-	std::vector<MutationRef> mutations;
-	while (1) {
-		if (reader.eof())
-			break;
-
-		// Deserialization of a MutationRef, which was packed by MutationListRef::push_back_deep()
-		uint32_t type, p1len, p2len;
-		type = reader.consume<uint32_t>();
-		p1len = reader.consume<uint32_t>();
-		p2len = reader.consume<uint32_t>();
-
-		const uint8_t* key = reader.consume(p1len);
-		const uint8_t* val = reader.consume(p2len);
-
-		mutations.emplace_back((MutationRef::Type)type, StringRef(key, p1len), StringRef(val, p2len));
-	}
-	return mutations;
-}
-
-// Accumulates mutation log value chunks, as both a vector of chunks and as a combined chunk,
-// in chunk order, and can check the chunk set for completion or intersection with a set
-// of ranges.
-struct AccumulatedMutations {
-	AccumulatedMutations() : lastChunkNumber(-1) {}
-
-	// Add a KV pair for this mutation chunk set
-	// It will be accumulated onto serializedMutations if the chunk number is
-	// the next expected value.
-	void addChunk(int chunkNumber, const KeyValueRef& kv) {
-		if (chunkNumber == lastChunkNumber + 1) {
-			lastChunkNumber = chunkNumber;
-			serializedMutations += kv.value.toString();
-		} else {
-			lastChunkNumber = -2;
-			serializedMutations.clear();
-		}
-		kvs.push_back(kv);
-	}
-
-	// Returns true if both
-	//   - 1 or more chunks were added to this set
-	//   - The header of the first chunk contains a valid protocol version and a length
-	//     that matches the bytes after the header in the combined value in serializedMutations
-	bool isComplete() const {
-		if (lastChunkNumber >= 0) {
-			StringRefReader reader(serializedMutations, restore_corrupted_data());
-
-			Version protocolVersion = reader.consume<uint64_t>();
-			if (protocolVersion <= 0x0FDB00A200090001) {
-				throw incompatible_protocol_version();
-			}
-
-			uint32_t vLen = reader.consume<uint32_t>();
-			return vLen == reader.remainder().size();
-		}
-
-		return false;
-	}
-
-	// Returns true if a complete chunk contains any MutationRefs which intersect with any
-	// range in ranges.
-	// It is undefined behavior to run this if isComplete() does not return true.
-	bool matchesAnyRange(const std::vector<KeyRange>& ranges) const {
-		std::vector<MutationRef> mutations = decodeLogValue(serializedMutations);
-		for (auto& m : mutations) {
-			for (auto& r : ranges) {
-				if (m.type == MutationRef::ClearRange) {
-					if (r.intersects(KeyRangeRef(m.param1, m.param2))) {
-						return true;
-					}
-				} else {
-					if (r.contains(m.param1)) {
-						return true;
-					}
-				}
-			}
-		}
-
-		return false;
-	}
-
-	std::vector<KeyValueRef> kvs;
-	std::string serializedMutations;
-	int lastChunkNumber;
-};
-
 struct VersionedMutations {
 	Version version;
 	std::vector<MutationRef> mutations;
 	Arena arena; // The arena that contains the mutations.
 	std::string serializedMutations; // buffer that contains mutations
 };
-
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file,
-                                                                    int64_t offset,
-                                                                    int len) {
-	state Standalone<StringRef> buf = makeString(len);
-	int rLen = wait(file->read(mutateString(buf), len, offset));
-	if (rLen != len)
-		throw restore_bad_read();
-
-	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-	state StringRefReader reader(buf, restore_corrupted_data());
-
-	try {
-		// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
-		if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
-			throw restore_unsupported_file_version();
-
-		// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
-		while (1) {
-			// If eof reached or first key len bytes is 0xFF then end of block was reached.
-			if (reader.eof() || *reader.rptr == 0xFF)
-				break;
-
-			// Read key and value.  If anything throws then there is a problem.
-			uint32_t kLen = reader.consumeNetworkUInt32();
-			const uint8_t* k = reader.consume(kLen);
-			uint32_t vLen = reader.consumeNetworkUInt32();
-			const uint8_t* v = reader.consume(vLen);
-
-			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-		}
-
-		// Make sure any remaining bytes in the block are 0xFF
-		for (auto b : reader.remainder())
-			if (b != 0xFF)
-				throw restore_corrupted_data_padding();
-
-		return results;
-
-	} catch (Error& e) {
-		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
-		    .error(e)
-		    .detail("Filename", file->getFilename())
-		    .detail("BlockOffset", offset)
-		    .detail("BlockLen", len)
-		    .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-		    .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
-		throw;
-	}
-}
 
 /*
  * Model a decoding progress for a mutation file. Usage is:
@@ -511,7 +336,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
  */
 class DecodeProgress {
 	Standalone<VectorRef<KeyValueRef>> blocks;
-	std::unordered_map<Version, AccumulatedMutations> mutationBlocksByVersion;
+	std::unordered_map<Version, fileBackup::AccumulatedMutations> mutationBlocksByVersion;
 
 public:
 	DecodeProgress() = default;
@@ -536,7 +361,7 @@ public:
 		for (auto& [version, m] : mutationBlocksByVersion) {
 			if (m.isComplete()) {
 				vms.version = version;
-				std::vector<MutationRef> mutations = decodeLogValue(m.serializedMutations);
+				std::vector<MutationRef> mutations = fileBackup::decodeMutationLogValue(m.serializedMutations);
 				TraceEvent("Decode").detail("Version", vms.version).detail("N", mutations.size());
 				vms.mutations.insert(vms.mutations.end(), mutations.begin(), mutations.end());
 				vms.arena = blocks.arena();
@@ -564,7 +389,7 @@ public:
 	// Add blocks to mutationBlocksByVersion
 	void addBlockKVPairs(VectorRef<KeyValueRef> blocks) {
 		for (auto& kv : blocks) {
-			auto versionAndChunkNumber = decodeLogKey(kv.key);
+			auto versionAndChunkNumber = fileBackup::decodeMutationLogKey(kv.key);
 			mutationBlocksByVersion[versionAndChunkNumber.first].addChunk(versionAndChunkNumber.second, kv);
 		}
 	}
@@ -579,7 +404,8 @@ public:
 			}
 
 			// Decode a file block into log_key and log_value pairs
-			Standalone<VectorRef<KeyValueRef>> blocks = wait(decodeLogFileBlock(self->fd, self->offset, len));
+			Standalone<VectorRef<KeyValueRef>> blocks =
+			    wait(fileBackup::decodeMutationLogFileBlock(self->fd, self->offset, len));
 			// This is memory inefficient, but we don't know if blocks are complete version data
 			self->blocks.reserve(self->blocks.arena(), self->blocks.size() + blocks.size());
 			for (int i = 0; i < blocks.size(); i++) {

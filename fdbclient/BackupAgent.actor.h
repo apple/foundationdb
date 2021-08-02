@@ -970,6 +970,11 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
                                                                       int64_t offset,
                                                                       int len);
 
+// Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
+                                                                            int64_t offset,
+                                                                            int len);
+
 // Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
 Value makePadding(int size);
 } // namespace fileBackup
