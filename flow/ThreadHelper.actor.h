@@ -321,10 +321,12 @@ public:
 		if (isReadyUnsafe()) {
 			delref();
 		} else {
-			onMainThreadVoid([this]() {
-				this->cancelFuture.cancel();
-				this->delref();
-			});
+			onMainThreadVoid(
+			    [this]() {
+				    this->cancelFuture.cancel();
+				    this->delref();
+			    },
+			    nullptr);
 		}
 	}
 
