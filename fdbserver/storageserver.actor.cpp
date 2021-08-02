@@ -1218,7 +1218,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
 	span.addTag("key"_sr, req.key);
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	// Temporarily disabled -- this path is hit a lot
+	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	try {
 		++data->counters.getValueQueries;
