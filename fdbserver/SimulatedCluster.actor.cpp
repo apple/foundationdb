@@ -2097,7 +2097,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 
 using namespace std::literals;
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#if defined(SSD_ROCKSDB_EXPERIMENTAL) && !VALGRIND
 bool rocksDBEnabled = true;
 #else
 bool rocksDBEnabled = false;
