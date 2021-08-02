@@ -1113,6 +1113,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// Second pass
 	wait(assignMutationsToStorageServers(self));
 
+	self->toCommit.saveTags(self->writtenTags);
+
 	// Obtain previous committed versions for each affected tlog from sequencer
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 		wait(getTPCV(self));
@@ -1210,7 +1212,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 		tpcvMap = self->tpcvMap;
 	}
-	self->toCommit.saveTags(self->writtenTags);
 	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
 	                                                          self->commitVersion,
 	                                                          pProxyCommitData->committedVersion.get(),
