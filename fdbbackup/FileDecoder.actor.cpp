@@ -19,14 +19,20 @@
  */
 
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <string>
 #include <vector>
 
 #include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbbackup/FileConverter.h"
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/MutationList.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
@@ -65,6 +71,14 @@ void printDecodeUsage() {
 	    TLS_HELP
 #endif
 	       "  --build_flags  Print build information and exit.\n"
+		   "  --list_only    Print file list and exit.\n"
+		   "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
+		   "  --hex_prefix   HEX_PREFIX\n"
+		   "                 The prefix specified in HEX format, e.g., \\x05\\x01.\n"
+		   "  --begin_version_filter BEGIN_VERSION\n"
+		   "                 The version range's begin version (inclusive) for filtering.\n"
+		   "  --end_version_filter END_VERSION\n"
+		   "                 The version range's end version (exclusive) for filtering.\n"
 	       "\n";
 	return;
 }
@@ -76,9 +90,19 @@ void printBuildInformation() {
 struct DecodeParams {
 	std::string container_url;
 	std::string fileFilter; // only files match the filter will be decoded
-	bool log_enabled = false;
+	bool log_enabled = true;
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
+	bool list_only = false;
+	std::string prefix; // Key prefix for filtering
+	Version beginVersionFilter = 0;
+	Version endVersionFilter = std::numeric_limits<Version>::max();
+
+	// Returns if [begin, end) overlap with the filter range
+	bool overlap(Version begin, Version end) const {
+		// Filter [100, 200),  [50,75) [200, 300)
+		return !(begin >= endVersionFilter || end <= beginVersionFilter);
+	}
 
 	std::string toString() {
 		std::string s;
@@ -97,11 +121,68 @@ struct DecodeParams {
 				s.append(" LogGroup:").append(trace_log_group);
 			}
 		}
+		s.append(", list_only: ").append(list_only ? "true" : "false");
+		if (beginVersionFilter != 0) {
+			s.append(", beginVersionFilter: ").append(std::to_string(beginVersionFilter));
+		}
+		if (endVersionFilter < std::numeric_limits<Version>::max()) {
+			s.append(", endVersionFilter: ").append(std::to_string(endVersionFilter));
+		}
+		if (!prefix.empty()) {
+			s.append(", KeyPrefix: ").append(printable(KeyRef(prefix)));
+		}
 		return s;
 	}
-
-
 };
+
+// Decode an ASCII string, e.g., "\x15\x1b\x19\x04\xaf\x0c\x28\x0a",
+// into the binary string.
+std::string decode_hex_string(std::string line) {
+	size_t i = 0;
+	std::string ret;
+
+	while (i <= line.length()) {
+		switch (line[i]) {
+		case '\\':
+			if (i + 2 > line.length()) {
+				std::cerr << "Invalid hex string at: " << i << "\n";
+				return ret;
+			}
+			switch (line[i + 1]) {
+				char ent, save;
+			case '"':
+			case '\\':
+			case ' ':
+			case ';':
+				line.erase(i, 1);
+				break;
+			case 'x':
+				if (i + 4 > line.length()) {
+					std::cerr << "Invalid hex string at: " << i << "\n";
+					return ret;
+				}
+				char* pEnd;
+				save = line[i + 4];
+				line[i + 4] = 0;
+				ent = char(strtoul(line.data() + i + 2, &pEnd, 16));
+				if (*pEnd) {
+					std::cerr << "Invalid hex string at: " << i << "\n";
+					return ret;
+				}
+				line[i + 4] = save;
+				line.replace(i, 4, 1, ent);
+				break;
+			default:
+				std::cerr << "Invalid hex string at: " << i << "\n";
+				return ret;
+			}
+		default:
+			i++;
+		}
+	}
+
+	return line.substr(0, i);
+}
 
 int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 	while (args->Next()) {
@@ -124,6 +205,26 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			param->container_url = args->OptionArg();
 			break;
 
+		case OPT_LIST_ONLY:
+			param->list_only = true;
+			break;
+
+		case OPT_KEY_PREFIX:
+			param->prefix = args->OptionArg();
+			break;
+
+		case OPT_HEX_KEY_PREFIX:
+			param->prefix = decode_hex_string(args->OptionArg());
+			break;
+
+		case OPT_BEGIN_VERSION_FILTER:
+			param->beginVersionFilter = std::atoll(args->OptionArg());
+			break;
+
+		case OPT_END_VERSION_FILTER:
+			param->endVersionFilter = std::atoll(args->OptionArg());
+			break;
+
 		case OPT_CRASHONERROR:
 			g_crashOnError = true;
 			break;
@@ -141,7 +242,7 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case OPT_TRACE_FORMAT:
-			if (!validateTraceFormat(args->OptionArg())) {
+			if (!selectTraceFormatter(args->OptionArg())) {
 				std::cerr << "ERROR: Unrecognized trace format " << args->OptionArg() << "\n";
 				return FDB_EXIT_ERROR;
 			}
@@ -202,7 +303,8 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, const DecodeParams& params) {
 	std::vector<LogFile> filtered;
 	for (const auto& file : files) {
-		if (file.fileName.find(params.fileFilter) != std::string::npos) {
+		if (file.fileName.find(params.fileFilter) != std::string::npos &&
+		    params.overlap(file.beginVersion, file.endVersion + 1)) {
 			filtered.push_back(file);
 		}
 	}
@@ -501,7 +603,7 @@ public:
 
 ACTOR Future<Void> decode_logs(DecodeParams params) {
 	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
-
+	state UID uid = deterministicRandom()->randomUniqueID();
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs
 	listing.logs.erase(std::remove_if(listing.logs.begin(),
@@ -512,13 +614,16 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	                                  }),
 	                   listing.logs.end());
 	std::sort(listing.logs.begin(), listing.logs.end());
-	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());
+	TraceEvent("Container", uid).detail("URL", params.container_url).detail("Logs", listing.logs.size());
+	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params.toString());
 
 	BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
 
 	state std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params);
 	printLogFiles("Relevant files are: ", logs);
+
+	if (params.list_only) return Void();
 
 	state int i = 0;
 	// Previous file's unfinished version data
@@ -531,8 +636,32 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 		wait(progress.openFile(container));
 		while (!progress.finished()) {
 			VersionedMutations vms = wait(progress.getNextBatch());
+			if (vms.version < params.beginVersionFilter || vms.version >= params.endVersionFilter) {
+				continue;
+			}
+
+			int i = 0;
 			for (const auto& m : vms.mutations) {
-				std::cout << vms.version << " " << m.toString() << "\n";
+				i++; // sub sequence number starts at 1
+				bool print = params.prefix.empty(); // no filtering
+
+				if (!print) {
+					if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+						print = m.param1.startsWith(StringRef(params.prefix));
+					} else if (m.type == MutationRef::ClearRange) {
+						KeyRange range(KeyRangeRef(m.param1, m.param2));
+						print = range.contains(StringRef(params.prefix));
+					} else {
+						ASSERT(false);
+					}
+				}
+				if (print) {
+					TraceEvent(format("Mutation_%d_%d", vms.version, i).c_str(), uid)
+					    .detail("Version", vms.version)
+					    .setMaxFieldLength(10000)
+					    .detail("M", m.toString());
+					std::cout << vms.version << " " << m.toString() << "\n";
+				}
 			}
 		}
 		left = std::move(progress).getUnfinishedBuffer();
@@ -540,6 +669,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 			TraceEvent("UnfinishedFile").detail("File", logs[i].fileName).detail("Q", left.size());
 		}
 	}
+	TraceEvent("DecodeDone", uid);
 	return Void();
 }
 
@@ -564,6 +694,8 @@ int main(int argc, char** argv) {
 			}
 			if (!param.trace_format.empty()) {
 				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(param.trace_format));
+			} else {
+				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, "json"_sr);
 			}
 			if (!param.trace_log_group.empty()) {
 				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(param.trace_log_group));
@@ -582,12 +714,17 @@ int main(int argc, char** argv) {
 		setupNetwork(0, UseMetrics::True);
 
 		TraceEvent::setNetworkThread();
-		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "decode", param.trace_log_group);
+		openTraceFile(NetworkAddress(), 10 << 20, 500 << 20, param.log_dir, "decode", param.trace_log_group);
 		param.tlsConfig.setupBlobCredentials();
 
 		auto f = stopAfter(decode_logs(param));
 
 		runNetwork();
+
+		flushTraceFileVoid();
+		fflush(stdout);
+		closeTraceFile();
+
 		return status;
 	} catch (Error& e) {
 		std::cerr << "ERROR: " << e.what() << "\n";
