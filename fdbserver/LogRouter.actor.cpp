@@ -441,10 +441,11 @@ Version poppedVersion(LogRouterData* self, Tag tag) {
 	return tagData->popped;
 }
 
+// TODO: enable streaming peek log from log router
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
-ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamRequest req) {
-	return Void();
-}
+// ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamRequest req) {
+// 	return Void();
+// }
 
 ACTOR Future<Void> logRouterPeekMessages(LogRouterData* self, TLogPeekRequest req) {
 	state BinaryWriter messages(Unversioned());
@@ -652,7 +653,7 @@ ACTOR Future<Void> logRouterCore(TLogInterface interf,
 		}
 		when(TLogPeekStreamRequest req = waitNext(interf.peekStreamMessages.getFuture())) {
 			// addActor.send(logRouterPeekStream(&logRouterData, req));
-			// FIXME: temporarily disable streaming peek from LogRouter
+			// FIXME: currently LogRouter doesn't support streaming peek request
 			TraceEvent(SevError, "LogRouterPeekStream", logRouterData.dbgid)
 			    .detail("Token", interf.peekStreamMessages.getEndpoint().token);
 			req.reply.sendError(operation_failed());

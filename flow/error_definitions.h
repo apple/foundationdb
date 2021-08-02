@@ -33,7 +33,6 @@
 // clang-format off
 ERROR( success, 0, "Success" )
 ERROR( end_of_stream, 1, "End of stream" )
-ERROR( no_action_needed, 2, "No action needed" )
 ERROR( operation_failed, 1000, "Operation failed")
 ERROR( wrong_shard_server, 1001, "Shard is not available from this server")
 ERROR( operation_obsolete, 1002, "Operation result no longer necessary")

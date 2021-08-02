@@ -52,7 +52,8 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterf
   : interf(interf), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(begin), end(end),
     poppedVersion(0), hasMsg(false), randomID(deterministicRandom()->randomUniqueID()),
     returnIfBlocked(returnIfBlocked), onlySpilled(false), parallelGetMore(parallelGetMore), sequence(0), lastReset(0),
-    resetCheck(Void()), slowReplies(0), fastReplies(0), unknownReplies(0), usePeekStream(SERVER_KNOBS->PEEK_USEING_STREAMING) {
+    resetCheck(Void()), slowReplies(0), fastReplies(0), unknownReplies(0),
+    usePeekStream(SERVER_KNOBS->PEEK_USEING_STREAMING) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	TraceEvent("SPC_Starting", randomID)
@@ -361,8 +362,8 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 					    .detail("End", res.end)
 					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
 
-					// NOTE: delay is needed here since TLog need to be scheduled to response if there are TLog and SS
-					// on the same machine
+					// NOTE: delay is necessary here since ReplyPromiseStream delivers reply on high priority. Here we
+					// change the priority to the intended one.
 					wait(delay(0, taskID));
 					return Void();
 				}
