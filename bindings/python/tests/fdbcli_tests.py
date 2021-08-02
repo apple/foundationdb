@@ -449,7 +449,7 @@ if __name__ == '__main__':
         throttle()
     else:
         assert process_number > 1, "Process number should be positive"
-        coordinators()
-        exclude()
+        #coordinators()
+        #exclude()
 
     
