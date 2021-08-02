@@ -144,7 +144,7 @@ void TDMetricCollection::checkRoll(uint64_t t, int64_t usedBytes) {
 }
 
 DynamicEventMetric::DynamicEventMetric(MetricNameRef const& name, Void)
-  : BaseEventMetric(name), newFields(false), latestRecorded(false) {}
+  : BaseEventMetric(name), latestRecorded(false), newFields(false) {}
 
 uint64_t DynamicEventMetric::log(uint64_t explicitTime) {
 	if (!enabled)

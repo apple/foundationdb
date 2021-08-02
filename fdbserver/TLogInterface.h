@@ -52,13 +52,13 @@ struct TLogInterface {
 
 	TLogInterface() {}
 	explicit TLogInterface(const LocalityData& locality)
-	  : uniqueID(deterministicRandom()->randomUniqueID()), filteredLocality(locality) {
+	  : filteredLocality(locality), uniqueID(deterministicRandom()->randomUniqueID()) {
 		sharedTLogID = uniqueID;
 	}
 	TLogInterface(UID sharedTLogID, const LocalityData& locality)
-	  : uniqueID(deterministicRandom()->randomUniqueID()), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
+	  : filteredLocality(locality), uniqueID(deterministicRandom()->randomUniqueID()), sharedTLogID(sharedTLogID) {}
 	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality)
-	  : uniqueID(uniqueID), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
+	  : filteredLocality(locality), uniqueID(uniqueID), sharedTLogID(sharedTLogID) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
@@ -152,7 +152,7 @@ struct VerUpdateRef {
 	VectorRef<MutationRef> mutations;
 	bool isPrivateData;
 
-	VerUpdateRef() : isPrivateData(false), version(invalidVersion) {}
+	VerUpdateRef() : version(invalidVersion), isPrivateData(false) {}
 	VerUpdateRef(Arena& to, const VerUpdateRef& from)
 	  : version(from.version), mutations(to, from.mutations), isPrivateData(from.isPrivateData) {}
 	int expectedSize() const { return mutations.expectedSize(); }
@@ -200,7 +200,7 @@ struct TLogPeekRequest {
 	                bool returnIfBlocked,
 	                bool onlySpilled,
 	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>())
-	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence), onlySpilled(onlySpilled) {}
+	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), onlySpilled(onlySpilled), sequence(sequence) {}
 	TLogPeekRequest() {}
 
 	template <class Ar>

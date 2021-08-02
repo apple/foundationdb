@@ -39,9 +39,9 @@ class ISimulator : public INetwork {
 public:
 	ISimulator()
 	  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1),
-	    isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-	    allSwapsDisabled(false), backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType),
-	    extraDB(nullptr), allowLogSetKills(true), usableRegions(1), tssMode(TSSMode::Disabled) {}
+	    extraDB(nullptr), usableRegions(1), allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false),
+	    lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
+	    backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
 
 	// Order matters!
 	enum KillType {
@@ -99,10 +99,10 @@ public:
 		            INetworkConnections* net,
 		            const char* dataFolder,
 		            const char* coordinationFolder)
-		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
-		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
-		    failed(false), excluded(false), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-		    fault_injection_r(0), machine(0), cleared(false), failedDisk(false) {
+		  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
+		    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
+		    failed(false), excluded(false), cleared(false), rebooting(false), network(net), fault_injection_r(0),
+		    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false) {
 			uid = deterministicRandom()->randomUniqueID();
 		}
 

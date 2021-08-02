@@ -627,7 +627,7 @@ public:
 	T& value() { return *(T*)&value_storage; }
 
 	SAV(int futures, int promises)
-	  : futures(futures), promises(promises), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
+	  : promises(promises), futures(futures), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
 		Callback<T>::prev = Callback<T>::next = this;
 	}
 	~SAV() {
@@ -958,7 +958,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	Promise<Void> onEmpty;
 	Error error;
 
-	NotifiedQueue(int futures, int promises) : futures(futures), promises(promises), onEmpty(nullptr) {
+	NotifiedQueue(int futures, int promises) : promises(promises), futures(futures), onEmpty(nullptr) {
 		SingleCallback<T>::next = this;
 	}
 
@@ -1322,6 +1322,9 @@ inline double now() {
 }
 inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(seconds, taskID);
+}
+inline Future<Void> orderedDelay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	return g_network->orderedDelay(seconds, taskID);
 }
 inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(std::max(0.0, time - g_network->now()), taskID);

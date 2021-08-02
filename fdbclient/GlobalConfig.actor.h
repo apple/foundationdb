@@ -113,6 +113,7 @@ public:
 	// the key.
 	template <typename T, typename std::enable_if<std::is_arithmetic<T>{}, bool>::type = true>
 	const T get(KeyRef name, T defaultVal) {
+		TraceEvent(SevInfo, "GlobalConfig_Get").detail("Key", name);
 		try {
 			auto configValue = get(name);
 			if (configValue.isValid()) {

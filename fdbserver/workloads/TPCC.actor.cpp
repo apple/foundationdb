@@ -31,23 +31,23 @@ namespace {
 struct TPCCMetrics {
 	static constexpr int latenciesStored = 1000;
 
-	uint64_t successfulStockLevelTransactions, failedStockLevelTransactions, successfulDeliveryTransactions,
-	    failedDeliveryTransactions, successfulOrderStatusTransactions, failedOrderStatusTransactions,
-	    successfulPaymentTransactions, failedPaymentTransactions, successfulNewOrderTransactions,
-	    failedNewOrderTransactions;
-	double stockLevelResponseTime, deliveryResponseTime, orderStatusResponseTime, paymentResponseTime,
-	    newOrderResponseTime;
+	uint64_t successfulStockLevelTransactions{ 0 };
+	uint64_t failedStockLevelTransactions{ 0 };
+	uint64_t successfulDeliveryTransactions{ 0 };
+	uint64_t failedDeliveryTransactions{ 0 };
+	uint64_t successfulOrderStatusTransactions{ 0 };
+	uint64_t failedOrderStatusTransactions{ 0 };
+	uint64_t successfulPaymentTransactions{ 0 };
+	uint64_t failedPaymentTransactions{ 0 };
+	uint64_t successfulNewOrderTransactions{ 0 };
+	uint64_t failedNewOrderTransactions{ 0 };
+	double stockLevelResponseTime{ 0.0 };
+	double deliveryResponseTime{ 0.0 };
+	double orderStatusResponseTime{ 0.0 };
+	double paymentResponseTime{ 0.0 };
+	double newOrderResponseTime{ 0.0 };
 	std::vector<double> stockLevelLatencies, deliveryLatencies, orderStatusLatencies, paymentLatencies,
 	    newOrderLatencies;
-	TPCCMetrics()
-	  : successfulStockLevelTransactions(0), successfulDeliveryTransactions(0), successfulOrderStatusTransactions(0),
-	    successfulPaymentTransactions(0), successfulNewOrderTransactions(0), failedStockLevelTransactions(0),
-	    failedDeliveryTransactions(0), failedOrderStatusTransactions(0), failedPaymentTransactions(0),
-	    failedNewOrderTransactions(0), stockLevelResponseTime(0.0), deliveryResponseTime(0.0),
-	    orderStatusResponseTime(0.0), paymentResponseTime(0.0), newOrderResponseTime(0.0),
-	    stockLevelLatencies(latenciesStored, 0.0), deliveryLatencies(latenciesStored, 0.0),
-	    orderStatusLatencies(latenciesStored, 0.0), paymentLatencies(latenciesStored, 0.0),
-	    newOrderLatencies(latenciesStored, 0.0) {}
 
 	void sort() {
 		std::sort(stockLevelLatencies.begin(), stockLevelLatencies.end());
