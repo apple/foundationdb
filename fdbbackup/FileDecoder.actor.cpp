@@ -592,7 +592,7 @@ public:
 			if (m.isComplete()) {
 				vms.version = version;
 				std::vector<MutationRef> mutations = decodeLogValue(m.serializedMutations);
-				TraceEvent("Decode").detail("version", vms.version).detail("N", mutations.size());
+				TraceEvent("Decode").detail("Version", vms.version).detail("N", mutations.size());
 				vms.mutations.insert(vms.mutations.end(), mutations.begin(), mutations.end());
 				vms.arena = blocks.arena();
 				vms.serializedMutations = m.serializedMutations;
@@ -711,7 +711,7 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 				}
 			}
 			if (print) {
-				TraceEvent(format("Mutation_%d_%d", vms.version, sub).c_str(), uid)
+				TraceEvent(format("Mutation_%llu_%d", vms.version, sub).c_str(), uid)
 					.detail("Version", vms.version)
 					.setMaxFieldLength(10000)
 					.detail("M", m.toString());
