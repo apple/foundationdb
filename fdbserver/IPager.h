@@ -185,7 +185,7 @@ public:
 class IPager2 : public IClosable {
 public:
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.
-	virtual Reference<ArenaPage> newPageBuffer(size_t size= 1) = 0;
+	virtual Reference<ArenaPage> newPageBuffer(size_t size = 1) = 0;
 
 	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
 	// For a given pager instance, separate calls to this function must return the same value.

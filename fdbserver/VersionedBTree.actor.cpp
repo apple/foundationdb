@@ -2383,7 +2383,7 @@ public:
 		return id;
 	}
 
-	Reference<ArenaPage> newPageBuffer(size_t size=1) override {
+	Reference<ArenaPage> newPageBuffer(size_t size = 1) override {
 		return Reference<ArenaPage>(new ArenaPage(logicalPageSize * size, physicalPageSize * size));
 	}
 
@@ -2435,7 +2435,7 @@ public:
 	}
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
-	
+
 	Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs(size_t size) override {
 		return newPageIDs_impl(this, size);
 	}
@@ -2550,7 +2550,8 @@ public:
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
-		return writePhysicalPage(PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page, true);
+		return writePhysicalPage(
+		    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page, true);
 	}
 
 	void updatePage(PagerEventReasons reason, uint8_t level, LogicalPageID pageID, Reference<ArenaPage> data) {
@@ -2812,7 +2813,8 @@ public:
 			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageIDs.front());
 			if (pCacheEntry != nullptr) {
 				++g_redwoodMetrics.metric.pagerProbeHit;
-				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageIDs).c_str());				return pCacheEntry->readFuture;
+				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageIDs).c_str());
+				return pCacheEntry->readFuture;
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageIDs).c_str());
@@ -3131,8 +3133,12 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data = wait(
-			    self->readPage(PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&p.newPageID,1), ioLeafPriority, false, true));
+			Reference<ArenaPage> data = wait(self->readPage(PagerEventReasons::MetaData,
+			                                                nonBtreeLevel,
+			                                                VectorRef<LogicalPageID>(&p.newPageID, 1),
+			                                                ioLeafPriority,
+			                                                false,
+			                                                true));
 
 			// Write the data to the original page so it can be read using its original pageID
 			self->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, p.originalPageID, data);
@@ -5324,7 +5330,7 @@ private:
 			if (pagesToBuild.size() == 1 && previousID.size() == p.blockSize && p.blockSize == 1) {
 
 				LogicalPageID id = wait(
-					self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID.front(), pages, v));
+				    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID.front(), pages, v));
 				childPageID.push_back(records.arena(), id);
 			} else {
 				// Either the original page is being split, or it's not but it has changed BTreePageID size.
@@ -5373,8 +5379,11 @@ private:
 		return records;
 	}
 
-	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>>
-	buildNewRoot(VersionedBTree* self, Version version, Standalone<VectorRef<RedwoodRecordRef>> records, uint8_t height) {
+	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> buildNewRoot(
+	    VersionedBTree* self,
+	    Version version,
+	    Standalone<VectorRef<RedwoodRecordRef>> records,
+	    uint8_t height) {
 		debug_printf("buildNewRoot start version %" PRId64 ", %lu records\n", version, records.size());
 
 		// While there are multiple child pages for this version we must write new tree levels.
@@ -5497,7 +5506,7 @@ private:
 			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
 		}
 
-		state int height = ((BTreePage*)page->begin())->height;
+		state uint8_t height = ((BTreePage*)page->begin())->height;
 		if (oldID.size() == 1) {
 			LogicalPageID id = wait(
 			    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, oldID.front(), page, writeVersion));
