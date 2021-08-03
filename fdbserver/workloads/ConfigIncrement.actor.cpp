@@ -128,7 +128,8 @@ public:
 
 	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> actors;
-		auto localIncrementActors = (incrementActors - clientId - 1) / clientCount + 1;
+		auto localIncrementActors =
+		    (clientId < incrementActors) ? ((incrementActors - clientId - 1) / clientCount + 1) : 0;
 		for (int i = 0; i < localIncrementActors; ++i) {
 			actors.push_back(incrementActor(this, cx));
 		}
