@@ -86,10 +86,9 @@ int main(int argc, char** argv) {
 	fdb_check(fdb_stop_network());
 	network_thread.join();
 
-	// After shutting down, the trace file's suffix is (eventually) removed
+	// After shutting down, the trace file's suffix is removed
 	if (!trace_partial_file_suffix.empty()) {
-		while (file_exists(name.c_str())) {
-		}
+		assert(!file_exists(name.c_str()));
 	}
 
 	auto new_name = name.substr(0, name.size() - trace_partial_file_suffix.size());
