@@ -82,6 +82,7 @@ if(NOT WIN32)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
     add_executable(fdb_c_txn_size_test test/txn_size_test.c test/test.h)
     add_executable(mako ${MAKO_SRCS})
+    add_executable(trace_partial_file_suffix_test test/unit/trace_partial_file_suffix_test.cpp)
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
@@ -89,9 +90,18 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
   target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c)
+
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
   target_link_libraries(mako PRIVATE fdb_c)
+
+  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads)
+
+  add_fdbclient_test(
+    NAME trace_partial_file_suffix_test
+    COMMAND $<TARGET_FILE:trace_partial_file_suffix_test>
+            @CLUSTER_FILE@
+            fdb)
 endif()
 
 set(c_workloads_srcs

@@ -63,6 +63,7 @@ struct NetworkOptions {
 	std::string traceFormat;
 	std::string traceClockSource;
 	std::string traceFileIdentifier;
+	std::string tracePartialFileSuffix;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
