@@ -18,12 +18,13 @@
  * limitations under the License.
  */
 
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
 #include <thread>
+
+#include "flow/Platform.h"
 
 #define FDB_API_VERSION 710
 #include "foundationdb/fdb_c.h"
@@ -77,8 +78,7 @@ int main(int argc, char** argv) {
 	// Eventually there's a new trace file for this test ending in .tmp
 	std::string name;
 	for (;;) {
-		for (const auto& entry : std::filesystem::directory_iterator(".")) {
-			auto path = entry.path().string();
+		for (const auto& path : platform::listFiles(".")) {
 			if (path.find(file_identifier) != std::string::npos && path.find(".simulated.") == std::string::npos) {
 				assert(path.substr(path.size() - trace_partial_file_suffix.size()) == trace_partial_file_suffix);
 				name = path;
