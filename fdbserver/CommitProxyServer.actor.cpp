@@ -1294,31 +1294,33 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 		self->toCommit.pGroupMessageBuilders = &self->pGroupMessageBuilders;
 		std::vector<Future<Version>> pushResults;
+		std::vector<ptxn::TLogGroupID> tLogGroupIDs;
+		std::vector<Version> prevVersions;
+
 		pushResults.reserve(self->pGroupMessageBuilders.size());
 		for (auto& groupMessageBuilder : self->pGroupMessageBuilders) {
-			pushResults.push_back(
-			    pProxyCommitData->logSystem->push(self->previousCommitVersionByGroup[groupMessageBuilder.first],
-			                                      self->commitVersion,
-			                                      pProxyCommitData->committedVersion.get(),
-			                                      pProxyCommitData->minKnownCommittedVersion,
-			                                      self->toCommit,
-			                                      span.context,
-			                                      self->debugID));
+			// for each tlog group
+			tLogGroupIDs.emplace_back(groupMessageBuilder.first);
+			prevVersions.emplace_back(self->previousCommitVersionByGroup[groupMessageBuilder.first]);
 		}
 
-		std::function<Version(const std::vector<Version>&)> reduce =
-		    [](const std::vector<Version>& versions) -> Version {
-			return *std::min_element(versions.begin(), versions.end());
-		};
-		self->loggingComplete = getAll(pushResults, reduce);
-	} else {
-		self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
+		self->loggingComplete = pProxyCommitData->logSystem->push(prevVersions,
 		                                                          self->commitVersion,
 		                                                          pProxyCommitData->committedVersion.get(),
 		                                                          pProxyCommitData->minKnownCommittedVersion,
 		                                                          self->toCommit,
 		                                                          span.context,
-		                                                          self->debugID);
+		                                                          self->debugID,
+		                                                          tLogGroupIDs);
+	} else {
+		self->loggingComplete = pProxyCommitData->logSystem->push(std::vector<Version>{ self->prevVersion },
+		                                                          self->commitVersion,
+		                                                          pProxyCommitData->committedVersion.get(),
+		                                                          pProxyCommitData->minKnownCommittedVersion,
+		                                                          self->toCommit,
+		                                                          span.context,
+		                                                          self->debugID,
+		                                                          std::vector<ptxn::TLogGroupID>());
 	}
 
 	float ratio = self->toCommit.getEmptyMessageRatio();

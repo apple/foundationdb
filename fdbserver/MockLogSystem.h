@@ -44,14 +44,14 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	Future<Void> onCoreStateChanged() final;
 	void coreStateWritten(const DBCoreState& newState) final;
 	Future<Void> onError() final;
-	Future<Version> push(Version prevVersion,
+	Future<Version> push(std::vector<Version> prevVersions,
 	                     Version version,
 	                     Version knownCommittedVersion,
 	                     Version minKnownCommittedVersion,
 	                     struct LogPushData& data,
 	                     const SpanID& spanContext,
 	                     Optional<UID> debugID,
-	                     Optional<ptxn::TLogGroupID> tLogGroup) final;
+	                     std::vector<ptxn::TLogGroupID> tLogGroups) final;
 	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) final;
 	Reference<IPeekCursor> peek(UID dbgid,
 	                            Version begin,

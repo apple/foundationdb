@@ -219,7 +219,7 @@ ACTOR Future<Void> TLogDriverContext::sendPushMessages_impl(TLogDriverContext* p
 			toCommit.writeTypedMessage(m);
 		}
 		Future<Version> loggingComplete =
-		    pTLogDriverContext->ls->push(prev, next, prev, prev, toCommit, deterministicRandom()->randomUniqueID());
+		    pTLogDriverContext->ls->push(std::vector<Version>{prev}, next, prev, prev, toCommit, deterministicRandom()->randomUniqueID());
 		Version ver = wait(loggingComplete);
 		ASSERT_LE(ver, next);
 		prev++;

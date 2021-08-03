@@ -95,10 +95,10 @@ void print(const TLogCommitRequest& request) {
 	std::cout << std::endl << ">>> TLogCommitRequest" << std::endl;
 
 	std::cout << formatKVPair("Span ID", request.spanID) << std::endl
-	          << formatKVPair("Log Group ID", request.tLogGroupID) << std::endl
+	          << formatKVPair("Log Group ID length", request.tLogGroupIDs.size()) << std::endl
 	          << formatKVPair("Debug ID", request.debugID) << std::endl
 	          << formatKVPair("Message data length", request.messages.size()) << std::endl
-	          << formatKVPair("Previous version", request.prevVersion) << std::endl
+	          << formatKVPair("Previous version length", request.prevVersions.size()) << std::endl
 	          << formatKVPair("Version", request.version) << std::endl;
 }
 

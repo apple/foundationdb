@@ -562,67 +562,101 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return t;
 	}
 
-	Future<Version> pushTLogGroup(Version prevVersion,
+	Future<Version> pushTLogGroup(std::vector<Version> prevVersions,
 	                              Version version,
 	                              Version knownCommittedVersion,
 	                              Version minKnownCommittedVersion,
 	                              LogPushData& data,
 	                              SpanID const& spanContext,
 	                              Optional<UID> debugID,
-	                              ptxn::TLogGroupID tLogGroup) {
+	                              std::vector<ptxn::TLogGroupID> tLogGroups) {
 		vector<Future<Void>> quorumResults;
 		vector<Future<ptxn::TLogCommitReply>> allReplies;
-		int location = 0;
 		Span span("TPLS:push"_loc, spanContext);
+		ASSERT(tLogGroups.size() == prevVersions.size());
+
+		std::unordered_map<UID, vector<ptxn::TLogGroupID>> idToGroupIds;
+		std::unordered_map<UID, vector<Version>> idToPrevVersions;
+
+		// no more than 1 request will be sent to each tlog, even if the tlog belong to multiple tlog groups.
+		// we include all tlog groups data in this aggregated request.
+		// recording the tlog id that already has a request sent, so that no duplicate requests
+		std::unordered_map<UID, int> submitted;
+
 		for (auto& it : tLogs) {
+			// for all logset(each DC in current epoch)
 			if (it->isLocal && it->groupIdToInterfaces.size()) {
-				ASSERT(it->groupIdToInterfaces.count(tLogGroup));
-				const auto& logServers = it->groupIdToInterfaces[tLogGroup];
-				vector<Future<Void>> tLogCommitResults;
-				for (int loc = 0; loc < logServers.size(); loc++) {
-					auto serialized = data.pGroupMessageBuilders->find(tLogGroup)->second->getAllSerialized();
-					allReplies.push_back(logServers[loc]->get().interf().commit.getReply(
-					    ptxn::TLogCommitRequest(spanContext,
-					                            tLogGroup,
-					                            serialized.first,
-					                            serialized.second,
-					                            prevVersion,
-					                            version,
-					                            knownCommittedVersion,
-					                            minKnownCommittedVersion,
-					                            debugID),
-					    TaskPriority::ProxyTLogCommitReply));
-					Future<Void> commitSuccess = success(allReplies.back());
-					addActor.get().send(commitSuccess);
-					tLogCommitResults.push_back(commitSuccess);
-					location++;
+				for (int i = 0; i < tLogGroups.size(); i++) {
+					ASSERT(it->groupIdToInterfaces.count(tLogGroups[i]));
+					const auto& logServers = it->groupIdToInterfaces[tLogGroups[i]];
+					for (int loc = 0; loc < logServers.size(); loc++) {
+						UID id = logServers[loc]->get().id();
+						idToGroupIds[id].push_back(tLogGroups[i]);
+						idToPrevVersions[id].push_back(prevVersions[i]);
+					}
 				}
-				quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size()));
+				for (int i = 0; i < tLogGroups.size(); i++) {
+					ASSERT(it->groupIdToInterfaces.count(tLogGroups[i]));
+					const auto& logServers = it->groupIdToInterfaces[tLogGroups[i]];
+					vector<Future<Void>> tLogCommitResultsForGroup;
+					for (int loc = 0; loc < logServers.size(); loc++) {
+						UID id = logServers[loc]->get().id();
+						if (submitted.find(id) != submitted.end()) {
+							tLogCommitResultsForGroup.push_back(success(allReplies[submitted[id]]));
+							continue;
+						}
+						// send requests to each tlog interface, with a request containing all tlog group ids.
+						std::vector<std::unordered_map<ptxn::StorageTeamID, StringRef>> groupData;
+						std::vector<Arena> arenas;
+						for (auto& groupId : idToGroupIds[id]) {
+							auto serialized = data.pGroupMessageBuilders->find(groupId)->second->getAllSerialized();
+							arenas.push_back(serialized.first);
+							groupData.push_back(serialized.second);
+						}
+						allReplies.push_back(logServers[loc]->get().interf().commit.getReply(
+						    ptxn::TLogCommitRequest(spanContext,
+						                            idToGroupIds[id],
+						                            arenas,
+						                            groupData,
+						                            idToPrevVersions[id],
+						                            version,
+						                            knownCommittedVersion,
+						                            minKnownCommittedVersion,
+						                            debugID),
+						    TaskPriority::ProxyTLogCommitReply));
+						Future<Void> commitSuccess = success(allReplies.back());
+						addActor.get().send(commitSuccess);
+						tLogCommitResultsForGroup.push_back(commitSuccess);
+						submitted[id] = allReplies.size() - 1;
+					}
+					// for each TLog group, we need replies to reach quorum.
+					quorumResults.push_back(quorum(tLogCommitResultsForGroup, tLogCommitResultsForGroup.size()));
+				}
 			}
 		}
 		return minVersionWhenReady(waitForAll(quorumResults), allReplies);
 	}
 
-	Future<Version> push(Version prevVersion,
+	Future<Version> push(std::vector<Version> prevVersions,
 	                     Version version,
 	                     Version knownCommittedVersion,
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
 	                     SpanID const& spanContext,
 	                     Optional<UID> debugID,
-	                     Optional<ptxn::TLogGroupID> tLogGroup) final {
+	                     std::vector<ptxn::TLogGroupID> tLogGroups) final {
 		// commit to ptxn tlog system
-		if (tLogGroup.present()) {
-			return pushTLogGroup(prevVersion,
+		if (!tLogGroups.empty()) {
+			return pushTLogGroup(prevVersions,
 			                     version,
 			                     knownCommittedVersion,
 			                     minKnownCommittedVersion,
 			                     data,
 			                     spanContext,
 			                     debugID,
-			                     tLogGroup.get());
+			                     tLogGroups);
 		}
-
+		ASSERT(prevVersions.size() == 1);
 		// FIXME: Randomize request order as in LegacyLogSystem?
 		vector<Future<Void>> quorumResults;
 		vector<Future<TLogCommitReply>> allReplies;
@@ -644,7 +678,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					    it->logServers[loc]->get().interf().address(),
 					    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
 					                                                                          msg.arena(),
-					                                                                          prevVersion,
+					                                                                          prevVersions[0],
 					                                                                          version,
 					                                                                          knownCommittedVersion,
 					                                                                          minKnownCommittedVersion,

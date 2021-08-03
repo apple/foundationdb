@@ -120,10 +120,10 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
 	// Commit
 	ptxn::TLogCommitRequest commitRequest(ptxn::test::randomUID(),
-	                                      pContext->storageTeamIDTLogGroupIDMapper[storageTeamID],
-	                                      serialized.arena(),
-	                                      messages,
-	                                      prevVersion,
+	                                      std::vector<ptxn::TLogGroupID>{pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]},
+	                                      std::vector<Arena>{serialized.arena()},
+	                                      std::vector<std::unordered_map<ptxn::StorageTeamID, StringRef>>{messages},
+	                                      std::vector<Version>{prevVersion},
 	                                      beginVersion,
 	                                      0,
 	                                      0,
@@ -311,10 +311,10 @@ ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> p
 		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
 		std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
 		requests.emplace_back(ptxn::test::randomUID(),
-		                      pContext->storageTeamIDTLogGroupIDMapper[storageTeamID],
-		                      serialized.arena(),
-		                      messages,
-		                      prevVersion,
+		                      std::vector<ptxn::TLogGroupID>{pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]},
+		                      std::vector<Arena>{serialized.arena()},
+		                      std::vector<std::unordered_map<ptxn::StorageTeamID, StringRef>>{messages},
+		                      std::vector<Version>{prevVersion},
 		                      currVersion,
 		                      0,
 		                      0,

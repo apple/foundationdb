@@ -87,14 +87,14 @@ Future<Void> MockLogSystem::onError() {
 	return Future<Void>();
 }
 
-Future<Version> MockLogSystem::push(Version prevVersion,
+Future<Version> MockLogSystem::push(std::vector<Version> prevVersions,
                                     Version version,
                                     Version knownCommittedVersion,
                                     Version minKnownCommittedVersion,
                                     struct LogPushData& data,
                                     const SpanID& spanContext,
                                     Optional<UID> debugID,
-                                    Optional<ptxn::TLogGroupID> tLogGroup) {
+                                    std::vector<ptxn::TLogGroupID> tLogGroups) {
 	logMethodName(__func__);
 	return Future<Version>();
 }

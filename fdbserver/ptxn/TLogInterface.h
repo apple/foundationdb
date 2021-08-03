@@ -56,21 +56,22 @@ struct TLogCommitRequest {
 	// SpanID for tracing
 	SpanID spanID;
 
-	TLogGroupID tLogGroupID;
+	std::vector<TLogGroupID> tLogGroupIDs;
 
 	// TODO:
 	// std::unordered_map<StorageTeamID, StringRef> commits
 	// TLogGroupID group
 
 	// Arena
-	Arena arena;
+	std::vector<Arena> arenas;
 
 	// Serialized messages
-	std::unordered_map<StorageTeamID, StringRef> messages;
+	std::vector<std::unordered_map<StorageTeamID, StringRef>> messages;
 
 	// Versions
-	Version prevVersion;
+	std::vector<Version> prevVersions;
 	Version version;
+
 	Version knownCommittedVersion;
 	Version minKnownCommittedVersion;
 
@@ -82,25 +83,25 @@ struct TLogCommitRequest {
 
 	TLogCommitRequest() = default;
 	TLogCommitRequest(const SpanID& spanID_,
-	                  const TLogGroupID& tLogGroupID_,
-	                  const Arena arena_,
-	                  std::unordered_map<StorageTeamID, StringRef> messages_,
-	                  const Version prevVersion_,
+	                  const std::vector<TLogGroupID> tLogGroupIDs_,
+	                  const std::vector<Arena> arenas_,
+	                  std::vector<std::unordered_map<StorageTeamID, StringRef>> messages_,
+	                  const std::vector<Version> prevVersions_,
 	                  const Version version_,
 	                  const Version knownCommittedVersion_,
 	                  const Version minKnownCommittedVersion_,
 	                  const Optional<UID>& debugID_)
-	  : spanID(spanID_), tLogGroupID(tLogGroupID_), arena(arena_), messages(std::move(messages_)),
-	    prevVersion(prevVersion_), version(version_), knownCommittedVersion(knownCommittedVersion_),
+	  : spanID(spanID_), tLogGroupIDs(tLogGroupIDs_), arenas(arenas_), messages(std::move(messages_)),
+	    prevVersions(prevVersions_), version(version_), knownCommittedVersion(knownCommittedVersion_),
 	    minKnownCommittedVersion(minKnownCommittedVersion_), debugID(debugID_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
 		           spanID,
-		           arena,
+		           arenas,
 		           messages,
-		           prevVersion,
+		           prevVersions,
 		           version,
 		           knownCommittedVersion,
 		           minKnownCommittedVersion,

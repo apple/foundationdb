@@ -47,7 +47,8 @@ void processTLogCommitRequestByStorageTeam(std::shared_ptr<FakeTLogContext> pFak
 			const auto& message = vsm.message;
 			// We skip the subsequence check, as SpanContextMessage is broadcasted to all storage teams, it will be
 			// interfering the subsequence of mutationRefs.
-			ASSERT(message == pFakeTLogContext->pTestDriverContext->commitRecord.messages[version][storageTeamID][index++].second);
+			ASSERT(message ==
+			       pFakeTLogContext->pTestDriverContext->commitRecord.messages[version][storageTeamID][index++].second);
 		}
 		pFakeTLogContext->pTestDriverContext->commitRecord.tags[version][storageTeamID].tLogValidated = true;
 	}
@@ -74,8 +75,11 @@ void processTLogCommitRequestByStorageTeam(std::shared_ptr<FakeTLogContext> pFak
 
 void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
                               const TLogCommitRequest& commitRequest) {
-	for (const auto& message : commitRequest.messages) {
-		processTLogCommitRequestByStorageTeam(pFakeTLogContext, commitRequest.version, message.first, message.second);
+	for (const auto& messageMap : commitRequest.messages) {
+		for (const auto& message : messageMap) {
+			processTLogCommitRequestByStorageTeam(
+			    pFakeTLogContext, commitRequest.version, message.first, message.second);
+		}
 	}
 	commitRequest.reply.send(TLogCommitReply{ 0 });
 }
@@ -160,6 +164,7 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 
 Future<StorageServerPushReply> forwardTLogCommitToStorageServer(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
                                                                 const TLogCommitRequest& commitRequest,
+                                                                const Arena arena,
                                                                 const StorageTeamID& storageTeamID,
                                                                 const StringRef messages) {
 
@@ -167,7 +172,7 @@ Future<StorageServerPushReply> forwardTLogCommitToStorageServer(std::shared_ptr<
 	request.spanID = commitRequest.spanID;
 	request.storageTeamID = storageTeamID;
 	request.version = commitRequest.version;
-	request.arena = commitRequest.arena;
+	request.arena = arena;
 	request.messages = messages;
 
 	std::shared_ptr<StorageServerInterface_PassivelyReceive> storageServerInterface =
@@ -188,21 +193,26 @@ ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeT
 
 	loop choose {
 		when(TLogCommitRequest commitRequest = waitNext(pTLogInterface->commit.getFuture())) {
-			state TLogGroupID tLogGroupID(commitRequest.tLogGroupID);
 			printTiming << "Received commitRequest version = " << commitRequest.version << std::endl;
 			processTLogCommitRequest(pFakeTLogContext, commitRequest);
-
-			printTiming << concatToString("Push the message to storage servers, log group id = ", tLogGroupID)
-			            << std::endl;
-			std::vector<Future<StorageServerPushReply>> replies;
-			replies.reserve(commitRequest.messages.size());
-			for (const auto& message : commitRequest.messages) {
-				replies.push_back(
-				    forwardTLogCommitToStorageServer(pFakeTLogContext, commitRequest, message.first, message.second));
+			for (const auto& id : commitRequest.tLogGroupIDs) {
+				printTiming << concatToString("Push the message to storage servers, log group id = ", id) << std::endl;
 			}
+			std::vector<Future<StorageServerPushReply>> replies;
+			int i = 0;
+			for (const auto& messageMap : commitRequest.messages) {
+				for (const auto& message : messageMap) {
+					replies.push_back(forwardTLogCommitToStorageServer(
+					    pFakeTLogContext, commitRequest, commitRequest.arenas[i], message.first, message.second));
+				}
+				i++;
+			}
+			state std::vector<TLogGroupID> ids = commitRequest.tLogGroupIDs;
 			wait(waitForAll(replies));
 
-			printTiming << concatToString("Complete push, log group id = ", tLogGroupID) << std::endl;
+			for (const auto& id : ids) {
+				printTiming << concatToString("Push completed, log group id = ", id) << std::endl;
+			}
 		}
 		when(TLogPeekRequest peekRequest = waitNext(pTLogInterface->peek.getFuture())) {
 			fakeTLogPeek(peekRequest, pFakeTLogContext);

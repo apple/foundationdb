@@ -896,9 +896,12 @@ ACTOR Future<Void> commitQueue(Reference<TLogGroupData> self) {
 	}
 }
 
-ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
-                              TLogCommitRequest req,
-                              Reference<LogGenerationData> logData) {
+// return Optional.empty if failed to commit
+// Otherwise return the durableKnownCommittedVersion of certain tlog group in the current generation.
+ACTOR Future<Optional<Version>> tLogCommitSingle(TLogCommitRequest req,
+                                                 Reference<LogGenerationData> logData,
+                                                 Version prevVersion) {
+	state Reference<TLogGroupData> self = logData->tlogGroupData;
 	state Span span("TLog:tLogCommit"_loc, req.spanID);
 	state Optional<UID> tlogDebugID;
 	if (req.debugID.present()) {
@@ -908,7 +911,7 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 	}
 
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
-	wait(logData->version.whenAtLeast(req.prevVersion));
+	wait(logData->version.whenAtLeast(prevVersion));
 
 	// Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
 	if (g_network->check_yield(g_network->getCurrentTask())) {
@@ -926,20 +929,22 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 
 	if (logData->stopped) {
 		req.reply.sendError(tlog_stopped());
-		return Void();
+		return Optional<Version>();
 	}
 
 	state double beforeCommitT = now();
 
 	// Not a duplicate (check relies on critical section between here self->version.set() below!)
-	state bool isNotDuplicate = (logData->version.get() == req.prevVersion);
+	state bool isNotDuplicate = (logData->version.get() == prevVersion);
 	if (isNotDuplicate) {
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
-		for (auto& message : req.messages) {
-			commitMessages(self, logData, req.version, message.second, message.first);
+		for (auto& messageMap : req.messages) {
+			for (auto& message : messageMap) {
+				commitMessages(self, logData, req.version, message.second, message.first);
+			}
 		}
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
@@ -951,9 +956,11 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 		qe.id = logData->logId;
 		qe.storageTeams.reserve(req.messages.size());
 		qe.messages.reserve(req.messages.size());
-		for (auto& message : req.messages) {
-			qe.storageTeams.push_back(message.first);
-			qe.messages.push_back(message.second);
+		for (auto& messageMap : req.messages) {
+			for (auto& message : messageMap) {
+				qe.storageTeams.push_back(message.first);
+				qe.messages.push_back(message.second);
+			}
 		}
 		// Currently only store commit messages in memory and not using persistent queue
 		// self->persistentQueue->push(qe, logData);
@@ -977,7 +984,7 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 	if (stopped.isReady()) {
 		ASSERT(logData->stopped);
 		req.reply.sendError(tlog_stopped());
-		return Void();
+		return Optional<Version>();
 	}
 
 	if (isNotDuplicate) {
@@ -986,8 +993,22 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 
 	if (req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
+	return logData->durableKnownCommittedVersion;
+}
 
-	req.reply.send(logData->durableKnownCommittedVersion);
+ACTOR Future<Void> tLogCommit(TLogCommitRequest req, std::vector<Reference<LogGenerationData>> logDataList) {
+	state Version minVersion = std::numeric_limits<Version>::max();
+	state int i;
+	for (i = 0; i < logDataList.size(); i++) {
+		state Reference<LogGenerationData> logData = logDataList[i];
+		state Optional<Version> version = wait(tLogCommitSingle(req, logData, req.prevVersions[i]));
+		if (!version.present()) {
+			// error happens and reply with error message has been sent
+			return Void();
+		}
+		minVersion = std::min(minVersion, version.get());
+	}
+	req.reply.send(minVersion);
 	return Void();
 }
 
@@ -1177,18 +1198,26 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			}
 		}
 		when(TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
-			auto tlogGroup = activeGeneration->find(req.tLogGroupID);
-			TEST(tlogGroup == activeGeneration->end()); // TLog group not found
-			if (tlogGroup == activeGeneration->end()) {
-				req.reply.sendError(tlog_group_not_found());
-				continue;
+			std::vector<Reference<LogGenerationData>> logData;
+			bool hasError = false;
+			for (TLogGroupID tLogGroupID : req.tLogGroupIDs) {
+				auto tlogGroup = activeGeneration->find(tLogGroupID);
+				TEST(tlogGroup == activeGeneration->end()); // TLog group not found
+				if (tlogGroup == activeGeneration->end()) {
+					req.reply.sendError(tlog_group_not_found());
+					hasError = true;
+					break;
+				}
+				logData.emplace_back(tlogGroup->second);
+				TEST(logData.back()->stopped); // TLogCommitRequest while stopped
+				if (logData.back()->stopped) {
+					req.reply.sendError(tlog_stopped());
+					hasError = true;
+					break;
+				}
 			}
-			Reference<LogGenerationData> logData = tlogGroup->second;
-			TEST(logData->stopped); // TLogCommitRequest while stopped
-			if (logData->stopped) {
-				req.reply.sendError(tlog_stopped());
-			} else {
-				self->addActors.send(tLogCommit(logData->tlogGroupData, req, logData));
+			if (!hasError) {
+				self->addActors.send(tLogCommit(req, logData));
 			}
 		}
 		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {

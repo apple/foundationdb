@@ -108,10 +108,10 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 			            << std::endl;
 			auto serialized = serializer->getAllSerialized();
 			TLogCommitRequest request(deterministicRandom()->randomUniqueID(),
-			                          tLogGroupID,
-			                          serialized.first,
-			                          serialized.second,
-			                          commitVersionPair.first,
+			                          std::vector<TLogGroupID>{tLogGroupID},
+			                          std::vector<Arena> {serialized.first},
+			                          std::vector<std::unordered_map<ptxn::StorageTeamID, StringRef>>{serialized.second},
+			                          std::vector<Version>{commitVersionPair.first},
 			                          commitVersionPair.second,
 			                          0,
 			                          0,
