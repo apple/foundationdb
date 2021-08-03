@@ -1848,7 +1848,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	case FDBNetworkOptions::TRACE_PARTIAL_FILE_SUFFIX:
-		validateOptionValuePresent(value);
+		validateOptionValue(value, true);
 		networkOptions.tracePartialFileSuffix = value.get().toString();
 		break;
 	case FDBNetworkOptions::KNOB: {
