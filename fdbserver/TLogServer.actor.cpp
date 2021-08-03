@@ -1531,7 +1531,7 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest* req, double timeout) {
 	self->blockingPeeks += 1;
 	auto tagData = self->getTagData(req->tag);
-	if (tagData.isValid()) {
+	if (tagData.isValid() && !tagData->versionMessages.empty() && tagData->versionMessages.back().first > req->begin) {
 		return Void();
 	}
 	choose {
@@ -1742,6 +1742,10 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		return Void();
 	}
 
+	if (req.begin > logData->persistentDataDurableVersion && !req.onlySpilled && req.tag.locality >= 0 &&
+	    !req.returnIfBlocked) {
+		wait(waitForMessagesForTag(logData, &req, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
+	}
 	state Version endVersion = logData->version.get() + 1;
 	state bool onlySpilled = false;
 
@@ -1873,10 +1877,6 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		if (req.onlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			if (req.tag.locality >= 0 && !req.returnIfBlocked) {
-				// wait for at most 1 second
-				wait(waitForMessagesForTag(logData, &req, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
-			}
 			peekMessagesFromMemory(logData, req, messages, endVersion);
 		}
 
