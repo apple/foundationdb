@@ -2098,7 +2098,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					RangeResult UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
 					state std::map<Tag, UID> tag_uid;
 					state std::unordered_map<UID, ptxn::StorageTeamID> storageServerToStorageTeam;
-					state std::unordered_map<KeyRef, ValueRef> keyServers;
+					state std::vector<std::pair<KeyRef, ValueRef>> keyServers;
 					for (const KeyValueRef kv : UIDtoTagMap) {
 						tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 					}
@@ -2116,7 +2116,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 						MutationsVec mutations;
 						for (auto& kv : data) {
 							if (kv.key.startsWith(keyServersPrefix)) {
-								keyServers.emplace(kv.key.removePrefix(keyServersPrefix), kv.value);
+								keyServers.emplace_back(kv.key.removePrefix(keyServersPrefix), kv.value);
 							} else if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 								KeyRef k = kv.key.removePrefix(keyServersPrefix);
 								std::set<ptxn::StorageTeamID> storageTeamIDs =
