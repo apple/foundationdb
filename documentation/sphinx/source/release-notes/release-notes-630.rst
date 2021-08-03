@@ -9,7 +9,7 @@ Release Notes
 * The multi-version client API would not propagate errors that occurred when creating databases on external clients. This could result in a invalid memory accesses. `(PR #5221) <https://github.com/apple/foundationdb/pull/5221>`_
 * Fixed a race between the multi-version client connecting to a cluster and destroying the database that could cause an assertion failure. `(PR #5221) <https://github.com/apple/foundationdb/pull/5221>`_
 * Added Mako latency measurements. `(PR #5255) <https://github.com/apple/foundationdb/pull/5255>`_
-* Fixed a bug introduced when porting restoring an inconsistent snapshot feature from 7.0 branch to 6.3 branch. The parameter that controls whether to perform inconsistent snapshot restore may be used to lock the database during restore. `(PR #5228) <https://github.com/apple/foundationdb/pull/5228>`_
+* Fixed a bug introduced when porting restoring an inconsistent snapshot feature from 7.0 branch to 6.3 branch. The parameter that controls whether to perform an inconsistent snapshot restore may instead be used to lock the database during restore. `(PR #5228) <https://github.com/apple/foundationdb/pull/5228>`_
 * Added SidebandMultiThreadClientTest, which validates causal consistency for multi-threaded client. `(PR #5173) <https://github.com/apple/foundationdb/pull/5173>`_
 
 6.3.17
