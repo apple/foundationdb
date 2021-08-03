@@ -165,8 +165,8 @@ public:
 class IPagerSnapshot {
 public:
 	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
-	                                                           unsigned int level,
-	                                                           LogicalPageID pageID,
+	                                                           uint8_t level,
+	                                                           VectorRef<LogicalPageID> pageIDs,
 	                                                           int priority,
 	                                                           bool cacheable,
 	                                                           bool nohit) = 0;
@@ -185,7 +185,7 @@ public:
 class IPager2 : public IClosable {
 public:
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.
-	virtual Reference<ArenaPage> newPageBuffer() = 0;
+	virtual Reference<ArenaPage> newPageBuffer(size_t size= 1) = 0;
 
 	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
 	// For a given pager instance, separate calls to this function must return the same value.
@@ -198,6 +198,7 @@ public:
 	// Allocate a new page ID for a subsequent write.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to.
 	virtual Future<LogicalPageID> newPageID() = 0;
+	virtual Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs(size_t size) = 0;
 
 	virtual Future<LogicalPageID> newExtentPageID(QueueID queueID) = 0;
 	virtual QueueID newLastQueueID() = 0;
@@ -206,16 +207,19 @@ public:
 	// Existing holders of a page reference for pageID, read from any version,
 	// may see the effects of this write.
 	virtual void updatePage(PagerEventReasons reason,
-	                        unsigned int level,
-	                        LogicalPageID pageID,
+	                        uint8_t level,
+	                        Standalone<VectorRef<LogicalPageID>> pageIDs,
 	                        Reference<ArenaPage> data) = 0;
+	void updatePage(PagerEventReasons reason, uint8_t level, LogicalPageID pageID, Reference<ArenaPage> data) {
+		updatePage(reason, level, VectorRef<LogicalPageID>(&pageID, 1), data);
+	}
 
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
 	// instead and return the new page ID to the caller.  Otherwise the original pageID argument will be returned.
 	// If a new page ID is returned, the old page ID will be freed as of version v
 	virtual Future<LogicalPageID> atomicUpdatePage(PagerEventReasons reason,
-	                                               unsigned int level,
+	                                               uint8_t level,
 	                                               LogicalPageID pageID,
 	                                               Reference<ArenaPage> data,
 	                                               Version v) = 0;
@@ -237,11 +241,19 @@ public:
 	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
 	// considered likely to be needed soon.
 	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
-	                                              unsigned int level,
-	                                              LogicalPageID pageID,
+	                                              uint8_t level,
+	                                              Standalone<VectorRef<LogicalPageID>> pageIDs,
 	                                              int priority,
 	                                              bool cacheable,
 	                                              bool noHit) = 0;
+	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
+	                                      uint8_t level,
+	                                      LogicalPageID pageID,
+	                                      int priority,
+	                                      bool cacheable,
+	                                      bool noHit) {
+		return readPage(reason, level, VectorRef<LogicalPageID>(&pageID, 1), priority, cacheable, noHit);
+	}
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 
