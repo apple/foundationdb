@@ -56,11 +56,10 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterf
     fastReplies(0), unknownReplies(0) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
-	TraceEvent("SPC_Starting", randomID)
+	TraceEvent(SevDebug, "SPC_Starting", randomID)
 	    .detail("Tag", tag.toString())
 	    .detail("Begin", begin)
-	    .detail("End", end)
-	    .backtrace();
+	    .detail("End", end);
 }
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
@@ -357,7 +356,7 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 					}
 					updateCursorWithReply(self, res);
 					expectedBegin = res.end;
-					TraceEvent("SPC_GetMoreB", self->randomID)
+					TraceEvent(SevDebug, "SPC_GetMoreB", self->randomID)
 					    .detail("Has", self->hasMessage())
 					    .detail("End", res.end)
 					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
