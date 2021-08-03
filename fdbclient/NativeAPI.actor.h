@@ -68,6 +68,7 @@ struct NetworkOptions {
 	std::string traceFormat;
 	std::string traceClockSource;
 	std::string traceFileIdentifier;
+	std::string tracePartialFileSuffix;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
@@ -189,7 +190,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	TransactionLogInfo() : logLocation(DONT_LOG), maxFieldLength(0) {}
 	TransactionLogInfo(LoggingLocation location) : logLocation(location), maxFieldLength(0) {}
 	TransactionLogInfo(std::string id, LoggingLocation location)
-	  : logLocation(location), identifier(id), maxFieldLength(0) {}
+	  : logLocation(location), maxFieldLength(0), identifier(id) {}
 
 	void setIdentifier(std::string id) { identifier = id; }
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
@@ -231,10 +232,10 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	Promise<Void> onSetWatchTrigger;
 	Future<Void> watchFuture;
 
-	Watch() : watchFuture(Never()), valuePresent(false), setPresent(false) {}
-	Watch(Key key) : key(key), watchFuture(Never()), valuePresent(false), setPresent(false) {}
+	Watch() : valuePresent(false), setPresent(false), watchFuture(Never()) {}
+	Watch(Key key) : key(key), valuePresent(false), setPresent(false), watchFuture(Never()) {}
 	Watch(Key key, Optional<Value> val)
-	  : key(key), value(val), watchFuture(Never()), valuePresent(true), setPresent(false) {}
+	  : key(key), value(val), valuePresent(true), setPresent(false), watchFuture(Never()) {}
 
 	void setWatch(Future<Void> watchFuture);
 };

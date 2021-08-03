@@ -449,7 +449,10 @@ if __name__ == '__main__':
         throttle()
     else:
         assert process_number > 1, "Process number should be positive"
-        coordinators()
-        exclude()
+        # the kill command which used to list processes seems to not work as expected sometime
+        # which makes the test flaky.
+        # We need to figure out the reason and then re-enable these tests
+        #coordinators()
+        #exclude()
 
     
