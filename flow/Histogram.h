@@ -67,7 +67,7 @@ public:
 	          Unit unit = Unit::MAXHISTOGRAMUNIT,
 	          uint32_t lower = 0,
 	          uint32_t upper = UINT32_MAX,
-			  Reference<HistogramRegistry> regis= Reference<HistogramRegistry>(new HistogramRegistry() ))
+	          Reference<HistogramRegistry> regis = Reference<HistogramRegistry>(new HistogramRegistry()))
 	  : group(group), op(op), unit(unit), registry(regis), lowerBound(lower),
 	    upperBound(upper), ReferenceCounted<Histogram>() {
 
@@ -76,13 +76,14 @@ public:
 
 		clear();
 	}
+
 private:
 	static std::string generateName(std::string const& group, std::string const& op) { return group + ":" + op; }
 
 public:
-	~Histogram() { 
+	~Histogram() {
 		if (registry.isValid() && unit != Unit::MAXHISTOGRAMUNIT) {
-			registry->unregisterHistogram(this); 
+			registry->unregisterHistogram(this);
 		}
 		registry.clear();
 	}
@@ -98,7 +99,7 @@ public:
 		HistogramRegistry& registry = GetHistogramRegistry();
 		Histogram* h = registry.lookupHistogram(name);
 		if (!h) {
-			h = new Histogram(group_str, op_str, unit, lower, upper,  Reference<HistogramRegistry>::addRef(&registry));
+			h = new Histogram(group_str, op_str, unit, lower, upper, Reference<HistogramRegistry>::addRef(&registry));
 			registry.registerHistogram(h);
 			return Reference<Histogram>(h);
 		} else {
