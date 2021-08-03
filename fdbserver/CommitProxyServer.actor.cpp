@@ -2170,6 +2170,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					// insert keyTag data separately from metadata mutations so that we can do one bulk insert which
 					// avoids a lot of map lookups.
 					commitData.keyInfo.rawInsert(keyInfoData);
+					storageServerToStorageTeam.clear();
+					keyServers.clear();
 
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();
 					commitData.locked = lockedKey.present() && lockedKey.get().size();
