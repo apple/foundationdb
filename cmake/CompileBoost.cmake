@@ -6,7 +6,15 @@ function(compile_boost)
                           "${multiValueArgs}" ${ARGN} )
   # Configure the boost toolset to use
   set(BOOTSTRAP_ARGS "--with-libraries=context")
+
   set(B2_COMMAND "./b2")
+  set(B2_BUILD_ARGS "")
+
+  if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
+    set(BOOTSTRAP_ARGS ${BOOTSTRAP_ARGS} "--with-toolset=clang")
+    set(B2_BUILD_ARGS "link=static cxxflags='-std=c++14 -stdlib=libc++ -nostdlib++' linkflags='-stdlib=libc++ -nostdlib++ -static-libgcc -lc++ -lc++abi'")
+  endif ()
+
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++14 -w)
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
   if(APPLE)
@@ -41,7 +49,7 @@ function(compile_boost)
     URL "https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2"
     URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
     CONFIGURE_COMMAND ./bootstrap.sh ${BOOTSTRAP_ARGS}
-    BUILD_COMMAND ${B2_COMMAND} link=static ${MY_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
+    BUILD_COMMAND ${B2_COMMAND} link=static ${B2_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
     INSTALL_COMMAND ""
     UPDATE_COMMAND ""
@@ -72,10 +80,22 @@ if(USE_SANITIZER)
   return()
 endif()
 
-list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_72_0)
 # since boost 1.72 boost installs cmake configs. We will enforce config mode
 set(Boost_USE_STATIC_LIBS ON)
-set(BOOST_HINT_PATHS /opt/boost_1_72_0)
+
+# Clang and Gcc will have different name mangling to std::call_once, etc.
+if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
+  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_72_0_clang)
+  set(BOOST_HINT_PATHS /opt/boost_1_72_0_clang)
+  message(STATUS "Using Clang version of boost::context")
+else ()
+  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_72_0)
+  set(BOOST_HINT_PATHS /opt/boost_1_72_0)
+  message(STATUS "Using g++ version of boost::context")
+endif ()
+
+message(STATUS "Boost hint path: ${BOOST_HINT_PATHS}")
+
 if(BOOST_ROOT)
   list(APPEND BOOST_HINT_PATHS ${BOOST_ROOT})
 endif()
