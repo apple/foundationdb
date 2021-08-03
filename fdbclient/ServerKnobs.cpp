@@ -432,6 +432,8 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( SAMPLE_POLL_TIME,                                      0.1 );
 	init( RESOLVER_STATE_MEMORY_LIMIT,                           1e6 );
 	init( LAST_LIMITED_RATIO,                                    2.0 );
+	init( INSERT_EMPTY_TRANSACTION,                             true );
+	init( LAGGING_TLOG_GROUP_VERSION_LIMIT,                      1e5 ); // 100 ms
 
 	// Backup Worker
 	init( BACKUP_TIMEOUT,                                        0.4 );

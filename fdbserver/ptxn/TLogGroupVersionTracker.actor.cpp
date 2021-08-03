@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <fdbserver/Knobs.h>
 #include "fdbserver/ptxn/TLogGroupVersionTracker.h"
 
 #include "fdbclient/FDBTypes.h"
@@ -57,6 +58,17 @@ std::map<TLogGroupID, Version> TLogGroupVersionTracker::updateGroups(const std::
 		ASSERT_WE_THINK(pair.second); // insertion happens
 		it->second = commitVersion;
 	}
+
+	if (SERVER_KNOBS->INSERT_EMPTY_TRANSACTION) {
+		for (auto& it : versions) {
+			if (results.count(it.first) == 0 &&
+			    commitVersion - it.second >= SERVER_KNOBS->LAGGING_TLOG_GROUP_VERSION_LIMIT) {
+				it.second = commitVersion;
+				results.emplace(it.first, it.second);
+			}
+		}
+	}
+
 	return results;
 }
 
