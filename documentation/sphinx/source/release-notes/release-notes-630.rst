@@ -4,6 +4,10 @@
 Release Notes
 #############
 
+6.3.19
+======
+* Add the ``trace_partial_file_suffix`` network option. This option will give unfinished trace files a special suffix to indicate they're not complete yet. When the trace file is complete, it is renamed to remove the suffix. `(PR #5330) <https://github.com/apple/foundationdb/pull/5330>`_
+
 6.3.18
 ======
 * The multi-version client API would not propagate errors that occurred when creating databases on external clients. This could result in a invalid memory accesses. `(PR #5221) <https://github.com/apple/foundationdb/pull/5221>`_
