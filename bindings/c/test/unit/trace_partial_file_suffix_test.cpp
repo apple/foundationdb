@@ -53,12 +53,11 @@ int main(int argc, char** argv) {
 	fdb_check(fdb_select_api_version(710));
 
 	std::string file_identifier = "trace_partial_file_suffix_test" + std::to_string(std::random_device{}());
-	// std::string trace_partial_file_suffix = ".tmp";
-	std::string trace_partial_file_suffix = "";
+	std::string trace_partial_file_suffix = ".tmp";
 
 	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, "");
 	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_FILE_IDENTIFIER, file_identifier);
-	// set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_PARTIAL_FILE_SUFFIX, trace_partial_file_suffix);
+	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_PARTIAL_FILE_SUFFIX, trace_partial_file_suffix);
 
 	fdb_check(fdb_setup_network());
 	std::thread network_thread{ &fdb_run_network };

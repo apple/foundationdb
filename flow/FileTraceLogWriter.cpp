@@ -87,11 +87,13 @@ FileTraceLogWriter::FileTraceLogWriter(std::string const& directory,
                                        std::string const& processName,
                                        std::string const& basename,
                                        std::string const& extension,
+                                       std::string const& tracePartialFileSuffix,
                                        uint64_t maxLogsSize,
                                        std::function<void()> const& onError,
                                        Reference<ITraceLogIssuesReporter> const& issues)
-  : directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize),
-    traceFileFD(-1), index(0), issues(issues), onError(onError) {}
+  : directory(directory), processName(processName), basename(basename), extension(extension),
+    tracePartialFileSuffix(tracePartialFileSuffix), maxLogsSize(maxLogsSize), traceFileFD(-1), index(0), issues(issues),
+    onError(onError) {}
 
 void FileTraceLogWriter::addref() {
 	ReferenceCounted<FileTraceLogWriter>::addref();
@@ -158,7 +160,8 @@ void FileTraceLogWriter::open() {
 	// log10(index) < 10
 	UNSTOPPABLE_ASSERT(indexWidth < 10);
 
-	auto finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
+	finalname =
+	    format("%s.%d.%d.%s%s", basename.c_str(), indexWidth, index, extension.c_str(), tracePartialFileSuffix.c_str());
 	while ((traceFileFD = __open(finalname.c_str(), TRACEFILE_FLAGS, TRACEFILE_MODE)) == -1) {
 		lastError(errno);
 		if (errno == EEXIST) {
@@ -166,7 +169,12 @@ void FileTraceLogWriter::open() {
 			indexWidth = unsigned(::floor(log10f(float(index))));
 
 			UNSTOPPABLE_ASSERT(indexWidth < 10);
-			finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
+			finalname = format("%s.%d.%d.%s%s",
+			                   basename.c_str(),
+			                   indexWidth,
+			                   index,
+			                   extension.c_str(),
+			                   tracePartialFileSuffix.c_str());
 		} else {
 			fprintf(stderr,
 			        "ERROR: could not create trace log file `%s' (%d: %s)\n",
@@ -178,7 +186,7 @@ void FileTraceLogWriter::open() {
 
 			int errorNum = errno;
 			onMainThreadVoid(
-			    [finalname, errorNum] {
+			    [finalname = finalname, errorNum] {
 				    TraceEvent(SevWarnAlways, "TraceFileOpenError")
 				        .detail("Filename", finalname)
 				        .detail("ErrorCode", errorNum)
@@ -201,6 +209,11 @@ void FileTraceLogWriter::close() {
 		while (__close(traceFileFD))
 			threadSleep(0.1);
 	}
+	traceFileFD = -1;
+	if (!tracePartialFileSuffix.empty()) {
+		renameFile(finalname, finalname.substr(0, finalname.size() - tracePartialFileSuffix.size()));
+	}
+	finalname = "";
 }
 
 void FileTraceLogWriter::roll() {
