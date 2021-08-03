@@ -83,8 +83,6 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	// Need to do one round trip to the network thread to make sure the trace file gets opened
-
 	fdb_check(fdb_stop_network());
 	network_thread.join();
 
