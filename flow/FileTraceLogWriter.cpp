@@ -19,6 +19,7 @@
  */
 
 #include "flow/FileTraceLogWriter.h"
+#include "flow/Platform.h"
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
 
@@ -229,6 +230,15 @@ void FileTraceLogWriter::cleanupTraceFiles() {
 	// Setting maxLogsSize=0 disables trace file cleanup based on dir size
 	if (!g_network->isSimulated() && maxLogsSize > 0) {
 		try {
+			// Rename/finalize any stray files ending in tracePartialFileSuffix for this process.
+			if (!tracePartialFileSuffix.empty()) {
+				for (const auto& f : platform::listFiles(directory, tracePartialFileSuffix)) {
+					if (f.substr(0, processName.length()) == processName) {
+						renameFile(f, f.substr(0, f.size() - tracePartialFileSuffix.size()));
+					}
+				}
+			}
+
 			std::vector<std::string> existingFiles = platform::listFiles(directory, extension);
 			std::vector<std::string> existingTraceFiles;
 

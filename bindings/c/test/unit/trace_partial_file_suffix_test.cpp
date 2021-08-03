@@ -18,10 +18,12 @@
  * limitations under the License.
  */
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <random>
+#include <string>
 #include <thread>
-#include <filesystem>
 
 #define FDB_API_VERSION 710
 #include "foundationdb/fdb_c.h"
@@ -54,6 +56,11 @@ int main(int argc, char** argv) {
 
 	std::string file_identifier = "trace_partial_file_suffix_test" + std::to_string(std::random_device{}());
 	std::string trace_partial_file_suffix = ".tmp";
+	std::string simulated_stray_partial_file =
+	    "trace.127.0.0.1." + file_identifier + ".simulated.xml" + trace_partial_file_suffix;
+
+	// Simulate this process crashing previously by creating a ".tmp" file
+	{ std::ofstream file{ simulated_stray_partial_file }; }
 
 	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, "");
 	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_FILE_IDENTIFIER, file_identifier);
@@ -67,12 +74,12 @@ int main(int argc, char** argv) {
 	fdb_check(fdb_create_database(nullptr, &out));
 	fdb_database_destroy(out);
 
-	// Eventually there's a trace file for this test ending in .tmp
+	// Eventually there's a new trace file for this test ending in .tmp
 	std::string name;
 	for (;;) {
 		for (const auto& entry : std::filesystem::directory_iterator(".")) {
 			auto path = entry.path().string();
-			if (path.find(file_identifier) != std::string::npos) {
+			if (path.find(file_identifier) != std::string::npos && path.find(".simulated.") == std::string::npos) {
 				assert(path.substr(path.size() - trace_partial_file_suffix.size()) == trace_partial_file_suffix);
 				name = path;
 				break;
@@ -86,12 +93,19 @@ int main(int argc, char** argv) {
 	fdb_check(fdb_stop_network());
 	network_thread.join();
 
-	// After shutting down, the trace file's suffix is removed
+	// After shutting down, the suffix is removed for both the simulated stray file and our new file
 	if (!trace_partial_file_suffix.empty()) {
 		assert(!file_exists(name.c_str()));
+		assert(!file_exists(simulated_stray_partial_file.c_str()));
 	}
 
 	auto new_name = name.substr(0, name.size() - trace_partial_file_suffix.size());
+	auto new_stray_name =
+	    simulated_stray_partial_file.substr(0, simulated_stray_partial_file.size() - trace_partial_file_suffix.size());
 	assert(file_exists(new_name.c_str()));
+	assert(file_exists(new_stray_name.c_str()));
 	remove(new_name.c_str());
+	remove(new_stray_name.c_str());
+	assert(!file_exists(new_name.c_str()));
+	assert(!file_exists(new_stray_name.c_str()));
 }
