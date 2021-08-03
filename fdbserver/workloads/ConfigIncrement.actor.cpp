@@ -29,12 +29,13 @@ class ConfigIncrementWorkload : public TestWorkload {
 	Version lastKnownCommittedVersion{ ::invalidVersion };
 	int lastKnownValue{ -1 };
 	bool useSimpleConfigDB{ true };
+	double meanSleepWithinTransactions{ 0.01 };
+	double meanSleepBetweenTransactions{ 0.1 };
 
 	static KeyRef const testKnobName;
 	static Key configKey;
 
 	PerfIntCounter transactions, retries;
-	PerfDoubleCounter totalLatency;
 
 	static Key getConfigKey() {
 		Tuple tuple;
@@ -67,6 +68,7 @@ class ConfigIncrementWorkload : public TestWorkload {
 					state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
 					state int currentValue = wait(get(tr));
 					set(tr, currentValue + 1);
+					wait(delay(deterministicRandom()->random01() * 2 * self->meanSleepWithinTransactions));
 					wait(tr->commit());
 					ASSERT_GT(tr->getCommittedVersion(), self->lastKnownCommittedVersion);
 					ASSERT_GE(currentValue, self->lastKnownValue);
@@ -74,10 +76,14 @@ class ConfigIncrementWorkload : public TestWorkload {
 					self->lastKnownValue = currentValue + 1;
 					++self->transactions;
 					++trsComplete;
+					wait(delay(deterministicRandom()->random01() * 2 * self->meanSleepBetweenTransactions));
 					break;
 				} catch (Error& e) {
-					// TODO: Increment error counters
+					TraceEvent(SevDebug, "ConfigIncrementError")
+					    .detail("LastKnownValue", self->lastKnownValue)
+					    .error(e);
 					wait(tr->onError(e));
+					++self->retries;
 				}
 			}
 		}
@@ -89,10 +95,11 @@ class ConfigIncrementWorkload : public TestWorkload {
 		loop {
 			try {
 				state int currentValue = wait(get(tr));
+				auto expectedValue = self->incrementActors * self->incrementsPerActor;
 				TraceEvent("ConfigIncrementCheck")
 				    .detail("CurrentValue", currentValue)
-				    .detail("ExpectedValue", self->incrementActors * self->incrementsPerActor);
-				return currentValue >= (self->incrementActors * self->incrementsPerActor);
+				    .detail("ExpectedValue", expectedValue);
+				return currentValue >= expectedValue; // >= because we may have maybe_committed errors
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -107,10 +114,12 @@ class ConfigIncrementWorkload : public TestWorkload {
 
 public:
 	ConfigIncrementWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency") {
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries") {
 		incrementActors = getOption(options, "incrementActors"_sr, 10);
 		incrementsPerActor = getOption(options, "incrementsPerActor"_sr, 10);
 		useSimpleConfigDB = getOption(options, "useSimpleConfigDB"_sr, true);
+		meanSleepWithinTransactions = getOption(options, "meanSleepWithinTransactions"_sr, 0.01);
+		meanSleepBetweenTransactions = getOption(options, "meanSleepBetweenTransactions"_sr, 0.1);
 	}
 
 	std::string description() const override { return "ConfigIncrementWorkload"; }
@@ -118,19 +127,20 @@ public:
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
-		if (clientId != 0) {
-			return Void();
-		}
 		std::vector<Future<Void>> actors;
-		for (int i = 0; i < incrementActors; ++i) {
+		auto localIncrementActors = (incrementActors - clientId - 1) / clientCount + 1;
+		for (int i = 0; i < localIncrementActors; ++i) {
 			actors.push_back(incrementActor(this, cx));
 		}
 		return waitForAll(actors);
 	}
 
-	Future<bool> check(Database const& cx) override { return check(this, cx); }
+	Future<bool> check(Database const& cx) override { return clientId ? Future<bool>{ true } : check(this, cx); }
 
-	void getMetrics(std::vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {
+		m.push_back(transactions.getMetric());
+		m.push_back(retries.getMetric());
+	}
 };
 
 WorkloadFactory<ConfigIncrementWorkload> ConfigIncrementWorkloadFactory("ConfigIncrement");

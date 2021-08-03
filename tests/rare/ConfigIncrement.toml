@@ -3,5 +3,7 @@ testTitle = 'ConfigIncrement'
 
   [[test.workload]]
   testName = 'ConfigIncrement'
-  incrementActors = 10
+  incrementActors = 5
   incrementsPerActor = 10
+  meanSleepWithinTransactions = 0.00
+  meanSleepBetweenTransactions = 0.1
