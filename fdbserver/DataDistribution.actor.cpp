@@ -3967,7 +3967,6 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
                                                   FutureStream<Void> finishStorageWiggleSignal,
                                                   DDTeamCollection* teamCollection) {
-	state int lastFinishTime = now();
 	loop {
 		choose {
 			when(wait(stopSignal->onChange())) {}
@@ -4047,8 +4046,7 @@ ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, 
 // cluster is unhealthy and restarted once the cluster is healthy again.
 ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
                                            PromiseStream<Void> finishStorageWiggleSignal,
-                                           DDTeamCollection* self,
-                                           const DDEnabledState* ddEnabledState) {
+                                           DDTeamCollection* self) {
 	state Future<Void> watchFuture = Never();
 	state Future<Void> moveFinishFuture = Never();
 	state int extraTeamCount = 0;
@@ -4132,8 +4130,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 // This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by command
 // `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 // `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
-ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection,
-                                                 const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection) {
 	state int speed = 0;
 	state AsyncVar<bool> stopWiggleSignal(true);
 	state PromiseStream<Void> finishStorageWiggleSignal;
@@ -4158,8 +4155,8 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 					stopWiggleSignal.set(false);
 					collection.add(perpetualStorageWiggleIterator(
 					    &stopWiggleSignal, finishStorageWiggleSignal.getFuture(), teamCollection));
-					collection.add(perpetualStorageWiggler(
-					    &stopWiggleSignal, finishStorageWiggleSignal, teamCollection, ddEnabledState));
+					collection.add(
+					    perpetualStorageWiggler(&stopWiggleSignal, finishStorageWiggleSignal, teamCollection));
 					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId).log();
 				} else if (speed == 0) {
 					if (!stopWiggleSignal.get()) {
@@ -5564,7 +5561,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> te
 		self->addActor.send(waitHealthyZoneChange(self));
 
 		if (self->primary) { // the primary dc also handle the satellite dc's perpetual wiggling
-			self->addActor.send(monitorPerpetualStorageWiggle(self, ddEnabledState));
+			self->addActor.send(monitorPerpetualStorageWiggle(self));
 		}
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
