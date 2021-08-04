@@ -116,10 +116,10 @@ struct GrvProxyStats {
 	    recentRequests(0), lastBucketBegin(now()),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
 	    grvConfirmEpochLiveDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                                    LiteralStringRef("grvConfirmEpochLive"),
+	                                                    LiteralStringRef("GrvConfirmEpochLive"),
 	                                                    Histogram::Unit::microseconds)),
 	    grvGetCommittedVersionRpcDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                       LiteralStringRef("grvGetCommittedVersionRpc"),
+	                                       LiteralStringRef("GrvGetCommittedVersionRpc"),
 	                                       Histogram::Unit::microseconds)) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
