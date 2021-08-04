@@ -215,7 +215,7 @@ class LocalConfigurationImpl {
 			self->updateInMemoryState(lastSeenVersion);
 			return Void();
 		}
-		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
+		RangeResult range = wait(self->kvStore->readRange(knobOverrideKeys));
 		for (const auto& kv : range) {
 			auto configKey =
 			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(knobOverrideKeys.begin), IncludeVersion());

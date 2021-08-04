@@ -144,7 +144,9 @@ namespace SummarizeTest
                         string oldBinaryFolder = (args.Length > 1)  ? args[1] : Path.Combine("/opt", "joshua", "global_data", "oldBinaries");
                         bool useValgrind = args.Length > 2 && args[2].ToLower() == "true";
                         int maxTries = (args.Length > 3) ? int.Parse(args[3]) : 3;
-                        return Run(Path.Combine("bin", BINARY), "", "tests", "summary.xml", "error.xml", "tmp", oldBinaryFolder, useValgrind, maxTries, true, Path.Combine("/app", "deploy", "runtime", ".tls_5_1", PLUGIN));
+                        bool buggifyEnabled = (args.Length > 4) ? bool.Parse(args[4]) : true;
+                        bool faultInjectionEnabled = (args.Length > 5) ? bool.Parse(args[5]) : true;
+                        return Run(Path.Combine("bin", BINARY), "", "tests", "summary.xml", "error.xml", "tmp", oldBinaryFolder, useValgrind, maxTries, true, Path.Combine("/app", "deploy", "runtime", ".tls_5_1", PLUGIN), buggifyEnabled, faultInjectionEnabled);
                     }
                     catch(Exception e)
                     {
@@ -240,10 +242,10 @@ namespace SummarizeTest
             }
         }
 
-        static int Run(string fdbserverName, string tlsPluginFile, string testFolder, string summaryFileName, string errorFileName, string runDir, string oldBinaryFolder, bool useValgrind, int maxTries, bool traceToStdout = false, string tlsPluginFile_5_1 = "")
+        static int Run(string fdbserverName, string tlsPluginFile, string testFolder, string summaryFileName, string errorFileName, string runDir, string oldBinaryFolder, bool useValgrind, int maxTries, bool traceToStdout = false, string tlsPluginFile_5_1 = "", bool buggifyEnabled = true, bool faultInjectionEnabled = true)
         {
             int seed = random.Next(1000000000);
-            bool buggify = random.NextDouble() < buggifyOnRatio;
+            bool buggify = buggifyEnabled ? (random.NextDouble() < buggifyOnRatio) : false;
             string testFile = null;
             string testDir = "";
             string oldServerName = "";
@@ -353,11 +355,11 @@ namespace SummarizeTest
                     bool useNewPlugin = (oldServerName == fdbserverName) || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
                     bool useToml = File.Exists(testFile + "-1.toml");
                     string testFile1 = useToml ? testFile + "-1.toml" : testFile + "-1.txt";
-                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout, noSim);
+                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
                     if (result == 0)
                     {
                         string testFile2 = useToml ? testFile + "-2.toml" : testFile + "-2.txt";
-                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout, noSim);
+                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
                     }
                 }
                 else
@@ -365,13 +367,13 @@ namespace SummarizeTest
                     int expectedUnseed = -1;
                     if (!useValgrind && unseedCheck)
                     {
-                        result = RunTest(fdbserverName, tlsPluginFile, null, null, seed, buggify, testFile, runDir, Guid.NewGuid().ToString(), -1, out expectedUnseed, out retryableError, logOnRetryableError, false, false, false, "", traceToStdout, noSim);
+                        result = RunTest(fdbserverName, tlsPluginFile, null, null, seed, buggify, testFile, runDir, Guid.NewGuid().ToString(), -1, out expectedUnseed, out retryableError, logOnRetryableError, false, false, false, "", traceToStdout, noSim, faultInjectionEnabled);
                     }
 
                     if (!retryableError)
                     {
                         int unseed;
-                        result = RunTest(fdbserverName, tlsPluginFile, summaryFileName, errorFileName, seed, buggify, testFile, runDir, Guid.NewGuid().ToString(), expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, false, "", traceToStdout, noSim);
+                        result = RunTest(fdbserverName, tlsPluginFile, summaryFileName, errorFileName, seed, buggify, testFile, runDir, Guid.NewGuid().ToString(), expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, false, "", traceToStdout, noSim, faultInjectionEnabled);
                     }
                 }
 
@@ -386,7 +388,7 @@ namespace SummarizeTest
 
         private static int RunTest(string fdbserverName, string tlsPluginFile, string summaryFileName, string errorFileName, int seed,
             bool buggify, string testFile, string runDir, string uid, int expectedUnseed, out int unseed, out bool retryableError, bool logOnRetryableError, bool useValgrind, bool restarting = false,
-            bool willRestart = false, string oldBinaryName = "", bool traceToStdout = false, bool noSim = false)
+            bool willRestart = false, string oldBinaryName = "", bool traceToStdout = false, bool noSim = false, bool faultInjectionEnabled = true)
         {
             unseed = -1;
 
@@ -407,7 +409,7 @@ namespace SummarizeTest
                 Directory.CreateDirectory(tempPath);
                 Directory.SetCurrentDirectory(tempPath);
 
-                if (!restarting) LogTestPlan(summaryFileName, testFile, seed, buggify, expectedUnseed != -1, uid, oldBinaryName);
+                if (!restarting) LogTestPlan(summaryFileName, testFile, seed, buggify, expectedUnseed != -1, uid, faultInjectionEnabled, oldBinaryName);
 
                 string valgrindOutputFile = null;
                 using (var process = new System.Diagnostics.Process())
@@ -422,15 +424,16 @@ namespace SummarizeTest
                     process.StartInfo.RedirectStandardOutput = true;
                     string role = (noSim) ? "test" : "simulation";
                     var args = "";
+                    string faultInjectionArg = string.IsNullOrEmpty(oldBinaryName) ? string.Format("-fi {0}", faultInjectionEnabled ? "on" : "off") : "";
                     if (willRestart && oldBinaryName.EndsWith("alpha6"))
                     {
-                        args = string.Format("-Rs 1000000000 -r {0} {1} -s {2} -f \"{3}\" -b {4} {5} --crash",
-                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
+                        args = string.Format("-Rs 1000000000 -r {0} {1} -s {2} -f \"{3}\" -b {4} {5} {6} --crash",
+                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", faultInjectionArg, tlsPluginArg);
                     }
                     else
                     {
-                        args = string.Format("-Rs 1GB -r {0} {1} -s {2} -f \"{3}\" -b {4} {5} --crash",
-                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
+                        args = string.Format("-Rs 1GB -r {0} {1} -s {2} -f \"{3}\" -b {4} {5} {6} --crash",
+                            role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", faultInjectionArg, tlsPluginArg);
                     }
                     if (restarting) args = args + " --restarting";
                     if (useValgrind && !willRestart)
@@ -524,7 +527,7 @@ namespace SummarizeTest
                             var xout = new XElement("UnableToKillProcess",
                                 new XAttribute("Severity", (int)Magnesium.Severity.SevWarnAlways));
 
-                            AppendXmlMessageToSummary(summaryFileName, xout, traceToStdout, testFile, seed, buggify, expectedUnseed != -1, oldBinaryName);
+                            AppendXmlMessageToSummary(summaryFileName, xout, traceToStdout, testFile, seed, buggify, expectedUnseed != -1, oldBinaryName, faultInjectionEnabled);
                             return 104;
                         }
                     }
@@ -549,7 +552,7 @@ namespace SummarizeTest
                             new XAttribute("Plugin", tlsPluginFile),
                             new XAttribute("MachineName", System.Environment.MachineName));
 
-                        AppendXmlMessageToSummary(summaryFileName, xout, traceToStdout, testFile, seed, buggify, expectedUnseed != -1, oldBinaryName);
+                        AppendXmlMessageToSummary(summaryFileName, xout, traceToStdout, testFile, seed, buggify, expectedUnseed != -1, oldBinaryName, faultInjectionEnabled);
                         ok = useValgrind ? 0 : 103;
                     }
                     else
@@ -588,7 +591,7 @@ namespace SummarizeTest
                     new XAttribute("Severity", (int)Magnesium.Severity.SevError),
                     new XAttribute("ErrorMessage", e.Message));
 
-                AppendXmlMessageToSummary(summaryFileName, xout, traceToStdout, testFile, seed, buggify, expectedUnseed != -1, oldBinaryName);
+                AppendXmlMessageToSummary(summaryFileName, xout, traceToStdout, testFile, seed, buggify, expectedUnseed != -1, oldBinaryName, faultInjectionEnabled);
                 return 101;
             }
             finally
@@ -704,13 +707,14 @@ namespace SummarizeTest
             }
         }
 
-        static void LogTestPlan(string summaryFileName, string testFileName, int randomSeed, bool buggify, bool testDeterminism, string uid, string oldBinary="")
+        static void LogTestPlan(string summaryFileName, string testFileName, int randomSeed, bool buggify, bool testDeterminism, string uid, bool faultInjectionEnabled, string oldBinary="")
         {
             var xout = new XElement("TestPlan",
                 new XAttribute("TestUID", uid),
                 new XAttribute("RandomSeed", randomSeed),
                 new XAttribute("TestFile", testFileName),
                 new XAttribute("BuggifyEnabled", buggify ? "1" : "0"),
+                new XAttribute("FaultInjectionEnabled", faultInjectionEnabled ? "1" : "0"),
                 new XAttribute("DeterminismCheck", testDeterminism ? "1" : "0"),
                 new XAttribute("OldBinary", Path.GetFileName(oldBinary)));
             AppendToSummary(summaryFileName, xout);
@@ -800,6 +804,8 @@ namespace SummarizeTest
                                     new XAttribute("DeterminismCheck", expectedUnseed != -1 ? "1" : "0"),
                                     new XAttribute("OldBinary", Path.GetFileName(oldBinaryName)));
                                 testBeginFound = true;
+                                if (ev.DDetails.ContainsKey("FaultInjectionEnabled"))
+                                    xout.Add(new XAttribute("FaultInjectionEnabled", ev.Details.FaultInjectionEnabled));
                             }
                             if (ev.Type == "Simulation")
                             {
@@ -1235,7 +1241,7 @@ namespace SummarizeTest
         }
 
         private static void AppendXmlMessageToSummary(string summaryFileName, XElement xout, bool traceToStdout = false, string testFile = null,
-            int? seed = null, bool? buggify = null, bool? determinismCheck = null, string oldBinaryName = null)
+            int? seed = null, bool? buggify = null, bool? determinismCheck = null, string oldBinaryName = null, bool? faultInjectionEnabled = null)
         {
             var test = new XElement("Test", xout);
             if(testFile != null)
@@ -1244,6 +1250,8 @@ namespace SummarizeTest
                 test.Add(new XAttribute("RandomSeed", seed));
             if(buggify != null)
                 test.Add(new XAttribute("BuggifyEnabled", buggify.Value ? "1" : "0"));
+            if(faultInjectionEnabled != null)
+                test.Add(new XAttribute("FaultInjectionEnabled", faultInjectionEnabled.Value ? "1" : "0"));
             if(determinismCheck != null)
                 test.Add(new XAttribute("DeterminismCheck", determinismCheck.Value ? "1" : "0"));
             if(oldBinaryName != null)
