@@ -564,7 +564,8 @@ void openTraceFile(const NetworkAddress& na,
                    std::string directory = ".",
                    std::string baseOfBase = "trace",
                    std::string logGroup = "default",
-                   std::string identifier = "");
+                   std::string identifier = "",
+                   std::string tracePartialFileSuffix = "");
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();

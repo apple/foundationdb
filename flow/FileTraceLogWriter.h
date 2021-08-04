@@ -51,6 +51,8 @@ private:
 	std::string processName;
 	std::string basename;
 	std::string extension;
+	std::string finalname;
+	std::string tracePartialFileSuffix;
 
 	uint64_t maxLogsSize;
 	int traceFileFD;
@@ -66,6 +68,7 @@ public:
 	                   std::string processName,
 	                   std::string basename,
 	                   std::string extension,
+	                   std::string tracePartialFileSuffix,
 	                   uint64_t maxLogsSize,
 	                   std::function<void()> onError,
 	                   Reference<ITraceLogIssuesReporter> issues);
