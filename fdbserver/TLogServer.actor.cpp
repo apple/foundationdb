@@ -1531,7 +1531,7 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest* req, double timeout) {
 	self->blockingPeeks += 1;
 	auto tagData = self->getTagData(req->tag);
-	if (tagData.isValid() && !tagData->versionMessages.empty() && tagData->versionMessages.back().first > req->begin) {
+	if (tagData.isValid() && !tagData->versionMessages.empty() && tagData->versionMessages.back().first >= req->begin) {
 		return Void();
 	}
 	choose {
