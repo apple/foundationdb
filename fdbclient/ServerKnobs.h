@@ -274,6 +274,7 @@ public:
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	int ROCKSDB_PREFIX_LEN;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
+	double ROCKSDB_METRICS_DELAY;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -297,6 +298,7 @@ public:
 	double START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET;
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
+	double COMMIT_PROXY_LIVENESS_TIMEOUT;
 
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -593,6 +595,8 @@ public:
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
 	bool ENABLE_CROSS_CLUSTER_SUPPORT; // Allow a coordinator to serve requests whose connection string does not match
 	                                   // the local descriptor
+	double FORWARD_REQUEST_TOO_OLD; // Do not forward requests older than this setting
+	double COORDINATOR_LEADER_CONNECTION_TIMEOUT;
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;

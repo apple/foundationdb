@@ -51,7 +51,7 @@ constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
-static constexpr int WLTOKEN_COUNTS = 20; // number of wellKnownEndpoints
+static constexpr int WLTOKEN_COUNTS = 21; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:
@@ -340,9 +340,8 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 }
 
 TransportData::TransportData(uint64_t transportId)
-  : endpoints(WLTOKEN_COUNTS), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
-    warnAlwaysForLargePacket(true), lastIncompatibleMessage(0), transportId(transportId),
-    numIncompatibleConnections(0) {
+  : warnAlwaysForLargePacket(true), endpoints(WLTOKEN_COUNTS), endpointNotFoundReceiver(endpoints),
+    pingReceiver(endpoints), numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
 }
@@ -795,13 +794,14 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 }
 
 Peer::Peer(TransportData* transport, NetworkAddress const& destination)
-  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
-    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
-    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
-    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
-    bytesSent(0), lastLoggedBytesSent(0), timeoutCount(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
-    connectFailedCount(0), connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1),
-    protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())) {
+  : transport(transport), destination(destination), compatible(true), outgoingConnectionIdle(true),
+    lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), peerReferences(-1),
+    incompatibleProtocolVersionNewer(false), bytesReceived(0), bytesSent(0), lastDataPacketSentTime(now()),
+    outstandingReplies(0), pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1),
+    lastLoggedTime(0.0), lastLoggedBytesReceived(0), lastLoggedBytesSent(0), timeoutCount(0),
+    protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())),
+    connectOutgoingCount(0), connectIncomingCount(0), connectFailedCount(0),
+    connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1) {
 	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
 }
 
@@ -922,9 +922,9 @@ ACTOR static void deliver(TransportData* self,
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
 	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
 	// with a higher priority. ReplyPromiseStream needs to guarentee that messages are recieved in the order they were
-	// sent, so even in the case of local delivery those messages need to skip this delay.
-	if (priority < TaskPriority::ReadSocket || (priority != TaskPriority::NoDeliverDelay && !inReadSocket)) {
-		wait(delay(0, priority));
+	// sent, so we are using orderedDelay.
+	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
+		wait(orderedDelay(0, priority));
 	} else {
 		g_network->setCurrentTask(priority);
 	}
@@ -1019,7 +1019,7 @@ static void scanPackets(TransportData* transport,
 			    BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
-				TraceEvent(SevInfo, "BitsFlip");
+				TraceEvent(SevInfo, "BitsFlip").log();
 				int flipBits = 32 - (int)floor(log2(deterministicRandom()->randomUInt32()));
 
 				uint32_t firstFlipByteLocation = deterministicRandom()->randomUInt32() % packetLen;

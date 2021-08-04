@@ -92,11 +92,11 @@ struct IncrementalBackupWorkload : TestWorkload {
 			}
 			loop {
 				// Wait for backup container to be created and avoid race condition
-				TraceEvent("IBackupWaitContainer");
+				TraceEvent("IBackupWaitContainer").log();
 				wait(success(self->backupAgent.waitBackup(
 				    cx, self->tag.toString(), StopWhenDone::False, &backupContainer, &backupUID)));
 				if (!backupContainer.isValid()) {
-					TraceEvent("IBackupCheckListContainersAttempt");
+					TraceEvent("IBackupCheckListContainersAttempt").log();
 					state std::vector<std::string> containers =
 					    wait(IBackupContainer::listContainers(self->backupDir.toString()));
 					TraceEvent("IBackupCheckListContainersSuccess")
@@ -132,7 +132,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		}
 		if (self->stopBackup) {
 			try {
-				TraceEvent("IBackupDiscontinueBackup");
+				TraceEvent("IBackupDiscontinueBackup").log();
 				wait(self->backupAgent.discontinueBackup(cx, self->tag));
 			} catch (Error& e) {
 				TraceEvent("IBackupDiscontinueBackupException").error(e);
@@ -148,7 +148,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		if (self->submitOnly) {
 			Standalone<VectorRef<KeyRangeRef>> backupRanges;
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-			TraceEvent("IBackupSubmitAttempt");
+			TraceEvent("IBackupSubmitAttempt").log();
 			try {
 				wait(self->backupAgent.submitBackup(cx,
 				                                    self->backupDir,
@@ -165,7 +165,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 					throw;
 				}
 			}
-			TraceEvent("IBackupSubmitSuccess");
+			TraceEvent("IBackupSubmitSuccess").log();
 		}
 		if (self->restoreOnly) {
 			if (self->clearBackupAgentKeys) {
@@ -189,7 +189,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			wait(success(self->backupAgent.waitBackup(
 			    cx, self->tag.toString(), StopWhenDone::False, &backupContainer, &backupUID)));
 			if (self->checkBeginVersion) {
-				TraceEvent("IBackupReadSystemKeys");
+				TraceEvent("IBackupReadSystemKeys").log();
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				loop {
 					try {
@@ -201,7 +201,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 						    .detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
 						    .detail("EndVersionValue", versionValue.present() ? versionValue.get().toString() : "N/A");
 						if (!versionValue.present()) {
-							TraceEvent("IBackupCheckSpecialKeysFailure");
+							TraceEvent("IBackupCheckSpecialKeysFailure").log();
 							// Snapshot failed to write to special keys, possibly due to snapshot itself failing
 							throw key_not_found();
 						}
@@ -217,7 +217,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 					}
 				}
 			}
-			TraceEvent("IBackupStartListContainersAttempt");
+			TraceEvent("IBackupStartListContainersAttempt").log();
 			state std::vector<std::string> containers =
 			    wait(IBackupContainer::listContainers(self->backupDir.toString()));
 			TraceEvent("IBackupStartListContainersSuccess")
@@ -239,7 +239,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       OnlyApplyMutationLogs::True,
 			                                       InconsistentSnapshotOnly::False,
 			                                       beginVersion)));
-			TraceEvent("IBackupRestoreSuccess");
+			TraceEvent("IBackupRestoreSuccess").log();
 		}
 		return Void();
 	}

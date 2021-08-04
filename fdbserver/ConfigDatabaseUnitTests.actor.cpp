@@ -22,7 +22,7 @@
 #include "fdbclient/IConfigTransaction.h"
 #include "fdbclient/TestKnobCollection.h"
 #include "fdbserver/ConfigBroadcaster.h"
-#include "fdbserver/IConfigDatabaseNode.h"
+#include "fdbserver/ConfigNode.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "fdbclient/Tuple.h"
 #include "flow/UnitTest.h"
@@ -55,7 +55,7 @@ class WriteToTransactionEnvironment {
 	std::string dataDir;
 	ConfigTransactionInterface cti;
 	ConfigFollowerInterface cfi;
-	Reference<IConfigDatabaseNode> node;
+	Reference<ConfigNode> node;
 	Future<Void> ctiServer;
 	Future<Void> cfiServer;
 	Version lastWrittenVersion{ 0 };
@@ -65,11 +65,10 @@ class WriteToTransactionEnvironment {
 		return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 	}
 
-	ACTOR template <class T>
-	static Future<Void> set(WriteToTransactionEnvironment* self,
-	                        Optional<KeyRef> configClass,
-	                        T value,
-	                        KeyRef knobName) {
+	ACTOR static Future<Void> set(WriteToTransactionEnvironment* self,
+	                              Optional<KeyRef> configClass,
+	                              int64_t value,
+	                              KeyRef knobName) {
 		state Reference<IConfigTransaction> tr = IConfigTransaction::createTestSimple(self->cti);
 		auto configKey = encodeConfigKey(configClass, knobName);
 		tr->set(configKey, longToValue(value));
@@ -94,13 +93,12 @@ class WriteToTransactionEnvironment {
 
 public:
 	WriteToTransactionEnvironment(std::string const& dataDir)
-	  : dataDir(dataDir), node(IConfigDatabaseNode::createSimple(dataDir)) {
+	  : dataDir(dataDir), node(makeReference<ConfigNode>(dataDir)) {
 		platform::eraseDirectoryRecursive(dataDir);
 		setup();
 	}
 
-	template <class T>
-	Future<Void> set(Optional<KeyRef> configClass, T value, KeyRef knobName = "test_long"_sr) {
+	Future<Void> set(Optional<KeyRef> configClass, int64_t value, KeyRef knobName = "test_long"_sr) {
 		return set(this, configClass, value, knobName);
 	}
 
@@ -111,7 +109,7 @@ public:
 	void restartNode() {
 		cfiServer.cancel();
 		ctiServer.cancel();
-		node = IConfigDatabaseNode::createSimple(dataDir);
+		node = makeReference<ConfigNode>(dataDir);
 		setup();
 	}
 
@@ -241,8 +239,8 @@ class BroadcasterToLocalConfigEnvironment {
 
 public:
 	BroadcasterToLocalConfigEnvironment(std::string const& dataDir, std::string const& configPath)
-	  : broadcaster(ConfigFollowerInterface{}), cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
-	    readFrom(dataDir, configPath, {}) {}
+	  : readFrom(dataDir, configPath, {}), cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
+	    broadcaster(ConfigFollowerInterface{}) {}
 
 	Future<Void> setup() { return setup(this); }
 
@@ -293,7 +291,7 @@ class TransactionEnvironment {
 		    IConfigTransaction::createTestSimple(self->writeTo.getTransactionInterface());
 		state KeySelector begin = firstGreaterOrEqual(configClassKeys.begin);
 		state KeySelector end = firstGreaterOrEqual(configClassKeys.end);
-		Standalone<RangeResultRef> range = wait(tr->getRange(begin, end, 1000));
+		RangeResult range = wait(tr->getRange(begin, end, 1000));
 		Standalone<VectorRef<KeyRef>> result;
 		for (const auto& kv : range) {
 			result.push_back_deep(result.arena(), kv.key);
@@ -312,7 +310,7 @@ class TransactionEnvironment {
 		}
 		KeySelector begin = firstGreaterOrEqual(keys.begin);
 		KeySelector end = firstGreaterOrEqual(keys.end);
-		Standalone<RangeResultRef> range = wait(tr->getRange(begin, end, 1000));
+		RangeResult range = wait(tr->getRange(begin, end, 1000));
 		Standalone<VectorRef<KeyRef>> result;
 		for (const auto& kv : range) {
 			result.push_back_deep(result.arena(), kv.key);
@@ -371,8 +369,9 @@ class TransactionToLocalConfigEnvironment {
 
 public:
 	TransactionToLocalConfigEnvironment(std::string const& dataDir, std::string const& configPath)
-	  : writeTo(dataDir), readFrom(dataDir, configPath, {}), broadcaster(writeTo.getFollowerInterface()),
-	    cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()) {}
+	  : writeTo(dataDir), readFrom(dataDir, configPath, {}),
+	    cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()), broadcaster(writeTo.getFollowerInterface()) {
+	}
 
 	Future<Void> setup() { return setup(this); }
 
