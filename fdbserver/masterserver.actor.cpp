@@ -1922,6 +1922,9 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	} else {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
+		for (const auto& s : self->configuration.splits) {
+			TraceEvent("InitialSplitPoint", self->dbgid).detail("Point", s.toString());
+		}
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
 
 		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {

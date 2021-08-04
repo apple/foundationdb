@@ -244,6 +244,7 @@ public:
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
+	Optional<std::string> splits; // pre-defined shard split boundaries
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
 		if (data.is_table()) {
@@ -286,6 +287,7 @@ public:
 		    .add("resolverCount", &resolverCount)
 		    .add("storageEngineType", &storageEngineType)
 		    .add("config", &config)
+		    .add("splits", &splits)
 		    .add("buggify", &buggify)
 		    .add("StderrSeverity", &stderrSeverity)
 		    .add("machineCount", &machineCount)
@@ -1155,6 +1157,7 @@ private:
 	void setProcessesPerMachine(const TestConfig& testConfig);
 	void setTss(const TestConfig& testConfig);
 	void generateNormalConfig(const TestConfig& testConfig);
+	void setSplits(const TestConfig& testConfig);
 };
 
 SimulationConfig::SimulationConfig(const TestConfig& testConfig) : extraDB(testConfig.extraDB) {
@@ -1168,6 +1171,12 @@ void SimulationConfig::set_config(std::string config) {
 	ASSERT(buildConfiguration(config, hack_map) != ConfigurationResult::NO_OPTIONS_PROVIDED);
 	for (auto kv : hack_map)
 		db.set(kv.first, kv.second);
+}
+
+void SimulationConfig::setSplits(const TestConfig& testConfig) {
+	if (testConfig.splits.present()) {
+		db.set(configKeysPrefix.withSuffix("splits"_sr), testConfig.splits.get());
+	}
 }
 
 StringRef StringRefOf(const char* s) {
@@ -1688,6 +1697,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 	setProcessesPerMachine(testConfig);
 	setTss(testConfig);
+	setSplits(testConfig);
 }
 
 // Configures the system according to the given specifications in order to run

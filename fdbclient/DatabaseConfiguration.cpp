@@ -158,6 +158,10 @@ void parse(std::vector<RegionInfo>* regions, ValueRef const& v) {
 	}
 }
 
+void parse(std::vector<StringRef>* splits, ValueRef const& v) {
+	*splits = v.splitAny(":"_sr);
+}
+
 void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	if (!storagePolicy) {
 		storagePolicy = Reference<IReplicationPolicy>(
@@ -389,6 +393,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
+	result["splits"] = getSplitJSON();
 	return result;
 }
 
@@ -454,6 +459,14 @@ StatusArray DatabaseConfiguration::getRegionJSON() const {
 		regionArr.push_back(regionObj);
 	}
 	return regionArr;
+}
+
+StatusArray DatabaseConfiguration::getSplitJSON() const {
+	StatusArray splitsArr;
+	for (const StringRef& s : splits) {
+		splitsArr.push_back(s.toString());
+	}
+	return splitsArr;
 }
 
 std::string DatabaseConfiguration::toString() const {
@@ -542,6 +555,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse(&regions, value);
 	} else if (ck == LiteralStringRef("perpetual_storage_wiggle")) {
 		parse(&perpetualStorageWiggleSpeed, value);
+	} else if (ck == "splits"_sr) {
+		parse(&splits, value);
 	} else {
 		return false;
 	}
