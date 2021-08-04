@@ -338,6 +338,8 @@ struct TLogData : NonCopyable {
 	int64_t instanceID;
 	int64_t bytesInput;
 	int64_t bytesDurable;
+	int64_t blockingPeeks;
+	int64_t blockingPeekTimeouts;
 	int64_t targetVolatileBytes; // The number of bytes of mutations this TLog should hold in memory before spilling.
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
@@ -377,10 +379,10 @@ struct TLogData : NonCopyable {
 	         std::string folder)
 	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
 	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), diskQueueCommitBytes(0),
-	    largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0), queueCommitBegin(0),
-	    instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0), bytesDurable(0),
-	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
-	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
+	    largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0), queueCommitBegin(0), blockingPeeks(0),
+	    blockingPeekTimeouts(0), instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0),
+	    bytesDurable(0), targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0),
+	    overheadBytesDurable(0), peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopRequest(false),
 	    dataFolder(folder), degraded(degraded),
 	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
@@ -1167,17 +1169,19 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 		}
 
 		uint64_t PoppedVersionLag = logData->persistentDataDurableVersion - logData->queuePoppedVersion;
-		if ( SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
-			(logData->queuePoppedVersion > 0) && //avoid generating massive events at beginning 
-			(tagData->unpoppedRecovered || PoppedVersionLag >= SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { //when recovery or long lag
+		if (SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
+		    (logData->queuePoppedVersion > 0) && // avoid generating massive events at beginning
+		    (tagData->unpoppedRecovered ||
+		     PoppedVersionLag >=
+		         SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { // when recovery or long lag
 			TraceEvent("TLogPopDetails", logData->logId)
-				.detail("Tag", tagData->tag.toString())
-				.detail("UpTo", upTo)
-				.detail("PoppedVersionLag", PoppedVersionLag)
-				.detail("MinPoppedTag", logData->minPoppedTag.toString())
-				.detail("QueuePoppedVersion", logData->queuePoppedVersion)
-				.detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
-				.detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
+			    .detail("Tag", tagData->tag.toString())
+			    .detail("UpTo", upTo)
+			    .detail("PoppedVersionLag", PoppedVersionLag)
+			    .detail("MinPoppedTag", logData->minPoppedTag.toString())
+			    .detail("QueuePoppedVersion", logData->queuePoppedVersion)
+			    .detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
+			    .detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
 		}
 		if (upTo > logData->persistentDataDurableVersion)
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
@@ -1526,14 +1530,20 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 	return tagData->versionMessages;
 };
 
-ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest* req) {
+ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest* req, double timeout) {
+	// 	self->blockingPeeks += 1;
 	auto tagData = self->getTagData(req->tag);
-	if (tagData.isValid()) {
+	if (tagData.isValid() && !tagData->versionMessages.empty() && tagData->versionMessages.back().first >= req->begin) {
 		return Void();
 	}
-	wait(self->waitingTags[req->tag].getFuture());
-	// we want the caller to finish first, otherwise the data structure it is building might not be complete
-	wait(delay(0.0));
+	choose {
+		when(wait(self->waitingTags[req->tag].getFuture())) {
+			// we want the caller to finish first, otherwise the data structure it is building might not be complete
+			wait(delay(0.0));
+		}
+		when(wait(delay(timeout))) { /*self->blockingPeekTimeouts += 1;*/
+		}
+	}
 	return Void();
 }
 
@@ -1735,6 +1745,11 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		return Void();
 	}
 
+	if (req.begin > logData->persistentDataDurableVersion && !req.onlySpilled && req.tag.locality >= 0 &&
+	    !req.returnIfBlocked) {
+		wait(waitForMessagesForTag(logData, &req, 1.0));
+	}
+
 	state Version endVersion = logData->version.get() + 1;
 	state bool onlySpilled = false;
 
@@ -1866,10 +1881,6 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		if (req.onlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			if (req.tag.locality >= 0 && !req.returnIfBlocked) {
-				// wait for at most 1 second
-				wait(waitForMessagesForTag(logData, &req) || delay(1.0));
-			}
 			peekMessagesFromMemory(logData, req, messages, endVersion);
 		}
 
