@@ -272,29 +272,23 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	           Standalone<StringRef> const& dbId,
 	           PromiseStream<Future<Void>> const& addActor,
 	           bool forceRecovery)
-	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
-	    lastCommitTime(0), liveCommittedVersion(invalidVersion), databaseLocked(false),
-	    minKnownCommittedVersion(invalidVersion), hasConfiguration(false), coordinators(coordinators),
-	    version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
-	    myInterface(myInterface), clusterController(clusterController), cstate(coordinators, addActor, dbgid),
-	    dbInfo(dbInfo), registrationCount(0), addActor(addActor),
-	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
-	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
-	    lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), prevTLogVersion(invalidVersion), databaseLocked(false),
-	    minKnownCommittedVersion(invalidVersion), recoveryTransactionVersion(invalidVersion), lastCommitTime(0),
-	    registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9),
-	    addActor(addActor), hasConfiguration(false), recruitmentStalled(makeReference<AsyncVar<bool>>(false)),
-	    cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
-	    getCommitVersionRequests("GetCommitVersionRequests", cc),
-	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
-	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
-	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
-		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
-		if (forceRecovery && !myInterface.locality.dcId().present()) {
-			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
-			forceRecovery = false;
-		}
+         : dbgid(myInterface.id()), myInterface(myInterface), dbInfo(dbInfo), cstate(coordinators, addActor, dbgid),
+            coordinators(coordinators), clusterController(clusterController), dbId(dbId), forceRecovery(forceRecovery),
+            safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), neverCreated(false),
+            lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), databaseLocked(false),
+            minKnownCommittedVersion(invalidVersion), recoveryTransactionVersion(invalidVersion), lastCommitTime(0),
+            registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9),
+            addActor(addActor), hasConfiguration(false), recruitmentStalled(makeReference<AsyncVar<bool>>(false)),
+            cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+            getCommitVersionRequests("GetCommitVersionRequests", cc),
+            backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
+            getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
+            reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
+                logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
+                if (forceRecovery && !myInterface.locality.dcId().present()) {
+                        TraceEvent(SevError, "ForcedRecoveryRequiresDcID");
+                        forceRecovery = false;
+                }
 	}
 	~MasterData() {
 		if (txnStateStore)
@@ -1294,7 +1288,6 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(ReportRawCommittedVersionRequest req =
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-<<<<<<< HEAD
 				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
 				    (self->liveCommittedVersion.get() != invalidVersion) &&
 				    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
@@ -1302,20 +1295,6 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				} else {
 					updateLiveCommittedVersion(self, req);
 					req.reply.send(Void());
-=======
-				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
-					// NB: this if-condition is not needed after wait-for-prev is ported to this branch
-					if (req.version > self->ssVersionVector.maxVersion) {
-						// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-						self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
-					}
-				}
-				if (req.version > self->liveCommittedVersion) {
-					self->liveCommittedVersion = req.version;
-					self->databaseLocked = req.locked;
-					self->proxyMetadataVersion = req.metadataVersion;
->>>>>>> - Address a merge conflict
 				}
 			}
 			when(GetTLogPrevCommitVersionRequest req =
