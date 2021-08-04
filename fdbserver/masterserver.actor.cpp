@@ -1289,7 +1289,6 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(ReportRawCommittedVersionRequest req =
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-<<<<<<< HEAD
 				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
 				    (self->liveCommittedVersion.get() != invalidVersion) &&
 				    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
@@ -1297,20 +1296,6 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				} else {
 					updateLiveCommittedVersion(self, req);
 					req.reply.send(Void());
-=======
-				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
-					// NB: this if-condition is not needed after wait-for-prev is ported to this branch
-					if (req.version > self->ssVersionVector.maxVersion) {
-						// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-						self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
-					}
-				}
-				if (req.version > self->liveCommittedVersion) {
-					self->liveCommittedVersion = req.version;
-					self->databaseLocked = req.locked;
-					self->proxyMetadataVersion = req.metadataVersion;
->>>>>>> - Address a merge conflict
 				}
 			}
 			when(GetTLogPrevCommitVersionRequest req =
