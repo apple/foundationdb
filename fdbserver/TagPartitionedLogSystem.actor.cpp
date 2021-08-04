@@ -568,7 +568,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if (it->tlogPushDistTrackers.empty()) {
 					for (int i = 0; i < it->logServers.size(); i++) {
 						it->tlogPushDistTrackers.push_back(
-						    Histogram::getHistogram(format("ID_%s", it->logServers[i]->get().interf().uniqueID),
+						    Histogram::getHistogram("ID_" + it->logServers[i]->get().interf().uniqueID.toString(),
 						                            it->logServers[i]->get().interf().address().toString(),
 						                            Histogram::Unit::microseconds));
 					}

@@ -1880,7 +1880,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	ASSERT(commitData.resolvers.size() != 0);
 	for (int i = 0; i < commitData.resolvers.size(); ++i) {
 		commitData.stats.resolverDist.push_back(Histogram::getHistogram(
-		    LiteralStringRef("CommitProxy"), format("ToResolver_%d", i), Histogram::Unit::microseconds));
+		    LiteralStringRef("CommitProxy"), "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::microseconds));
 	}
 	auto rs = commitData.keyResolvers.modify(allKeys);
 	for (auto r = rs.begin(); r != rs.end(); ++r)
