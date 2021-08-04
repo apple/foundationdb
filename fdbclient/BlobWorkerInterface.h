@@ -64,6 +64,7 @@ struct MutationAndVersion {
 	}
 };
 
+// TODO should name all things that don't have their own arena *Ref
 // file format of actual blob files
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
 

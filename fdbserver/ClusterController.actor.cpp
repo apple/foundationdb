@@ -3094,6 +3094,9 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 	state std::string bucket = SERVER_KNOBS->BG_BUCKET;
 	state Reference<S3BlobStoreEndpoint> bstore;
 
+	// TODO CHANGE BACK
+	wait(delay(10.0));
+
 	printf("Initializing CC s3 stuff\n");
 	try {
 		printf("constructing s3blobstoreendpoint from %s\n", SERVER_KNOBS->BG_URL.c_str());
@@ -3171,6 +3174,9 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 				req.readVersion = v;
 				ErrorOr<BlobGranuleFileReply> _rep =
 				    wait(workerInterfaceCache[workerId].blobGranuleFileRequest.tryGetReply(req));
+				if (_rep.isError()) {
+					throw _rep.getError();
+				}
 				BlobGranuleFileReply rep = _rep.get();
 				printf("Blob granule request for [%s - %s) @ %lld got reply from %s:\n",
 				       granuleStartKey.printable().c_str(),

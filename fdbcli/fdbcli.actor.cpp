@@ -1886,7 +1886,7 @@ ACTOR Future<Void> setBlobRange(Database db, Key startKey, Key endKey, Value val
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
 			wait(krmSetRangeCoalescing(
-			    tr, blobRangeKeys.begin, KeyRange(KeyRangeRef(startKey, endKey)), KeyRange(allKeys), value));
+			    tr, blobRangeKeys.begin, KeyRange(KeyRangeRef(startKey, endKey)), KeyRange(normalKeys), value));
 			wait(tr->commit());
 			printf("Successfully updated blob range [%s - %s) to %s\n",
 			       startKey.printable().c_str(),

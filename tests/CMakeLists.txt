@@ -44,6 +44,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
   add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
   add_fdb_test(TEST_FILES BlobGranuleReaderUnit.txt) # TODO re-ignore!
+  add_fdb_test(TEST_FILES BlobManagerUnit.txt) # TODO re-ignore!
   add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
   add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
   add_fdb_test(TEST_FILES DataDistributionMetrics.txt IGNORE)

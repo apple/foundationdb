@@ -29,63 +29,126 @@
 // sorted thing could work. And if it used arenas it'd probably be more efficient with allocations, since everything
 // else is in 1 arena and discarded at the end.
 
-// TODO could refactor the like 6 lines of file reading code from here and the delta file function into another actor,
+// TODO could refactor the file reading code from here and the delta file function into another actor,
 // then this part would also be testable? but meh
-ACTOR Future<Void> readSnapshotFile(Reference<S3BlobStoreEndpoint> bstore,
-                                    std::string bucket,
-                                    std::string filename,
-                                    Arena arena,
-                                    KeyRangeRef keyRange,
-                                    std::map<KeyRef, ValueRef>* dataMap) {
-	state AsyncFileS3BlobStoreRead reader(bstore, bucket, filename);
-	state int64_t size = wait(reader.size());
-	state uint8_t* data = new (arena) uint8_t[size];
-	printf("Reading %d bytes from snapshot file %s\n", size, filename.c_str());
-	int readSize = wait(reader.read(data, size, 0));
-	printf("Read %d bytes from snapshot file %s\n", readSize, filename.c_str());
-	ASSERT(size == readSize);
 
-	StringRef dataRef(data, size);
+ACTOR Future<Arena> readSnapshotFile(Reference<S3BlobStoreEndpoint> bstore,
+                                     std::string bucket,
+                                     std::string filename,
+                                     KeyRangeRef keyRange,
+                                     std::map<KeyRef, ValueRef>* dataMap) {
+	try {
+		state Arena arena;
+		printf("Starting read of snapshot file %s\n", filename.c_str());
+		state Reference<AsyncFileS3BlobStoreRead> reader =
+		    makeReference<AsyncFileS3BlobStoreRead>(bstore, bucket, filename);
+		state int64_t size = wait(reader->size());
+		printf("Got snapshot file size %lld\n", size);
+		state uint8_t* data = new (arena) uint8_t[size];
+		printf("Reading %lld bytes from snapshot file %s\n", size, filename.c_str());
+		int readSize = wait(reader->read(data, size, 0));
+		printf("Read %lld bytes from snapshot file %s\n", readSize, filename.c_str());
+		ASSERT(size == readSize);
 
-	GranuleSnapshot snapshot = ObjectReader::fromStringRef<GranuleSnapshot>(dataRef, Unversioned());
-	printf("Parsed %d rows from snapshot file %s\n", snapshot.size(), filename.c_str());
-	int i = 0;
-	while (i < snapshot.size() && snapshot[i].key < keyRange.begin) {
-		i++;
+		// weird stuff for deserializing vector and arenas
+		Arena parseArena;
+		GranuleSnapshot snapshot;
+		StringRef dataRef(data, size);
+		ArenaObjectReader rdr(arena, dataRef, Unversioned());
+		rdr.deserialize(FileIdentifierFor<GranuleSnapshot>::value, snapshot, parseArena);
+		arena.dependsOn(parseArena);
+
+		// GranuleSnapshot snapshot = ObjectReader::fromStringRef<GranuleSnapshot>(dataRef, Unversioned();)
+		printf("Parsed %d rows from snapshot file %s\n", snapshot.size(), filename.c_str());
+
+		// TODO REMOVE sanity check eventually
+		for (int i = 0; i < snapshot.size() - 1; i++) {
+			if (snapshot[i].key >= snapshot[i + 1].key) {
+				printf("BG SORT ORDER VIOLATION IN SNAPSHOT FILE: '%s', '%s'\n",
+				       snapshot[i].key.printable().c_str(),
+				       snapshot[i + 1].key.printable().c_str());
+			}
+			ASSERT(snapshot[i].key < snapshot[i + 1].key);
+		}
+
+		int i = 0;
+		while (i < snapshot.size() && snapshot[i].key < keyRange.begin) {
+			if (snapshot.size() < 10) { // debug
+				printf("  Pruning %s < %s\n", snapshot[i].key.printable().c_str(), keyRange.begin.printable().c_str());
+			}
+			i++;
+		}
+		while (i < snapshot.size() && snapshot[i].key < keyRange.end) {
+			dataMap->insert({ snapshot[i].key, snapshot[i].value });
+			if (snapshot.size() < 10) { // debug
+				printf("  Including %s\n", snapshot[i].key.printable().c_str());
+			}
+			i++;
+		}
+		if (snapshot.size() < 10) { // debug
+			while (i < snapshot.size()) {
+				printf("  Pruning %s >= %s\n", snapshot[i].key.printable().c_str(), keyRange.end.printable().c_str());
+				i++;
+			}
+		}
+		printf("Started with %d rows from snapshot file %s after pruning to [%s - %s)\n",
+		       dataMap->size(),
+		       filename.c_str(),
+		       keyRange.begin.printable().c_str(),
+		       keyRange.end.printable().c_str());
+
+		return arena;
+	} catch (Error& e) {
+		printf("Reading snapshot file %s got error %s\n", filename.c_str(), e.name());
+		throw e;
 	}
-	while (i < snapshot.size() && snapshot[i].key < keyRange.end) {
-		dataMap->insert({ snapshot[i].key, snapshot[i].value });
-	}
-	printf("Started with %d rows from snapshot file %s\n", dataMap->size(), filename.c_str());
-
-	return Void();
 }
 
-ACTOR Future<GranuleDeltas> readDeltaFile(Reference<S3BlobStoreEndpoint> bstore,
-                                          std::string bucket,
-                                          std::string filename,
-                                          Arena arena,
-                                          KeyRangeRef keyRange,
-                                          Version readVersion) {
-	state AsyncFileS3BlobStoreRead reader(bstore, bucket, filename);
-	state int64_t size = wait(reader.size());
-	state uint8_t* data = new (arena) uint8_t[size];
-	printf("Reading %d bytes from delta file %s\n", size, filename.c_str());
-	int readSize = wait(reader.read(data, size, 0));
-	printf("Read %d bytes from delta file %s\n", readSize, filename.c_str());
-	ASSERT(size == readSize);
+ACTOR Future<Standalone<GranuleDeltas>> readDeltaFile(Reference<S3BlobStoreEndpoint> bstore,
+                                                      std::string bucket,
+                                                      std::string filename,
+                                                      KeyRangeRef keyRange,
+                                                      Version readVersion) {
+	try {
+		printf("Starting read of delta file %s\n", filename.c_str());
+		state Standalone<GranuleDeltas> result;
+		state Reference<AsyncFileS3BlobStoreRead> reader =
+		    makeReference<AsyncFileS3BlobStoreRead>(bstore, bucket, filename);
+		state int64_t size = wait(reader->size());
+		printf("Got delta file size %lld\n", size);
+		state uint8_t* data = new (result.arena()) uint8_t[size];
+		printf("Reading %lld bytes from delta file %s into %p\n", size, filename.c_str(), data);
+		int readSize = wait(reader->read(data, size, 0));
+		printf("Read %d bytes from delta file %s\n", readSize, filename.c_str());
+		ASSERT(size == readSize);
 
-	// Don't do range or version filtering in here since we'd have to copy/rewrite the deltas and it might starve
-	// snapshot read task, do it in main thread
+		// Don't do range or version filtering in here since we'd have to copy/rewrite the deltas and it might starve
+		// snapshot read task, do it in main thread
 
-	StringRef dataRef(data, size);
+		// weirdness with vector refs and arenas here
+		Arena parseArena;
+		StringRef dataRef(data, size);
+		ArenaObjectReader rdr(result.arena(), dataRef, Unversioned());
+		rdr.deserialize(FileIdentifierFor<GranuleDeltas>::value, result.contents(), parseArena);
+		result.arena().dependsOn(parseArena);
 
-	GranuleDeltas deltas = ObjectReader::fromStringRef<GranuleDeltas>(dataRef, Unversioned());
-	printf("Parsed %d deltas from delta file %s\n", deltas.size(), filename.c_str());
-	return deltas;
+		// result.contents() = ObjectReader::fromStringRef<GranuleDeltas>(dataRef, Unversioned());
+		printf("Parsed %d deltas from delta file %s\n", result.size(), filename.c_str());
+
+		// TODO REMOVE sanity check
+		for (int i = 0; i < result.size() - 1; i++) {
+			if (result[i].v > result[i + 1].v) {
+				printf("BG VERSION ORDER VIOLATION IN DELTA FILE: '%lld', '%lld'\n", result[i].v, result[i + 1].v);
+			}
+			ASSERT(result[i].v <= result[i + 1].v);
+		}
+
+		return result;
+	} catch (Error& e) {
+		printf("Reading delta file %s got error %s\n", filename.c_str(), e.name());
+		throw e;
+	}
 }
-
-// TODO unit test this!
 
 // TODO this giant switch is mostly lifted from storage server.
 // Could refactor atomics to have a generic "handle this atomic mutation" thing instead of having to duplicate code with
@@ -192,38 +255,48 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunk chunk,
                                           Version readVersion,
                                           Reference<S3BlobStoreEndpoint> bstore,
                                           std::string bucket) {
-	// arena to hold all stuff for parsing and updaing mutations. Most of it will likely be tossed, so we copy at the
-	// end instead of doing a dependsOn
+	// Arena to hold all allocations for applying deltas. Most of it, and the arenas produced by reading the files,
+	// will likely be tossed if there are a significant number of mutations, so we copy at the end instead of doing a
+	// dependsOn.
+	// FIXME: probably some threshold of a small percentage of the data is actually changed, where it makes sense to
+	// just to dependsOn instead of copy, to use a little extra memory footprint to help cpu?
 	state Arena arena;
 
-	state std::map<KeyRef, ValueRef> dataMap;
-	Future<Void> readSnapshotFuture =
-	    readSnapshotFile(bstore, bucket, chunk.snapshotFileName.toString(), arena, keyRange, &dataMap);
-	state std::vector<Future<GranuleDeltas>> readDeltaFutures;
-	readDeltaFutures.resize(chunk.deltaFileNames.size());
-	for (StringRef deltaFileName : chunk.deltaFileNames) {
-		readDeltaFutures.push_back(
-		    readDeltaFile(bstore, bucket, deltaFileName.toString(), arena, keyRange, readVersion));
-	}
+	try {
+		state std::map<KeyRef, ValueRef> dataMap;
+		Future<Arena> readSnapshotFuture =
+		    readSnapshotFile(bstore, bucket, chunk.snapshotFileName.toString(), keyRange, &dataMap);
+		state std::vector<Future<Standalone<GranuleDeltas>>> readDeltaFutures;
+		readDeltaFutures.reserve(chunk.deltaFileNames.size());
+		for (StringRef deltaFileName : chunk.deltaFileNames) {
+			readDeltaFutures.push_back(readDeltaFile(bstore, bucket, deltaFileName.toString(), keyRange, readVersion));
+		}
 
-	wait(readSnapshotFuture);
-	for (Future<GranuleDeltas> deltaFuture : readDeltaFutures) {
-		GranuleDeltas result = wait(deltaFuture);
-		applyDeltas(&dataMap, arena, result, keyRange, readVersion);
+		Arena snapshotArena = wait(readSnapshotFuture);
+		arena.dependsOn(snapshotArena);
+
+		printf("Applying %d delta files\n", readDeltaFutures.size());
+		for (Future<Standalone<GranuleDeltas>> deltaFuture : readDeltaFutures) {
+			Standalone<GranuleDeltas> result = wait(deltaFuture);
+			arena.dependsOn(result.arena());
+			applyDeltas(&dataMap, arena, result, keyRange, readVersion);
+			wait(yield());
+		}
+		printf("Applying %d memory deltas\n", chunk.newDeltas.size());
+		applyDeltas(&dataMap, arena, chunk.newDeltas, keyRange, readVersion);
 		wait(yield());
-	}
-	printf("Applying %d memory deltas\n", chunk.newDeltas.size());
-	applyDeltas(&dataMap, arena, chunk.newDeltas, keyRange, readVersion);
-	wait(yield());
 
-	RangeResult ret;
-	for (auto& it : dataMap) {
-		ret.push_back_deep(ret.arena(), KeyValueRef(it.first, it.second));
-		// TODO for large reads, probably wait to yield periodically here for slowTask
-	}
-	printf("Final processing ended up with %d rows\n", ret.size());
+		RangeResult ret;
+		for (auto& it : dataMap) {
+			ret.push_back_deep(ret.arena(), KeyValueRef(it.first, it.second));
+			// TODO for large reads, probably wait to yield periodically here for slowTask
+		}
 
-	return ret;
+		return ret;
+	} catch (Error& e) {
+		printf("Reading blob granule got error %s\n", e.name());
+		throw e;
+	}
 }
 
 // TODO probably should add things like limit/bytelimit at some point?

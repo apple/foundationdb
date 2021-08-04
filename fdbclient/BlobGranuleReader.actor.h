@@ -33,7 +33,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// Reads the fileset in the reply using the provided blob store, amnd filters data and mutations by key + version from
+// Reads the fileset in the reply using the provided blob store, and filters data and mutations by key + version from
 // the request
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunk chunk,
                                           KeyRangeRef keyRange,

@@ -5,6 +5,8 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.cpp
   BackupProgress.actor.h
   BackupWorker.actor.cpp
+  BlobManager.actor.cpp
+  BlobManagerInterface.h
   ClusterController.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
