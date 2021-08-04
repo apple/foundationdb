@@ -1447,16 +1447,6 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() 
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
 
-void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
-	if (encryptionKeyFileName.present()) {
-#if ENCRYPTION_ENABLED
-		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
-#else
-		encryptionSetupFuture = Void();
-#endif
-	}
-}
-
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
 #if ENCRYPTION_ENABLED
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);

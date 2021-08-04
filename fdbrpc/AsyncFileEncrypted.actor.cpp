@@ -174,7 +174,6 @@ Future<Void> AsyncFileEncrypted::truncate(int64_t size) {
 }
 
 Future<Void> AsyncFileEncrypted::sync() {
-	TraceEvent("HERE_Syncing");
 	ASSERT(mode == Mode::APPEND_ONLY);
 	return AsyncFileEncryptedImpl::sync(this);
 }
