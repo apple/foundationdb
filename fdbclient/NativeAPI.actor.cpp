@@ -201,6 +201,34 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 }
 
+void DatabaseContext::addSSIdTagMapping(const UID& uid, const Tag& tag) {
+	ssidTagMapping[uid] = tag;
+}
+
+void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
+                                              Version readVersion,
+                                              VersionVector& latestCommitVersions) {
+	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
+	for (int i = 0; i < locationInfo->locations()->size(); i++) {
+		UID uid = locationInfo->locations()->getId(i);
+		if (ssidTagMapping.find(uid) != ssidTagMapping.end()) {
+			Tag tag = ssidTagMapping[uid];
+			if (ssVersionVectorCache.hasVersion(tag)) {
+				Version commitVersion = ssVersionVectorCache.getVersion(tag); // latest commit version
+				if (commitVersion < readVersion) {
+					versionMap[commitVersion].insert(tag);
+				}
+			}
+		}
+	}
+
+	// insert the commit versions in the version vector.
+	latestCommitVersions.clear();
+	for (auto& iter : versionMap) {
+		latestCommitVersions.setVersion(iter.second, iter.first);
+	}
+}
+
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
@@ -2609,6 +2637,9 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 		Key locationKey(k.getKey(), k.arena());
 		state pair<KeyRange, Reference<LocationInfo>> ssi =
 		    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, Reverse{ k.isBackward() }));
+
+		state VersionVector ssLatestCommitVersions;
+		cx->getLatestCommitVersions(ssi.second, version.get(), ssLatestCommitVersions);
 
 		state VersionVector ssLatestCommitVersions;
 		cx->getLatestCommitVersions(ssi.second, version.get(), ssLatestCommitVersions);

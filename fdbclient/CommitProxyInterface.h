@@ -251,7 +251,7 @@ struct GetReadVersionRequest : TimedRequest {
 	                      uint32_t flags = 0,
 	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
 	                      Optional<UID> debugID = Optional<UID>())
-	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
+	  : spanContext(spanContext), transactionCount(transactionCount), priority(priority), flags(flags), tags(tags),
 	    debugID(debugID), maxVersion(maxVersion) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {

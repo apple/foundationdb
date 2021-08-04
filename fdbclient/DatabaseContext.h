@@ -447,7 +447,6 @@ public:
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
 
-
 	// Adds or updates the specified (UID, Tag) pair in the tag mapping.
 	void addSSIdTagMapping(const UID& uid, const Tag& tag);
 
@@ -457,8 +456,10 @@ public:
 	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
 	                             Version readVersion,
 	                             VersionVector& latestCommitVersions);
+
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
+
 };
 
 #endif
