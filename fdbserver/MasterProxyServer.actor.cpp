@@ -118,6 +118,8 @@ struct ProxyStats {
 	Deque<int> requestBuckets;
 	double lastBucketBegin;
 	double bucketInterval;
+	Reference<Histogram> grvConfirmEpochLiveDist;
+	Reference<Histogram> grvGetCommittedVersionRpcDist;
 
 	int64_t maxComputeNS;
 	int64_t minComputeNS;
@@ -239,7 +241,12 @@ struct ProxyStats {
 	                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    systemGRVQueueSize(0), defaultGRVQueueSize(0), batchGRVQueueSize(0), transactionRateAllowed(0),
 	    batchTransactionRateAllowed(0), transactionLimit(0), batchTransactionLimit(0),
-	    percentageOfDefaultGRVQueueProcessed(0), percentageOfBatchGRVQueueProcessed(0) {
+	    grvConfirmEpochLiveDist(Histogram::getHistogram(LiteralStringRef("MasterProxy"),
+	                                                    LiteralStringRef("GrvConfirmEpochLive"),
+	                                                    Histogram::Unit::microseconds)),
+	    grvGetCommittedVersionRpcDist(Histogram::getHistogram(LiteralStringRef("MasterProxy"),
+	                                                          LiteralStringRef("GrvGetCommittedVersionRpc"),
+	                                                          Histogram::Unit::microseconds)) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
@@ -1817,6 +1824,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	//     and no other proxy could have already committed anything without first ending the epoch
 	++commitData->stats.txnStartBatch;
 
+	state double grvStart = now();
+
 	state vector<Future<GetReadVersionReply>> proxyVersions;
 	for (auto const& p : *otherProxies)
 		proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(
@@ -1828,6 +1837,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	           now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > commitData->lastCommitTime.get()) {
 		wait(commitData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION));
 	}
+	state double grvConfirmEpochLive = now();
+	commitData->stats.grvConfirmEpochLiveDist->sampleSeconds(grvConfirmEpochLive - grvStart);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
@@ -1835,6 +1846,9 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	}
 
 	vector<GetReadVersionReply> versions = wait(getAll(proxyVersions));
+
+	commitData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
+
 	GetReadVersionReply rep;
 	rep.version = commitData->committedVersion.get();
 	rep.locked = commitData->locked;
