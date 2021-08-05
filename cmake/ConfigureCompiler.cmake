@@ -41,7 +41,9 @@ endif()
 add_compile_options(-DCMAKE_BUILD)
 add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+
 if(ALLOC_INSTRUMENTATION)
   add_compile_options(-DALLOC_INSTRUMENTATION)
 endif()
