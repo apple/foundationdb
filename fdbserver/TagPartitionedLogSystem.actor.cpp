@@ -532,7 +532,6 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                       Future<TLogCommitReply> in) {
 		state double startTime = now();
 		TLogCommitReply t = wait(in);
-		dist->sampleSeconds(now() - startTime);
 		if (now() - self->lastReset > SERVER_KNOBS->PUSH_RESET_INTERVAL) {
 			if (now() - startTime > SERVER_KNOBS->PUSH_MAX_LATENCY) {
 				if (self->resetCheck.isReady()) {
@@ -543,6 +542,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 				self->fastReplies++;
 			}
 		}
+		dist->sampleSeconds(now() - startTime);
 		return t;
 	}
 
@@ -568,7 +568,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 				if (it->tlogPushDistTrackers.empty()) {
 					for (int i = 0; i < it->logServers.size(); i++) {
 						it->tlogPushDistTrackers.push_back(
-						    Histogram::getHistogram("ID_" + it->logServers[i]->get().interf().uniqueID.toString(),
+						    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
 						                            it->logServers[i]->get().interf().address().toString(),
 						                            Histogram::Unit::microseconds));
 					}
