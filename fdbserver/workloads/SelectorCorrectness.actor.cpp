@@ -109,7 +109,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		state int offsetA;
 		state int offsetB;
 		state Standalone<StringRef> maxKey;
-		state bool reverse;
+		state Reverse reverse = Reverse::False;
 
 		maxKey = Standalone<StringRef>(format("%010d", self->maxKeySpace + 1));
 
@@ -166,7 +166,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						onEqualB = deterministicRandom()->randomInt(0, 2) != 0;
 						offsetA = 1; //-1*deterministicRandom()->randomInt( 0, self->maxOffset );
 						offsetB = deterministicRandom()->randomInt(1, self->maxOffset);
-						reverse = deterministicRandom()->random01() > 0.5 ? false : true;
+						reverse.set(deterministicRandom()->coinflip());
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("Direction",direction);
 						state int expectedSize =
@@ -180,7 +180,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 							    wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 							                         2 * (self->maxKeySpace + self->maxOffset),
-							                         false,
+							                         Snapshot::False,
 							                         reverse));
 
 							int trueSize = 0;
@@ -208,7 +208,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 							    wait(tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                     KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 							                     2 * (self->maxKeySpace + self->maxOffset),
-							                     false,
+							                     Snapshot::False,
 							                     reverse));
 
 							int trueSize = 0;

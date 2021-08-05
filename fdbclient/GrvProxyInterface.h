@@ -46,6 +46,7 @@ struct GrvProxyInterface {
 	bool operator==(GrvProxyInterface const& r) const { return id() == r.id(); }
 	bool operator!=(GrvProxyInterface const& r) const { return id() != r.id(); }
 	NetworkAddress address() const { return getConsistentReadVersion.getEndpoint().getPrimaryAddress(); }
+	NetworkAddressList addresses() const { return getConsistentReadVersion.getEndpoint().addresses; }
 
 	template <class Archive>
 	void serialize(Archive& ar) {

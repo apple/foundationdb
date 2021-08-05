@@ -670,9 +670,9 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 	RangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
 	RangeResultRef(Arena& p, const RangeResultRef& toCopy)
-	  : more(toCopy.more), readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd),
+	  : VectorRef<KeyValueRef>(p, toCopy), more(toCopy.more),
 	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
-	    VectorRef<KeyValueRef>(p, toCopy) {}
+	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
 	RangeResultRef(const VectorRef<KeyValueRef>& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
 	  : VectorRef<KeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false), readThroughEnd(false) {
 	}

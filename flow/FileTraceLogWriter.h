@@ -45,12 +45,14 @@ private:
 	std::unique_ptr<IssuesListImpl> impl;
 };
 
-class FileTraceLogWriter : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
+class FileTraceLogWriter final : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
 private:
 	std::string directory;
 	std::string processName;
 	std::string basename;
 	std::string extension;
+	std::string finalname;
+	std::string tracePartialFileSuffix;
 
 	uint64_t maxLogsSize;
 	int traceFileFD;
@@ -66,6 +68,7 @@ public:
 	                   std::string const& processName,
 	                   std::string const& basename,
 	                   std::string const& extension,
+	                   std::string const& tracePartialFileSuffix,
 	                   uint64_t maxLogsSize,
 	                   std::function<void()> const& onError,
 	                   Reference<ITraceLogIssuesReporter> const& issues);

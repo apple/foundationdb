@@ -219,6 +219,7 @@ public:
 
 	template <class U>
 	Optional(const U& t) : impl(std::in_place, t) {}
+	Optional(T&& t) : impl(std::in_place, std::move(t)) {}
 
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be
 	converted to Optional<Optional<int>> in the wrong way (a non-present Optional<int> converts to a non-present
@@ -237,12 +238,12 @@ public:
 	}
 
 	template <class R>
-	Optional<R> map(std::function<R(T)> f) const {
-		if (present()) {
-			return Optional<R>(f(get()));
-		} else {
-			return Optional<R>();
-		}
+	Optional<R> map(std::function<R(T)> f) const& {
+		return present() ? Optional<R>(f(get())) : Optional<R>();
+	}
+	template <class R>
+	Optional<R> map(std::function<R(T)> f) && {
+		return present() ? Optional<R>(f(std::move(*this).get())) : Optional<R>();
 	}
 
 	bool present() const { return impl.has_value(); }
@@ -258,7 +259,14 @@ public:
 		UNSTOPPABLE_ASSERT(impl.has_value());
 		return std::move(impl.value());
 	}
-	T orDefault(T const& default_value) const { return impl.value_or(default_value); }
+	template <class U>
+	T orDefault(U&& defaultValue) const& {
+		return impl.value_or(std::forward<U>(defaultValue));
+	}
+	template <class U>
+	T orDefault(U&& defaultValue) && {
+		return std::move(impl).value_or(std::forward<U>(defaultValue));
+	}
 
 	// Spaceship operator.  Treats not-present as less-than present.
 	int compare(Optional const& rhs) const {
@@ -655,7 +663,16 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
 };
 
-#define LiteralStringRef(str) StringRef((const uint8_t*)(str), sizeof((str)) - 1)
+namespace literal_string_ref {
+template <class T, int Size>
+StringRef LiteralStringRefHelper(const char* str) {
+	static_assert(std::is_same_v<T, const char(&)[Size]> || std::is_same_v<T, const char[Size]>,
+	              "Argument to LiteralStringRef must be a literal string");
+	return StringRef(reinterpret_cast<const uint8_t*>(str), Size - 1);
+}
+} // namespace literal_string_ref
+#define LiteralStringRef(str) literal_string_ref::LiteralStringRefHelper<decltype(str), sizeof(str)>(str)
+
 inline StringRef operator"" _sr(const char* str, size_t size) {
 	return StringRef(reinterpret_cast<const uint8_t*>(str), size);
 }

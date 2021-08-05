@@ -293,16 +293,58 @@ public:
 	                                                          Version beginVersion = -1) = 0;
 
 	// Get an IBackupContainer based on a container spec string
-	static Reference<IBackupContainer> openContainer(const std::string& url);
+	static Reference<IBackupContainer> openContainer(const std::string& url,
+	                                                 const Optional<std::string>& encryptionKeyFileName = {});
 	static std::vector<std::string> getURLFormats();
 	static Future<std::vector<std::string>> listContainers(const std::string& baseURL);
 
-	std::string getURL() const { return URL; }
+	std::string const &getURL() const { return URL; }
+	Optional<std::string> const &getEncryptionKeyFileName() const { return encryptionKeyFileName; }
 
 	static std::string lastOpenError;
 
 private:
 	std::string URL;
+	Optional<std::string> encryptionKeyFileName;
 };
+
+namespace fileBackup {
+// Accumulates mutation log value chunks, as both a vector of chunks and as a combined chunk,
+// in chunk order, and can check the chunk set for completion or intersection with a set
+// of ranges.
+struct AccumulatedMutations {
+	AccumulatedMutations() : lastChunkNumber(-1) {}
+
+	// Add a KV pair for this mutation chunk set
+	// It will be accumulated onto serializedMutations if the chunk number is
+	// the next expected value.
+	void addChunk(int chunkNumber, const KeyValueRef& kv);
+
+	// Returns true if both
+	//   - 1 or more chunks were added to this set
+	//   - The header of the first chunk contains a valid protocol version and a length
+	//     that matches the bytes after the header in the combined value in serializedMutations
+	bool isComplete() const;
+
+	// Returns true if a complete chunk contains any MutationRefs which intersect with any
+	// range in ranges.
+	// It is undefined behavior to run this if isComplete() does not return true.
+	bool matchesAnyRange(const std::vector<KeyRange>& ranges) const;
+
+	std::vector<KeyValueRef> kvs;
+	std::string serializedMutations;
+	int lastChunkNumber;
+};
+
+// Decodes a mutation log key, which contains (hash, commitVersion, chunkNumber) and
+// returns (commitVersion, chunkNumber)
+std::pair<Version, int32_t> decodeMutationLogKey(const StringRef& key);
+
+// Decodes an encoded list of mutations in the format of:
+//   [includeVersion:uint64_t][val_length:uint32_t][mutation_1][mutation_2]...[mutation_k],
+// where a mutation is encoded as:
+//   [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][param1][param2]
+std::vector<MutationRef> decodeMutationLogValue(const StringRef& value);
+} // namespace fileBackup
 
 #endif

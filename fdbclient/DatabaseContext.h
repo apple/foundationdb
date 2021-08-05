@@ -52,7 +52,7 @@ public:
 private:
 	DatabaseContext* cx;
 	StorageServerInfo(DatabaseContext* cx, StorageServerInterface const& interf, LocalityData const& locality)
-	  : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
+	  : ReferencedInterface<StorageServerInterface>(interf, locality), cx(cx) {}
 };
 
 struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
@@ -158,11 +158,11 @@ public:
 	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	                       Future<Void> clientInfoMonitor,
 	                       LocalityData clientLocality,
-	                       bool enableLocalityLoadBalance,
+	                       EnableLocalityLoadBalance,
 	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
-	                       bool lockAware = false,
+	                       LockAware = LockAware::False,
 	                       int apiVersion = Database::API_VERSION_LATEST,
-	                       bool switchable = false);
+	                       IsSwitchable = IsSwitchable::False);
 
 	~DatabaseContext();
 
@@ -181,13 +181,13 @@ public:
 		                                    switchable));
 	}
 
-	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, bool isBackward = false);
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
 	bool getCachedLocations(const KeyRangeRef&,
 	                        vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
 	                        int limit,
-	                        bool reverse);
+	                        Reverse reverse);
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
-	void invalidateCache(const KeyRef&, bool isBackward = false);
+	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
 	void invalidateCache(const KeyRangeRef&);
 
 	bool sampleReadTags() const;
@@ -197,7 +197,7 @@ public:
 	Reference<CommitProxyInfo> getCommitProxies(bool useProvisionalProxies);
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
-	Future<Void> onProxiesChanged();
+	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Returns the protocol version reported by the coordinator this client is connected to
@@ -218,7 +218,7 @@ public:
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
 	Error deferredError;
-	bool lockAware;
+	LockAware lockAware{ LockAware::False };
 
 	bool isError() const { return deferredError.code() != invalid_error_code; }
 
@@ -243,7 +243,7 @@ public:
 	// new cluster.
 	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
 	Future<Void> connectionFileChanged();
-	bool switchable = false;
+	IsSwitchable switchable{ false };
 
 	// Management API, Attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
@@ -256,15 +256,15 @@ public:
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-	                         Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+	                         Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
 	                         Future<Void> clientInfoMonitor,
 	                         TaskPriority taskID,
 	                         LocalityData const& clientLocality,
-	                         bool enableLocalityLoadBalance,
-	                         bool lockAware,
-	                         bool internal = true,
+	                         EnableLocalityLoadBalance,
+	                         LockAware,
+	                         IsInternal = IsInternal::True,
 	                         int apiVersion = Database::API_VERSION_LATEST,
-	                         bool switchable = false);
+	                         IsSwitchable = IsSwitchable::False);
 
 	explicit DatabaseContext(const Error& err);
 
@@ -276,14 +276,14 @@ public:
 	Future<Void> monitorProxiesInfoChange;
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;
-	PromiseStream<UID> tssMismatchStream;
+	PromiseStream<std::pair<UID, std::vector<DetailedTSSMismatch>>> tssMismatchStream;
 	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
 	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
-	bool enableLocalityLoadBalance;
+	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::False };
 
 	struct VersionRequest {
 		SpanID spanContext;
@@ -308,7 +308,7 @@ public:
 	// trust that the read version (possibly set manually by the application) is actually from the correct cluster.
 	// Updated everytime we get a GRV response
 	Version minAcceptableReadVersion = std::numeric_limits<Version>::max();
-	void validateVersion(Version);
+	void validateVersion(Version) const;
 
 	// Client status updater
 	struct ClientStatusUpdater {
@@ -336,7 +336,7 @@ public:
 	std::unordered_map<UID, Tag> ssidTagMapping;
 
 	UID dbId;
-	bool internal; // Only contexts created through the C client and fdbcli are non-internal
+	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
 
 	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
 
@@ -406,7 +406,7 @@ public:
 	Future<Void> connected;
 
 	// An AsyncVar that reports the coordinator this DatabaseContext is interacting with
-	Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator;
+	Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator;
 
 	Reference<AsyncVar<Optional<ClusterInterface>>> statusClusterInterface;
 	Future<Void> statusLeaderMon;
@@ -435,7 +435,6 @@ public:
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
-	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 
 	// Cache of the latest commit versions of storage servers.
 	VersionVector ssVersionVectorCache;
@@ -457,6 +456,8 @@ public:
 	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
 	                             Version readVersion,
 	                             VersionVector& latestCommitVersions);
+private:
+	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 };
 
 #endif

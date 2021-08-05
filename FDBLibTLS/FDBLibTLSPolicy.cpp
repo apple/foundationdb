@@ -42,7 +42,7 @@ FDBLibTLSPolicy::FDBLibTLSPolicy(Reference<FDBLibTLSPlugin> plugin)
     key_data_set(false), verify_peers_set(false) {
 
 	if ((tls_cfg = tls_config_new()) == nullptr) {
-		TraceEvent(SevError, "FDBLibTLSConfigError");
+		TraceEvent(SevError, "FDBLibTLSConfigError").log();
 		throw std::runtime_error("FDBLibTLSConfigError");
 	}
 
@@ -67,14 +67,14 @@ ITLSSession* FDBLibTLSPolicy::create_session(bool is_client,
 		// servername, since this will be ignored - the servername should be
 		// matched by the verify criteria instead.
 		if (verify_peers_set && servername != nullptr) {
-			TraceEvent(SevError, "FDBLibTLSVerifyPeersWithServerName");
+			TraceEvent(SevError, "FDBLibTLSVerifyPeersWithServerName").log();
 			return nullptr;
 		}
 
 		// If verify peers has not been set, then require a server name to
 		// avoid an accidental lack of name validation.
 		if (!verify_peers_set && servername == nullptr) {
-			TraceEvent(SevError, "FDBLibTLSNoServerName");
+			TraceEvent(SevError, "FDBLibTLSNoServerName").log();
 			return nullptr;
 		}
 	}
@@ -123,18 +123,18 @@ struct stack_st_X509* FDBLibTLSPolicy::parse_cert_pem(const uint8_t* cert_pem, s
 	if (cert_pem_len > INT_MAX)
 		goto err;
 	if ((bio = BIO_new_mem_buf((void*)cert_pem, cert_pem_len)) == nullptr) {
-		TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+		TraceEvent(SevError, "FDBLibTLSOutOfMemory").log();
 		goto err;
 	}
 	if ((certs = sk_X509_new_null()) == nullptr) {
-		TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+		TraceEvent(SevError, "FDBLibTLSOutOfMemory").log();
 		goto err;
 	}
 
 	ERR_clear_error();
 	while ((cert = PEM_read_bio_X509(bio, nullptr, password_cb, nullptr)) != nullptr) {
 		if (!sk_X509_push(certs, cert)) {
-			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory").log();
 			goto err;
 		}
 	}
@@ -150,7 +150,7 @@ struct stack_st_X509* FDBLibTLSPolicy::parse_cert_pem(const uint8_t* cert_pem, s
 	}
 
 	if (sk_X509_num(certs) < 1) {
-		TraceEvent(SevError, "FDBLibTLSNoCerts");
+		TraceEvent(SevError, "FDBLibTLSNoCerts").log();
 		goto err;
 	}
 
@@ -168,11 +168,11 @@ err:
 
 bool FDBLibTLSPolicy::set_ca_data(const uint8_t* ca_data, int ca_len) {
 	if (ca_data_set) {
-		TraceEvent(SevError, "FDBLibTLSCAAlreadySet");
+		TraceEvent(SevError, "FDBLibTLSCAAlreadySet").log();
 		return false;
 	}
 	if (session_created) {
-		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive");
+		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive").log();
 		return false;
 	}
 
@@ -194,11 +194,11 @@ bool FDBLibTLSPolicy::set_ca_data(const uint8_t* ca_data, int ca_len) {
 
 bool FDBLibTLSPolicy::set_cert_data(const uint8_t* cert_data, int cert_len) {
 	if (cert_data_set) {
-		TraceEvent(SevError, "FDBLibTLSCertAlreadySet");
+		TraceEvent(SevError, "FDBLibTLSCertAlreadySet").log();
 		return false;
 	}
 	if (session_created) {
-		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive");
+		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive").log();
 		return false;
 	}
 
@@ -218,11 +218,11 @@ bool FDBLibTLSPolicy::set_key_data(const uint8_t* key_data, int key_len, const c
 	bool rc = false;
 
 	if (key_data_set) {
-		TraceEvent(SevError, "FDBLibTLSKeyAlreadySet");
+		TraceEvent(SevError, "FDBLibTLSKeyAlreadySet").log();
 		goto err;
 	}
 	if (session_created) {
-		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive");
+		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive").log();
 		goto err;
 	}
 
@@ -231,7 +231,7 @@ bool FDBLibTLSPolicy::set_key_data(const uint8_t* key_data, int key_len, const c
 		long len;
 
 		if ((bio = BIO_new_mem_buf((void*)key_data, key_len)) == nullptr) {
-			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory").log();
 			goto err;
 		}
 		ERR_clear_error();
@@ -241,7 +241,7 @@ bool FDBLibTLSPolicy::set_key_data(const uint8_t* key_data, int key_len, const c
 
 			if ((ERR_GET_LIB(errnum) == ERR_LIB_PEM && ERR_GET_REASON(errnum) == PEM_R_BAD_DECRYPT) ||
 			    (ERR_GET_LIB(errnum) == ERR_LIB_EVP && ERR_GET_REASON(errnum) == EVP_R_BAD_DECRYPT)) {
-				TraceEvent(SevError, "FDBLibTLSIncorrectPassword");
+				TraceEvent(SevError, "FDBLibTLSIncorrectPassword").log();
 			} else {
 				ERR_error_string_n(errnum, errbuf, sizeof(errbuf));
 				TraceEvent(SevError, "FDBLibTLSPrivateKeyError").detail("LibcryptoErrorMessage", errbuf);
@@ -250,15 +250,15 @@ bool FDBLibTLSPolicy::set_key_data(const uint8_t* key_data, int key_len, const c
 		}
 		BIO_free(bio);
 		if ((bio = BIO_new(BIO_s_mem())) == nullptr) {
-			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory").log();
 			goto err;
 		}
 		if (!PEM_write_bio_PrivateKey(bio, key, nullptr, nullptr, 0, nullptr, nullptr)) {
-			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory").log();
 			goto err;
 		}
 		if ((len = BIO_get_mem_data(bio, &data)) <= 0) {
-			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory").log();
 			goto err;
 		}
 		if (tls_config_set_key_mem(tls_cfg, (const uint8_t*)data, len) == -1) {
@@ -283,16 +283,16 @@ err:
 
 bool FDBLibTLSPolicy::set_verify_peers(int count, const uint8_t* verify_peers[], int verify_peers_len[]) {
 	if (verify_peers_set) {
-		TraceEvent(SevError, "FDBLibTLSVerifyPeersAlreadySet");
+		TraceEvent(SevError, "FDBLibTLSVerifyPeersAlreadySet").log();
 		return false;
 	}
 	if (session_created) {
-		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive");
+		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive").log();
 		return false;
 	}
 
 	if (count < 1) {
-		TraceEvent(SevError, "FDBLibTLSNoVerifyPeers");
+		TraceEvent(SevError, "FDBLibTLSNoVerifyPeers").log();
 		return false;
 	}
 

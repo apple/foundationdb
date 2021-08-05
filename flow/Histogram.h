@@ -27,6 +27,7 @@
 #include <string>
 #include <map>
 #include <unordered_map>
+#include <iomanip>
 
 #ifdef _WIN32
 #include <intrin.h>
@@ -58,15 +59,20 @@ HistogramRegistry& GetHistogramRegistry();
  */
 class Histogram final : public ReferenceCounted<Histogram> {
 public:
-	enum class Unit { microseconds, bytes, bytes_per_second };
+	enum class Unit { microseconds = 0, bytes, bytes_per_second, percentage, count, MAXHISTOGRAMUNIT };
+	static const char* const UnitToStringMapper[];
 
 private:
-	static const std::unordered_map<Unit, std::string> UnitToStringMapper;
+	Histogram(std::string const& group,
+	          std::string const& op,
+	          Unit unit,
+	          HistogramRegistry& registry,
+	          uint32_t lower,
+	          uint32_t upper)
+	  : group(group), op(op), unit(unit), registry(registry), lowerBound(lower), upperBound(upper) {
 
-	Histogram(std::string const& group, std::string const& op, Unit unit, HistogramRegistry& registry)
-	  : group(group), op(op), unit(unit), registry(registry), ReferenceCounted<Histogram>() {
-
-		ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
+		ASSERT(unit < Unit::MAXHISTOGRAMUNIT);
+		ASSERT(upperBound >= lowerBound);
 
 		clear();
 	}
@@ -76,14 +82,18 @@ private:
 public:
 	~Histogram() { registry.unregisterHistogram(this); }
 
-	static Reference<Histogram> getHistogram(StringRef group, StringRef op, Unit unit) {
+	static Reference<Histogram> getHistogram(StringRef group,
+	                                         StringRef op,
+	                                         Unit unit,
+	                                         uint32_t lower = 0,
+	                                         uint32_t upper = UINT32_MAX) {
 		std::string group_str = group.toString();
 		std::string op_str = op.toString();
 		std::string name = generateName(group_str, op_str);
 		HistogramRegistry& registry = GetHistogramRegistry();
 		Histogram* h = registry.lookupHistogram(name);
 		if (!h) {
-			h = new Histogram(group_str, op_str, unit, registry);
+			h = new Histogram(group_str, op_str, unit, registry, lower, upper);
 			registry.registerHistogram(h);
 			return Reference<Histogram>(h);
 		} else {
@@ -117,6 +127,32 @@ public:
 			sample((uint32_t)(delta * 1000000)); // convert to microseconds and truncate to integer
 		}
 	}
+	// Histogram buckets samples into linear interval of size 4 percent.
+	inline void samplePercentage(double pct) {
+		ASSERT(pct >= 0.0);
+		if (pct >= 1.28) {
+			pct = 1.24;
+		}
+		size_t idx = (pct * 100) / 4;
+		ASSERT(idx < 32 && idx >= 0);
+		buckets[idx]++;
+	}
+
+	// Histogram buckets samples into one of the same sized buckets
+	// This is used when the distance b/t upperBound and lowerBound are relativly small
+	inline void sampleRecordCounter(uint32_t sample) {
+		if (sample > upperBound) {
+			sample = upperBound;
+		}
+		size_t idx = ((sample - lowerBound) * 31.0) / (upperBound - lowerBound);
+		ASSERT(idx < 32 && idx >= 0);
+		buckets[idx]++;
+	}
+
+	void updateUpperBound(uint32_t upperBound) {
+		this->upperBound = upperBound;
+		clear();
+	}
 
 	void clear() {
 		for (uint32_t& i : buckets) {
@@ -127,11 +163,15 @@ public:
 
 	std::string name() const { return generateName(this->group, this->op); }
 
+	std::string drawHistogram();
+
 	std::string const group;
 	std::string const op;
 	Unit const unit;
 	HistogramRegistry& registry;
 	uint32_t buckets[32];
+	uint32_t lowerBound;
+	uint32_t upperBound;
 };
 
 #endif // FLOW_HISTOGRAM_H

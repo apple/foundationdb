@@ -96,8 +96,8 @@ public:
 	ReusableCoordinatedState(ServerCoordinators const& coordinators,
 	                         PromiseStream<Future<Void>> const& addActor,
 	                         UID const& dbgid)
-	  : coordinators(coordinators), cstate(coordinators), addActor(addActor), dbgid(dbgid), finalWriteStarted(false),
-	    previousWrite(Void()) {}
+	  : finalWriteStarted(false), previousWrite(Void()), cstate(coordinators), coordinators(coordinators),
+	    addActor(addActor), dbgid(dbgid) {}
 
 	Future<Void> read() { return _read(this); }
 
@@ -231,7 +231,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	ReusableCoordinatedState cstate;
 	Promise<Void> cstateUpdated;
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	int64_t registrationCount; // Number of different MasterRegistrationRequests sent to clusterController
 
 	RecoveryState recoveryState;
@@ -265,21 +265,22 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Future<Void> logger;
 
-	MasterData(Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
+	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	           MasterInterface const& myInterface,
 	           ServerCoordinators const& coordinators,
 	           ClusterControllerFullInterface const& clusterController,
 	           Standalone<StringRef> const& dbId,
 	           PromiseStream<Future<Void>> const& addActor,
 	           bool forceRecovery)
-	  : dbgid(myInterface.id()), myInterface(myInterface), dbInfo(dbInfo), cstate(coordinators, addActor, dbgid),
-	    coordinators(coordinators), clusterController(clusterController), dbId(dbId), forceRecovery(forceRecovery),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), neverCreated(false),
-	    lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), prevTLogVersion(invalidVersion),
-	    databaseLocked(false), minKnownCommittedVersion(invalidVersion), recoveryTransactionVersion(invalidVersion),
-	    lastCommitTime(0), registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr),
-	    memoryLimit(2e9), addActor(addActor), hasConfiguration(false),
-	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), cc("Master", dbgid.toString()),
+
+	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
+	    lastCommitTime(0), prevTLogVersion(invalidVersion), liveCommittedVersion(invalidVersion), databaseLocked(false),
+	    minKnownCommittedVersion(invalidVersion), hasConfiguration(false), coordinators(coordinators),
+	    version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
+	    myInterface(myInterface), clusterController(clusterController), cstate(coordinators, addActor, dbgid),
+	    dbInfo(dbInfo), registrationCount(0), addActor(addActor),
+	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
 	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
@@ -287,7 +288,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
-			TraceEvent(SevError, "ForcedRecoveryRequiresDcID");
+			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;
 		}
 	}
@@ -588,7 +589,7 @@ Future<Void> sendMasterRegistration(MasterData* self,
 }
 
 ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILogSystem> logSystem) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	state Future<Void> trigger = self->registrationTrigger.onTrigger();
 	state Future<Void> updateLogsKey;
 
@@ -915,7 +916,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	                             // make KeyValueStoreMemory guarantee immediate reads, we should be able to get rid of
 	                             // the discardCommit() below and not need a writable log adapter
 
-	TraceEvent("RTSSComplete", self->dbgid);
+	TraceEvent("RTSSComplete", self->dbgid).log();
 
 	return Void();
 }
@@ -1098,7 +1099,7 @@ ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
 			when(Standalone<CommitTransactionRef> _req = wait(provisional)) {
 				state Standalone<CommitTransactionRef> req = _req; // mutable
 				TEST(true); // Emergency transaction processing during recovery
-				TraceEvent("EmergencyTransaction", self->dbgid);
+				TraceEvent("EmergencyTransaction", self->dbgid).log();
 				for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
 					TraceEvent("EmergencyTransactionMutation", self->dbgid)
 					    .detail("MType", m->type)
@@ -1113,7 +1114,7 @@ ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
 				initialConfChanges->clear();
 				if (self->originalConfiguration.isValid() &&
 				    self->configuration.usableRegions != self->originalConfiguration.usableRegions) {
-					TraceEvent(SevWarnAlways, "CannotChangeUsableRegions", self->dbgid);
+					TraceEvent(SevWarnAlways, "CannotChangeUsableRegions", self->dbgid).log();
 					self->configuration = self->originalConfiguration;
 				} else {
 					initialConfChanges->push_back(req);
@@ -1556,7 +1557,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
 
 		if (newState.oldTLogData.size() && configuration.repopulateRegionAntiQuorum > 0 &&
 		    self->logSystem->remoteStorageRecovered()) {
-			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid);
+			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid).log();
 			self->recruitmentStalled->set(true);
 		}
 		self->registrationTrigger.trigger();
@@ -1626,7 +1627,7 @@ ACTOR static Future<Optional<Version>> getMinBackupVersion(Reference<MasterData>
 					minVersion = minVersion.present() ? std::min(version, minVersion.get()) : version;
 				}
 			} else {
-				TraceEvent("EmptyBackupStartKey", self->dbgid);
+				TraceEvent("EmptyBackupStartKey", self->dbgid).log();
 			}
 			return minVersion;
 
@@ -1719,7 +1720,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 
 	std::vector<InitializeBackupReply> newRecruits = wait(getAll(initializationReplies));
 	self->logSystem->setBackupWorkers(newRecruits);
-	TraceEvent("BackupRecruitmentDone", self->dbgid);
+	TraceEvent("BackupRecruitmentDone", self->dbgid).log();
 	self->registrationTrigger.trigger();
 	return Void();
 }
@@ -1779,7 +1780,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
 			g_simulator.connectionFailuresDisableDuration = 1e6;
 			g_simulator.speedUpSimulation = true;
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations");
+			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations").log();
 		}
 	}
 
@@ -1868,7 +1869,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
 			// Pause the backups that got restored in this snapshot to avoid data corruption
 			// Requires further operational work to abort the backup
-			TraceEvent("MasterRecoveryPauseBackupAgents");
+			TraceEvent("MasterRecoveryPauseBackupAgents").log();
 			Key backupPauseKey = FileBackupAgent::getPauseKey();
 			tr.set(recoveryCommitRequest.arena, backupPauseKey, StringRef());
 			// Clear the key so multiple recoveries will not overwrite the first version recorded
@@ -1942,7 +1943,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
 	self->tpcvVector.resize(1 + numLogs, 0);
 
-	TraceEvent("MasterRecoveryCommit", self->dbgid);
+	TraceEvent("MasterRecoveryCommit", self->dbgid).log();
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
 	self->addActor.send(waitResolverFailure(self->resolvers));
@@ -1990,7 +1991,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
 	if (debugResult) {
-		TraceEvent(self->forceRecovery ? SevWarn : SevError, "DBRecoveryDurabilityError");
+		TraceEvent(self->forceRecovery ? SevWarn : SevError, "DBRecoveryDurabilityError").log();
 	}
 
 	TraceEvent("MasterCommittedTLogs", self->dbgid)
@@ -2025,7 +2026,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		self->addActor.send(resolutionBalancing(self));
 
 	self->addActor.send(changeCoordinators(self));
-	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
+	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {
 		self->addActor.send(recruitBackupWorkers(self, cx));
@@ -2038,7 +2039,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 }
 
 ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo>> db,
+                                Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators coordinators,
                                 LifetimeToken lifetime,

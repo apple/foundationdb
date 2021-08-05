@@ -35,7 +35,7 @@ struct DDBalanceWorkload : TestWorkload {
 	ContinuousSample<double> latencies;
 
 	DDBalanceWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), latencies(2000), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries") {
+	  : TestWorkload(wcx), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries"), latencies(2000) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		binCount = getOption(options, LiteralStringRef("binCount"), 1000);
 		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 1);

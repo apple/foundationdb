@@ -122,7 +122,7 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 	return notUpdated;
 }
 
-ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> db,
                                             Reference<AsyncVar<ClientDBInfo>> info) {
 	state std::vector<UID> lastCommitProxyUIDs;
 	state std::vector<CommitProxyInterface> lastCommitProxies;
@@ -136,10 +136,10 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo>> db
 	}
 }
 
-Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
+Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                         TaskPriority taskID,
-                        bool enableLocalityLoadBalance,
-                        bool lockAware) {
+                        LockAware lockAware,
+                        EnableLocalityLoadBalance enableLocalityLoadBalance) {
 	auto info = makeReference<AsyncVar<ClientDBInfo>>();
 	auto cx = DatabaseContext::create(info,
 	                                  extractClientInfo(db, info),
@@ -502,15 +502,15 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 
 // Register the worker interf to cluster controller (cc) and
 // re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
-ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                       WorkerInterface interf,
                                       Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                       ProcessClass initialClass,
-                                      Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
-                                      Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
-                                      Reference<AsyncVar<bool>> degraded,
+                                      Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
+                                      Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                      Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
-                                      Reference<AsyncVar<std::set<std::string>>> issues) {
+                                      Reference<AsyncVar<std::set<std::string>> const> issues) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -613,12 +613,29 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		}
 	}
 
+
+	for (const auto& grvProxy : dbi.client.grvProxies) {
+		if (grvProxy.addresses().contains(address)) {
+			return true;
+		}
+	}
+
+	for (const auto& commitProxy : dbi.client.commitProxies) {
+		if (commitProxy.addresses().contains(address)) {
+			return true;
+		}
+	}
+
 	auto localityIsInPrimaryDc = [&dbInfo](const LocalityData& locality) {
 		return locality.dcId() == dbInfo->get().master.locality.dcId();
 	};
 
 	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
 		for (const auto& tlog : logSet.tLogs) {
+			if (!tlog.present()) {
+				continue;
+			}
+
 			if (!localityIsInPrimaryDc(tlog.interf().filteredLocality)) {
 				continue;
 			}
@@ -651,13 +668,17 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	testDbInfo.master.changeCoordinators =
 	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ testAddress }, UID(1, 2)));
 
-	// First, create a remote TLog. Although the remote TLog also uses the local address, it shouldn't be considered as
+	// First, create an empty TLogInterface, and check that it shouldn't be considered as in primary DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface<TLogInterface>());
+	ASSERT(!addressInDbAndPrimaryDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote TLog. Although the remote TLog also uses the local address, it shouldn't be considered as
 	// in primary DC given the remote locality.
 	LocalityData fakeRemote;
 	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
 	TLogInterface remoteTlog(fakeRemote);
 	remoteTlog.initEndpoints();
-	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
 	ASSERT(!addressInDbAndPrimaryDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
@@ -667,9 +688,22 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(localTlog));
 	ASSERT(addressInDbAndPrimaryDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
-	// Last, use the master's address to test, which should be considered as in local DC.
+	// Use the master's address to test, which should be considered as in local DC.
 	testDbInfo.logSystemConfig.tLogs.clear();
 	ASSERT(addressInDbAndPrimaryDc(testAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Last, tests that proxies included in the ClientDbInfo are considered as local.
+	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
+	GrvProxyInterface grvProxyInterf;
+	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
+	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
+	CommitProxyInterface commitProxyInterf;
+	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
+	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	return Void();
 }
@@ -848,7 +882,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 	uint64_t page_size = sysconf(_SC_PAGESIZE);
 	int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
-		TraceEvent("OpenStatmFileFailure");
+		TraceEvent("OpenStatmFileFailure").log();
 		*error = true;
 		return false;
 	}
@@ -857,7 +891,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 	char stat_buf[buf_sz];
 	ssize_t stat_nread = read(fd, stat_buf, buf_sz);
 	if (stat_nread < 0) {
-		TraceEvent("ReadStatmFileFailure");
+		TraceEvent("ReadStatmFileFailure").log();
 		*error = true;
 		return false;
 	}
@@ -869,7 +903,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 		return true;
 	}
 #else
-	TraceEvent("CheckHighMemoryUnsupported");
+	TraceEvent("CheckHighMemoryUnsupported").log();
 	*error = true;
 #endif
 	return false;
@@ -926,7 +960,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		else if (e.getError().code() != error_code_please_reboot)
 			throw e.getError();
 
-		TraceEvent("StorageServerRequestedReboot", id);
+		TraceEvent("StorageServerRequestedReboot", id).log();
 
 		StorageServerInterface recruited;
 		recruited.uniqueID = id;
@@ -964,7 +998,7 @@ ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageCache));
 		if (!e.isError()) {
-			TraceEvent("StorageCacheRequestedReboot1", id);
+			TraceEvent("StorageCacheRequestedReboot1", id).log();
 			return Void();
 		} else if (e.getError().code() != error_code_please_reboot &&
 		           e.getError().code() != error_code_worker_removed) {
@@ -972,7 +1006,7 @@ ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
 			throw e.getError();
 		}
 
-		TraceEvent("StorageCacheRequestedReboot", id);
+		TraceEvent("StorageCacheRequestedReboot", id).log();
 
 		StorageServerInterface recruited;
 		recruited.uniqueID = deterministicRandom()->randomUniqueID(); // id;
@@ -1215,15 +1249,15 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		if (metricsConnFile.size() > 0) {
 			try {
 				state Database db =
-				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, true, locality);
+				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, IsInternal::True, locality);
 				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
 		} else {
-			bool lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff';
-			metricsLogger = runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, lockAware),
-			                           KeyRef(metricsPrefix));
+			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
+			metricsLogger =
+			    runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware), KeyRef(metricsPrefix));
 		}
 	}
 
@@ -1504,7 +1538,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					}
 					throw please_reboot();
 				} else {
-					TraceEvent("ProcessReboot");
+					TraceEvent("ProcessReboot").log();
 					ASSERT(!rebootReq.deleteData);
 					flushAndExit(0);
 				}
@@ -2017,7 +2051,7 @@ ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInte
 			                                    ci->get().get().openDatabase.getEndpoint(), FailureStatus(false))
 			                              : Never())) {
 				printf("FDBD joined cluster.\n");
-				TraceEvent("FDBDConnected");
+				TraceEvent("FDBDConnected").log();
 				return Void();
 			}
 			when(wait(ci->onChange())) {}
@@ -2303,10 +2337,9 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 
 		if (useConfigDB != UseConfigDB::DISABLED) {
-			actors.push_back(
-			    reportErrors(localConfig.consume(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(
-			                     dbInfo, [](auto const& info) { return info.configBroadcaster; })),
-			                 "LocalConfiguration"));
+			actors.push_back(reportErrors(localConfig.consume(IAsyncListener<ConfigBroadcastFollowerInterface>::create(
+			                                  dbInfo, [](auto const& info) { return info.configBroadcaster; })),
+			                              "LocalConfiguration"));
 		}
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));

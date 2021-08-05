@@ -296,7 +296,9 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 			if (!ready.isValid()) {
 				ready = Promise<Void>();
 			}
-			ready.sendError(message.getError());
+			// Sending the error can lead to the destruction of the acknowledgementReceiver so we keep a local copy
+			Promise<Void> hold = ready;
+			hold.sendError(message.getError());
 		} else {
 			ASSERT(message.get().bytes > bytesAcknowledged);
 			bytesAcknowledged = message.get().bytes;
@@ -404,9 +406,6 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 template <class T>
 class ReplyPromiseStream {
 public:
-	// The endpoints of a ReplyPromiseStream must be initialized at Task::ReadSocket, because with lower priorities a
-	// delay(0) in FlowTransport deliver can cause out of order delivery.
-
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
@@ -530,6 +529,8 @@ public:
 			rhs.errors = 0;
 		}
 	}
+
+	void reset() { *this = ReplyPromiseStream<T>(); }
 
 private:
 	NetNotifiedQueueWithAcknowledgements<T>* queue;

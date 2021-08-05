@@ -46,10 +46,10 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	virtual Future<Optional<Value>> get(KeyRef& key) = 0;
 
 	// Gets a range of key-value pairs from the database specified by a key range
-	virtual Future<RangeResult> getRange(KeyRangeRef& keys, int limit, bool reverse) = 0;
+	virtual Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) = 0;
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
-	virtual Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, bool reverse) = 0;
+	virtual Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) = 0;
 
 	// Gets the key from the database specified by a given key selector
 	virtual Future<Key> getKey(KeySelectorRef& key) = 0;
@@ -101,13 +101,13 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	Future<Optional<Value>> get(KeyRef& key) override { return transaction.get(key); }
 
 	// Gets a range of key-value pairs from the database specified by a key range
-	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, bool reverse) override {
-		return transaction.getRange(keys, limit, false, reverse);
+	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {
+		return transaction.getRange(keys, limit, Snapshot::False, reverse);
 	}
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
-	Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, bool reverse) override {
-		return transaction.getRange(begin, end, limit, false, reverse);
+	Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) override {
+		return transaction.getRange(begin, end, limit, Snapshot::False, reverse);
 	}
 
 	// Gets the key from the database specified by a given key selector
@@ -161,13 +161,13 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	Future<Optional<Value>> get(KeyRef& key) override { return unsafeThreadFutureToFuture(transaction->get(key)); }
 
 	// Gets a range of key-value pairs from the database specified by a key range
-	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, bool reverse) override {
-		return unsafeThreadFutureToFuture(transaction->getRange(keys, limit, false, reverse));
+	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {
+		return unsafeThreadFutureToFuture(transaction->getRange(keys, limit, Snapshot::False, reverse));
 	}
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
-	Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, bool reverse) override {
-		return unsafeThreadFutureToFuture(transaction->getRange(begin, end, limit, false, reverse));
+	Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) override {
+		return unsafeThreadFutureToFuture(transaction->getRange(begin, end, limit, Snapshot::False, reverse));
 	}
 
 	// Gets the key from the database specified by a given key selector
@@ -223,7 +223,7 @@ struct ApiWorkload : TestWorkload {
 	Database extraDB;
 
 	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1)
-	  : TestWorkload(wcx), success(true), transactionFactory(nullptr), maxClients(maxClients) {
+	  : TestWorkload(wcx), maxClients(maxClients), success(true), transactionFactory(nullptr) {
 		clientPrefixInt = getOption(options, LiteralStringRef("clientId"), clientId);
 		clientPrefix = format("%010d", clientPrefixInt);
 

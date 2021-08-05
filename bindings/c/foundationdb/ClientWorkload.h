@@ -66,6 +66,7 @@ public:
 };
 
 struct FDBPromise {
+	virtual ~FDBPromise() = default;
 	virtual void send(void*) = 0;
 };
 

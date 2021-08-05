@@ -33,8 +33,8 @@ struct Increment : TestWorkload {
 	PerfDoubleCounter totalLatency;
 
 	Increment(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
-	    tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed") {
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), tooOldRetries("Retries.too_old"),
+	    commitFailedRetries("Retries.commit_failed"), totalLatency("Latency") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0);
 		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5);
