@@ -22,7 +22,6 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated
 // version of this file.  In intellisense use the source version.
-#include "flow/FastRef.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLI_FDBCLI_ACTOR_G_H)
 #define FDBCLI_FDBCLI_ACTOR_G_H
 #include "fdbcli/fdbcli.actor.g.h"
