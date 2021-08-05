@@ -1,69 +1,73 @@
 function(compile_boost)
+
+  # Initialize function incoming parameters
   set(options)
   set(oneValueArgs TARGET)
   set(multiValueArgs BUILD_ARGS CXXFLAGS LDFLAGS)
-  cmake_parse_arguments(MY "${options}" "${oneValueArgs}"
+  cmake_parse_arguments(COMPILE_BOOST "${options}" "${oneValueArgs}"
                           "${multiValueArgs}" ${ARGN} )
-  # Configure the boost toolset to use
-  set(BOOTSTRAP_ARGS "--with-libraries=context")
 
-  set(B2_COMMAND "./b2")
-  set(B2_BUILD_ARGS "")
+  # Configure bootstrap command
+  set(BOOTSTRAP_COMMAND "./bootstrap.sh")
+  set(BOOTSTRAP_LIBRARIES "context")
 
-  if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
-    set(BOOTSTRAP_ARGS ${BOOTSTRAP_ARGS} "--with-toolset=clang")
-    set(B2_BUILD_ARGS "link=static cxxflags='-std=c++14 -stdlib=libc++ -nostdlib++' linkflags='-stdlib=libc++ -nostdlib++ -static-libgcc -lc++ -lc++abi'")
-  endif ()
-
-  set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++14 -w)
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
-  if(APPLE)
-    set(BOOST_TOOLSET "clang-darwin")
-    # this is to fix a weird macOS issue -- by default
-    # cmake would otherwise pass a compiler that can't
-    # compile boost
-    set(BOOST_CXX_COMPILER "/usr/bin/clang++")
-  elseif(CLANG)
+  if(CLANG)
     set(BOOST_TOOLSET "clang")
-    list(APPEND BOOTSTRAP_ARGS "${BOOTSTRAP_COMMAND} --with-toolset=clang")
+    if(APPLE)
+      # this is to fix a weird macOS issue -- by default
+      # cmake would otherwise pass a compiler that can't
+      # compile boost
+      set(BOOST_CXX_COMPILER "/usr/bin/clang++")
+    endif()
   else()
-    set(BOOST_TOOLSET "gcc")
+	set(BOOST_TOOLSET "gcc")
   endif()
-  if(APPLE OR USE_LIBCXX)
-    list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++)
-  endif()
-  set(BOOST_ADDITIONAL_COMPILE_OPTIOINS "")
-  foreach(flag IN LISTS BOOST_COMPILER_FLAGS MY_CXXFLAGS)
-    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIOINS "<cxxflags>${flag} ")
-  endforeach()
-  foreach(flag IN LISTS MY_LDFLAGS)
-    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIOINS "<linkflags>${flag} ")
-  endforeach()
-  configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
+  message(STATUS "Use ${BOOST_TOOLSET} to build boost")
 
+  # Configure b2 command
+  set(B2_COMMAND "./b2")
+  set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 -w)
+  set(BOOST_LINK_FLAGS "")
+  if(APPLE OR CLANG OR USE_LIBCXX)
+    list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
+	list(APPEND BOOST_LINK_FLAGS -static-libgcc -lc++ -lc++abi)
+  endif()
+
+  # Update the user-config.jam
+  set(BOOST_ADDITIONAL_COMPILE_OPTIOINS "")
+  foreach(flag IN LISTS BOOST_COMPILER_FLAGS COMPILE_BOOST_CXXFLAGS)
+    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<cxxflags>${flag} ")
+  endforeach()
+  #foreach(flag IN LISTS BOOST_LINK_FLAGS COMPILE_BOOST_LDFLAGS)
+  # string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<linkflags>${flag} ")
+  #endforeach()
+  configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
 
+  # Build boost
   include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
-  ExternalProject_add("${MY_TARGET}Project"
+  ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
     URL "https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2"
     URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
-    CONFIGURE_COMMAND ./bootstrap.sh ${BOOTSTRAP_ARGS}
-    BUILD_COMMAND ${B2_COMMAND} link=static ${B2_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
+	CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} ${BOOTSTRAP_ARGS} --with-libraries=${BOOTSTRAP_LIBRARIES} --with-toolset=${BOOST_TOOLSET}
+	BUILD_COMMAND ${B2_COMMAND} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
     INSTALL_COMMAND ""
     UPDATE_COMMAND ""
     BUILD_BYPRODUCTS "${BOOST_INSTALL_DIR}/boost/config.hpp"
                      "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
 
-  add_library(${MY_TARGET}_context STATIC IMPORTED)
-  add_dependencies(${MY_TARGET}_context ${MY_TARGET}Project)
-  set_target_properties(${MY_TARGET}_context PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
+  add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
+  add_dependencies(${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}Project)
+  set_target_properties(${COMPILE_BOOST_TARGET}_context PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
 
-  add_library(${MY_TARGET} INTERFACE)
-  target_include_directories(${MY_TARGET} SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
-  target_link_libraries(${MY_TARGET} INTERFACE ${MY_TARGET}_context)
-endfunction()
+  add_library(${COMPILE_BOOST_TARGET} INTERFACE)
+  target_include_directories(${COMPILE_BOOST_TARGET} SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
+  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context)
+
+endfunction(compile_boost)
 
 if(USE_SANITIZER)
   if(WIN32)
@@ -93,8 +97,6 @@ else ()
   set(BOOST_HINT_PATHS /opt/boost_1_72_0)
   message(STATUS "Using g++ version of boost::context")
 endif ()
-
-message(STATUS "Boost hint path: ${BOOST_HINT_PATHS}")
 
 if(BOOST_ROOT)
   list(APPEND BOOST_HINT_PATHS ${BOOST_ROOT})
