@@ -254,29 +254,36 @@ Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint32_t bl
 // then reads this data back from the file in random increments, then confirms that
 // the bytes read match the bytes written.
 TEST_CASE("fdbrpc/AsyncFileEncrypted") {
-	state const int bytes = FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * deterministicRandom()->randomInt(0, 1000);
+	state const int bytes = deterministicRandom()->randomInt(0, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * 1000);
 	state std::vector<unsigned char> writeBuffer(bytes, 0);
 	generateRandomData(&writeBuffer.front(), bytes);
 	state std::vector<unsigned char> readBuffer(bytes, 0);
 	ASSERT(g_network->isSimulated());
 	StreamCipher::Key::initializeRandomTestKey();
-	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
-	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
-	            IAsyncFile::OPEN_NO_AIO;
-	state Reference<IAsyncFile> file =
-	    wait(IAsyncFileSystem::filesystem()->open(joinPath(params.getDataDir(), "test-encrypted-file"), flags, 0600));
+	auto writeFlags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
+	                  IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
+	                  IAsyncFile::OPEN_NO_AIO;
+	state Reference<IAsyncFile> writeFile = wait(
+	    IAsyncFileSystem::filesystem()->open(joinPath(params.getDataDir(), "test-encrypted-file"), writeFlags, 0600));
 	state int bytesWritten = 0;
 	state int chunkSize;
 	while (bytesWritten < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesWritten);
-		wait(file->write(&writeBuffer[bytesWritten], chunkSize, bytesWritten));
+		wait(writeFile->write(&writeBuffer[bytesWritten], chunkSize, bytesWritten));
+		if (deterministicRandom()->random01() < 0.1) {
+			wait(writeFile->sync());
+		}
 		bytesWritten += chunkSize;
 	}
-	wait(file->sync());
+	wait(writeFile->sync());
+	auto readFlags = IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED |
+	                 IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
+	state Reference<IAsyncFile> readFile = wait(
+	    IAsyncFileSystem::filesystem()->open(joinPath(params.getDataDir(), "test-encrypted-file"), readFlags, 0400));
 	state int bytesRead = 0;
 	while (bytesRead < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesRead);
-		int bytesReadInChunk = wait(file->read(&readBuffer[bytesRead], chunkSize, bytesRead));
+		int bytesReadInChunk = wait(readFile->read(&readBuffer[bytesRead], chunkSize, bytesRead));
 		ASSERT_EQ(bytesReadInChunk, chunkSize);
 		bytesRead += bytesReadInChunk;
 	}

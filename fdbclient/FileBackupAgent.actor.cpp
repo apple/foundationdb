@@ -73,6 +73,21 @@ static Future<Optional<int64_t>> getTimestampFromVersion(Optional<Version> ver,
 	return timeKeeperEpochsFromVersion(ver.get(), tr);
 }
 
+ACTOR static Future<Reference<IBackupContainer>> getBackupContainer(BackupConfig config, Database cx) {
+	state Reference<IBackupContainer> bc = wait(config.backupContainer().getD(cx));
+	if (bc) {
+		wait(bc->setupEncryption());
+	}
+	return bc;
+}
+
+ACTOR template <class T>
+static Future<Reference<IBackupContainer>> getBackupContainerOrThrow(BackupConfig config, T t) {
+	state Reference<IBackupContainer> bc = wait(config.backupContainer().getOrThrow(t));
+	wait(bc->setupEncryption());
+	return bc;
+}
+
 // Time format :
 // <= 59 seconds
 // <= 59.99 minutes
@@ -1220,7 +1235,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
-		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx));
+		state Reference<IBackupContainer> bc = wait(getBackupContainer(backup, cx));
 		if (!bc) {
 			return Void();
 		}
@@ -2014,7 +2029,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 
 				if (!bc) {
 					// Backup container must be present if we're still here
-					Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
+					Reference<IBackupContainer> _bc = wait(getBackupContainerOrThrow(config, tr));
 					bc = _bc;
 				}
 
@@ -2539,7 +2554,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 
 				if (!bc) {
 					// Backup container must be present if we're still here
-					wait(store(bc, config.backupContainer().getOrThrow(tr)));
+					wait(store(bc, getBackupContainerOrThrow(config, tr)));
 				}
 
 				BackupConfig::RangeFileMapT::PairsType rangeresults =
@@ -4484,7 +4499,7 @@ public:
 
 					if (pContainer != nullptr) {
 						Reference<IBackupContainer> c =
-						    wait(config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info()));
+						    wait(transformErrors(getBackupContainerOrThrow(config, tr), backup_invalid_info()));
 						*pContainer = c;
 					}
 
@@ -4562,6 +4577,8 @@ public:
 			fprintf(stderr, "ERROR: Could not create backup container: %s\n", e.what());
 			throw backup_error();
 		}
+
+		wait(bc->setupEncryption());
 
 		Optional<Value> lastBackupTimestamp = wait(backupAgent->lastBackupTimestamp().get(tr));
 
@@ -4967,7 +4984,7 @@ public:
 
 						wait(
 						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(bc, config.backupContainer().getOrThrow(tr)));
+						    store(bc, getBackupContainerOrThrow(config, tr)));
 
 						doc.setKey("Restorable", latestRestorable.present());
 
@@ -5109,7 +5126,7 @@ public:
 					state Version recentReadVersion;
 
 					wait(store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
-					     store(bc, config.backupContainer().getOrThrow(tr)) &&
+					     store(bc, getBackupContainerOrThrow(config, tr)) &&
 					     store(recentReadVersion, tr->getReadVersion()));
 
 					bool snapshotProgress = false;
@@ -5491,7 +5508,7 @@ public:
 			}
 		}
 
-		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
+		Reference<IBackupContainer> bc = wait(getBackupContainerOrThrow(backupConfig, cx));
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();

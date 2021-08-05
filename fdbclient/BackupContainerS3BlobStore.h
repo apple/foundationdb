@@ -43,8 +43,7 @@ class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
 public:
 	BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore,
 	                           const std::string& name,
-	                           const S3BlobStoreEndpoint::ParametersT& params,
-	                           const Optional<std::string>& encryptionKeyFileName);
+	                           const S3BlobStoreEndpoint::ParametersT& params);
 
 	void addref() override;
 	void delref() override;

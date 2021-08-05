@@ -527,7 +527,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       StopWhenDone::True);
+					                                       StopWhenDone::True,
+														   UsePartitionedLog::False,
+														   IncrementalBackupOnly::False,
+														   self->encryptionKeyFileName);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)

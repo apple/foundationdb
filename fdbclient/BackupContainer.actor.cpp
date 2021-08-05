@@ -29,6 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
+#include "flow/StreamCipher.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
@@ -51,6 +52,31 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace IBackupFile_impl {
+
+#if ENCRYPTION_ENABLED
+ACTOR Future<Void> setupEncryption(std::string encryptionKeyFileName) {
+	TraceEvent(SevDebug, "SettingUpBackupEncryption").detail("EncryptionKeyFileName", encryptionKeyFileName);
+	state Reference<IAsyncFile> keyFile;
+	state StreamCipher::Key::RawKeyType key;
+	try {
+		Reference<IAsyncFile> _keyFile = wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
+		keyFile = _keyFile;
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile").detail("FileName", encryptionKeyFileName).error(e);
+		throw e;
+	}
+	int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
+	if (bytesRead != key.size()) {
+		TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")
+		    .detail("ExpectedSize", key.size())
+		    .detail("ActualSize", bytesRead);
+		throw invalid_encryption_key_file();
+	}
+	ASSERT_EQ(bytesRead, key.size());
+	StreamCipher::Key::initializeKey(std::move(key));
+	return Void();
+}
+#endif // ENCRYPTION_ENABLED
 
 ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<StringRef> s) {
 	state uint32_t lenBuf = bigEndian32((uint32_t)s.size());
@@ -265,7 +291,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 	try {
 		StringRef u(url);
 		if (u.startsWith("file://"_sr)) {
-			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
+			r = makeReference<BackupContainerLocalDirectory>(url);
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 
@@ -279,7 +305,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			for (auto c : resource)
 				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
 					throw backup_invalid_url();
-			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName);
+			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
@@ -287,8 +313,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			auto address = NetworkAddress::parse(u.eat("/"_sr).toString());
 			auto containerName = u.eat("/"_sr).toString();
 			auto accountName = u.eat("/"_sr).toString();
-			r = makeReference<BackupContainerAzureBlobStore>(
-			    address, containerName, accountName, encryptionKeyFileName);
+			r = makeReference<BackupContainerAzureBlobStore>(address, containerName, accountName);
 		}
 #endif
 		else {
@@ -296,6 +321,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			throw backup_invalid_url();
 		}
 
+		r->encryptionKeyFileName = encryptionKeyFileName;
 		r->URL = url;
 		return r;
 	} catch (Error& e) {
@@ -336,7 +362,7 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 			}
 
 			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
-			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams, {});
+			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams);
 
 			std::vector<std::string> results = wait(BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket()));
 			return results;
@@ -371,6 +397,19 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 
 Future<std::vector<std::string>> IBackupContainer::listContainers(const std::string& baseURL) {
 	return listContainers_impl(baseURL);
+}
+
+Future<Void> IBackupContainer::setupEncryption() {
+#if ENCRYPTION_ENABLED
+	if (encryptionKeyFileName.present()) {
+		return IBackupFile_impl::setupEncryption(encryptionKeyFileName.get());
+	}
+#endif
+	return Void();
+}
+
+bool IBackupContainer::usesEncryption() const {
+	return encryptionKeyFileName.present();
 }
 
 ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db) {
