@@ -1,5 +1,5 @@
 [configuration]
-splits = "a:b:c"
+splits = ["a","b","c"]
 
 [[test]]
 testTitle = 'Cycle'

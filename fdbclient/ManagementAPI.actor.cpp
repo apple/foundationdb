@@ -148,13 +148,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		}
 
 		if (key == "splits") {
-			json_spirit::mValue mv;
-			json_spirit::read_string(value, mv);
-
-			StatusObject splitsObj;
-			splitsObj["splits"] = mv;
-			out[p + key] = BinaryWriter::toValue(splitsObj, IncludeVersion(ProtocolVersion::withPartitionTransaction())).toString();
-			//out[p + key] = value;
+			out[p + key] = value;
 		}
 
 		if (key == "perpetual_storage_wiggle" && isInteger(value)) {

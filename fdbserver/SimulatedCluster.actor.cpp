@@ -55,12 +55,27 @@ const int MACHINE_REBOOT_TIME = 10;
 
 bool destructed = false;
 
+namespace {
+std::string toJSONString(const std::vector<std::string>& v) {
+	if (v.empty()) {
+		return "[]";
+	}
+	std::stringstream value;
+	value << "[\"" << v[0];
+	for (int i = 1; i < v.size(); ++i) {
+		value << "\",\"" << v[i];
+	}
+	value << "\"]";
+	return value.str();
+}
+} // anonymous namespace
+
 // Configuration details specified in workload test files that change the simulation
 // environment details
 class TestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
-		using base_variant = std::variant<int, bool, std::string, std::vector<int>>;
+		using base_variant = std::variant<int, bool, std::string, std::vector<int>, std::vector<std::string>>;
 		using types =
 		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
 		std::unordered_map<std::string_view, types> confMap;
@@ -82,6 +97,17 @@ class TestConfig {
 			}
 			void operator()(Optional<std::vector<int>>* val) const {
 				std::vector<int> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+			void operator()(std::vector<std::string>* val) const {
+				auto arr = value.as_array();
+				for (const auto& i : arr) {
+					val->emplace_back(i.as_string());
+				}
+			}
+			void operator()(Optional<std::vector<std::string>>* val) const {
+				std::vector<std::string> res;
 				(*this)(&res);
 				*val = std::move(res);
 			}
@@ -112,6 +138,14 @@ class TestConfig {
 			}
 			void operator()(Optional<std::vector<int>>* val) const {
 				std::vector<int> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+			void operator()(std::vector<std::string>* val) const {
+				evt.detail(key.c_str(), toJSONString(*val));
+			}
+			void operator()(Optional<std::vector<std::string>>* val) const {
+				std::vector<std::string> res;
 				(*this)(&res);
 				*val = std::move(res);
 			}
@@ -244,7 +278,7 @@ public:
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
-	Optional<std::string> splits; // pre-defined shard split boundaries
+	std::vector<std::string> splits; // pre-defined shard split boundaries
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
 		if (data.is_table()) {
@@ -1143,6 +1177,7 @@ struct SimulationConfig {
 	int machine_count; // Total, not per DC.
 	int processes_per_machine;
 	int coordinators;
+	std::string splitsStr; // serialized splits for DatabaseConfiguration
 
 private:
 	void setRandomConfig();
@@ -1174,8 +1209,9 @@ void SimulationConfig::set_config(std::string config) {
 }
 
 void SimulationConfig::setSplits(const TestConfig& testConfig) {
-	if (testConfig.splits.present()) {
-		db.set(configKeysPrefix.withSuffix("splits"_sr), testConfig.splits.get());
+	if (!testConfig.splits.empty()) {
+		splitsStr = toJSONString(testConfig.splits);
+		db.set(configKeysPrefix.withSuffix("splits"_sr), StringRef(splitsStr));
 	}
 }
 
