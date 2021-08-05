@@ -21,7 +21,7 @@ function(compile_boost)
       set(BOOST_CXX_COMPILER "/usr/bin/clang++")
     endif()
   else()
-	set(BOOST_TOOLSET "gcc")
+    set(BOOST_TOOLSET "gcc")
   endif()
   message(STATUS "Use ${BOOST_TOOLSET} to build boost")
 
@@ -31,7 +31,7 @@ function(compile_boost)
   set(BOOST_LINK_FLAGS "")
   if(APPLE OR CLANG OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
-	list(APPEND BOOST_LINK_FLAGS -static-libgcc -lc++ -lc++abi)
+    list(APPEND BOOST_LINK_FLAGS -static-libgcc -lc++ -lc++abi)
   endif()
 
   # Update the user-config.jam
@@ -51,8 +51,8 @@ function(compile_boost)
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
     URL "https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2"
     URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
-	CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} ${BOOTSTRAP_ARGS} --with-libraries=${BOOTSTRAP_LIBRARIES} --with-toolset=${BOOST_TOOLSET}
-	BUILD_COMMAND ${B2_COMMAND} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
+    CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} ${BOOTSTRAP_ARGS} --with-libraries=${BOOTSTRAP_LIBRARIES} --with-toolset=${BOOST_TOOLSET}
+    BUILD_COMMAND ${B2_COMMAND} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
     INSTALL_COMMAND ""
     UPDATE_COMMAND ""
