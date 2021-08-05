@@ -466,6 +466,15 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REPLACE_INTERFACE_CHECK_DELAY,                         5.0 );
 	init( COORDINATOR_REGISTER_INTERVAL,                         5.0 );
 	init( CLIENT_REGISTER_INTERVAL,                            600.0 );
+	init( CC_ENABLE_WORKER_HEALTH_MONITOR,                     false );
+	init( CC_WORKER_HEALTH_CHECKING_INTERVAL,                   60.0 );
+	init( CC_DEGRADED_LINK_EXPIRATION_INTERVAL,                300.0 );
+	init( CC_MIN_DEGRADATION_INTERVAL,                         120.0 );
+	init( CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE,                      3 );
+	init( CC_MAX_EXCLUSION_DUE_TO_HEALTH,                          2 );
+	init( CC_HEALTH_TRIGGER_RECOVERY,                          false );
+	init( CC_TRACKING_HEALTH_RECOVERY_INTERVAL,               3600.0 );
+	init( CC_MAX_HEALTH_RECOVERY_COUNT,                            2 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
@@ -634,6 +643,12 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             10.0 );
 	init( MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             30.0 );
 	init( DBINFO_FAILED_DELAY,                                   1.0 );
+	init( ENABLE_WORKER_HEALTH_MONITOR,                        false );
+	init( WORKER_HEALTH_MONITOR_INTERVAL,                       60.0 );
+	init( PEER_LATENCY_CHECK_MIN_POPULATION,                      30 );
+	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.90 );
+	init( PEER_LATENCY_DEGRADATION_THRESHOLD,                   0.05 );
+	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
