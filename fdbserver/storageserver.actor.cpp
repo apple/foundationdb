@@ -4979,8 +4979,10 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 		for (; i < reply.versions.size(); ++i) {
 			if (self->version.get() == prevVersion && !reply.versions[i].second) {
 				self->version.set(reply.versions[i].first);
+				prevVersion = reply.versions[i].first;
 			} else if (self->version.get() < reply.versions[i].first) {
 				wait(self->version.whenAtLeast(reply.versions[i].first));
+				prevVersion = reply.versions[i].first;
 			}
 		}
 	}
