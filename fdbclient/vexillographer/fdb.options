@@ -51,6 +51,9 @@ description is not currently required but encouraged.
     <Option name="trace_format" code="34"
             paramType="String" paramDescription="Format of trace files"
             description="Select the format of the log files. xml (the default) and json are supported."/>
+    <Option name="trace_partial_file_suffix" code="39"
+            paramType="String" paramDesciption="Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension."
+            description="" />
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>

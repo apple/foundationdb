@@ -4,6 +4,10 @@
 Release Notes
 #############
 
+6.2.34
+======
+* Add the ``trace_partial_file_suffix`` network option. This option will give unfinished trace files a special suffix to indicate they're not complete yet. When the trace file is complete, it is renamed to remove the suffix. `(PR #5330) <https://github.com/apple/foundationdb/pull/5330>`_
+
 6.2.33
 ======
 * Fixed an issue where storage servers could shutdown with ``unknown_error``. `(PR #4437) <https://github.com/apple/foundationdb/pull/4437>`_
