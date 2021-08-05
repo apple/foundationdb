@@ -48,22 +48,6 @@ else()
 endif()
 
 ################################################################################
-# Java Bindings
-################################################################################
-
-set(WITH_JAVA OFF)
-find_package(JNI 1.8)
-find_package(Java 1.8 COMPONENTS Development)
-# leave FreeBSD JVM compat for later
-if(JNI_FOUND AND Java_FOUND AND Java_Development_FOUND AND NOT (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD"))
-  set(WITH_JAVA ON)
-  include(UseJava)
-  enable_language(Java)
-else()
-  set(WITH_JAVA OFF)
-endif()
-
-################################################################################
 # Python Bindings
 ################################################################################
 
@@ -75,12 +59,57 @@ else()
   set(WITH_PYTHON OFF)
 endif()
 
+option(BUILD_PYTHON_BINDING "build python binding" ON)
+if(NOT BUILD_PYTHON_BINDING OR NOT WITH_PYTHON)
+  set(WITH_PYTHON_BINDING OFF)
+else()
+  if(WITH_PYTHON)
+    set(WITH_PYTHON_BINDING ON)
+  else()
+    #message(FATAL_ERROR "Could not found a suitable python interpreter")
+    set(WITH_PYTHON_BINDING OFF)
+  endif()
+endif()
+
+################################################################################
+# C Bindings
+################################################################################
+
+option(BUILD_C_BINDING "build C binding" ON)
+if(BUILD_C_BINDING AND WITH_PYTHON)
+  set(WITH_C_BINDING ON)
+else()
+  set(WITH_C_BINDING OFF)
+endif()
+
+################################################################################
+# Java Bindings
+################################################################################
+
+option(BUILD_JAVA_BINDING "build java binding" ON)
+if(NOT BUILD_JAVA_BINDING OR NOT WITH_C_BINDING)
+  set(WITH_JAVA_BINDING OFF)
+else()
+  set(WITH_JAVA_BINDING OFF)
+  find_package(JNI 1.8)
+  find_package(Java 1.8 COMPONENTS Development)
+  # leave FreeBSD JVM compat for later
+  if(JNI_FOUND AND Java_FOUND AND Java_Development_FOUND AND NOT (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD") AND WITH_C_BINDING)
+    set(WITH_JAVA_BINDING ON)
+    include(UseJava)
+    enable_language(Java)
+  else()
+    set(WITH_JAVA_BINDING OFF)
+  endif()
+endif()
+
 ################################################################################
 # Pip
 ################################################################################
 
+option(BUILD_DOCUMENTATION "build documentation" ON)
 find_package(Python3 COMPONENTS Interpreter)
-if (Python3_Interpreter_FOUND)
+if (WITH_PYTHON AND Python3_Interpreter_FOUND AND BUILD_DOCUMENTATION)
   set(WITH_DOCUMENTATION ON)
 else()
   set(WITH_DOCUMENTATION OFF)
@@ -90,27 +119,37 @@ endif()
 # GO
 ################################################################################
 
-find_program(GO_EXECUTABLE go)
-# building the go binaries is currently not supported on Windows
-if(GO_EXECUTABLE AND NOT WIN32)
-  set(WITH_GO ON)
+option(BUILD_GO_BINDING "build go binding" ON)
+if(NOT BUILD_GO_BINDING OR NOT BUILD_C_BINDING)
+  set(WITH_GO_BINDING OFF)
 else()
-  set(WITH_GO OFF)
-endif()
-if (USE_SANITIZER)
-  # Disable building go for sanitizers, since _stacktester doesn't link properly
-  set(WITH_GO OFF)
+  find_program(GO_EXECUTABLE go)
+  # building the go binaries is currently not supported on Windows
+  if(GO_EXECUTABLE AND NOT WIN32 AND WITH_C_BINDING)
+    set(WITH_GO_BINDING ON)
+  else()
+    set(WITH_GO_BINDING OFF)
+  endif()
+  if (USE_SANITIZER)
+    # Disable building go for sanitizers, since _stacktester doesn't link properly
+    set(WITH_GO_BINDING OFF)
+  endif()
 endif()
 
 ################################################################################
 # Ruby
 ################################################################################
 
-find_program(GEM_EXECUTABLE gem)
-set(WITH_RUBY OFF)
-if(GEM_EXECUTABLE)
-  set(GEM_COMMAND ${RUBY_EXECUTABLE} ${GEM_EXECUTABLE})
-  set(WITH_RUBY ON)
+option(BUILD_RUBY_BINDING "build ruby binding" ON)
+if(NOT BUILD_RUBY_BINDING OR NOT BUILD_C_BINDING)
+  set(WITH_RUBY_BINDING OFF)
+else()
+  find_program(GEM_EXECUTABLE gem)
+  set(WITH_RUBY_BINDING OFF)
+  if(GEM_EXECUTABLE AND WITH_C_BINDING)
+    set(GEM_COMMAND ${RUBY_EXECUTABLE} ${GEM_EXECUTABLE})
+    set(WITH_RUBY_BINDING ON)
+  endif()
 endif()
 
 ################################################################################
@@ -160,20 +199,22 @@ function(print_components)
   message(STATUS "=========================================")
   message(STATUS "   Components Build Overview ")
   message(STATUS "=========================================")
-  message(STATUS "Build Java Bindings:                  ${WITH_JAVA}")
-  message(STATUS "Build with TLS support:               ${WITH_TLS}")
-  message(STATUS "Build Go bindings:                    ${WITH_GO}")
-  message(STATUS "Build Ruby bindings:                  ${WITH_RUBY}")
-  message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON}")
-  message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
   message(STATUS "Build Bindings (depends on Python):   ${WITH_PYTHON}")
+  message(STATUS "Build C Bindings:                     ${WITH_C_BINDING}")
+  message(STATUS "Build Python Bindings:                ${WITH_PYTHON_BINDING}")
+  message(STATUS "Build Java Bindings:                  ${WITH_JAVA_BINDING}")
+  message(STATUS "Build Go bindings:                    ${WITH_GO_BINDING}")
+  message(STATUS "Build Ruby bindings:                  ${WITH_RUBY_BINDING}")
+  message(STATUS "Build with TLS support:               ${WITH_TLS}")
+  message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
+  message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON_BINDING}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
   message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
   message(STATUS "=========================================")
 endfunction()
 
 if(FORCE_ALL_COMPONENTS)
-  if(NOT WITH_JAVA OR NOT WITH_TLS OR NOT WITH_GO OR NOT WITH_RUBY OR NOT WITH_PYTHON OR NOT WITH_DOCUMENTATION)
+  if(NOT WITH_C_BINDING OR NOT WITH_JAVA_BINDING OR NOT WITH_TLS OR NOT WITH_GO_BINDING OR NOT WITH_RUBY_BINDING OR NOT WITH_PYTHON_BINDING OR NOT WITH_DOCUMENTATION)
     print_components()
     message(FATAL_ERROR "FORCE_ALL_COMPONENTS is set but not all dependencies could be found")
   endif()
