@@ -225,9 +225,6 @@ private:
 };
 
 struct UpdateEagerReadInfo {
-	std::vector<KeyRef> keyBegin;
-	std::vector<Key> keyEnd; // these are for ClearRange
-
 	std::vector<std::pair<KeyRef, int>> keys;
 	std::vector<Optional<Value>> value;
 
@@ -240,10 +237,7 @@ struct UpdateEagerReadInfo {
 
 	void addMutation(MutationRef const& m) {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
-		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end))
-			keyBegin.push_back(m.param2);
-		else if (m.type == MutationRef::CompareAndClear) {
-			keyBegin.push_back(keyAfter(m.param1, arena));
+		if (m.type == MutationRef::CompareAndClear) {
 			if (keys.size() > 0 && keys.back().first == m.param1) {
 				// Don't issue a second read, if the last read was equal to the current key.
 				// CompareAndClear is likely to be used after another atomic operation on same key.
@@ -259,8 +253,6 @@ struct UpdateEagerReadInfo {
 	}
 
 	void finishKeyBegin() {
-		std::sort(keyBegin.begin(), keyBegin.end());
-		keyBegin.resize(std::unique(keyBegin.begin(), keyBegin.end()) - keyBegin.begin());
 		std::sort(keys.begin(), keys.end(), [](const std::pair<KeyRef, int>& lhs, const std::pair<KeyRef, int>& rhs) {
 			return (lhs.first < rhs.first) || (lhs.first == rhs.first && lhs.second > rhs.second);
 		});
@@ -283,12 +275,6 @@ struct UpdateEagerReadInfo {
 		        keys.begin();
 		ASSERT(i < keys.size() && keys[i].first == key);
 		return value[i];
-	}
-
-	KeyRef getKeyEnd(KeyRef key) {
-		int i = std::lower_bound(keyBegin.begin(), keyBegin.end(), key) - keyBegin.begin();
-		ASSERT(i < keyBegin.size() && keyBegin[i] == key);
-		return keyEnd[i];
 	}
 };
 
@@ -2193,10 +2179,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				}
 
 				/*for( int i = 0; i < r.data.size(); i++ ) {
-					StorageMetrics m;
-					m.bytesPerKSecond = r.data[i].expectedSize();
-					m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
-					data->metrics.notify(r.data[i].key, m);
+				    StorageMetrics m;
+				    m.bytesPerKSecond = r.data[i].expectedSize();
+				    m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
+				    data->metrics.notify(r.data[i].key, m);
 				}*/
 
 				// For performance concerns, the cost of a range read is billed to the start key and end key of the
@@ -2369,21 +2355,13 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
 	eager->finishKeyBegin();
 
-	vector<Future<Key>> keyEnd(eager->keyBegin.size());
-	for (int i = 0; i < keyEnd.size(); i++)
-		keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i]);
-
-	state Future<vector<Key>> futureKeyEnds = getAll(keyEnd);
-
 	vector<Future<Optional<Value>>> value(eager->keys.size());
 	for (int i = 0; i < value.size(); i++)
 		value[i] = data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second);
 
 	state Future<vector<Optional<Value>>> futureValues = getAll(value);
-	state vector<Key> keyEndVal = wait(futureKeyEnds);
 	vector<Optional<Value>> optionalValues = wait(futureValues);
 
-	eager->keyEnd = keyEndVal;
 	eager->value = optionalValues;
 
 	return Void();
@@ -2476,7 +2454,6 @@ Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
 bool expandMutation(MutationRef& m,
                     StorageServer::VersionedData const& data,
                     UpdateEagerReadInfo* eager,
-                    KeyRef eagerTrustedEnd,
                     Arena& ar) {
 	// After this function call, m should be copied into an arena immediately (before modifying data, shards, or eager)
 	if (m.type == MutationRef::ClearRange) {
@@ -2492,18 +2469,6 @@ bool expandMutation(MutationRef& m,
 		i = d.lastLessOrEqual(m.param2);
 		if (i && i->isClearTo() && i->getEndKey() >= m.param2) {
 			m.param2 = i->getEndKey();
-		} else {
-			// Expand to the next set or clear (from storage or latestVersion), and if it
-			// is a clear, engulf it as well
-			i = d.lower_bound(m.param2);
-			KeyRef endKeyAtStorageVersion =
-			    m.param2 == eagerTrustedEnd ? eagerTrustedEnd : std::min(eager->getKeyEnd(m.param2), eagerTrustedEnd);
-			if (!i || endKeyAtStorageVersion < i.key())
-				m.param2 = endKeyAtStorageVersion;
-			else if (i->isClearTo())
-				m.param2 = i->getEndKey();
-			else
-				m.param2 = i.key();
 		}
 	} else if (m.type != MutationRef::SetValue && (m.type)) {
 
@@ -2557,7 +2522,7 @@ bool expandMutation(MutationRef& m,
 			if (oldVal.present() && m.param2 == oldVal.get()) {
 				m.type = MutationRef::ClearRange;
 				m.param2 = keyAfter(m.param1, ar);
-				return expandMutation(m, data, eager, eagerTrustedEnd, ar);
+				return expandMutation(m, data, eager, ar);
 			}
 			return false;
 		}
@@ -3350,7 +3315,7 @@ void StorageServer::addMutation(Version version,
 	MutationRef expanded = mutation;
 	auto& mLog = addVersionToMutationLog(version);
 
-	if (!expandMutation(expanded, data(), eagerReads, shard.end, mLog.arena())) {
+	if (!expandMutation(expanded, data(), eagerReads, mLog.arena())) {
 		return;
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
