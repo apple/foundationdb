@@ -91,6 +91,8 @@ set(FLOW_SRCS
   stacktrace.h
   test_memcpy.cpp
   test_memcpy_perf.cpp
+  UringReactor.cpp
+  UringReactor.h
   version.cpp
   xxhash.c
   xxhash.h)
@@ -117,6 +119,23 @@ add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_link_libraries(flow PRIVATE stacktrace)
 if (NOT APPLE AND NOT WIN32)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
+    include(ExternalProject)
+    ExternalProject_Add(io_uring
+        URL https://github.com/axboe/liburing/archive/refs/tags/liburing-2.0.tar.gz
+        BUILD_ALWAYS 0
+        BUILD_IN_SOURCE 1
+        CONFIGURE_COMMAND ./configure
+        #workaround for failing uring tests
+        BUILD_COMMAND  make CFLAGS=-fPIC || echo OK
+        INSTALL_COMMAND ""
+        BUILD_BYPRODUCTS <BINARY_DIR>/src/liburing.a
+        )
+
+    ExternalProject_Get_Property(io_uring BINARY_DIR)
+    set(URING_LIBRARIES ${BINARY_DIR}/src/liburing.a)
+    set(URING_INCLUDE_DIR ${BINARY_DIR}/src/include)
+  target_include_directories(flow PRIVATE ${URING_INCLUDE_DIR})
+  target_link_libraries(flow PRIVATE ${URING_LIBRARIES})
 elseif(WIN32)
   target_link_libraries(flow PUBLIC winmm.lib)
   target_link_libraries(flow PUBLIC psapi.lib)

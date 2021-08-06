@@ -517,7 +517,7 @@ ACTOR Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection>
 		loop {
 			lastWriteTime = now();
 
-			int sent = conn->write(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+			int sent = wait(conn->asyncWrite(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
 			if (sent) {
 				self->bytesSent += sent;
 				self->transport->bytesSent += sent;
@@ -530,8 +530,8 @@ ACTOR Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection>
 
 			TEST(true); // We didn't write everything, so apparently the write buffer is full.  Wait for it to be
 			            // nonfull.
-			wait(conn->onWritable());
-			wait(yield(TaskPriority::WriteSocket));
+			// wait(conn->onWritable());
+			// wait(yield(TaskPriority::WriteSocket));
 		}
 
 		// Wait until there is something to send

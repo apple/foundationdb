@@ -41,6 +41,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
+#include "flow/UringReactor.h"
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SendBufferIterator.h"
@@ -210,6 +211,7 @@ public:
 	// private:
 
 	ASIOReactor reactor;
+    UringReactor ureactor;
 #ifndef TLS_DISABLED
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
@@ -410,12 +412,12 @@ public:
 
 	void close() override { closeSocket(); }
 
-	explicit Connection(boost::asio::io_service& io_service)
-	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service) {}
+	explicit Connection(boost::asio::io_service& io_service, UringReactor *ureactor)
+	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service), ureactor(ureactor){}
 
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
-	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios, NetworkAddress addr) {
-		state Reference<Connection> self(new Connection(*ios));
+	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios, UringReactor *ureactor, NetworkAddress addr) {
+		state Reference<Connection> self(new Connection(*ios, ureactor));
 
 		self->peer_address = addr;
 		try {
@@ -531,8 +533,8 @@ public:
 private:
 	UID id;
 	tcp::socket socket;
+    UringReactor *ureactor;
 	NetworkAddress peer_address;
-
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
 		socket.non_blocking(true);
@@ -589,7 +591,7 @@ private:
 			throw err;
 		}
 	}
-
+/*
 	ACTOR static Future<int> asyncWrite(Connection* self, SendBuffer const* data, int limit) {
 		BindPromiseInt p("N2_AsyncWriteError", self->id);
 		auto f = p.getFuture();
@@ -600,6 +602,29 @@ private:
 		    std::move(p));
 		try {
 			int size = wait(f);
+			return size;
+		} catch (Error& err) {
+			ASSERT(limit > 0);
+			bool notEmpty = false;
+			for (auto p = data; p; p = p->next)
+				if (p->bytes_written - p->bytes_sent > 0) {
+					notEmpty = true;
+					break;
+				}
+			ASSERT(notEmpty);
+			self->closeSocket();
+			throw err;
+		}
+	}
+*/
+	ACTOR static Future<int> asyncWrite(Connection* self, SendBuffer const* data, int limit) {
+        Promise<int> p;
+		auto f = p.getFuture();
+		++g_net2->countWrites;
+        self->ureactor->write(self->socket.native_handle(), data, limit, std::move(p));
+		try {
+			int size = wait(f);
+            //std::cout<<"written "<<size<<std::endl;
 			return size;
 		} catch (Error& err) {
 			ASSERT(limit > 0);
@@ -796,12 +821,13 @@ private:
 
 class Listener final : public IListener, ReferenceCounted<Listener> {
 	boost::asio::io_context& io_service;
+    UringReactor *ureactor;
 	NetworkAddress listenAddress;
 	tcp::acceptor acceptor;
 
 public:
-	Listener(boost::asio::io_context& io_service, NetworkAddress listenAddress)
-	  : io_service(io_service), listenAddress(listenAddress), acceptor(io_service, tcpEndpoint(listenAddress)) {
+	Listener(boost::asio::io_context& io_service, UringReactor *ureactor, NetworkAddress listenAddress)
+	  : io_service(io_service), listenAddress(listenAddress), ureactor(ureactor) ,acceptor(io_service, tcpEndpoint(listenAddress)) {
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
@@ -815,7 +841,7 @@ public:
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept(Listener* self) {
-		state Reference<Connection> conn(new Connection(self->io_service));
+		state Reference<Connection> conn(new Connection(self->io_service, self->ureactor));
 		state tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			BindPromise p("N2_AcceptError", UID());
@@ -1268,7 +1294,7 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 // 5MB for loading files into memory
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
-  : useThreadPool(useThreadPool), network(this), reactor(this), stopped(false), tasksIssued(0),
+  : useThreadPool(useThreadPool), network(this), reactor(this), ureactor(256, 0), stopped(false), tasksIssued(0),
     ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE),
     // Until run() is called, yield() will always yield
     tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield), numYields(0),
@@ -1556,6 +1582,7 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
 		reactor.react();
+        ureactor.poll();
 
 		updateNow();
 		double now = this->currentTime;
@@ -1881,7 +1908,7 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::s
 	}
 #endif
 
-	return Connection::connect(&this->reactor.ios, toAddr);
+	return Connection::connect(&this->reactor.ios, &this->ureactor, toAddr);
 }
 
 Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string& host) {
@@ -1977,7 +2004,7 @@ Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
 		}
 #endif
-		return Reference<IListener>(new Listener(reactor.ios, localAddr));
+		return Reference<IListener>(new Listener(reactor.ios, &ureactor, localAddr));
 	} catch (boost::system::system_error const& e) {
 		Error x;
 		if (e.code().value() == EADDRINUSE)
