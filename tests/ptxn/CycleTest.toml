@@ -1,3 +1,6 @@
+[configuration]
+splits = ["a","b","c"]
+
 [[test]]
 testTitle = 'Cycle'
 

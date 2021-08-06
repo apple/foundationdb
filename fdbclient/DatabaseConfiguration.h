@@ -104,8 +104,8 @@ struct DatabaseConfiguration {
 	DatabaseConfiguration();
 
 	void applyMutation(MutationRef mutation);
-	bool set(KeyRef key,
-	         ValueRef value); // Returns true if a configuration option that requires recovery to take effect is changed
+	// Returns true if a configuration option that requires recovery to take effect is changed
+	bool set(KeyRef key, ValueRef value);
 	bool clear(KeyRangeRef keys);
 	Optional<ValueRef> get(KeyRef key) const;
 
@@ -116,6 +116,7 @@ struct DatabaseConfiguration {
 	std::string toString() const;
 	StatusObject toJSON(bool noPolicies = false) const;
 	StatusArray getRegionJSON() const;
+	StatusArray getSplitJSON() const;
 
 	RegionInfo getRegion(Optional<Key> dcId) const {
 		if (!dcId.present()) {
@@ -245,6 +246,9 @@ struct DatabaseConfiguration {
 
 	// Perpetual Storage Setting
 	int32_t perpetualStorageWiggleSpeed;
+
+	// Initial shard split boundaries
+	std::vector<StringRef> splits;
 
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;

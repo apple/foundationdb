@@ -23,6 +23,9 @@
 #include <vector>
 
 #include "fdbclient/Knobs.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/json_spirit/json_spirit_reader_template.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
@@ -35,12 +38,14 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "fdbclient/Schemas.h"
+#include "flow/serialize.h"
 
 bool isInteger(const std::string& s) {
 	if (s.empty())
@@ -140,6 +145,10 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			regionObj["regions"] = mv;
 			out[p + key] =
 			    BinaryWriter::toValue(regionObj, IncludeVersion(ProtocolVersion::withRegionConfiguration())).toString();
+		}
+
+		if (key == "splits") {
+			out[p + key] = value;
 		}
 
 		if (key == "perpetual_storage_wiggle" && isInteger(value)) {
