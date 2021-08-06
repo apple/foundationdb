@@ -111,7 +111,7 @@ class ConfigNodeImpl {
 	Counter setMutations;
 	Counter clearMutations;
 	Counter getValueRequests;
-	Counter newVersionRequests;
+	Counter getGenerationRequests;
 	Future<Void> logger;
 
 	ACTOR static Future<ConfigGeneration> getGeneration(ConfigNodeImpl* self) {
@@ -347,7 +347,7 @@ class ConfigNodeImpl {
 		loop {
 			choose {
 				when(ConfigTransactionGetGenerationRequest req = waitNext(cti->getGeneration.getFuture())) {
-					++self->newVersionRequests;
+					++self->getGenerationRequests;
 					wait(getNewGeneration(self, req));
 				}
 				when(ConfigTransactionGetRequest req = waitNext(cti->get.getFuture())) {
@@ -472,7 +472,7 @@ public:
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
 	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), successfulCommits("SuccessfulCommits", cc),
 	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
-	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {
+	    getValueRequests("GetValueRequests", cc), getGenerationRequests("GetGenerationRequests", cc) {
 		logger = traceCounters("ConfigNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigNode");
 		TraceEvent(SevDebug, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
 	}
