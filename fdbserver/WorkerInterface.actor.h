@@ -120,7 +120,7 @@ struct WorkerInterface {
 		           workerSnapReq,
 		           backup,
 		           updateServerDBInfo,
-				   configBroadcastInterface);
+		           configBroadcastInterface);
 	}
 };
 
@@ -392,10 +392,11 @@ struct RegisterWorkerRequest {
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
 	                      bool degraded,
-						  Version lastSeenKnobVersion,
-						  ConfigClassSet knobConfigClassSet)
+	                      Version lastSeenKnobVersion,
+	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
-	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet) {}
+	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded),
+	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -411,8 +412,8 @@ struct RegisterWorkerRequest {
 		           incompatiblePeers,
 		           reply,
 		           degraded,
-				   lastSeenKnobVersion,
-				   knobConfigClassSet);
+		           lastSeenKnobVersion,
+		           knobConfigClassSet);
 	}
 };
 

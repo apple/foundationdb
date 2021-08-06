@@ -98,8 +98,9 @@ struct ConfigBroadcastChangesRequest {
 	ReplyPromise<ConfigBroadcastChangesReply> reply;
 
 	ConfigBroadcastChangesRequest() = default;
-	explicit ConfigBroadcastChangesRequest(Version mostRecentVersion, Standalone<VectorRef<VersionedConfigMutationRef>> const& changes)
-		: mostRecentVersion(mostRecentVersion), changes(changes) {}
+	explicit ConfigBroadcastChangesRequest(Version mostRecentVersion,
+	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes)
+	  : mostRecentVersion(mostRecentVersion), changes(changes) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
