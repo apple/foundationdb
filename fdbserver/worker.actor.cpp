@@ -2298,9 +2298,11 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 	state Promise<Void> recoveredDiskFiles;
 	state LocalConfiguration localConfig(dataFolder, configPath, manualKnobOverrides);
 
+	/*
 	if (useConfigDB != UseConfigDB::DISABLED) {
-		wait(localConfig.initialize());
+	    wait(localConfig.initialize());
 	}
+	*/
 
 	actors.push_back(serveProtocolInfo());
 
@@ -2336,11 +2338,13 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 
+		/*
 		if (useConfigDB != UseConfigDB::DISABLED) {
-			actors.push_back(reportErrors(localConfig.consume(IAsyncListener<ConfigBroadcastFollowerInterface>::create(
-			                                  dbInfo, [](auto const& info) { return info.configBroadcaster; })),
-			                              "LocalConfiguration"));
+		    actors.push_back(reportErrors(localConfig.consume(IAsyncListener<ConfigBroadcastFollowerInterface>::create(
+		                                      dbInfo, [](auto const& info) { return info.configBroadcaster; })),
+		                                  "LocalConfiguration"));
 		}
+		*/
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
