@@ -126,7 +126,7 @@ class ConfigBroadcasterImpl {
 	Version mostRecentVersion;
 	std::unique_ptr<IConfigConsumer> consumer;
 	ActorCollection actors{ false };
-	std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>> workers; // TODO: Compact into struct
+	std::vector<std::tuple<ConfigClassSet, Version, ConfigBroadcastInterface*>> workers; // TODO: Compact into struct
 
 	UID id;
 	CounterCollection cc;
@@ -136,47 +136,44 @@ class ConfigBroadcasterImpl {
 	Counter snapshotRequest;
 	Future<Void> logger;
 
-	// Push changes to the specified clients.
 	template <class Changes>
-	Future<Void> pushChanges(std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>>::iterator begin,
-	                         std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>>::iterator end,
+	Future<Void> pushChanges(std::tuple<ConfigClassSet, Version, ConfigBroadcastInterface*>& client,
 	                         Changes const& changes) {
 		std::vector<Future<Void>> responses;
-		for (auto it = begin; it != end; ++it) {
-			auto& [configClassSet, lastSeenVersion, worker] = *it;
-			ConfigBroadcastChangesRequest req;
+		auto& [configClassSet, lastSeenVersion, broadcastInterface] = client;
 
-			// Skip if client has already been updated to the latest version.
-			if (lastSeenVersion >= mostRecentVersion) {
-				continue;
-			}
+		// Skip if client has already seen the latest version.
+		if (lastSeenVersion >= mostRecentVersion) {
+			return Void();
+		}
 
-			for (const auto& versionedMutation : changes) {
-				if (versionedMutation.version > lastSeenVersion &&
-				    matchesConfigClass(configClassSet, versionedMutation.mutation.getConfigClass())) {
-					TraceEvent te(SevDebug, "ConfigBroadcasterSendingChangeMutation", id);
-					te.detail("Version", versionedMutation.version)
-					    .detail("ReqLastSeenVersion", lastSeenVersion)
-					    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
-					    .detail("KnobName", versionedMutation.mutation.getKnobName());
-					if (versionedMutation.mutation.isSet()) {
-						te.detail("Op", "Set").detail("KnobValue", versionedMutation.mutation.getValue().toString());
-					} else {
-						te.detail("Op", "Clear");
-					}
-
-					req.changes.push_back_deep(req.changes.arena(), versionedMutation);
+		ConfigBroadcastChangesRequest req;
+		for (const auto& versionedMutation : changes) {
+			if (versionedMutation.version > lastSeenVersion &&
+			    matchesConfigClass(configClassSet, versionedMutation.mutation.getConfigClass())) {
+				TraceEvent te(SevDebug, "ConfigBroadcasterSendingChangeMutation", id);
+				te.detail("Version", versionedMutation.version)
+				    .detail("ReqLastSeenVersion", lastSeenVersion)
+				    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
+				    .detail("KnobName", versionedMutation.mutation.getKnobName());
+				if (versionedMutation.mutation.isSet()) {
+					te.detail("Op", "Set").detail("KnobValue", versionedMutation.mutation.getValue().toString());
+				} else {
+					te.detail("Op", "Clear");
 				}
-			}
 
-			if (req.changes.size() > 0) {
-				lastSeenVersion = mostRecentVersion;
-				req.mostRecentVersion = mostRecentVersion;
-				// TODO: Retry in event of failure
-				responses.push_back(success(worker->interf.configBroadcastInterface.getChanges.getReply(req)));
-				++successfulChangeRequest;
+				req.changes.push_back_deep(req.changes.arena(), versionedMutation);
 			}
 		}
+
+		if (req.changes.size() > 0) {
+			lastSeenVersion = mostRecentVersion;
+			req.mostRecentVersion = mostRecentVersion;
+			// TODO: Retry in event of failure
+			responses.push_back(success(broadcastInterface->getChanges.getReply(req)));
+			++successfulChangeRequest;
+		}
+
 		return waitForAll(responses);
 	}
 
@@ -204,7 +201,9 @@ class ConfigBroadcasterImpl {
 			}
 		}
 
-		actors.add(pushChanges(workers.begin(), workers.end(), changes));
+		for (auto& worker : workers) {
+			actors.add(pushChanges(worker, changes));
+		}
 	}
 
 	template <class Snapshot>
@@ -219,11 +218,11 @@ public:
 	                            Version lastSeenVersion,
 	                            ConfigClassSet configClassSet,
 	                            Future<Void>& watcher,
-	                            WorkerDetails* worker) {
+	                            ConfigBroadcastInterface* broadcastInterface) {
 		actors.add(consumer->consume(*self));
 		// TODO: Use `watcher` to detect death of client
-		workers.push_back(std::make_tuple(std::move(configClassSet), lastSeenVersion, worker));
-		return pushChanges(workers.end() - 1, workers.end(), mutationHistory);
+		workers.push_back(std::make_tuple(std::move(configClassSet), lastSeenVersion, broadcastInterface));
+		return pushChanges(workers.back(), mutationHistory);
 	}
 
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
@@ -347,8 +346,8 @@ ConfigBroadcaster::~ConfigBroadcaster() = default;
 Future<Void> ConfigBroadcaster::registerWorker(Version lastSeenVersion,
                                                ConfigClassSet configClassSet,
                                                Future<Void>& watcher,
-                                               WorkerDetails* worker) {
-	return impl().registerWorker(this, lastSeenVersion, configClassSet, watcher, worker);
+                                               ConfigBroadcastInterface* broadcastInterface) {
+	return impl().registerWorker(this, lastSeenVersion, configClassSet, watcher, broadcastInterface);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
