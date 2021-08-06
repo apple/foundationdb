@@ -549,6 +549,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	CounterCollection cc;
 	Counter bytesInput;
 	Counter bytesDurable;
+	Counter blockingPeeks;
+	Counter blockingPeekTimeouts;
 
 	UID logId;
 	ProtocolVersion protocolVersion;
@@ -630,7 +632,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	  : stopped(false), initialized(false), queueCommittingVersion(0), knownCommittedVersion(0),
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0),
 	    minPoppedTag(invalidTag), unpoppedRecoveredTags(0), cc("TLog", interf.id().toString()),
-	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), logId(interf.id()),
+	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
+ 	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), logId(interf.id()),
 	    protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion), tLogData(tLogData),
 	    unrecoveredBefore(1), recoveredAt(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag),
 	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
@@ -1526,14 +1529,19 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 	return tagData->versionMessages;
 };
 
-ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest* req) {
+ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest* req, double timeout) {
+	self->blockingPeeks += 1;
 	auto tagData = self->getTagData(req->tag);
-	if (tagData.isValid()) {
+	if (tagData.isValid() && !tagData->versionMessages.empty() && tagData->versionMessages.back().first > req->begin) {
 		return Void();
 	}
-	wait(self->waitingTags[req->tag].getFuture());
-	// we want the caller to finish first, otherwise the data structure it is building might not be complete
-	wait(delay(0.0));
+	choose {
+		when(wait(self->waitingTags[req->tag].getFuture())) {
+			// we want the caller to finish first, otherwise the data structure it is building might not be complete
+			wait(delay(0.0));
+		}
+		when(wait(delay(timeout))) { self->blockingPeekTimeouts += 1; }
+	}
 	return Void();
 }
 
@@ -1735,6 +1743,10 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		return Void();
 	}
 
+	if (req.begin > logData->persistentDataDurableVersion && !req.onlySpilled && req.tag.locality >= 0 &&
+	    !req.returnIfBlocked) {
+		wait(waitForMessagesForTag(logData, &req, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
+	}
 	state Version endVersion = logData->version.get() + 1;
 	state bool onlySpilled = false;
 
@@ -1866,10 +1878,6 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		if (req.onlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			if (req.tag.locality >= 0 && !req.returnIfBlocked) {
-				// wait for at most 1 second
-				wait(waitForMessagesForTag(logData, &req) || delay(1.0));
-			}
 			peekMessagesFromMemory(logData, req, messages, endVersion);
 		}
 
