@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/SimpleConfigConsumer.h"
 
 class SimpleConfigConsumerImpl {

@@ -52,6 +52,7 @@ class ConfigBroadcasterImpl {
 	// PendingRequestStore stores a set of pending ConfigBroadcastFollowerGetChangesRequests,
 	// indexed by configuration class. When an update is received, replies are sent for all
 	// pending requests with affected configuration classes
+	/*
 	class PendingRequestStore {
 		using Req = ConfigBroadcastFollowerGetChangesRequest;
 		std::map<Key, std::set<Endpoint::Token>> configClassToTokens;
@@ -117,6 +118,7 @@ class ConfigBroadcasterImpl {
 			remove(tokenToRequest, token);
 		}
 	} pending;
+	*/
 	std::map<ConfigKey, KnobValue> snapshot;
 	std::deque<VersionedConfigMutation> mutationHistory;
 	std::deque<VersionedConfigCommitAnnotation> annotationHistory;
@@ -124,82 +126,56 @@ class ConfigBroadcasterImpl {
 	Version mostRecentVersion;
 	std::unique_ptr<IConfigConsumer> consumer;
 	ActorCollection actors{ false };
+	std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>> workers; // TODO: Compact into struct
 
 	UID id;
 	CounterCollection cc;
 	Counter compactRequest;
-	mutable Counter successfulChangeRequest;
+	Counter successfulChangeRequest;
 	Counter failedChangeRequest;
 	Counter snapshotRequest;
 	Future<Void> logger;
 
+	// Push changes to the specified clients.
 	template <class Changes>
-	void sendChangesReply(ConfigBroadcastFollowerGetChangesRequest const& req, Changes const& changes) const {
-		ASSERT_LT(req.lastSeenVersion, mostRecentVersion);
-		ConfigBroadcastFollowerGetChangesReply reply;
-		reply.mostRecentVersion = mostRecentVersion;
-		for (const auto& versionedMutation : changes) {
-			if (versionedMutation.version > req.lastSeenVersion &&
-			    matchesConfigClass(req.configClassSet, versionedMutation.mutation.getConfigClass())) {
-				TraceEvent te(SevDebug, "ConfigBroadcasterSendingChangeMutation", id);
-				te.detail("Version", versionedMutation.version)
-				    .detail("ReqLastSeenVersion", req.lastSeenVersion)
-				    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
-				    .detail("KnobName", versionedMutation.mutation.getKnobName());
-				if (versionedMutation.mutation.isSet()) {
-					te.detail("Op", "Set").detail("KnobValue", versionedMutation.mutation.getValue().toString());
-				} else {
-					te.detail("Op", "Clear");
-				}
+	Future<Void> pushChanges(std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>>::iterator begin, std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>>::iterator end, Changes const& changes) {
+		std::vector<Future<Void>> responses;
+		for (auto it = begin; it != end; ++it) {
+			auto& [configClassSet, lastSeenVersion, worker] = *it;
+			ConfigBroadcastChangesRequest req;
 
-				reply.changes.push_back_deep(reply.changes.arena(), versionedMutation);
+			// Skip if client has already been updated to the latest version.
+			if (lastSeenVersion >= mostRecentVersion) {
+				continue;
 			}
-		}
-		req.reply.send(reply);
-		++successfulChangeRequest;
-	}
 
-	ACTOR static Future<Void> serve(ConfigBroadcaster* self,
-	                                ConfigBroadcasterImpl* impl,
-	                                ConfigBroadcastFollowerInterface cbfi) {
-		impl->actors.add(impl->consumer->consume(*self));
-		loop {
-			choose {
-				when(ConfigBroadcastFollowerGetSnapshotRequest req = waitNext(cbfi.getSnapshot.getFuture())) {
-					++impl->snapshotRequest;
-					ConfigBroadcastFollowerGetSnapshotReply reply;
-					for (const auto& [key, value] : impl->snapshot) {
-						if (matchesConfigClass(req.configClassSet, key.configClass)) {
-							reply.snapshot[key] = value;
-						}
-					}
-					reply.version = impl->mostRecentVersion;
-					TraceEvent(SevDebug, "ConfigBroadcasterGotSnapshotRequest", impl->id)
-					    .detail("Size", reply.snapshot.size())
-					    .detail("Version", reply.version);
-					req.reply.send(reply);
-				}
-				when(ConfigBroadcastFollowerGetChangesRequest req = waitNext(cbfi.getChanges.getFuture())) {
-					if (req.lastSeenVersion < impl->lastCompactedVersion) {
-						req.reply.sendError(version_already_compacted());
-						++impl->failedChangeRequest;
-						continue;
-					}
-					if (req.lastSeenVersion < impl->mostRecentVersion) {
-						impl->sendChangesReply(req, impl->mutationHistory);
+			for (const auto& versionedMutation : changes) {
+				if (versionedMutation.version > lastSeenVersion &&
+				    matchesConfigClass(configClassSet, versionedMutation.mutation.getConfigClass())) {
+					TraceEvent te(SevDebug, "ConfigBroadcasterSendingChangeMutation", id);
+					te.detail("Version", versionedMutation.version)
+					    .detail("ReqLastSeenVersion", lastSeenVersion)
+					    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
+					    .detail("KnobName", versionedMutation.mutation.getKnobName());
+					if (versionedMutation.mutation.isSet()) {
+						te.detail("Op", "Set").detail("KnobValue", versionedMutation.mutation.getValue().toString());
 					} else {
-						TEST(req.lastSeenVersion > impl->mostRecentVersion); // Worker is ahead of ConfigBroadcaster
-						TraceEvent(SevDebug, "ConfigBroadcasterRegisteringChangeRequest", impl->id)
-						    .detail("Peer", req.reply.getEndpoint().getPrimaryAddress())
-						    .detail("MostRecentVersion", impl->mostRecentVersion)
-						    .detail("ReqLastSeenVersion", req.lastSeenVersion)
-						    .detail("ConfigClass", req.configClassSet);
-						impl->pending.addRequest(req);
+						te.detail("Op", "Clear");
 					}
+
+					req.changes.push_back_deep(req.changes.arena(), versionedMutation);
 				}
-				when(wait(impl->actors.getResult())) { ASSERT(false); }
+			}
+
+			if (req.changes.size() > 0) {
+				lastSeenVersion = mostRecentVersion;
+				req.mostRecentVersion = mostRecentVersion;
+				// TODO: Retry in event of failure
+				responses.push_back(success(worker->interf.configBroadcastInterface.getChanges.getReply(req)));
+				++successfulChangeRequest;
 			}
 		}
+		return waitForAll(responses);
 	}
 
 	ConfigBroadcasterImpl()
@@ -209,25 +185,6 @@ class ConfigBroadcasterImpl {
 	    snapshotRequest("SnapshotRequest", cc) {
 		logger = traceCounters(
 		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
-	}
-
-	void notifyFollowers(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes) {
-		auto toNotify = pending.getRequestsToNotify(changes);
-		TraceEvent(SevDebug, "ConfigBroadcasterNotifyingFollowers", id)
-		    .detail("ChangesSize", changes.size())
-		    .detail("ToNotify", toNotify.size());
-		for (auto& req : toNotify) {
-			sendChangesReply(req, changes);
-			pending.removeRequest(req);
-		}
-	}
-
-	void notifyOutdatedRequests() {
-		auto outdated = pending.getOutdatedRequests(mostRecentVersion);
-		for (auto& req : outdated) {
-			req.reply.sendError(version_already_compacted());
-			pending.removeRequest(req);
-		}
 	}
 
 	void addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
@@ -244,6 +201,8 @@ class ConfigBroadcasterImpl {
 				snapshot.erase(mutation.getKey());
 			}
 		}
+
+		actors.add(pushChanges(workers.begin(), workers.end(), changes));
 	}
 
 	template <class Snapshot>
@@ -254,8 +213,11 @@ class ConfigBroadcasterImpl {
 	}
 
 public:
-	Future<Void> serve(ConfigBroadcaster* self, ConfigBroadcastFollowerInterface const& cbfi) {
-		return serve(self, this, cbfi);
+	Future<Void> registerWorker(ConfigBroadcaster* self, Version lastSeenVersion, ConfigClassSet configClassSet, Future<Void>& watcher, WorkerDetails* worker) {
+		actors.add(consumer->consume(*self));
+		// TODO: Use `watcher` to detect death of client
+		workers.push_back(std::make_tuple(std::move(configClassSet), lastSeenVersion, worker));
+		return pushChanges(workers.end() - 1, workers.end(), mutationHistory);
 	}
 
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
@@ -267,7 +229,6 @@ public:
 		    .detail("NewMostRecentVersion", mostRecentVersion)
 		    .detail("AnnotationsSize", annotations.size());
 		addChanges(changes, mostRecentVersion, annotations);
-		notifyFollowers(changes);
 	}
 
 	template <class Snapshot>
@@ -285,7 +246,6 @@ public:
 		    .detail("AnnotationsSize", annotations.size());
 		setSnapshot(std::forward<Snapshot>(snapshot), snapshotVersion);
 		addChanges(changes, changesVersion, annotations);
-		notifyOutdatedRequests();
 	}
 
 	ConfigBroadcasterImpl(ConfigFollowerInterface const& cfi) : ConfigBroadcasterImpl() {
@@ -378,8 +338,8 @@ ConfigBroadcaster& ConfigBroadcaster::operator=(ConfigBroadcaster&&) = default;
 
 ConfigBroadcaster::~ConfigBroadcaster() = default;
 
-Future<Void> ConfigBroadcaster::serve(ConfigBroadcastFollowerInterface const& cbfi) {
-	return impl().serve(this, cbfi);
+Future<Void> ConfigBroadcaster::registerWorker(Version lastSeenVersion, ConfigClassSet configClassSet, Future<Void>& watcher, WorkerDetails* worker) {
+	return impl().registerWorker(this, lastSeenVersion, configClassSet, watcher, worker);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
@@ -420,59 +380,59 @@ void ConfigBroadcaster::compact(Version compactionVersion) {
 
 namespace {
 
-Standalone<VectorRef<VersionedConfigMutationRef>> getTestChanges(Version version, bool includeGlobalMutation) {
-	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
-	if (includeGlobalMutation) {
-		ConfigKey key = ConfigKeyRef({}, "test_long"_sr);
-		auto value = KnobValue::create(int64_t{ 5 });
-		ConfigMutation mutation = ConfigMutationRef(key, value.contents());
-		changes.emplace_back_deep(changes.arena(), version, mutation);
-	}
-	{
-		ConfigKey key = ConfigKeyRef("class-A"_sr, "test_long"_sr);
-		auto value = KnobValue::create(int64_t{ 5 });
-		ConfigMutation mutation = ConfigMutationRef(key, value.contents());
-		changes.emplace_back_deep(changes.arena(), version, mutation);
-	}
-	return changes;
-}
+// Standalone<VectorRef<VersionedConfigMutationRef>> getTestChanges(Version version, bool includeGlobalMutation) {
+// 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
+// 	if (includeGlobalMutation) {
+// 		ConfigKey key = ConfigKeyRef({}, "test_long"_sr);
+// 		auto value = KnobValue::create(int64_t{ 5 });
+// 		ConfigMutation mutation = ConfigMutationRef(key, value.contents());
+// 		changes.emplace_back_deep(changes.arena(), version, mutation);
+// 	}
+// 	{
+// 		ConfigKey key = ConfigKeyRef("class-A"_sr, "test_long"_sr);
+// 		auto value = KnobValue::create(int64_t{ 5 });
+// 		ConfigMutation mutation = ConfigMutationRef(key, value.contents());
+// 		changes.emplace_back_deep(changes.arena(), version, mutation);
+// 	}
+// 	return changes;
+// }
 
-ConfigBroadcastFollowerGetChangesRequest getTestRequest(Version lastSeenVersion,
-                                                        std::vector<KeyRef> const& configClasses) {
-	Standalone<VectorRef<KeyRef>> configClassesVector;
-	for (const auto& configClass : configClasses) {
-		configClassesVector.push_back_deep(configClassesVector.arena(), configClass);
-	}
-	return ConfigBroadcastFollowerGetChangesRequest{ lastSeenVersion, ConfigClassSet{ configClassesVector } };
-}
+// ConfigBroadcastFollowerGetChangesRequest getTestRequest(Version lastSeenVersion,
+//                                                         std::vector<KeyRef> const& configClasses) {
+// 	Standalone<VectorRef<KeyRef>> configClassesVector;
+// 	for (const auto& configClass : configClasses) {
+// 		configClassesVector.push_back_deep(configClassesVector.arena(), configClass);
+// 	}
+// 	return ConfigBroadcastFollowerGetChangesRequest{ lastSeenVersion, ConfigClassSet{ configClassesVector } };
+// }
 
 } // namespace
 
-void ConfigBroadcasterImpl::runPendingRequestStoreTest(bool includeGlobalMutation, int expectedMatches) {
-	PendingRequestStore pending;
-	for (Version v = 0; v < 5; ++v) {
-		pending.addRequest(getTestRequest(v, {}));
-		pending.addRequest(getTestRequest(v, { "class-A"_sr }));
-		pending.addRequest(getTestRequest(v, { "class-B"_sr }));
-		pending.addRequest(getTestRequest(v, { "class-A"_sr, "class-B"_sr }));
-	}
-	auto toNotify = pending.getRequestsToNotify(getTestChanges(0, includeGlobalMutation));
-	ASSERT_EQ(toNotify.size(), 0);
-	for (Version v = 1; v <= 5; ++v) {
-		auto toNotify = pending.getRequestsToNotify(getTestChanges(v, includeGlobalMutation));
-		ASSERT_EQ(toNotify.size(), expectedMatches);
-		for (const auto& req : toNotify) {
-			pending.removeRequest(req);
-		}
-	}
-}
+// void ConfigBroadcasterImpl::runPendingRequestStoreTest(bool includeGlobalMutation, int expectedMatches) {
+// 	PendingRequestStore pending;
+// 	for (Version v = 0; v < 5; ++v) {
+// 		pending.addRequest(getTestRequest(v, {}));
+// 		pending.addRequest(getTestRequest(v, { "class-A"_sr }));
+// 		pending.addRequest(getTestRequest(v, { "class-B"_sr }));
+// 		pending.addRequest(getTestRequest(v, { "class-A"_sr, "class-B"_sr }));
+// 	}
+// 	auto toNotify = pending.getRequestsToNotify(getTestChanges(0, includeGlobalMutation));
+// 	ASSERT_EQ(toNotify.size(), 0);
+// 	for (Version v = 1; v <= 5; ++v) {
+// 		auto toNotify = pending.getRequestsToNotify(getTestChanges(v, includeGlobalMutation));
+// 		ASSERT_EQ(toNotify.size(), expectedMatches);
+// 		for (const auto& req : toNotify) {
+// 			pending.removeRequest(req);
+// 		}
+// 	}
+// }
 
-TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Internal/PendingRequestStore/Simple") {
-	ConfigBroadcasterImpl::runPendingRequestStoreTest(false, 2);
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Internal/PendingRequestStore/GlobalMutation") {
-	ConfigBroadcasterImpl::runPendingRequestStoreTest(true, 4);
-	return Void();
-}
+// TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Internal/PendingRequestStore/Simple") {
+// 	ConfigBroadcasterImpl::runPendingRequestStoreTest(false, 2);
+// 	return Void();
+// }
+// 
+// TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Internal/PendingRequestStore/GlobalMutation") {
+// 	ConfigBroadcasterImpl::runPendingRequestStoreTest(true, 4);
+// 	return Void();
+// }

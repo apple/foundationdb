@@ -28,6 +28,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
+/*
 namespace {
 
 Key encodeConfigKey(Optional<KeyRef> configClass, KeyRef knobName) {
@@ -763,3 +764,4 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/BadRangeRead") {
 	}
 	return Void();
 }
+*/

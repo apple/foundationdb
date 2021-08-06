@@ -20,7 +20,6 @@
 
 #include "fdbclient/IKnobCollection.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "fdbserver/OnDemandStore.h"
@@ -166,7 +165,6 @@ class LocalConfigurationImpl {
 	}
 
 	CounterCollection cc;
-	Counter broadcasterChanges;
 	Counter snapshots;
 	Counter changeRequestsFetched;
 	Counter mutations;
@@ -265,6 +263,7 @@ class LocalConfigurationImpl {
 		++self->changeRequestsFetched;
 		for (const auto& versionedMutation : changes) {
 			ASSERT_GT(versionedMutation.version, self->lastSeenVersion);
+			TraceEvent("LUKAS_addChanges").detail("Version", versionedMutation.version).detail("Key", versionedMutation.mutation.getKnobName()).detail("Value", versionedMutation.mutation.getValue().toString()).detail("ConfigClass", versionedMutation.mutation.getConfigClass());
 			++self->mutations;
 			const auto& mutation = versionedMutation.mutation;
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
@@ -283,39 +282,28 @@ class LocalConfigurationImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> consumeInternal(LocalConfigurationImpl* self,
-	                                          ConfigBroadcastFollowerInterface broadcaster) {
+	ACTOR static Future<Void> consumeInternal(LocalConfigurationImpl* self, ConfigBroadcastInterface broadcaster) {
 		loop {
-			try {
-				state ConfigBroadcastFollowerGetChangesReply changesReply =
-				    wait(broadcaster.getChanges.getReply(ConfigBroadcastFollowerGetChangesRequest{
-				        self->lastSeenVersion, self->configKnobOverrides.getConfigClassSet() }));
-				TraceEvent(SevDebug, "LocalConfigGotChanges", self->id)
-				    .detail("Size", changesReply.changes.size())
-				    .detail("Version", changesReply.mostRecentVersion);
-				wait(self->addChanges(changesReply.changes, changesReply.mostRecentVersion));
-			} catch (Error& e) {
-				if (e.code() == error_code_version_already_compacted) {
-					state ConfigBroadcastFollowerGetSnapshotReply snapshotReply = wait(broadcaster.getSnapshot.getReply(
-					    ConfigBroadcastFollowerGetSnapshotRequest{ self->configKnobOverrides.getConfigClassSet() }));
-					ASSERT_GT(snapshotReply.version, self->lastSeenVersion);
-					++self->snapshots;
-					wait(setSnapshot(self, std::move(snapshotReply.snapshot), snapshotReply.version));
-				} else {
-					throw e;
+			choose {
+				when(state ConfigBroadcastChangesRequest req = waitNext(broadcaster.getChanges.getFuture())) {
+					wait(self->addChanges(req.changes, req.mostRecentVersion));
+					req.reply.send(ConfigBroadcastChangesReply());
+				}
+				when(ConfigBroadcastSnapshotRequest snapshotReq = waitNext(broadcaster.getSnapshot.getFuture())) {
+					// TODO: Implement
+					// ASSERT_GT(snapshotReply.version, self->lastSeenVersion);
+					// ++self->snapshots;
+					// wait(setSnapshot(self, std::move(snapshotReply.snapshot), snapshotReply.version));
 				}
 			}
-			wait(yield()); // Necessary to not immediately trigger retry?
 		}
 	}
 
-	ACTOR static Future<Void> consume(LocalConfigurationImpl* self,
-	                                  Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> broadcaster) {
+	ACTOR static Future<Void> consume(LocalConfigurationImpl* self, ConfigBroadcastInterface broadcaster) {
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			choose {
-				when(wait(brokenPromiseToNever(consumeInternal(self, broadcaster->get())))) { ASSERT(false); }
-				when(wait(broadcaster->onChange())) { ++self->broadcasterChanges; }
+				when(wait(consumeInternal(self, broadcaster))) { ASSERT(false); }
 				when(wait(self->kvStore->getError())) { ASSERT(false); }
 			}
 		}
@@ -328,7 +316,7 @@ public:
 	                       IsTest isTest)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"),
 	    configKnobOverrides(configPath), manualKnobOverrides(manualKnobOverrides), cc("LocalConfiguration"),
-	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
+	    snapshots("Snapshots", cc),
 	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc) {
 		if (isTest) {
 			testKnobCollection =
@@ -370,11 +358,15 @@ public:
 		return getKnobs().getTestKnobs();
 	}
 
-	Future<Void> consume(Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
-		return consume(this, broadcaster);
+	Future<Void> consume(ConfigBroadcastInterface const& broadcastInterface) {
+		return consume(this, broadcastInterface);
 	}
 
 	UID getID() const { return id; }
+
+	Version getLastSeenVersion() const { return lastSeenVersion; }
+
+	ConfigClassSet configClassSet() const { return configKnobOverrides.getConfigClassSet(); }
 
 	static void testManualKnobOverridesInvalidName() {
 		std::map<std::string, std::string> invalidOverrides;
@@ -451,8 +443,7 @@ TestKnobs const& LocalConfiguration::getTestKnobs() const {
 	return impl().getTestKnobs();
 }
 
-Future<Void> LocalConfiguration::consume(
-    Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+Future<Void> LocalConfiguration::consume(ConfigBroadcastInterface const& broadcaster) {
 	return impl().consume(broadcaster);
 }
 
@@ -463,6 +454,14 @@ Future<Void> LocalConfiguration::addChanges(Standalone<VectorRef<VersionedConfig
 
 UID LocalConfiguration::getID() const {
 	return impl().getID();
+}
+
+Version LocalConfiguration::lastSeenVersion() const {
+	return impl().getLastSeenVersion();
+}
+
+ConfigClassSet LocalConfiguration::configClassSet() const {
+	return impl().configClassSet();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ManualKnobOverrides/InvalidName") {
