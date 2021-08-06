@@ -594,7 +594,8 @@ private:
 		BindPromiseInt p("N2_AsyncWriteError", self->id);
 		auto f = p.getFuture();
 		++g_net2->countWrites;
-		self->socket.async_write_some(
+		boost::asio::async_write(
+            self->socket,
 		    boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()),
 		    std::move(p));
 		try {
