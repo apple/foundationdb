@@ -284,11 +284,11 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
 			u.eat("azure://"_sr);
-			auto address = NetworkAddress::parse(u.eat("/"_sr).toString());
+			auto accountName = u.eat("@"_sr).toString();
+			auto endpoint = u.eat("/"_sr).toString();
 			auto containerName = u.eat("/"_sr).toString();
-			auto accountName = u.eat("/"_sr).toString();
 			r = makeReference<BackupContainerAzureBlobStore>(
-			    address, containerName, accountName, encryptionKeyFileName);
+			    endpoint, accountName, containerName, encryptionKeyFileName);
 		}
 #endif
 		else {
@@ -296,6 +296,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			throw backup_invalid_url();
 		}
 
+		r->encryptionKeyFileName = encryptionKeyFileName;
 		r->URL = url;
 		return r;
 	} catch (Error& e) {
