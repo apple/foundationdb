@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <vector>
+
 #include "fdbclient/IConfigTransaction.h"
 #include "fdbclient/SimpleConfigTransaction.h"
 #include "fdbclient/PaxosConfigTransaction.h"
@@ -26,10 +28,6 @@ Reference<IConfigTransaction> IConfigTransaction::createTestSimple(ConfigTransac
 	return makeReference<SimpleConfigTransaction>(cti);
 }
 
-Reference<IConfigTransaction> IConfigTransaction::createSimple(Database const& cx) {
-	return makeReference<SimpleConfigTransaction>(cx);
-}
-
-Reference<IConfigTransaction> IConfigTransaction::createPaxos(Database const& cx) {
-	return makeReference<PaxosConfigTransaction>(cx);
+Reference<IConfigTransaction> IConfigTransaction::createTestPaxos(std::vector<ConfigTransactionInterface> const& ctis) {
+	return makeReference<PaxosConfigTransaction>(ctis);
 }

@@ -48,8 +48,8 @@ using namespace std;
 WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
-  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), dbInfo(r.dbInfo),
-    sharedRandomNumber(r.sharedRandomNumber) {}
+  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
+    dbInfo(r.dbInfo) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -232,6 +232,15 @@ vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, vector<st
 			return v;
 		}
 	return defaultValue;
+}
+
+bool hasOption(VectorRef<KeyValueRef> options, Key key) {
+	for (const auto& option : options) {
+		if (option.key == key) {
+			return true;
+		}
+	}
+	return false;
 }
 
 // returns unconsumed options
@@ -607,7 +616,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
-			cx = Database::createDatabase(ccf, -1, true, locality);
+			cx = Database::createDatabase(ccf, -1, IsInternal::True, locality);
 			wait(delay(1.0));
 		}
 
@@ -808,7 +817,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 		}
 
 		state std::vector<Future<ErrorOr<CheckReply>>> checks;
-		TraceEvent("CheckingResults");
+		TraceEvent("CheckingResults").log();
 
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
 
@@ -1007,7 +1016,7 @@ ACTOR Future<bool> runTest(Database cx,
 
 	if (spec.useDB && spec.clearAfterTest) {
 		try {
-			TraceEvent("TesterClearingDatabase");
+			TraceEvent("TesterClearingDatabase").log();
 			wait(timeoutError(clearData(cx), 1000.0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "ErrorClearingDatabaseAfterTest").error(e);
@@ -1049,8 +1058,7 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeTypes", ""); } },
 	{ "maxTLogVersion",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } },
-	{ "disableTss",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } }
+	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1177,6 +1185,11 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      if (value == "true")
 		      spec->phases = TestWorkload::CHECK;
+	  } },
+	{ "restorePerpetualWiggleSetting",
+	  [](const std::string& value, TestSpec* spec) {
+	      if (value == "false")
+		      spec->restorePerpetualWiggleSetting = false;
 	  } },
 };
 
@@ -1468,7 +1481,9 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
-			wait(setPerpetualStorageWiggle(cx, true, true));
+			printf("Set perpetual_storage_wiggle=1 ...\n");
+			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
+			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
 	}
 
@@ -1546,7 +1561,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			}
 			when(wait(cc->onChange())) {}
 			when(wait(testerTimeout)) {
-				TraceEvent(SevError, "TesterRecruitmentTimeout");
+				TraceEvent(SevError, "TesterRecruitmentTimeout").log();
 				throw timed_out();
 			}
 		}

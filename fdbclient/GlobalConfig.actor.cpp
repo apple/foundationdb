@@ -77,6 +77,7 @@ void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
+	// TraceEvent(SevInfo, "GlobalConfig_Insert").detail("Key", key).detail("Value", value);
 	data.erase(key);
 
 	Arena arena(key.expectedSize() + value.expectedSize());
@@ -112,6 +113,7 @@ void GlobalConfig::erase(Key key) {
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
+	// TraceEvent(SevInfo, "GlobalConfig_Erase").detail("Range", range);
 	auto it = data.begin();
 	while (it != data.end()) {
 		if (range.contains(it->first)) {
@@ -165,7 +167,7 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 		// attempt this migration at the same time, sometimes resulting in
 		// aborts due to conflicts. Purposefully avoid retrying, making this
 		// migration best-effort.
-		TraceEvent(SevInfo, "GlobalConfigMigrationError").detail("What", e.what());
+		TraceEvent(SevInfo, "GlobalConfig_MigrationError").detail("What", e.what());
 	}
 
 	return Void();
@@ -174,6 +176,7 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 // Updates local copy of global configuration by reading the entire key-range
 // from storage.
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
+	// TraceEvent trace(SevInfo, "GlobalConfig_Refresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	Transaction tr(self->cx);

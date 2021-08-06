@@ -29,6 +29,8 @@
 typedef bool (*compare_pages)(void*, void*);
 typedef int64_t loc_t;
 
+FDB_DEFINE_BOOLEAN_PARAM(CheckHashes);
+
 // 0 -> 0
 // 1 -> 4k
 // 4k -> 4k
@@ -166,11 +168,11 @@ private:
 class RawDiskQueue_TwoFiles : public Tracked<RawDiskQueue_TwoFiles> {
 public:
 	RawDiskQueue_TwoFiles(std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit)
-	  : basename(basename), fileExtension(fileExtension), onError(delayed(error.getFuture())),
-	    onStopped(stopped.getFuture()), readingFile(-1), readingPage(-1), writingPos(-1), dbgid(dbgid),
-	    dbg_file0BeginSeq(0), fileExtensionBytes(SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES),
-	    fileShrinkBytes(SERVER_KNOBS->DISK_QUEUE_FILE_SHRINK_BYTES), readingBuffer(dbgid), readyToPush(Void()),
-	    fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true) {
+	  : basename(basename), fileExtension(fileExtension), dbgid(dbgid), dbg_file0BeginSeq(0),
+	    fileSizeWarningLimit(fileSizeWarningLimit), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
+	    readyToPush(Void()), lastCommit(Void()), isFirstCommit(true), readingBuffer(dbgid), readingFile(-1),
+	    readingPage(-1), writingPos(-1), fileExtensionBytes(SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES),
+	    fileShrinkBytes(SERVER_KNOBS->DISK_QUEUE_FILE_SHRINK_BYTES) {
 		if (BUGGIFY)
 			fileExtensionBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
 		if (BUGGIFY)
@@ -876,9 +878,9 @@ public:
 	          DiskQueueVersion diskQueueVersion,
 	          int64_t fileSizeWarningLimit)
 	  : rawQueue(new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit)), dbgid(dbgid),
-	    diskQueueVersion(diskQueueVersion), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
-	    nextReadLocation(-1), readBufPage(nullptr), readBufPos(0), pushed_page_buffer(nullptr), recovered(false),
-	    initialized(false), lastCommittedSeq(-1), warnAlwaysForMemory(true) {}
+	    diskQueueVersion(diskQueueVersion), anyPopped(false), warnAlwaysForMemory(true), nextPageSeq(0), poppedSeq(0),
+	    lastPoppedSeq(0), lastCommittedSeq(-1), pushed_page_buffer(nullptr), recovered(false), initialized(false),
+	    nextReadLocation(-1), readBufPage(nullptr), readBufPos(0) {}
 
 	location push(StringRef contents) override {
 		ASSERT(recovered);
@@ -1241,9 +1243,9 @@ private:
 			// start and end are on the same page
 			ASSERT(pagedData.size() == sizeof(Page));
 			Page* data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
-			if (ch == CheckHashes::YES && !data->checkHash())
+			if (ch && !data->checkHash())
 				throw io_error();
-			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+			if (!ch && data->payloadSize > Page::maxPayload)
 				throw io_error();
 			pagedData.contents() = pagedData.substr(sizeof(PageHeader) + startingOffset, endingOffset - startingOffset);
 			return pagedData;
@@ -1252,9 +1254,9 @@ private:
 			// we don't have to double allocate in a hot, memory hungry call.
 			uint8_t* buf = mutateString(pagedData);
 			Page* data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
-			if (ch == CheckHashes::YES && !data->checkHash())
+			if (ch && !data->checkHash())
 				throw io_error();
-			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+			if (!ch && data->payloadSize > Page::maxPayload)
 				throw io_error();
 
 			// Only start copying from `start` in the first page.
@@ -1264,9 +1266,9 @@ private:
 				buf += length;
 			}
 			data++;
-			if (ch == CheckHashes::YES && !data->checkHash())
+			if (ch && !data->checkHash())
 				throw io_error();
-			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+			if (!ch && data->payloadSize > Page::maxPayload)
 				throw io_error();
 
 			// Copy all the middle pages
@@ -1277,9 +1279,9 @@ private:
 				memmove(buf, data->payload, length);
 				buf += length;
 				data++;
-				if (ch == CheckHashes::YES && !data->checkHash())
+				if (ch && !data->checkHash())
 					throw io_error();
-				if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+				if (!ch && data->payloadSize > Page::maxPayload)
 					throw io_error();
 			}
 

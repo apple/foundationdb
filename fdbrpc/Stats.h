@@ -80,7 +80,7 @@ struct CounterCollection {
 	void logToTraceEvent(TraceEvent& te) const;
 };
 
-struct Counter : ICounter, NonCopyable {
+struct Counter final : ICounter, NonCopyable {
 public:
 	typedef int64_t Value;
 
@@ -227,7 +227,7 @@ private:
 class LatencySample {
 public:
 	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
-	  : name(name), id(id), sample(sampleSize), sampleStart(now()) {
+	  : name(name), id(id), sampleStart(now()), sample(sampleSize) {
 		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
 

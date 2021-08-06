@@ -90,7 +90,7 @@ struct TLogQueueEntryRef {
 
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
-	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id),
+	  : id(from.id), version(from.version), knownCommittedVersion(from.knownCommittedVersion),
 	    messages(a, from.messages), tags(a, from.tags) {}
 
 	template <class Ar>
@@ -108,7 +108,7 @@ struct TLogQueueEntryRef {
 
 typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
 
-struct TLogQueue : public IClosable {
+struct TLogQueue final : public IClosable {
 public:
 	TLogQueue(IDiskQueue* queue, UID dbgid) : queue(queue), dbgid(dbgid) {}
 
@@ -291,7 +291,7 @@ struct TLogData : NonCopyable {
 	AsyncVar<bool>
 	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
 
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 
 	NotifiedVersion queueCommitEnd;
 	Version queueCommitBegin;
@@ -321,11 +321,11 @@ struct TLogData : NonCopyable {
 	         UID workerID,
 	         IKeyValueStore* persistentData,
 	         IDiskQueue* persistentQueue,
-	         Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
-	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
-	    persistentData(persistentData), rawPersistentQueue(persistentQueue),
-	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0),
-	    prevVersion(0), diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0),
+	         Reference<AsyncVar<ServerDBInfo> const> const& dbInfo)
+	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
+	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), diskQueueCommitBytes(0),
+	    largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0), queueCommitBegin(0),
+	    instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0), bytesDurable(0), prevVersion(0),
 	    updatePersist(Void()), terminated(false) {}
 };
 
@@ -339,7 +339,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		bool update_version_sizes;
 
 		TagData(Version popped, bool nothing_persistent, bool popped_recently, OldTag tag)
-		  : nothing_persistent(nothing_persistent), popped(popped), popped_recently(popped_recently),
+		  : nothing_persistent(nothing_persistent), popped_recently(popped_recently), popped(popped),
 		    update_version_sizes(tag != txsTagOld) {}
 
 		TagData(TagData&& r) noexcept
@@ -440,11 +440,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Future<Void> recovery;
 
 	explicit LogData(TLogData* tLogData, TLogInterface interf)
-	  : tLogData(tLogData), knownCommittedVersion(0), tli(interf), logId(interf.id()),
+	  : stopped(false), initialized(false), recoveryCount(), queueCommittingVersion(0), knownCommittedVersion(0),
 	    cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc),
-	    // These are initialized differently on init() or recovery
-	    recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0),
-	    newPersistentDataVersion(invalidVersion), recovery(Void()) {
+	    logId(interf.id()), newPersistentDataVersion(invalidVersion), tli(interf), tLogData(tLogData),
+	    recovery(Void()) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -1387,7 +1386,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 	state KeyRange tagKeys;
 	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
 
-	TraceEvent("TLogRestorePersistentState", self->dbgid);
+	TraceEvent("TLogRestorePersistentState", self->dbgid).log();
 
 	IKeyValueStore* storage = self->persistentData;
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
@@ -1568,14 +1567,14 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         UID tlogId,
                         UID workerID) {
 	state TLogData self(tlogId, workerID, persistentData, persistentQueue, db);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
-	TraceEvent("SharedTlog", tlogId);
+	TraceEvent("SharedTlog", tlogId).log();
 
 	try {
 		wait(restorePersistentState(&self, locality));

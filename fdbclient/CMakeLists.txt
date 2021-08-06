@@ -15,6 +15,8 @@ set(FDBCLIENT_SRCS
   BackupContainerLocalDirectory.h
   BackupContainerS3BlobStore.actor.cpp
   BackupContainerS3BlobStore.h
+  ClientBooleanParams.cpp
+  ClientBooleanParams.h
   ClientKnobCollection.cpp
   ClientKnobCollection.h
   ClientKnobs.cpp
@@ -170,7 +172,7 @@ if(BUILD_AZURE_BACKUP)
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
-add_dependencies(fdbclient fdboptions)
+add_dependencies(fdbclient fdboptions fdb_c_options)
 if(BUILD_AZURE_BACKUP)
   target_link_libraries(fdbclient PUBLIC fdbrpc PRIVATE curl uuid azure-storage-lite)
 else()

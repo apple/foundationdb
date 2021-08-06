@@ -19,12 +19,11 @@
  */
 
 #include "Tuple.h"
-#include <boost/static_assert.hpp>
 
 namespace FDB {
 // The floating point operations depend on this using the IEEE 754 standard.
-BOOST_STATIC_ASSERT(std::numeric_limits<float>::is_iec559);
-BOOST_STATIC_ASSERT(std::numeric_limits<double>::is_iec559);
+static_assert(std::numeric_limits<float>::is_iec559);
+static_assert(std::numeric_limits<double>::is_iec559);
 
 const size_t Uuid::SIZE = 16;
 

@@ -29,6 +29,9 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/MutationTracking.h"
+#include "flow/Arena.h"
+#include "flow/Error.h"
+#include "flow/Histogram.h"
 #include "flow/IndexedSet.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -45,7 +48,7 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	int slowReplies;
 	int fastReplies;
 
-	ConnectionResetInfo() : lastReset(now()), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
+	ConnectionResetInfo() : lastReset(now()), resetCheck(Void()), slowReplies(0), fastReplies(0) {}
 };
 
 // The set of tLog servers, logRouters and backupWorkers for a log tag
@@ -55,6 +58,7 @@ public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
+	std::vector<Reference<Histogram>> tlogPushDistTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector<LocalityData> tLogLocalities; // Stores the localities of the log servers
@@ -289,7 +293,7 @@ public:
 
 		if (allLocations) {
 			// special handling for allLocations
-			TraceEvent("AllLocationsSet");
+			TraceEvent("AllLocationsSet").log();
 			for (int i = 0; i < logServers.size(); i++) {
 				newLocations.push_back(i);
 			}
@@ -971,6 +975,7 @@ struct LogPushData : NonCopyable {
 				}
 			}
 		}
+		isEmptyMessage = std::vector<bool>(messagesWriter.size(), false);
 	}
 
 	void addTxsTag() {
@@ -1104,7 +1109,29 @@ struct LogPushData : NonCopyable {
 		next_message_tags.clear();
 	}
 
-	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
+	Standalone<StringRef> getMessages(int loc) {
+		return messagesWriter[loc].toValue();
+	}
+
+	// Records if a tlog (specified by "loc") will receive an empty version batch message.
+	// "value" is the message returned by getMessages() call.
+	void recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
+		if (!isEmptyMessage[loc]) {
+			BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
+			Standalone<StringRef> v = w.toValue();
+			if (value.size() > v.size()) {
+				isEmptyMessage[loc] = true;
+			}
+		}
+	}
+
+	// Returns the ratio of empty messages in this version batch.
+	// MUST be called after getMessages() and recordEmptyMessage().
+	float getEmptyMessageRatio() const {
+		auto count = std::count(isEmptyMessage.begin(), isEmptyMessage.end(), false);
+		ASSERT_WE_THINK(isEmptyMessage.size() > 0);
+		return 1.0 * count / isEmptyMessage.size();
+	}
 
 private:
 	Reference<ILogSystem> logSystem;
@@ -1112,6 +1139,7 @@ private:
 	std::vector<Tag> prev_tags;
 	std::set<Tag> written_tags;
 	std::vector<BinaryWriter> messagesWriter;
+	std::vector<bool> isEmptyMessage; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
 	// Stores message locations that have had span information written to them
 	// for the current transaction. Adding transaction info will reset this

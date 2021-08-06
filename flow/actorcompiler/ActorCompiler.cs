@@ -83,6 +83,7 @@ namespace actorcompiler
         public bool endIsUnreachable = false;
         public string exceptionParameterIs = null;
         public bool publicName = false;
+        public string specifiers;
         string indentation;
         StreamWriter body;
         public bool wasCalled { get; protected set; }
@@ -419,7 +420,7 @@ namespace actorcompiler
 
             string callback_base_classes = string.Join(", ", callbacks.Select(c=>string.Format("public {0}", c.type)));
             if (callback_base_classes != "") callback_base_classes += ", ";
-            writer.WriteLine("class {0} : public Actor<{2}>, {3}public FastAllocated<{1}>, public {4} {{",
+            writer.WriteLine("class {0} final : public Actor<{2}>, {3}public FastAllocated<{1}>, public {4} {{",
                 className,
                 fullClassName,
                 actor.returnType == null ? "void" : actor.returnType,
@@ -429,7 +430,10 @@ namespace actorcompiler
             writer.WriteLine("public:");
             writer.WriteLine("\tusing FastAllocated<{0}>::operator new;", fullClassName);
             writer.WriteLine("\tusing FastAllocated<{0}>::operator delete;", fullClassName);
-            writer.WriteLine("\tvirtual void destroy() {{ ((Actor<{0}>*)this)->~Actor(); operator delete(this); }}", actor.returnType == null ? "void" : actor.returnType);
+            if (actor.returnType != null)
+                writer.WriteLine("\tvoid destroy() override {{ ((Actor<{0}>*)this)->~Actor(); operator delete(this); }}", actor.returnType);
+            else
+                writer.WriteLine("\tvoid destroy() {{ ((Actor<void>*)this)->~Actor(); operator delete(this); }}");
             foreach (var cb in callbacks)
                 writer.WriteLine("friend struct {0};", cb.type);
 
@@ -1189,10 +1193,11 @@ namespace actorcompiler
 
         private static void WriteFunction(TextWriter writer, Function func, string body)
         {
-            writer.WriteLine(memberIndentStr + "{0}{1}({2})", 
+            writer.WriteLine(memberIndentStr + "{0}{1}({2}){3}",
                 func.returnType == "" ? "" : func.returnType + " ", 
                 func.useByName(),
-                string.Join(",", func.formalParameters));
+                string.Join(",", func.formalParameters),
+                func.specifiers == "" ? "" : " " + func.specifiers);
             if (func.returnType != "")
                 writer.WriteLine(memberIndentStr + "{");
             writer.WriteLine(body);
@@ -1251,7 +1256,8 @@ namespace actorcompiler
                     returnType = "void",
                     formalParameters = new string[] {},
                     endIsUnreachable = true,
-                    publicName = true
+                    publicName = true,
+                    specifiers = "override"
                 };
                 cancelFunc.Indent(codeIndent);
                 cancelFunc.WriteLine("auto wait_state = this->actor_wait_state;");

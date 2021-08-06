@@ -11,6 +11,8 @@ set(FDBSERVER_SRCS
   ConfigDatabaseUnitTests.actor.cpp
   ConfigFollowerInterface.cpp
   ConfigFollowerInterface.h
+  ConfigNode.actor.cpp
+  ConfigNode.h
   ConflictSet.h
   CoordinatedState.actor.cpp
   CoordinatedState.h
@@ -28,8 +30,6 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
-  IConfigDatabaseNode.cpp
-  IConfigDatabaseNode.h
   IConfigConsumer.cpp
   IConfigConsumer.h
   IDiskQueue.h
@@ -72,8 +72,6 @@ set(FDBSERVER_SRCS
   OnDemandStore.h
   PaxosConfigConsumer.actor.cpp
   PaxosConfigConsumer.h
-  PaxosConfigDatabaseNode.actor.cpp
-  PaxosConfigDatabaseNode.h
   ProxyCommitData.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -105,7 +103,6 @@ set(FDBSERVER_SRCS
   ServerDBInfo.h
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
-  SimpleConfigDatabaseNode.actor.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
@@ -146,7 +143,7 @@ set(FDBSERVER_SRCS
   workloads/BackgroundSelectors.actor.cpp
   workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
-  workloads/ParallelRestore.actor.cpp
+  workloads/ClogSingleConnection.actor.cpp
   workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
@@ -197,6 +194,7 @@ set(FDBSERVER_SRCS
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
+  workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
   workloads/PopulateTPCC.actor.cpp

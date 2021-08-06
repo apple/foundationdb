@@ -6,7 +6,7 @@ Visibility Documents
 
 Curation of documents related to Visibility into FDB.
 
-* :doc:`request-tracing` walks you through request-tracing framework.
+* :doc:`request-tracing` provides fine-grained visibility into the flow of transactions through the system.
 
 .. toctree::
  :maxdepth: 2

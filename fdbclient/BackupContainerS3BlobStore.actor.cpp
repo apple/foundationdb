@@ -20,6 +20,9 @@
 
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#include "fdbrpc/AsyncFileEncrypted.h"
+#endif
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -103,6 +106,10 @@ public:
 			wait(bc->m_bstore->writeEntireFile(bc->m_bucket, bc->indexEntry(), ""));
 		}
 
+		if (bc->usesEncryption()) {
+			wait(bc->encryptionSetupComplete());
+		}
+
 		return Void();
 	}
 
@@ -137,9 +144,10 @@ std::string BackupContainerS3BlobStore::indexEntry() {
 
 BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore,
                                                        const std::string& name,
-                                                       const S3BlobStoreEndpoint::ParametersT& params)
+                                                       const S3BlobStoreEndpoint::ParametersT& params,
+                                                       const Optional<std::string>& encryptionKeyFileName)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
-
+	setEncryptionKey(encryptionKeyFileName);
 	// Currently only one parameter is supported, "bucket"
 	for (const auto& [name, value] : params) {
 		if (name == "bucket") {
@@ -164,12 +172,19 @@ std::string BackupContainerS3BlobStore::getURLFormat() {
 }
 
 Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::string& path) {
-	return Reference<IAsyncFile>(new AsyncFileReadAheadCache(
-	    Reference<IAsyncFile>(new AsyncFileS3BlobStoreRead(m_bstore, m_bucket, dataPath(path))),
-	    m_bstore->knobs.read_block_size,
-	    m_bstore->knobs.read_ahead_blocks,
-	    m_bstore->knobs.concurrent_reads_per_file,
-	    m_bstore->knobs.read_cache_blocks_per_file));
+	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreRead>(m_bstore, m_bucket, dataPath(path));
+
+#if ENCRYPTION_ENABLED
+	if (usesEncryption()) {
+		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
+	}
+#endif
+	f = makeReference<AsyncFileReadAheadCache>(f,
+	                                           m_bstore->knobs.read_block_size,
+	                                           m_bstore->knobs.read_ahead_blocks,
+	                                           m_bstore->knobs.concurrent_reads_per_file,
+	                                           m_bstore->knobs.read_cache_blocks_per_file);
+	return f;
 }
 
 Future<std::vector<std::string>> BackupContainerS3BlobStore::listURLs(Reference<S3BlobStoreEndpoint> bstore,
@@ -178,8 +193,13 @@ Future<std::vector<std::string>> BackupContainerS3BlobStore::listURLs(Reference<
 }
 
 Future<Reference<IBackupFile>> BackupContainerS3BlobStore::writeFile(const std::string& path) {
-	return Reference<IBackupFile>(new BackupContainerS3BlobStoreImpl::BackupFile(
-	    path, Reference<IAsyncFile>(new AsyncFileS3BlobStoreWrite(m_bstore, m_bucket, dataPath(path)))));
+	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreWrite>(m_bstore, m_bucket, dataPath(path));
+#if ENCRYPTION_ENABLED
+	if (usesEncryption()) {
+		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
+	}
+#endif
+	return Future<Reference<IBackupFile>>(makeReference<BackupContainerS3BlobStoreImpl::BackupFile>(path, f));
 }
 
 Future<Void> BackupContainerS3BlobStore::deleteFile(const std::string& path) {

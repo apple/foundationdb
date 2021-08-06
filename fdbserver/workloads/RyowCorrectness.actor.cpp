@@ -49,7 +49,7 @@ struct Operation {
 	Value value;
 
 	int limit;
-	bool reverse = false;
+	Reverse reverse{ Reverse::False };
 };
 
 // A workload which executes random sequences of operations on RYOW transactions and confirms the results
@@ -112,7 +112,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 						info.beginKey = selectRandomKey(data, .8);
 						info.endKey = selectRandomKey(data, .8);
 						info.limit = deterministicRandom()->randomInt(0, 1000);
-						info.reverse = (bool)deterministicRandom()->randomInt(0, 2);
+						info.reverse.set(deterministicRandom()->coinflip());
 
 						if (info.beginKey > info.endKey)
 							std::swap(info.beginKey, info.endKey);
@@ -123,7 +123,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 						info.beginSelector = generateKeySelector(data, 1000);
 						info.endSelector = generateKeySelector(data, 1000);
 						info.limit = deterministicRandom()->randomInt(0, 1000);
-						info.reverse = (bool)deterministicRandom()->randomInt(0, 2);
+						info.reverse.set(deterministicRandom()->coinflip());
 						break;
 					}
 

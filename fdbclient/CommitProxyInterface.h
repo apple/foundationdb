@@ -65,6 +65,7 @@ struct CommitProxyInterface {
 	bool operator==(CommitProxyInterface const& r) const { return id() == r.id(); }
 	bool operator!=(CommitProxyInterface const& r) const { return id() != r.id(); }
 	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
+	NetworkAddressList addresses() const { return commit.getEndpoint().addresses; }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -250,7 +251,7 @@ struct GetReadVersionRequest : TimedRequest {
 	                      uint32_t flags = 0,
 	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
 	                      Optional<UID> debugID = Optional<UID>())
-	  : spanContext(spanContext), transactionCount(transactionCount), priority(priority), flags(flags), tags(tags),
+	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
 	    debugID(debugID), maxVersion(maxVersion) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
@@ -326,7 +327,7 @@ struct GetKeyServerLocationsRequest {
 	                             int limit,
 	                             bool reverse,
 	                             Arena const& arena)
-	  : spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse), arena(arena) {}
+	  : arena(arena), spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

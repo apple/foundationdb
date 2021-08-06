@@ -183,6 +183,7 @@ ACTOR Future<Void> echoServer() {
 					req.reply.send(std::string(req.message.rbegin(), req.message.rend()));
 				}
 				when(state StreamRequest req = waitNext(echoServer.stream.getFuture())) {
+					req.reply.setByteLimit(1024);
 					state int i = 0;
 					for (; i < 100; ++i) {
 						wait(req.reply.onReady());

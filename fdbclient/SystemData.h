@@ -124,6 +124,10 @@ extern const KeyRangeRef tssQuarantineKeys;
 const Key tssQuarantineKeyFor(UID serverID);
 UID decodeTssQuarantineKey(KeyRef const&);
 
+// \xff/tssMismatch/[[Tuple<TSSStorageUID, timestamp, mismatchUID>]] := [[TraceEventString]]
+// For recording tss mismatch details in the system keyspace
+extern const KeyRangeRef tssMismatchKeys;
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
 //	storage server's corresponding TLog in order to apply mutations.

@@ -129,7 +129,7 @@ void decodeKeyServersValue(RangeResult result,
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
 	if (missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
-		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
+		TraceEvent(SevError, "AttemptedToDecodeMissingTag").log();
 		for (const KeyValueRef& kv : result) {
 			Tag tag = decodeServerTagValue(kv.value);
 			UID serverID = decodeServerTagKey(kv.key);
@@ -363,6 +363,8 @@ UID decodeTssQuarantineKey(KeyRef const& key) {
 	rd >> serverID;
 	return serverID;
 }
+
+const KeyRangeRef tssMismatchKeys(LiteralStringRef("\xff/tssMismatch/"), LiteralStringRef("\xff/tssMismatch0"));
 
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
 
