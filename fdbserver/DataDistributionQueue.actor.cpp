@@ -1267,6 +1267,7 @@ ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
                                   Reference<IDataDistributionTeam> destTeam,
                                   bool primary,
                                   TraceEvent* traceEvent) {
+    /*
 	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
@@ -1327,6 +1328,7 @@ ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
 	}
 
 	traceEvent->detail("ShardStillPresent", false);
+    */
 	return false;
 }
 
