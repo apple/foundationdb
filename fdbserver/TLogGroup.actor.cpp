@@ -109,7 +109,7 @@ void TLogGroupCollection::addWorkers(
 
 void TLogGroupCollection::addWorkers(const std::vector<ptxn::TLogInterface_PassivelyPull>& logWorkers) {
 	for (const auto& worker : logWorkers) {
-		TraceEvent("TLogGroupAddWorker").detail("ID", worker.id()).detail("Address", worker.address());
+		TraceEvent("TLogGroupAddWorker").detail("WorkerID", worker.id()).detail("Address", worker.address());
 		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
 	}
 }
