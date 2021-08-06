@@ -424,6 +424,8 @@ public:
 	// be 0) (or may throw an error if the connection dies)
 	virtual int read(uint8_t* begin, uint8_t* end) = 0;
 
+	virtual Future<int> asyncRead(uint8_t* begin, uint8_t* end) = 0;
+
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of
 	// bytes written (might be 0) (or may throw an error if the connection dies) The SendBuffer chain cannot be empty,
 	// and the limit must be positive. Important non-obvious behavior:  The caller is committing to write the contents
@@ -433,6 +435,8 @@ public:
 	// to limitations of TLSConnection, callers must also avoid reallocations that reduce the amount of written data in
 	// the first buffer in the chain.
 	virtual int write(SendBuffer const* buffer, int limit = std::numeric_limits<int>::max()) = 0;
+
+	virtual Future<int> asyncWrite(SendBuffer const* buffer, int limit = std::numeric_limits<int>::max()) = 0;
 
 	// Returns the network address and port of the other end of the connection.  In the case of an incoming connection,
 	// this may not be an address we can connect to!

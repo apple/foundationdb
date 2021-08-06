@@ -364,6 +364,45 @@ public:
 	}
 };
 
+class BindPromiseInt {
+	Promise<int> p;
+	const char* errContext;
+	UID errID;
+
+public:
+	BindPromiseInt(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
+	BindPromiseInt(BindPromiseInt const& r) : p(r.p), errContext(r.errContext), errID(r.errID) {}
+	BindPromiseInt(BindPromiseInt&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+
+	Future<int> getFuture() { return p.getFuture(); }
+
+	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
+		try {
+			if (error) {
+				if (error == boost::asio::error::would_block) {
+					++g_net2->countWouldBlock;
+					p.send(int(0));
+				} else {
+					// Log the error...
+					{
+						TraceEvent evt(SevWarn, errContext, errID);
+						evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
+					}
+
+					p.sendError(connection_failed());
+				}
+			} else {
+				ASSERT(bytesWritten);
+				p.send(int(bytesWritten));
+			}
+		} catch (Error& e) {
+			p.sendError(e);
+		} catch (...) {
+			p.sendError(unknown_error());
+		}
+	}
+};
+
 class Connection final : public IConnection, ReferenceCounted<Connection> {
 public:
 	void addref() override { ReferenceCounted<Connection>::addref(); }
@@ -422,6 +461,10 @@ public:
 		socket.async_read_some(boost::asio::null_buffers(), std::move(p));
 		return f;
 	}
+
+	Future<int> asyncRead(uint8_t* begin, uint8_t* end) override { return asyncRead(this, begin, end); };
+
+	Future<int> asyncWrite(SendBuffer const* data, int limit) override { return asyncWrite(this, data, limit); }
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might
 	// be 0)
@@ -529,6 +572,46 @@ private:
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
+	}
+
+	ACTOR static Future<int> asyncRead(Connection* self, uint8_t* begin, uint8_t* end) {
+		BindPromiseInt p("N2_AsyncReadError", self->id);
+		auto f = p.getFuture();
+		++g_net2->countReads;
+		size_t toRead = end - begin;
+		self->socket.async_read_some(boost::asio::mutable_buffers_1(begin, toRead), std::move(p));
+		try {
+			int size = wait(f);
+			g_net2->bytesReceived += size;
+			return size;
+		} catch (Error& err) {
+			self->closeSocket();
+			throw err;
+		}
+	}
+
+	ACTOR static Future<int> asyncWrite(Connection* self, SendBuffer const* data, int limit) {
+		BindPromiseInt p("N2_AsyncWriteError", self->id);
+		auto f = p.getFuture();
+		++g_net2->countWrites;
+		self->socket.async_write_some(
+		    boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()),
+		    std::move(p));
+		try {
+			int size = wait(f);
+			return size;
+		} catch (Error& err) {
+			ASSERT(limit > 0);
+			bool notEmpty = false;
+			for (auto p = data; p; p = p->next)
+				if (p->bytes_written - p->bytes_sent > 0) {
+					notEmpty = true;
+					break;
+				}
+			ASSERT(notEmpty);
+			self->closeSocket();
+			throw err;
+		}
 	}
 };
 
@@ -1002,6 +1085,10 @@ public:
 		return f;
 	}
 
+	Future<int> asyncRead(uint8_t* begin, uint8_t* end) override { return asyncRead(this, begin, end); }
+
+	Future<int> asyncWrite(SendBuffer const* buffer, int limit) override { return asyncWrite(this, buffer, limit); }
+
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might
 	// be 0)
 	int read(uint8_t* begin, uint8_t* end) override {
@@ -1107,6 +1194,16 @@ private:
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
+	}
+
+	ACTOR static Future<int> asyncRead(SSLConnection* self, uint8_t* begin, uint8_t* end) {
+		wait(self->onReadable());
+		return self->read(begin, end);
+	}
+
+	ACTOR static Future<int> asyncWrite(SSLConnection* self, SendBuffer const* buffer, int limit) {
+		wait(self->onWritable());
+		return self->write(buffer, limit);
 	}
 };
 

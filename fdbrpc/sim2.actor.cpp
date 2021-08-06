@@ -222,6 +222,10 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		stopReceive = delay(1.0);
 	}
 
+	Future<int> asyncRead(uint8_t* begin, uint8_t* end) override { return asyncRead(this, begin, end); }
+
+	Future<int> asyncWrite(SendBuffer const* buffer, int limit) override { return asyncWrite(this, buffer, limit); }
+
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might
 	// be 0) (or may throw an error if the connection dies)
 	int read(uint8_t* begin, uint8_t* end) override {
@@ -381,6 +385,16 @@ private:
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
 			throw;
 		}
+	}
+
+	ACTOR static Future<int> asyncRead(Sim2Conn* self, uint8_t* begin, uint8_t* end) {
+		wait(self->onReadable());
+		return self->read(begin, end);
+	}
+
+	ACTOR static Future<int> asyncWrite(Sim2Conn* self, SendBuffer const* buffer, int limit) {
+		wait(self->onWritable());
+		return self->write(buffer, limit);
 	}
 
 	void rollRandomClose() {
