@@ -3823,7 +3823,10 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			self->masterProcessId = w.locality.processId();
 		}
 		if (configBroadcaster != nullptr) {
-			self->addActor.send(configBroadcaster->registerWorker(req.lastSeenKnobVersion, req.knobConfigClassSet, self->id_worker[w.locality.processId()].watcher, &self->id_worker[w.locality.processId()].details));
+			self->addActor.send(configBroadcaster->registerWorker(req.lastSeenKnobVersion,
+			                                                      req.knobConfigClassSet,
+			                                                      self->id_worker[w.locality.processId()].watcher,
+			                                                      &self->id_worker[w.locality.processId()].details));
 		}
 		checkOutstandingRequests(self);
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
@@ -3844,7 +3847,8 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
 		}
 		if (configBroadcaster != nullptr) {
-			self->addActor.send(configBroadcaster->registerWorker(req.lastSeenKnobVersion, req.knobConfigClassSet, info->second.watcher, &info->second.details));
+			self->addActor.send(configBroadcaster->registerWorker(
+			    req.lastSeenKnobVersion, req.knobConfigClassSet, info->second.watcher, &info->second.details));
 		}
 		checkOutstandingRequests(self);
 	} else {

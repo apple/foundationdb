@@ -263,7 +263,6 @@ class LocalConfigurationImpl {
 		++self->changeRequestsFetched;
 		for (const auto& versionedMutation : changes) {
 			ASSERT_GT(versionedMutation.version, self->lastSeenVersion);
-			TraceEvent("LUKAS_addChanges").detail("Version", versionedMutation.version).detail("Key", versionedMutation.mutation.getKnobName()).detail("Value", versionedMutation.mutation.getValue().toString()).detail("ConfigClass", versionedMutation.mutation.getConfigClass());
 			++self->mutations;
 			const auto& mutation = versionedMutation.mutation;
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
@@ -316,8 +315,7 @@ public:
 	                       IsTest isTest)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"),
 	    configKnobOverrides(configPath), manualKnobOverrides(manualKnobOverrides), cc("LocalConfiguration"),
-	    snapshots("Snapshots", cc),
-	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc) {
+	    snapshots("Snapshots", cc), changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc) {
 		if (isTest) {
 			testKnobCollection =
 			    IKnobCollection::create(IKnobCollection::Type::TEST,

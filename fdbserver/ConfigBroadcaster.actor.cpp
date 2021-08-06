@@ -54,69 +54,69 @@ class ConfigBroadcasterImpl {
 	// pending requests with affected configuration classes
 	/*
 	class PendingRequestStore {
-		using Req = ConfigBroadcastFollowerGetChangesRequest;
-		std::map<Key, std::set<Endpoint::Token>> configClassToTokens;
-		std::map<Endpoint::Token, Req> tokenToRequest;
+	    using Req = ConfigBroadcastFollowerGetChangesRequest;
+	    std::map<Key, std::set<Endpoint::Token>> configClassToTokens;
+	    std::map<Endpoint::Token, Req> tokenToRequest;
 
 	public:
-		void addRequest(Req const& req) {
-			auto token = req.reply.getEndpoint().token;
-			tokenToRequest[token] = req;
-			for (const auto& configClass : req.configClassSet.getClasses()) {
-				configClassToTokens[configClass].insert(token);
-			}
-		}
+	    void addRequest(Req const& req) {
+	        auto token = req.reply.getEndpoint().token;
+	        tokenToRequest[token] = req;
+	        for (const auto& configClass : req.configClassSet.getClasses()) {
+	            configClassToTokens[configClass].insert(token);
+	        }
+	    }
 
-		std::vector<Req> getRequestsToNotify(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes) const {
-			std::set<Endpoint::Token> tokenSet;
-			for (const auto& change : changes) {
-				if (!change.mutation.getConfigClass().present()) {
-					// Update everything
-					for (const auto& [token, req] : tokenToRequest) {
-						if (req.lastSeenVersion < change.version) {
-							tokenSet.insert(token);
-						}
-					}
-				} else {
-					Key configClass = change.mutation.getConfigClass().get();
-					if (configClassToTokens.count(configClass)) {
-						auto tokens = get(configClassToTokens, Key(change.mutation.getConfigClass().get()));
-						for (const auto& token : tokens) {
-							auto req = get(tokenToRequest, token);
-							if (req.lastSeenVersion < change.version) {
-								tokenSet.insert(token);
-							} else {
-								TEST(true); // Worker is ahead of config broadcaster
-							}
-						}
-					}
-				}
-			}
-			std::vector<Req> result;
-			for (const auto& token : tokenSet) {
-				result.push_back(get(tokenToRequest, token));
-			}
-			return result;
-		}
+	    std::vector<Req> getRequestsToNotify(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes) const {
+	        std::set<Endpoint::Token> tokenSet;
+	        for (const auto& change : changes) {
+	            if (!change.mutation.getConfigClass().present()) {
+	                // Update everything
+	                for (const auto& [token, req] : tokenToRequest) {
+	                    if (req.lastSeenVersion < change.version) {
+	                        tokenSet.insert(token);
+	                    }
+	                }
+	            } else {
+	                Key configClass = change.mutation.getConfigClass().get();
+	                if (configClassToTokens.count(configClass)) {
+	                    auto tokens = get(configClassToTokens, Key(change.mutation.getConfigClass().get()));
+	                    for (const auto& token : tokens) {
+	                        auto req = get(tokenToRequest, token);
+	                        if (req.lastSeenVersion < change.version) {
+	                            tokenSet.insert(token);
+	                        } else {
+	                            TEST(true); // Worker is ahead of config broadcaster
+	                        }
+	                    }
+	                }
+	            }
+	        }
+	        std::vector<Req> result;
+	        for (const auto& token : tokenSet) {
+	            result.push_back(get(tokenToRequest, token));
+	        }
+	        return result;
+	    }
 
-		std::vector<Req> getOutdatedRequests(Version newSnapshotVersion) {
-			std::vector<Req> result;
-			for (const auto& [token, req] : tokenToRequest) {
-				if (req.lastSeenVersion < newSnapshotVersion) {
-					result.push_back(req);
-				}
-			}
-			return result;
-		}
+	    std::vector<Req> getOutdatedRequests(Version newSnapshotVersion) {
+	        std::vector<Req> result;
+	        for (const auto& [token, req] : tokenToRequest) {
+	            if (req.lastSeenVersion < newSnapshotVersion) {
+	                result.push_back(req);
+	            }
+	        }
+	        return result;
+	    }
 
-		void removeRequest(Req const& req) {
-			auto token = req.reply.getEndpoint().token;
-			for (const auto& configClass : req.configClassSet.getClasses()) {
-				remove(get(configClassToTokens, configClass), token);
-				// TODO: Don't leak config classes
-			}
-			remove(tokenToRequest, token);
-		}
+	    void removeRequest(Req const& req) {
+	        auto token = req.reply.getEndpoint().token;
+	        for (const auto& configClass : req.configClassSet.getClasses()) {
+	            remove(get(configClassToTokens, configClass), token);
+	            // TODO: Don't leak config classes
+	        }
+	        remove(tokenToRequest, token);
+	    }
 	} pending;
 	*/
 	std::map<ConfigKey, KnobValue> snapshot;
@@ -138,7 +138,9 @@ class ConfigBroadcasterImpl {
 
 	// Push changes to the specified clients.
 	template <class Changes>
-	Future<Void> pushChanges(std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>>::iterator begin, std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>>::iterator end, Changes const& changes) {
+	Future<Void> pushChanges(std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>>::iterator begin,
+	                         std::vector<std::tuple<ConfigClassSet, Version, WorkerDetails*>>::iterator end,
+	                         Changes const& changes) {
 		std::vector<Future<Void>> responses;
 		for (auto it = begin; it != end; ++it) {
 			auto& [configClassSet, lastSeenVersion, worker] = *it;
@@ -213,7 +215,11 @@ class ConfigBroadcasterImpl {
 	}
 
 public:
-	Future<Void> registerWorker(ConfigBroadcaster* self, Version lastSeenVersion, ConfigClassSet configClassSet, Future<Void>& watcher, WorkerDetails* worker) {
+	Future<Void> registerWorker(ConfigBroadcaster* self,
+	                            Version lastSeenVersion,
+	                            ConfigClassSet configClassSet,
+	                            Future<Void>& watcher,
+	                            WorkerDetails* worker) {
 		actors.add(consumer->consume(*self));
 		// TODO: Use `watcher` to detect death of client
 		workers.push_back(std::make_tuple(std::move(configClassSet), lastSeenVersion, worker));
@@ -338,7 +344,10 @@ ConfigBroadcaster& ConfigBroadcaster::operator=(ConfigBroadcaster&&) = default;
 
 ConfigBroadcaster::~ConfigBroadcaster() = default;
 
-Future<Void> ConfigBroadcaster::registerWorker(Version lastSeenVersion, ConfigClassSet configClassSet, Future<Void>& watcher, WorkerDetails* worker) {
+Future<Void> ConfigBroadcaster::registerWorker(Version lastSeenVersion,
+                                               ConfigClassSet configClassSet,
+                                               Future<Void>& watcher,
+                                               WorkerDetails* worker) {
 	return impl().registerWorker(this, lastSeenVersion, configClassSet, watcher, worker);
 }
 
@@ -431,7 +440,7 @@ namespace {
 // 	ConfigBroadcasterImpl::runPendingRequestStoreTest(false, 2);
 // 	return Void();
 // }
-// 
+//
 // TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Internal/PendingRequestStore/GlobalMutation") {
 // 	ConfigBroadcasterImpl::runPendingRequestStoreTest(true, 4);
 // 	return Void();
