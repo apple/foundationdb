@@ -441,7 +441,6 @@ if __name__ == '__main__':
     # assertions will fail if fdbcli does not work as expected
     process_number = int(sys.argv[3])
     if process_number == 1:
-        # TODO: disable for now, the change can cause the database unavailable
         advanceversion()
         cache_range()
         consistencycheck()
