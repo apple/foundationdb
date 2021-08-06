@@ -138,6 +138,7 @@ private:
 	std::string directory;
 	std::string processName;
 	Optional<NetworkAddress> localAddress;
+	std::string tracePartialFileSuffix;
 
 	Reference<IThreadPool> writer;
 	uint64_t rollsize;
@@ -294,21 +295,23 @@ public:
 	          std::string const& timestamp,
 	          uint64_t rs,
 	          uint64_t maxLogsSize,
-	          Optional<NetworkAddress> na) {
+	          Optional<NetworkAddress> na,
+	          std::string const& tracePartialFileSuffix) {
 		ASSERT(!writer && !opened);
 
 		this->directory = directory;
 		this->processName = processName;
 		this->logGroup = logGroup;
 		this->localAddress = na;
+		this->tracePartialFileSuffix = tracePartialFileSuffix;
 
 		basename = format("%s/%s.%s.%s",
 		                  directory.c_str(),
 		                  processName.c_str(),
 		                  timestamp.c_str(),
 		                  deterministicRandom()->randomAlphaNumeric(6).c_str());
-		logWriter = Reference<ITraceLogWriter>(
-		    new FileTraceLogWriter(directory, processName, basename, formatter->getExtension(), maxLogsSize, [this]() {
+		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(
+		    directory, processName, basename, formatter->getExtension(), tracePartialFileSuffix, maxLogsSize, [this]() {
 			    barriers->triggerAll();
 		    }));
 
@@ -654,7 +657,8 @@ void openTraceFile(const NetworkAddress& na,
                    uint64_t maxLogsSize,
                    std::string directory,
                    std::string baseOfBase,
-                   std::string logGroup) {
+                   std::string logGroup,
+                   std::string tracePartialFileSuffix) {
 	if (g_traceLog.isOpen())
 		return;
 
@@ -673,7 +677,8 @@ void openTraceFile(const NetworkAddress& na,
 	                format("%lld", time(NULL)),
 	                rollsize,
 	                maxLogsSize,
-	                !g_network->isSimulated() ? na : Optional<NetworkAddress>());
+	                !g_network->isSimulated() ? na : Optional<NetworkAddress>(),
+	                tracePartialFileSuffix);
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();
