@@ -23,14 +23,15 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/ConfigFollowerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/flow.h"
 #include <memory>
 
 /*
  * The configuration broadcaster runs on the cluster controller. The broadcaster listens uses
- * an IConfigConsumer instantitation to consume updates from the configuration database, and broadcasts
+ * an IConfigConsumer instantiation to consume updates from the configuration database, and broadcasts
  * these updates to all workers' local configurations
  */
 class ConfigBroadcaster {
@@ -43,7 +44,7 @@ public:
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
-	Future<Void> serve(ConfigBroadcastFollowerInterface const&);
+	Future<Void> registerWorker(Version lastSeenVersion, ConfigClassSet configClassSet, Future<Void>& watcher, WorkerDetails* worker);
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                  Version mostRecentVersion,
 	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
