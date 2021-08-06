@@ -368,13 +368,13 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "SPC_GetMoreB_Error", self->randomID).detail("Error", e.what());
-
-			self->peekReplyStream.reset();
+			TraceEvent(SevDebug, "SPC_GetMoreB_Error").error(e, true);
 			if (e.code() == error_code_connection_failed || e.code() == error_code_operation_obsolete) {
 				// NOTE: delay in order to avoid the endless retry loop block other tasks
+				self->peekReplyStream.reset();
 				wait(delay(0));
 			} else if (e.code() == error_code_end_of_stream) {
+				self->peekReplyStream.reset();
 				self->end.reset(self->messageVersion.version);
 				return Void();
 			} else {
@@ -425,8 +425,8 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		// TODO: remove locality check when log router support streaming peek
-		if (usePeekStream && tag.locality >= 0) {
+		// TODO: add tagLocalityRemoteLog when log router support streaming peek
+		if (usePeekStream && (tag.locality >= 0 || tag.locality == tagLocalityLogRouter)) {
 			more = serverPeekStreamGetMore(this, taskID);
 		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
 			more = serverPeekParallelGetMore(this, taskID);
