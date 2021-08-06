@@ -1211,6 +1211,7 @@ void SimulationConfig::set_config(std::string config) {
 void SimulationConfig::setSplits(const TestConfig& testConfig) {
 	if (!testConfig.splits.empty()) {
 		splitsStr = toJSONString(testConfig.splits);
+		std::cout << "set splits: " << splitsStr << "\n";
 		db.set(configKeysPrefix.withSuffix("splits"_sr), StringRef(splitsStr));
 	}
 }

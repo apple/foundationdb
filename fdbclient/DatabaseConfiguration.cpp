@@ -405,7 +405,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
-	result["splits"] = getSplitJSON();
+	if (!splits.empty()) {
+		result["splits"] = getSplitJSON();
+	}
 	return result;
 }
 
