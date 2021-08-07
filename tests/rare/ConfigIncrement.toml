@@ -1,5 +1,5 @@
 [configuration]
-configDB = 'simple'
+configDB = 'random'
 
 [[test]]
 testTitle = 'ConfigIncrement'

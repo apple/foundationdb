@@ -200,3 +200,4 @@ struct ConfigCommitAnnotationRef {
 using ConfigCommitAnnotation = Standalone<ConfigCommitAnnotationRef>;
 
 ConfigDBType configDBTypeFromString(std::string const&);
+std::string configDBTypeToString(ConfigDBType);

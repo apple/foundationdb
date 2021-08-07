@@ -74,7 +74,7 @@ bool destructed = false;
 class TestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
-		using base_variant = std::variant<int, bool, std::string, std::vector<int>>;
+		using base_variant = std::variant<int, bool, std::string, std::vector<int>, ConfigDBType>;
 		using types =
 		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
 		std::unordered_map<std::string_view, types> confMap;
@@ -96,6 +96,18 @@ class TestConfig {
 			}
 			void operator()(Optional<std::vector<int>>* val) const {
 				std::vector<int> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+			void operator()(ConfigDBType* val) const {
+				if (value.as_string() == "random") {
+					*val = deterministicRandom()->coinflip() ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
+				} else {
+					*val = configDBTypeFromString(value.as_string());
+				}
+			}
+			void operator()(Optional<ConfigDBType>* val) const {
+				ConfigDBType res;
 				(*this)(&res);
 				*val = std::move(res);
 			}
@@ -128,6 +140,14 @@ class TestConfig {
 				std::vector<int> res;
 				(*this)(&res);
 				*val = std::move(res);
+			}
+			void operator()(ConfigDBType* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(Optional<ConfigDBType>* val) const {
+				Optional<std::string> optStr;
+				if (val->present()) {
+					optStr = configDBTypeToString(val->get());
+				}
+				evt.detail(key.c_str(), optStr);
 			}
 		};
 
@@ -228,14 +248,18 @@ class TestConfig {
 				isFirstTestInRestart = true;
 			}
 			if (attrib == "configDBType") {
-				configDBTypeString = value;
+				if (value == "random") {
+					configDBType = deterministicRandom()->coinflip() ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
+				} else {
+					configDBType = configDBTypeFromString(value);
+				}
 			}
 		}
 
 		ifs.close();
 	}
 
-	std::string configDBTypeString{ "disabled" };
+	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
 public:
 	int extraDB = 0;
@@ -265,7 +289,7 @@ public:
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
 
-	ConfigDBType getConfigDBType() const { return configDBTypeFromString(configDBTypeString); }
+	ConfigDBType getConfigDBType() const { return configDBType; }
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
 		if (data.is_table()) {
@@ -313,7 +337,7 @@ public:
 		    .add("machineCount", &machineCount)
 		    .add("processesPerMachine", &processesPerMachine)
 		    .add("coordinators", &coordinators)
-		    .add("configDB", &configDBTypeString);
+		    .add("configDB", &configDBType);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {

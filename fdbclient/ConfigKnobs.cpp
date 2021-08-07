@@ -129,6 +129,20 @@ ConfigDBType configDBTypeFromString(std::string const& str) {
 	}
 }
 
+std::string configDBTypeToString(ConfigDBType configDBType) {
+	switch (configDBType) {
+	case ConfigDBType::DISABLED:
+		return "disabled";
+	case ConfigDBType::SIMPLE:
+		return "simple";
+	case ConfigDBType::PAXOS:
+		return "paxos";
+	default:
+		ASSERT(false);
+		return "";
+	}
+}
+
 TEST_CASE("/fdbclient/ConfigDB/ConfigKey/EncodeDecode") {
 	Tuple tuple;
 	tuple << "class-A"_sr
