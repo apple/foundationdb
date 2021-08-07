@@ -116,30 +116,16 @@ std::string KnobValueRef::toString() const {
 	return std::visit(ToStringFunc{}, value);
 }
 
-std::string configDBToString(UseConfigDB configDB) {
-	switch (configDB) {
-	case UseConfigDB::DISABLED:
-		return "disabled";
-	case UseConfigDB::SIMPLE:
-		return "simple";
-	case UseConfigDB::PAXOS:
-		return "paxos";
-	default:
-		ASSERT(false);
-		return "";
-	}
-}
-
-UseConfigDB configDBFromString(std::string const& str) {
+ConfigDBType configDBTypeFromString(std::string const& str) {
 	if (str == "disabled") {
-		return UseConfigDB::DISABLED;
+		return ConfigDBType::DISABLED;
 	} else if (str == "simple") {
-		return UseConfigDB::SIMPLE;
+		return ConfigDBType::SIMPLE;
 	} else if (str == "paxos") {
-		return UseConfigDB::PAXOS;
+		return ConfigDBType::PAXOS;
 	} else {
 		TraceEvent(SevWarnAlways, "InvalidConfigDBString");
-		return UseConfigDB::DISABLED;
+		return ConfigDBType::DISABLED;
 	}
 }
 

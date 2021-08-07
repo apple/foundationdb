@@ -37,7 +37,7 @@
 struct NoKnobFound {};
 using ParsedKnobValue = std::variant<NoKnobFound, int, double, int64_t, bool, std::string>;
 
-enum class UseConfigDB {
+enum class ConfigDBType {
 	DISABLED,
 	SIMPLE,
 	PAXOS,

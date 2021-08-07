@@ -107,9 +107,9 @@ class ConfigIncrementWorkload : public TestWorkload {
 
 	Reference<ISingleThreadTransaction> getTransaction(Database cx) const {
 		ASSERT(g_network->isSimulated()); // TODO: Enforce elsewhere
-		ASSERT(g_simulator.configDB != UseConfigDB::DISABLED);
-		auto type = (g_simulator.configDB == UseConfigDB::SIMPLE) ? ISingleThreadTransaction::Type::SIMPLE_CONFIG
-		                                                          : ISingleThreadTransaction::Type::PAXOS_CONFIG;
+		ASSERT(g_simulator.configDBType != ConfigDBType::DISABLED);
+		auto type = (g_simulator.configDBType == ConfigDBType::SIMPLE) ? ISingleThreadTransaction::Type::SIMPLE_CONFIG
+		                                                               : ISingleThreadTransaction::Type::PAXOS_CONFIG;
 		return ISingleThreadTransaction::create(type, cx);
 	}
 

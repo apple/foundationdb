@@ -409,7 +409,7 @@ public:
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 	TSSMode tssMode;
-	UseConfigDB configDB;
+	ConfigDBType configDBType;
 
 	// Used by workloads that perform reconfigurations
 	int testerCount;

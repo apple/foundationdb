@@ -293,16 +293,16 @@ public:
 		TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
 	}
 
-	ConfigBroadcasterImpl(ServerCoordinators const& coordinators, UseConfigDB useConfigDB) : ConfigBroadcasterImpl() {
-		if (useConfigDB != UseConfigDB::DISABLED) {
-			if (useConfigDB == UseConfigDB::SIMPLE) {
+	ConfigBroadcasterImpl(ServerCoordinators const& coordinators, ConfigDBType configDBType) : ConfigBroadcasterImpl() {
+		if (configDBType != ConfigDBType::DISABLED) {
+			if (configDBType == ConfigDBType::SIMPLE) {
 				consumer = IConfigConsumer::createSimple(coordinators, 0.5, Optional<double>{});
 			} else {
 				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, Optional<double>{});
 			}
 			TraceEvent(SevDebug, "BroadcasterStartingConsumer", id)
 			    .detail("Consumer", consumer->getID())
-			    .detail("UsingSimpleConsumer", useConfigDB == UseConfigDB::SIMPLE);
+			    .detail("UsingSimpleConsumer", configDBType == ConfigDBType::SIMPLE);
 		}
 	}
 
@@ -369,8 +369,8 @@ public:
 ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
   : impl(PImpl<ConfigBroadcasterImpl>::create(cfi)) {}
 
-ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, UseConfigDB useConfigDB)
-  : impl(PImpl<ConfigBroadcasterImpl>::create(coordinators, useConfigDB)) {}
+ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, ConfigDBType configDBType)
+  : impl(PImpl<ConfigBroadcasterImpl>::create(coordinators, configDBType)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigBroadcaster&&) = default;
 

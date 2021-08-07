@@ -38,7 +38,7 @@ class ConfigBroadcaster {
 	PImpl<class ConfigBroadcasterImpl> impl;
 
 public:
-	explicit ConfigBroadcaster(ServerCoordinators const&, UseConfigDB);
+	explicit ConfigBroadcaster(ServerCoordinators const&, ConfigDBType);
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();

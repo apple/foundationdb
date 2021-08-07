@@ -199,5 +199,4 @@ struct ConfigCommitAnnotationRef {
 };
 using ConfigCommitAnnotation = Standalone<ConfigCommitAnnotationRef>;
 
-std::string configDBToString(UseConfigDB);
-UseConfigDB configDBFromString(std::string const&);
+ConfigDBType configDBTypeFromString(std::string const&);
