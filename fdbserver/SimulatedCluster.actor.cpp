@@ -227,10 +227,15 @@ class TestConfig {
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
+			if (attrib == "configDB") {
+				configDBString = value;
+			}
 		}
 
 		ifs.close();
 	}
+
+	std::string configDBString{ "disabled" };
 
 public:
 	int extraDB = 0;
@@ -259,6 +264,8 @@ public:
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
+
+	UseConfigDB getConfigDB() const { return configDBFromString(configDBString); }
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
 		if (data.is_table()) {
@@ -305,7 +312,8 @@ public:
 		    .add("StderrSeverity", &stderrSeverity)
 		    .add("machineCount", &machineCount)
 		    .add("processesPerMachine", &processesPerMachine)
-		    .add("coordinators", &coordinators);
+		    .add("coordinators", &coordinators)
+		    .add("configDB", &configDBString);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -438,7 +446,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
                                                          bool useSeedFile,
                                                          AgentMode runBackupAgents,
                                                          std::string whitelistBinPaths,
-                                                         ProtocolVersion protocolVersion) {
+                                                         ProtocolVersion protocolVersion,
+                                                         UseConfigDB configDB) {
 	state ISimulator::ProcessInfo* simProcess = g_simulator.getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
 	state int cycles = 0;
@@ -521,7 +530,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					                       whitelistBinPaths,
 					                       "",
 					                       {},
-					                       UseConfigDB::SIMPLE));
+					                       configDB));
 				}
 				if (runBackupAgents != AgentNone) {
 					futures.push_back(runBackup(connFile));
@@ -660,7 +669,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
                                     AgentMode runBackupAgents,
                                     bool sslOnly,
                                     std::string whitelistBinPaths,
-                                    ProtocolVersion protocolVersion) {
+                                    ProtocolVersion protocolVersion,
+                                    UseConfigDB configDB) {
 	state int bootCount = 0;
 	state std::vector<std::string> myFolders;
 	state std::vector<std::string> coordFolders;
@@ -730,7 +740,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          useSeedFile,
 					                                          agentMode,
 					                                          whitelistBinPaths,
-					                                          protocolVersion));
+					                                          protocolVersion,
+					                                          configDB));
 					g_simulator.setDiffProtocol = true;
 				} else {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
@@ -747,7 +758,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          useSeedFile,
 					                                          agentMode,
 					                                          whitelistBinPaths,
-					                                          g_network->protocolVersion()));
+					                                          g_network->protocolVersion(),
+					                                          configDB));
 				}
 				TraceEvent("SimulatedMachineProcess", randomId)
 				    .detail("Address", NetworkAddress(ips[i], listenPort, true, false))
@@ -973,6 +985,8 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
 
+	auto configDB = testConfig.getConfigDB();
+
 	// allows multiple ipAddr entries
 	ini.SetMultiKey();
 
@@ -1081,7 +1095,8 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 			                     AgentAddition,
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
 			                     whitelistBinPaths,
-			                     protocolVersion),
+			                     protocolVersion,
+			                     configDB),
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}
 
@@ -1667,6 +1682,10 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 	}
 }
 
+void setConfigDB(TestConfig const& testConfig) {
+	g_simulator.configDB = testConfig.getConfigDB();
+}
+
 // Generates and sets an appropriate configuration for the database according to
 // the provided testConfig. Some attributes are randomly generated for more coverage
 // of different combinations
@@ -1702,6 +1721,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 	setProcessesPerMachine(testConfig);
 	setTss(testConfig);
+	setConfigDB(testConfig);
 }
 
 // Configures the system according to the given specifications in order to run
@@ -1724,6 +1744,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	if (testConfig.configureLocked) {
 		startingConfigString += " locked";
 	}
+	auto configDB = testConfig.getConfigDB();
 	for (auto kv : startingConfigJSON) {
 		if ("tss_storage_engine" == kv.first) {
 			continue;
@@ -2006,7 +2027,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 			                                                      requiresExtraDBMachines ? AgentOnly : AgentAddition,
 			                                                      sslOnly,
 			                                                      whitelistBinPaths,
-			                                                      protocolVersion),
+			                                                      protocolVersion,
+			                                                      configDB),
 			                                     "SimulatedMachine"));
 
 			if (requiresExtraDBMachines) {
@@ -2032,7 +2054,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 				                                                      AgentNone,
 				                                                      sslOnly,
 				                                                      whitelistBinPaths,
-				                                                      protocolVersion),
+				                                                      protocolVersion,
+				                                                      configDB),
 				                                     "SimulatedMachine"));
 			}
 
@@ -2071,7 +2094,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		                                  AgentNone,
 		                                  sslEnabled && sslOnly,
 		                                  whitelistBinPaths,
-		                                  protocolVersion),
+		                                  protocolVersion,
+		                                  configDB),
 		                 "SimulatedTesterMachine"));
 	}
 

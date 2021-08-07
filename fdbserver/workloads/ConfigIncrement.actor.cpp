@@ -28,7 +28,6 @@ class ConfigIncrementWorkload : public TestWorkload {
 	int incrementsPerActor{ 0 };
 	Version lastKnownCommittedVersion{ ::invalidVersion };
 	int lastKnownValue{ -1 };
-	bool useSimpleConfigDB{ true };
 	double meanSleepWithinTransactions{ 0.01 };
 	double meanSleepBetweenTransactions{ 0.1 };
 
@@ -107,8 +106,10 @@ class ConfigIncrementWorkload : public TestWorkload {
 	}
 
 	Reference<ISingleThreadTransaction> getTransaction(Database cx) const {
-		auto type = useSimpleConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG
-		                              : ISingleThreadTransaction::Type::PAXOS_CONFIG;
+		ASSERT(g_network->isSimulated()); // TODO: Enforce elsewhere
+		ASSERT(g_simulator.configDB != UseConfigDB::DISABLED);
+		auto type = (g_simulator.configDB == UseConfigDB::SIMPLE) ? ISingleThreadTransaction::Type::SIMPLE_CONFIG
+		                                                          : ISingleThreadTransaction::Type::PAXOS_CONFIG;
 		return ISingleThreadTransaction::create(type, cx);
 	}
 
@@ -117,7 +118,6 @@ public:
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries") {
 		incrementActors = getOption(options, "incrementActors"_sr, 10);
 		incrementsPerActor = getOption(options, "incrementsPerActor"_sr, 10);
-		useSimpleConfigDB = getOption(options, "useSimpleConfigDB"_sr, true);
 		meanSleepWithinTransactions = getOption(options, "meanSleepWithinTransactions"_sr, 0.01);
 		meanSleepBetweenTransactions = getOption(options, "meanSleepBetweenTransactions"_sr, 0.1);
 	}
