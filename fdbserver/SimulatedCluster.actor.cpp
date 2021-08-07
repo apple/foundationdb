@@ -117,13 +117,11 @@ class TestConfig {
 			std::string key;
 			TraceEvent& evt;
 			trace_visitor(std::string const& key, TraceEvent& e) : key("Key" + key), evt(e) {}
-			void operator()(int* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(Optional<int>* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(bool* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(Optional<bool>* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(std::string* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(Optional<std::string>* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(std::vector<int>* val) const {
+			template <class T>
+			void operator()(T const* val) const {
+				evt.detail(key.c_str(), *val);
+			}
+			void operator()(std::vector<int> const* val) const {
 				if (val->empty()) {
 					evt.detail(key.c_str(), "[]");
 					return;
@@ -136,13 +134,15 @@ class TestConfig {
 				value << "]";
 				evt.detail(key.c_str(), value.str());
 			}
-			void operator()(Optional<std::vector<int>>* val) const {
-				std::vector<int> res;
-				(*this)(&res);
-				*val = std::move(res);
+			void operator()(Optional<std::vector<int>> const* val) const {
+				if (!val->present()) {
+					evt.detail(key.c_str(), *val);
+				} else {
+					(*this)(&(val->get()));
+				}
 			}
-			void operator()(ConfigDBType* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(Optional<ConfigDBType>* val) const {
+			void operator()(ConfigDBType const* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(Optional<ConfigDBType> const* val) const {
 				Optional<std::string> optStr;
 				if (val->present()) {
 					optStr = configDBTypeToString(val->get());
