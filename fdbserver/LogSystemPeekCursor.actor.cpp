@@ -426,7 +426,7 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 		return Void();
 	if (!more.isValid() || more.isReady()) {
 		// TODO: add tagLocalityRemoteLog when log router support streaming peek
-		if (usePeekStream && (tag.locality >= 0 || tag.locality == tagLocalityLogRouter)) {
+		if (usePeekStream && (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
 			more = serverPeekStreamGetMore(this, taskID);
 		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
 			more = serverPeekParallelGetMore(this, taskID);

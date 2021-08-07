@@ -1209,13 +1209,13 @@ void peekMessagesFromMemory(Reference<LogData> self,
 // Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
 ACTOR template <typename PromiseType>
 Future<Void> tLogPeekMessages(PromiseType replyPromise,
-							  TLogData* self,
-							  Reference<LogData> logData,
-							  Version reqBegin,
-							  Tag reqTag,
-							  bool reqReturnIfBlocked = false,
-							  bool reqOnlySpilled = false,
-							  Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>()) {
+                              TLogData* self,
+                              Reference<LogData> logData,
+                              Version reqBegin,
+                              Tag reqTag,
+                              bool reqReturnIfBlocked = false,
+                              bool reqOnlySpilled = false,
+                              Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>()) {
 	state BinaryWriter messages(Unversioned());
 	state BinaryWriter messages2(Unversioned());
 	state int sequence = -1;
@@ -1231,7 +1231,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			peekId = reqSequence.get().first;
 			sequence = reqSequence.get().second;
 			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
-			logData->peekTracker.find(peekId) == logData->peekTracker.end()) {
+			    logData->peekTracker.find(peekId) == logData->peekTracker.end()) {
 				throw operation_obsolete();
 			}
 			auto& trackerData = logData->peekTracker[peekId];
@@ -1241,7 +1241,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			}
 			auto seqBegin = trackerData.sequence_version.begin();
 			while (trackerData.sequence_version.size() &&
-			seqBegin->first <= sequence - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
+			       seqBegin->first <= sequence - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
 				if (seqBegin->second.canBeSet()) {
 					seqBegin->second.sendError(operation_obsolete());
 				}
@@ -1369,10 +1369,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		}
 
 		RangeResult kvs = wait(self->persistentData->readRange(
-			KeyRangeRef(persistTagMessagesKey(logData->logId, reqTag, reqBegin),
-						persistTagMessagesKey(logData->logId, reqTag, logData->persistentDataDurableVersion + 1)),
-						SERVER_KNOBS->DESIRED_TOTAL_BYTES,
-						SERVER_KNOBS->DESIRED_TOTAL_BYTES));
+		    KeyRangeRef(persistTagMessagesKey(logData->logId, reqTag, reqBegin),
+		                persistTagMessagesKey(logData->logId, reqTag, logData->persistentDataDurableVersion + 1)),
+		    SERVER_KNOBS->DESIRED_TOTAL_BYTES,
+		    SERVER_KNOBS->DESIRED_TOTAL_BYTES));
 
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().address).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
 
@@ -1460,14 +1460,9 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 		state Promise<TLogPeekReply> promise;
 		state Future<TLogPeekReply> future(promise.getFuture());
 		try {
-			wait(req.reply.onReady() &&
-			tLogPeekMessages(promise, self, logData, begin, req.tag, req.returnIfBlocked, onlySpilled));
-			ASSERT(future.isReady());
-			if (future.isError()) {
-				throw future.getError();
-			}
+			wait(req.reply.onReady() && store(reply.rep, future) &&
+			     tLogPeekMessages(promise, self, logData, begin, req.tag, req.returnIfBlocked, onlySpilled));
 
-			reply.rep = future.get();
 			reply.rep.begin = begin;
 			req.reply.send(reply);
 			begin = reply.rep.end;
@@ -1986,7 +1981,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
 			logData->addActor.send(tLogPeekMessages(
-				req.reply, self, logData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
+			    req.reply, self, logData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
