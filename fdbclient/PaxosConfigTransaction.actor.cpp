@@ -22,24 +22,81 @@
 #include "fdbclient/PaxosConfigTransaction.h"
 #include "flow/actorcompiler.h" // must be last include
 
+namespace {
+
+class GetGenerationQuorum {
+	std::vector<Future<Void>> futures;
+	std::map<ConfigGeneration, size_t> seenGenerations;
+	Promise<ConfigGeneration> result;
+	size_t totalRepliesReceived{ 0 };
+	size_t maxAgreement{ 0 };
+	size_t size{ 0 };
+	Optional<Version> lastSeenLiveVersion;
+
+	ACTOR static Future<Void> handleReplyActor(GetGenerationQuorum* self,
+	                                           Future<ConfigTransactionGetGenerationReply> replyFuture) {
+		ConfigTransactionGetGenerationReply reply = wait(replyFuture);
+		++self->totalRepliesReceived;
+		auto gen = reply.generation;
+		self->lastSeenLiveVersion = std::max(gen.liveVersion, self->lastSeenLiveVersion.orDefault(::invalidVersion));
+		auto& count = self->seenGenerations[gen];
+		++count;
+		self->maxAgreement = std::max(count, self->maxAgreement);
+		if (count == self->size / 2 + 1) {
+			self->result.send(gen); // self may be destroyed here
+		} else if (self->maxAgreement + (self->size - self->totalRepliesReceived) < (self->size / 2 + 1)) {
+			self->result.sendError(failed_to_reach_quorum());
+		}
+		return Void();
+	}
+
+public:
+	GetGenerationQuorum(size_t size, Optional<Version> const& lastSeenLiveVersion)
+	  : size(size), lastSeenLiveVersion(lastSeenLiveVersion) {
+		futures.reserve(size);
+	}
+	void addReplyCallback(Future<ConfigTransactionGetGenerationReply> replyFuture) {
+		futures.push_back(handleReplyActor(this, replyFuture));
+	}
+	Future<ConfigGeneration> getGeneration() const { return result.getFuture(); }
+	Optional<Version> getLastSeenLiveVersion() const { return lastSeenLiveVersion; }
+};
+
+} // namespace
+
 class PaxosConfigTransactionImpl {
 	ConfigTransactionCommitRequest toCommit;
 	Future<ConfigGeneration> getGenerationFuture;
 	std::vector<ConfigTransactionInterface> ctis;
 	int numRetries{ 0 };
 	bool committed{ false };
+	Optional<Version> lastSeenLiveVersion;
 	Optional<UID> dID;
 	Database cx;
 
 	ACTOR static Future<ConfigGeneration> getGeneration(PaxosConfigTransactionImpl* self) {
-		state std::vector<Future<ConfigTransactionGetGenerationReply>> getGenerationFutures;
-		getGenerationFutures.reserve(self->ctis.size());
-		for (auto const& cti : self->ctis) {
-			getGenerationFutures.push_back(cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{}));
+		state GetGenerationQuorum quorum(self->ctis.size(), self->lastSeenLiveVersion);
+		state int retries = 0;
+		loop {
+			for (auto const& cti : self->ctis) {
+				quorum.addReplyCallback(
+				    cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }));
+			}
+			try {
+				state ConfigGeneration gen = wait(quorum.getGeneration());
+				wait(delay(0.0)); // Let reply callback actors finish before destructing quorum
+				return gen;
+			} catch (Error& e) {
+				if (e.code() == error_code_failed_to_reach_quorum) {
+					TEST(true); // Failed to reach quorum getting generation
+					wait(delayJittered(0.01 * (1 << retries)));
+					++retries;
+				} else {
+					throw e;
+				}
+			}
+			self->lastSeenLiveVersion = quorum.getLastSeenLiveVersion();
 		}
-		// FIXME: Must tolerate failures and disagreement
-		wait(waitForAll(getGenerationFutures));
-		return getGenerationFutures[0].get().generation;
 	}
 
 	ACTOR static Future<Optional<Value>> get(PaxosConfigTransactionImpl* self, Key key) {
@@ -48,7 +105,7 @@ class PaxosConfigTransactionImpl {
 		}
 		state ConfigKey configKey = ConfigKey::decodeKey(key);
 		ConfigGeneration generation = wait(self->getGenerationFuture);
-		// TODO: Load balance
+		// TODO: Load balance, and only send request to replicas that we have gotten the current generation from
 		ConfigTransactionGetReply reply =
 		    wait(self->ctis[0].get.getReply(ConfigTransactionGetRequest{ generation, configKey }));
 		if (reply.value.present()) {

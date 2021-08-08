@@ -66,13 +66,16 @@ class ConfigIncrementWorkload : public TestWorkload {
 				try {
 					state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
 					state int currentValue = wait(get(tr));
+					ASSERT_GE(currentValue, self->lastKnownValue);
 					set(tr, currentValue + 1);
 					wait(delay(deterministicRandom()->random01() * 2 * self->meanSleepWithinTransactions));
 					wait(tr->commit());
 					ASSERT_GT(tr->getCommittedVersion(), self->lastKnownCommittedVersion);
-					ASSERT_GE(currentValue, self->lastKnownValue);
 					self->lastKnownCommittedVersion = tr->getCommittedVersion();
 					self->lastKnownValue = currentValue + 1;
+					TraceEvent("ConfigIncrementSucceeded")
+					    .detail("CommittedVersion", self->lastKnownCommittedVersion)
+					    .detail("CommittedValue", self->lastKnownValue);
 					++self->transactions;
 					++trsComplete;
 					wait(delay(deterministicRandom()->random01() * 2 * self->meanSleepBetweenTransactions));

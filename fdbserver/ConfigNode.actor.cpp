@@ -203,6 +203,10 @@ class ConfigNodeImpl {
 	ACTOR static Future<Void> getNewGeneration(ConfigNodeImpl* self, ConfigTransactionGetGenerationRequest req) {
 		state ConfigGeneration generation = wait(getGeneration(self));
 		++generation.liveVersion;
+		if (req.lastSeenLiveVersion.present()) {
+			TEST(req.lastSeenLiveVersion.get() >= generation.liveVersion); // Node is lagging behind some other node
+			generation.liveVersion = std::max(generation.liveVersion, req.lastSeenLiveVersion.get() + 1);
+		}
 		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
 		wait(self->kvStore->commit());
 		req.reply.send(ConfigTransactionGetGenerationReply{ generation });

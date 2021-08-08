@@ -55,6 +55,22 @@ bool ConfigGeneration::operator!=(ConfigGeneration const& rhs) const {
 	return !(*this == rhs);
 }
 
+bool ConfigGeneration::operator<(ConfigGeneration const& rhs) const {
+	if (committedVersion != rhs.committedVersion) {
+		return committedVersion < rhs.committedVersion;
+	} else {
+		return liveVersion < rhs.liveVersion;
+	}
+}
+
+bool ConfigGeneration::operator>(ConfigGeneration const& rhs) const {
+	if (committedVersion != rhs.committedVersion) {
+		return committedVersion > rhs.committedVersion;
+	} else {
+		return liveVersion > rhs.liveVersion;
+	}
+}
+
 void ConfigTransactionCommitRequest::set(KeyRef key, ValueRef value) {
 	if (key == configTransactionDescriptionKey) {
 		annotation.description = KeyRef(arena, value);
