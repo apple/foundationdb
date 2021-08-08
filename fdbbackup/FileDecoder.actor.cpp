@@ -659,7 +659,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 					TraceEvent(format("Mutation_%d_%d", vms.version, i).c_str(), uid)
 					    .detail("Version", vms.version)
 					    .setMaxFieldLength(10000)
-					    .detail("M", m.toString());
+					    .detail("M", m);
 					std::cout << vms.version << " " << m.toString() << "\n";
 				}
 			}
@@ -669,7 +669,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 			TraceEvent("UnfinishedFile").detail("File", logs[i].fileName).detail("Q", left.size());
 		}
 	}
-	TraceEvent("DecodeDone", uid);
+	TraceEvent("DecodeDone", uid).log();
 	return Void();
 }
 
