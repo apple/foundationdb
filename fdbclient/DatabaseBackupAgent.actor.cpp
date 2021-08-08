@@ -2339,7 +2339,7 @@ std::string getDRMutationStreamId(StatusObjectReader statusObj, const char* cont
 				}
 			}
 		}
-		TraceEvent(SevWarn, "DBA_TagNotPresentInStatus").detail("Tag", tagName.toString()).detail("Context", context);
+		TraceEvent(SevWarn, "DBA_TagNotPresentInStatus").detail("Tag", tagName).detail("Context", context);
 		throw backup_error();
 	} catch (std::runtime_error& e) {
 		TraceEvent(SevWarn, "DBA_GetDRMutationStreamIdFail").detail("Error", e.what());

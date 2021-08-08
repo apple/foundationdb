@@ -663,16 +663,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									    .detail(format("StorageServer%d", j).c_str(), iter_ss[j].toString())
 									    .detail(format("StorageServer%d", firstValidServer).c_str(),
 									            iter_ss[firstValidServer].toString())
-									    .detail("ShardBegin", printable(req.begin.getKey()))
-									    .detail("ShardEnd", printable(req.end.getKey()))
+									    .detail("ShardBegin", req.begin.getKey())
+									    .detail("ShardEnd", req.end.getKey())
 									    .detail("VersionNumber", req.version)
 									    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-									    .detail(format("Server%dUniqueKey", j).c_str(), printable(currentUniqueKey))
+									    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
 									    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
 									    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
-									            printable(referenceUniqueKey))
+									            referenceUniqueKey)
 									    .detail("ValueMismatches", valueMismatches)
-									    .detail("ValueMismatchKey", printable(valueMismatchKey))
+									    .detail("ValueMismatchKey", valueMismatchKey)
 									    .detail("MatchingKVPairs", matchingKVPairs);
 
 									self->testFailure("Data inconsistent", true);
@@ -718,7 +718,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (bytesReadInRange > 0) {
 				TraceEvent("CacheConsistencyCheck_ReadRange")
 				    .suppressFor(1.0)
-				    .detail("Range", printable(iter->range()))
+				    .detail("Range", iter->range())
 				    .detail("BytesRead", bytesReadInRange);
 			}
 		}
@@ -1083,8 +1083,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						TraceEvent("ConsistencyCheck_InconsistentStorageMetrics")
 						    .detail("ByteEstimate1", estimatedBytes[firstValidStorageServer])
 						    .detail("ByteEstimate2", numBytes)
-						    .detail("Begin", printable(shard.begin))
-						    .detail("End", printable(shard.end))
+						    .detail("Begin", shard.begin)
+						    .detail("End", shard.end)
 						    .detail("StorageServer1", storageServers[firstValidStorageServer].id())
 						    .detail("StorageServer2", storageServers[i].id())
 						    .detail("IsTSS",
@@ -1451,17 +1451,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
 										    .detail(format("StorageServer%d", firstValidServer).c_str(),
 										            storageServers[firstValidServer].toString())
-										    .detail("ShardBegin", printable(req.begin.getKey()))
-										    .detail("ShardEnd", printable(req.end.getKey()))
+										    .detail("ShardBegin", req.begin.getKey())
+										    .detail("ShardEnd", req.end.getKey())
 										    .detail("VersionNumber", req.version)
 										    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-										    .detail(format("Server%dUniqueKey", j).c_str(), printable(currentUniqueKey))
+										    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
 										    .detail(format("Server%dUniques", firstValidServer).c_str(),
 										            referenceUniques)
 										    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
-										            printable(referenceUniqueKey))
+										            referenceUniqueKey)
 										    .detail("ValueMismatches", valueMismatches)
-										    .detail("ValueMismatchKey", printable(valueMismatchKey))
+										    .detail("ValueMismatchKey", valueMismatchKey)
 										    .detail("MatchingKVPairs", matchingKVPairs)
 										    .detail("IsTSS",
 										            storageServerInterfaces[j].isTss() ||
@@ -1673,7 +1673,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (bytesReadInRange > 0) {
 				TraceEvent("ConsistencyCheck_ReadRange")
 				    .suppressFor(1.0)
-				    .detail("Range", printable(range))
+				    .detail("Range", range)
 				    .detail("BytesRead", bytesReadInRange);
 			}
 		}
