@@ -2933,12 +2933,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
 					    .detail("Version", fetchVersion)
 					    .detail("More", this_block.more);
-
-					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
+					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys);
 					if(MUTATION_TRACKING_ENABLED) {
-						for (auto k = this_block.begin(); k != this_block.end(); ++k) {
-							DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value), data->thisServerID);
-						}
+						for (auto k = this_block.begin(); k != this_block.end(); ++k)
+							DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
 					}
 
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
@@ -3103,9 +3101,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
 			if(MUTATION_TRACKING_ENABLED) {
-				for (auto& m : b->mutations) {
-					DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
-				}
+				for (auto& m : b->mutations)
+					DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m);
 			}
 		}
 
