@@ -57,9 +57,6 @@ class ConfigBroadcasterImpl {
 		Version lastSeenVersion;
 		ConfigBroadcastInterface broadcastInterface;
 
-		BroadcastClientDetails(BroadcastClientDetails&& other) = default;
-		BroadcastClientDetails& operator=(BroadcastClientDetails&& other) = default;
-
 		bool operator==(BroadcastClientDetails const& rhs) const {
 			return configClassSet == rhs.configClassSet && lastSeenVersion == rhs.lastSeenVersion &&
 			       broadcastInterface == rhs.broadcastInterface;
