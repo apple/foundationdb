@@ -111,6 +111,39 @@ private:
 	Promise<T> promise;
 };
 
+template <class T>
+class ThreadReturnPromiseStream : NonCopyable {
+public:
+	ThreadReturnPromiseStream() {}
+	~ThreadReturnPromiseStream() {
+		if (!promiseStream.isValid())
+			sendError(broken_promise());
+	}
+
+	Future<T> getFuture() { // Call only on the originating thread!
+		return promiseStream.getFuture();
+	}
+
+	void send(T const& t) { // Can be called safely from another thread.
+		Promise<Void> signal;
+		tagAndForward(&promiseStream, t, signal.getFuture());
+		g_network->onMainThread(std::move(signal),
+		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
+		                                                    : TaskPriority::DefaultOnMainThread);
+	}
+
+	void sendError(Error const& e) { // Can be called safely from another thread.
+		Promise<Void> signal;
+		tagAndForwardError(&promiseStream, e, signal.getFuture());
+		g_network->onMainThread(std::move(signal),
+		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
+		                                                    : TaskPriority::DefaultOnMainThread);
+	}
+
+private:
+	PromiseStream<T> promiseStream;
+};
+
 Reference<IThreadPool> createGenericThreadPool(int stackSize = 0);
 
 class DummyThreadPool final : public IThreadPool, ReferenceCounted<DummyThreadPool> {
