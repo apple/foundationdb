@@ -307,7 +307,6 @@ static int mvccStorageBytes(MutationRef const& m) {
 
 struct FetchInjectionInfo {
 	Arena arena;
-	Version transferredVersion;
 	vector<VerUpdateRef> changes;
 };
 
@@ -1513,11 +1512,15 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 ACTOR Future<Void> overlappingRangeFeedsQ(StorageServer* data, OverlappingRangeFeedsRequest req) {
 	wait(delay(0));
 	auto ranges = data->keyRangeFeed.intersectingRanges(req.range);
-	std::set<std::pair<Key, KeyRange>> rangeIds;
+	std::map<Key, KeyRange> rangeIds;
 	for (auto r : ranges) {
 		for (auto& it : r.value()) {
-			rangeIds.insert(std::make_pair(it->id, it->range));
+			rangeIds[it->id] = it->range;
 		}
+	}
+	std::vector<std::pair<Key, KeyRange>> result;
+	for (auto& it : rangeIds) {
+		result.push_back(std::make_pair(it.first, it.second));
 	}
 	OverlappingRangeFeedsReply reply(std::vector<std::pair<Key, KeyRange>>(rangeIds.begin(), rangeIds.end()));
 	req.reply.send(reply);
@@ -2985,6 +2988,7 @@ ACTOR Future<Void> fetchRangeFeed(StorageServer* data, Key rangeId, KeyRange ran
 		// write mutation to disk
 		mLoc++;
 	}
+	return Void();
 }
 
 ACTOR Future<Void> dispatchRangeFeeds(StorageServer* data, UID fetchKeysID, KeyRange keys, Version fetchVersion) {
@@ -3293,8 +3297,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// AddingShard::addMutations and be applied to versionedMap and mutationLog as normal. The lie about their
 		// version is acceptable because this shard will never be read at versions < transferredVersion
 
-		batch->transferredVersion = shard->transferredVersion;
 		for (auto i = shard->updates.begin(); i != shard->updates.end(); ++i) {
+			i->version = shard->transferredVersion;
 			batch->arena.dependsOn(i->arena());
 		}
 
@@ -4010,7 +4014,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			state int mutationNum = 0;
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-				updater.applyMutation(data, pUpdate->mutations[mutationNum], fii.transferredVersion, true);
+				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				// data->counters.mutationBytes or data->counters.mutations should not be updated because they should
 				// have counted when the mutations arrive from cursor initially.
@@ -4262,7 +4266,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		std::set<Key> modifiedRangeFeeds;
-		while (data->rangeFeedVersions.front().second < newOldestVersion) {
+		while (!data->rangeFeedVersions.empty() && data->rangeFeedVersions.front().second < newOldestVersion) {
 			modifiedRangeFeeds.insert(data->rangeFeedVersions.front().first.begin(),
 			                          data->rangeFeedVersions.front().first.end());
 			data->rangeFeedVersions.pop_front();
