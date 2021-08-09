@@ -124,7 +124,9 @@ typedef struct {
 	int commit_get;
 	int verbose;
 	mako_txnspec_t txnspec;
-	char cluster_file[PATH_MAX];
+	char cluster_files[2][PATH_MAX];
+	int num_fdb_clusters;
+	int num_databases;
 	char log_group[LOGGROUP_MAX];
 	int prefixpadding;
 	int trace;
@@ -171,14 +173,15 @@ typedef struct {
 typedef struct {
 	int worker_id;
 	pid_t parent_id;
-	FDBDatabase* database;
 	mako_args_t* args;
 	mako_shmhdr_t* shm;
+	FDBDatabase* databases[10];
 } process_info_t;
 
 /* args for threads */
 typedef struct {
 	int thread_id;
+	int database_index; // index of the database to do work to
 	int elem_size[MAX_OP]; /* stores the multiple of LAT_BLOCK_SIZE to check the memory allocation of each operation */
 	bool is_memory_allocated[MAX_OP]; /* flag specified for each operation, whether the memory was allocated to that
 	                                     specific operation */
