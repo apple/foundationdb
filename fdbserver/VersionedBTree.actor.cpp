@@ -1847,7 +1847,7 @@ public:
 	// After a get(), the object for i is the last in evictionOrder.
 	// If noHit is set, do not consider this access to be cache hit if the object is present
 	// If noMiss is set, do not consider this access to be a cache miss if the object is not present
-	ObjectType& get(const IndexType& index, int size, bool noHit = false) {
+	ObjectType& get(const IndexType& index, int size = 1, bool noHit = false) {
 		Entry& entry = cache[index];
 
 		// If entry is linked into evictionOrder then move it to the back of the order
@@ -2349,7 +2349,6 @@ public:
 	// get a list of used extents for a given extent based queue (for testing purpose)
 	ACTOR static Future<Standalone<VectorRef<LogicalPageID>>> getUsedExtents_impl(DWALPager* self, QueueID queueID) {
 		state Standalone<VectorRef<LogicalPageID>> extentIDs;
-
 		extentIDs.reserve(extentIDs.arena(),
 		                  self->extentUsedList.numEntries); // TODO this is overreserving. is that a problem?
 
@@ -2726,6 +2725,16 @@ public:
 	}
 	void freeExtent(LogicalPageID pageID) override { freeExtent_impl(this, pageID); }
 
+	ACTOR static Future<int> readPhysicalPage_impl(DWALPager* self,
+	                                               uint8_t* data,
+	                                               int blockSize,
+	                                               int64_t offset,
+	                                               int priority) {
+		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
+		int reader = wait(self->pageFile->read(data, blockSize, offset));
+		return reader;
+	}
+
 	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
@@ -2752,19 +2761,21 @@ public:
 
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
-		state int totalReadBytes = 0;
 		state int i = 0;
-		for (i = 0; i < pageIDs.size(); i++) {
-			int readBytes = wait(
-			    self->pageFile->read(page->mutate() + i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize));
-			totalReadBytes += readBytes;
+		state uint8_t* data = page->mutate();
+		std::vector<Future<int>> reads;
+		for (i = 0; i < pageIDs.size(); ++i) {
+			reads.push_back(readPhysicalPage_impl(self, data, blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
+			data += blockSize;
 		}
+		// wait for all the parallel read futures
+		wait(waitForAll(reads));
+
 		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageIDs).c_str(),
 		             page->begin(),
-		             totalReadBytes);
-
+		             pageIDs.size() * blockSize);
 		// Header reads are checked explicitly during recovery
 		if (!header) {
 			if (!page->verifyChecksum(pageIDs.front())) {
@@ -2989,23 +3000,20 @@ public:
 		             pagesPerExtent,
 		             toString(headPageID).c_str(),
 		             toString(tailPageID).c_str());
-		int pageSize = 1;
+
 		if (headPageID >= pageID && ((headPageID - pageID) < pagesPerExtent))
 			headExt = true;
 		if ((tailPageID - pageID) < pagesPerExtent)
 			tailExt = true;
 		if (headExt && tailExt) {
 			readSize = (tailPageID - headPageID + 1) * physicalPageSize;
-			pageSize = (tailPageID - headPageID + 1);
 		} else if (headExt) {
 			readSize = (pagesPerExtent - (headPageID - pageID)) * physicalPageSize;
-			pageSize = (pagesPerExtent - (headPageID - pageID));
 		} else if (tailExt) {
 			readSize = (tailPageID - pageID + 1) * physicalPageSize;
-			pageSize = (tailPageID - headPageID + 1);
 		}
 
-		PageCacheEntry& cacheEntry = extentCache.get(pageID, pageSize);
+		PageCacheEntry& cacheEntry = extentCache.get(pageID);
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = Void();
 			cacheEntry.readFuture =
@@ -5843,7 +5851,7 @@ private:
 	    Reference<IPagerSnapshot> snapshot,
 	    MutationBuffer* mutationBuffer,
 	    BTreePageIDRef rootID,
-	    unsigned int  height,
+	    unsigned int height,
 	    MutationBuffer::const_iterator mBegin, // greatest mutation boundary <= subtreeLowerBound->key
 	    MutationBuffer::const_iterator mEnd, // least boundary >= subtreeUpperBound->key
 	    InternalPageSliceUpdate* update) {
