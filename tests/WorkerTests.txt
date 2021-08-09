@@ -4,4 +4,4 @@ useDB=false
 
     testName=UnitTests
     maxTestCases=0
-    testsMatching=/flow/IThreadPool/
+    testsMatching=/fdbserver/worker/
