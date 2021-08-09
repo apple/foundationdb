@@ -2397,8 +2397,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	rc = validate_args(&args);
-	printf("DEBUG: %d clusters\n", args.num_fdb_clusters);
-	printf("DEBUG: %d databases\n", args.num_databases);
 	if (rc < 0)
 		return -1;
 
@@ -2415,9 +2413,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	pid_main = getpid();
-	printf("DEBUG: pid_main=%d\n", pid_main);
 	/* create the shared memory for stats */
-	printf("DEBUG: create shared memory\n");
 	sprintf(shmpath, "mako%d", pid_main);
 	shmfd = shm_open(shmpath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
 	if (shmfd < 0) {
@@ -2426,7 +2422,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* allocate */
-	printf("DEBUG: allocating shared memory\n");
 	shmsize = sizeof(mako_shmhdr_t) + (sizeof(mako_stats_t) * args.num_processes * args.num_threads);
 	if (ftruncate(shmfd, shmsize) < 0) {
 		shm = MAP_FAILED;
@@ -2435,7 +2430,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* map it */
-	printf("DEBUG: calling mmap\n");
 	shm = (mako_shmhdr_t*)mmap(NULL, shmsize, PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0);
 	if (shm == MAP_FAILED) {
 		fprintf(stderr, "ERROR: mmap (fd:%d size:%llu) failed\n", shmfd, (unsigned long long)shmsize);
@@ -2462,7 +2456,6 @@ int main(int argc, char* argv[]) {
 
 	/* forking (num_process + 1) children */
 	/* last process is the stats handler */
-	printf("DEBUG: forking processes\n");
 	for (p = 0; p < args.num_processes + 1; p++) {
 		pid = fork();
 		if (pid != 0) {
@@ -2494,7 +2487,6 @@ int main(int argc, char* argv[]) {
 
 	if (proc_type == proc_worker) {
 		/* worker process */
-		printf("DEBUG: running worker_process_main\n");
 		worker_process_main(&args, worker_id, shm, &pid_main);
 		/* worker can exit here */
 		exit(0);
