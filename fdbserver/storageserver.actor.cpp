@@ -3380,7 +3380,6 @@ AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
 }
 
 void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
-	ASSERT(!fromFetch);
 	if (mutation.type == mutation.ClearRange) {
 		ASSERT(keys.begin <= mutation.param1 && mutation.param2 <= keys.end);
 	} else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
@@ -3403,23 +3402,25 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 		}
 		// Add the mutation to the version.
 		updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
-		if (mutation.type == MutationRef::SetValue) {
-			for (auto& it : server->keyRangeFeed[mutation.param1]) {
-				if (it->mutations.empty() || it->mutations.back().version != version) {
-					it->mutations.push_back(MutationsAndVersionRef(version));
-				}
-				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
-				server->currentRangeFeeds.insert(it->id);
-			}
-		} else if (mutation.type == MutationRef::ClearRange) {
-			auto ranges = server->keyRangeFeed.intersectingRanges(KeyRangeRef(mutation.param1, mutation.param2));
-			for (auto& r : ranges) {
-				for (auto& it : r.value()) {
+		if (!fromFetch) {
+			if (mutation.type == MutationRef::SetValue) {
+				for (auto& it : server->keyRangeFeed[mutation.param1]) {
 					if (it->mutations.empty() || it->mutations.back().version != version) {
 						it->mutations.push_back(MutationsAndVersionRef(version));
 					}
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
 					server->currentRangeFeeds.insert(it->id);
+				}
+			} else if (mutation.type == MutationRef::ClearRange) {
+				auto ranges = server->keyRangeFeed.intersectingRanges(KeyRangeRef(mutation.param1, mutation.param2));
+				for (auto& r : ranges) {
+					for (auto& it : r.value()) {
+						if (it->mutations.empty() || it->mutations.back().version != version) {
+							it->mutations.push_back(MutationsAndVersionRef(version));
+						}
+						it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
+						server->currentRangeFeeds.insert(it->id);
+					}
 				}
 			}
 		}
