@@ -1786,7 +1786,7 @@ template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 
 	struct Entry : public boost::intrusive::list_base_hook<> {
-		Entry() : hits(0), size(1) {}
+		Entry() : hits(0), size(0) {}
 		IndexType index;
 		ObjectType item;
 		int hits;
@@ -2565,6 +2565,7 @@ public:
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
 		// Similarly, this does not count as a point lookup for reason.
+		ASSERT(pageIDs.front() != invalidLogicalPageID);
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), true);
 		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n",
 		             filename.c_str(),
@@ -2760,13 +2761,37 @@ public:
 
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
 		++g_redwoodMetrics.metric.pagerDiskRead;
-
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
-		state int i = 0;
 		state uint8_t* data = page->mutate();
+		if (pageIDs.size() == 1) {
+			int readBytes = wait(self->pageFile->read(data, blockSize, (int64_t)pageIDs.front() * blockSize));
+			debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
+			             self->filename.c_str(),
+			             toString(pageIDs).c_str(),
+			             page->begin(),
+			             readBytes);
+			if (!header) {
+				if (!page->verifyChecksum(pageIDs.front())) {
+					debug_printf(
+					    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageIDs).c_str());
+					Error e = checksum_failed();
+					TraceEvent(SevError, "RedwoodChecksumFailed")
+					    .detail("Filename", self->filename.c_str())
+					    .detail("PageID", pageIDs)
+					    .detail("PageSize", self->physicalPageSize)
+					    .detail("Offset", pageIDs.front() * self->physicalPageSize)
+					    .detail("CalculatedChecksum", page->calculateChecksum(pageIDs.front()))
+					    .detail("ChecksumInPage", page->getChecksum())
+					    .error(e);
+					ASSERT(false);
+					throw e;
+				}
+			}
+			return page;
+		}
 		std::vector<Future<int>> reads;
-		for (i = 0; i < pageIDs.size(); ++i) {
+		for (int i = 0; i < pageIDs.size(); ++i) {
 			reads.push_back(readPhysicalPage_impl(self, data, blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
 			data += blockSize;
 		}
