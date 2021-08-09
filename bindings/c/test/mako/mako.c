@@ -1022,7 +1022,7 @@ void* worker_thread(void* thread_args) {
 	int worker_id = ((thread_args_t*)thread_args)->process->worker_id;
 	int thread_id = ((thread_args_t*)thread_args)->thread_id;
 	mako_args_t* args = ((thread_args_t*)thread_args)->process->args;
-	FDBDatabase* database = ((thread_args_t*)thread_args)->process->database;
+	FDBDatabase* database = ((thread_args_t*)thread_args)->process->databases[((thread_args_t*)thread_args)->database_index];
 	fdb_error_t err;
 	int rc;
 	FDBTransaction* transaction;
@@ -1073,10 +1073,12 @@ void* worker_thread(void* thread_args) {
 	}
 
 	/* create my own transaction object */
+	printf("create transaction...\n");
 	err = fdb_database_create_transaction(database, &transaction);
 	check_fdb_error(err);
 
 	/* i'm ready */
+	printf("ready!\n");
 	__sync_fetch_and_add(readycount, 1);
 	while (*signal == SIGNAL_OFF) {
 		usleep(10000); /* 10ms */
@@ -1188,6 +1190,8 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fprintf(debugme, "DEBUG: worker %d started\n", worker_id);
 
 	/* Everything starts from here */
+	printf("API Version: %d\n", args->api_version);
+
 	err = fdb_select_api_version(args->api_version);
 	if (err) {
 		fprintf(stderr, "ERROR: Failed at %s:%d (%s)\n", __FILE__, __LINE__, fdb_get_error(err));
@@ -1284,7 +1288,18 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fdb_future_destroy(f);
 
 #else /* >= 610 */
-	fdb_create_database(args->cluster_file, &process.database);
+	if (args->num_databases == 0) {
+		fdb_create_database(NULL, &process.databases[0]);
+	}
+	size_t cluster_index = 0;
+	for (size_t i = 0; i < args->num_databases; i++) {
+		if (args->num_fdb_clusters == 0) { // if only default fdb.cluster is used
+			fdb_create_database(NULL, &process.databases[i]);
+		} else {
+			fdb_create_database(args->cluster_files[cluster_index], &process.databases[i]);
+			cluster_index = (cluster_index+1) % args->num_fdb_clusters;
+		}
+	}
 #endif
 
 	fprintf(debugme, "DEBUG: creating %d worker threads\n", args->num_threads);
@@ -1302,7 +1317,10 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	}
 
 	for (i = 0; i < args->num_threads; i++) {
+		printf("Loop: %d\n", i);
 		thread_args[i].thread_id = i;
+		thread_args[i].database_index = i % args->num_databases; // divide equally num threads per database
+		printf("thread db index: %d\n", thread_args[i].database_index);
 		for (int op = 0; op < MAX_OP; op++) {
 			if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 				thread_args[i].block[op] = (lat_block_t*)malloc(sizeof(lat_block_t));
@@ -1317,6 +1335,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 			}
 		}
 		thread_args[i].process = &process;
+		printf("pthread_create worker threads...\n");
 		rc = pthread_create(&worker_threads[i], NULL, worker_thread, (void*)&thread_args[i]);
 		if (rc != 0) {
 			fprintf(stderr, "ERROR: cannot create a new worker thread %d\n", i);
@@ -1342,7 +1361,10 @@ failExit:
 		free(thread_args);
 
 	/* clean up database and cluster */
-	fdb_database_destroy(process.database);
+	for (size_t i = 0; i < args->num_databases; i++) {
+		fdb_database_destroy(process.databases[i]);
+	}
+
 #if FDB_API_VERSION < 610
 	fdb_cluster_destroy(cluster);
 #endif
@@ -1368,6 +1390,8 @@ int init_args(mako_args_t* args) {
 	if (!args)
 		return -1;
 	memset(args, 0, sizeof(mako_args_t)); /* zero-out everything */
+	args->num_fdb_clusters = 0;
+	args->num_databases = 0;
 	args->api_version = fdb_get_max_api_version();
 	args->json = 0;
 	args->num_processes = 1;
@@ -1532,6 +1556,7 @@ void usage() {
 	printf("%-24s %s\n", "-v, --verbose", "Specify verbosity");
 	printf("%-24s %s\n", "-a, --api_version=API_VERSION", "Specify API_VERSION to use");
 	printf("%-24s %s\n", "-c, --cluster=FILE", "Specify FDB cluster file");
+	printf("%-24s %s\n", "-d, --num_databases=NUM_DATABASES", "Specify number of databases");
 	printf("%-24s %s\n", "-p, --procs=PROCS", "Specify number of worker processes");
 	printf("%-24s %s\n", "-t, --threads=THREADS", "Specify number of worker threads");
 	printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
@@ -1572,10 +1597,11 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 	int c;
 	int idx;
 	while (1) {
-		const char* short_options = "a:c:p:t:r:s:i:x:v:m:hjz";
+		const char* short_options = "a:c:d:p:t:r:s:i:x:v:m:hjz";
 		static struct option long_options[] = { /* name, has_arg, flag, val */
 			                                    { "api_version", required_argument, NULL, 'a' },
 			                                    { "cluster", required_argument, NULL, 'c' },
+												{ "num_databases", optional_argument, NULL, 'd' },
 			                                    { "procs", required_argument, NULL, 'p' },
 			                                    { "threads", required_argument, NULL, 't' },
 			                                    { "rows", required_argument, NULL, 'r' },
@@ -1624,7 +1650,11 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			args->api_version = atoi(optarg);
 			break;
 		case 'c':
-			strcpy(args->cluster_file, optarg);
+			strcpy(args->cluster_files[args->num_fdb_clusters], optarg);
+			args->num_fdb_clusters++;
+			break;
+		case 'd':
+			args->num_databases = atoi(optarg);
 			break;
 		case 'p':
 			args->num_processes = atoi(optarg);
@@ -1805,6 +1835,10 @@ int validate_args(mako_args_t* args) {
 	}
 	if (args->value_length < 0) {
 		fprintf(stderr, "ERROR: --vallen must be a positive integer\n");
+		return -1;
+	}
+	if (args->num_databases < args->num_fdb_clusters) {
+		fprintf(stderr, "ERROR: --num_databases must be >= number of clusters\n");
 		return -1;
 	}
 	if (args->key_length < 4 /* "mako" */ + digits(args->rows)) {
@@ -2364,6 +2398,8 @@ int main(int argc, char* argv[]) {
 	}
 
 	rc = validate_args(&args);
+	printf("DEBUG: %d clusters\n", args.num_fdb_clusters);
+	printf("DEBUG: %d databases\n", args.num_databases);
 	if (rc < 0)
 		return -1;
 
@@ -2380,7 +2416,9 @@ int main(int argc, char* argv[]) {
 	}
 
 	pid_main = getpid();
+	printf("DEBUG: pid_main=%d\n", pid_main);
 	/* create the shared memory for stats */
+	printf("DEBUG: create shared memory\n");
 	sprintf(shmpath, "mako%d", pid_main);
 	shmfd = shm_open(shmpath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
 	if (shmfd < 0) {
@@ -2389,6 +2427,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* allocate */
+	printf("DEBUG: allocating shared memory\n");
 	shmsize = sizeof(mako_shmhdr_t) + (sizeof(mako_stats_t) * args.num_processes * args.num_threads);
 	if (ftruncate(shmfd, shmsize) < 0) {
 		shm = MAP_FAILED;
@@ -2397,6 +2436,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* map it */
+	printf("DEBUG: calling mmap\n");
 	shm = (mako_shmhdr_t*)mmap(NULL, shmsize, PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0);
 	if (shm == MAP_FAILED) {
 		fprintf(stderr, "ERROR: mmap (fd:%d size:%llu) failed\n", shmfd, (unsigned long long)shmsize);
@@ -2423,6 +2463,7 @@ int main(int argc, char* argv[]) {
 
 	/* forking (num_process + 1) children */
 	/* last process is the stats handler */
+	printf("DEBUG: forking processes\n");
 	for (p = 0; p < args.num_processes + 1; p++) {
 		pid = fork();
 		if (pid != 0) {
@@ -2454,6 +2495,7 @@ int main(int argc, char* argv[]) {
 
 	if (proc_type == proc_worker) {
 		/* worker process */
+		printf("DEBUG: running worker_process_main\n");
 		worker_process_main(&args, worker_id, shm, &pid_main);
 		/* worker can exit here */
 		exit(0);
