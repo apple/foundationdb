@@ -1216,6 +1216,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
                                 std::string _coordFolder,
                                 std::string whitelistBinPaths,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                UseConfigDB useConfigDB,
                                 LocalConfiguration* localConfig) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
@@ -1481,7 +1482,9 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		                                       issues,
 		                                       localConfig));
 
-		errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
+		if (useConfigDB != UseConfigDB::DISABLED) {
+			errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
+		}
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
 			errorForwarders.add(healthMonitor(ccInterface, interf, locality, dbInfo));
@@ -2374,6 +2377,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		                                                 coordFolder,
 		                                                 whitelistBinPaths,
 		                                                 dbInfo,
+		                                                 useConfigDB,
 		                                                 &localConfig),
 		                                    "WorkerServer",
 		                                    UID(),

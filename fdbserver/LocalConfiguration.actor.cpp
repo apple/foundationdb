@@ -284,15 +284,14 @@ class LocalConfigurationImpl {
 	ACTOR static Future<Void> consumeInternal(LocalConfigurationImpl* self, ConfigBroadcastInterface broadcaster) {
 		loop {
 			choose {
+				when(ConfigBroadcastSnapshotRequest snapshotReq = waitNext(broadcaster.getSnapshot.getFuture())) {
+					ASSERT_GT(snapshotReq.version, self->lastSeenVersion);
+					++self->snapshots;
+					wait(setSnapshot(self, std::move(snapshotReq.snapshot), snapshotReq.version));
+				}
 				when(state ConfigBroadcastChangesRequest req = waitNext(broadcaster.getChanges.getFuture())) {
 					wait(self->addChanges(req.changes, req.mostRecentVersion));
 					req.reply.send(ConfigBroadcastChangesReply());
-				}
-				when(ConfigBroadcastSnapshotRequest snapshotReq = waitNext(broadcaster.getSnapshot.getFuture())) {
-					// TODO: Implement
-					// ASSERT_GT(snapshotReply.version, self->lastSeenVersion);
-					// ++self->snapshots;
-					// wait(setSnapshot(self, std::move(snapshotReply.snapshot), snapshotReply.version));
 				}
 			}
 		}

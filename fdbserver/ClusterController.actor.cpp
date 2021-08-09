@@ -3827,7 +3827,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			    req.lastSeenKnobVersion,
 			    req.knobConfigClassSet,
 			    self->id_worker[w.locality.processId()].watcher,
-			    &self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
+			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
 		}
 		checkOutstandingRequests(self);
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
@@ -3852,7 +3852,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			    configBroadcaster->registerWorker(req.lastSeenKnobVersion,
 			                                      req.knobConfigClassSet,
 			                                      info->second.watcher,
-			                                      &info->second.details.interf.configBroadcastInterface));
+			                                      info->second.details.interf.configBroadcastInterface));
 		}
 		checkOutstandingRequests(self);
 	} else {

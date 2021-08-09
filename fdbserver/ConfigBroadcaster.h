@@ -46,8 +46,8 @@ public:
 	~ConfigBroadcaster();
 	Future<Void> registerWorker(Version lastSeenVersion,
 	                            ConfigClassSet configClassSet,
-	                            Future<Void>& watcher,
-	                            ConfigBroadcastInterface* worker);
+	                            Future<Void> watcher,
+	                            ConfigBroadcastInterface worker);
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                  Version mostRecentVersion,
 	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
