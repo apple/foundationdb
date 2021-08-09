@@ -252,7 +252,9 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutations(StringRef rangeID);
+	Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutations(StringRef rangeID,
+	                                                                            KeyRangeRef range = allKeys);
+	Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingRangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popRangeFeedMutations(StringRef rangeID, Version version);
 
 	// private:

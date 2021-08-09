@@ -78,6 +78,7 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 	RequestStream<struct RangeFeedRequest> rangeFeed;
+	RequestStream<struct OverlappingRangeFeedsRequest> overlappingRangeFeeds;
 	RequestStream<struct RangeFeedPopRequest> rangeFeedPop;
 	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
 
@@ -120,11 +121,13 @@ struct StorageServerInterface {
 				    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
 				getRangeSplitPoints =
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
-				rangeFeed = RequestStream<struct RangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				rangeFeedPop =
-				    RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
 				getKeyValuesStream =
-				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+				rangeFeed = RequestStream<struct RangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				overlappingRangeFeeds =
+				    RequestStream<struct OverlappingRangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				rangeFeedPop =
+				    RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -166,9 +169,10 @@ struct StorageServerInterface {
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
-		streams.push_back(rangeFeed.getReceiver());
-		streams.push_back(rangeFeedPop.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(rangeFeed.getReceiver());
+		streams.push_back(overlappingRangeFeeds.getReceiver());
+		streams.push_back(rangeFeedPop.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -662,7 +666,7 @@ struct RangeFeedRequest {
 	ReplyPromise<RangeFeedReply> reply;
 
 	RangeFeedRequest() {}
-	RangeFeedRequest(Key const& rangeID) : rangeID(rangeID) {}
+	explicit RangeFeedRequest(Key const& rangeID) : rangeID(rangeID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -682,6 +686,35 @@ struct RangeFeedPopRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, rangeID, version, reply);
+	}
+};
+
+struct OverlappingRangeFeedsReply {
+	constexpr static FileIdentifier file_identifier = 11815134;
+	std::vector<std::pair<Key, KeyRange>> rangeIds;
+	bool cached;
+	Arena arena;
+
+	OverlappingRangeFeedsReply() : cached(false) {}
+	explicit OverlappingRangeFeedsReply(std::vector<std::pair<Key, KeyRange>> const& rangeIds)
+	  : rangeIds(rangeIds), cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeIds, arena);
+	}
+};
+struct OverlappingRangeFeedsRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	KeyRange range;
+	ReplyPromise<OverlappingRangeFeedsReply> reply;
+
+	OverlappingRangeFeedsRequest() {}
+	explicit OverlappingRangeFeedsRequest(KeyRange const& range) : range(range) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range, reply);
 	}
 };
 

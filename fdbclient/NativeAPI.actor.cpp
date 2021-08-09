@@ -6518,7 +6518,8 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 }
 
 ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutationsActor(Reference<DatabaseContext> db,
-                                                                                       StringRef rangeID) {
+                                                                                       StringRef rangeID,
+                                                                                       KeyRangeRef range) {
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
@@ -6553,8 +6554,45 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutation
 	return Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena);
 }
 
-Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getRangeFeedMutations(StringRef rangeID) {
-	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID);
+Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getRangeFeedMutations(StringRef rangeID,
+                                                                                             KeyRangeRef range) {
+	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, range);
+}
+
+ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingRangeFeedsActor(Reference<DatabaseContext> db,
+                                                                                  KeyRangeRef range,
+                                                                                  Version minVersion) {
+	state Database cx(db);
+	state Transaction tr(cx);
+	state Span span("NAPI:GetOverlappingRangeFeeds"_loc);
+	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+	    wait(getKeyRangeLocations(cx,
+	                              range,
+	                              100,
+	                              Reverse::False,
+	                              &StorageServerInterface::rangeFeed,
+	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
+
+	if (locations.size() > 1) {
+		throw unsupported_operation();
+	}
+
+	state OverlappingRangeFeedsRequest req;
+	req.range = range;
+
+	OverlappingRangeFeedsReply rep = wait(loadBalance(cx.getPtr(),
+	                                                  locations[0].second,
+	                                                  &StorageServerInterface::overlappingRangeFeeds,
+	                                                  req,
+	                                                  TaskPriority::DefaultPromiseEndpoint,
+	                                                  AtMostOnce::False,
+	                                                  cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
+	return rep.rangeIds;
+}
+
+Future<std::vector<std::pair<Key, KeyRange>>> DatabaseContext::getOverlappingRangeFeeds(KeyRangeRef range,
+                                                                                        Version minVersion) {
+	return getOverlappingRangeFeedsActor(Reference<DatabaseContext>::addRef(this), range, minVersion);
 }
 
 ACTOR Future<Void> popRangeFeedMutationsActor(Reference<DatabaseContext> db, StringRef rangeID, Version version) {

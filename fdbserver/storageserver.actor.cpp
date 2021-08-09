@@ -94,6 +94,7 @@ struct AddingShard : NonCopyable {
 	Future<Void> fetchClient; // holds FetchKeys() actor
 	Promise<Void> fetchComplete;
 	Promise<Void> readWrite;
+	PromiseStream<Key> rangeFeedRemovals;
 
 	// During the Fetching phase, it saves newer mutations whose version is greater or equal to fetchClient's
 	// fetchVersion, while the shard is still busy catching up with fetchClient. It applies these updates after fetching
@@ -130,7 +131,7 @@ struct AddingShard : NonCopyable {
 			readWrite.send(Void());
 	}
 
-	void addMutation(Version version, MutationRef const& mutation);
+	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 
 	bool isTransferred() const { return phase == Waiting; }
 };
@@ -159,7 +160,7 @@ public:
 	bool notAssigned() const { return !readWrite && !adding; }
 	bool assigned() const { return readWrite || adding; }
 	bool isInVersionedData() const { return readWrite || (adding && adding->isTransferred()); }
-	void addMutation(Version version, MutationRef const& mutation);
+	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 	bool isFetched() const { return readWrite || (adding && adding->fetchComplete.isSet()); }
 
 	const char* debugDescribeState() const {
@@ -306,6 +307,7 @@ static int mvccStorageBytes(MutationRef const& m) {
 
 struct FetchInjectionInfo {
 	Arena arena;
+	Version transferredVersion;
 	vector<VerUpdateRef> changes;
 };
 
@@ -583,6 +585,7 @@ public:
 	KeyRangeMap<std::vector<Reference<RangeFeedInfo>>> keyRangeFeed;
 	std::map<Key, Reference<RangeFeedInfo>> uidRangeFeed;
 	Deque<std::pair<std::vector<Key>, Version>> rangeFeedVersions;
+	std::map<UID, PromiseStream<Key>> rangeFeedRemovals;
 	std::set<Key> currentRangeFeeds;
 
 	// newestAvailableVersion[k]
@@ -882,6 +885,7 @@ public:
 		shards.insert(newShard->keys, Reference<ShardInfo>(newShard));
 	}
 	void addMutation(Version version,
+	                 bool fromFetch,
 	                 MutationRef const& mutation,
 	                 KeyRangeRef const& shard,
 	                 UpdateEagerReadInfo* eagerReads);
@@ -1506,7 +1510,21 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 	}
 }
 
-ACTOR Future<Void> rangeFeedQ(StorageServer* data, RangeFeedRequest req) {
+ACTOR Future<Void> overlappingRangeFeedsQ(StorageServer* data, OverlappingRangeFeedsRequest req) {
+	wait(delay(0));
+	auto ranges = data->keyRangeFeed.intersectingRanges(req.range);
+	std::set<std::pair<Key, KeyRange>> rangeIds;
+	for (auto r : ranges) {
+		for (auto& it : r.value()) {
+			rangeIds.insert(std::make_pair(it->id, it->range));
+		}
+	}
+	OverlappingRangeFeedsReply reply(std::vector<std::pair<Key, KeyRange>>(rangeIds.begin(), rangeIds.end()));
+	req.reply.send(reply);
+	return Void();
+}
+
+ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFeedRequest req) {
 	state RangeFeedReply reply;
 	wait(delay(0));
 	auto& feedInfo = data->uidRangeFeed[req.rangeID];
@@ -1537,11 +1555,12 @@ ACTOR Future<Void> rangeFeedQ(StorageServer* data, RangeFeedRequest req) {
 			}
 		}
 	}
+	return reply;
+}
 
-	TraceEvent("RangeFeedQuery", data->thisServerID)
-	    .detail("RangeID", req.rangeID.printable())
-	    .detail("Mutations", reply.mutations.size());
-	req.reply.send(reply);
+ACTOR Future<Void> rangeFeedQ(StorageServer* data, RangeFeedRequest req) {
+	RangeFeedReply rep = wait(getRangeFeedMutations(data, req));
+	req.reply.send(rep);
 	return Void();
 }
 
@@ -2622,7 +2641,8 @@ void applyMutation(StorageServer* self,
                    MutationRef const& m,
                    Arena& arena,
                    StorageServer::VersionedData& data,
-                   Version version) {
+                   Version version,
+                   bool fromFetch) {
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
@@ -2656,12 +2676,14 @@ void applyMutation(StorageServer* self,
 		data.insert(m.param1, ValueOrClearToRef::value(m.param2));
 		self->watches.trigger(m.param1);
 
-		for (auto& it : self->keyRangeFeed[m.param1]) {
-			if (it->mutations.empty() || it->mutations.back().version != version) {
-				it->mutations.push_back(MutationsAndVersionRef(version));
+		if (!fromFetch) {
+			for (auto& it : self->keyRangeFeed[m.param1]) {
+				if (it->mutations.empty() || it->mutations.back().version != version) {
+					it->mutations.push_back(MutationsAndVersionRef(version));
+				}
+				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
+				self->currentRangeFeeds.insert(it->id);
 			}
-			it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
-			self->currentRangeFeeds.insert(it->id);
 		}
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase(m.param1, m.param2);
@@ -2670,14 +2692,16 @@ void applyMutation(StorageServer* self,
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
 		self->watches.triggerRange(m.param1, m.param2);
 
-		auto ranges = self->keyRangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
-		for (auto& r : ranges) {
-			for (auto& it : r.value()) {
-				if (it->mutations.empty() || it->mutations.back().version != version) {
-					it->mutations.push_back(MutationsAndVersionRef(version));
+		if (!fromFetch) {
+			auto ranges = self->keyRangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+			for (auto& r : ranges) {
+				for (auto& it : r.value()) {
+					if (it->mutations.empty() || it->mutations.back().version != version) {
+						it->mutations.push_back(MutationsAndVersionRef(version));
+					}
+					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
+					self->currentRangeFeeds.insert(it->id);
 				}
-				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
-				self->currentRangeFeeds.insert(it->id);
 			}
 		}
 	}
@@ -2760,34 +2784,34 @@ void coalesceShards(StorageServer* data, KeyRangeRef keys) {
 }
 
 template <class T>
-void addMutation(T& target, Version version, MutationRef const& mutation) {
-	target.addMutation(version, mutation);
+void addMutation(T& target, Version version, bool fromFetch, MutationRef const& mutation) {
+	target.addMutation(version, fromFetch, mutation);
 }
 
 template <class T>
-void addMutation(Reference<T>& target, Version version, MutationRef const& mutation) {
-	addMutation(*target, version, mutation);
+void addMutation(Reference<T>& target, Version version, bool fromFetch, MutationRef const& mutation) {
+	addMutation(*target, version, fromFetch, mutation);
 }
 
 template <class T>
 void splitMutations(StorageServer* data, KeyRangeMap<T>& map, VerUpdateRef const& update) {
 	for (int i = 0; i < update.mutations.size(); i++) {
-		splitMutation(data, map, update.mutations[i], update.version);
+		splitMutation(data, map, update.mutations[i], update.version, update.version);
 	}
 }
 
 template <class T>
-void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& m, Version ver) {
+void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& m, Version ver, bool fromFetch) {
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		if (!SHORT_CIRCUT_ACTUAL_STORAGE || !normalKeys.contains(m.param1))
-			addMutation(map.rangeContaining(m.param1)->value(), ver, m);
+			addMutation(map.rangeContaining(m.param1)->value(), ver, fromFetch, m);
 	} else if (m.type == MutationRef::ClearRange) {
 		KeyRangeRef mKeys(m.param1, m.param2);
 		if (!SHORT_CIRCUT_ACTUAL_STORAGE || !normalKeys.contains(mKeys)) {
 			auto r = map.intersectingRanges(mKeys);
 			for (auto i = r.begin(); i != r.end(); ++i) {
 				KeyRangeRef k = mKeys & i->range();
-				addMutation(i->value(), ver, MutationRef((MutationRef::Type)m.type, k.begin, k.end));
+				addMutation(i->value(), ver, fromFetch, MutationRef((MutationRef::Type)m.type, k.begin, k.end));
 			}
 		}
 	} else
@@ -2890,12 +2914,129 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 	}
 }
 
+#define PERSIST_PREFIX "\xff\xff"
+
+// Immutable
+static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
+                                       LiteralStringRef("FoundationDB/StorageServer/1/4"));
+static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/StorageServer/1/2"),
+                                                    LiteralStringRef("FoundationDB/StorageServer/1/5"));
+static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
+static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
+static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
+
+// (Potentially) change with the durable version or when fetchKeys completes
+static const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
+static const KeyRangeRef persistShardAssignedKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAssigned/"), LiteralStringRef(PERSIST_PREFIX "ShardAssigned0"));
+static const KeyRangeRef persistShardAvailableKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAvailable/"), LiteralStringRef(PERSIST_PREFIX "ShardAvailable0"));
+static const KeyRangeRef persistByteSampleKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/"), LiteralStringRef(PERSIST_PREFIX "BS0"));
+static const KeyRangeRef persistByteSampleSampleKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS/"),
+                LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS0"));
+static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
+static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "PrimaryLocality");
+static const KeyRangeRef persistRangeFeedKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
+// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
+
+ACTOR Future<Void> fetchRangeFeed(StorageServer* data, Key rangeId, KeyRange range) {
+
+	TraceEvent("FetchRangeFeed", data->thisServerID)
+	    .detail("RangeID", rangeId.printable())
+	    .detail("Range", range.toString());
+	Reference<RangeFeedInfo> rangeFeedInfo(new RangeFeedInfo());
+	rangeFeedInfo->range = range;
+	rangeFeedInfo->id = rangeId;
+	data->uidRangeFeed[rangeId] = rangeFeedInfo;
+	auto rs = data->keyRangeFeed.modify(range);
+	for (auto r = rs.begin(); r != rs.end(); ++r) {
+		r->value().push_back(rangeFeedInfo);
+	}
+	data->keyRangeFeed.coalesce(range.contents());
+	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+	data->addMutationToMutationLog(mLV,
+	                               MutationRef(MutationRef::SetValue,
+	                                           persistRangeFeedKeys.begin.toString() + rangeId.toString(),
+	                                           rangeFeedValue(range)));
+
+	state Standalone<VectorRef<MutationsAndVersionRef>> mutations =
+	    wait(data->cx->getRangeFeedMutations(rangeId, range));
+	state RangeFeedRequest req;
+	req.rangeID = rangeId;
+	state RangeFeedReply rep = wait(getRangeFeedMutations(data, req));
+	state int mLoc = 0;
+	state int rLoc = 0;
+	while (mLoc < mutations.size() && rLoc < rep.mutations.size()) {
+		if (mutations[mLoc].version < rep.mutations[rLoc].version) {
+			// write mutation to disk
+			mLoc++;
+		} else if (mutations[mLoc].version == rep.mutations[rLoc].version) {
+			// merge mutations and write to disk
+			mLoc++;
+			rLoc++;
+		} else {
+			rLoc++;
+		}
+	}
+	while (mLoc < mutations.size()) {
+		// write mutation to disk
+		mLoc++;
+	}
+}
+
+ACTOR Future<Void> dispatchRangeFeeds(StorageServer* data, UID fetchKeysID, KeyRange keys, Version fetchVersion) {
+	// find overlapping range feeds
+	state std::map<Key, Future<Void>> feedFetches;
+	state PromiseStream<Key> removals;
+	data->rangeFeedRemovals[fetchKeysID] = removals;
+	try {
+		state std::vector<std::pair<Key, KeyRange>> feeds =
+		    wait(data->cx->getOverlappingRangeFeeds(keys, fetchVersion));
+		for (auto& feed : feeds) {
+			feedFetches[feed.first] = fetchRangeFeed(data, feed.first, feed.second);
+		}
+
+		loop {
+			Future<Void> nextFeed = Never();
+			if (!removals.getFuture().isReady()) {
+				bool done = true;
+				while (!feedFetches.empty()) {
+					if (feedFetches.begin()->second.isReady()) {
+						feedFetches.erase(feedFetches.begin());
+					} else {
+						nextFeed = feedFetches.begin()->second;
+						done = false;
+					}
+				}
+				if (done) {
+					data->rangeFeedRemovals.erase(fetchKeysID);
+					return Void();
+				}
+			}
+			choose {
+				when(Key remove = waitNext(removals.getFuture())) { feedFetches.erase(remove); }
+				when(wait(nextFeed)) {}
+			}
+		}
+
+	} catch (Error& e) {
+		if (!data->shuttingDown) {
+			data->rangeFeedRemovals.erase(fetchKeysID);
+		}
+		throw;
+	}
+}
+
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
 	state KeyRange keys = shard->keys;
 	state Future<Void> warningLogger = logFetchKeysWarning(shard);
 	state const double startTime = now();
+	state Version fetchVersion = invalidVersion;
 	state FetchKeysMetricReporter metricReporter(fetchKeysID,
 	                                             startTime,
 	                                             keys,
@@ -2957,7 +3098,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// Get the history
 		state int debug_getRangeRetries = 0;
 		state int debug_nextRetryToLog = 1;
-		state bool isTooOld = false;
 
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
 		// we must refresh the cache manually.
@@ -2965,7 +3105,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		loop {
 			state Transaction tr(data->cx);
-			state Version fetchVersion = data->version.get();
+			fetchVersion = data->version.get();
 
 			TraceEvent(SevDebug, "FetchKeysUnblocked", data->thisServerID)
 			    .detail("FKID", interval.pairID)
@@ -3107,8 +3247,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// being recovered. Instead we wait for the updateStorage loop to commit something (and consequently also what
 		// we have written)
 
+		state Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
+
 		holdingFKPL.release();
-		wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
+		wait(fetchDurable);
 
 		TraceEvent(SevDebug, "FKAfterFinalCommit", data->thisServerID)
 		    .detail("FKID", interval.pairID)
@@ -3150,8 +3292,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// Eager reads will be done for them by update(), and the mutations will come back through
 		// AddingShard::addMutations and be applied to versionedMap and mutationLog as normal. The lie about their
 		// version is acceptable because this shard will never be read at versions < transferredVersion
+
+		batch->transferredVersion = shard->transferredVersion;
 		for (auto i = shard->updates.begin(); i != shard->updates.end(); ++i) {
-			i->version = shard->transferredVersion;
 			batch->arena.dependsOn(i->arena());
 		}
 
@@ -3232,7 +3375,8 @@ AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
 	fetchClient = fetchKeys(server, this);
 }
 
-void AddingShard::addMutation(Version version, MutationRef const& mutation) {
+void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
+	ASSERT(!fromFetch);
 	if (mutation.type == mutation.ClearRange) {
 		ASSERT(keys.begin <= mutation.param1 && mutation.param2 <= keys.end);
 	} else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
@@ -3255,19 +3399,39 @@ void AddingShard::addMutation(Version version, MutationRef const& mutation) {
 		}
 		// Add the mutation to the version.
 		updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
+		if (mutation.type == MutationRef::SetValue) {
+			for (auto& it : server->keyRangeFeed[mutation.param1]) {
+				if (it->mutations.empty() || it->mutations.back().version != version) {
+					it->mutations.push_back(MutationsAndVersionRef(version));
+				}
+				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
+				server->currentRangeFeeds.insert(it->id);
+			}
+		} else if (mutation.type == MutationRef::ClearRange) {
+			auto ranges = server->keyRangeFeed.intersectingRanges(KeyRangeRef(mutation.param1, mutation.param2));
+			for (auto& r : ranges) {
+				for (auto& it : r.value()) {
+					if (it->mutations.empty() || it->mutations.back().version != version) {
+						it->mutations.push_back(MutationsAndVersionRef(version));
+					}
+					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
+					server->currentRangeFeeds.insert(it->id);
+				}
+			}
+		}
 	} else if (phase == Waiting) {
-		server->addMutation(version, mutation, keys, server->updateEagerReads);
+		server->addMutation(version, fromFetch, mutation, keys, server->updateEagerReads);
 	} else
 		ASSERT(false);
 }
 
-void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
+void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	ASSERT((void*)this);
 	ASSERT(keys.contains(mutation.param1));
 	if (adding)
-		adding->addMutation(version, mutation);
+		adding->addMutation(version, fromFetch, mutation);
 	else if (readWrite)
-		readWrite->addMutation(version, mutation, this->keys, readWrite->updateEagerReads);
+		readWrite->addMutation(version, fromFetch, mutation, this->keys, readWrite->updateEagerReads);
 	else if (mutation.type != MutationRef::ClearRange) {
 		TraceEvent(SevError, "DeliveredToNotAssigned")
 		    .detail("Version", version)
@@ -3418,6 +3582,7 @@ void rollback(StorageServer* data, Version rollbackVersion, Version nextVersion)
 }
 
 void StorageServer::addMutation(Version version,
+                                bool fromFetch,
                                 MutationRef const& mutation,
                                 KeyRangeRef const& shard,
                                 UpdateEagerReadInfo* eagerReads) {
@@ -3432,7 +3597,7 @@ void StorageServer::addMutation(Version version,
 	    .detail("UID", thisServerID)
 	    .detail("ShardBegin", shard.begin)
 	    .detail("ShardEnd", shard.end);
-	applyMutation(this, expanded, mLog.arena(), mutableData(), version);
+	applyMutation(this, expanded, mLog.arena(), mutableData(), version, fromFetch);
 	// printf("\nSSUpdate: Printing versioned tree after applying mutation\n");
 	// mutableData().printTree(version);
 }
@@ -3447,34 +3612,6 @@ struct OrderByVersion {
 	}
 };
 
-#define PERSIST_PREFIX "\xff\xff"
-
-// Immutable
-static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
-                                       LiteralStringRef("FoundationDB/StorageServer/1/4"));
-static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/StorageServer/1/2"),
-                                                    LiteralStringRef("FoundationDB/StorageServer/1/5"));
-static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
-static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
-static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
-
-// (Potentially) change with the durable version or when fetchKeys completes
-static const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
-static const KeyRangeRef persistShardAssignedKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAssigned/"), LiteralStringRef(PERSIST_PREFIX "ShardAssigned0"));
-static const KeyRangeRef persistShardAvailableKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAvailable/"), LiteralStringRef(PERSIST_PREFIX "ShardAvailable0"));
-static const KeyRangeRef persistByteSampleKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/"), LiteralStringRef(PERSIST_PREFIX "BS0"));
-static const KeyRangeRef persistByteSampleSampleKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS/"),
-                LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS0"));
-static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
-static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "PrimaryLocality");
-static const KeyRangeRef persistRangeFeedKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
-// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
-
 class StorageUpdater {
 public:
 	StorageUpdater()
@@ -3484,7 +3621,7 @@ public:
 	  : fromVersion(fromVersion), currentVersion(fromVersion), restoredVersion(restoredVersion),
 	    processedStartKey(false), processedCacheStartKey(false) {}
 
-	void applyMutation(StorageServer* data, MutationRef const& m, Version ver) {
+	void applyMutation(StorageServer* data, MutationRef const& m, Version ver, bool fromFetch) {
 		//TraceEvent("SSNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
 
 		if (currentVersion != ver) {
@@ -3505,7 +3642,7 @@ public:
 			//	DEBUG_MUTATION("SSUpdateMutation", changes[c].version, *m);
 			//}
 
-			splitMutation(data, data->shards, m, ver);
+			splitMutation(data, data->shards, m, ver, fromFetch);
 		}
 
 		if (data->otherError.getFuture().isReady())
@@ -3873,7 +4010,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			state int mutationNum = 0;
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version);
+				updater.applyMutation(data, pUpdate->mutations[mutationNum], fii.transferredVersion, true);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				// data->counters.mutationBytes or data->counters.mutations should not be updated because they should
 				// have counted when the mutations arrive from cursor initially.
@@ -3950,7 +4087,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						//TraceEvent("SSPeekMutation", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cloneCursor2->version().toString());
 					}
 
-					updater.applyMutation(data, msg, ver);
+					updater.applyMutation(data, msg, ver, false);
 					mutationBytes += msg.totalSize();
 					data->counters.mutationBytes += msg.totalSize();
 					++data->counters.mutations;
@@ -5084,6 +5221,15 @@ ACTOR Future<Void> serveRangeFeedRequests(StorageServer* self, FutureStream<Rang
 	}
 }
 
+ACTOR Future<Void> serveOverlappingRangeFeedsRequests(
+    StorageServer* self,
+    FutureStream<OverlappingRangeFeedsRequest> overlappingRangeFeeds) {
+	loop {
+		OverlappingRangeFeedsRequest req = waitNext(overlappingRangeFeeds);
+		self->actors.add(self->readGuard(req, overlappingRangeFeedsQ));
+	}
+}
+
 ACTOR Future<Void> serveRangeFeedPopRequests(StorageServer* self, FutureStream<RangeFeedPopRequest> rangeFeedPops) {
 	loop {
 		RangeFeedPopRequest req = waitNext(rangeFeedPops);
@@ -5155,6 +5301,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
 	self->actors.add(serveRangeFeedRequests(self, ssi.rangeFeed.getFuture()));
+	self->actors.add(serveOverlappingRangeFeedsRequests(self, ssi.overlappingRangeFeeds.getFuture()));
 	self->actors.add(serveRangeFeedPopRequests(self, ssi.rangeFeedPop.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));

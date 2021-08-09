@@ -1861,10 +1861,13 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("Tag", req.tag.toString()).
-	//	detail("BeginVer", req.begin).detail("EndVer", reply.end).
-	//	detail("MsgBytes", reply.messages.expectedSize()).
-	//	detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
+	TraceEvent("TlogPeek", self->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", req.tag.toString())
+	    .detail("BeginVer", req.begin)
+	    .detail("EndVer", reply.end)
+	    .detail("MsgBytes", reply.messages.expectedSize())
+	    .detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 	if (req.sequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];
