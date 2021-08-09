@@ -37,6 +37,11 @@ public:
 			classes.insert(configClass);
 		}
 	}
+	ConfigClassSet(std::vector<KeyRef> configClasses) {
+		for (const auto& configClass : configClasses) {
+			classes.insert(configClass);
+		}
+	}
 
 	bool contains(KeyRef configClass) const { return classes.count(configClass); }
 	std::set<Key> const& getClasses() const { return classes; }
