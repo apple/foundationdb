@@ -2516,6 +2516,17 @@ public:
 
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
+		if (pageIDs.size() == 1) {
+			wait(self->pageFile->write(page->begin(), blockSize, (int64_t)pageIDs.front() * blockSize));
+			debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
+			             self->filename.c_str(),
+			             (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
+			             toString(pageIDs.front()).c_str(),
+			             page->begin(),
+			             (pageIDs.front() * blockSize));
+
+			return Void();
+		}
 		state std::vector<Future<Void>> writers;
 		state int i = 0;
 		for (const auto pageID : pageIDs) {
