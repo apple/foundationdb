@@ -126,8 +126,13 @@ public:
 	};
 
 private:
-	typedef Promise<Lock> Slot;
-	typedef Deque<Slot> Queue;
+	struct Waiter {
+		Waiter() : queuedTime(now()) {}
+		Promise<Lock> lockPromise;
+		double queuedTime;
+	};
+
+	typedef Deque<Waiter> Queue;
 
 #if PRIORITYMULTILOCK_DEBUG
 #define prioritylock_printf(...) printf(__VA_ARGS__)
@@ -156,29 +161,30 @@ public:
 			return p;
 		}
 
-		Slot s;
-		waiters[priority].push_back(s);
+		Waiter w;
+		waiters[priority].push_back(w);
 		++waiting;
 		prioritylock_printf("lock exit queued %s\n", toString().c_str());
-		return s.getFuture();
+		return w.lockPromise.getFuture();
 	}
 
 	std::string toString() const {
 		int runnersDone = 0;
-		for(int i = 0; i < runners.size(); ++i) {
-			if(runners[i].isReady()) {
+		for (int i = 0; i < runners.size(); ++i) {
+			if (runners[i].isReady()) {
 				++runnersDone;
 			}
 		}
 
-		std::string s = format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d ",
-		                       this,
-		                       concurrency,
-		                       available,
-		                       concurrency - available,
-		                       waiting,
-		                       runners.size(),
-							   runnersDone);
+		std::string s =
+		    format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d ",
+		           this,
+		           concurrency,
+		           available,
+		           concurrency - available,
+		           waiting,
+		           runners.size(),
+		           runnersDone);
 
 		for (int i = 0; i < waiters.size(); ++i) {
 			s += format("p%d_waiters=%u ", i, waiters[i].size());
@@ -235,12 +241,15 @@ private:
 				                    self->toString().c_str());
 
 				while (!pQueue->empty() && ++lastPriorityCount < self->launchLimit) {
-					Slot s = pQueue->front();
+					Waiter w = pQueue->front();
 					pQueue->pop_front();
 					--self->waiting;
 					Lock lock;
-					prioritylock_printf("  Running waiter priority=%d %s\n", priority, self->toString().c_str());
-					s.send(lock);
+					prioritylock_printf("  Running waiter priority=%d wait=%f %s\n",
+					                    priority,
+					                    now() - w.queuedTime,
+					                    self->toString().c_str());
+					w.lockPromise.send(lock);
 
 					// Self may have been destructed during the lock callback
 					if (error.isReady()) {
@@ -2086,10 +2095,10 @@ public:
 	          int concurrentExtentReads,
 	          bool memoryOnly = false,
 	          Promise<Void> errorPromise = {})
-	  : ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2), pageCacheBytes(pageCacheSizeBytes), pHeader(nullptr),
-	    desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize), filename(filename),
-	    memoryOnly(memoryOnly), errorPromise(errorPromise), remapCleanupWindow(remapCleanupWindow),
-	    concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
+	  : ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
+	    pageCacheBytes(pageCacheSizeBytes), pHeader(nullptr), desiredPageSize(desiredPageSize),
+	    desiredExtentSize(desiredExtentSize), filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
+	    remapCleanupWindow(remapCleanupWindow), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
