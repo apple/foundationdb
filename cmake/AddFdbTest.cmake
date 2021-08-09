@@ -352,7 +352,7 @@ function(package_bindingtester)
     COMMENT "Copy Flow tester for bindingtester")
 
   set(generated_binding_files python/fdb/fdboptions.py)
-  if(WITH_JAVA)
+  if(WITH_JAVA_BINDING)
     if(NOT FDB_RELEASE)
       set(prerelease_string "-PRERELEASE")
     else()
@@ -369,7 +369,7 @@ function(package_bindingtester)
     set(generated_binding_files ${generated_binding_files} java/foundationdb-tests.jar)
   endif()
 
-  if(WITH_GO AND NOT OPEN_FOR_IDE)
+  if(WITH_GO_BINDING AND NOT OPEN_FOR_IDE)
     add_dependencies(copy_binding_output_files fdb_go_tester fdb_go)
     add_custom_command(
       TARGET copy_binding_output_files

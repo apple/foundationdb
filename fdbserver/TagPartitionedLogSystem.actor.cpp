@@ -527,6 +527,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	}
 
 	ACTOR static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
+	                                                       Reference<Histogram> dist,
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in) {
 		state double startTime = now();
@@ -541,6 +542,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 				self->fastReplies++;
 			}
 		}
+		dist->sampleSeconds(now() - startTime);
 		return t;
 	}
 
@@ -563,12 +565,21 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 						it->connectionResetTrackers.push_back(makeReference<ConnectionResetInfo>());
 					}
 				}
+				if (it->tlogPushDistTrackers.empty()) {
+					for (int i = 0; i < it->logServers.size(); i++) {
+						it->tlogPushDistTrackers.push_back(
+						    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
+						                            it->logServers[i]->get().interf().address().toString(),
+						                            Histogram::Unit::microseconds));
+					}
+				}
 				vector<Future<Void>> tLogCommitResults;
 				for (int loc = 0; loc < it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
 					data.recordEmptyMessage(location, msg);
 					allReplies.push_back(recordPushMetrics(
 					    it->connectionResetTrackers[loc],
+					    it->tlogPushDistTrackers[loc],
 					    it->logServers[loc]->get().interf().address(),
 					    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
 					                                                                          msg.arena(),
