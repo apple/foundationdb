@@ -166,7 +166,7 @@ class IPagerSnapshot {
 public:
 	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
 	                                                           unsigned int level,
-	                                                           Standalone<VectorRef<LogicalPageID>> pageIDs,
+	                                                           VectorRef<LogicalPageID> pageIDs,
 	                                                           int priority,
 	                                                           bool cacheable,
 	                                                           bool nohit) = 0;
@@ -208,7 +208,7 @@ public:
 	// may see the effects of this write.
 	virtual void updatePage(PagerEventReasons reason,
 	                        unsigned int level,
-	                        Standalone<VectorRef<LogicalPageID>> pageIDs,
+	                        VectorRef<LogicalPageID> pageIDs,
 	                        Reference<ArenaPage> data) = 0;
 	void updatePage(PagerEventReasons reason, unsigned int level, LogicalPageID pageID, Reference<ArenaPage> data) {
 		updatePage(reason, level, VectorRef<LogicalPageID>(&pageID, 1), data);
@@ -242,7 +242,7 @@ public:
 	// considered likely to be needed soon.
 	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                              unsigned int level,
-	                                              Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                              VectorRef<PhysicalPageID> pageIDs,
 	                                              int priority,
 	                                              bool cacheable,
 	                                              bool noHit) = 0;
@@ -252,10 +252,7 @@ public:
 	                                      int priority,
 	                                      bool cacheable,
 	                                      bool noHit) {
-		Standalone<VectorRef<PhysicalPageID>> pageIDs;
-		pageIDs.push_back(pageIDs.arena(), pageID);
-		// VectorRef<PhysicalPageID>(&pageID,1) commented out for now.
-		return readPage(reason, level, pageIDs, priority, cacheable, noHit);
+		return readPage(reason, level, VectorRef<PhysicalPageID>(&pageID, 1), priority, cacheable, noHit);
 	}
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;

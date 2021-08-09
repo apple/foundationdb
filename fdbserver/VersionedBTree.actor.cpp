@@ -2539,15 +2539,17 @@ public:
 
 	Future<Void> writePhysicalPage(PagerEventReasons reason,
 	                               unsigned int level,
-	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                               VectorRef<PhysicalPageID> pageIDs,
 	                               Reference<ArenaPage> page,
 	                               bool header = false) {
+		debug_printf("writePhysicalPage %s \n", toString(pageIDs).c_str());
 		Future<Void> f = writePhysicalPage_impl(this, reason, level, pageIDs, page, header);
 		operations.add(f);
 		return f;
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
+		debug_printf("writeHeaderPage %s \n", toString(pageID).c_str());
 		return writePhysicalPage(
 		    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page, true);
 	}
@@ -2558,7 +2560,7 @@ public:
 
 	void updatePage(PagerEventReasons reason,
 	                unsigned int level,
-	                Standalone<VectorRef<LogicalPageID>> pageIDs,
+	                VectorRef<LogicalPageID> pageIDs,
 	                Reference<ArenaPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
@@ -2798,6 +2800,7 @@ public:
 	}
 
 	static Future<Reference<ArenaPage>> readHeaderPage(DWALPager* self, PhysicalPageID pageID) {
+		debug_printf("DWALPager(%s) readHeaderPage %s\n", self->filename.c_str(), toString(pageID).c_str());
 		return readPhysicalPage(self, VectorRef<LogicalPageID>(&pageID, 1), ioMaxPriority, true);
 	}
 
@@ -2810,7 +2813,7 @@ public:
 	// in the current commit
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                      unsigned int level,
-	                                      Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                      VectorRef<PhysicalPageID> pageIDs,
 	                                      int priority,
 	                                      bool cacheable,
 	                                      bool noHit) override {
@@ -2893,7 +2896,7 @@ public:
 
 	Future<Reference<ArenaPage>> readPageAtVersion(PagerEventReasons reason,
 	                                               unsigned int level,
-	                                               Standalone<VectorRef<LogicalPageID>> logicalIDs,
+	                                               VectorRef<LogicalPageID> logicalIDs,
 	                                               int priority,
 	                                               Version v,
 	                                               bool cacheable,
@@ -3624,7 +3627,7 @@ public:
 
 	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
 	                                                   unsigned int level,
-	                                                   Standalone<VectorRef<LogicalPageID>> pageIDs,
+	                                                   VectorRef<LogicalPageID> pageIDs,
 	                                                   int priority,
 	                                                   bool cacheable,
 	                                                   bool noHit) override {
@@ -5336,7 +5339,6 @@ private:
 			// If we are only writing 1 page and it has the same BTreePageID size as the original then try to reuse the
 			// LogicalPageIDs in previousID and try to update them atomically.
 			if (pagesToBuild.size() == 1 && previousID.size() == p.blockSize && p.blockSize == 1) {
-
 				LogicalPageID id = wait(
 				    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID.front(), pages, v));
 				childPageID.push_back(records.arena(), id);
