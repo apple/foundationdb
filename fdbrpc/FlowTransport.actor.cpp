@@ -1153,7 +1153,9 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 					readAllBytes = buffer_end - unprocessed_end;
 				}
 
-				state int totalReadBytes = 0;
+				state int totalReadBytes = wait(conn->asyncRead(unprocessed_end, buffer_end));
+                unprocessed_end += totalReadBytes;
+                /*
 				while (true) {
 					const int len = std::min<int>(buffer_end - unprocessed_end, FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 					if (len == 0)
@@ -1164,7 +1166,8 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 					wait(yield(TaskPriority::ReadSocket));
 					totalReadBytes += readBytes;
 					unprocessed_end += readBytes;
-				}
+				}*/
+
 				if (peer) {
 					peer->bytesReceived += totalReadBytes;
 				}
@@ -1282,14 +1285,14 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 					}
 				}
 
-				if (readWillBlock)
-					break;
+				//if (readWillBlock)
+				//	break;
 
-				wait(yield(TaskPriority::ReadSocket));
+				//wait(yield(TaskPriority::ReadSocket));
 			}
 
-			wait(conn->onReadable());
-			wait(delay(0, TaskPriority::ReadSocket)); // We don't want to call conn->read directly from the reactor - we
+			//wait(conn->onReadable());
+			//wait(delay(0, TaskPriority::ReadSocket)); // We don't want to call conn->read directly from the reactor - we
 			                                          // could get stuck in the reactor reading 1 packet at a time
 		}
 	} catch (Error& e) {

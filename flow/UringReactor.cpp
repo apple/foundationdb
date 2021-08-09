@@ -19,6 +19,7 @@ UringReactor::UringReactor(unsigned entries, unsigned flags){
     int ret = ::io_uring_queue_init(entries, &ring, flags);
     // https://github.com/spacejam/sled/issues/899
     ASSERT(ret==0);
+    sqeCount = 0;
 }
 
 void UringReactor::poll(){
@@ -42,6 +43,11 @@ void UringReactor::poll(){
 
     }
     ::io_uring_cq_advance(&ring, count);
+    /*if(sqeCount) {
+        int ret = ::io_uring_submit(&ring);
+        ASSERT(ret>=0);
+        sqeCount -= ret;
+    }*/
 }
 void UringReactor::write(int fd, const SendBuffer* buffer, int limit, Promise<int> &&p){
     OwnedWrite *ow = new OwnedWrite(std::move(p));
@@ -63,6 +69,18 @@ void UringReactor::write(int fd, const SendBuffer* buffer, int limit, Promise<in
     if(count==64)std::cout<<"full"<<std::endl;
     struct io_uring_sqe *sqe = ::io_uring_get_sqe(&ring);
     ::io_uring_prep_writev(sqe, fd, iov, count, 0);
+    ::io_uring_sqe_set_data(sqe, ow);
+    int ret = ::io_uring_submit(&ring);
+    ASSERT(ret>=0);
+}
+
+void UringReactor::read(int fd, uint8_t *buff, int limit, Promise<int> &&p){
+    OwnedWrite *ow = new OwnedWrite(std::move(p));
+    struct iovec *iov = ow->iov;
+    iov[0].iov_base = (void*)buff;
+    iov[0].iov_len = limit;
+    struct io_uring_sqe *sqe = ::io_uring_get_sqe(&ring);
+    ::io_uring_prep_readv(sqe, fd, iov, 1, 0);
     ::io_uring_sqe_set_data(sqe, ow);
     int ret = ::io_uring_submit(&ring);
     ASSERT(ret>=0);

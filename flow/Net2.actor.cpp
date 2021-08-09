@@ -575,7 +575,7 @@ private:
 		    .detail("Message", error.message());
 		closeSocket();
 	}
-
+/*
 	ACTOR static Future<int> asyncRead(Connection* self, uint8_t* begin, uint8_t* end) {
 		BindPromiseInt p("N2_AsyncReadError", self->id);
 		auto f = p.getFuture();
@@ -585,6 +585,22 @@ private:
 		try {
 			int size = wait(f);
 			g_net2->bytesReceived += size;
+			return size;
+		} catch (Error& err) {
+			self->closeSocket();
+			throw err;
+		}
+	}
+/*/
+    ACTOR static Future<int> asyncRead(Connection* self, uint8_t* begin, uint8_t* end) {
+        Promise<int> p;
+		auto f = p.getFuture();
+		++g_net2->countReads;
+		size_t toRead = end - begin;
+        self->ureactor->read(self->socket.native_handle(), begin, toRead, std::move(p));
+		try {
+			int size = wait(f);
+            g_net2->bytesReceived += size;
 			return size;
 		} catch (Error& err) {
 			self->closeSocket();
@@ -1558,7 +1574,7 @@ void Net2::run() {
 				++countCantSleep;
 		} else
 			++countWontSleep;
-		if (b) {
+		if (b&&0) {
 			sleepTime = 1e99;
 			double sleepStart = timer_monotonic();
 			if (!timers.empty()) {
