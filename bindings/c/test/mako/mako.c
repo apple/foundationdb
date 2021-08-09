@@ -1073,12 +1073,10 @@ void* worker_thread(void* thread_args) {
 	}
 
 	/* create my own transaction object */
-	printf("create transaction...\n");
 	err = fdb_database_create_transaction(database, &transaction);
 	check_fdb_error(err);
 
 	/* i'm ready */
-	printf("ready!\n");
 	__sync_fetch_and_add(readycount, 1);
 	while (*signal == SIGNAL_OFF) {
 		usleep(10000); /* 10ms */
@@ -1190,7 +1188,6 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fprintf(debugme, "DEBUG: worker %d started\n", worker_id);
 
 	/* Everything starts from here */
-	printf("API Version: %d\n", args->api_version);
 
 	err = fdb_select_api_version(args->api_version);
 	if (err) {
@@ -1288,16 +1285,16 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fdb_future_destroy(f);
 
 #else /* >= 610 */
-	if (args->num_databases == 0) {
-		fdb_create_database(NULL, &process.databases[0]);
-	}
-	size_t cluster_index = 0;
-	for (size_t i = 0; i < args->num_databases; i++) {
-		if (args->num_fdb_clusters == 0) { // if only default fdb.cluster is used
-			fdb_create_database(NULL, &process.databases[i]);
-		} else {
-			fdb_create_database(args->cluster_files[cluster_index], &process.databases[i]);
-			cluster_index = (cluster_index+1) % args->num_fdb_clusters;
+	if (worker_id == 0) {
+		// first process does work to one database in the first cluster
+		fdb_create_database(args->cluster_files[0], &process.databases[0]);
+	} else {
+		for (size_t i = 1; i < args->num_databases; i++) {
+			if (args->num_fdb_clusters <= 1) { // if only default fdb.cluster is used
+				fdb_create_database(args->cluster_files[0], &process.databases[i]);
+			} else {
+				fdb_create_database(args->cluster_files[worker_id % args->num_fdb_clusters], &process.databases[i]);
+			}
 		}
 	}
 #endif
@@ -1317,10 +1314,13 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	}
 
 	for (i = 0; i < args->num_threads; i++) {
-		printf("Loop: %d\n", i);
 		thread_args[i].thread_id = i;
-		thread_args[i].database_index = i % args->num_databases; // divide equally num threads per database
-		printf("thread db index: %d\n", thread_args[i].database_index);
+		if (worker_id == 0) {
+			thread_args[i].database_index = 0;
+		} else {
+			thread_args[i].database_index = i % (args->num_databases-1) + 1;
+		}
+
 		for (int op = 0; op < MAX_OP; op++) {
 			if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 				thread_args[i].block[op] = (lat_block_t*)malloc(sizeof(lat_block_t));
@@ -1335,7 +1335,6 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 			}
 		}
 		thread_args[i].process = &process;
-		printf("pthread_create worker threads...\n");
 		rc = pthread_create(&worker_threads[i], NULL, worker_thread, (void*)&thread_args[i]);
 		if (rc != 0) {
 			fprintf(stderr, "ERROR: cannot create a new worker thread %d\n", i);
@@ -1391,7 +1390,7 @@ int init_args(mako_args_t* args) {
 		return -1;
 	memset(args, 0, sizeof(mako_args_t)); /* zero-out everything */
 	args->num_fdb_clusters = 0;
-	args->num_databases = 0;
+	args->num_databases = 1;
 	args->api_version = fdb_get_max_api_version();
 	args->json = 0;
 	args->num_processes = 1;
