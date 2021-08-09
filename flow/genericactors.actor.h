@@ -1269,7 +1269,7 @@ void tagAndForwardError(Promise<T>* pOutputPromise, Error value, Future<Void> si
 ACTOR template <class T>
 void tagAndForwardError(PromiseStream<T>* pOutput, Error value, Future<Void> signal) {
 	wait(signal);
-	pOutput.sendError(value);
+	pOutput->sendError(value);
 }
 
 ACTOR template <class T>

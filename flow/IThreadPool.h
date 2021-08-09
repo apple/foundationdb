@@ -115,12 +115,9 @@ template <class T>
 class ThreadReturnPromiseStream : NonCopyable {
 public:
 	ThreadReturnPromiseStream() {}
-	~ThreadReturnPromiseStream() {
-		if (!promiseStream.isValid())
-			sendError(broken_promise());
-	}
+	~ThreadReturnPromiseStream() {}
 
-	Future<T> getFuture() { // Call only on the originating thread!
+	FutureStream<T> getFuture() { // Call only on the originating thread!
 		return promiseStream.getFuture();
 	}
 
