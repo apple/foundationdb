@@ -1053,7 +1053,7 @@ const Value rangeFeedDurableKey(Key const& feed, Version const& version) {
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withRangeFeed()));
 	wr.serializeBytes(rangeFeedDurablePrefix);
 	wr << feed;
-	wr << littleEndian64(version);
+	wr << bigEndian64(version);
 	return wr.toValue();
 }
 std::pair<Key, Version> decodeRangeFeedDurableKey(ValueRef const& key) {
@@ -1062,7 +1062,7 @@ std::pair<Key, Version> decodeRangeFeedDurableKey(ValueRef const& key) {
 	BinaryReader reader(key.removePrefix(rangeFeedDurablePrefix), AssumeVersion(ProtocolVersion::withRangeFeed()));
 	reader >> feed;
 	reader >> version;
-	return std::make_pair(feed, littleEndian64(version));
+	return std::make_pair(feed, bigEndian64(version));
 }
 const Value rangeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
