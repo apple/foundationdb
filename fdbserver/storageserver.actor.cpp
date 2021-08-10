@@ -1560,7 +1560,9 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 	if (req.end <= feedInfo->emptyVersion + 1) {
 	} else if (feedInfo->durableVersion == invalidVersion || req.begin > feedInfo->durableVersion) {
 		for (auto& it : data->uidRangeFeed[req.rangeID]->mutations) {
-			reply.mutations.push_back(reply.arena, it);
+			if (it.version >= req.begin) {
+				reply.mutations.push_back(reply.arena, it);
+			}
 		}
 	} else {
 		state std::deque<Standalone<MutationsAndVersionRef>> mutationsDeque =
@@ -1568,7 +1570,7 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 		state Version startingDurableVersion = feedInfo->durableVersion;
 		RangeResult res = wait(data->storage.readRange(
 		    KeyRangeRef(rangeFeedDurableKey(req.rangeID, req.begin), rangeFeedDurableKey(req.rangeID, req.end))));
-		Version lastVersion = invalidVersion;
+		Version lastVersion = req.begin - 1;
 		for (auto& kv : res) {
 			Key id;
 			Version version;
@@ -4336,9 +4338,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				if (it.version >= newOldestVersion) {
 					break;
 				}
-				data->storage.writeKeyValue(KeyValueRef(rangeFeedDurableKey(info->id, info->mutations.front().version),
-				                                        rangeFeedDurableValue(info->mutations.front().mutations)));
-				info->storageVersion = info->mutations.front().version;
+				data->storage.writeKeyValue(
+				    KeyValueRef(rangeFeedDurableKey(info->id, it.version), rangeFeedDurableValue(it.mutations)));
+				info->storageVersion = it.version;
 			}
 			wait(yield(TaskPriority::UpdateStorage));
 			curFeed++;
@@ -4383,9 +4385,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			while (info->mutations.front().version < newOldestVersion) {
 				info->mutations.pop_front();
 			}
-			if (info->storageVersion != invalidVersion) {
-				info->durableVersion = info->mutations.front().version;
-			}
+			info->durableVersion = info->storageVersion;
 			wait(yield(TaskPriority::UpdateStorage));
 			curFeed++;
 		}
