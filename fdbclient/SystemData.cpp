@@ -1050,19 +1050,19 @@ const KeyRangeRef rangeFeedDurableKeys(LiteralStringRef("\xff\xff/rf/"), Literal
 const KeyRef rangeFeedDurablePrefix = rangeFeedDurableKeys.begin;
 
 const Value rangeFeedDurableKey(Key const& feed, Version const& version) {
-	BinaryWriter wr(Unversioned());
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withRangeFeed()));
 	wr.serializeBytes(rangeFeedDurablePrefix);
 	wr << feed;
-	wr << version;
+	wr << littleEndian64(version);
 	return wr.toValue();
 }
 std::pair<Key, Version> decodeRangeFeedDurableKey(ValueRef const& key) {
 	Key feed;
 	Version version;
-	BinaryReader reader(key.removePrefix(rangeFeedDurablePrefix), Unversioned());
+	BinaryReader reader(key.removePrefix(rangeFeedDurablePrefix), AssumeVersion(ProtocolVersion::withRangeFeed()));
 	reader >> feed;
 	reader >> version;
-	return std::make_pair(feed, version);
+	return std::make_pair(feed, littleEndian64(version));
 }
 const Value rangeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
