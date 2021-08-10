@@ -3580,12 +3580,32 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						}
 					} else if (tokencmp(tokens[1], "get")) {
-						if (tokens.size() != 3) {
+						if (tokens.size() < 3 || tokens.size() > 5) {
 							printUsage(tokens[0]);
 							is_error = true;
 							continue;
 						}
-						Standalone<VectorRef<MutationsAndVersionRef>> res = wait(db->getRangeFeedMutations(tokens[2]));
+						Version begin = 0;
+						Version end = std::numeric_limits<Version>::max();
+						if (tokens.size() > 3) {
+							int n = 0;
+							if (sscanf(tokens[3].toString().c_str(), "%ld%n", &begin, &n) != 1 ||
+							    n != tokens[3].size()) {
+								printUsage(tokens[0]);
+								is_error = true;
+								continue;
+							}
+						}
+						if (tokens.size() > 4) {
+							int n = 0;
+							if (sscanf(tokens[4].toString().c_str(), "%ld%n", &end, &n) != 1 || n != tokens[4].size()) {
+								printUsage(tokens[0]);
+								is_error = true;
+								continue;
+							}
+						}
+						Standalone<VectorRef<MutationsAndVersionRef>> res =
+						    wait(db->getRangeFeedMutations(tokens[2], begin, end));
 						for (auto& it : res) {
 							for (auto& it2 : it.mutations) {
 								printf("%lld %s\n", it.version, it2.toString().c_str());

@@ -6519,7 +6519,9 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 
 ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutationsActor(Reference<DatabaseContext> db,
                                                                                        StringRef rangeID,
-                                                                                       KeyRangeRef range) {
+                                                                                       Version begin,
+                                                                                       Version end,
+                                                                                       KeyRange range) {
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
@@ -6543,6 +6545,8 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutation
 
 	state RangeFeedRequest req;
 	req.rangeID = rangeID;
+	req.begin = begin;
+	req.end = end;
 
 	RangeFeedReply rep = wait(loadBalance(cx.getPtr(),
 	                                      locations[0].second,
@@ -6555,8 +6559,10 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutation
 }
 
 Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getRangeFeedMutations(StringRef rangeID,
-                                                                                             KeyRangeRef range) {
-	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, range);
+                                                                                             Version begin,
+                                                                                             Version end,
+                                                                                             KeyRange range) {
+	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, begin, end, range);
 }
 
 ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingRangeFeedsActor(Reference<DatabaseContext> db,

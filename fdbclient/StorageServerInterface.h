@@ -663,6 +663,8 @@ struct RangeFeedReply {
 struct RangeFeedRequest {
 	constexpr static FileIdentifier file_identifier = 10726174;
 	Key rangeID;
+	Version begin = 0;
+	Version end = 0;
 	ReplyPromise<RangeFeedReply> reply;
 
 	RangeFeedRequest() {}
@@ -670,7 +672,7 @@ struct RangeFeedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, reply);
+		serializer(ar, rangeID, begin, end, reply);
 	}
 };
 

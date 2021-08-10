@@ -313,6 +313,7 @@ struct FetchInjectionInfo {
 struct RangeFeedInfo : ReferenceCounted<RangeFeedInfo> {
 	std::deque<Standalone<MutationsAndVersionRef>> mutations;
 	Version durableVersion = invalidVersion;
+	Version emptyVersion = 0;
 	KeyRange range;
 	Key id;
 };
@@ -1531,7 +1532,8 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 	state RangeFeedReply reply;
 	wait(delay(0));
 	auto& feedInfo = data->uidRangeFeed[req.rangeID];
-	if (feedInfo->durableVersion == invalidVersion) {
+	if (req.end <= feedInfo->emptyVersion + 1) {
+	} else if (feedInfo->durableVersion == invalidVersion || req.begin > feedInfo->durableVersion) {
 		for (auto& it : data->uidRangeFeed[req.rangeID]->mutations) {
 			reply.mutations.push_back(reply.arena, it);
 		}
@@ -1539,10 +1541,7 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 		state std::deque<Standalone<MutationsAndVersionRef>> mutationsDeque =
 		    data->uidRangeFeed[req.rangeID]->mutations;
 		RangeResult res = wait(data->storage.readRange(
-		    KeyRangeRef(rangeFeedDurableKey(req.rangeID, 0), rangeFeedDurableKey(req.rangeID, data->version.get()))));
-		if (res.empty()) {
-			data->uidRangeFeed[req.rangeID]->durableVersion = invalidVersion;
-		}
+		    KeyRangeRef(rangeFeedDurableKey(req.rangeID, req.begin), rangeFeedDurableKey(req.rangeID, req.end))));
 		Version lastVersion = invalidVersion;
 		for (auto& kv : res) {
 			Key id;
@@ -1553,8 +1552,33 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 			lastVersion = version;
 		}
 		for (auto& it : mutationsDeque) {
+			if (it.version >= req.end) {
+				break;
+			}
 			if (it.version > lastVersion) {
 				reply.mutations.push_back(reply.arena, it);
+			}
+		}
+		if (res.empty()) {
+			auto& feedInfo = data->uidRangeFeed[req.rangeID];
+			if (req.end > feedInfo->durableVersion) {
+				if (req.begin == 0) {
+					feedInfo->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
+				} else {
+					RangeResult emp = wait(data->storage.readRange(
+					    KeyRangeRef(rangeFeedDurableKey(req.rangeID, 0), rangeFeedDurableKey(req.rangeID, req.end)),
+					    -1));
+
+					auto& feedInfo = data->uidRangeFeed[req.rangeID];
+					if (emp.empty()) {
+						feedInfo->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
+					} else {
+						Key id;
+						Version version;
+						std::tie(id, version) = decodeRangeFeedDurableKey(emp[0].key);
+						feedInfo->durableVersion = version;
+					}
+				}
 			}
 		}
 	}
@@ -2945,7 +2969,7 @@ static const KeyRangeRef persistRangeFeedKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
-ACTOR Future<Void> fetchRangeFeed(StorageServer* data, Key rangeId, KeyRange range) {
+ACTOR Future<Void> fetchRangeFeed(StorageServer* data, Key rangeId, KeyRange range, Version fetchVersion) {
 
 	TraceEvent("FetchRangeFeed", data->thisServerID)
 	    .detail("RangeID", rangeId.printable())
@@ -2966,9 +2990,11 @@ ACTOR Future<Void> fetchRangeFeed(StorageServer* data, Key rangeId, KeyRange ran
 	                                           rangeFeedValue(range)));
 
 	state Standalone<VectorRef<MutationsAndVersionRef>> mutations =
-	    wait(data->cx->getRangeFeedMutations(rangeId, range));
+	    wait(data->cx->getRangeFeedMutations(rangeId, 0, fetchVersion, range));
 	state RangeFeedRequest req;
 	req.rangeID = rangeId;
+	req.begin = 0;
+	req.end = fetchVersion;
 	state RangeFeedReply rep = wait(getRangeFeedMutations(data, req));
 	state int mLoc = 0;
 	state int rLoc = 0;
@@ -3000,7 +3026,7 @@ ACTOR Future<Void> dispatchRangeFeeds(StorageServer* data, UID fetchKeysID, KeyR
 		state std::vector<std::pair<Key, KeyRange>> feeds =
 		    wait(data->cx->getOverlappingRangeFeeds(keys, fetchVersion));
 		for (auto& feed : feeds) {
-			feedFetches[feed.first] = fetchRangeFeed(data, feed.first, feed.second);
+			feedFetches[feed.first] = fetchRangeFeed(data, feed.first, feed.second, fetchVersion);
 		}
 
 		loop {
@@ -3752,6 +3778,7 @@ private:
 				Reference<RangeFeedInfo> rangeFeedInfo(new RangeFeedInfo());
 				rangeFeedInfo->range = rangeFeedRange;
 				rangeFeedInfo->id = rangeFeedId;
+				rangeFeedInfo->emptyVersion = currentVersion - 1;
 				data->uidRangeFeed[rangeFeedId] = rangeFeedInfo;
 				auto rs = data->keyRangeFeed.modify(rangeFeedRange);
 				for (auto r = rs.begin(); r != rs.end(); ++r) {
@@ -4277,11 +4304,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state int curFeed = 0;
 		while (curFeed < updatedRangeFeeds.size()) {
 			auto info = data->uidRangeFeed[updatedRangeFeeds[curFeed]];
-			while (info->mutations.front().version < newOldestVersion) {
+			for (auto& it : info->mutations) {
+				if (it.version >= newOldestVersion) {
+					break;
+				}
 				data->storage.writeKeyValue(KeyValueRef(rangeFeedDurableKey(info->id, info->mutations.front().version),
 				                                        rangeFeedDurableValue(info->mutations.front().mutations)));
 				info->durableVersion = info->mutations.front().version;
-				info->mutations.pop_front();
 			}
 			wait(yield(TaskPriority::UpdateStorage));
 			curFeed++;
@@ -4318,6 +4347,16 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			// The data distributor's buildTeam() will get stuck in building a team
 			durableInProgress.sendError(please_reboot());
 			throw please_reboot();
+		}
+
+		curFeed = 0;
+		while (curFeed < updatedRangeFeeds.size()) {
+			auto info = data->uidRangeFeed[updatedRangeFeeds[curFeed]];
+			while (info->mutations.front().version < newOldestVersion) {
+				info->mutations.pop_front();
+			}
+			wait(yield(TaskPriority::UpdateStorage));
+			curFeed++;
 		}
 
 		durableInProgress.send(Void());
@@ -5240,14 +5279,17 @@ ACTOR Future<Void> serveRangeFeedPopRequests(StorageServer* self, FutureStream<R
 	loop {
 		RangeFeedPopRequest req = waitNext(rangeFeedPops);
 		auto& feed = self->uidRangeFeed[req.rangeID];
-		while (!feed->mutations.empty() && feed->mutations.front().version < req.version) {
-			self->uidRangeFeed[req.rangeID]->mutations.pop_front();
-		}
-		if (feed->durableVersion != invalidVersion) {
-			self->storage.clearRange(
-			    KeyRangeRef(rangeFeedDurableKey(feed->id, 0), rangeFeedDurableKey(feed->id, req.version)));
-			if (req.version > feed->durableVersion) {
-				feed->durableVersion = invalidVersion;
+		if (req.version - 1 > feed->emptyVersion) {
+			feed->emptyVersion = req.version - 1;
+			while (!feed->mutations.empty() && feed->mutations.front().version < req.version) {
+				self->uidRangeFeed[req.rangeID]->mutations.pop_front();
+			}
+			if (feed->durableVersion != invalidVersion) {
+				self->storage.clearRange(
+				    KeyRangeRef(rangeFeedDurableKey(feed->id, 0), rangeFeedDurableKey(feed->id, req.version)));
+				if (req.version > feed->durableVersion) {
+					feed->durableVersion = invalidVersion;
+				}
 			}
 		}
 		TraceEvent("RangeFeedPopQuery", self->thisServerID)
