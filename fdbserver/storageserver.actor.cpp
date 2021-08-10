@@ -192,6 +192,9 @@ struct StorageServerDisk {
 	Future<Void> getError() { return storage->getError(); }
 	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
+	Future<Void> commitAsync(Version version) { return storage->commitAsync(version); }
+
+    FutureStream<IKeyValueStore::CommitNotification> commitNotifications() { return storage->getNotifyCommit()->getFuture(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	Future<Key> readNextKeyInclusive(KeyRef key) { return readFirstKey(storage, KeyRangeRef(key, allKeys.end)); }
@@ -4027,10 +4030,25 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
-		if (newOldestVersion > data->rebootAfterDurableVersion) {
+		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
+		data->fetchKeysBytesBudget = SERVER_KNOBS->STORAGE_FETCH_BYTES;
+		data->fetchKeysBudgetUsed.set(false);
+		if (!data->fetchKeysBudgetUsed.get()) {
+			wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
+		}
+	}
+}
+
+ACTOR Future<Void> onDataPersisted(
+	StorageServer* data, FutureStream<IKeyValueStore::CommitNotification> dataPersisted) {
+
+	loop {
+		IKeyValueStore::CommitNotification persistedData = waitNext(dataPersisted);
+		Version lastPersistedVersion = persistedData.version;
+		if (lastPersistedVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
-			    .detail("NewOldestVersion", newOldestVersion)
-			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+				.detail("NewOldestVersion", lastPersistedVersion)
+				.detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
 			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
 			// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
 			// Otherwise, in the race situation when storage server receives both reboot and
@@ -4043,7 +4061,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		durableInProgress.send(Void());
 		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to shut
-		                                             // down, so delay to check for cancellation
+														// down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
 		// effective and are applied after we change the durable version. Also ensure that we have to lock while calling
@@ -4052,7 +4070,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait(data->durableVersionLock.take());
 		data->popVersion(data->durableVersion.get() + 1);
 
-		while (!changeDurableVersion(data, newOldestVersion)) {
+		while (!changeDurableVersion(data, lastPersistedVersion)) {
 			if (g_network->check_yield(TaskPriority::UpdateStorage)) {
 				data->durableVersionLock.release();
 				wait(delay(0, TaskPriority::UpdateStorage));
@@ -4062,13 +4080,50 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		data->durableVersionLock.release();
 		data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
+	}
+}
 
-		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
-		data->fetchKeysBytesBudget = SERVER_KNOBS->STORAGE_FETCH_BYTES;
-		data->fetchKeysBudgetUsed.set(false);
-		if (!data->fetchKeysBudgetUsed.get()) {
-			wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
-		}
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
+
+////////////////////////////////// StorageServerDisk ///////////////////////////////////////
+#ifndef __INTEL_COMPILER
+#pragma region StorageServerDisk
+#endif
+
+void StorageServerDisk::makeNewStorageServerDurable() {
+	storage->set(persistFormat);
+	storage->set(KeyValueRef(persistID, BinaryWriter::toValue(data->thisServerID, Unversioned())));
+	if (data->tssPairID.present()) {
+		storage->set(KeyValueRef(persistTssPairID, BinaryWriter::toValue(data->tssPairID.get(), Unversioned())));
+	}
+	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
+	storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), LiteralStringRef("0")));
+	storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), LiteralStringRef("0")));
+}
+
+void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
+	// ASSERT( self->debug_inApplyUpdate );
+	ASSERT(!keys.empty());
+
+	auto& mLV = self->addVersionToMutationLog(self->data().getLatestVersion());
+
+	KeyRange availableKeys = KeyRangeRef(persistShardAvailableKeys.begin.toString() + keys.begin.toString(),
+	                                     persistShardAvailableKeys.begin.toString() + keys.end.toString());
+	//TraceEvent("SetAvailableStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", availableKeys.begin).detail("RangeEnd", availableKeys.end);
+
+	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, availableKeys.begin, availableKeys.end));
+	self->addMutationToMutationLog(mLV,
+	                               MutationRef(MutationRef::SetValue,
+	                                           availableKeys.begin,
+	                                           available ? LiteralStringRef("1") : LiteralStringRef("0")));
+	if (keys.end != allKeys.end) {
+		bool endAvailable = self->shards.rangeContaining(keys.end)->value()->isInVersionedData();
+		self->addMutationToMutationLog(mLV,
+		                               MutationRef(MutationRef::SetValue,
+		                                           availableKeys.end,
+		                                           endAvailable ? LiteralStringRef("1") : LiteralStringRef("0")));
 	}
 }
 
@@ -4959,6 +5014,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	self->actors.add(updateStorage(self));
+    self->actors.add(onDataPersisted(self, self->storage.commitNotifications()));
 	self->actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
 	self->actors.add(self->otherError.getFuture());
 	self->actors.add(metricsCore(self, ssi));
