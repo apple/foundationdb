@@ -633,13 +633,12 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0),
 	    minPoppedTag(invalidTag), unpoppedRecoveredTags(0), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
- 	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), logId(interf.id()),
-	    protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion), tLogData(tLogData),
-	    unrecoveredBefore(1), recoveredAt(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag),
-	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
-	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
-	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
-	    txsTags(txsTags) {
+	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), logId(interf.id()), protocolVersion(protocolVersion),
+	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
+	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
+	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
+	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
+	    terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false), txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -1170,17 +1169,19 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 		}
 
 		uint64_t PoppedVersionLag = logData->persistentDataDurableVersion - logData->queuePoppedVersion;
-		if ( SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
-			(logData->queuePoppedVersion > 0) && //avoid generating massive events at beginning 
-			(tagData->unpoppedRecovered || PoppedVersionLag >= SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { //when recovery or long lag
+		if (SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
+		    (logData->queuePoppedVersion > 0) && // avoid generating massive events at beginning
+		    (tagData->unpoppedRecovered ||
+		     PoppedVersionLag >=
+		         SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { // when recovery or long lag
 			TraceEvent("TLogPopDetails", logData->logId)
-				.detail("Tag", tagData->tag.toString())
-				.detail("UpTo", upTo)
-				.detail("PoppedVersionLag", PoppedVersionLag)
-				.detail("MinPoppedTag", logData->minPoppedTag.toString())
-				.detail("QueuePoppedVersion", logData->queuePoppedVersion)
-				.detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
-				.detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
+			    .detail("Tag", tagData->tag.toString())
+			    .detail("UpTo", upTo)
+			    .detail("PoppedVersionLag", PoppedVersionLag)
+			    .detail("MinPoppedTag", logData->minPoppedTag.toString())
+			    .detail("QueuePoppedVersion", logData->queuePoppedVersion)
+			    .detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
+			    .detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
 		}
 		if (upTo > logData->persistentDataDurableVersion)
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
@@ -1743,8 +1744,8 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		return Void();
 	}
 
-	if (req.begin > logData->persistentDataDurableVersion && !req.onlySpilled && req.tag.locality >= 0 &&
-	    !req.returnIfBlocked) {
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.begin > logData->persistentDataDurableVersion && !req.onlySpilled &&
+	    req.tag.locality >= 0 && !req.returnIfBlocked) {
 		wait(waitForMessagesForTag(logData, &req, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
 	}
 	state Version endVersion = logData->version.get() + 1;
