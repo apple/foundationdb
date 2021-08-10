@@ -26,6 +26,10 @@
 #include "fdbserver/Knobs.h"
 #include "flow/IThreadPool.h"
 
+#include "flow/actorcompiler.h" // This must be the last #include.
+
+
+
 class IClosable {
 public:
 	// IClosable is a base interface for any disk-backed data structure that needs to support asynchronous errors,
@@ -42,28 +46,26 @@ public:
 
 class IKeyValueStore : public IClosable {
 public:
-   struct CommitNotification { 
+    struct CommitNotification {
        enum Type { 
            BufferWrite, 
            Persist, 
        }; 
 
-		CommitNotification(Type type, Version version) :
-			type(type), version(version) {}
+        CommitNotification(Version version) :
+            type(Persist), version(version) {}
 
        Type type; 
        Version version; 
-   }; 
+    }; 
 
-	virtual KeyValueStoreType getType() const = 0;
+    virtual KeyValueStoreType getType() const = 0;
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
 	virtual Future<Void> commitAsync(Version version, bool sequential = false) {
-		wait(commit(sequential));
-		notifyCommit.send(CommitNotification(CommitNotification::Persist, version));
-		return Void();
+		return commit(sequential);
 	}
 	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) = 0;
 
