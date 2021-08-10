@@ -92,6 +92,9 @@ public:
 
 protected:
 	virtual ~IKeyValueStore() {}
+
+private:
+	ThreadReturnPromiseStream<
 };
 
 extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
