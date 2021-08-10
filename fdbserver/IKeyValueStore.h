@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
+#include "flow/IThreadPool.h"
 
 class IClosable {
 public:
@@ -41,12 +42,29 @@ public:
 
 class IKeyValueStore : public IClosable {
 public:
+   struct CommitNotification { 
+       enum Type { 
+           BufferWrite, 
+           Persist, 
+       }; 
+
+		CommitNotification(Type type, Version version) :
+			type(type), version(version) {}
+
+       Type type; 
+       Version version; 
+   }; 
+
 	virtual KeyValueStoreType getType() const = 0;
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
-
+	virtual Future<Void> commitAsync(Version version, bool sequential = false) {
+		wait(commit(sequential));
+		notifyCommit.send(CommitNotification(CommitNotification::Persist, version));
+		return Void();
+	}
 	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer
@@ -90,11 +108,13 @@ public:
 	// of a rollback.
 	virtual Future<Void> init() { return Void(); }
 
+	ThreadReturnPromiseStream<CommitNotification>* getNotifyCommit() { return &notifyCommit; }
+
 protected:
 	virtual ~IKeyValueStore() {}
 
 private:
-	ThreadReturnPromiseStream<
+	ThreadReturnPromiseStream<CommitNotification> notifyCommit; 
 };
 
 extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
