@@ -1698,7 +1698,8 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 			              networkOptions.traceDirectory.get(),
 			              "trace",
 			              networkOptions.traceLogGroup,
-			              networkOptions.traceFileIdentifier);
+			              networkOptions.traceFileIdentifier,
+			              networkOptions.tracePartialFileSuffix);
 
 			TraceEvent("ClientStart")
 			    .detail("SourceVersion", getSourceVersion())
@@ -1855,6 +1856,10 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			fprintf(stderr, "Unrecognized trace clock source: `%s'\n", networkOptions.traceClockSource.c_str());
 			throw invalid_option_value();
 		}
+		break;
+	case FDBNetworkOptions::TRACE_PARTIAL_FILE_SUFFIX:
+		validateOptionValuePresent(value);
+		networkOptions.tracePartialFileSuffix = value.get().toString();
 		break;
 	case FDBNetworkOptions::KNOB: {
 		validateOptionValuePresent(value);
@@ -4088,8 +4093,7 @@ SpanID generateSpanID(int transactionTracingEnabled) {
 	}
 }
 
-Transaction::Transaction()
-  : info(TaskPriority::DefaultEndpoint, generateSpanID(true)), span(info.spanID, "Transaction"_loc) {}
+Transaction::Transaction() = default;
 
 Transaction::Transaction(Database const& cx)
   : info(cx->taskID, generateSpanID(cx->transactionTracingEnabled)), numErrors(0), options(cx),
