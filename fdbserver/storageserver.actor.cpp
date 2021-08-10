@@ -1267,14 +1267,16 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		DEBUG_MUTATION("ShardGetValue",
 		               version,
-		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")));
+		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")),
+					   data->thisServerID);
 		DEBUG_MUTATION("ShardGetPath",
 		               version,
 		               MutationRef(MutationRef::DebugKey,
 		                           req.key,
 		                           path == 0   ? LiteralStringRef("0")
 		                           : path == 1 ? LiteralStringRef("1")
-		                                       : LiteralStringRef("2")));
+		                                       : LiteralStringRef("2")),
+					   data->thisServerID);
 
 		/*
 		StorageMetrics m;
@@ -1382,7 +1384,8 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent
 			    latest,
 			    MutationRef(MutationRef::DebugKey,
 			                metadata->key,
-			                reply.value.present() ? StringRef(reply.value.get()) : LiteralStringRef("<null>")));
+			                reply.value.present() ? StringRef(reply.value.get()) : LiteralStringRef("<null>")),
+				data->thisServerID);
 
 			if (metadata->debugID.present())
 				g_traceBatch.addEvent(
@@ -2835,7 +2838,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	wait(data->coreStarted.getFuture() && delay(0));
 
 	try {
-		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys);
+		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys, data->thisServerID);
 
 		TraceEvent(SevDebug, interval.begin(), data->thisServerID)
 		    .detail("KeyBegin", shard->keys.begin)
@@ -2926,10 +2929,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
 					    .detail("Version", fetchVersion)
 					    .detail("More", this_block.more);
-					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys);
+
+					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
 					if(MUTATION_TRACKING_ENABLED) {
-						for (auto k = this_block.begin(); k != this_block.end(); ++k)
-							DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
+						for (auto k = this_block.begin(); k != this_block.end(); ++k) {
+							DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value), data->thisServerID);
+						}
 					}
 
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
@@ -3094,8 +3099,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
 			if(MUTATION_TRACKING_ENABLED) {
-				for (auto& m : b->mutations)
-					DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m);
+				for (auto& m : b->mutations) {
+					DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
+				}
 			}
 		}
 
@@ -3222,7 +3228,7 @@ void changeServerKeys(StorageServer* data,
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
-	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys);
+	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys, data->thisServerID);
 
 	bool isDifferent = false;
 	auto existingShards = data->shards.intersectingRanges(keys);
@@ -3330,7 +3336,7 @@ void changeServerKeys(StorageServer* data,
 
 void rollback(StorageServer* data, Version rollbackVersion, Version nextVersion) {
 	TEST(true); // call to shard rollback
-	DEBUG_KEY_RANGE("Rollback", rollbackVersion, allKeys);
+	DEBUG_KEY_RANGE("Rollback", rollbackVersion, allKeys, data->thisServerID);
 
 	// We used to do a complicated dance to roll back in MVCC history.  It's much simpler, and more testable,
 	// to simply restart the storage server actor and restore from the persistent disk state, and then roll
@@ -3355,8 +3361,7 @@ void StorageServer::addMutation(Version version,
 		return;
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
-	DEBUG_MUTATION("applyMutation", version, expanded)
-	    .detail("UID", thisServerID)
+	DEBUG_MUTATION("applyMutation", version, expanded, thisServerID)
 	    .detail("ShardBegin", shard.begin)
 	    .detail("ShardEnd", shard.end);
 	applyMutation(this, expanded, mLog.arena(), mutableData());
@@ -3427,7 +3432,7 @@ public:
 		} else {
 			// FIXME: enable when DEBUG_MUTATION is active
 			// for(auto m = changes[c].mutations.begin(); m; ++m) {
-			//	DEBUG_MUTATION("SSUpdateMutation", changes[c].version, *m);
+			//	DEBUG_MUTATION("SSUpdateMutation", changes[c].version, *m, data->thisServerID);
 			//}
 
 			splitMutation(data, data->shards, m, ver);
@@ -3834,11 +3839,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .suppressFor(10.0)
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
-					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);
+					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
 					if (ver == 1) {
 						//TraceEvent("SSPeekMutation", data->thisServerID).log();
 						// The following trace event may produce a value with special characters
-						TraceEvent("SSPeekMutation", data->thisServerID).detail("Mutation", msg).detail("Version", cloneCursor2->version().toString());
+						TraceEvent("SSPeekMutation", data->thisServerID)
+						    .detail("Mutation", msg)
+						    .detail("Version", cloneCursor2->version().toString());
 					}
 
 					updater.applyMutation(data, msg, ver);
@@ -4158,7 +4165,7 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
                                        Version debugVersion,
                                        const char* debugContext) {
 	for (const auto& m : mutations) {
-		DEBUG_MUTATION(debugContext, debugVersion, m).detail("UID", data->thisServerID);
+		DEBUG_MUTATION(debugContext, debugVersion, m, data->thisServerID);
 		if (m.type == MutationRef::SetValue) {
 			storage->set(KeyValueRef(m.param1, m.param2));
 		} else if (m.type == MutationRef::ClearRange) {
