@@ -1110,10 +1110,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					pProxyCommitData->singleKeyMutationEvent->log();
 				}
 
-				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
-				    .detail("Dbgid", pProxyCommitData->dbgid)
-				    .detail("To", tags)
-				    .detail("Mutation", m);
+				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
+				    .detail("To", tags);
 				self->toCommit.addTags(tags);
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
@@ -1130,10 +1128,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				std::set<ptxn::StorageTeamID> storageTeams; // write m to these storage teams
 				if (firstRange == ranges.end()) {
 					// Fast path
-					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
-					    .detail("Dbgid", pProxyCommitData->dbgid)
-					    .detail("To", ranges.begin().value().tags)
-					    .detail("Mutation", m);
+					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
+					    .detail("To", ranges.begin().value().tags);
 
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
@@ -1172,10 +1168,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 							trCost->get().clearIdxCosts.pop_front();
 						}
 					}
-					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
-					    .detail("Dbgid", pProxyCommitData->dbgid)
-					    .detail("To", allSources)
-					    .detail("Mutation", m);
+					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
+					    .detail("To", allSources);
 
 					self->toCommit.addTags(allSources);
 				}
@@ -1752,7 +1746,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
 
-	TraceEvent("ProxyReadyForReads", proxy.id());
+	TraceEvent("ProxyReadyForReads", proxy.id()).log();
 
 	loop {
 		GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture());
