@@ -3606,6 +3606,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							wait(db->popRangeFeedMutations(tokens[2], v));
 						}
 					}
+					continue;
 				}
 				if (tokencmp(tokens[0], "tssq")) {
 					if (tokens.size() == 2) {

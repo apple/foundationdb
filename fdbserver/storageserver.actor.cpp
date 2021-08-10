@@ -1549,7 +1549,7 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 			Version version;
 			std::tie(id, version) = decodeRangeFeedDurableKey(kv.key);
 			auto mutations = decodeRangeFeedDurableValue(kv.value);
-			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(mutations, version));
+			reply.mutations.push_back_deep(reply.arena, MutationsAndVersionRef(mutations, version));
 			lastVersion = version;
 		}
 		for (auto& it : mutationsDeque) {
@@ -4284,6 +4284,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				info->mutations.pop_front();
 			}
 			wait(yield(TaskPriority::UpdateStorage));
+			curFeed++;
 		}
 
 		// Set the new durable version as part of the outstanding change set, before commit
@@ -5239,7 +5240,7 @@ ACTOR Future<Void> serveRangeFeedPopRequests(StorageServer* self, FutureStream<R
 	loop {
 		RangeFeedPopRequest req = waitNext(rangeFeedPops);
 		auto& feed = self->uidRangeFeed[req.rangeID];
-		while (feed->mutations.front().version < req.version) {
+		while (!feed->mutations.empty() && feed->mutations.front().version < req.version) {
 			self->uidRangeFeed[req.rangeID]->mutations.pop_front();
 		}
 		if (feed->durableVersion != invalidVersion) {
