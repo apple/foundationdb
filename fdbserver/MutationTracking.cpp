@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <vector>
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/LogProtocolMessage.h"
@@ -27,33 +28,32 @@
 #error "You cannot use mutation tracking in a clean/release build."
 #endif
 
-// Track up to 2 keys in simulation via enabling MUTATION_TRACKING_ENABLED and setting the keys here.
-StringRef debugKey = LiteralStringRef("");
-StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
+// Track any of these keys in simulation via enabling MUTATION_TRACKING_ENABLED and setting the keys here.
+std::vector<KeyRef> debugKeys = { ""_sr, "\xff\xff"_sr };
 
-TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
+TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation) {
 	if (std::any_of(debugKeys.begin(), debugKeys.end(), [&mutation](const KeyRef& debugKey) {
 		    return ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
 		            mutation.param1 <= debugKey && mutation.param2 > debugKey) ||
 		           mutation.param1 == debugKey;
 	    })) {
 
-		TraceEvent event("MutationTracking", id);
+		TraceEvent event("MutationTracking");
 		event.detail("At", context).detail("Version", version).detail("Mutation", mutation);
 		return event;
-	} else {
-		return TraceEvent();
 	}
+	return TraceEvent();
 }
 
-TraceEvent debugKeyRangeEnabled(const char* context, Version version, KeyRangeRef const& keys, UID id) {
+TraceEvent debugKeyRangeEnabled(const char* context, Version version, KeyRangeRef const& keys) {
 	if (std::any_of(
 	        debugKeys.begin(), debugKeys.end(), [&keys](const KeyRef& debugKey) { return keys.contains(debugKey); })) {
 
-		TraceEvent event("MutationTracking", id);
+		TraceEvent event("MutationTracking");
 		event.detail("At", context).detail("Version", version).detail("Mutation", MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end));
 		return event;
 	}
+	return TraceEvent();
 }
 
 TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, StringRef commitBlob, UID id) {

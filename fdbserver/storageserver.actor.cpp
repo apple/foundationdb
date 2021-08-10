@@ -3208,9 +3208,7 @@ void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
 	else if (readWrite)
 		readWrite->addMutation(version, mutation, this->keys, readWrite->updateEagerReads);
 	else if (mutation.type != MutationRef::ClearRange) {
-		TraceEvent(SevError, "DeliveredToNotAssigned")
-		    .detail("Version", version)
-		    .detail("Mutation", mutation.toString());
+		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
 		ASSERT(false); // Mutation delivered to notAssigned shard!
 	}
 }
@@ -3848,7 +3846,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
 				    deterministicRandom()->random01() < 0.05) {
 					TraceEvent(SevWarnAlways, "TSSInjectDropMutation", data->thisServerID)
-					    .detail("Mutation", msg.toString())
+					    .detail("Mutation", msg)
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (data->isTSSInQuarantine() &&
 				           (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff)) {
@@ -4180,7 +4178,6 @@ void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
 }
 
 void StorageServerDisk::writeMutation(MutationRef mutation) {
-	// FIXME: DEBUG_MUTATION(debugContext, debugVersion, *m);
 	if (mutation.type == MutationRef::SetValue) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
 	} else if (mutation.type == MutationRef::ClearRange) {
