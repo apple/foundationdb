@@ -726,10 +726,10 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigAndCha
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/CompactNode") {
-	wait(testCompact<TransactionToLocalConfigEnvironment>(params));
-	return Void();
-}
+// TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/CompactNode") {
+// 	wait(testCompact<TransactionToLocalConfigEnvironment>(params));
+// 	return Void();
+// }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigurationAfterCompaction") {
 	wait(testNewLocalConfigAfterCompaction<TransactionToLocalConfigEnvironment>(params));
