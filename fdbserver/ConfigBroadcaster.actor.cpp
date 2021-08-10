@@ -296,7 +296,7 @@ public:
 		}
 	}
 
-	Future<Void> getError() const { return consumerFuture; }
+	Future<Void> getError() const { return consumerFuture || actors.getResult(); }
 
 	UID getID() const { return id; }
 
