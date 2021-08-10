@@ -781,6 +781,7 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetConfigClasses") {
 	return Void();
 }
 
+// TODO: The below tests seem to always segfault
 TEST_CASE("/fdbserver/ConfigDB/Transaction/GetKnobs") {
 	wait(testGetKnobs(params, false, false));
 	return Void();

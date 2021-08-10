@@ -84,6 +84,11 @@ class ConfigBroadcasterImpl {
 
 	template <class Changes>
 	Future<Void> pushChanges(BroadcastClientDetails& client, Changes const& changes) {
+		// Skip if client has already seen the latest version.
+		if (client.lastSeenVersion >= mostRecentVersion) {
+			return Void();
+		}
+
 		ConfigBroadcastChangesRequest req;
 		for (const auto& versionedMutation : changes) {
 			if (versionedMutation.version > client.lastSeenVersion &&
@@ -314,7 +319,7 @@ Future<Void> ConfigBroadcaster::registerWorker(Version lastSeenVersion,
                                                ConfigClassSet configClassSet,
                                                Future<Void> watcher,
                                                ConfigBroadcastInterface broadcastInterface) {
-	return impl().registerWorker(this, lastSeenVersion, configClassSet, watcher, broadcastInterface);
+	return impl().registerWorker(this, lastSeenVersion, std::move(configClassSet), watcher, broadcastInterface);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
