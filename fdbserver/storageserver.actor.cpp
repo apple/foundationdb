@@ -779,9 +779,9 @@ public:
 		LatencyBands readLatencyBands;
 
 		Counters(StorageServer* self)
-		  : cc("StorageServer", self->thisServerID.toString()), getKeyQueries("GetKeyQueries", cc),
-		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
-		    getRangeStreamQueries("GetRangeStreamQueries", cc), allQueries("QueryQueue", cc),
+		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
+		    getKeyQueries("GetKeyQueries", cc), getValueQueries("GetValueQueries", cc),
+		    getRangeQueries("GetRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
 		    finishedQueries("FinishedQueries", cc), lowPriorityQueries("LowPriorityQueries", cc),
 		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc),
 		    emptyQueries("EmptyQueries", cc), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc),
@@ -823,18 +823,7 @@ public:
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi)
-	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
-	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
-	    primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
-	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
-	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false), shuttingDown(false),
-	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
-	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()), tssInQuarantine(false),
-	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
-	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
-	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
-	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	  : tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
 	                                                            Histogram::Unit::microseconds)),
 	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
@@ -857,7 +846,18 @@ public:
 	                                                          Histogram::Unit::microseconds)),
 	    ssDurableVersionUpdateLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                   SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM,
-	                                                                   Histogram::Unit::microseconds)) {
+	                                                                   Histogram::Unit::microseconds)),
+	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
+	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
+	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), primaryLocality(tagLocalityInvalid),
+	    versionLag(0), logProtocol(0), thisServerID(ssi.id()), tssInQuarantine(false), db(db), actors(false),
+	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), durableInProgress(Void()), watchBytes(0),
+	    numWatches(0), noRecentUpdates(false), lastUpdate(now()),
+	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), updateEagerReads(nullptr),
+	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
+	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
+	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
+	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -3401,7 +3401,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 };
 
 AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
-  : server(server), keys(keys), transferredVersion(invalidVersion), phase(WaitPrevious) {
+  : keys(keys), server(server), transferredVersion(invalidVersion), phase(WaitPrevious) {
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -3646,10 +3646,10 @@ struct OrderByVersion {
 class StorageUpdater {
 public:
 	StorageUpdater()
-	  : fromVersion(invalidVersion), currentVersion(invalidVersion), restoredVersion(invalidVersion),
+	  : currentVersion(invalidVersion), fromVersion(invalidVersion), restoredVersion(invalidVersion),
 	    processedStartKey(false), processedCacheStartKey(false) {}
 	StorageUpdater(Version fromVersion, Version restoredVersion)
-	  : fromVersion(fromVersion), currentVersion(fromVersion), restoredVersion(restoredVersion),
+	  : currentVersion(fromVersion), fromVersion(fromVersion), restoredVersion(restoredVersion),
 	    processedStartKey(false), processedCacheStartKey(false) {}
 
 	void applyMutation(StorageServer* data, MutationRef const& m, Version ver, bool fromFetch) {

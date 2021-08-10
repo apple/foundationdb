@@ -116,10 +116,10 @@ TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 
 // The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 NetworkOptions::NetworkOptions()
-  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()), traceRollSize(TRACE_DEFAULT_ROLL_SIZE),
-    traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"), traceFormat("xml"),
-    traceClockSource("now"), runLoopProfilingEnabled(false),
-    supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()) {}
+  : traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
+    traceFormat("xml"), traceClockSource("now"),
+    supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false) {
+}
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
@@ -1094,11 +1094,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  IsInternal internal,
                                  int apiVersion,
                                  IsSwitchable switchable)
-  : connectionFile(connectionFile), clientInfo(clientInfo), coordinator(coordinator),
-    clientInfoMonitor(clientInfoMonitor), taskID(taskID), clientLocality(clientLocality),
-    enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware), apiVersion(apiVersion),
-    switchable(switchable), proxyProvisional(false), cc("TransactionMetrics"),
-    transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
+  : lockAware(lockAware), switchable(switchable), connectionFile(connectionFile), proxyProvisional(false),
+    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), internal(internal),
+    cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
+    transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
     transactionBatchReadVersions("BatchPriorityReadVersions", cc),
@@ -1123,11 +1122,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
-    transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0),
-    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
-    internal(internal), transactionTracingEnabled(true), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+    transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), latencies(1000), readLatencies(1000),
+    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0),
+    transactionTracingEnabled(true), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
+    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
+    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
@@ -1340,8 +1340,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 }
 
 DatabaseContext::DatabaseContext(const Error& err)
-  : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
-    transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
+  : deferredError(err), internal(IsInternal::False), cc("TransactionMetrics"),
+    transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
     transactionBatchReadVersions("BatchPriorityReadVersions", cc),
@@ -1366,11 +1366,10 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
-    transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000),
-    readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(IsInternal::False),
-    transactionTracingEnabled(true) {}
+    transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), latencies(1000), readLatencies(1000),
+    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+    transactionTracingEnabled(true), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT) {}
 
 // Static constructor used by server processes to create a DatabaseContext
 // For internal (fdbserver) use only
@@ -1699,7 +1698,8 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 			              networkOptions.traceDirectory.get(),
 			              "trace",
 			              networkOptions.traceLogGroup,
-			              networkOptions.traceFileIdentifier);
+			              networkOptions.traceFileIdentifier,
+			              networkOptions.tracePartialFileSuffix);
 
 			TraceEvent("ClientStart")
 			    .detail("SourceVersion", getSourceVersion())
@@ -1856,6 +1856,10 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			fprintf(stderr, "Unrecognized trace clock source: `%s'\n", networkOptions.traceClockSource.c_str());
 			throw invalid_option_value();
 		}
+		break;
+	case FDBNetworkOptions::TRACE_PARTIAL_FILE_SUFFIX:
+		validateOptionValuePresent(value);
+		networkOptions.tracePartialFileSuffix = value.get().toString();
 		break;
 	case FDBNetworkOptions::KNOB: {
 		validateOptionValuePresent(value);
@@ -4093,9 +4097,9 @@ Transaction::Transaction()
   : info(TaskPriority::DefaultEndpoint, generateSpanID(true)), span(info.spanID, "Transaction"_loc) {}
 
 Transaction::Transaction(Database const& cx)
-  : cx(cx), info(cx->taskID, generateSpanID(cx->transactionTracingEnabled)), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
-    committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0),
-    trLogInfo(createTrLogInfoProbabilistically(cx)), tr(info.spanID), span(info.spanID, "Transaction"_loc) {
+  : info(cx->taskID, generateSpanID(cx->transactionTracingEnabled)), numErrors(0), options(cx),
+    span(info.spanID, "Transaction"_loc), trLogInfo(createTrLogInfoProbabilistically(cx)), cx(cx),
+    backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), tr(info.spanID) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(this);
 	}
@@ -5259,7 +5263,10 @@ ACTOR Future<Void> commitAndWatch(Transaction* self) {
 			self->setupWatches();
 		}
 
-		self->reset();
+		if (!self->apiVersionAtLeast(700)) {
+			self->reset();
+		}
+
 		return Void();
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
@@ -5268,7 +5275,10 @@ ACTOR Future<Void> commitAndWatch(Transaction* self) {
 			}
 
 			self->versionstampPromise.sendError(transaction_invalid_version());
-			self->reset();
+
+			if (!self->apiVersionAtLeast(700)) {
+				self->reset();
+			}
 		}
 
 		throw;

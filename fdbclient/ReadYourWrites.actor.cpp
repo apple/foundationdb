@@ -1285,9 +1285,9 @@ public:
 };
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
-  : ISingleThreadTransaction(cx->deferredError), cache(&arena), writes(&arena), tr(cx), retries(0), approximateSize(0),
-    creationTime(now()), commitStarted(false), options(tr), versionStampFuture(tr.getVersionstamp()),
-    specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end) {
+  : ISingleThreadTransaction(cx->deferredError), tr(cx), cache(&arena), writes(&arena), retries(0), approximateSize(0),
+    creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
+    specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
 	std::copy(
 	    cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));
 	applyPersistentOptions();
@@ -2284,10 +2284,11 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 }
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept
-  : ISingleThreadTransaction(std::move(r.deferredError)), cache(std::move(r.cache)), writes(std::move(r.writes)),
-    arena(std::move(r.arena)), reading(std::move(r.reading)), retries(r.retries), approximateSize(r.approximateSize),
-    creationTime(r.creationTime), timeoutActor(std::move(r.timeoutActor)), resetPromise(std::move(r.resetPromise)),
-    commitStarted(r.commitStarted), options(r.options), transactionDebugInfo(r.transactionDebugInfo) {
+  : ISingleThreadTransaction(std::move(r.deferredError)), arena(std::move(r.arena)), cache(std::move(r.cache)),
+    writes(std::move(r.writes)), resetPromise(std::move(r.resetPromise)), reading(std::move(r.reading)),
+    retries(r.retries), approximateSize(r.approximateSize), timeoutActor(std::move(r.timeoutActor)),
+    creationTime(r.creationTime), commitStarted(r.commitStarted), transactionDebugInfo(r.transactionDebugInfo),
+    options(r.options) {
 	cache.arena = &arena;
 	writes.arena = &arena;
 	tr = std::move(r.tr);

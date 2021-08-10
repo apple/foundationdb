@@ -513,7 +513,7 @@ struct JVM {
 	}
 };
 
-struct JavaWorkload : FDBWorkload {
+struct JavaWorkload final : FDBWorkload {
 	std::shared_ptr<JVM> jvm;
 	FDBLogger& log;
 	FDBWorkloadContext* context = nullptr;

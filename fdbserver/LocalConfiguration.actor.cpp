@@ -215,7 +215,7 @@ class LocalConfigurationImpl {
 			self->updateInMemoryState(lastSeenVersion);
 			return Void();
 		}
-		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
+		RangeResult range = wait(self->kvStore->readRange(knobOverrideKeys));
 		for (const auto& kv : range) {
 			auto configKey =
 			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(knobOverrideKeys.begin), IncludeVersion());
@@ -326,10 +326,10 @@ public:
 	                       std::string const& configPath,
 	                       std::map<std::string, std::string> const& manualKnobOverrides,
 	                       IsTest isTest)
-	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"), cc("LocalConfiguration"),
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"),
+	    configKnobOverrides(configPath), manualKnobOverrides(manualKnobOverrides), cc("LocalConfiguration"),
 	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
-	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
-	    manualKnobOverrides(manualKnobOverrides) {
+	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc) {
 		if (isTest) {
 			testKnobCollection =
 			    IKnobCollection::create(IKnobCollection::Type::TEST,
