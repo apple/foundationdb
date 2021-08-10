@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,10 +35,13 @@
 
 namespace mutation_log_reader {
 
+// RangeResultBlock is the wrapper of RangeResult. Each PipelinedReader maintains a Deque of RangeResultBlocks, from its
+// getRange results. MutationLogReader maintains a priority queue of RangeResultBlocks, and provides RangeResult
+// partially in it to consumer.
 struct RangeResultBlock {
 	RangeResult result;
-	Version firstVersion; // version of first record
-	Version lastVersion; // version of last record
+	Version firstVersion; // version of first record, inclusive
+	Version lastVersion; // version of last record, inclusive
 	uint8_t hash; // points back to the PipelinedReader
 	int prefixLen; // size of keyspace, uid, and hash prefix
 	int indexToRead; // index of first unconsumed record
@@ -53,6 +56,8 @@ struct RangeResultBlock {
 	}
 };
 
+// PipelinedReader is the class actually doing range read (getRange). A MutationLogReader has 256 PipelinedReaders, each
+// in charge of one hash value from 0-255.
 class PipelinedReader {
 public:
 	PipelinedReader(uint8_t h, Version bv, Version ev, unsigned pd, Key p)
