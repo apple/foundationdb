@@ -169,7 +169,9 @@ public:
 	                            ConfigClassSet configClassSet,
 	                            Future<Void> watcher,
 	                            ConfigBroadcastInterface broadcastInterface) {
-		consumerFuture = consumer->consume(*self);
+		if (!consumerFuture.isValid()) {
+			consumerFuture = consumer->consume(*self);
+		}
 		clients.push_back(BroadcastClientDetails{
 		    watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface) });
 		this->actors.add(waitForFailure(this, watcher, &clients.back()));
