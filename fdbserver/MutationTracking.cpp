@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <vector>
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
@@ -28,14 +29,21 @@
 #error "You cannot use mutation tracking in a clean/release build."
 #endif
 
-// Track any of these keys in simulation via enabling MUTATION_TRACKING_ENABLED and setting the keys here.
-std::vector<KeyRef> debugKeys = { ""_sr, "\xff\xff"_sr };
+// If MUTATION_TRACKING_ENABLED is set, MutationTracking events will be logged for the
+// keys in debugKeys and the ranges in debugRanges
+std::vector<KeyRef> debugKeys = {};
+std::vector<KeyRangeRef> debugRanges = {};
 
 TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
 	if (std::any_of(debugKeys.begin(), debugKeys.end(), [&mutation](const KeyRef& debugKey) {
 		    return ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
-		            mutation.param1 <= debugKey && mutation.param2 > debugKey) ||
+					KeyRangeRef(mutation.param1, mutation.param2).contains(debugKey)) ||
 		           mutation.param1 == debugKey;
+	    }) ||
+		std::any_of(debugRanges.begin(), debugRanges.end(), [&mutation](const KeyRangeRef& debugRange) {
+		    return ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
+					KeyRangeRef(mutation.param1, mutation.param2).intersects(debugRange)) ||
+					debugRange.contains(mutation.param1);
 	    })) {
 
 		TraceEvent event("MutationTracking", id);
