@@ -74,16 +74,19 @@ struct LowLatencyWorkload : TestWorkload {
 				state double operationStart = now();
 				state bool doCommit = self->testWrites && deterministicRandom()->coinflip();
 				state double maxLatency = doCommit ? self->maxCommitLatency : self->maxGRVLatency;
+				state UID uid = doCommit ? UID() : deterministicRandom()->randomUniqueID(); 
 				++self->operations;
 				loop {
 					try {
-						TraceEvent("StartLowLatencyTransaction").log();
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						if (doCommit) {
+							TraceEvent("StartLowLatencyTransaction").log();
 							tr.set(self->testKey, LiteralStringRef(""));
 							wait(tr.commit());
 						} else {
+							TraceEvent("StartLowLatencyTransaction").detail("DebugId", uid);
+							tr.debugTransaction(uid);
 							wait(success(tr.getReadVersion()));
 						}
 						break;
@@ -97,7 +100,8 @@ struct LowLatencyWorkload : TestWorkload {
 					TraceEvent(SevError, "LatencyTooLarge")
 					    .detail("MaxLatency", maxLatency)
 					    .detail("ObservedLatency", now() - operationStart)
-					    .detail("IsCommit", doCommit);
+					    .detail("IsCommit", doCommit)
+						.detail("DebugId", uid);
 					self->ok = false;
 				}
 				if (now() - testStart > self->testDuration)
