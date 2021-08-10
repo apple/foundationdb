@@ -312,6 +312,7 @@ struct FetchInjectionInfo {
 
 struct RangeFeedInfo : ReferenceCounted<RangeFeedInfo> {
 	std::deque<Standalone<MutationsAndVersionRef>> mutations;
+	Version storageVersion = invalidVersion;
 	Version durableVersion = invalidVersion;
 	Version emptyVersion = 0;
 	KeyRange range;
@@ -1540,6 +1541,7 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 	} else {
 		state std::deque<Standalone<MutationsAndVersionRef>> mutationsDeque =
 		    data->uidRangeFeed[req.rangeID]->mutations;
+		state Version startingDurableVersion = feedInfo->durableVersion;
 		RangeResult res = wait(data->storage.readRange(
 		    KeyRangeRef(rangeFeedDurableKey(req.rangeID, req.begin), rangeFeedDurableKey(req.rangeID, req.end))));
 		Version lastVersion = invalidVersion;
@@ -1559,9 +1561,9 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 				reply.mutations.push_back(reply.arena, it);
 			}
 		}
-		if (res.empty()) {
+		if (reply.mutations.empty()) {
 			auto& feedInfo = data->uidRangeFeed[req.rangeID];
-			if (req.end > feedInfo->durableVersion) {
+			if (startingDurableVersion == feedInfo->storageVersion && req.end > startingDurableVersion) {
 				if (req.begin == 0) {
 					feedInfo->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
 				} else {
@@ -1570,13 +1572,15 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 					    -1));
 
 					auto& feedInfo = data->uidRangeFeed[req.rangeID];
-					if (emp.empty()) {
-						feedInfo->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
-					} else {
-						Key id;
-						Version version;
-						std::tie(id, version) = decodeRangeFeedDurableKey(emp[0].key);
-						feedInfo->durableVersion = version;
+					if (startingDurableVersion == feedInfo->storageVersion) {
+						if (emp.empty()) {
+							feedInfo->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
+						} else {
+							Key id;
+							Version version;
+							std::tie(id, version) = decodeRangeFeedDurableKey(emp[0].key);
+							feedInfo->durableVersion = version;
+						}
 					}
 				}
 			}
@@ -4310,7 +4314,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				}
 				data->storage.writeKeyValue(KeyValueRef(rangeFeedDurableKey(info->id, info->mutations.front().version),
 				                                        rangeFeedDurableValue(info->mutations.front().mutations)));
-				info->durableVersion = info->mutations.front().version;
+				info->storageVersion = info->mutations.front().version;
 			}
 			wait(yield(TaskPriority::UpdateStorage));
 			curFeed++;
@@ -4355,6 +4359,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			while (info->mutations.front().version < newOldestVersion) {
 				info->mutations.pop_front();
 			}
+			info->durableVersion = info->mutations.front().version;
 			wait(yield(TaskPriority::UpdateStorage));
 			curFeed++;
 		}
@@ -4744,6 +4749,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		rangeFeedInfo->range = rangeFeedRange;
 		rangeFeedInfo->id = rangeFeedId;
 		rangeFeedInfo->durableVersion = version;
+		rangeFeedInfo->storageVersion = version;
 		data->uidRangeFeed[rangeFeedId] = rangeFeedInfo;
 		auto rs = data->keyRangeFeed.modify(rangeFeedRange);
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
@@ -5284,10 +5290,11 @@ ACTOR Future<Void> serveRangeFeedPopRequests(StorageServer* self, FutureStream<R
 			while (!feed->mutations.empty() && feed->mutations.front().version < req.version) {
 				self->uidRangeFeed[req.rangeID]->mutations.pop_front();
 			}
-			if (feed->durableVersion != invalidVersion) {
+			if (feed->storageVersion != invalidVersion) {
 				self->storage.clearRange(
 				    KeyRangeRef(rangeFeedDurableKey(feed->id, 0), rangeFeedDurableKey(feed->id, req.version)));
-				if (req.version > feed->durableVersion) {
+				if (req.version > feed->storageVersion) {
+					feed->storageVersion = invalidVersion;
 					feed->durableVersion = invalidVersion;
 				}
 			}
