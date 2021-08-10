@@ -941,8 +941,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
 				    .detail("Dbgid", pProxyCommitData->dbgid)
-				    .detail("To", tags)
-				    .detail("Mutation", m);
+				    .detail("To", tags);
 				self->toCommit.addTags(tags);
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
@@ -957,8 +956,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					// Fast path
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
 					    .detail("Dbgid", pProxyCommitData->dbgid)
-					    .detail("To", ranges.begin().value().tags)
-					    .detail("Mutation", m);
+					    .detail("To", ranges.begin().value().tags);
 
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
@@ -995,8 +993,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					}
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
 					    .detail("Dbgid", pProxyCommitData->dbgid)
-					    .detail("To", allSources)
-					    .detail("Mutation", m);
+					    .detail("To", allSources);
 
 					self->toCommit.addTags(allSources);
 				}
