@@ -84,11 +84,6 @@ class ConfigBroadcasterImpl {
 
 	template <class Changes>
 	Future<Void> pushChanges(BroadcastClientDetails& client, Changes const& changes) {
-		// Skip if client has already seen the latest version.
-		if (client.lastSeenVersion >= mostRecentVersion) {
-			return Void();
-		}
-
 		ConfigBroadcastChangesRequest req;
 		for (const auto& versionedMutation : changes) {
 			if (versionedMutation.version > client.lastSeenVersion &&
