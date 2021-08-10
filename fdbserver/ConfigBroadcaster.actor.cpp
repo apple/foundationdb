@@ -70,6 +70,7 @@ class ConfigBroadcasterImpl {
 	Version lastCompactedVersion;
 	Version mostRecentVersion;
 	std::unique_ptr<IConfigConsumer> consumer;
+	Future<Void> consumerFuture;
 	ActorCollection actors{ false };
 	std::vector<BroadcastClientDetails> clients;
 
@@ -169,7 +170,7 @@ public:
 	                            Future<Void> watcher,
 	                            ConfigBroadcastInterface broadcastInterface) {
 		if (!consumerFuture.isValid()) {
-			actors.add(consumer->consume(*self));
+			consumerFuture = consumer->consume(*self);
 		}
 		clients.push_back(BroadcastClientDetails{
 		    watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface) });
@@ -295,7 +296,7 @@ public:
 		}
 	}
 
-	Future<Void> getError() const { return actors.getResult(); }
+	Future<Void> getError() const { return consumerFuture; }
 
 	UID getID() const { return id; }
 
