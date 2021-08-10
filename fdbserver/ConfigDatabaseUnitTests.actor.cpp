@@ -279,7 +279,7 @@ public:
 
 	void compact() { broadcaster.compact(lastWrittenVersion); }
 
-	Future<Void> getError() const { return readFrom.getError(); }
+	Future<Void> getError() const { return readFrom.getError() || broadcaster.getError(); }
 };
 
 class TransactionEnvironment {
@@ -411,7 +411,7 @@ public:
 	}
 	Future<Void> clear(Optional<KeyRef> configClass) { return writeTo.clear(configClass); }
 	Future<Void> check(Optional<int64_t> value) const { return readFrom.checkEventually(value); }
-	Future<Void> getError() const { return writeTo.getError() || readFrom.getError(); }
+	Future<Void> getError() const { return writeTo.getError() || readFrom.getError() || broadcaster.getError(); }
 };
 
 // These functions give a common interface to all environments, to improve code reuse

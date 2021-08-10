@@ -70,6 +70,7 @@ class ConfigBroadcasterImpl {
 	Version lastCompactedVersion;
 	Version mostRecentVersion;
 	std::unique_ptr<IConfigConsumer> consumer;
+	Future<Void> consumerFuture;
 	ActorCollection actors{ false };
 	std::vector<BroadcastClientDetails> clients;
 
@@ -83,10 +84,6 @@ class ConfigBroadcasterImpl {
 
 	template <class Changes>
 	Future<Void> pushChanges(BroadcastClientDetails& client, Changes const& changes) {
-		if (client.watcher.isReady()) {
-			clients.erase(std::remove(clients.begin(), clients.end(), client));
-		}
-
 		// Skip if client has already seen the latest version.
 		if (client.lastSeenVersion >= mostRecentVersion) {
 			return Void();
@@ -172,7 +169,7 @@ public:
 	                            ConfigClassSet configClassSet,
 	                            Future<Void> watcher,
 	                            ConfigBroadcastInterface broadcastInterface) {
-		actors.add(consumer->consume(*self));
+		consumerFuture = consumer->consume(*self);
 		clients.push_back(BroadcastClientDetails{
 		    watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface) });
 		this->actors.add(waitForFailure(this, watcher, &clients.back()));
@@ -297,6 +294,8 @@ public:
 		}
 	}
 
+	Future<Void> getError() const { return consumerFuture; }
+
 	UID getID() const { return id; }
 
 	static void runPendingRequestStoreTest(bool includeGlobalMutation, int expectedMatches);
@@ -343,6 +342,10 @@ void ConfigBroadcaster::applySnapshotAndChanges(
     Version changesVersion,
     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
 	impl().applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion, annotations);
+}
+
+Future<Void> ConfigBroadcaster::getError() const {
+	return impl().getError();
 }
 
 UID ConfigBroadcaster::getID() const {

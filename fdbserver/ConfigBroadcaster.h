@@ -61,6 +61,7 @@ public:
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion,
 	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
+	Future<Void> getError() const;
 	UID getID() const;
 	JsonBuilderObject getStatus() const;
 	void compact(Version compactionVersion);
