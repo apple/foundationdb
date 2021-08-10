@@ -122,8 +122,8 @@ class ConfigBroadcastInterface {
 
 public:
 	static constexpr FileIdentifier file_identifier = 1676543;
-	RequestStream<ConfigBroadcastSnapshotRequest> getSnapshot;
-	RequestStream<ConfigBroadcastChangesRequest> getChanges;
+	RequestStream<ConfigBroadcastSnapshotRequest> snapshot;
+	RequestStream<ConfigBroadcastChangesRequest> changes;
 
 	ConfigBroadcastInterface() : _id(deterministicRandom()->randomUniqueID()) {}
 
@@ -133,6 +133,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, getSnapshot, getChanges);
+		serializer(ar, _id, snapshot, changes);
 	}
 };

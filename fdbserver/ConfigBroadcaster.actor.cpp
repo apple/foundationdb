@@ -119,7 +119,7 @@ class ConfigBroadcasterImpl {
 		req.mostRecentVersion = mostRecentVersion;
 		// TODO: Retry in event of failure
 		++successfulChangeRequest;
-		return success(client.broadcastInterface.getChanges.getReply(req));
+		return success(client.broadcastInterface.changes.getReply(req));
 	}
 
 	ConfigBroadcasterImpl()
@@ -193,7 +193,7 @@ public:
 		TraceEvent(SevDebug, "ConfigBroadcasterSnapshotRequest", id)
 		    .detail("Size", request.snapshot.size())
 		    .detail("Version", request.version);
-		return success(clients.back().broadcastInterface.getSnapshot.getReply(request));
+		return success(clients.back().broadcastInterface.snapshot.getReply(request));
 	}
 
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
