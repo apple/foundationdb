@@ -1594,8 +1594,6 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() {
-		metric = {};
-		startTime = g_network ? now() : 0;
 		kvSizeWritten = Reference<Histogram>(
 		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "Written", Histogram::Unit::bytes));
 		kvSizeReadByGet = Reference<Histogram>(
@@ -1612,11 +1610,11 @@ struct RedwoodMetrics {
 			++levelCounter;
 		}
 		metric = {};
-		startTime = g_network ? now() : 0;
-
 		kvSizeWritten->clear();
 		kvSizeReadByGet->clear();
 		kvSizeReadByGetRange->clear();
+
+		startTime = g_network ? now() : 0;
 	}
 
 	// btree levels and one extra level for non btree level.
