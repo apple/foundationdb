@@ -71,7 +71,7 @@ class SimpleConfigTransactionImpl {
 		if (reply.value.present()) {
 			return reply.value.get().toValue();
 		} else {
-			return {};
+			return Optional<Value>{};
 		}
 	}
 

@@ -63,8 +63,7 @@ struct StagingKey {
 		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
 		DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
 		    .detail("Version", version.toString())
-		    .detail("NewVersion", newVersion.toString())
-		    .detail("Mutation", m);
+		    .detail("NewVersion", newVersion.toString());
 		if (version == newVersion) {
 			// This could happen because the same mutation can be present in
 			// overlapping mutation logs, because new TLogs can copy mutations

@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <atomic>
+
 #include "fdbclient/AsyncTaskThread.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -30,13 +32,22 @@ public:
 	bool isTerminate() const override { return true; }
 };
 
-ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread, int* sum, int count) {
+ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread, std::atomic<int> *sum, int count, int clientId, double meanSleep) {
 	state int i = 0;
+	state double randomSleep = 0.0;
 	for (; i < count; ++i) {
+		randomSleep = deterministicRandom()->random01() * 2 * meanSleep;
+		wait(delay(randomSleep));
 		wait(asyncTaskThread->execAsync([sum = sum] {
-			++(*sum);
+			sum->fetch_add(1);
 			return Void();
 		}));
+		TraceEvent("AsyncTaskThreadIncrementedSum")
+			.detail("Index", i)
+			.detail("Sum", sum->load())
+			.detail("ClientId", clientId)
+			.detail("RandomSleep", randomSleep)
+			.detail("MeanSleep", meanSleep);
 	}
 	return Void();
 }
@@ -51,7 +62,7 @@ AsyncTaskThread::~AsyncTaskThread() {
 	bool wakeUp = false;
 	{
 		std::lock_guard<std::mutex> g(m);
-		wakeUp = queue.push(std::make_shared<TerminateTask>());
+		wakeUp = queue.push(std::make_unique<TerminateTask>());
 	}
 	if (wakeUp) {
 		cv.notify_one();
@@ -61,7 +72,7 @@ AsyncTaskThread::~AsyncTaskThread() {
 
 void AsyncTaskThread::run(AsyncTaskThread* self) {
 	while (true) {
-		std::shared_ptr<IAsyncTask> task;
+		std::unique_ptr<IAsyncTask> task;
 		{
 			std::unique_lock<std::mutex> lk(self->m);
 			self->cv.wait(lk, [self] { return !self->queue.canSleep(); });
@@ -75,14 +86,30 @@ void AsyncTaskThread::run(AsyncTaskThread* self) {
 }
 
 TEST_CASE("/asynctaskthread/add") {
-	state int sum = 0;
+	state std::atomic<int> sum = 0;
 	state AsyncTaskThread asyncTaskThread;
+	state int numClients = 10;
+	state int incrementsPerClient = 100;
 	std::vector<Future<Void>> clients;
-	clients.reserve(10);
-	for (int i = 0; i < 10; ++i) {
-		clients.push_back(asyncTaskThreadClient(&asyncTaskThread, &sum, 100));
+	clients.reserve(numClients);
+	for (int clientId = 0; clientId < numClients; ++clientId) {
+		clients.push_back(asyncTaskThreadClient(&asyncTaskThread, &sum, incrementsPerClient, clientId, deterministicRandom()->random01() * 0.01));
 	}
 	wait(waitForAll(clients));
-	ASSERT_EQ(sum, 1000);
+	ASSERT_EQ(sum.load(), numClients * incrementsPerClient);
+	return Void();
+}
+
+TEST_CASE("/asynctaskthread/error") {
+	state AsyncTaskThread asyncTaskThread;
+	try {
+		wait(asyncTaskThread.execAsync([]{
+			throw operation_failed();
+			return Void();
+		}));
+		ASSERT(false);
+	} catch (Error &e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+	}
 	return Void();
 }

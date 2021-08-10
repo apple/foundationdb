@@ -1423,9 +1423,8 @@ void commitMessages(TLogData* self,
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 		}
 
-		DEBUG_TAGS_AND_MESSAGE("TLogCommitMessages", version, msg.getRawMessage())
-		    .detail("UID", self->dbgid)
-		    .detail("LogId", logData->logId);
+		DEBUG_TAGS_AND_MESSAGE("TLogCommitMessages", version, msg.getRawMessage(), logData->logId)
+		    .detail("DebugID", self->dbgid);
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for (auto tag : msg.tags) {
 			if (logData->locality == tagLocalitySatellite) {
@@ -1557,8 +1556,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
 		messages << it->second.toStringRef();
 		void* data = messages.getData();
 		DEBUG_TAGS_AND_MESSAGE(
-		    "TLogPeek", currentVersion, StringRef((uint8_t*)data + offset, messages.getLength() - offset))
-		    .detail("LogId", self->logId)
+		    "TLogPeek", currentVersion, StringRef((uint8_t*)data + offset, messages.getLength() - offset), self->logId)
 		    .detail("PeekTag", tag);
 	}
 }
@@ -1837,9 +1835,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				    wait(parseMessagesForTag(entry.messages, reqTag, logData->logRouterTags));
 				for (const StringRef& msg : rawMessages) {
 					messages.serializeBytes(msg);
-					DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg)
-					    .detail("UID", self->dbgid)
-					    .detail("LogId", logData->logId)
+					DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg, logData->logId)
+					    .detail("DebugID", self->dbgid)
 					    .detail("PeekTag", reqTag);
 				}
 
