@@ -70,7 +70,6 @@ class ConfigBroadcasterImpl {
 	Version lastCompactedVersion;
 	Version mostRecentVersion;
 	std::unique_ptr<IConfigConsumer> consumer;
-	Future<Void> consumerFuture;
 	ActorCollection actors{ false };
 	std::vector<BroadcastClientDetails> clients;
 
@@ -170,11 +169,11 @@ public:
 	                            Future<Void> watcher,
 	                            ConfigBroadcastInterface broadcastInterface) {
 		if (!consumerFuture.isValid()) {
-			consumerFuture = consumer->consume(*self);
+			actors.add(consumer->consume(*self));
 		}
 		clients.push_back(BroadcastClientDetails{
 		    watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface) });
-		this->actors.add(waitForFailure(this, watcher, &clients.back()));
+		actors.add(waitForFailure(this, watcher, &clients.back()));
 
 		// Push all dynamic knobs to worker if it isn't up to date.
 		if (clients.back().lastSeenVersion >= mostRecentVersion) {
@@ -296,7 +295,7 @@ public:
 		}
 	}
 
-	Future<Void> getError() const { return consumerFuture; }
+	Future<Void> getError() const { return actors.getResult(); }
 
 	UID getID() const { return id; }
 
