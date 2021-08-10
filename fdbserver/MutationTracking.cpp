@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <vector>
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/LogProtocolMessage.h"
@@ -27,43 +28,35 @@
 #error "You cannot use mutation tracking in a clean/release build."
 #endif
 
-// Track up to 2 keys in simulation via enabling MUTATION_TRACKING_ENABLED and setting the keys here.
-StringRef debugKey = LiteralStringRef("");
-StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
+// Track any of these keys in simulation via enabling MUTATION_TRACKING_ENABLED and setting the keys here.
+std::vector<KeyRef> debugKeys = { ""_sr, "\xff\xff"_sr };
 
-TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation) {
-	if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
-	    ((mutation.param1 <= debugKey && mutation.param2 > debugKey) ||
-	     (mutation.param1 <= debugKey2 && mutation.param2 > debugKey2))) {
-		TraceEvent event("MutationTracking");
-		event.detail("At", context)
-		    .detail("Version", version)
-		    .detail("MutationType", typeString[mutation.type])
-		    .detail("KeyBegin", mutation.param1)
-		    .detail("KeyEnd", mutation.param2);
+TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
+	if (std::any_of(debugKeys.begin(), debugKeys.end(), [&mutation](const KeyRef& debugKey) {
+		    return ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
+		            mutation.param1 <= debugKey && mutation.param2 > debugKey) ||
+		           mutation.param1 == debugKey;
+	    })) {
+
+		TraceEvent event("MutationTracking", id);
+		event.detail("At", context).detail("Version", version).detail("Mutation", mutation);
 		return event;
-	} else if (mutation.param1 == debugKey || mutation.param1 == debugKey2) {
-		TraceEvent event("MutationTracking");
-		event.detail("At", context)
-		    .detail("Version", version)
-		    .detail("MutationType", typeString[mutation.type])
-		    .detail("Key", mutation.param1)
-		    .detail("Value", mutation.param2);
-		return event;
-	} else {
-		return TraceEvent();
 	}
+	return TraceEvent();
 }
 
-TraceEvent debugKeyRangeEnabled(const char* context, Version version, KeyRangeRef const& keys) {
-	if (keys.contains(debugKey) || keys.contains(debugKey2)) {
-		return debugMutation(context, version, MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end));
-	} else {
-		return TraceEvent();
+TraceEvent debugKeyRangeEnabled(const char* context, Version version, KeyRangeRef const& keys, UID id) {
+	if (std::any_of(
+	        debugKeys.begin(), debugKeys.end(), [&keys](const KeyRef& debugKey) { return keys.contains(debugKey); })) {
+
+		TraceEvent event("MutationTracking", id);
+		event.detail("At", context).detail("Version", version).detail("Mutation", MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end));
+		return event;
 	}
+	return TraceEvent();
 }
 
-TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, StringRef commitBlob) {
+TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, StringRef commitBlob, UID id) {
 	BinaryReader rdr(commitBlob, AssumeVersion(g_network->protocolVersion()));
 	while (!rdr.empty()) {
 		if (*(int32_t*)rdr.peekBytes(4) == VERSION_HEADER) {
@@ -93,7 +86,7 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 			MutationRef m;
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
 			br >> m;
-			TraceEvent event = debugMutation(context, version, m);
+			TraceEvent event = debugMutation(context, version, m, id);
 			if (event.isEnabled()) {
 				event.detail("MessageTags", msg.tags);
 				return event;
@@ -104,23 +97,23 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 }
 
 #if MUTATION_TRACKING_ENABLED
-TraceEvent debugMutation(const char* context, Version version, MutationRef const& mutation) {
-	return debugMutationEnabled(context, version, mutation);
+TraceEvent debugMutation(const char* context, Version version, MutationRef const& mutation, UID id) {
+	return debugMutationEnabled(context, version, mutation, id);
 }
-TraceEvent debugKeyRange(const char* context, Version version, KeyRangeRef const& keys) {
-	return debugKeyRangeEnabled(context, version, keys);
+TraceEvent debugKeyRange(const char* context, Version version, KeyRangeRef const& keys, UID id) {
+	return debugKeyRangeEnabled(context, version, keys, id);
 }
-TraceEvent debugTagsAndMessage(const char* context, Version version, StringRef commitBlob) {
-	return debugTagsAndMessageEnabled(context, version, commitBlob);
+TraceEvent debugTagsAndMessage(const char* context, Version version, StringRef commitBlob, UID id) {
+	return debugTagsAndMessageEnabled(context, version, commitBlob, id);
 }
 #else
-TraceEvent debugMutation(const char* context, Version version, MutationRef const& mutation) {
+TraceEvent debugMutation(const char* context, Version version, MutationRef const& mutation, UID id) {
 	return TraceEvent();
 }
-TraceEvent debugKeyRange(const char* context, Version version, KeyRangeRef const& keys) {
+TraceEvent debugKeyRange(const char* context, Version version, KeyRangeRef const& keys, UID id) {
 	return TraceEvent();
 }
-TraceEvent debugTagsAndMessage(const char* context, Version version, StringRef commitBlob) {
+TraceEvent debugTagsAndMessage(const char* context, Version version, StringRef commitBlob, UID id) {
 	return TraceEvent();
 }
 #endif

@@ -476,10 +476,10 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 	auto begin = writeImpls[range.begin];
 	auto end = writeImpls.rangeContainingKeyBefore(range.end)->value();
 	if (begin != end) {
-		TraceEvent(SevDebug, "SpecialKeySpaceCrossModuleClear").detail("Range", range.toString());
+		TraceEvent(SevDebug, "SpecialKeySpaceCrossModuleClear").detail("Range", range);
 		throw special_keys_cross_module_clear(); // ban cross module clear
 	} else if (begin == nullptr) {
-		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range.toString());
+		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range);
 		throw special_keys_no_write_module_found();
 	}
 	return begin->clear(ryw, range);
