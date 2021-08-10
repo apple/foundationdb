@@ -121,7 +121,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 	Reference<ITransaction> tr;
 
-	ThreadSafetyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), tr(nullptr), stopped(false) {
+	ThreadSafetyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), stopped(false) {
 
 		threadsPerClient = getOption(options, LiteralStringRef("threadsPerClient"), 3);
 		threadDuration = getOption(options, LiteralStringRef("threadDuration"), 60.0);

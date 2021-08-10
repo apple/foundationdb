@@ -57,6 +57,9 @@ description is not currently required but encouraged.
     <Option name="trace_file_identifier" code="36"
             paramType="String" paramDescription="The identifier that will be part of all trace file names"
             description="Once provided, this string will be used to replace the port/PID in the log file names." />
+    <Option name="trace_partial_file_suffix" code="39"
+            paramType="String" paramDesciption="Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension."
+            description="" />
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>

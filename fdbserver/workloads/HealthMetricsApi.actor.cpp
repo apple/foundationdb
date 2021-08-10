@@ -75,7 +75,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override {
 		if (healthMetricsStoppedUpdating) {
-			TraceEvent(SevError, "HealthMetricsStoppedUpdating");
+			TraceEvent(SevError, "HealthMetricsStoppedUpdating").log();
 			return false;
 		}
 		bool correctHealthMetricsState = true;

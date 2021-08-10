@@ -404,10 +404,33 @@ void applyMetadataMutations(SpanID const& spanContext,
 				confChange = true;
 				TEST(true); // Recovering at a higher version.
 			} else if (m.param1 == writeRecoveryKey) {
-				TraceEvent("WriteRecoveryKeySet", dbgid);
+				TraceEvent("WriteRecoveryKeySet", dbgid).log();
 				if (!initialCommit)
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
+			} else if (m.param1.startsWith(rangeFeedPrefix)) {
+				if (toCommit && keyInfo) {
+					KeyRange r = decodeRangeFeedValue(m.param2);
+					MutationRef privatized = m;
+					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+					auto ranges = keyInfo->intersectingRanges(r);
+					auto firstRange = ranges.begin();
+					++firstRange;
+					if (firstRange == ranges.end()) {
+						ranges.begin().value().populateTags();
+						TraceEvent("RangeFeedTags1").detail("Tags", describe(ranges.begin().value().tags));
+						toCommit->addTags(ranges.begin().value().tags);
+					} else {
+						std::set<Tag> allSources;
+						for (auto r : ranges) {
+							r.value().populateTags();
+							allSources.insert(r.value().tags.begin(), r.value().tags.end());
+						}
+						TraceEvent("RangeFeedTags2").detail("Tags", describe(allSources));
+						toCommit->addTags(allSources);
+					}
+					toCommit->writeTypedMessage(privatized);
+				}
 			}
 		} else if (m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] && m.type == MutationRef::ClearRange) {
 			KeyRangeRef range(m.param1, m.param2);

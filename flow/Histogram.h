@@ -69,8 +69,7 @@ private:
 	          HistogramRegistry& registry,
 	          uint32_t lower,
 	          uint32_t upper)
-	  : group(group), op(op), unit(unit), registry(registry), lowerBound(lower),
-	    upperBound(upper), ReferenceCounted<Histogram>() {
+	  : group(group), op(op), unit(unit), registry(registry), lowerBound(lower), upperBound(upper) {
 
 		ASSERT(unit < Unit::MAXHISTOGRAMUNIT);
 		ASSERT(upperBound >= lowerBound);

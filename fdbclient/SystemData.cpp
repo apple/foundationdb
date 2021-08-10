@@ -129,7 +129,7 @@ void decodeKeyServersValue(RangeResult result,
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
 	if (missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
-		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
+		TraceEvent(SevError, "AttemptedToDecodeMissingTag").log();
 		for (const KeyValueRef& kv : result) {
 			Tag tag = decodeServerTagValue(kv.value);
 			UID serverID = decodeServerTagKey(kv.key);
@@ -1029,6 +1029,52 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTON
 const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
+
+const KeyRangeRef rangeFeedKeys(LiteralStringRef("\xff\x02/feed/"), LiteralStringRef("\xff\x02/feed0"));
+const KeyRef rangeFeedPrefix = rangeFeedKeys.begin;
+const KeyRef rangeFeedPrivatePrefix = LiteralStringRef("\xff\xff\x02/feed/");
+
+const Value rangeFeedValue(KeyRangeRef const& range) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
+	wr << range;
+	return wr.toValue();
+}
+KeyRange decodeRangeFeedValue(ValueRef const& value) {
+	KeyRange range;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> range;
+	return range;
+}
+
+const KeyRangeRef rangeFeedDurableKeys(LiteralStringRef("\xff\xff/rf/"), LiteralStringRef("\xff\xff/rf0"));
+const KeyRef rangeFeedDurablePrefix = rangeFeedDurableKeys.begin;
+
+const Value rangeFeedDurableKey(Key const& feed, Version const& version) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withRangeFeed()));
+	wr.serializeBytes(rangeFeedDurablePrefix);
+	wr << feed;
+	wr << littleEndian64(version);
+	return wr.toValue();
+}
+std::pair<Key, Version> decodeRangeFeedDurableKey(ValueRef const& key) {
+	Key feed;
+	Version version;
+	BinaryReader reader(key.removePrefix(rangeFeedDurablePrefix), AssumeVersion(ProtocolVersion::withRangeFeed()));
+	reader >> feed;
+	reader >> version;
+	return std::make_pair(feed, littleEndian64(version));
+}
+const Value rangeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
+	wr << mutations;
+	return wr.toValue();
+}
+Standalone<VectorRef<MutationRef>> decodeRangeFeedDurableValue(ValueRef const& value) {
+	Standalone<VectorRef<MutationRef>> mutations;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> mutations;
+	return mutations;
+}
 
 const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
 const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);

@@ -368,8 +368,8 @@ public:
 	DatabaseBackupAgent(DatabaseBackupAgent&& r) noexcept
 	  : subspace(std::move(r.subspace)), states(std::move(r.states)), config(std::move(r.config)),
 	    errors(std::move(r.errors)), ranges(std::move(r.ranges)), tagNames(std::move(r.tagNames)),
-	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)),
-	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)) {}
+	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)),
+	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}
 
 	void operator=(DatabaseBackupAgent&& r) noexcept {
 		subspace = std::move(r.subspace);
@@ -717,11 +717,22 @@ protected:
 
 template <>
 inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
-	return Tuple().append(StringRef(bc->getURL()));
+	Tuple tuple;
+	tuple.append(StringRef(bc->getURL()));
+	if (bc->getEncryptionKeyFileName().present()) {
+		tuple.append(bc->getEncryptionKeyFileName().get());
+	}
+	return tuple;
 }
 template <>
 inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	return IBackupContainer::openContainer(val.getString(0).toString());
+	ASSERT(val.size() == 1 || val.size() == 2);
+	auto url = val.getString(0).toString();
+	Optional<std::string> encryptionKeyFileName;
+	if (val.size() == 2) {
+		encryptionKeyFileName = val.getString(1).toString();
+	}
+	return IBackupContainer::openContainer(url, encryptionKeyFileName);
 }
 
 class BackupConfig : public KeyBackedConfig {
@@ -969,6 +980,11 @@ namespace fileBackup {
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len);
+
+// Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
+                                                                            int64_t offset,
+                                                                            int len);
 
 // Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
 Value makePadding(int size);

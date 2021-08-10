@@ -311,7 +311,7 @@ public:
 		entries.insert(Entry(allKeys.end, afterAllKeys, VectorRef<KeyValueRef>()), NoMetric(), true);
 	}
 	// Visual Studio refuses to generate these, apparently despite the standard
-	SnapshotCache(SnapshotCache&& r) noexcept : entries(std::move(r.entries)), arena(r.arena) {}
+	SnapshotCache(SnapshotCache&& r) noexcept : arena(r.arena), entries(std::move(r.entries)) {}
 	SnapshotCache& operator=(SnapshotCache&& r) noexcept {
 		entries = std::move(r.entries);
 		arena = r.arena;

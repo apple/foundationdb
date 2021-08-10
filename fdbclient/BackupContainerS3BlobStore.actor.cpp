@@ -147,9 +147,7 @@ BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndp
                                                        const S3BlobStoreEndpoint::ParametersT& params,
                                                        const Optional<std::string>& encryptionKeyFileName)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	setEncryptionKey(encryptionKeyFileName);
-#endif
 	// Currently only one parameter is supported, "bucket"
 	for (const auto& [name, value] : params) {
 		if (name == "bucket") {

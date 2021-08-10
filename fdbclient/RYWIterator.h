@@ -28,7 +28,7 @@
 class RYWIterator {
 public:
 	RYWIterator(SnapshotCache* snapshotCache, WriteMap* writeMap)
-	  : cache(snapshotCache), writes(writeMap), begin_key_cmp(0), end_key_cmp(0), bypassUnreadable(false) {}
+	  : begin_key_cmp(0), end_key_cmp(0), cache(snapshotCache), writes(writeMap), bypassUnreadable(false) {}
 
 	enum SEGMENT_TYPE { UNKNOWN_RANGE, EMPTY_RANGE, KV };
 	static const SEGMENT_TYPE typeMap[12];

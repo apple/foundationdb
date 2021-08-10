@@ -39,6 +39,9 @@ function(configure_testing)
 endfunction()
 
 function(verify_testing)
+  if(NOT ENABLE_SIMULATION_TESTS)
+    return()
+  endif()
   foreach(test_file IN LISTS fdb_test_files)
     message(SEND_ERROR "${test_file} found but it is not associated with a test")
   endforeach()
@@ -119,28 +122,30 @@ function(add_fdb_test)
     set(VALGRIND_OPTION "--use-valgrind")
   endif()
   list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
-  add_test(NAME ${test_name}
-    COMMAND $<TARGET_FILE:Python::Interpreter> ${TestRunner}
-    -n ${test_name}
-    -b ${PROJECT_BINARY_DIR}
-    -t ${test_type}
-    -O ${OLD_FDBSERVER_BINARY}
-    --crash
-    --aggregate-traces ${TEST_AGGREGATE_TRACES}
-    --log-format ${TEST_LOG_FORMAT}
-    --keep-logs ${TEST_KEEP_LOGS}
-    --keep-simdirs ${TEST_KEEP_SIMDIR}
-    --seed ${SEED}
-    --test-number ${assigned_id}
-    ${BUGGIFY_OPTION}
-    ${VALGRIND_OPTION}
-    ${ADD_FDB_TEST_TEST_FILES}
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-  set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
-  get_filename_component(test_dir_full ${first_file} DIRECTORY)
-  if(NOT ${test_dir_full} STREQUAL "")
-    get_filename_component(test_dir ${test_dir_full} NAME)
-    set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout} LABELS "${test_dir}")
+  if (ENABLE_SIMULATION_TESTS)
+    add_test(NAME ${test_name}
+      COMMAND $<TARGET_FILE:Python::Interpreter> ${TestRunner}
+      -n ${test_name}
+      -b ${PROJECT_BINARY_DIR}
+      -t ${test_type}
+      -O ${OLD_FDBSERVER_BINARY}
+      --crash
+      --aggregate-traces ${TEST_AGGREGATE_TRACES}
+      --log-format ${TEST_LOG_FORMAT}
+      --keep-logs ${TEST_KEEP_LOGS}
+      --keep-simdirs ${TEST_KEEP_SIMDIR}
+      --seed ${SEED}
+      --test-number ${assigned_id}
+      ${BUGGIFY_OPTION}
+      ${VALGRIND_OPTION}
+      ${ADD_FDB_TEST_TEST_FILES}
+      WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+    set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+    get_filename_component(test_dir_full ${first_file} DIRECTORY)
+    if(NOT ${test_dir_full} STREQUAL "")
+      get_filename_component(test_dir ${test_dir_full} NAME)
+      set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout} LABELS "${test_dir}")
+    endif()
   endif()
   # set variables used for generating test packages
   set(TEST_NAMES ${TEST_NAMES} ${test_name} PARENT_SCOPE)
@@ -347,7 +352,7 @@ function(package_bindingtester)
     COMMENT "Copy Flow tester for bindingtester")
 
   set(generated_binding_files python/fdb/fdboptions.py)
-  if(WITH_JAVA)
+  if(WITH_JAVA_BINDING)
     if(NOT FDB_RELEASE)
       set(prerelease_string "-PRERELEASE")
     else()
@@ -364,7 +369,7 @@ function(package_bindingtester)
     set(generated_binding_files ${generated_binding_files} java/foundationdb-tests.jar)
   endif()
 
-  if(WITH_GO AND NOT OPEN_FOR_IDE)
+  if(WITH_GO_BINDING AND NOT OPEN_FOR_IDE)
     add_dependencies(copy_binding_output_files fdb_go_tester fdb_go)
     add_custom_command(
       TARGET copy_binding_output_files
@@ -416,14 +421,14 @@ function(add_fdbclient_test)
   message(STATUS "Adding Client test ${T_NAME}")
   if (T_PROCESS_NUMBER)
     add_test(NAME "${T_NAME}"
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --process-number ${T_PROCESS_NUMBER}
             --
             ${T_COMMAND})
   else()
     add_test(NAME "${T_NAME}"
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --
             ${T_COMMAND})
@@ -459,7 +464,7 @@ function(add_multi_fdbclient_test)
   endif()
   message(STATUS "Adding Client test ${T_NAME}")
   add_test(NAME "${T_NAME}"
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --clusters 3
             --

@@ -31,6 +31,7 @@
 #include "fdbrpc/TimedRequest.h"
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbclient/CommitTransaction.h"
 #include "flow/UnitTest.h"
 
 // Dead code, removed in the next protocol version
@@ -76,6 +77,9 @@ struct StorageServerInterface {
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
+	RequestStream<struct RangeFeedRequest> rangeFeed;
+	RequestStream<struct OverlappingRangeFeedsRequest> overlappingRangeFeeds;
+	RequestStream<struct RangeFeedPopRequest> rangeFeedPop;
 	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
@@ -119,6 +123,11 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+				rangeFeed = RequestStream<struct RangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				overlappingRangeFeeds =
+				    RequestStream<struct OverlappingRangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				rangeFeedPop =
+				    RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -161,6 +170,9 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(rangeFeed.getReceiver());
+		streams.push_back(overlappingRangeFeeds.getReceiver());
+		streams.push_back(rangeFeedPop.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -612,6 +624,99 @@ struct SplitRangeRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, chunkSize, reply, arena);
+	}
+};
+
+struct MutationsAndVersionRef {
+	VectorRef<MutationRef> mutations;
+	Version version;
+
+	MutationsAndVersionRef() {}
+	explicit MutationsAndVersionRef(Version version) : version(version) {}
+	MutationsAndVersionRef(VectorRef<MutationRef> mutations, Version version)
+	  : mutations(mutations), version(version) {}
+	MutationsAndVersionRef(Arena& to, VectorRef<MutationRef> mutations, Version version)
+	  : mutations(to, mutations), version(version) {}
+	MutationsAndVersionRef(Arena& to, const MutationsAndVersionRef& from)
+	  : mutations(to, from.mutations), version(from.version) {}
+	int expectedSize() const { return mutations.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mutations, version);
+	}
+};
+
+struct RangeFeedReply {
+	constexpr static FileIdentifier file_identifier = 11815134;
+	VectorRef<MutationsAndVersionRef> mutations;
+	bool cached;
+	Arena arena;
+
+	RangeFeedReply() : cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mutations, arena);
+	}
+};
+struct RangeFeedRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	Key rangeID;
+	Version begin = 0;
+	Version end = 0;
+	ReplyPromise<RangeFeedReply> reply;
+
+	RangeFeedRequest() {}
+	explicit RangeFeedRequest(Key const& rangeID) : rangeID(rangeID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeID, begin, end, reply);
+	}
+};
+
+struct RangeFeedPopRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	Key rangeID;
+	Version version;
+	ReplyPromise<Void> reply;
+
+	RangeFeedPopRequest() {}
+	RangeFeedPopRequest(Key const& rangeID, Version version) : rangeID(rangeID), version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeID, version, reply);
+	}
+};
+
+struct OverlappingRangeFeedsReply {
+	constexpr static FileIdentifier file_identifier = 11815134;
+	std::vector<std::pair<Key, KeyRange>> rangeIds;
+	bool cached;
+	Arena arena;
+
+	OverlappingRangeFeedsReply() : cached(false) {}
+	explicit OverlappingRangeFeedsReply(std::vector<std::pair<Key, KeyRange>> const& rangeIds)
+	  : rangeIds(rangeIds), cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeIds, arena);
+	}
+};
+struct OverlappingRangeFeedsRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	KeyRange range;
+	ReplyPromise<OverlappingRangeFeedsReply> reply;
+
+	OverlappingRangeFeedsRequest() {}
+	explicit OverlappingRangeFeedsRequest(KeyRange const& range) : range(range) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range, reply);
 	}
 };
 

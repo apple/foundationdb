@@ -566,15 +566,6 @@ void initHelp() {
 	    "pair in <ADDRESS...> or any LocalityData (like dcid, zoneid, machineid, processid), removes any "
 	    "matching exclusions from the excluded servers and localities list. "
 	    "(A specified IP will match all IP:* exclusion entries)");
-	helpMap["setclass"] =
-	    CommandHelp("setclass [<ADDRESS> <CLASS>]",
-	                "change the class of a process",
-	                "If no address and class are specified, lists the classes of all servers.\n\nSetting the class to "
-	                "`default' resets the process class to the class specified on the command line. The available "
-	                "classes are `unset', `storage', `transaction', `resolution', `commit_proxy', `grv_proxy', "
-	                "`master', `test', "
-	                "`stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', "
-	                "`coordinator', `ratekeeper', `storage_cache', `backup', and `default'.");
 	helpMap["status"] =
 	    CommandHelp("status [minimal|details|json]",
 	                "get the status of a FoundationDB cluster",
@@ -648,11 +639,6 @@ void initHelp() {
 	                                 "namespace for all the profiling-related commands.",
 	                                 "Different types support different actions.  Run `profile` to get a list of "
 	                                 "types, and iteratively explore the help.\n");
-	helpMap["throttle"] =
-	    CommandHelp("throttle <on|off|enable auto|disable auto|list> [ARGS]",
-	                "view and control throttled tags",
-	                "Use `on' and `off' to manually throttle or unthrottle tags. Use `enable auto' or `disable auto' "
-	                "to enable or disable automatic tag throttling. Use `list' to print the list of throttled tags.\n");
 	helpMap["cache_range"] = CommandHelp(
 	    "cache_range <set|clear> <BEGINKEY> <ENDKEY>",
 	    "Mark a key range to add to or remove from storage caches.",
@@ -671,6 +657,7 @@ void initHelp() {
 	    CommandHelp("triggerddteaminfolog",
 	                "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
+	helpMap["rangefeed"] = CommandHelp("rangefeed <register|get|pop> <RANGEID> <BEGINKEY> <ENDKEY>", "", "");
 	helpMap["tssq"] =
 	    CommandHelp("tssq start|stop <StorageUID>",
 	                "start/stop tss quarantine",
@@ -2771,45 +2758,6 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	return false;
 }
 
-ACTOR Future<bool> setClass(Database db, std::vector<StringRef> tokens) {
-	if (tokens.size() == 1) {
-		vector<ProcessData> _workers = wait(makeInterruptable(getWorkers(db)));
-		auto workers = _workers; // strip const
-
-		if (!workers.size()) {
-			printf("No processes are registered in the database.\n");
-			return false;
-		}
-
-		std::sort(workers.begin(), workers.end(), ProcessData::sort_by_address());
-
-		printf("There are currently %zu processes in the database:\n", workers.size());
-		for (const auto& w : workers)
-			printf("  %s: %s (%s)\n",
-			       w.address.toString().c_str(),
-			       w.processClass.toString().c_str(),
-			       w.processClass.sourceString().c_str());
-		return false;
-	}
-
-	AddressExclusion addr = AddressExclusion::parse(tokens[1]);
-	if (!addr.isValid()) {
-		fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", tokens[1].toString().c_str());
-		if (tokens[1].toString().find(":tls") != std::string::npos)
-			printf("        Do not include the `:tls' suffix when naming a process\n");
-		return true;
-	}
-
-	ProcessClass processClass(tokens[2].toString(), ProcessClass::DBSource);
-	if (processClass.classType() == ProcessClass::InvalidClass && tokens[2] != LiteralStringRef("default")) {
-		fprintf(stderr, "ERROR: '%s' is not a valid process class\n", tokens[2].toString().c_str());
-		return true;
-	}
-
-	wait(makeInterruptable(setClass(db, addr, processClass)));
-	return false;
-};
-
 Reference<ReadYourWritesTransaction> getTransaction(Database db,
                                                     Reference<ReadYourWritesTransaction>& tr,
                                                     FdbOptions* options,
@@ -3580,6 +3528,77 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "rangefeed")) {
+					if (tokens.size() == 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+						continue;
+					}
+					if (tokencmp(tokens[1], "register")) {
+						if (tokens.size() != 5) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						state Transaction trx(db);
+						loop {
+							try {
+								wait(trx.registerRangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
+								wait(trx.commit());
+								break;
+							} catch (Error& e) {
+								wait(trx.onError(e));
+							}
+						}
+					} else if (tokencmp(tokens[1], "get")) {
+						if (tokens.size() < 3 || tokens.size() > 5) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						Version begin = 0;
+						Version end = std::numeric_limits<Version>::max();
+						if (tokens.size() > 3) {
+							int n = 0;
+							if (sscanf(tokens[3].toString().c_str(), "%ld%n", &begin, &n) != 1 ||
+							    n != tokens[3].size()) {
+								printUsage(tokens[0]);
+								is_error = true;
+								continue;
+							}
+						}
+						if (tokens.size() > 4) {
+							int n = 0;
+							if (sscanf(tokens[4].toString().c_str(), "%ld%n", &end, &n) != 1 || n != tokens[4].size()) {
+								printUsage(tokens[0]);
+								is_error = true;
+								continue;
+							}
+						}
+						Standalone<VectorRef<MutationsAndVersionRef>> res =
+						    wait(db->getRangeFeedMutations(tokens[2], begin, end));
+						for (auto& it : res) {
+							for (auto& it2 : it.mutations) {
+								printf("%lld %s\n", it.version, it2.toString().c_str());
+							}
+						}
+					} else if (tokencmp(tokens[1], "pop")) {
+						if (tokens.size() != 4) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						Version v;
+						int n = 0;
+						if (sscanf(tokens[3].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[3].size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(db->popRangeFeedMutations(tokens[2], v));
+						}
+					}
+					continue;
+				}
 				if (tokencmp(tokens[0], "tssq")) {
 					if (tokens.size() == 2) {
 						if (tokens[1] != LiteralStringRef("list")) {
@@ -3718,14 +3737,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "setclass")) {
-					if (tokens.size() != 3 && tokens.size() != 1) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(setClassCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						bool err = wait(setClass(db, tokens));
-						if (err)
-							is_error = true;
-					}
 					continue;
 				}
 
@@ -3984,6 +3998,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
+						wait(makeInterruptable(GlobalConfig::globalConfig().onInitialized()));
 						if (tokencmp(tokens[2], "get")) {
 							if (tokens.size() != 3) {
 								fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
@@ -4551,300 +4566,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "throttle")) {
-					if (tokens.size() == 1) {
-						printUsage(tokens[0]);
+					bool _result = wait(throttleCommandActor(db2, tokens));
+					if (!_result)
 						is_error = true;
-						continue;
-					} else if (tokencmp(tokens[1], "list")) {
-						if (tokens.size() > 4) {
-							printf("Usage: throttle list [throttled|recommended|all] [LIMIT]\n");
-							printf("\n");
-							printf("Lists tags that are currently throttled.\n");
-							printf("The default LIMIT is 100 tags.\n");
-							is_error = true;
-							continue;
-						}
-
-						state bool reportThrottled = true;
-						state bool reportRecommended = false;
-						if (tokens.size() >= 3) {
-							if (tokencmp(tokens[2], "recommended")) {
-								reportThrottled = false;
-								reportRecommended = true;
-							} else if (tokencmp(tokens[2], "all")) {
-								reportThrottled = true;
-								reportRecommended = true;
-							} else if (!tokencmp(tokens[2], "throttled")) {
-								printf("ERROR: failed to parse `%s'.\n", printable(tokens[2]).c_str());
-								is_error = true;
-								continue;
-							}
-						}
-
-						state int throttleListLimit = 100;
-						if (tokens.size() >= 4) {
-							char* end;
-							throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
-							if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
-								fprintf(stderr, "ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
-								is_error = true;
-								continue;
-							}
-						}
-
-						state std::vector<TagThrottleInfo> tags;
-						if (reportThrottled && reportRecommended) {
-							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
-						} else if (reportThrottled) {
-							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
-						} else if (reportRecommended) {
-							wait(store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit)));
-						}
-
-						bool anyLogged = false;
-						for (auto itr = tags.begin(); itr != tags.end(); ++itr) {
-							if (itr->expirationTime > now()) {
-								if (!anyLogged) {
-									printf("Throttled tags:\n\n");
-									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Reason     |Tag\n");
-									printf(
-									    " --------------+----------------+-----------+--------+------------+------\n");
-
-									anyLogged = true;
-								}
-
-								std::string reasonStr = "unset";
-								if (itr->reason == TagThrottledReason::MANUAL) {
-									reasonStr = "manual";
-								} else if (itr->reason == TagThrottledReason::BUSY_WRITE) {
-									reasonStr = "busy write";
-								} else if (itr->reason == TagThrottledReason::BUSY_READ) {
-									reasonStr = "busy read";
-								}
-
-								printf("  %12d | %13ds | %9s | %6s | %10s |%s\n",
-								       (int)(itr->tpsRate),
-								       std::min((int)(itr->expirationTime - now()), (int)(itr->initialDuration)),
-								       transactionPriorityToString(itr->priority, false),
-								       itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual",
-								       reasonStr.c_str(),
-								       itr->tag.toString().c_str());
-							}
-						}
-
-						if (tags.size() == throttleListLimit) {
-							printf(
-							    "\nThe tag limit `%d' was reached. Use the [LIMIT] argument to view additional tags.\n",
-							    throttleListLimit);
-							printf("Usage: throttle list [LIMIT]\n");
-						}
-						if (!anyLogged) {
-							printf("There are no %s tags\n", reportThrottled ? "throttled" : "recommended");
-						}
-					} else if (tokencmp(tokens[1], "on")) {
-						if (tokens.size() < 4 || !tokencmp(tokens[2], "tag") || tokens.size() > 7) {
-							printf("Usage: throttle on tag <TAG> [RATE] [DURATION] [PRIORITY]\n");
-							printf("\n");
-							printf("Enables throttling for transactions with the specified tag.\n");
-							printf("An optional transactions per second rate can be specified (default 0).\n");
-							printf("An optional duration can be specified, which must include a time suffix (s, m, h, "
-							       "d) (default 1h).\n");
-							printf("An optional priority can be specified. Choices are `default', `immediate', and "
-							       "`batch' (default `default').\n");
-							is_error = true;
-							continue;
-						}
-
-						double tpsRate = 0.0;
-						uint64_t duration = 3600;
-						TransactionPriority priority = TransactionPriority::DEFAULT;
-
-						if (tokens.size() >= 5) {
-							char* end;
-							tpsRate = std::strtod((const char*)tokens[4].begin(), &end);
-							if ((tokens.size() > 5 && !std::isspace(*end)) || (tokens.size() == 5 && *end != '\0')) {
-								fprintf(stderr, "ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
-								is_error = true;
-								continue;
-							}
-							if (tpsRate < 0) {
-								fprintf(stderr, "ERROR: rate cannot be negative `%f'\n", tpsRate);
-								is_error = true;
-								continue;
-							}
-						}
-						if (tokens.size() == 6) {
-							Optional<uint64_t> parsedDuration = parseDuration(tokens[5].toString());
-							if (!parsedDuration.present()) {
-								fprintf(
-								    stderr, "ERROR: failed to parse duration `%s'.\n", printable(tokens[5]).c_str());
-								is_error = true;
-								continue;
-							}
-							duration = parsedDuration.get();
-
-							if (duration == 0) {
-								fprintf(stderr, "ERROR: throttle duration cannot be 0\n");
-								is_error = true;
-								continue;
-							}
-						}
-						if (tokens.size() == 7) {
-							if (tokens[6] == LiteralStringRef("default")) {
-								priority = TransactionPriority::DEFAULT;
-							} else if (tokens[6] == LiteralStringRef("immediate")) {
-								priority = TransactionPriority::IMMEDIATE;
-							} else if (tokens[6] == LiteralStringRef("batch")) {
-								priority = TransactionPriority::BATCH;
-							} else {
-								fprintf(stderr,
-								        "ERROR: unrecognized priority `%s'. Must be one of `default',\n  `immediate', "
-								        "or `batch'.\n",
-								        tokens[6].toString().c_str());
-								is_error = true;
-								continue;
-							}
-						}
-
-						TagSet tags;
-						tags.addTag(tokens[3]);
-
-						wait(ThrottleApi::throttleTags(db, tags, tpsRate, duration, TagThrottleType::MANUAL, priority));
-						printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
-					} else if (tokencmp(tokens[1], "off")) {
-						int nextIndex = 2;
-						TagSet tags;
-						bool throttleTypeSpecified = false;
-						Optional<TagThrottleType> throttleType = TagThrottleType::MANUAL;
-						Optional<TransactionPriority> priority;
-
-						if (tokens.size() == 2) {
-							is_error = true;
-						}
-
-						while (nextIndex < tokens.size() && !is_error) {
-							if (tokencmp(tokens[nextIndex], "all")) {
-								if (throttleTypeSpecified) {
-									is_error = true;
-									continue;
-								}
-								throttleTypeSpecified = true;
-								throttleType = Optional<TagThrottleType>();
-								++nextIndex;
-							} else if (tokencmp(tokens[nextIndex], "auto")) {
-								if (throttleTypeSpecified) {
-									is_error = true;
-									continue;
-								}
-								throttleTypeSpecified = true;
-								throttleType = TagThrottleType::AUTO;
-								++nextIndex;
-							} else if (tokencmp(tokens[nextIndex], "manual")) {
-								if (throttleTypeSpecified) {
-									is_error = true;
-									continue;
-								}
-								throttleTypeSpecified = true;
-								throttleType = TagThrottleType::MANUAL;
-								++nextIndex;
-							} else if (tokencmp(tokens[nextIndex], "default")) {
-								if (priority.present()) {
-									is_error = true;
-									continue;
-								}
-								priority = TransactionPriority::DEFAULT;
-								++nextIndex;
-							} else if (tokencmp(tokens[nextIndex], "immediate")) {
-								if (priority.present()) {
-									is_error = true;
-									continue;
-								}
-								priority = TransactionPriority::IMMEDIATE;
-								++nextIndex;
-							} else if (tokencmp(tokens[nextIndex], "batch")) {
-								if (priority.present()) {
-									is_error = true;
-									continue;
-								}
-								priority = TransactionPriority::BATCH;
-								++nextIndex;
-							} else if (tokencmp(tokens[nextIndex], "tag")) {
-								if (tags.size() > 0 || nextIndex == tokens.size() - 1) {
-									is_error = true;
-									continue;
-								}
-								tags.addTag(tokens[nextIndex + 1]);
-								nextIndex += 2;
-							}
-						}
-
-						if (!is_error) {
-							state const char* throttleTypeString =
-							    !throttleType.present()
-							        ? ""
-							        : (throttleType.get() == TagThrottleType::AUTO ? "auto-" : "manually ");
-							state std::string priorityString =
-							    priority.present()
-							        ? format(" at %s priority", transactionPriorityToString(priority.get(), false))
-							        : "";
-
-							if (tags.size() > 0) {
-								bool success = wait(ThrottleApi::unthrottleTags(db, tags, throttleType, priority));
-								if (success) {
-									printf("Unthrottled tag `%s'%s\n",
-									       tokens[3].toString().c_str(),
-									       priorityString.c_str());
-								} else {
-									printf("Tag `%s' was not %sthrottled%s\n",
-									       tokens[3].toString().c_str(),
-									       throttleTypeString,
-									       priorityString.c_str());
-								}
-							} else {
-								bool unthrottled = wait(ThrottleApi::unthrottleAll(db, throttleType, priority));
-								if (unthrottled) {
-									printf("Unthrottled all %sthrottled tags%s\n",
-									       throttleTypeString,
-									       priorityString.c_str());
-								} else {
-									printf("There were no tags being %sthrottled%s\n",
-									       throttleTypeString,
-									       priorityString.c_str());
-								}
-							}
-						} else {
-							printf("Usage: throttle off [all|auto|manual] [tag <TAG>] [PRIORITY]\n");
-							printf("\n");
-							printf("Disables throttling for throttles matching the specified filters. At least one "
-							       "filter must be used.\n\n");
-							printf("An optional qualifier `all', `auto', or `manual' can be used to specify the type "
-							       "of throttle\n");
-							printf("affected. `all' targets all throttles, `auto' targets those created by the "
-							       "cluster, and\n");
-							printf("`manual' targets those created manually (default `manual').\n\n");
-							printf("The `tag' filter can be use to turn off only a specific tag.\n\n");
-							printf("The priority filter can be used to turn off only throttles at specific priorities. "
-							       "Choices are\n");
-							printf("`default', `immediate', or `batch'. By default, all priorities are targeted.\n");
-						}
-					} else if (tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) {
-						if (tokens.size() != 3 || !tokencmp(tokens[2], "auto")) {
-							printf("Usage: throttle <enable|disable> auto\n");
-							printf("\n");
-							printf("Enables or disable automatic tag throttling.\n");
-							is_error = true;
-							continue;
-						}
-						state bool autoTagThrottlingEnabled = tokencmp(tokens[1], "enable");
-						wait(ThrottleApi::enableAuto(db, autoTagThrottlingEnabled));
-						printf("Automatic tag throttling has been %s\n",
-						       autoTagThrottlingEnabled ? "enabled" : "disabled");
-					} else {
-						printUsage(tokens[0]);
-						is_error = true;
-					}
 					continue;
 				}
+
 				if (tokencmp(tokens[0], "cache_range")) {
 					if (tokens.size() != 4) {
 						printUsage(tokens[0]);

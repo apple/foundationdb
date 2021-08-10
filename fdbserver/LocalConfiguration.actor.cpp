@@ -215,7 +215,7 @@ class LocalConfigurationImpl {
 			self->updateInMemoryState(lastSeenVersion);
 			return Void();
 		}
-		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
+		RangeResult range = wait(self->kvStore->readRange(knobOverrideKeys));
 		for (const auto& kv : range) {
 			auto configKey =
 			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(knobOverrideKeys.begin), IncludeVersion());
@@ -309,9 +309,8 @@ class LocalConfigurationImpl {
 		}
 	}
 
-	ACTOR static Future<Void> consume(
-	    LocalConfigurationImpl* self,
-	    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> broadcaster) {
+	ACTOR static Future<Void> consume(LocalConfigurationImpl* self,
+	                                  Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> broadcaster) {
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			choose {
@@ -327,10 +326,10 @@ public:
 	                       std::string const& configPath,
 	                       std::map<std::string, std::string> const& manualKnobOverrides,
 	                       IsTest isTest)
-	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"), cc("LocalConfiguration"),
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"),
+	    configKnobOverrides(configPath), manualKnobOverrides(manualKnobOverrides), cc("LocalConfiguration"),
 	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
-	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
-	    manualKnobOverrides(manualKnobOverrides) {
+	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc) {
 		if (isTest) {
 			testKnobCollection =
 			    IKnobCollection::create(IKnobCollection::Type::TEST,
@@ -371,7 +370,7 @@ public:
 		return getKnobs().getTestKnobs();
 	}
 
-	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+	Future<Void> consume(Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
 		return consume(this, broadcaster);
 	}
 
@@ -453,7 +452,7 @@ TestKnobs const& LocalConfiguration::getTestKnobs() const {
 }
 
 Future<Void> LocalConfiguration::consume(
-    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+    Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
 	return impl().consume(broadcaster);
 }
 

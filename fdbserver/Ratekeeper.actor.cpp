@@ -520,8 +520,7 @@ struct RatekeeperLimits {
 	                 int64_t logSpringBytes,
 	                 double maxVersionDifference,
 	                 int64_t durabilityLagTargetVersions)
-	  : priority(priority), tpsLimit(std::numeric_limits<double>::infinity()),
-	    tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
+	  : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
 	    reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
 	    storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
 	    maxVersionDifference(maxVersionDifference),
@@ -529,7 +528,8 @@ struct RatekeeperLimits {
 	        durabilityLagTargetVersions +
 	        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
 	                                                           // be durable on the storage servers
-	    durabilityLagLimit(std::numeric_limits<double>::infinity()), lastDurabilityLag(0), context(context) {}
+	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
+	    context(context) {}
 };
 
 struct GrvProxyInfo {
@@ -541,7 +541,7 @@ struct GrvProxyInfo {
 	double lastTagPushTime;
 
 	GrvProxyInfo()
-	  : totalTransactions(0), batchTransactions(0), lastUpdateTime(0), lastThrottledTagChangeId(0), lastTagPushTime(0) {
+	  : totalTransactions(0), batchTransactions(0), lastThrottledTagChangeId(0), lastUpdateTime(0), lastTagPushTime(0) {
 	}
 };
 
@@ -582,7 +582,7 @@ struct RatekeeperData {
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
-	    throttledTagChangeId(0), lastBusiestCommitTagPick(0),
+	    lastBusiestCommitTagPick(0), throttledTagChangeId(0),
 	    normalLimits(TransactionPriority::DEFAULT,
 	                 "",
 	                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
@@ -806,14 +806,14 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData* self) {
 				    autoThrottlingEnabled.get().get() == LiteralStringRef("0")) {
 					TEST(true); // Auto-throttling disabled
 					if (self->autoThrottlingEnabled) {
-						TraceEvent("AutoTagThrottlingDisabled", self->id);
+						TraceEvent("AutoTagThrottlingDisabled", self->id).log();
 					}
 					self->autoThrottlingEnabled = false;
 				} else if (autoThrottlingEnabled.get().present() &&
 				           autoThrottlingEnabled.get().get() == LiteralStringRef("1")) {
 					TEST(true); // Auto-throttling enabled
 					if (!self->autoThrottlingEnabled) {
-						TraceEvent("AutoTagThrottlingEnabled", self->id);
+						TraceEvent("AutoTagThrottlingEnabled", self->id).log();
 					}
 					self->autoThrottlingEnabled = true;
 				} else {
@@ -875,7 +875,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData* self) {
 				committed = true;
 
 				wait(watchFuture);
-				TraceEvent("RatekeeperThrottleSignaled", self->id);
+				TraceEvent("RatekeeperThrottleSignaled", self->id).log();
 				TEST(true); // Tag throttle changes detected
 				break;
 			} catch (Error& e) {
@@ -1413,6 +1413,7 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 	}
 }
 
+<<<<<<< HEAD
 //  |-------------------------------------|
 //  |         Blob Granule Stuff          |
 //  |-------------------------------------|
@@ -2249,6 +2250,9 @@ ACTOR Future<Void> blobManagerPoc(RatekeeperData* rkData, LocalityData locality)
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+=======
+ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+>>>>>>> feature-range-feed
 	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Future<Void> timeout = Void();
 	state std::vector<Future<Void>> tlogTrackers;

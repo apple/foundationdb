@@ -746,7 +746,7 @@ struct EventLogRequest {
 	ReplyPromise<TraceEventFields> reply;
 
 	EventLogRequest() : getLastError(true) {}
-	explicit EventLogRequest(Standalone<StringRef> eventName) : eventName(eventName), getLastError(false) {}
+	explicit EventLogRequest(Standalone<StringRef> eventName) : getLastError(false), eventName(eventName) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -762,8 +762,8 @@ struct DebugEntryRef {
 	MutationRef mutation;
 	DebugEntryRef() {}
 	DebugEntryRef(const char* c, Version v, MutationRef const& m)
-	  : context((const uint8_t*)c, strlen(c)), version(v), mutation(m), time(now()),
-	    address(g_network->getLocalAddress()) {}
+	  : time(now()), address(g_network->getLocalAddress()), context((const uint8_t*)c, strlen(c)), version(v),
+	    mutation(m) {}
 	DebugEntryRef(Arena& a, DebugEntryRef const& d)
 	  : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
 
@@ -831,7 +831,7 @@ ACTOR Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
 
-class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
+class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
                               LockAware = LockAware::False,
                               EnableLocalityLoadBalance = EnableLocalityLoadBalance::True);
@@ -868,32 +868,32 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Tag seedTag,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo>> db,
+                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
-    Reference<AsyncVar<ServerDBInfo>> db,
+    Reference<AsyncVar<ServerDBInfo> const> db,
     std::string folder,
     Promise<Void> recovered,
     Reference<ClusterConnectionFile>
         connFile); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo>> db,
+                                Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators serverCoordinators,
                                 LifetimeToken lifetime,
                                 bool forceRecovery);
 ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo>> db,
+                                     Reference<AsyncVar<ServerDBInfo> const> db,
                                      std::string whitelistBinPaths);
 ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
                                   InitializeGrvProxyRequest req,
-                                  Reference<AsyncVar<ServerDBInfo>> db);
+                                  Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
                         UID tlogId,
@@ -906,14 +906,18 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Reference<AsyncVar<UID>> activeSharedTLog);
 ACTOR Future<Void> resolver(ResolverInterface resolver,
                             InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo>> db);
+                            Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> logRouter(TLogInterface interf,
                              InitializeLogRouterRequest req,
-                             Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> storageCacheServer(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> backupWorker(BackupInterface bi, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo>> db);
+                             Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
+                                      uint16_t id,
+                                      Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> backupWorker(BackupInterface bi,
+                                InitializeBackupRequest req,
+                                Reference<AsyncVar<ServerDBInfo> const> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
@@ -921,7 +925,7 @@ void updateCpuProfiler(ProfilerRequest req);
 namespace oldTLog_4_6 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         UID tlogId,
                         UID workerID);
@@ -929,7 +933,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 namespace oldTLog_6_0 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
                         UID tlogId,
@@ -944,7 +948,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 namespace oldTLog_6_2 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
                         UID tlogId,
