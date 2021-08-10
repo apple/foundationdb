@@ -782,35 +782,35 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetConfigClasses") {
 }
 
 // TODO: The below tests seem to always segfault
-// TEST_CASE("/fdbserver/ConfigDB/Transaction/GetKnobs") {
-//     wait(testGetKnobs(params, false, false));
-//     return Void();
-// }
-//
-// TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetKnobs") {
-//     wait(testGetKnobs(params, false, true));
-//     return Void();
-// }
-//
-// TEST_CASE("/fdbserver/ConfigDB/Transaction/GetGlobalKnobs") {
-//     wait(testGetKnobs(params, true, false));
-//     return Void();
-// }
-//
-// TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetGlobalKnobs") {
-//     wait(testGetKnobs(params, true, true));
-//     return Void();
-// }
-//
-// TEST_CASE("/fdbserver/ConfigDB/Transaction/BadRangeRead") {
-//     state TransactionEnvironment env(params.getDataDir());
-//     try {
-//         wait(env.badRangeRead() || env.getError());
-//         ASSERT(false);
-//     } catch (Error& e) {
-//         ASSERT_EQ(e.code(), error_code_invalid_config_db_range_read);
-//     }
-//     return Void();
-// }
+TEST_CASE("/fdbserver/ConfigDB/Transaction/GetKnobs") {
+	wait(testGetKnobs(params, false, false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetKnobs") {
+	wait(testGetKnobs(params, false, true));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/GetGlobalKnobs") {
+	wait(testGetKnobs(params, true, false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetGlobalKnobs") {
+	wait(testGetKnobs(params, true, true));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/BadRangeRead") {
+	state TransactionEnvironment env(params.getDataDir());
+	try {
+		wait(env.badRangeRead() || env.getError());
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_invalid_config_db_range_read);
+	}
+	return Void();
+}
 
 // TODO: Test worker failure detection on ConfigBroadcaster
