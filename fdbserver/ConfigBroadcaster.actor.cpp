@@ -318,7 +318,7 @@ Future<Void> ConfigBroadcaster::registerWorker(Version lastSeenVersion,
                                                ConfigClassSet configClassSet,
                                                Future<Void> watcher,
                                                ConfigBroadcastInterface broadcastInterface) {
-	return impl().registerWorker(this, lastSeenVersion, configClassSet, watcher, broadcastInterface);
+	return impl().registerWorker(this, lastSeenVersion, std::move(configClassSet), watcher, broadcastInterface);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
