@@ -354,22 +354,28 @@ int populate(FDBTransaction* transaction,
 			xacts++; /* for throttling */
 		}
 	}
-	bool retriedTxnOnce = false;
-	// might hit FDB_ERROR_RETRY if running mako with multi-version client
-	while (!retriedTxnOnce) {
+	time_t start_time_sec, current_time_sec;
+	time(&start_time_sec);
+	int is_committed = false;
+	// will hit FDB_ERROR_RETRY if running mako with multi-version client
+	while (!is_committed) {
 		if (stats->xacts % args->sampling == 0) {
 			clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
 		}
 		int rc;
 		if ((rc = commit_transaction(transaction) != FDB_SUCCESS)) {
-			if (rc == FDB_ERROR_RETRY && !retriedTxnOnce) {
-				retriedTxnOnce = true;
-				continue;
+			if (rc == FDB_ERROR_RETRY) {
+				time(&current_time_sec);
+				if (difftime(current_time_sec, start_time_sec) > 5) {
+					goto failExit;
+				} else {
+					continue;
+				}
 			} else {
 				goto failExit;
 			}
 		}
-
+		is_committed = true;
 		/* xact latency stats */
 		if (stats->xacts % args->sampling == 0) {
 			clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
@@ -378,7 +384,6 @@ int populate(FDBTransaction* transaction,
 			update_op_lat_stats(
 				&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
 		}
-		break;
 	}
 
 	clock_gettime(CLOCK_MONOTONIC, &timer_end);
