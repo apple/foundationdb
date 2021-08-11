@@ -11,10 +11,7 @@
 
 void forceLinkIThreadPoolTests() {}
 
-
 struct ThreadNameReceiver final : IThreadPoolReceiver {
-	ThreadNameReceiver(){};
-
 	void init() override {}
 
 	struct GetNameAction final : TypedAction<ThreadNameReceiver, GetNameAction> {
@@ -87,6 +84,14 @@ struct ThreadSafePromiseStreamSender final : IThreadPoolReceiver {
 		notifications->send(std::move(name));
 	}
 
+	struct FaultyAction final : TypedAction<ThreadSafePromiseStreamSender, FaultyAction> {
+		double getTimeEstimate() const override { return 3.; }
+	};
+
+	void action(FaultyAction& a) {
+		notifications->sendError(platform_error().asInjectedFault());
+	}
+
 private:
 	ThreadReturnPromiseStream<std::string>* notifications;
 };
@@ -123,6 +128,16 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	}
 
 	ASSERT(n == num);
+
+	auto* faultyAction = new ThreadSafePromiseStreamSender::FaultyAction();
+	pool->post(faultyAction);
+
+	try {
+		std::string name = waitNext(futs);
+		ASSERT(false);
+	} catch(Error& e) {
+		ASSERT(e.isInjectedFault());
+	}
 
 	wait(pool->stop());
 
