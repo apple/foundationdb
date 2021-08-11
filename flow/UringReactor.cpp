@@ -47,7 +47,11 @@ void UringReactor::poll(){
                 p.sendError(connection_failed());
             }
         } else {
-            ow->pv.send(Void());
+            if (cqe->res & POLLERR) {
+                ow->pv.sendError(connection_failed());
+            } else {
+                ow->pv.send(Void());
+            }
         }
         delete ow;
 
