@@ -30,38 +30,51 @@
 #endif
 
 // If MUTATION_TRACKING_ENABLED is set, MutationTracking events will be logged for the
-// keys in debugKeys and the ranges in debugRanges
-std::vector<KeyRef> debugKeys = {};
-std::vector<KeyRangeRef> debugRanges = {};
+// keys in debugKeys and the ranges in debugRanges.
+// Each entry is a pair of (label, keyOrRange) and the Label will be attached to the
+// MutationTracking TraceEvent for easier searching/recognition.
+std::vector<std::pair<const char *, KeyRef>> debugKeys = {
+	{"SomeKey", "foo"_sr}
+};
+std::vector<std::pair<const char *, KeyRangeRef>> debugRanges = {
+	{"Everything", {""_sr, "\xff\xff\xff\xff"_sr}}
+};
 
 TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
-	if (std::any_of(debugKeys.begin(), debugKeys.end(), [&mutation](const KeyRef& debugKey) {
-		    return ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
-					KeyRangeRef(mutation.param1, mutation.param2).contains(debugKey)) ||
-		           mutation.param1 == debugKey;
-	    }) ||
-		std::any_of(debugRanges.begin(), debugRanges.end(), [&mutation](const KeyRangeRef& debugRange) {
-		    return ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
-					KeyRangeRef(mutation.param1, mutation.param2).intersects(debugRange)) ||
-					debugRange.contains(mutation.param1);
-	    })) {
+	const char *label = nullptr;
 
+	for(auto &labelKey : debugKeys) {
+		if(((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
+					KeyRangeRef(mutation.param1, mutation.param2).contains(labelKey.second)) ||
+			mutation.param1 == labelKey.second) {
+			label = labelKey.first;
+			break;
+		}
+	}
+
+	for(auto &labelRange : debugRanges) {
+		if(((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
+					KeyRangeRef(mutation.param1, mutation.param2).intersects(labelRange.second)) ||
+			labelRange.second.contains(mutation.param1)) {
+			label = labelRange.first;
+			break;
+		}
+	}
+
+	if(label != nullptr) {
 		TraceEvent event("MutationTracking", id);
-		event.detail("At", context).detail("Version", version).detail("Mutation", mutation);
+		event.detail("Label", label)
+			.detail("At", context)
+			.detail("Version", version)
+			.detail("Mutation", mutation);
 		return event;
 	}
+
 	return TraceEvent();
 }
 
 TraceEvent debugKeyRangeEnabled(const char* context, Version version, KeyRangeRef const& keys, UID id) {
-	if (std::any_of(
-	        debugKeys.begin(), debugKeys.end(), [&keys](const KeyRef& debugKey) { return keys.contains(debugKey); })) {
-
-		TraceEvent event("MutationTracking", id);
-		event.detail("At", context).detail("Version", version).detail("Mutation", MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end));
-		return event;
-	}
-	return TraceEvent();
+	return debugMutation(context, version, MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end), id);
 }
 
 TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, StringRef commitBlob, UID id) {
