@@ -78,7 +78,7 @@ struct NetworkOptions {
 
 class ReadYourWritesTransaction; // workaround cyclic dependency
 
-class Database : public ThreadSafeReferenceCounted<Database> {
+class Database final : public ThreadSafeReferenceCounted<Database> {
 public:
 	enum { API_VERSION_LATEST = -1 };
 

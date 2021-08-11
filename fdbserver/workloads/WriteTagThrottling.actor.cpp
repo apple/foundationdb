@@ -94,7 +94,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	std::string description() const override { return WriteTagThrottlingWorkload::NAME; }
 
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
-		state Reference<Database> db = Reference<Database>::addRef(&cx);
+		state Reference<Database> db = makeReference<Database>(cx);
 		ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION &&
 		       CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH >= MIN_TRANSACTION_TAG_LENGTH);
 		if (self->populateData) {
@@ -307,9 +307,10 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	}
 	ACTOR static Future<Void> throttledTagUpdater(Database cx, WriteTagThrottlingWorkload* self) {
 		state std::vector<TagThrottleInfo> tags;
+		state Reference<Database> db = makeReference<Database>(cx);
 		loop {
 			wait(delay(1.0));
-			wait(store(tags, ThrottleApi::getThrottledTags(cx, CLIENT_KNOBS->TOO_MANY, true)));
+			wait(store(tags, ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY, true)));
 			self->recordThrottledTags(tags);
 		};
 	}

@@ -595,8 +595,12 @@ struct RatekeeperData {
 	                SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
 	                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
 	    autoThrottlingEnabled(false) {
-		expiredTagThrottleCleanup =
-		    recurring([this]() { ThrottleApi::expire(this->db); }, SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
+		expiredTagThrottleCleanup = recurring(
+		    [this]() {
+			    Reference<Database> db = makeReference<Database>(this->db);
+			    ThrottleApi::expire(db);
+		    },
+		    SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
 	}
 };
 
@@ -942,7 +946,8 @@ void tryAutoThrottleTag(RatekeeperData* self,
 			TagSet tags;
 			tags.addTag(tag);
 
-			self->addActor.send(ThrottleApi::throttleTags(self->db,
+			Reference<Database> db = makeReference<Database>(self->db);
+			self->addActor.send(ThrottleApi::throttleTags(db,
 			                                              tags,
 			                                              clientRate.get(),
 			                                              SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION,

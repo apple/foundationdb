@@ -32,334 +32,6 @@
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-namespace {
-
-// Helper functions copied from TagThrottle.actor.cpp
-// The only difference is transactions are changed to go through MultiversionTransaction,
-// instead of the native Transaction(i.e., RYWTransaction)
-
-ACTOR Future<bool> getValidAutoEnabled(Reference<ITransaction> tr) {
-	state bool result;
-	loop {
-		Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
-		if (!value.present()) {
-			tr->reset();
-			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
-			continue;
-		} else if (value.get() == LiteralStringRef("1")) {
-			result = true;
-		} else if (value.get() == LiteralStringRef("0")) {
-			result = false;
-		} else {
-			TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue").detail("Value", value.get());
-			tr->reset();
-			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
-			continue;
-		}
-		return result;
-	};
-}
-
-ACTOR Future<std::vector<TagThrottleInfo>> getThrottledTags(Reference<IDatabase> db,
-                                                            int limit,
-                                                            bool containsRecommend = false) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	state bool reportAuto = containsRecommend;
-	loop {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		try {
-			if (!containsRecommend) {
-				wait(store(reportAuto, getValidAutoEnabled(tr)));
-			}
-			state ThreadFuture<RangeResult> f = tr->getRange(
-			    reportAuto ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix), limit);
-			RangeResult throttles = wait(safeThreadFutureToFuture(f));
-			std::vector<TagThrottleInfo> results;
-			for (auto throttle : throttles) {
-				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
-				                                  TagThrottleValue::fromValue(throttle.value)));
-			}
-			return results;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
-ACTOR Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<IDatabase> db, int limit) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		try {
-			bool enableAuto = wait(getValidAutoEnabled(tr));
-			if (enableAuto) {
-				return std::vector<TagThrottleInfo>();
-			}
-			state ThreadFuture<RangeResult> f =
-			    tr->getRange(KeyRangeRef(tagThrottleAutoKeysPrefix, tagThrottleKeys.end), limit);
-			RangeResult throttles = wait(safeThreadFutureToFuture(f));
-			std::vector<TagThrottleInfo> results;
-			for (auto throttle : throttles) {
-				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
-				                                  TagThrottleValue::fromValue(throttle.value)));
-			}
-			return results;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
-ACTOR Future<Void> updateThrottleCount(Reference<ITransaction> tr, int64_t delta) {
-	state ThreadFuture<Optional<Value>> countVal = tr->get(tagThrottleCountKey);
-	state ThreadFuture<Optional<Value>> limitVal = tr->get(tagThrottleLimitKey);
-
-	wait(success(safeThreadFutureToFuture(countVal)) && success(safeThreadFutureToFuture(limitVal)));
-
-	int64_t count = 0;
-	int64_t limit = 0;
-
-	if (countVal.get().present()) {
-		BinaryReader reader(countVal.get().get(), Unversioned());
-		reader >> count;
-	}
-
-	if (limitVal.get().present()) {
-		BinaryReader reader(limitVal.get().get(), Unversioned());
-		reader >> limit;
-	}
-
-	count += delta;
-
-	if (count > limit) {
-		throw too_many_tag_throttles();
-	}
-
-	BinaryWriter writer(Unversioned());
-	writer << count;
-
-	tr->set(tagThrottleCountKey, writer.toValue());
-	return Void();
-}
-
-void signalThrottleChange(Reference<ITransaction> tr) {
-	tr->atomicOp(
-	    tagThrottleSignalKey, LiteralStringRef("XXXXXXXXXX\x00\x00\x00\x00"), MutationRef::SetVersionstampedValue);
-}
-
-ACTOR Future<Void> throttleTags(Reference<IDatabase> db,
-                                TagSet tags,
-                                double tpsRate,
-                                double initialDuration,
-                                TagThrottleType throttleType,
-                                TransactionPriority priority,
-                                Optional<double> expirationTime = Optional<double>(),
-                                Optional<TagThrottledReason> reason = Optional<TagThrottledReason>()) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	state Key key = TagThrottleKey(tags, throttleType, priority).toKey();
-
-	ASSERT(initialDuration > 0);
-
-	if (throttleType == TagThrottleType::MANUAL) {
-		reason = TagThrottledReason::MANUAL;
-	}
-	TagThrottleValue throttle(tpsRate,
-	                          expirationTime.present() ? expirationTime.get() : 0,
-	                          initialDuration,
-	                          reason.present() ? reason.get() : TagThrottledReason::UNSET);
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
-	wr << throttle;
-	state Value value = wr.toValue();
-
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		try {
-			if (throttleType == TagThrottleType::MANUAL) {
-				Optional<Value> oldThrottle = wait(safeThreadFutureToFuture(tr->get(key)));
-				if (!oldThrottle.present()) {
-					wait(updateThrottleCount(tr, 1));
-				}
-			}
-
-			tr->set(key, value);
-
-			if (throttleType == TagThrottleType::MANUAL) {
-				signalThrottleChange(tr);
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return Void();
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
-ACTOR Future<bool> unthrottleTags(Reference<IDatabase> db,
-                                  TagSet tags,
-                                  Optional<TagThrottleType> throttleType,
-                                  Optional<TransactionPriority> priority) {
-	state Reference<ITransaction> tr = db->createTransaction();
-
-	state std::vector<Key> keys;
-	for (auto p : allTransactionPriorities) {
-		if (!priority.present() || priority.get() == p) {
-			if (!throttleType.present() || throttleType.get() == TagThrottleType::AUTO) {
-				keys.push_back(TagThrottleKey(tags, TagThrottleType::AUTO, p).toKey());
-			}
-			if (!throttleType.present() || throttleType.get() == TagThrottleType::MANUAL) {
-				keys.push_back(TagThrottleKey(tags, TagThrottleType::MANUAL, p).toKey());
-			}
-		}
-	}
-
-	state bool removed = false;
-
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		try {
-			state std::vector<Future<Optional<Value>>> values;
-			values.reserve(keys.size());
-			for (auto key : keys) {
-				values.push_back(safeThreadFutureToFuture(tr->get(key)));
-			}
-
-			wait(waitForAll(values));
-
-			int delta = 0;
-			for (int i = 0; i < values.size(); ++i) {
-				if (values[i].get().present()) {
-					if (TagThrottleKey::fromKey(keys[i]).throttleType == TagThrottleType::MANUAL) {
-						delta -= 1;
-					}
-
-					tr->clear(keys[i]);
-
-					// Report that we are removing this tag if we ever see it present.
-					// This protects us from getting confused if the transaction is maybe committed.
-					// It's ok if someone else actually ends up removing this tag at the same time
-					// and we aren't the ones to actually do it.
-					removed = true;
-				}
-			}
-
-			if (delta != 0) {
-				wait(updateThrottleCount(tr, delta));
-			}
-			if (removed) {
-				signalThrottleChange(tr);
-				wait(safeThreadFutureToFuture(tr->commit()));
-			}
-
-			return removed;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
-// ACTOR Future<Void> enableAuto(Reference<IDatabase> db, bool enabled) {
-// 	state Reference<ITransaction> tr = db->createTransaction();
-
-// 	loop {
-// 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-// 		try {
-// 			Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
-// 			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
-// 			    (!enabled && value.get() != LiteralStringRef("0"))) {
-// 				tr->set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
-// 				signalThrottleChange(tr);
-
-// 				wait(safeThreadFutureToFuture(tr->commit()));
-// 			}
-// 			return Void();
-// 		} catch (Error& e) {
-// 			wait(safeThreadFutureToFuture(tr->onError(e)));
-// 		}
-// 	}
-// }
-
-ACTOR Future<bool> unthrottleMatchingThrottles(Reference<IDatabase> db,
-                                               KeyRef beginKey,
-                                               KeyRef endKey,
-                                               Optional<TransactionPriority> priority,
-                                               bool onlyExpiredThrottles) {
-	state Reference<ITransaction> tr = db->createTransaction();
-
-	state KeySelector begin = firstGreaterOrEqual(beginKey);
-	state KeySelector end = firstGreaterOrEqual(endKey);
-
-	state bool removed = false;
-
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		try {
-			// holds memory of the RangeResult
-			state ThreadFuture<RangeResult> f = tr->getRange(begin, end, 1000);
-			state RangeResult tags = wait(safeThreadFutureToFuture(f));
-			state uint64_t unthrottledTags = 0;
-			uint64_t manualUnthrottledTags = 0;
-			for (auto tag : tags) {
-				if (onlyExpiredThrottles) {
-					double expirationTime = TagThrottleValue::fromValue(tag.value).expirationTime;
-					if (expirationTime == 0 || expirationTime > now()) {
-						continue;
-					}
-				}
-
-				TagThrottleKey key = TagThrottleKey::fromKey(tag.key);
-				if (priority.present() && key.priority != priority.get()) {
-					continue;
-				}
-
-				if (key.throttleType == TagThrottleType::MANUAL) {
-					++manualUnthrottledTags;
-				}
-
-				removed = true;
-				tr->clear(tag.key);
-				unthrottledTags++;
-			}
-
-			if (manualUnthrottledTags > 0) {
-				wait(updateThrottleCount(tr, -manualUnthrottledTags));
-			}
-
-			if (unthrottledTags > 0) {
-				signalThrottleChange(tr);
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (!tags.more) {
-				return removed;
-			}
-
-			ASSERT(tags.size() > 0);
-			begin = KeySelector(firstGreaterThan(tags[tags.size() - 1].key), tags.arena());
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
-Future<bool> unthrottleAll(Reference<IDatabase> db,
-                           Optional<TagThrottleType> tagThrottleType,
-                           Optional<TransactionPriority> priority) {
-	KeyRef begin = tagThrottleKeys.begin;
-	KeyRef end = tagThrottleKeys.end;
-
-	if (tagThrottleType.present() && tagThrottleType == TagThrottleType::AUTO) {
-		begin = tagThrottleAutoKeysPrefix;
-	} else if (tagThrottleType.present() && tagThrottleType == TagThrottleType::MANUAL) {
-		end = tagThrottleAutoKeysPrefix;
-	}
-
-	return unthrottleMatchingThrottles(db, begin, end, priority, false);
-}
-
-} // namespace
-
 namespace fdb_cli {
 
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
@@ -403,11 +75,11 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 
 		state std::vector<TagThrottleInfo> tags;
 		if (reportThrottled && reportRecommended) {
-			wait(store(tags, getThrottledTags(db, throttleListLimit, true)));
+			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
 		} else if (reportThrottled) {
-			wait(store(tags, getThrottledTags(db, throttleListLimit)));
+			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
 		} else if (reportRecommended) {
-			wait(store(tags, getRecommendedTags(db, throttleListLimit)));
+			wait(store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit)));
 		}
 
 		bool anyLogged = false;
@@ -509,7 +181,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 		TagSet tags;
 		tags.addTag(tokens[3]);
 
-		wait(throttleTags(db, tags, tpsRate, duration, TagThrottleType::MANUAL, priority));
+		wait(ThrottleApi::throttleTags(db, tags, tpsRate, duration, TagThrottleType::MANUAL, priority));
 		printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
 	} else if (tokencmp(tokens[1], "off")) {
 		int nextIndex = 2;
@@ -586,7 +258,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			    priority.present() ? format(" at %s priority", transactionPriorityToString(priority.get(), false)) : "";
 
 			if (tags.size() > 0) {
-				bool success = wait(unthrottleTags(db, tags, throttleType, priority));
+				bool success = wait(ThrottleApi::unthrottleTags(db, tags, throttleType, priority));
 				if (success) {
 					printf("Unthrottled tag `%s'%s\n", tokens[3].toString().c_str(), priorityString.c_str());
 				} else {
@@ -596,7 +268,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 					       priorityString.c_str());
 				}
 			} else {
-				bool unthrottled = wait(unthrottleAll(db, throttleType, priority));
+				bool unthrottled = wait(ThrottleApi::unthrottleAll(db, throttleType, priority));
 				if (unthrottled) {
 					printf("Unthrottled all %sthrottled tags%s\n", throttleTypeString, priorityString.c_str());
 				} else {

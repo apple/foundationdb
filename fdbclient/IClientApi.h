@@ -89,7 +89,7 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
-	template<typename Type> using FutureT = ThreadFuture<Type>;
+	template<class Type> using FutureT = ThreadFuture<Type>;
 };
 
 // An interface that represents a connection to a cluster made by a client

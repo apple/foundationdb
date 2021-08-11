@@ -627,6 +627,7 @@ Future<T> safeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 	return threadFuture.get();
 }
 
+// do nothing, just for template functions' calls
 template <class T>
 Future<T> safeThreadFutureToFuture(Future<T> future) {
 	// do nothing
