@@ -530,10 +530,8 @@ ACTOR Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection>
 
 			TEST(true); // We didn't write everything, so apparently the write buffer is full.  Wait for it to be
 			            // nonfull.
-
-            wait(conn->onWritable());
-            wait(yield(TaskPriority::WriteSocket));
-
+			// wait(conn->onWritable());
+			// wait(yield(TaskPriority::WriteSocket));
 		}
 
 		// Wait until there is something to send
@@ -1287,13 +1285,13 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 					}
 				}
 
-				if (readWillBlock)
-					break;
+				//if (readWillBlock)
+				//	break;
 
-				wait(yield(TaskPriority::ReadSocket));
+				//wait(yield(TaskPriority::ReadSocket));
 			}
 
-			wait(conn->onReadable());
+			//wait(conn->onReadable());
             wait(delay(0, TaskPriority::ReadSocket)); // We don't want to call conn->read directly from the reactor - we
 			                                          // could get stuck in the reactor reading 1 packet at a time
 		}
