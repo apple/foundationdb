@@ -35,7 +35,6 @@ struct ThreadNameReceiver final : IThreadPoolReceiver {
 	}
 };
 
-
 TEST_CASE("/flow/IThreadPool/NamedThread") {
 	noUnseed = true;
 
@@ -62,9 +61,8 @@ TEST_CASE("/flow/IThreadPool/NamedThread") {
 }
 
 struct ThreadSafePromiseStreamSender final : IThreadPoolReceiver {
-	ThreadSafePromiseStreamSender(
-		ThreadReturnPromiseStream<std::string>* notifications)
-		 : notifications(notifications) {}
+	ThreadSafePromiseStreamSender(ThreadReturnPromiseStream<std::string>* notifications)
+	  : notifications(notifications) {}
 	void init() override {}
 
 	struct GetNameAction final : TypedAction<ThreadSafePromiseStreamSender, GetNameAction> {
@@ -88,9 +86,7 @@ struct ThreadSafePromiseStreamSender final : IThreadPoolReceiver {
 		double getTimeEstimate() const override { return 3.; }
 	};
 
-	void action(FaultyAction& a) {
-		notifications->sendError(platform_error().asInjectedFault());
-	}
+	void action(FaultyAction& a) { notifications->sendError(platform_error().asInjectedFault()); }
 
 private:
 	ThreadReturnPromiseStream<std::string>* notifications;
@@ -99,8 +95,8 @@ private:
 TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	noUnseed = true;
 
-	state std::unique_ptr<ThreadReturnPromiseStream<std::string>> 
-		notifications(new ThreadReturnPromiseStream<std::string>());
+	state std::unique_ptr<ThreadReturnPromiseStream<std::string>> notifications(
+	    new ThreadReturnPromiseStream<std::string>());
 
 	state Reference<IThreadPool> pool = createGenericThreadPool();
 	pool->addThread(new ThreadSafePromiseStreamSender(notifications.get()), "thread-foo");
@@ -135,7 +131,7 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	try {
 		std::string name = waitNext(futs);
 		ASSERT(false);
-	} catch(Error& e) {
+	} catch (Error& e) {
 		ASSERT(e.isInjectedFault());
 	}
 
