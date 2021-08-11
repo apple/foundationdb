@@ -448,6 +448,7 @@ public:
 
 	Future<Void> connectHandshake() override { return Void(); }
 
+    /*
 	// returns when write() can write at least one byte
 	Future<Void> onWritable() override {
 		++g_net2->countWriteProbes;
@@ -463,6 +464,24 @@ public:
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
 		socket.async_read_some(boost::asio::null_buffers(), std::move(p));
+		return f;
+	} */
+
+    // returns when write() can write at least one byte
+	Future<Void> onWritable() override {
+		++g_net2->countWriteProbes;
+		Promise<Void> p;
+		auto f = p.getFuture();
+		ureactor->poll(socket.native_handle(), POLLOUT, std::move(p));
+		return f;
+	}
+
+	// returns when read() can read at least one byte
+	Future<Void> onReadable() override {
+		++g_net2->countReadProbes;
+		Promise<Void> p;
+		auto f = p.getFuture();
+		ureactor->poll(socket.native_handle(), POLLIN, std::move(p));
 		return f;
 	}
 
