@@ -175,6 +175,8 @@ public:
 	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
 	Transaction& getTransaction() { return tr; }
 
+	template<typename Type> using FutureT = Future<Type>;
+
 private:
 	friend class RYWImpl;
 

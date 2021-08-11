@@ -88,6 +88,8 @@ public:
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+
+	template<typename Type> using FutureT = ThreadFuture<Type>;
 };
 
 // An interface that represents a connection to a cluster made by a client
@@ -115,6 +117,8 @@ public:
 	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
+
+	using TransactionT = ITransaction;
 };
 
 // An interface that presents the top-level FDB client API as exposed through the C bindings

@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -227,15 +227,16 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> enableAutoThrottling(TagThrottleApiWorkload* self, Database cx) {
+		state Reference<Database> db = Reference<Database>::addRef(&cx);
 		if (deterministicRandom()->coinflip()) {
-			wait(ThrottleApi::enableAuto(cx, true));
+			wait(ThrottleApi::enableAuto(db, true));
 			self->autoThrottleEnabled = true;
 			if (deterministicRandom()->coinflip()) {
 				bool unthrottled =
 				    wait(ThrottleApi::unthrottleAll(cx, TagThrottleType::AUTO, Optional<TransactionPriority>()));
 			}
 		} else {
-			wait(ThrottleApi::enableAuto(cx, false));
+			wait(ThrottleApi::enableAuto(db, false));
 			self->autoThrottleEnabled = false;
 		}
 

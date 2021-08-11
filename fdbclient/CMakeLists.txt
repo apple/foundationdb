@@ -104,7 +104,7 @@ set(FDBCLIENT_SRCS
   SystemData.cpp
   SystemData.h
   TagThrottle.actor.cpp
-  TagThrottle.h
+  TagThrottle.actor.h
   TaskBucket.actor.cpp
   TaskBucket.h
   TestKnobCollection.cpp

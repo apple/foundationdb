@@ -76,7 +76,9 @@ struct NetworkOptions {
 	NetworkOptions();
 };
 
-class Database {
+class ReadYourWritesTransaction; // workaround cyclic dependency
+
+class Database : public ThreadSafeReferenceCounted<Database> {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
@@ -108,6 +110,9 @@ public:
 	DatabaseContext* operator->() const { return db.getPtr(); }
 
 	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
+
+	using TransactionT = ReadYourWritesTransaction;
+	Reference<TransactionT> createTransaction();
 
 private:
 	Reference<DatabaseContext> db;
@@ -169,7 +174,6 @@ private:
 	void clear();
 };
 
-class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;

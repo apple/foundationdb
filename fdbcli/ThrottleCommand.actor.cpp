@@ -21,7 +21,7 @@
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/CommitTransaction.h"
@@ -258,26 +258,26 @@ ACTOR Future<bool> unthrottleTags(Reference<IDatabase> db,
 	}
 }
 
-ACTOR Future<Void> enableAuto(Reference<IDatabase> db, bool enabled) {
-	state Reference<ITransaction> tr = db->createTransaction();
+// ACTOR Future<Void> enableAuto(Reference<IDatabase> db, bool enabled) {
+// 	state Reference<ITransaction> tr = db->createTransaction();
 
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		try {
-			Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
-			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
-			    (!enabled && value.get() != LiteralStringRef("0"))) {
-				tr->set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
-				signalThrottleChange(tr);
+// 	loop {
+// 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+// 		try {
+// 			Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
+// 			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
+// 			    (!enabled && value.get() != LiteralStringRef("0"))) {
+// 				tr->set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
+// 				signalThrottleChange(tr);
 
-				wait(safeThreadFutureToFuture(tr->commit()));
-			}
-			return Void();
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
+// 				wait(safeThreadFutureToFuture(tr->commit()));
+// 			}
+// 			return Void();
+// 		} catch (Error& e) {
+// 			wait(safeThreadFutureToFuture(tr->onError(e)));
+// 		}
+// 	}
+// }
 
 ACTOR Future<bool> unthrottleMatchingThrottles(Reference<IDatabase> db,
                                                KeyRef beginKey,
@@ -626,7 +626,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			return false;
 		}
 		state bool autoTagThrottlingEnabled = tokencmp(tokens[1], "enable");
-		wait(enableAuto(db, autoTagThrottlingEnabled));
+		wait(ThrottleApi::enableAuto(db, autoTagThrottlingEnabled));
 		printf("Automatic tag throttling has been %s\n", autoTagThrottlingEnabled ? "enabled" : "disabled");
 	} else {
 		printUsage(tokens[0]);

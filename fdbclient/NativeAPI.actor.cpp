@@ -1773,6 +1773,10 @@ Database Database::createDatabase(std::string connFileName,
 	return Database::createDatabase(rccf, apiVersion, internal, clientLocality);
 }
 
+Reference<Database::TransactionT> Database::createTransaction() {
+	return makeReference<ReadYourWritesTransaction>(*this);
+}
+
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(KeyRef key) const {
 	const auto it = watchMap.find(key);
 	if (it == watchMap.end())

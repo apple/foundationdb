@@ -1,5 +1,5 @@
 /*
- * TagThrottle.h
+ * TagThrottle.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,15 +18,23 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_TAG_THROTTLE_H
-#define FDBCLIENT_TAG_THROTTLE_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TAG_THROTTLE_ACTOR_G_H)
+#define FDBCLIENT_TAG_THROTTLE_ACTOR_G_H
+#include "fdbclient/TagThrottle.actor.g.h"
+#elif !defined(FDBCLIENT_TAG_THROTTLE_ACTOR_H)
+#define FDBCLIENT_TAG_THROTTLE_ACTOR_H
 
 #pragma once
 
 #include "flow/Error.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "flow/ThreadHelper.actor.h"
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/CommitTransaction.h"
+// #include "fdbclient/SystemData.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 #include <set>
 
@@ -228,6 +236,15 @@ struct ClientTrCommitCostEstimation {
 	}
 };
 
+// Keys to view and control tag throttling
+extern const KeyRangeRef tagThrottleKeys;
+extern const KeyRef tagThrottleKeysPrefix;
+extern const KeyRef tagThrottleAutoKeysPrefix;
+extern const KeyRef tagThrottleSignalKey;
+extern const KeyRef tagThrottleAutoEnabledKey;
+extern const KeyRef tagThrottleLimitKey;
+extern const KeyRef tagThrottleCountKey;
+
 namespace ThrottleApi {
 Future<std::vector<TagThrottleInfo>> getThrottledTags(Database const& db,
                                                       int const& limit,
@@ -251,7 +268,34 @@ Future<bool> unthrottleTags(Database const& db,
 Future<bool> unthrottleAll(Database db, Optional<TagThrottleType> throttleType, Optional<TransactionPriority> priority);
 Future<bool> expire(Database db);
 
-Future<Void> enableAuto(Database const& db, bool const& enabled);
+template<typename Tr>
+void signalThrottleChange(Reference<Tr> tr) {
+	tr->atomicOp(
+	    tagThrottleSignalKey, LiteralStringRef("XXXXXXXXXX\x00\x00\x00\x00"), MutationRef::SetVersionstampedValue);
+}
+
+ACTOR template<typename DB>
+Future<Void> enableAuto(Reference<DB> db, bool enabled) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		try {
+			Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
+			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
+			    (!enabled && value.get() != LiteralStringRef("0"))) {
+				tr->set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
+				signalThrottleChange<typename DB::TransactionT>(tr);
+
+				wait(safeThreadFutureToFuture(tr->commit()));
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 }; // namespace ThrottleApi
 
 template <class Value>

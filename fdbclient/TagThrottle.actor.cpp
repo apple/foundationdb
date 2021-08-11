@@ -18,10 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 
+#include "flow/FastRef.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 void TagSet::addTag(TransactionTagRef tag) {
@@ -406,23 +408,24 @@ Future<bool> expire(Database db) {
 	    db, tagThrottleKeys.begin, tagThrottleKeys.end, Optional<TransactionPriority>(), true);
 }
 
-ACTOR Future<Void> enableAuto(Database db, bool enabled) {
-	state Transaction tr(db);
+// ACTOR template<typename DB>
+// Future<Void> enableAuto(Reference<DB> db, bool enabled) {
+// 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	loop {
-		try {
-			Optional<Value> value = wait(tr.get(tagThrottleAutoEnabledKey));
-			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
-			    (!enabled && value.get() != LiteralStringRef("0"))) {
-				tr.set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
-				signalThrottleChange(tr);
+// 	loop {
+// 		try {
+// 			Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
+// 			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
+// 			    (!enabled && value.get() != LiteralStringRef("0"))) {
+// 				tr->set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
+// 				signalThrottleChange(tr);
 
-				wait(tr.commit());
-			}
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
+// 				wait(safeThreadFutureToFuture(tr->commit()));
+// 			}
+// 			return Void();
+// 		} catch (Error& e) {
+// 			wait(safeThreadFutureToFuture(tr->onError(e)));
+// 		}
+// 	}
+// }
 } // namespace ThrottleApi
