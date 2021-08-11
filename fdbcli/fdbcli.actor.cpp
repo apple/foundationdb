@@ -36,6 +36,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tuple.h"
 
@@ -657,7 +658,8 @@ void initHelp() {
 	    CommandHelp("triggerddteaminfolog",
 	                "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
-	helpMap["rangefeed"] = CommandHelp("rangefeed <register|get|stream|pop> <RANGEID> <BEGIN> <END>", "", "");
+	helpMap["rangefeed"] =
+	    CommandHelp("rangefeed <register|destroy|get|stream|pop|list> <RANGEID> <BEGIN> <END>", "", "");
 	helpMap["tssq"] =
 	    CommandHelp("tssq start|stop <StorageUID>",
 	                "start/stop tss quarantine",
@@ -1969,6 +1971,31 @@ ACTOR Future<Void> commitTransaction(Reference<ReadYourWritesTransaction> tr) {
 	return Void();
 }
 
+ACTOR Future<Void> rangeFeedList(Database db) {
+	state ReadYourWritesTransaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			RangeResult result = wait(tr.getRange(rangeFeedKeys, CLIENT_KNOBS->TOO_MANY));
+			// shouldn't have many quarantined TSSes
+			ASSERT(!result.more);
+			printf("Found %d range feeds%s\n", result.size(), result.size() == 0 ? "." : ":");
+			for (auto& it : result) {
+				auto range = decodeRangeFeedValue(it.value);
+				printf("  %s: %s - %s\n",
+				       it.key.removePrefix(rangeFeedPrefix).toString().c_str(),
+				       range.begin.toString().c_str(),
+				       range.end.toString().c_str());
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<bool> configure(Database db,
                              std::vector<StringRef> tokens,
                              Reference<ClusterConnectionFile> ccf,
@@ -3240,6 +3267,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state Database db;
 	state Reference<ReadYourWritesTransaction> tr;
+	state Transaction trx;
 	// TODO: refactoring work, will replace db, tr when we have all commands through the general fdb interface
 	state Reference<IDatabase> db2;
 	state Reference<ITransaction> tr2;
@@ -3510,16 +3538,40 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 						continue;
 					}
-					if (tokencmp(tokens[1], "register")) {
+					if (tokencmp(tokens[1], "list")) {
+						if (tokens.size() != 2) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						wait(rangeFeedList(db));
+						continue;
+					} else if (tokencmp(tokens[1], "register")) {
 						if (tokens.size() != 5) {
 							printUsage(tokens[0]);
 							is_error = true;
 							continue;
 						}
-						state Transaction trx(db);
+						trx = Transaction(db);
 						loop {
 							try {
 								wait(trx.registerRangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
+								wait(trx.commit());
+								break;
+							} catch (Error& e) {
+								wait(trx.onError(e));
+							}
+						}
+					} else if (tokencmp(tokens[1], "destroy")) {
+						if (tokens.size() != 3) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						trx = Transaction(db);
+						loop {
+							try {
+								trx.destroyRangeFeed(tokens[2]);
 								wait(trx.commit());
 								break;
 							} catch (Error& e) {
@@ -3591,14 +3643,26 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						state Future<Void> feed = db->getRangeFeedStream(feedResults, tokens[2], begin, end);
 						printf("\n");
 						try {
+							state Future<Void> feedInterrupt = LineNoise::onKeyboardInterrupt();
 							loop {
-								Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults.getFuture());
-								for (auto& it : res) {
-									for (auto& it2 : it.mutations) {
-										printf("%lld %s\n", it.version, it2.toString().c_str());
+								choose {
+									when(Standalone<VectorRef<MutationsAndVersionRef>> res =
+									         waitNext(feedResults.getFuture())) {
+										for (auto& it : res) {
+											for (auto& it2 : it.mutations) {
+												printf("%lld %s\n", it.version, it2.toString().c_str());
+											}
+										}
+									}
+									when(wait(feedInterrupt)) {
+										feedInterrupt = Future<Void>();
+										feed.cancel();
+										feedResults = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+										break;
 									}
 								}
 							}
+							continue;
 						} catch (Error& e) {
 							if (e.code() == error_code_end_of_stream) {
 								continue;

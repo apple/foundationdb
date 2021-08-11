@@ -4330,6 +4330,10 @@ Future<Void> Transaction::registerRangeFeed(const Key& rangeID, const KeyRange& 
 	return registerRangeFeedActor(this, rangeID, range);
 }
 
+void Transaction::destroyRangeFeed(const Key& rangeID) {
+	clear(rangeID.withPrefix(rangeFeedPrefix));
+}
+
 ACTOR Future<Key> getKeyAndConflictRange(Database cx,
                                          KeySelector k,
                                          Future<Version> version,
