@@ -2510,7 +2510,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if (tss_info_by_pair.count(newServer.id())) {
 				tss_info_by_pair[newServer.id()]->onTSSPairRemoved = r->onRemoved;
 				if (tss_info_by_pair[newServer.id()]->wakeUpTracker.canBeSet()) {
-					tss_info_by_pair[newServer.id()]->wakeUpTracker.send(Void());
+					auto p = tss_info_by_pair[newServer.id()]->wakeUpTracker;
+					// This callback could delete tss_info_by_pair[newServer.id()], so use a copy
+					p.send(Void());
 				}
 			}
 
