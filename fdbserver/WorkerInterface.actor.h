@@ -39,6 +39,7 @@
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "flow/actorcompiler.h"
 
 struct WorkerInterface {
@@ -67,6 +68,7 @@ struct WorkerInterface {
 	RequestStream<struct WorkerSnapRequest> workerSnapReq;
 	RequestStream<struct UpdateServerDBInfoRequest> updateServerDBInfo;
 
+	ConfigBroadcastInterface configBroadcastInterface;
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
@@ -117,7 +119,8 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
-		           updateServerDBInfo);
+		           updateServerDBInfo,
+		           configBroadcastInterface);
 	}
 };
 
@@ -376,6 +379,8 @@ struct RegisterWorkerRequest {
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
+	Version lastSeenKnobVersion;
+	ConfigClassSet knobConfigClassSet;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -386,9 +391,12 @@ struct RegisterWorkerRequest {
 	                      Generation generation,
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
-	                      bool degraded)
+	                      bool degraded,
+	                      Version lastSeenKnobVersion,
+	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
-	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
+	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded),
+	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -403,7 +411,9 @@ struct RegisterWorkerRequest {
 		           issues,
 		           incompatiblePeers,
 		           reply,
-		           degraded);
+		           degraded,
+		           lastSeenKnobVersion,
+		           knobConfigClassSet);
 	}
 };
 
@@ -746,7 +756,7 @@ struct EventLogRequest {
 	ReplyPromise<TraceEventFields> reply;
 
 	EventLogRequest() : getLastError(true) {}
-	explicit EventLogRequest(Standalone<StringRef> eventName) : eventName(eventName), getLastError(false) {}
+	explicit EventLogRequest(Standalone<StringRef> eventName) : getLastError(false), eventName(eventName) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -762,8 +772,8 @@ struct DebugEntryRef {
 	MutationRef mutation;
 	DebugEntryRef() {}
 	DebugEntryRef(const char* c, Version v, MutationRef const& m)
-	  : context((const uint8_t*)c, strlen(c)), version(v), mutation(m), time(now()),
-	    address(g_network->getLocalAddress()) {}
+	  : time(now()), address(g_network->getLocalAddress()), context((const uint8_t*)c, strlen(c)), version(v),
+	    mutation(m) {}
 	DebugEntryRef(Arena& a, DebugEntryRef const& d)
 	  : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
 

@@ -93,7 +93,7 @@ struct CpuProfilerWorkload : TestWorkload {
 					if (!replies[i].get().present())
 						self->success = false;
 
-			TraceEvent("DoneSignalingProfiler");
+			TraceEvent("DoneSignalingProfiler").log();
 		}
 
 		return Void();
@@ -104,14 +104,14 @@ struct CpuProfilerWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, CpuProfilerWorkload* self) {
 		wait(delay(self->initialDelay));
 		if (self->clientId == 0)
-			TraceEvent("SignalProfilerOn");
+			TraceEvent("SignalProfilerOn").log();
 		wait(timeoutError(self->updateProfiler(true, cx, self), 60.0));
 
 		// If a duration was given, let the duration elapse and then shut the profiler off
 		if (self->duration > 0) {
 			wait(delay(self->duration));
 			if (self->clientId == 0)
-				TraceEvent("SignalProfilerOff");
+				TraceEvent("SignalProfilerOff").log();
 			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
 		}
 
@@ -124,7 +124,7 @@ struct CpuProfilerWorkload : TestWorkload {
 		// If no duration was given, then shut the profiler off now
 		if (self->duration <= 0) {
 			if (self->clientId == 0)
-				TraceEvent("SignalProfilerOff");
+				TraceEvent("SignalProfilerOff").log();
 			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
 		}
 

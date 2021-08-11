@@ -97,7 +97,7 @@ struct OldTLogCoreData {
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 
-	OldTLogCoreData() : epochBegin(0), epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
+	OldTLogCoreData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), epoch(0) {}
 	explicit OldTLogCoreData(const OldLogData&);
 
 	bool operator==(const OldTLogCoreData& rhs) const {

@@ -261,10 +261,6 @@ else()
 
   if (CLANG)
     add_compile_options()
-    # Clang has link errors unless `atomic` is specifically requested.
-    if(NOT APPLE)
-      #add_link_options(-latomic)
-    endif()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       if (NOT APPLE)
@@ -285,25 +281,20 @@ else()
       -Wpessimizing-move
       -Woverloaded-virtual
       -Wshift-sign-overflow
-      # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 10
+      # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
       -Wno-comment
-      -Wno-dangling-else
       -Wno-delete-non-virtual-dtor
       -Wno-format
       -Wno-mismatched-tags
       -Wno-missing-field-initializers
-      -Wno-reorder
-      -Wno-reorder-ctor
       -Wno-sign-compare
       -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
-      -Wno-tautological-pointer-compare
       -Wno-unknown-pragmas
       -Wno-unknown-warning-option
       -Wno-unused-function
       -Wno-unused-local-typedef
       -Wno-unused-parameter
-      -Wno-self-assign
       )
     if (USE_CCACHE)
       add_compile_options(

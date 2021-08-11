@@ -396,7 +396,7 @@ void loadClientFunction(T* fp, void* lib, std::string libPath, const char* funct
 }
 
 DLApi::DLApi(std::string fdbCPath, bool unlinkOnLoad)
-  : api(new FdbCApi()), fdbCPath(fdbCPath), unlinkOnLoad(unlinkOnLoad), networkSetup(false) {}
+  : fdbCPath(fdbCPath), api(new FdbCApi()), unlinkOnLoad(unlinkOnLoad), networkSetup(false) {}
 
 // Loads client API functions (definitions are in FdbCApi struct)
 void DLApi::init() {
@@ -1014,8 +1014,8 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)
-  : clusterFilePath(clusterFilePath), versionMonitorDb(versionMonitorDb),
-    dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))), closed(false) {}
+  : dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))),
+    clusterFilePath(clusterFilePath), versionMonitorDb(versionMonitorDb), closed(false) {}
 
 // Adds a client (local or externally loaded) that can be used to connect to the cluster
 void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client) {
@@ -1521,7 +1521,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 #else
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	if (threadCount > 1) {
-		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows");
+		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows").log();
 		throw unsupported_operation();
 	}
 	std::vector<std::pair<std::string, bool>> paths;
@@ -1912,8 +1912,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 }
 
 MultiVersionApi::MultiVersionApi()
-  : bypassMultiClientApi(false), networkStartSetup(false), networkSetup(false), callbackOnMainThread(true),
-    externalClient(false), localClientDisabled(false), apiVersion(0), envOptionsLoaded(false), threadCount(0) {}
+  : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
+    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 

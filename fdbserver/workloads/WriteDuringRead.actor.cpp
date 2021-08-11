@@ -518,7 +518,7 @@ ACTOR Future<Void> commitAndUpdateMemory(ReadYourWritesTransaction* tr,
 			}
 
 			if (failed) {
-				TraceEvent(SevError, "WriteConflictRangeError");
+				TraceEvent(SevError, "WriteConflictRangeError").log();
 				for (transactionIter = transactionRanges.begin(); transactionIter != transactionRanges.end();
 				     ++transactionIter) {
 					TraceEvent("WCRTransaction")

@@ -24,7 +24,7 @@
 
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbclient/IKnobCollection.h"
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
@@ -60,8 +60,10 @@ public:
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;
 	TestKnobs const& getTestKnobs() const;
-	Future<Void> consume(Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster);
+	Future<Void> consume(ConfigBroadcastInterface const& broadcastInterface);
 	UID getID() const;
+	Version lastSeenVersion() const;
+	ConfigClassSet configClassSet() const;
 
 public: // Testing
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,

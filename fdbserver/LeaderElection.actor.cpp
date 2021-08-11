@@ -156,7 +156,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			}
 
 			if (leader.present() && leader.get().second && leader.get().first.equalInternalId(myInfo)) {
-				TraceEvent("BecomingLeader", myInfo.changeID);
+				TraceEvent("BecomingLeader", myInfo.changeID).log();
 				ASSERT(leader.get().first.serializedInfo == proposedSerializedInterface);
 				outSerializedLeader->set(leader.get().first.serializedInfo);
 				iAmLeader = true;
@@ -184,7 +184,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 				when(wait(nominees->onChange())) {}
 				when(wait(badCandidateTimeout.isValid() ? badCandidateTimeout : Never())) {
 					TEST(true); // Bad candidate timeout
-					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID);
+					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
 					break;
 				}
 				when(wait(candidacies)) { ASSERT(false); }
@@ -225,7 +225,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 				//TraceEvent("StillLeader", myInfo.changeID);
 			} // We are still leader
 			when(wait(quorum(false_heartbeats, false_heartbeats.size() / 2 + 1))) {
-				TraceEvent("ReplacedAsLeader", myInfo.changeID);
+				TraceEvent("ReplacedAsLeader", myInfo.changeID).log();
 				break;
 			} // We are definitely not leader
 			when(wait(delay(SERVER_KNOBS->POLLING_FREQUENCY))) {
@@ -243,7 +243,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 						    .detail("Coordinator",
 						            coordinators.leaderElectionServers[i].candidacy.getEndpoint().getPrimaryAddress());
 				}
-				TraceEvent("ReleasingLeadership", myInfo.changeID);
+				TraceEvent("ReleasingLeadership", myInfo.changeID).log();
 				break;
 			} // Give up on being leader, because we apparently have poor communications
 			when(wait(asyncPriorityInfo->onChange())) {}

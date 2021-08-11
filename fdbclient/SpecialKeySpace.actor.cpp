@@ -248,8 +248,9 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks,
 }
 
 SpecialKeySpace::SpecialKeySpace(KeyRef spaceStartKey, KeyRef spaceEndKey, bool testOnly)
-  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), readImpls(nullptr, spaceEndKey), writeImpls(nullptr, spaceEndKey),
-    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
+  : readImpls(nullptr, spaceEndKey),
+    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey),
+    writeImpls(nullptr, spaceEndKey), range(KeyRangeRef(spaceStartKey, spaceEndKey)) {
 	// Default begin of KeyRangeMap is Key(), insert the range to update start key
 	readImpls.insert(range, nullptr);
 	writeImpls.insert(range, nullptr);
@@ -475,10 +476,10 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 	auto begin = writeImpls[range.begin];
 	auto end = writeImpls.rangeContainingKeyBefore(range.end)->value();
 	if (begin != end) {
-		TraceEvent(SevDebug, "SpecialKeySpaceCrossModuleClear").detail("Range", range.toString());
+		TraceEvent(SevDebug, "SpecialKeySpaceCrossModuleClear").detail("Range", range);
 		throw special_keys_cross_module_clear(); // ban cross module clear
 	} else if (begin == nullptr) {
-		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range.toString());
+		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range);
 		throw special_keys_no_write_module_found();
 	}
 	return begin->clear(ryw, range);

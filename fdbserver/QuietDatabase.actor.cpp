@@ -576,7 +576,7 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
 		if (primaryDead && remoteDead) {
-			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration");
+			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration").log();
 			return Void();
 		}
 		if (primaryDead || remoteDead) {
@@ -640,14 +640,16 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
+	printf("Set perpetual_storage_wiggle=0 ...\n");
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
-
+	printf("Set perpetual_storage_wiggle=0 Done.\n");
+	
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
 
 	loop {
 		try {
-			TraceEvent("QuietDatabaseWaitingOnDataDistributor");
+			TraceEvent("QuietDatabaseWaitingOnDataDistributor").log();
 			WorkerInterface distributorWorker = wait(getDataDistributorWorker(cx, dbInfo));
 			UID distributorUID = dbInfo->get().distributor.get().id();
 			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID)

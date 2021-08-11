@@ -241,8 +241,8 @@ struct BackupData {
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
-	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false),
-	    lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)) {
+	    pulledVersion(0), paused(false), lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)),
+	    cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
@@ -477,7 +477,7 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present
 					if (present || !watch)
 						return true;
 				} else {
-					TraceEvent("BackupWorkerEmptyStartKey", self->myId);
+					TraceEvent("BackupWorkerEmptyStartKey", self->myId).log();
 					self->onBackupChanges(uidVersions);
 
 					self->exitEarly = shouldExit;
@@ -744,7 +744,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 
 		DEBUG_MUTATION("addMutation", message.version.version, m)
 		    .detail("Version", message.version.toString())
-		    .detail("Mutation", m)
 		    .detail("KCV", self->minKnownCommittedVersion)
 		    .detail("SavedVersion", self->savedVersion);
 
@@ -887,7 +886,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Version tagAt = std::max(self->pulledVersion.get(), std::max(self->startVersion, self->savedVersion));
 	state Arena prev;
 
-	TraceEvent("BackupWorkerPull", self->myId);
+	TraceEvent("BackupWorkerPull", self->myId).log();
 	loop {
 		while (self->paused.get()) {
 			wait(self->paused.onChange());
@@ -1017,7 +1016,7 @@ ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
 			Optional<Value> value = wait(tr->get(backupPausedKey));
 			bool paused = value.present() && value.get() == LiteralStringRef("1");
 			if (self->paused.get() != paused) {
-				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId);
+				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId).log();
 				self->paused.set(paused);
 			}
 

@@ -764,9 +764,9 @@ public:
 		LatencyBands readLatencyBands;
 
 		Counters(StorageServer* self)
-		  : cc("StorageServer", self->thisServerID.toString()), getKeyQueries("GetKeyQueries", cc),
-		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
-		    getRangeStreamQueries("GetRangeStreamQueries", cc), allQueries("QueryQueue", cc),
+		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
+		    getKeyQueries("GetKeyQueries", cc), getValueQueries("GetValueQueries", cc),
+		    getRangeQueries("GetRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
 		    finishedQueries("FinishedQueries", cc), lowPriorityQueries("LowPriorityQueries", cc),
 		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc),
 		    emptyQueries("EmptyQueries", cc), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc),
@@ -808,18 +808,7 @@ public:
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi)
-	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
-	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
-	    primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
-	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
-	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false), shuttingDown(false),
-	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
-	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()), tssInQuarantine(false),
-	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
-	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
-	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
-	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	  : tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
 	                                                            Histogram::Unit::microseconds)),
 	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
@@ -842,7 +831,18 @@ public:
 	                                                          Histogram::Unit::microseconds)),
 	    ssDurableVersionUpdateLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                   SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM,
-	                                                                   Histogram::Unit::microseconds)) {
+	                                                                   Histogram::Unit::microseconds)),
+	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
+	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
+	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), primaryLocality(tagLocalityInvalid),
+	    versionLag(0), logProtocol(0), thisServerID(ssi.id()), tssInQuarantine(false), db(db), actors(false),
+	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), durableInProgress(Void()), watchBytes(0),
+	    numWatches(0), noRecentUpdates(false), lastUpdate(now()),
+	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), updateEagerReads(nullptr),
+	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
+	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
+	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
+	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -1189,7 +1189,7 @@ Future<Version> waitForVersion(StorageServer* data, Version version, SpanID span
 	}
 
 	if (deterministicRandom()->random01() < 0.001) {
-		TraceEvent("WaitForVersion1000x");
+		TraceEvent("WaitForVersion1000x").log();
 	}
 	return waitForVersionActor(data, version, spanContext);
 }
@@ -1267,14 +1267,16 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		DEBUG_MUTATION("ShardGetValue",
 		               version,
-		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")));
+		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")),
+					   data->thisServerID);
 		DEBUG_MUTATION("ShardGetPath",
 		               version,
 		               MutationRef(MutationRef::DebugKey,
 		                           req.key,
 		                           path == 0   ? LiteralStringRef("0")
 		                           : path == 1 ? LiteralStringRef("1")
-		                                       : LiteralStringRef("2")));
+		                                       : LiteralStringRef("2")),
+					   data->thisServerID);
 
 		/*
 		StorageMetrics m;
@@ -1382,7 +1384,8 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent
 			    latest,
 			    MutationRef(MutationRef::DebugKey,
 			                metadata->key,
-			                reply.value.present() ? StringRef(reply.value.get()) : LiteralStringRef("<null>")));
+			                reply.value.present() ? StringRef(reply.value.get()) : LiteralStringRef("<null>")),
+				data->thisServerID);
 
 			if (metadata->debugID.present())
 				g_traceBatch.addEvent(
@@ -1954,7 +1957,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			throw wrong_shard_server();
 		}
 
-		state int offset1;
+		state int offset1 = 0;
 		state int offset2;
 		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                               ? Future<Key>(req.begin.getKey())
@@ -2120,7 +2123,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			throw wrong_shard_server();
 		}
 
-		state int offset1;
+		state int offset1 = 0;
 		state int offset2;
 		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                               ? Future<Key>(req.begin.getKey())
@@ -2835,7 +2838,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	wait(data->coreStarted.getFuture() && delay(0));
 
 	try {
-		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys);
+		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys, data->thisServerID);
 
 		TraceEvent(SevDebug, interval.begin(), data->thisServerID)
 		    .detail("KeyBegin", shard->keys.begin)
@@ -2883,7 +2886,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// Get the history
 		state int debug_getRangeRetries = 0;
 		state int debug_nextRetryToLog = 1;
-		state bool isTooOld = false;
 
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
 		// we must refresh the cache manually.
@@ -2927,9 +2929,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
 					    .detail("Version", fetchVersion)
 					    .detail("More", this_block.more);
-					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys);
-					for (auto k = this_block.begin(); k != this_block.end(); ++k)
-						DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
+
+					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
+					if(MUTATION_TRACKING_ENABLED) {
+						for (auto k = this_block.begin(); k != this_block.end(); ++k) {
+							DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value), data->thisServerID);
+						}
+					}
 
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 
@@ -3092,8 +3098,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		for (auto b = batch->changes.begin() + startSize; b != batch->changes.end(); ++b) {
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
-			for (auto& m : b->mutations)
-				DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m);
+			if(MUTATION_TRACKING_ENABLED) {
+				for (auto& m : b->mutations) {
+					DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
+				}
+			}
 		}
 
 		shard->updates.clear();
@@ -3154,7 +3163,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 };
 
 AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
-  : server(server), keys(keys), transferredVersion(invalidVersion), phase(WaitPrevious) {
+  : keys(keys), server(server), transferredVersion(invalidVersion), phase(WaitPrevious) {
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -3195,9 +3204,7 @@ void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
 	else if (readWrite)
 		readWrite->addMutation(version, mutation, this->keys, readWrite->updateEagerReads);
 	else if (mutation.type != MutationRef::ClearRange) {
-		TraceEvent(SevError, "DeliveredToNotAssigned")
-		    .detail("Version", version)
-		    .detail("Mutation", mutation.toString());
+		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
 		ASSERT(false); // Mutation delivered to notAssigned shard!
 	}
 }
@@ -3221,7 +3228,7 @@ void changeServerKeys(StorageServer* data,
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
-	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys);
+	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys, data->thisServerID);
 
 	bool isDifferent = false;
 	auto existingShards = data->shards.intersectingRanges(keys);
@@ -3329,7 +3336,7 @@ void changeServerKeys(StorageServer* data,
 
 void rollback(StorageServer* data, Version rollbackVersion, Version nextVersion) {
 	TEST(true); // call to shard rollback
-	DEBUG_KEY_RANGE("Rollback", rollbackVersion, allKeys);
+	DEBUG_KEY_RANGE("Rollback", rollbackVersion, allKeys, data->thisServerID);
 
 	// We used to do a complicated dance to roll back in MVCC history.  It's much simpler, and more testable,
 	// to simply restart the storage server actor and restore from the persistent disk state, and then roll
@@ -3354,8 +3361,7 @@ void StorageServer::addMutation(Version version,
 		return;
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
-	DEBUG_MUTATION("applyMutation", version, expanded)
-	    .detail("UID", thisServerID)
+	DEBUG_MUTATION("applyMutation", version, expanded, thisServerID)
 	    .detail("ShardBegin", shard.begin)
 	    .detail("ShardEnd", shard.end);
 	applyMutation(this, expanded, mLog.arena(), mutableData());
@@ -3402,10 +3408,10 @@ static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "Pr
 class StorageUpdater {
 public:
 	StorageUpdater()
-	  : fromVersion(invalidVersion), currentVersion(invalidVersion), restoredVersion(invalidVersion),
+	  : currentVersion(invalidVersion), fromVersion(invalidVersion), restoredVersion(invalidVersion),
 	    processedStartKey(false), processedCacheStartKey(false) {}
 	StorageUpdater(Version fromVersion, Version restoredVersion)
-	  : fromVersion(fromVersion), currentVersion(fromVersion), restoredVersion(restoredVersion),
+	  : currentVersion(fromVersion), fromVersion(fromVersion), restoredVersion(restoredVersion),
 	    processedStartKey(false), processedCacheStartKey(false) {}
 
 	void applyMutation(StorageServer* data, MutationRef const& m, Version ver) {
@@ -3426,7 +3432,7 @@ public:
 		} else {
 			// FIXME: enable when DEBUG_MUTATION is active
 			// for(auto m = changes[c].mutations.begin(); m; ++m) {
-			//	DEBUG_MUTATION("SSUpdateMutation", changes[c].version, *m);
+			//	DEBUG_MUTATION("SSUpdateMutation", changes[c].version, *m, data->thisServerID);
 			//}
 
 			splitMutation(data, data->shards, m, ver);
@@ -3450,7 +3456,7 @@ private:
 	bool processedCacheStartKey;
 
 	void applyPrivateData(StorageServer* data, MutationRef const& m) {
-		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m.toString());
+		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m);
 
 		if (processedStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -3542,10 +3548,10 @@ private:
 				ASSERT(ssId == data->thisServerID);
 				if (m.type == MutationRef::SetValue) {
 					TEST(true); // Putting TSS in quarantine
-					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID);
+					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID).log();
 					data->startTssQuarantine();
 				} else {
-					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID);
+					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID).log();
 					// dipose of this TSS
 					throw worker_removed();
 				}
@@ -3556,7 +3562,7 @@ private:
 	}
 
 	void applyPrivateCacheData(StorageServer* data, MutationRef const& m) {
-		//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Mutation", m.toString());
+		//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Mutation", m);
 
 		if (processedCacheStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -3620,7 +3626,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		    !g_simulator.speedUpSimulation && data->tssFaultInjectTime.present() &&
 		    data->tssFaultInjectTime.get() < now()) {
 			if (deterministicRandom()->random01() < 0.01) {
-				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID);
+				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
 				// small random chance to just completely get stuck here, each tss should eventually hit this in this
 				// mode
 				wait(tssDelayForever());
@@ -3690,7 +3696,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				if (LogProtocolMessage::isNextIn(cloneReader)) {
 					LogProtocolMessage lpm;
 					cloneReader >> lpm;
-					//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm.toString());
+					//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm);
 					dbgLastMessageWasProtocol = true;
 					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
 				} else if (cloneReader.protocolVersion().hasSpanContext() &&
@@ -3700,7 +3706,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
-					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg.toString());
+					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 
 					if (firstMutation && msg.param1.startsWith(systemKeys.end))
 						hasPrivateData = true;
@@ -3825,7 +3831,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
 				    deterministicRandom()->random01() < 0.05) {
 					TraceEvent(SevWarnAlways, "TSSInjectDropMutation", data->thisServerID)
-					    .detail("Mutation", msg.toString())
+					    .detail("Mutation", msg)
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (data->isTSSInQuarantine() &&
 				           (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff)) {
@@ -3833,11 +3839,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .suppressFor(10.0)
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
-					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);
+					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
 					if (ver == 1) {
-						TraceEvent("SSPeekMutation", data->thisServerID);
+						//TraceEvent("SSPeekMutation", data->thisServerID).log();
 						// The following trace event may produce a value with special characters
-						//TraceEvent("SSPeekMutation", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cloneCursor2->version().toString());
+						TraceEvent("SSPeekMutation", data->thisServerID)
+						    .detail("Mutation", msg)
+						    .detail("Version", cloneCursor2->version().toString());
 					}
 
 					updater.applyMutation(data, msg, ver);
@@ -3868,7 +3876,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					}
 				} else
 					TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)
-					    .detail("Mutation", msg.toString())
+					    .detail("Mutation", msg)
 					    .detail("Version", cloneCursor2->version().toString());
 			}
 		}
@@ -4145,7 +4153,6 @@ void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
 }
 
 void StorageServerDisk::writeMutation(MutationRef mutation) {
-	// FIXME: DEBUG_MUTATION(debugContext, debugVersion, *m);
 	if (mutation.type == MutationRef::SetValue) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
 	} else if (mutation.type == MutationRef::ClearRange) {
@@ -4158,7 +4165,7 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
                                        Version debugVersion,
                                        const char* debugContext) {
 	for (const auto& m : mutations) {
-		DEBUG_MUTATION(debugContext, debugVersion, m).detail("UID", data->thisServerID);
+		DEBUG_MUTATION(debugContext, debugVersion, m, data->thisServerID);
 		if (m.type == MutationRef::SetValue) {
 			storage->set(KeyValueRef(m.param1, m.param2));
 		} else if (m.type == MutationRef::ClearRange) {
@@ -4333,15 +4340,15 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	data->byteSampleRecovery =
 	    restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
-	TraceEvent("ReadingDurableState", data->thisServerID);
+	TraceEvent("ReadingDurableState", data->thisServerID).log();
 	wait(waitForAll(std::vector{ fFormat, fID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable }));
 	wait(byteSampleSampleRecovered.getFuture());
-	TraceEvent("RestoringDurableState", data->thisServerID);
+	TraceEvent("RestoringDurableState", data->thisServerID).log();
 
 	if (!fFormat.get().present()) {
 		// The DB was never initialized
-		TraceEvent("DBNeverInitialized", data->thisServerID);
+		TraceEvent("DBNeverInitialized", data->thisServerID).log();
 		storage->dispose();
 		data->thisServerID = UID();
 		data->sk = Key();
@@ -4943,8 +4950,8 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 		TraceEvent(level, "FetchKeyCurrentStatus")
 		    .detail("Timestamp", now())
 		    .detail("LongestRunningTime", longestRunningFetchKeys.first)
-		    .detail("StartKey", longestRunningFetchKeys.second.begin.printable())
-		    .detail("EndKey", longestRunningFetchKeys.second.end.printable())
+		    .detail("StartKey", longestRunningFetchKeys.second.begin)
+		    .detail("EndKey", longestRunningFetchKeys.second.end)
 		    .detail("NumRunning", numRunningFetchKeys);
 	}
 }
@@ -5262,7 +5269,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 							}
 
 							if (self->history.size() && BUGGIFY) {
-								TraceEvent("SSHistoryReboot", self->thisServerID);
+								TraceEvent("SSHistoryReboot", self->thisServerID).log();
 								throw please_reboot();
 							}
 
@@ -5337,7 +5344,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 	try {
 		state double start = now();
-		TraceEvent("StorageServerRebootStart", self.thisServerID);
+		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
 		wait(self.storage.init());
 		choose {
@@ -5346,7 +5353,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			when(wait(self.storage.commit())) {}
 
 			when(wait(memoryStoreRecover(persistentData, connFile, self.thisServerID))) {
-				TraceEvent("DisposeStorageServer", self.thisServerID);
+				TraceEvent("DisposeStorageServer", self.thisServerID).log();
 				throw worker_removed();
 			}
 		}

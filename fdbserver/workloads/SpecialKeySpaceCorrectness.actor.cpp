@@ -721,7 +721,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(false);
 				} else {
 					// If no worker process returned, skip the test
-					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
+					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest").log();
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
@@ -783,6 +783,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    Value(worker.processClass.toString())); // Set it as the same class type as before, thus only
 					                                            // class source will be changed
 					wait(tx->commit());
+					tx->reset();
 					Optional<Value> class_source = wait(tx->get(
 					    Key("process/class_source/" + address)
 					        .withPrefix(
@@ -796,7 +797,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					tx->reset();
 				} else {
 					// If no worker process returned, skip the test
-					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
+					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest").log();
 				}
 			} catch (Error& e) {
 				wait(tx->onError(e));
@@ -832,7 +833,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
-		TraceEvent(SevDebug, "DatabaseLocked");
+		TraceEvent(SevDebug, "DatabaseLocked").log();
 		// if database locked, fdb read should get database_locked error
 		try {
 			tx->reset();
@@ -851,7 +852,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				// unlock the database
 				tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("lock"));
 				wait(tx->commit());
-				TraceEvent(SevDebug, "DatabaseUnlocked");
+				TraceEvent(SevDebug, "DatabaseUnlocked").log();
 				tx->reset();
 				// read should be successful
 				RangeResult res = wait(tx->getRange(normalKeys, 1));
