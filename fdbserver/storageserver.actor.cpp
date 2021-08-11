@@ -228,8 +228,8 @@ private:
 
 	ACTOR static Future<Void> onCommit(
         Future<Void> commit,
-        CommitNotification notification,
-        ThreadReturnPromiseStream<CommitNotification>* notifyCommit) {
+        IKeyValueStore::CommitNotification notification,
+        ThreadReturnPromiseStream<IKeyValueStore::CommitNotification>* notifyCommit) {
     	wait(commit);
     	notifyCommit->send(notification);
     	return Void();
@@ -3985,7 +3985,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
 	loop {
-		ASSERT(data->durableVersion.get() == data->storageVersion());
+		// ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
 			double endTime =
 			    g_simulator.checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
@@ -3995,9 +3995,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 		wait(data->desiredOldestVersion.whenAtLeast(data->storageVersion() + 1));
 		wait(delay(0, TaskPriority::UpdateStorage));
-
-		state Promise<Void> durableInProgress;
-		data->durableInProgress = durableInProgress.getFuture();
 
 		state Version startOldestVersion = data->storageVersion();
 		state Version newOldestVersion = data->storageVersion();
@@ -4027,7 +4024,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
-		state Future<Void> durable = data->storage.commit();
+		state Future<Void> durable = data->storage.commitAsync(newOldestVersion);
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0) {
@@ -4053,7 +4050,10 @@ ACTOR Future<Void> onDataPersisted(
 
 	loop {
 		IKeyValueStore::CommitNotification persistedData = waitNext(dataPersisted);
-		Version lastPersistedVersion = persistedData.version;
+		state Version lastPersistedVersion = persistedData.version;
+		Promise<Void> durableInProgress;
+		data->durableInProgress = durableInProgress.getFuture();
+
 		if (lastPersistedVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
 				.detail("NewOldestVersion", lastPersistedVersion)
@@ -4091,54 +4091,6 @@ ACTOR Future<Void> onDataPersisted(
 		data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
 	}
 }
-
-#ifndef __INTEL_COMPILER
-#pragma endregion
-#endif
-
-////////////////////////////////// StorageServerDisk ///////////////////////////////////////
-#ifndef __INTEL_COMPILER
-#pragma region StorageServerDisk
-#endif
-
-void StorageServerDisk::makeNewStorageServerDurable() {
-	storage->set(persistFormat);
-	storage->set(KeyValueRef(persistID, BinaryWriter::toValue(data->thisServerID, Unversioned())));
-	if (data->tssPairID.present()) {
-		storage->set(KeyValueRef(persistTssPairID, BinaryWriter::toValue(data->tssPairID.get(), Unversioned())));
-	}
-	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
-	storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), LiteralStringRef("0")));
-	storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), LiteralStringRef("0")));
-}
-
-void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
-	// ASSERT( self->debug_inApplyUpdate );
-	ASSERT(!keys.empty());
-
-	auto& mLV = self->addVersionToMutationLog(self->data().getLatestVersion());
-
-	KeyRange availableKeys = KeyRangeRef(persistShardAvailableKeys.begin.toString() + keys.begin.toString(),
-	                                     persistShardAvailableKeys.begin.toString() + keys.end.toString());
-	//TraceEvent("SetAvailableStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", availableKeys.begin).detail("RangeEnd", availableKeys.end);
-
-	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, availableKeys.begin, availableKeys.end));
-	self->addMutationToMutationLog(mLV,
-	                               MutationRef(MutationRef::SetValue,
-	                                           availableKeys.begin,
-	                                           available ? LiteralStringRef("1") : LiteralStringRef("0")));
-	if (keys.end != allKeys.end) {
-		bool endAvailable = self->shards.rangeContaining(keys.end)->value()->isInVersionedData();
-		self->addMutationToMutationLog(mLV,
-		                               MutationRef(MutationRef::SetValue,
-		                                           availableKeys.end,
-		                                           endAvailable ? LiteralStringRef("1") : LiteralStringRef("0")));
-	}
-}
-
-#ifndef __INTEL_COMPILER
-#pragma endregion
-#endif
 
 ////////////////////////////////// StorageServerDisk ///////////////////////////////////////
 #ifndef __INTEL_COMPILER
