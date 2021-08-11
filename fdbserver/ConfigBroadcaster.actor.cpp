@@ -82,6 +82,27 @@ class ConfigBroadcasterImpl {
 	Counter snapshotRequest;
 	Future<Void> logger;
 
+	Future<Void> pushSnapshot(ConfigBroadcasterImpl* self,
+	                          Version snapshotVersion,
+	                          BroadcastClientDetails const& client) {
+		if (client.lastSeenVersion >= snapshotVersion) {
+			return Void();
+		}
+
+		++snapshotRequest;
+		ConfigBroadcastSnapshotRequest request;
+		for (const auto& [key, value] : self->snapshot) {
+			if (matchesConfigClass(client.configClassSet, key.configClass)) {
+				request.snapshot[key] = value;
+			}
+		}
+		request.version = snapshotVersion;
+		TraceEvent(SevDebug, "ConfigBroadcasterSnapshotRequest", id)
+		    .detail("Size", request.snapshot.size())
+		    .detail("Version", request.version);
+		return success(client.broadcastInterface.snapshot.getReply(request));
+	}
+
 	template <class Changes>
 	Future<Void> pushChanges(BroadcastClientDetails& client, Changes const& changes) {
 		// Skip if client has already seen the latest version.
@@ -148,9 +169,26 @@ class ConfigBroadcasterImpl {
 	}
 
 	template <class Snapshot>
-	Future<Void> setSnapshot(Snapshot&& snapshot, Version snapshotVersion) {
-		this->snapshot = std::forward<Snapshot>(snapshot);
+	Future<Void> setSnapshot(Snapshot& snapshot, Version snapshotVersion) {
+		this->snapshot = snapshot;
 		this->lastCompactedVersion = snapshotVersion;
+		std::vector<Future<Void>> futures;
+		for (const auto& client : clients) {
+			futures.push_back(brokenPromiseToNever(pushSnapshot(this, snapshotVersion, client)));
+		}
+		return waitForAll(futures);
+	}
+
+	ACTOR template <class Snapshot>
+	static Future<Void> pushSnapshotAndChanges(ConfigBroadcasterImpl* self,
+	                                           Snapshot snapshot,
+	                                           Version snapshotVersion,
+	                                           Standalone<VectorRef<VersionedConfigMutationRef>> changes,
+	                                           Version changesVersion,
+	                                           Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
+		// Make sure all snapshot messages were received before sending changes.
+		wait(self->setSnapshot(snapshot, snapshotVersion));
+		self->addChanges(changes, changesVersion, annotations);
 		return Void();
 	}
 
@@ -172,25 +210,14 @@ public:
 			consumerFuture = consumer->consume(*self);
 		}
 
-		Future<Void> result = Void();
-		// Push all dynamic knobs to worker if it isn't up to date.
-		if (lastSeenVersion < mostRecentVersion) {
-			++snapshotRequest;
-			ConfigBroadcastSnapshotRequest request;
-			for (const auto& [key, value] : snapshot) {
-				if (matchesConfigClass(configClassSet, key.configClass)) {
-					request.snapshot[key] = value;
-				}
-			}
-			request.version = mostRecentVersion;
-			TraceEvent(SevDebug, "ConfigBroadcasterSnapshotRequest", id)
-			    .detail("Size", request.snapshot.size())
-			    .detail("Version", request.version);
-			result = success(broadcastInterface.snapshot.getReply(request));
-		}
+		auto client = BroadcastClientDetails{
+			watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface)
+		};
 
-		clients.push_back(BroadcastClientDetails{
-		    watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface) });
+		// Push all dynamic knobs to worker if it isn't up to date.
+		Future<Void> result = pushSnapshot(this, mostRecentVersion, client);
+
+		clients.push_back(std::move(client));
 		actors.add(waitForFailure(this, watcher, &clients.back()));
 		return result;
 	}
@@ -219,8 +246,7 @@ public:
 		    .detail("ChangesSize", changes.size())
 		    .detail("ChangesVersion", changesVersion)
 		    .detail("AnnotationsSize", annotations.size());
-		setSnapshot(std::forward<Snapshot>(snapshot), snapshotVersion);
-		addChanges(changes, changesVersion, annotations);
+		actors.add(pushSnapshotAndChanges(this, snapshot, snapshotVersion, changes, changesVersion, annotations));
 	}
 
 	ConfigBroadcasterImpl(ConfigFollowerInterface const& cfi) : ConfigBroadcasterImpl() {
