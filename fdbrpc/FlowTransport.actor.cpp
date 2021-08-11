@@ -1292,7 +1292,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 			}
 
 			//wait(conn->onReadable());
-			//wait(delay(0, TaskPriority::ReadSocket)); // We don't want to call conn->read directly from the reactor - we
+            wait(delay(0, TaskPriority::ReadSocket)); // We don't want to call conn->read directly from the reactor - we
 			                                          // could get stuck in the reactor reading 1 packet at a time
 		}
 	} catch (Error& e) {

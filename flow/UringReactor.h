@@ -20,6 +20,7 @@ public:
     void poll();
     void write(int fd, const SendBuffer* buffer, int limit, Promise<int> &&p);
     void read(int fd, uint8_t *buff, int limit, Promise<int> &&p);
+    int getFD();
     ~UringReactor();
 
     UringReactor(UringReactor &&) = delete;

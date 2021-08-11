@@ -71,7 +71,7 @@ void UringReactor::write(int fd, const SendBuffer* buffer, int limit, Promise<in
     ::io_uring_prep_writev(sqe, fd, iov, count, 0);
     ::io_uring_sqe_set_data(sqe, ow);
     int ret = ::io_uring_submit(&ring);
-    ASSERT(ret>=0);
+    ASSERT(ret>0);
 }
 
 void UringReactor::read(int fd, uint8_t *buff, int limit, Promise<int> &&p){
@@ -83,7 +83,11 @@ void UringReactor::read(int fd, uint8_t *buff, int limit, Promise<int> &&p){
     ::io_uring_prep_readv(sqe, fd, iov, 1, 0);
     ::io_uring_sqe_set_data(sqe, ow);
     int ret = ::io_uring_submit(&ring);
-    ASSERT(ret>=0);
+    ASSERT(ret>0);
+}
+
+int UringReactor::getFD(){
+    return ring.ring_fd;
 }
 UringReactor::~UringReactor(){
     ::io_uring_queue_exit(&ring);

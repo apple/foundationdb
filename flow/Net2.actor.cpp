@@ -212,6 +212,8 @@ public:
 
 	ASIOReactor reactor;
     UringReactor ureactor;
+    boost::asio::posix::stream_descriptor ureactorSD;
+    static void nullReadHandler(const boost::system::error_code&, size_t) {};
 #ifndef TLS_DISABLED
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
@@ -1310,7 +1312,7 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 // 5MB for loading files into memory
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
-  : useThreadPool(useThreadPool), network(this), reactor(this), ureactor(256, 0), stopped(false), tasksIssued(0),
+  : useThreadPool(useThreadPool), network(this), reactor(this), ureactor(256, 0), ureactorSD(reactor.ios), stopped(false), tasksIssued(0),
     ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE),
     // Until run() is called, yield() will always yield
     tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield), numYields(0),
@@ -1332,6 +1334,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	setGlobal(INetwork::enNetworkConnections, (flowGlobalType)network);
 	setGlobal(INetwork::enASIOService, (flowGlobalType)&reactor.ios);
 	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);
+    ureactorSD.assign(ureactor.getFD());
 
 #ifdef __linux__
 	setGlobal(INetwork::enEventFD, (flowGlobalType)N2::ASIOReactor::newEventFD(reactor));
@@ -1574,7 +1577,7 @@ void Net2::run() {
 				++countCantSleep;
 		} else
 			++countWontSleep;
-		if (b&&0) {
+		if (b) {
 			sleepTime = 1e99;
 			double sleepStart = timer_monotonic();
 			if (!timers.empty()) {
@@ -1589,6 +1592,7 @@ void Net2::run() {
 				trackAtPriority(TaskPriority::Zero, sleepStart);
 				awakeMetric = false;
 				priorityMetric = 0;
+                ureactorSD.async_read_some(boost::asio::null_buffers(), &nullReadHandler);
 				reactor.sleep(sleepTime);
 				awakeMetric = true;
 			}
