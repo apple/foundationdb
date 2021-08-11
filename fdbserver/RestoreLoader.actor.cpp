@@ -910,7 +910,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 
 				DEBUG_MUTATION("RestoreLoaderSendMutation", commitVersion.version, kvm)
 				    .detail("Applier", applierID)
-				    .detail("Version", commitVersion.toString());
+				    .detail("SubVersion", commitVersion.toString());
 				// kvm data is saved in pkvOps in batchData, so shallow copy is ok here.
 				applierVersionedMutationsBuffer[applierID].push_back(applierVersionedMutationsBuffer[applierID].arena(),
 				                                                     VersionedMutation(kvm, commitVersion));
