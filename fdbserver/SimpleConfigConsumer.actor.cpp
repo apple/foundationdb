@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/SimpleConfigConsumer.h"
+#include "flow/actorcompiler.h" // must be last include
 
 class SimpleConfigConsumerImpl {
 	ConfigFollowerInterface cfi;

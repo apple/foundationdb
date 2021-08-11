@@ -3148,7 +3148,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				dbInfo.distributor = db->serverInfo->get().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 				dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
-				dbInfo.configBroadcaster = db->serverInfo->get().configBroadcaster;
 
 				TraceEvent("CCWDB", cluster->id)
 				    .detail("Lifetime", dbInfo.masterLifetime.toString())
@@ -3734,7 +3733,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	checkOutstandingRequests(self);
 }
 
-void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
+void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
@@ -3823,6 +3822,13 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
+		if (configBroadcaster != nullptr) {
+			self->addActor.send(configBroadcaster->registerWorker(
+			    req.lastSeenKnobVersion,
+			    req.knobConfigClassSet,
+			    self->id_worker[w.locality.processId()].watcher,
+			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
+		}
 		checkOutstandingRequests(self);
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
@@ -3840,6 +3846,13 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
+		}
+		if (configBroadcaster != nullptr) {
+			self->addActor.send(
+			    configBroadcaster->registerWorker(req.lastSeenKnobVersion,
+			                                      req.knobConfigClassSet,
+			                                      info->second.watcher,
+			                                      info->second.details.interf.configBroadcastInterface));
 		}
 		checkOutstandingRequests(self);
 	} else {
@@ -4782,9 +4795,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
-	if (useConfigDB != UseConfigDB::DISABLED) {
-		self.addActor.send(configBroadcaster.serve(self.db.serverInfo->get().configBroadcaster));
-	}
 	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
@@ -4842,7 +4852,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			registerWorker(req, &self);
+			registerWorker(req, &self, (useConfigDB == UseConfigDB::DISABLED) ? nullptr : &configBroadcaster);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
