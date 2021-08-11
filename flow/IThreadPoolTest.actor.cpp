@@ -11,10 +11,9 @@
 
 void forceLinkIThreadPoolTests() {}
 
-static ThreadReturnPromiseStream<std::string> notifications;
 
 struct ThreadNameReceiver final : IThreadPoolReceiver {
-	ThreadNameReceiver(const bool stream_signal = false) : stream_signal(stream_signal) {}
+	ThreadNameReceiver(){};
 
 	void init() override {}
 
@@ -32,20 +31,13 @@ struct ThreadNameReceiver final : IThreadPoolReceiver {
 		if (err != 0) {
 			std::cout << "Get name failed with error code: " << err << std::endl;
 			a.name.sendError(platform_error());
-			if (stream_signal) {
-				notifications.sendError(platform_error());
-			}
 			return;
 		}
 		std::string s = name;
-		if (stream_signal) {
-			notifications.send(s);
-		}
 		a.name.send(std::move(s));
 	}
-
-	bool stream_signal; 
 };
+
 
 TEST_CASE("/flow/IThreadPool/NamedThread") {
 	noUnseed = true;
@@ -72,11 +64,41 @@ TEST_CASE("/flow/IThreadPool/NamedThread") {
 	return Void();
 }
 
+struct ThreadSafePromiseStreamSender final : IThreadPoolReceiver {
+	ThreadSafePromiseStreamSender(
+		ThreadReturnPromiseStream<std::string>* notifications)
+		 : notifications(notifications) {}
+	void init() override {}
+
+	struct GetNameAction final : TypedAction<ThreadSafePromiseStreamSender, GetNameAction> {
+		double getTimeEstimate() const override { return 3.; }
+	};
+
+	void action(GetNameAction& a) {
+		pthread_t t = pthread_self();
+		const size_t arrayLen = 16;
+		char name[arrayLen];
+		int err = pthread_getname_np(t, name, arrayLen);
+		if (err != 0) {
+			std::cout << "Get name failed with error code: " << err << std::endl;
+			notifications->sendError(platform_error());
+			return;
+		}
+		notifications->send(std::move(name));
+	}
+
+private:
+	ThreadReturnPromiseStream<std::string>* notifications;
+};
+
 TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	noUnseed = true;
 
+	state std::unique_ptr<ThreadReturnPromiseStream<std::string>> 
+		notifications(new ThreadReturnPromiseStream<std::string>());
+
 	state Reference<IThreadPool> pool = createGenericThreadPool();
-	pool->addThread(new ThreadNameReceiver(/*stream_signal=*/true), "thread-foo");
+	pool->addThread(new ThreadSafePromiseStreamSender(notifications.get()), "thread-foo");
 
 	// Warning: this action is a little racy with the call to `pthread_setname_np`. In practice,
 	// ~nothing should depend on the thread name being set instantaneously. If this test ever
@@ -84,11 +106,11 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	// the actions.
 	state int num = 3;
 	for (int i = 0; i < num; ++i) {
-		auto* a = new ThreadNameReceiver::GetNameAction();
+		auto* a = new ThreadSafePromiseStreamSender::GetNameAction();
 		pool->post(a);
 	}
 
-	state FutureStream<std::string> futs = notifications.getFuture();
+	state FutureStream<std::string> futs = notifications->getFuture();
 
 	state int n = 0;
 	while (n < num) {
