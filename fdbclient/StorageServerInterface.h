@@ -77,10 +77,11 @@ struct StorageServerInterface {
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
+	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
 	RequestStream<struct RangeFeedRequest> rangeFeed;
+	RequestStream<struct RangeFeedStreamRequest> rangeFeedStream;
 	RequestStream<struct OverlappingRangeFeedsRequest> overlappingRangeFeeds;
 	RequestStream<struct RangeFeedPopRequest> rangeFeedPop;
-	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -124,10 +125,12 @@ struct StorageServerInterface {
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
 				rangeFeed = RequestStream<struct RangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				rangeFeedStream =
+				    RequestStream<struct RangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				overlappingRangeFeeds =
-				    RequestStream<struct OverlappingRangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				    RequestStream<struct OverlappingRangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
 				rangeFeedPop =
-				    RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				    RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -171,6 +174,7 @@ struct StorageServerInterface {
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		streams.push_back(rangeFeed.getReceiver());
+		streams.push_back(rangeFeedStream.getReceiver());
 		streams.push_back(overlappingRangeFeeds.getReceiver());
 		streams.push_back(rangeFeedPop.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
@@ -673,6 +677,38 @@ struct RangeFeedRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, rangeID, begin, end, reply);
+	}
+};
+
+struct RangeFeedStreamReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 1783066;
+	Arena arena;
+	VectorRef<MutationsAndVersionRef> mutations;
+
+	RangeFeedStreamReply() {}
+	RangeFeedStreamReply(RangeFeedReply r) : arena(r.arena), mutations(r.mutations) {}
+
+	int expectedSize() const { return sizeof(RangeFeedStreamReply) + mutations.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, mutations, arena);
+	}
+};
+
+struct RangeFeedStreamRequest {
+	constexpr static FileIdentifier file_identifier = 6795746;
+	SpanID spanContext;
+	Arena arena;
+	Key rangeID;
+	Version begin = 0;
+	Version end = 0;
+	ReplyPromiseStream<RangeFeedStreamReply> reply;
+
+	RangeFeedStreamRequest() {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeID, begin, end, reply, spanContext, arena);
 	}
 };
 

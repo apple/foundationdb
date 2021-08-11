@@ -317,6 +317,7 @@ struct RangeFeedInfo : ReferenceCounted<RangeFeedInfo> {
 	Version emptyVersion = 0;
 	KeyRange range;
 	Key id;
+	AsyncTrigger newMutations;
 };
 
 class ServerWatchMetadata : public ReferenceCounted<ServerWatchMetadata> {
@@ -1555,13 +1556,21 @@ ACTOR Future<Void> overlappingRangeFeedsQ(StorageServer* data, OverlappingRangeF
 
 ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFeedRequest req) {
 	state RangeFeedReply reply;
-	wait(delay(0));
+	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+	if (data->version.get() < req.begin) {
+		wait(data->version.whenAtLeast(req.begin));
+	}
 	auto& feedInfo = data->uidRangeFeed[req.rangeID];
 	if (req.end <= feedInfo->emptyVersion + 1) {
 	} else if (feedInfo->durableVersion == invalidVersion || req.begin > feedInfo->durableVersion) {
 		for (auto& it : data->uidRangeFeed[req.rangeID]->mutations) {
+			if (it.version >= req.end || remainingLimitBytes <= 0) {
+				break;
+			}
 			if (it.version >= req.begin) {
 				reply.mutations.push_back(reply.arena, it);
+				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + it.expectedSize();
 			}
 		}
 	} else {
@@ -1569,7 +1578,10 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 		    data->uidRangeFeed[req.rangeID]->mutations;
 		state Version startingDurableVersion = feedInfo->durableVersion;
 		RangeResult res = wait(data->storage.readRange(
-		    KeyRangeRef(rangeFeedDurableKey(req.rangeID, req.begin), rangeFeedDurableKey(req.rangeID, req.end))));
+		    KeyRangeRef(rangeFeedDurableKey(req.rangeID, req.begin), rangeFeedDurableKey(req.rangeID, req.end)),
+		    1 << 30,
+		    remainingLimitBytes));
+
 		Version lastVersion = req.begin - 1;
 		for (auto& kv : res) {
 			Key id;
@@ -1577,14 +1589,19 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 			std::tie(id, version) = decodeRangeFeedDurableKey(kv.key);
 			auto mutations = decodeRangeFeedDurableValue(kv.value);
 			reply.mutations.push_back_deep(reply.arena, MutationsAndVersionRef(mutations, version));
+			remainingLimitBytes -=
+			    sizeof(KeyValueRef) +
+			    kv.expectedSize(); // FIXME: this is currently tracking the size on disk rather than the reply size
+			                       // because we cannot add mutaitons from memory if there are potentially more on disk
 			lastVersion = version;
 		}
 		for (auto& it : mutationsDeque) {
-			if (it.version >= req.end) {
+			if (it.version >= req.end || remainingLimitBytes <= 0) {
 				break;
 			}
 			if (it.version > lastVersion) {
 				reply.mutations.push_back(reply.arena, it);
+				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + it.expectedSize();
 			}
 		}
 		if (reply.mutations.empty()) {
@@ -1612,12 +1629,57 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 			}
 		}
 	}
+	Version finalVersion = std::min(req.end - 1, data->version.get());
+	if ((reply.mutations.empty() || reply.mutations.back().version) < finalVersion && remainingLimitBytes > 0) {
+		reply.mutations.push_back(reply.arena, MutationsAndVersionRef(finalVersion));
+	}
 	return reply;
 }
 
 ACTOR Future<Void> rangeFeedQ(StorageServer* data, RangeFeedRequest req) {
 	RangeFeedReply rep = wait(getRangeFeedMutations(data, req));
 	req.reply.send(rep);
+	return Void();
+}
+
+ACTOR Future<Void> rangeFeedStreamQ(StorageServer* data, RangeFeedStreamRequest req)
+// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
+// selector offset prevents all data from being read in one range read
+{
+	state Span span("SS:getRangeFeedStream"_loc, { req.spanContext });
+	state Version begin = req.begin;
+	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
+
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+
+	try {
+		loop {
+			wait(req.reply.onReady());
+			state RangeFeedRequest feedRequest;
+			feedRequest.rangeID = req.rangeID;
+			feedRequest.begin = begin;
+			feedRequest.end = req.end;
+			RangeFeedReply feedReply = wait(getRangeFeedMutations(data, feedRequest));
+			begin = feedReply.mutations.back().version + 1;
+			req.reply.send(RangeFeedStreamReply(feedReply));
+			if (feedReply.mutations.back().version == req.end - 1) {
+				req.reply.sendError(end_of_stream());
+				return Void();
+			}
+			if (feedReply.mutations.back().mutations.empty()) {
+				choose {
+					when(wait(delay(5.0, TaskPriority::DefaultEndpoint))) {}
+					when(wait(data->uidRangeFeed[req.rangeID]->newMutations.onTrigger())) {}
+				}
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_operation_obsolete) {
+			if (!canReplyWith(e))
+				throw;
+			req.reply.sendError(e);
+		}
+	}
 	return Void();
 }
 
@@ -4219,12 +4281,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
 			}
 
-			if (data->currentRangeFeeds.size()) {
-				data->rangeFeedVersions.push_back(std::make_pair(
-				    std::vector<Key>(data->currentRangeFeeds.begin(), data->currentRangeFeeds.end()), ver));
-				data->currentRangeFeeds.clear();
-			}
-
 			data->noRecentUpdates.set(false);
 			data->lastUpdate = now();
 			data->version.set(ver); // Triggers replies to waiting gets for new version(s)
@@ -4260,6 +4316,15 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->recoveryVersionSkips.pop_front();
 			}
 			data->desiredOldestVersion.set(proposedOldestVersion);
+
+			if (data->currentRangeFeeds.size()) {
+				data->rangeFeedVersions.push_back(std::make_pair(
+				    std::vector<Key>(data->currentRangeFeeds.begin(), data->currentRangeFeeds.end()), ver));
+				for (auto& it : data->currentRangeFeeds) {
+					data->uidRangeFeed[it]->newMutations.trigger();
+				}
+				data->currentRangeFeeds.clear();
+			}
 		}
 
 		validate(data);
@@ -4382,7 +4447,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		curFeed = 0;
 		while (curFeed < updatedRangeFeeds.size()) {
 			auto info = data->uidRangeFeed[updatedRangeFeeds[curFeed]];
-			while (info->mutations.front().version < newOldestVersion) {
+			while (!info->mutations.empty() && info->mutations.front().version < newOldestVersion) {
 				info->mutations.pop_front();
 			}
 			info->durableVersion = info->storageVersion;
@@ -5298,6 +5363,14 @@ ACTOR Future<Void> serveRangeFeedRequests(StorageServer* self, FutureStream<Rang
 	}
 }
 
+ACTOR Future<Void> serveRangeFeedStreamRequests(StorageServer* self,
+                                                FutureStream<RangeFeedStreamRequest> rangeFeedStream) {
+	loop {
+		RangeFeedStreamRequest req = waitNext(rangeFeedStream);
+		self->actors.add(rangeFeedStreamQ(self, req));
+	}
+}
+
 ACTOR Future<Void> serveOverlappingRangeFeedsRequests(
     StorageServer* self,
     FutureStream<OverlappingRangeFeedsRequest> overlappingRangeFeeds) {
@@ -5364,6 +5437,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
 	self->actors.add(serveRangeFeedRequests(self, ssi.rangeFeed.getFuture()));
+	self->actors.add(serveRangeFeedStreamRequests(self, ssi.rangeFeedStream.getFuture()));
 	self->actors.add(serveOverlappingRangeFeedsRequests(self, ssi.overlappingRangeFeeds.getFuture()));
 	self->actors.add(serveRangeFeedPopRequests(self, ssi.rangeFeedPop.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));

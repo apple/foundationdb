@@ -657,7 +657,7 @@ void initHelp() {
 	    CommandHelp("triggerddteaminfolog",
 	                "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
-	helpMap["rangefeed"] = CommandHelp("rangefeed <register|get|pop> <RANGEID> <BEGINKEY> <ENDKEY>", "", "");
+	helpMap["rangefeed"] = CommandHelp("rangefeed <register|get|stream|pop> <RANGEID> <BEGIN> <END>", "", "");
 	helpMap["tssq"] =
 	    CommandHelp("tssq start|stop <StorageUID>",
 	                "start/stop tss quarantine",
@@ -3553,10 +3553,57 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						Standalone<VectorRef<MutationsAndVersionRef>> res =
 						    wait(db->getRangeFeedMutations(tokens[2], begin, end));
+						printf("\n");
 						for (auto& it : res) {
 							for (auto& it2 : it.mutations) {
 								printf("%lld %s\n", it.version, it2.toString().c_str());
 							}
+						}
+					} else if (tokencmp(tokens[1], "stream")) {
+						if (tokens.size() < 3 || tokens.size() > 5) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						Version begin = 0;
+						Version end = std::numeric_limits<Version>::max();
+						if (tokens.size() > 3) {
+							int n = 0;
+							if (sscanf(tokens[3].toString().c_str(), "%ld%n", &begin, &n) != 1 ||
+							    n != tokens[3].size()) {
+								printUsage(tokens[0]);
+								is_error = true;
+								continue;
+							}
+						}
+						if (tokens.size() > 4) {
+							int n = 0;
+							if (sscanf(tokens[4].toString().c_str(), "%ld%n", &end, &n) != 1 || n != tokens[4].size()) {
+								printUsage(tokens[0]);
+								is_error = true;
+								continue;
+							}
+						}
+						if (warn.isValid()) {
+							warn.cancel();
+						}
+						state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> feedResults;
+						state Future<Void> feed = db->getRangeFeedStream(feedResults, tokens[2], begin, end);
+						printf("\n");
+						try {
+							loop {
+								Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults.getFuture());
+								for (auto& it : res) {
+									for (auto& it2 : it.mutations) {
+										printf("%lld %s\n", it.version, it2.toString().c_str());
+									}
+								}
+							}
+						} catch (Error& e) {
+							if (e.code() == error_code_end_of_stream) {
+								continue;
+							}
+							throw;
 						}
 					} else if (tokencmp(tokens[1], "pop")) {
 						if (tokens.size() != 4) {
