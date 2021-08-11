@@ -539,8 +539,6 @@ Future<Void> testIgnore(UnitTestParameters params) {
 	return Void();
 }
 
-// TODO: ./bin/fdbserver -r simulation -f ../foundationdb/tests/SpecificUnitTest.txt --seed 2118116838
-// Rare timing bug where compaction runs before the consumer learns of the update
 ACTOR template <class Env>
 Future<Void> testCompact(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
@@ -726,10 +724,10 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigAndCha
 	return Void();
 }
 
-// TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/CompactNode") {
-// 	wait(testCompact<TransactionToLocalConfigEnvironment>(params));
-// 	return Void();
-// }
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/CompactNode") {
+	wait(testCompact<TransactionToLocalConfigEnvironment>(params));
+	return Void();
+}
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigurationAfterCompaction") {
 	wait(testNewLocalConfigAfterCompaction<TransactionToLocalConfigEnvironment>(params));
