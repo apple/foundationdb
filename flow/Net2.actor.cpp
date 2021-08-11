@@ -492,6 +492,7 @@ public:
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might
 	// be 0)
 	int read(uint8_t* begin, uint8_t* end) override {
+        ASSERT(0);
 		boost::system::error_code err;
 		++g_net2->countReads;
 		size_t toRead = end - begin;
@@ -514,6 +515,7 @@ public:
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of
 	// bytes written (might be 0)
 	int write(SendBuffer const* data, int limit) override {
+        ASSERT(0);
 		boost::system::error_code err;
 		++g_net2->countWrites;
 
