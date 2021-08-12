@@ -1973,6 +1973,8 @@ public:
 	virtual Output const& get() const = 0;
 	virtual Future<Void> onChange() const = 0;
 	template <class Input, class F>
+	static Reference<IAsyncListener> create(Reference<AsyncVar<Input> const> const& input, F const& f);
+	template <class Input, class F>
 	static Reference<IAsyncListener> create(Reference<AsyncVar<Input>> const& input, F const& f);
 	static Reference<IAsyncListener> create(Reference<AsyncVar<Output>> const& output);
 };
@@ -2002,8 +2004,15 @@ public:
 
 template <class Output>
 template <class Input, class F>
-Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Input>> const& input, F const& f) {
+Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Input> const> const& input,
+                                                                 F const& f) {
 	return makeReference<IAsyncListenerImpl::AsyncListener<Input, Output, F>>(input, f);
+}
+
+template <class Output>
+template <class Input, class F>
+Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Input>> const& input, F const& f) {
+	return create(Reference<AsyncVar<Input> const>(input), f);
 }
 
 template <class Output>

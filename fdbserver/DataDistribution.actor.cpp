@@ -5218,7 +5218,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 }
 
 ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
-                                    Reference<AsyncVar<ServerDBInfo> const> db,
+                                    Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
                                     const DDEnabledState* ddEnabledState) {
 	state Future<RecruitStorageReply> fCandidateWorker;
 	state RecruitStorageRequest lastRequest;
@@ -5320,8 +5320,8 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 			    rsr.excludeAddresses != lastRequest.excludeAddresses ||
 			    rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
 				lastRequest = rsr;
-				fCandidateWorker = brokenPromiseToNever(
-				    db->get().clusterInterface.recruitStorage.getReply(rsr, TaskPriority::DataDistribution));
+				fCandidateWorker =
+				    brokenPromiseToNever(recruitStorage->get().getReply(rsr, TaskPriority::DataDistribution));
 			}
 
 			choose {
@@ -5369,9 +5369,7 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 						}
 					}
 				}
-				when(wait(db->onChange())) { // SOMEDAY: only if clusterInterface changes?
-					fCandidateWorker = Future<RecruitStorageReply>();
-				}
+				when(wait(recruitStorage->onChange())) { fCandidateWorker = Future<RecruitStorageReply>(); }
 				when(wait(self->zeroHealthyTeams->onChange())) {
 					if (!pendingTSSCheck && self->zeroHealthyTeams->get() &&
 					    (self->isTssRecruiting || self->tss_info_by_pair.size() > 0)) {
@@ -5513,11 +5511,12 @@ ACTOR Future<Void> monitorHealthyTeams(DDTeamCollection* self) {
 }
 
 // Keep track of servers and teams -- serves requests for getRandomTeam
-ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> teamCollection,
-                                                  Reference<InitialDataDistribution> initData,
-                                                  TeamCollectionInterface tci,
-                                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                                  DDEnabledState const* ddEnabledState) {
+ACTOR Future<Void> dataDistributionTeamCollection(
+    Reference<DDTeamCollection> teamCollection,
+    Reference<InitialDataDistribution> initData,
+    TeamCollectionInterface tci,
+    Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
+    DDEnabledState const* ddEnabledState) {
 	state DDTeamCollection* self = teamCollection.getPtr();
 	state Future<Void> loggingTrigger = Void();
 	state PromiseStream<Void> serverRemoved;
@@ -5556,7 +5555,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> te
 
 		// The following actors (e.g. storageRecruiter) do not need to be assigned to a variable because
 		// they are always running.
-		self->addActor.send(storageRecruiter(self, db, ddEnabledState));
+		self->addActor.send(storageRecruiter(self, recruitStorage, ddEnabledState));
 		self->addActor.send(monitorStorageServerRecruitment(self));
 		self->addActor.send(waitServerListChange(self, serverRemoved.getFuture(), ddEnabledState));
 		self->addActor.send(trackExcludedServers(self));
@@ -6040,6 +6039,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    removeFailedServer,
 			    getUnhealthyRelocationCount);
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
+			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
+			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (configuration.usableRegions > 1) {
 				remoteTeamCollection =
 				    makeReference<DDTeamCollection>(cx,
@@ -6061,7 +6062,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(
 				    reportErrorsExcept(dataDistributionTeamCollection(
-				                           remoteTeamCollection, initData, tcis[1], self->dbInfo, ddEnabledState),
+				                           remoteTeamCollection, initData, tcis[1], recruitStorage, ddEnabledState),
 				                       "DDTeamCollectionSecondary",
 				                       self->ddId,
 				                       &normalDDQueueErrors()));
@@ -6069,11 +6070,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			}
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
 			self->teamCollection = primaryTeamCollection.getPtr();
-			actors.push_back(reportErrorsExcept(
-			    dataDistributionTeamCollection(primaryTeamCollection, initData, tcis[0], self->dbInfo, ddEnabledState),
-			    "DDTeamCollectionPrimary",
-			    self->ddId,
-			    &normalDDQueueErrors()));
+			actors.push_back(
+			    reportErrorsExcept(dataDistributionTeamCollection(
+			                           primaryTeamCollection, initData, tcis[0], recruitStorage, ddEnabledState),
+			                       "DDTeamCollectionPrimary",
+			                       self->ddId,
+			                       &normalDDQueueErrors()));
 
 			actors.push_back(printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
