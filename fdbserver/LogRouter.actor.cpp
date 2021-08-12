@@ -694,11 +694,9 @@ ACTOR Future<Void> logRouterCore(TLogInterface interf,
 			    req.reply, &logRouterData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
 		}
 		when(TLogPeekStreamRequest req = waitNext(interf.peekStreamMessages.getFuture())) {
-			// FIXME: currently LogRouter doesn't support streaming peek request
 			TraceEvent(SevDebug, "LogRouterPeekStream", logRouterData.dbgid)
 			    .detail("Token", interf.peekStreamMessages.getEndpoint().token);
 			addActor.send(logRouterPeekStream(&logRouterData, req));
-			// req.reply.sendError(operation_failed());
 		}
 		when(TLogPopRequest req = waitNext(interf.popMessages.getFuture())) {
 			// Request from remote tLog to pop data from LR
