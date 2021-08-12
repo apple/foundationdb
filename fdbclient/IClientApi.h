@@ -89,6 +89,7 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
+	// used in template functions as returned Future type
 	template<class Type> using FutureT = ThreadFuture<Type>;
 };
 
@@ -118,6 +119,7 @@ public:
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 
+	// used in templated functions as Transaction type that can be created
 	using TransactionT = ITransaction;
 };
 
