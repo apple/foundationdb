@@ -1557,34 +1557,61 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 	state RangeFeedReply reply;
 	wait(delay(0));
 	auto& feedInfo = data->uidRangeFeed[req.rangeID];
+	/*printf("SS processing range feed req %s for version [%lld - %lld)\n",
+	       req.rangeID.printable().c_str(),
+	       req.begin,
+	       req.end);
+	       */
 	if (req.end <= feedInfo->emptyVersion + 1) {
+		// printf("  Skipping b/c empty version\n");
 	} else if (feedInfo->durableVersion == invalidVersion || req.begin > feedInfo->durableVersion) {
 		for (auto& it : data->uidRangeFeed[req.rangeID]->mutations) {
-			reply.mutations.push_back(reply.arena, it);
+			// TODO could optimize this with binary search
+			if (it.version >= req.end) {
+				break;
+			}
+			if (it.version >= req.begin) {
+				reply.mutations.push_back(reply.arena, it);
+			}
 		}
+		// printf("  Found %d in memory mutations\n", reply.mutations.size());
 	} else {
 		state std::deque<Standalone<MutationsAndVersionRef>> mutationsDeque =
 		    data->uidRangeFeed[req.rangeID]->mutations;
 		state Version startingDurableVersion = feedInfo->durableVersion;
-		RangeResult res = wait(data->storage.readRange(
-		    KeyRangeRef(rangeFeedDurableKey(req.rangeID, req.begin), rangeFeedDurableKey(req.rangeID, req.end))));
-		Version lastVersion = invalidVersion;
+		Value rangeFeedKeyStart = rangeFeedDurableKey(req.rangeID, req.begin);
+		Value rangeFeedKeyEnd = rangeFeedDurableKey(req.rangeID, req.end);
+		/*printf("  Reading range feed versions from disk [%s - %s)\n",
+		       rangeFeedKeyStart.printable().c_str(),
+		       rangeFeedKeyEnd.printable().c_str());
+		       */
+		RangeResult res = wait(data->storage.readRange(KeyRangeRef(rangeFeedKeyStart, rangeFeedKeyEnd)));
+		Version lastVersion = req.begin - 1; // if no results, include all mutations from memory
+		// TODO REMOVE, for debugging
+		int diskMutations = 0;
 		for (auto& kv : res) {
 			Key id;
 			Version version;
 			std::tie(id, version) = decodeRangeFeedDurableKey(kv.key);
 			auto mutations = decodeRangeFeedDurableValue(kv.value);
+			diskMutations += mutations.size();
 			reply.mutations.push_back_deep(reply.arena, MutationsAndVersionRef(mutations, version));
 			lastVersion = version;
 		}
+		// printf("  Found %d on disk mutations from %d entries\n", diskMutations, res.size());
+		int memoryMutations = 0;
 		for (auto& it : mutationsDeque) {
 			if (it.version >= req.end) {
 				break;
 			}
 			if (it.version > lastVersion) {
+				memoryMutations += it.mutations.size();
 				reply.mutations.push_back(reply.arena, it);
 			}
 		}
+		/*printf(
+		    "  Found %d in memory mutations from %d entries\n", memoryMutations, reply.mutations.size() - res.size());
+		    */
 		if (reply.mutations.empty()) {
 			auto& feedInfo = data->uidRangeFeed[req.rangeID];
 			if (startingDurableVersion == feedInfo->storageVersion && req.end > startingDurableVersion) {
@@ -4336,9 +4363,15 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				if (it.version >= newOldestVersion) {
 					break;
 				}
-				data->storage.writeKeyValue(KeyValueRef(rangeFeedDurableKey(info->id, info->mutations.front().version),
-				                                        rangeFeedDurableValue(info->mutations.front().mutations)));
-				info->storageVersion = info->mutations.front().version;
+				// TODO REMOVE!!
+				/*printf("Persisting %d range feed %s mutations at %lld\n",
+				       info->mutations.front().mutations.size(),
+				       info->id.printable().c_str(),
+				       info->mutations.front().version);
+				       */
+				data->storage.writeKeyValue(
+				    KeyValueRef(rangeFeedDurableKey(info->id, it.version), rangeFeedDurableValue(it.mutations)));
+				info->storageVersion = it.version;
 			}
 			wait(yield(TaskPriority::UpdateStorage));
 			curFeed++;
@@ -4380,12 +4413,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		curFeed = 0;
 		while (curFeed < updatedRangeFeeds.size()) {
 			auto info = data->uidRangeFeed[updatedRangeFeeds[curFeed]];
-			while (info->mutations.front().version < newOldestVersion) {
+			while (info->mutations.size() && info->mutations.front().version < newOldestVersion) {
 				info->mutations.pop_front();
 			}
-			if (info->storageVersion != invalidVersion) {
-				info->durableVersion = info->mutations.front().version;
-			}
+			info->durableVersion = info->storageVersion;
+			// printf(" Updating range feed durable version to %lld\n", info->durableVersion);
 			wait(yield(TaskPriority::UpdateStorage));
 			curFeed++;
 		}
@@ -5788,6 +5820,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
+		printf("SS crashed with error %s\n", e.name());
 		if (recovered.canBeSet())
 			recovered.send(Void());
 		if (storageServerTerminated(self, persistentData, e))

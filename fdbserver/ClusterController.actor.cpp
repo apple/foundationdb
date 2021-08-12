@@ -2059,7 +2059,8 @@ public:
 			// disable the determinism check for remote region satellites.
 			bool remoteDCUsedAsSatellite = false;
 			if (req.configuration.regions.size() > 1) {
-				auto [region, remoteRegion] = getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
+				auto [region, remoteRegion] =
+				    getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
 				for (const auto& satellite : region.satellites) {
 					if (satellite.dcId == remoteRegion.dcId) {
 						remoteDCUsedAsSatellite = true;
@@ -3097,7 +3098,8 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 	state Reference<S3BlobStoreEndpoint> bstore;
 
 	// TODO CHANGE BACK
-	wait(delay(10.0));
+	// wait(delay(10.0));
+	wait(delay(70.0));
 
 	printf("Initializing CC s3 stuff\n");
 	try {
@@ -3120,7 +3122,8 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 		try {
 			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state KeyRange keyRange = KeyRange(KeyRangeRef(LiteralStringRef("\x01"), LiteralStringRef("\x02")));
+			// state KeyRange keyRange = KeyRange(KeyRangeRef(LiteralStringRef("\x01"), LiteralStringRef("\x02")));
+			// state KeyRange keyRange = KeyRange(KeyRangeRef());
 			state Version v = wait(tr->getReadVersion());
 			if (deterministicRandom()->random01() < 0.3) {
 				v -= 5000000;
@@ -3128,8 +3131,10 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 				v -= 30000000;
 			}
 
-			state RangeResult blobGranuleMapping = wait(
-			    krmGetRanges(tr, blobGranuleMappingKeys.begin, keyRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			// right now just read whole blob range
+
+			state RangeResult blobGranuleMapping = wait(krmGetRanges(
+			    tr, blobGranuleMappingKeys.begin, normalKeys /*keyRange*/, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 			ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
 
 			if (blobGranuleMapping.size() == 0) {
@@ -3148,7 +3153,9 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 					       granuleStartKey.printable().c_str(),
 					       granuleEndKey.printable().c_str());
 					// TODO probably new exception type instead
-					throw transaction_too_old();
+					// TODO ADD BACK
+					// throw transaction_too_old();
+					continue;
 				}
 
 				state UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
@@ -3157,12 +3164,14 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 				       granuleEndKey.printable().c_str(),
 				       workerId.toString().c_str());
 
-				if (i == 0) {
-					granuleStartKey = keyRange.begin;
+				// TODO CHANGE BACK!!
+				// prune first/last granules to requested range
+				/*if (i == 0) {
+				    granuleStartKey = keyRange.begin;
 				}
 				if (i == blobGranuleMapping.size() - 2) {
-					granuleEndKey = keyRange.end;
-				}
+				    granuleEndKey = keyRange.end;
+				}*/
 
 				if (!workerInterfaceCache.count(workerId)) {
 					Optional<Value> workerInterface = wait(tr->get(blobWorkerListKeyFor(workerId)));
@@ -3210,8 +3219,16 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 						printf("Waiting for result chunk\n");
 						RangeResult result = waitNext(results.getFuture());
 						printf("Result chunk (%d):\n", result.size());
+						int resultIdx = 0;
 						for (auto& it : result) {
 							printf("  %s=%s\n", it.key.printable().c_str(), it.value.printable().c_str());
+							resultIdx++;
+							if (resultIdx >= 10) {
+								break;
+							}
+						}
+						if (resultIdx >= 10) {
+							printf("  ...\n");
 						}
 					}
 				} catch (Error& e) {

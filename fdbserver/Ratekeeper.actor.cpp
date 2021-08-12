@@ -18,12 +18,15 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseContext.h" // TODO REMOVE
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ReadYourWrites.h"
+
+#include "fdbclient/NativeAPI.actor.h" // TODO REMOVE
 #include "fdbclient/Tuple.h" // TODO REMOVE
 #include "fdbclient/S3BlobStore.h" // TODO REMOVE
 #include "fdbclient/AsyncFileS3BlobStore.actor.h" // TODO REMOVE
@@ -532,7 +535,8 @@ struct RatekeeperLimits {
 	    context(context) {}
 };
 
-struct GrvProxyInfo {
+// TODO CHANGE BACK ONCE MOVING BLOB OUT OF HERE
+struct GrvProxyInfoRk {
 	int64_t totalTransactions;
 	int64_t batchTransactions;
 	uint64_t lastThrottledTagChangeId;
@@ -540,7 +544,7 @@ struct GrvProxyInfo {
 	double lastUpdateTime;
 	double lastTagPushTime;
 
-	GrvProxyInfo()
+	GrvProxyInfoRk()
 	  : totalTransactions(0), batchTransactions(0), lastThrottledTagChangeId(0), lastUpdateTime(0), lastTagPushTime(0) {
 	}
 };
@@ -552,7 +556,7 @@ struct RatekeeperData {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
-	std::map<UID, GrvProxyInfo> grvProxyInfo;
+	std::map<UID, GrvProxyInfoRk> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
@@ -1413,7 +1417,6 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 	}
 }
 
-<<<<<<< HEAD
 //  |-------------------------------------|
 //  |         Blob Granule Stuff          |
 //  |-------------------------------------|
@@ -1429,9 +1432,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	Arena deltaArena;
 
 	KeyRange keyRange;
-	Future<Void> rangeFeedFuture;
 	Future<Void> fileUpdaterFuture;
-	PromiseStream<MutationAndVersion> rangeFeed;
 	PromiseStream<Version> snapshotVersions;
 
 	// FIXME: right now there is a dependency because this contains both the actual file/delta data as well as the
@@ -1439,7 +1440,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	// better to have this in 2 separate objects, where the granule metadata map has the futures, but the read
 	// queries/file updater/range feed only copy the reference to the file/delta data.
 	void cancel() {
-		rangeFeedFuture = Never();
+		// rangeFeedFuture = Never();
 		fileUpdaterFuture = Never();
 	}
 
@@ -1607,62 +1608,146 @@ ACTOR Future<std::pair<Version, std::string>> dumpSnapshotFromFDB(RatekeeperData
 	}
 }
 
+ACTOR Future<std::pair<Key, Version>> createRangeFeed(RatekeeperData* rkData, KeyRange keyRange) {
+	state Key rangeFeedID = StringRef(deterministicRandom()->randomUniqueID().toString());
+	state Transaction tr(rkData->db);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	loop {
+		try {
+			wait(tr.registerRangeFeed(rangeFeedID, keyRange));
+			wait(tr.commit());
+			return std::pair<Key, Version>(rangeFeedID, tr.getCommittedVersion());
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// TODO this will have to change merging multiple range feeds and with the streaming API
+ACTOR Future<Void> rangeFeedReader(RatekeeperData* rkData,
+                                   Key rangeFeedID,
+                                   KeyRange keyRange,
+                                   Version startVersion,
+                                   PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> mutationStream) {
+	// TODO this is a hack, basically want unbounded endVersion, maybe make it optional in the request?
+	state Version beginVersion = startVersion;
+	state Version endVersion = beginVersion + 1000000000;
+	loop {
+		Standalone<VectorRef<MutationsAndVersionRef>> mutations =
+		    wait(rkData->db->getRangeFeedMutations(rangeFeedID, beginVersion, endVersion, keyRange));
+		// printf("RF got %d mutations for version [%lld - %lld)\n", mutations.size(), beginVersion, endVersion);
+		if (mutations.size()) {
+			// TODO REMOVE sanity check
+			for (auto& it : mutations) {
+				if (it.version < beginVersion || it.version >= endVersion) {
+					printf("RF returned version out of bounds! %lld [%lld - %lld)\n",
+					       it.version,
+					       beginVersion,
+					       endVersion);
+				}
+				ASSERT(it.version >= beginVersion && it.version < endVersion);
+			}
+			beginVersion = mutations.back().version + 1;
+			endVersion = beginVersion + 100000000;
+			mutationStream.send(std::move(mutations));
+			// printf("RangeFeed beginVersion=%lld\n", beginVersion);
+
+			// TODO REMOVE, just for debugging
+			wait(delay(1.0));
+		} else {
+			// TODO this won't be necessary once we use the streaming API
+			wait(delay(1.0));
+			endVersion += 1000000;
+		}
+	}
+}
+
 // updater for a single granule
 ACTOR Future<Void> blobGranuleUpdateFiles(RatekeeperData* rkData,
                                           BlobWorkerData* bwData,
                                           Reference<GranuleMetadata> metadata) {
 
+	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> rangeFeedStream;
+	state Future<Void> rangeFeedFuture;
 	try {
+		// create range feed first so the version the SS start recording mutations <= the snapshot version
+		state std::pair<Key, Version> rangeFeedData = wait(createRangeFeed(rkData, metadata->keyRange));
+		printf("Successfully created range feed %s for [%s - %s) @ %lld\n",
+		       rangeFeedData.first.printable().c_str(),
+		       metadata->keyRange.begin.printable().c_str(),
+		       metadata->keyRange.end.printable().c_str(),
+		       rangeFeedData.second);
+
 		std::pair<Version, std::string> newSnapshotFile = wait(dumpSnapshotFromFDB(rkData, bwData, metadata->keyRange));
+		ASSERT(rangeFeedData.second <= newSnapshotFile.first);
 		metadata->snapshotFiles.push_back(newSnapshotFile);
 		metadata->lastWriteVersion = newSnapshotFile.first;
 		metadata->snapshotVersions.send(newSnapshotFile.first);
+		rangeFeedFuture = rangeFeedReader(
+		    rkData, rangeFeedData.first, metadata->keyRange, newSnapshotFile.first + 1, rangeFeedStream);
 
 		loop {
-			MutationAndVersion delta = waitNext(metadata->rangeFeed.getFuture());
-			metadata->currentDeltas.push_back(metadata->deltaArena, delta);
-			// 8 for version, 1 for type, 4 for each param length then actual param size
-			metadata->currentDeltaBytes += 17 + delta.m.param1.size() + delta.m.param2.size();
+			state Standalone<VectorRef<MutationsAndVersionRef>> mutations = waitNext(rangeFeedStream.getFuture());
+			// TODO should maybe change mutation buffer to MutationsAndVersionRef instead of MutationAndVersion
+			for (auto& deltas : mutations) {
+				for (auto& delta : deltas.mutations) {
+					// TODO REMOVE!!! Just for initial debugging
+					/*printf("BlobWorker [%s - %s) Got Mutation @ %lld: %s\n",
+					       metadata->keyRange.begin.printable().c_str(),
+					       metadata->keyRange.end.printable().c_str(),
+					       deltas.version,
+					       delta.toString().c_str());*/
 
-			if (metadata->currentDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
-			    metadata->currentDeltas.back().v > metadata->lastWriteVersion) {
-				printf("Granule [%s - %s) flushing delta file after %d bytes\n",
-				       metadata->keyRange.begin.printable().c_str(),
-				       metadata->keyRange.end.printable().c_str(),
-				       metadata->currentDeltaBytes);
-				std::pair<Version, std::string> newDeltaFile =
-				    wait(writeDeltaFile(rkData, bwData, metadata->keyRange, &metadata->currentDeltas));
+					metadata->currentDeltas.emplace_back_deep(metadata->deltaArena, delta, deltas.version);
+					// 8 for version, 1 for type, 4 for each param length then actual param size
+					metadata->currentDeltaBytes += 17 + delta.param1.size() + delta.param2.size();
+				}
 
-				// add new delta file
-				metadata->deltaFiles.push_back(newDeltaFile);
-				metadata->lastWriteVersion = newDeltaFile.first;
-				metadata->bytesInNewDeltaFiles += metadata->currentDeltaBytes;
+				// TODO handle version batch barriers
+				if (metadata->currentDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
+				    metadata->currentDeltas.back().v > metadata->lastWriteVersion) {
+					printf("Granule [%s - %s) flushing delta file after %d bytes\n",
+					       metadata->keyRange.begin.printable().c_str(),
+					       metadata->keyRange.end.printable().c_str(),
+					       metadata->currentDeltaBytes);
+					std::pair<Version, std::string> newDeltaFile =
+					    wait(writeDeltaFile(rkData, bwData, metadata->keyRange, &metadata->currentDeltas));
 
-				// reset current deltas
-				metadata->deltaArena = Arena();
-				metadata->currentDeltas = GranuleDeltas();
-				metadata->currentDeltaBytes = 0;
-			}
+					// add new delta file
+					metadata->deltaFiles.push_back(newDeltaFile);
+					metadata->lastWriteVersion = newDeltaFile.first;
+					metadata->bytesInNewDeltaFiles += metadata->currentDeltaBytes;
 
-			if (metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
-				printf("Granule [%s - %s) compacting after %d bytes\n",
-				       metadata->keyRange.begin.printable().c_str(),
-				       metadata->keyRange.end.printable().c_str(),
-				       metadata->bytesInNewDeltaFiles);
-				// FIXME: instead of just doing new snapshot, it should offer shard back to blob manager and get
-				// reassigned
-				// FIXME: this should read previous snapshot + delta files instead, unless it knows it's really small or
-				// there was a huge clear or something
-				std::pair<Version, std::string> newSnapshotFile =
-				    wait(dumpSnapshotFromFDB(rkData, bwData, metadata->keyRange));
+					// reset current deltas
+					metadata->deltaArena = Arena();
+					metadata->currentDeltas = GranuleDeltas();
+					metadata->currentDeltaBytes = 0;
 
-				// add new snapshot file
-				metadata->snapshotFiles.push_back(newSnapshotFile);
-				metadata->lastWriteVersion = newSnapshotFile.first;
-				metadata->snapshotVersions.send(newSnapshotFile.first);
+					printf(
+					    "Popping range feed %s at %lld\n", rangeFeedData.first.printable().c_str(), newDeltaFile.first);
+					wait(rkData->db->popRangeFeedMutations(rangeFeedData.first, newDeltaFile.first));
+				}
 
-				// reset metadata
-				metadata->bytesInNewDeltaFiles = 0;
+				if (metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
+					printf("Granule [%s - %s) compacting after %d bytes\n",
+					       metadata->keyRange.begin.printable().c_str(),
+					       metadata->keyRange.end.printable().c_str(),
+					       metadata->bytesInNewDeltaFiles);
+					// FIXME: instead of just doing new snapshot, it should offer shard back to blob manager and get
+					// reassigned
+					// FIXME: this should read previous snapshot + delta files instead, unless it knows it's really
+					// small or there was a huge clear or something
+					std::pair<Version, std::string> newSnapshotFile =
+					    wait(dumpSnapshotFromFDB(rkData, bwData, metadata->keyRange));
+
+					// add new snapshot file
+					metadata->snapshotFiles.push_back(newSnapshotFile);
+					metadata->lastWriteVersion = newSnapshotFile.first;
+					metadata->snapshotVersions.send(newSnapshotFile.first);
+
+					// reset metadata
+					metadata->bytesInNewDeltaFiles = 0;
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -1777,66 +1862,6 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* wkData, const BlobGranu
 	req.reply.send(rep);
 }
 
-// dumb series of mutations that just sets/clears same key that is unrelated to actual db transactions
-ACTOR Future<Void> fakeRangeFeed(PromiseStream<MutationAndVersion> mutationStream,
-                                 PromiseStream<Version> snapshotVersions,
-                                 KeyRange keyRange) {
-	state Version version = waitNext(snapshotVersions.getFuture());
-	state uint32_t targetKbPerSec = (uint32_t)(SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES) / 10;
-	state Arena arena;
-	printf("Fake range feed got initial version %lld\n", version);
-	loop {
-		// dumb series of mutations that just sets/clears same key that is unrelated to actual db transactions
-		state uint32_t bytesGenerated = 0;
-		state uint32_t targetKbThisSec =
-		    targetKbPerSec / 2 + (uint32_t)(deterministicRandom()->random01() * targetKbPerSec);
-		state uint32_t mutationsGenerated = 0;
-		while (bytesGenerated < targetKbThisSec) {
-			MutationAndVersion update;
-			update.v = version;
-			update.m.param1 = keyRange.begin;
-			update.m.param2 = keyRange.begin;
-			if (deterministicRandom()->random01() < 0.5) {
-				// clear start key
-				update.m.type = MutationRef::Type::ClearRange;
-			} else {
-				// set
-				update.m.type = MutationRef::Type::SetValue;
-			}
-			mutationsGenerated++;
-			bytesGenerated += 17 + 2 * keyRange.begin.size();
-			mutationStream.send(update);
-
-			// simulate multiple mutations with same version (TODO: this should be possible right)
-			if (deterministicRandom()->random01() < 0.4) {
-				version++;
-			}
-			if (mutationsGenerated % 1000 == 0) {
-				wait(yield());
-			}
-		}
-
-		// printf("Fake range feed generated %d mutations at version %lld\n", mutationsGenerated, version);
-
-		choose {
-			when(wait(delay(1.0))) {
-				// slightly slower than real versions, to try to ensure it doesn't get ahead
-				version += 950000;
-			}
-			when(Version _v = waitNext(snapshotVersions.getFuture())) {
-				if (_v > version) {
-					printf("updating fake range feed from %lld to snapshot version %lld\n", version, _v);
-					version = _v;
-				} else {
-					printf("snapshot version %lld was ahead of fake range feed version %lld, keeping fake version\n",
-					       _v,
-					       version);
-				}
-			}
-		}
-	}
-}
-
 static Reference<GranuleMetadata> constructNewBlobRange(RatekeeperData* rkData,
                                                         BlobWorkerData* wkData,
                                                         KeyRange keyRange) {
@@ -1845,7 +1870,7 @@ static Reference<GranuleMetadata> constructNewBlobRange(RatekeeperData* rkData,
 	       keyRange.end.printable().c_str());
 	Reference<GranuleMetadata> newMetadata = makeReference<GranuleMetadata>();
 	newMetadata->keyRange = keyRange;
-	newMetadata->rangeFeedFuture = fakeRangeFeed(newMetadata->rangeFeed, newMetadata->snapshotVersions, keyRange);
+	// newMetadata->rangeFeedFuture = fakeRangeFeed(newMetadata->rangeFeed, newMetadata->snapshotVersions, keyRange);
 	newMetadata->fileUpdaterFuture = blobGranuleUpdateFiles(rkData, wkData, newMetadata);
 
 	return newMetadata;
@@ -2102,6 +2127,7 @@ ACTOR Future<Void> nukeBlobWorkerData(RatekeeperData* rkData) {
 		try {
 			tr->clear(blobWorkerListKeys);
 			tr->clear(blobGranuleMappingKeys);
+			tr->clear(rangeFeedKeys);
 
 			return Void();
 		} catch (Error& e) {
@@ -2249,10 +2275,7 @@ ACTOR Future<Void> blobManagerPoc(RatekeeperData* rkData, LocalityData locality)
 	}
 }
 
-ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-=======
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
->>>>>>> feature-range-feed
 	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Future<Void> timeout = Void();
 	state std::vector<Future<Void>> tlogTrackers;
