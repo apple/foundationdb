@@ -257,6 +257,13 @@ public:
 	    Version begin = 0,
 	    Version end = std::numeric_limits<Version>::max(),
 	    KeyRange range = allKeys);
+
+	Future<Void> getRangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
+	                                StringRef rangeID,
+	                                Version begin = 0,
+	                                Version end = std::numeric_limits<Version>::max(),
+	                                KeyRange range = allKeys);
+
 	Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingRangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popRangeFeedMutations(StringRef rangeID, Version version);
 

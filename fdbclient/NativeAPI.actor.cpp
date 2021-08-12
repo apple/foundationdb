@@ -4330,6 +4330,10 @@ Future<Void> Transaction::registerRangeFeed(const Key& rangeID, const KeyRange& 
 	return registerRangeFeedActor(this, rangeID, range);
 }
 
+void Transaction::destroyRangeFeed(const Key& rangeID) {
+	clear(rangeID.withPrefix(rangeFeedPrefix));
+}
+
 ACTOR Future<Key> getKeyAndConflictRange(Database cx,
                                          KeySelector k,
                                          Future<Version> version,
@@ -6575,6 +6579,126 @@ Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getRangeF
 	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, begin, end, range);
 }
 
+ACTOR Future<Void> getRangeFeedStreamActor(Reference<DatabaseContext> db,
+                                           PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
+                                           StringRef rangeID,
+                                           Version begin,
+                                           Version end,
+                                           KeyRange range) {
+	state Database cx(db);
+	state Transaction tr(cx);
+	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
+	state Span span("NAPI:GetRangeFeedStream"_loc);
+	state KeyRange keys;
+	loop {
+		try {
+			Optional<Value> val = wait(tr.get(rangeIDKey));
+			if (!val.present()) {
+				results.sendError(unsupported_operation());
+				return Void();
+			}
+			keys = decodeRangeFeedValue(val.get());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	loop {
+		try {
+			state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+			    wait(getKeyRangeLocations(cx,
+			                              keys,
+			                              100,
+			                              Reverse::False,
+			                              &StorageServerInterface::rangeFeed,
+			                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
+
+			if (locations.size() > 1) {
+				results.sendError(unsupported_operation());
+				return Void();
+			}
+
+			state int useIdx = -1;
+
+			loop {
+				// FIXME: create a load balance function for this code so future users of reply streams do not have
+				// to duplicate this code
+				int count = 0;
+				for (int i = 0; i < locations[0].second->size(); i++) {
+					if (!IFailureMonitor::failureMonitor()
+					         .getState(
+					             locations[0].second->get(i, &StorageServerInterface::rangeFeedStream).getEndpoint())
+					         .failed) {
+						if (deterministicRandom()->random01() <= 1.0 / ++count) {
+							useIdx = i;
+						}
+					}
+				}
+
+				if (useIdx >= 0) {
+					break;
+				}
+
+				vector<Future<Void>> ok(locations[0].second->size());
+				for (int i = 0; i < ok.size(); i++) {
+					ok[i] = IFailureMonitor::failureMonitor().onStateEqual(
+					    locations[0].second->get(i, &StorageServerInterface::rangeFeedStream).getEndpoint(),
+					    FailureStatus(false));
+				}
+
+				// Making this SevWarn means a lot of clutter
+				if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
+				    deterministicRandom()->random01() < 0.01) {
+					TraceEvent("AllAlternativesFailed").detail("Alternatives", locations[0].second->description());
+				}
+
+				wait(allAlternativesFailedDelay(quorum(ok, 1)));
+			}
+
+			state RangeFeedStreamRequest req;
+			req.rangeID = rangeID;
+			req.begin = begin;
+			req.end = end;
+
+			state ReplyPromiseStream<RangeFeedStreamReply> replyStream =
+			    locations[0].second->get(useIdx, &StorageServerInterface::rangeFeedStream).getReplyStream(req);
+
+			loop {
+				wait(results.onEmpty());
+				choose {
+					when(wait(cx->connectionFileChanged())) { break; }
+					when(RangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
+						begin = rep.mutations.back().version + 1;
+						results.send(Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
+					}
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+			    e.code() == error_code_connection_failed) {
+				cx->invalidateCache(keys);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+			} else {
+				results.sendError(e);
+				return Void();
+			}
+		}
+	}
+}
+
+Future<Void> DatabaseContext::getRangeFeedStream(
+    const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
+    StringRef rangeID,
+    Version begin,
+    Version end,
+    KeyRange range) {
+	return getRangeFeedStreamActor(Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range);
+}
+
 ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingRangeFeedsActor(Reference<DatabaseContext> db,
                                                                                   KeyRangeRef range,
                                                                                   Version minVersion) {
@@ -6633,6 +6757,7 @@ ACTOR Future<Void> popRangeFeedMutationsActor(Reference<DatabaseContext> db, Str
 		throw unsupported_operation();
 	}
 
+	// FIXME: lookup both the src and dest shards as of the pop version to ensure all locations are popped
 	state std::vector<Future<Void>> popRequests;
 	for (int i = 0; i < locations[0].second->size(); i++) {
 		popRequests.push_back(
