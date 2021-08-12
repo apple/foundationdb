@@ -108,11 +108,23 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	~TCServerInfo();
 };
 
-struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
+class TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
+	TCMachineInfo() = default;
+
+public:
 	std::vector<Reference<TCServerInfo>> serversOnMachine; // SOMEDAY: change from vector to set
 	Standalone<StringRef> machineID;
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // SOMEDAY: split good and bad machine teams.
 	LocalityEntry localityEntry;
+
+	Reference<TCMachineInfo> clone() const {
+		auto result = Reference<TCMachineInfo>(new TCMachineInfo);
+		result->serversOnMachine = serversOnMachine;
+		result->machineID = machineID;
+		result->machineTeams = machineTeams;
+		result->localityEntry = localityEntry;
+		return result;
+	}
 
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry) : localityEntry(entry) {
 		ASSERT(serversOnMachine.empty());
@@ -3011,7 +3023,10 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			configuration = self->configuration;
 			server_info = self->server_info;
 			teams = self->teams;
-			machine_info = self->machine_info;
+			// Perform deep copy so we have a consistent snapshot, even if yields are performed
+			for (const auto& [machineId, info] : self->machine_info) {
+				machine_info.emplace(machineId, info->clone());
+			}
 			machineTeams = self->machineTeams;
 			// internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
 			// machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
