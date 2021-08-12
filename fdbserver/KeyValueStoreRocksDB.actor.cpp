@@ -7,6 +7,7 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
+#include <rocksdb/env.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
@@ -25,6 +26,37 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
+Severity getSeverity(rocksdb::InfoLogLevel log_level) {
+	switch (log_level) {
+	case rocksdb::InfoLogLevel::DEBUG_LEVEL:
+		return SevDebug;
+	case rocksdb::InfoLogLevel::INFO_LEVEL:
+		return SevInfo;
+	case rocksdb::InfoLogLevel::WARN_LEVEL:
+		return SevWarn;
+	case rocksdb::InfoLogLevel::ERROR_LEVEL:
+		return SevError;
+	case rocksdb::InfoLogLevel::FATAL_LEVEL:
+		return SevError;
+	case rocksdb::InfoLogLevel::HEADER_LEVEL:
+		return SevInfo;
+	default:
+		return SevInfo;
+	}
+}
+
+class EventInfoLogger : public rocksdb::Logger {
+public:
+	explicit EventInfoLogger(){};
+	void Logv(const rocksdb::InfoLogLevel log_level, const char* format, va_list ap) override {
+		std::string message;
+		auto result = vsformat(message, format, ap);
+		if (result > 0) {
+			TraceEvent(getSeverity(log_level), "RocksDBLog").detail("Message", message);
+		}
+	}
+	void Logv(const char* format, va_list ap) override { Logv(rocksdb::INFO_LEVEL, format, ap); }
+};
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -50,6 +82,7 @@ rocksdb::Options getOptions() {
 	rocksdb::Options options({}, getCFOptions());
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
+	options.info_log = std::make_shared<EventInfoLogger>();
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
