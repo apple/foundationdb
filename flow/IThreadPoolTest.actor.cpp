@@ -79,7 +79,7 @@ struct ThreadSafePromiseStreamSender final : IThreadPoolReceiver {
 			notifications->sendError(platform_error());
 			return;
 		}
-		notifications->send(std::move(name));
+		notifications->send(name);
 	}
 
 	struct FaultyAction final : TypedAction<ThreadSafePromiseStreamSender, FaultyAction> {
