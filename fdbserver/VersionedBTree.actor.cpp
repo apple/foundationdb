@@ -880,6 +880,8 @@ public:
 				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext waiting for page load\n",
 				             self->toString().c_str());
 				wait(success(self->nextPageReader));
+				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext page loaded\n",
+				             self->toString().c_str());
 			}
 
 			state Optional<T> result = wait(self->readNext(upperBound, &localLock));
@@ -1922,7 +1924,6 @@ public:
 
 		state typename EvictionOrderT::iterator i = evictionOrder.begin();
 		state typename EvictionOrderT::iterator iEnd = evictionOrder.end();
-
 		while (i != iEnd) {
 			if (!i->item.evictable()) {
 				wait(i->item.onEvictable());
@@ -1935,6 +1936,7 @@ public:
 		evictionOrder.clear();
 		cache.clear();
 		ASSERT(currentSize == 0);
+
 		return Void();
 	}
 
@@ -1943,7 +1945,6 @@ public:
 		return clear_impl(this);
 	}
 
-	// int count() const { return evictionOrder.size(); }
 	int count() const { return currentSize; }
 
 private:
@@ -2119,10 +2120,8 @@ public:
 			if (!exists) {
 				flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
 			}
-
 			wait(store(self->pageFile, IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644)));
 		}
-
 		// Header page is always treated as having a page size of smallestPhysicalBlock
 		self->setPageSize(smallestPhysicalBlock);
 		self->lastCommittedHeaderPage = self->newPageBuffer();
@@ -3424,6 +3423,7 @@ public:
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->pageCache.clear());
+		wait(delay(0));
 
 		debug_printf("DWALPager(%s) shutdown remappedPagesMap: %s\n",
 		             self->filename.c_str(),
@@ -4696,7 +4696,6 @@ public:
 
 	ACTOR static Future<Void> init_impl(VersionedBTree* self) {
 		wait(self->m_pager->init());
-
 		// TODO: Get actual max MetaKey size limit from Pager
 		self->m_headerSpace = self->m_pager->getUsablePageSize();
 		self->m_pHeader = (MetaKey*)new uint8_t[self->m_headerSpace];
