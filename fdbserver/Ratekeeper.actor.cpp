@@ -39,6 +39,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <limits>
 
 enum limitReason_t {
 	unlimited, // TODO: rename to workload?
@@ -1552,7 +1553,7 @@ ACTOR Future<std::pair<Version, std::string>> dumpSnapshotFromFDB(RatekeeperData
 				}
 			}
 
-			printf("Granule [%s- %s) read %d snapshot rows from fdb\n",
+			printf("Granule [%s - %s) read %d snapshot rows from fdb\n",
 			       keyRange.begin.printable().c_str(),
 			       keyRange.end.printable().c_str(),
 			       allRows.size());
@@ -1589,7 +1590,7 @@ ACTOR Future<std::pair<Version, std::string>> dumpSnapshotFromFDB(RatekeeperData
 			snapshotFileKey.append(LiteralStringRef("snapshot")).append(readVersion);
 			tr->set(snapshotFileKey.getDataAsStandalone().withPrefix(blobGranuleFileKeys.begin), fname);
 			wait(tr->commit());
-			printf("Granule [%s - %s) committed new snapshot file %s with %d bytes for range\n",
+			printf("Granule [%s - %s) committed new snapshot file %s with %d bytes\n\n",
 			       keyRange.begin.printable().c_str(),
 			       keyRange.end.printable().c_str(),
 			       fname.c_str(),
@@ -1623,44 +1624,9 @@ ACTOR Future<std::pair<Key, Version>> createRangeFeed(RatekeeperData* rkData, Ke
 	}
 }
 
-// TODO this will have to change merging multiple range feeds and with the streaming API
-ACTOR Future<Void> rangeFeedReader(RatekeeperData* rkData,
-                                   Key rangeFeedID,
-                                   KeyRange keyRange,
-                                   Version startVersion,
-                                   PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> mutationStream) {
-	// TODO this is a hack, basically want unbounded endVersion, maybe make it optional in the request?
-	state Version beginVersion = startVersion;
-	state Version endVersion = beginVersion + 1000000000;
-	loop {
-		Standalone<VectorRef<MutationsAndVersionRef>> mutations =
-		    wait(rkData->db->getRangeFeedMutations(rangeFeedID, beginVersion, endVersion, keyRange));
-		// printf("RF got %d mutations for version [%lld - %lld)\n", mutations.size(), beginVersion, endVersion);
-		if (mutations.size()) {
-			// TODO REMOVE sanity check
-			for (auto& it : mutations) {
-				if (it.version < beginVersion || it.version >= endVersion) {
-					printf("RF returned version out of bounds! %lld [%lld - %lld)\n",
-					       it.version,
-					       beginVersion,
-					       endVersion);
-				}
-				ASSERT(it.version >= beginVersion && it.version < endVersion);
-			}
-			beginVersion = mutations.back().version + 1;
-			endVersion = beginVersion + 100000000;
-			mutationStream.send(std::move(mutations));
-			// printf("RangeFeed beginVersion=%lld\n", beginVersion);
-
-			// TODO REMOVE, just for debugging
-			wait(delay(1.0));
-		} else {
-			// TODO this won't be necessary once we use the streaming API
-			wait(delay(1.0));
-			endVersion += 1000000;
-		}
-	}
-}
+// TODO a hack, eventually just have open end interval in range feed request?
+// Or maybe we want to cycle and start a new range feed stream every X million versions?
+static const Version maxVersion = std::numeric_limits<Version>::max();
 
 // updater for a single granule
 ACTOR Future<Void> blobGranuleUpdateFiles(RatekeeperData* rkData,
@@ -1683,8 +1649,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(RatekeeperData* rkData,
 		metadata->snapshotFiles.push_back(newSnapshotFile);
 		metadata->lastWriteVersion = newSnapshotFile.first;
 		metadata->snapshotVersions.send(newSnapshotFile.first);
-		rangeFeedFuture = rangeFeedReader(
-		    rkData, rangeFeedData.first, metadata->keyRange, newSnapshotFile.first + 1, rangeFeedStream);
+		rangeFeedFuture = rkData->db->getRangeFeedStream(
+		    rangeFeedStream, rangeFeedData.first, newSnapshotFile.first + 1, maxVersion, metadata->keyRange);
 
 		loop {
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations = waitNext(rangeFeedStream.getFuture());
@@ -1723,13 +1689,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(RatekeeperData* rkData,
 					metadata->currentDeltas = GranuleDeltas();
 					metadata->currentDeltaBytes = 0;
 
-					printf(
-					    "Popping range feed %s at %lld\n", rangeFeedData.first.printable().c_str(), newDeltaFile.first);
+					printf("Popping range feed %s at %lld\n\n",
+					       rangeFeedData.first.printable().c_str(),
+					       newDeltaFile.first);
 					wait(rkData->db->popRangeFeedMutations(rangeFeedData.first, newDeltaFile.first));
 				}
 
 				if (metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
-					printf("Granule [%s - %s) compacting after %d bytes\n",
+					printf("Granule [%s - %s) re-snapshotting after %d bytes\n",
 					       metadata->keyRange.begin.printable().c_str(),
 					       metadata->keyRange.end.printable().c_str(),
 					       metadata->bytesInNewDeltaFiles);
@@ -1796,9 +1763,9 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* wkData, const BlobGranu
 		return;
 	}
 
-	printf("BW processing blob granule request for [%s - %s)\n",
+	/*printf("BW processing blob granule request for [%s - %s)\n",
 	       req.keyRange.begin.printable().c_str(),
-	       req.keyRange.end.printable().c_str());
+	       req.keyRange.end.printable().c_str());*/
 
 	// do work for each range
 	auto requestRanges = wkData->granuleMetadata.intersectingRanges(req.keyRange);
@@ -1865,9 +1832,9 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* wkData, const BlobGranu
 static Reference<GranuleMetadata> constructNewBlobRange(RatekeeperData* rkData,
                                                         BlobWorkerData* wkData,
                                                         KeyRange keyRange) {
-	printf("Creating new worker metadata for range [%s - %s)\n",
+	/*printf("Creating new worker metadata for range [%s - %s)\n",
 	       keyRange.begin.printable().c_str(),
-	       keyRange.end.printable().c_str());
+	       keyRange.end.printable().c_str());*/
 	Reference<GranuleMetadata> newMetadata = makeReference<GranuleMetadata>();
 	newMetadata->keyRange = keyRange;
 	// newMetadata->rangeFeedFuture = fakeRangeFeed(newMetadata->rangeFeed, newMetadata->snapshotVersions, keyRange);
@@ -1882,10 +1849,10 @@ static void changeBlobRange(RatekeeperData* rkData,
                             BlobWorkerData* wkData,
                             KeyRange keyRange,
                             Reference<GranuleMetadata> newMetadata) {
-	printf("Changing range for [%s - %s): %s\n",
+	/*printf("Changing range for [%s - %s): %s\n",
 	       keyRange.begin.printable().c_str(),
 	       keyRange.end.printable().c_str(),
-	       newMetadata.isValid() ? "T" : "F");
+	       newMetadata.isValid() ? "T" : "F");*/
 
 	// if any of these ranges are active, cancel them.
 	// if the first or last range was set, and this key range insertion truncates but does not completely replace them,
@@ -1907,21 +1874,21 @@ static void changeBlobRange(RatekeeperData* rkData,
 		}
 		if (lastRangeActive) {
 			// cancel actors for old range and clear reference
-			printf("  [%s - %s): T (cancelling)\n", r.begin().printable().c_str(), r.end().printable().c_str());
+			// printf("  [%s - %s): T (cancelling)\n", r.begin().printable().c_str(), r.end().printable().c_str());
 			r.value()->cancel();
 			r.value().clear();
-		} else {
-			printf("  [%s - %s):F\n", r.begin().printable().c_str(), r.end().printable().c_str());
-		}
+		} /*else {
+		    printf("  [%s - %s):F\n", r.begin().printable().c_str(), r.end().printable().c_str());
+		}*/
 		i++;
 	}
 
 	wkData->granuleMetadata.insert(keyRange, newMetadata);
 
 	if (firstRangeActive && firstRangeStart < keyRange.begin) {
-		printf("    Truncated first range [%s - %s)\n",
+		/*printf("    Truncated first range [%s - %s)\n",
 		       firstRangeStart.printable().c_str(),
-		       keyRange.begin.printable().c_str());
+		       keyRange.begin.printable().c_str());*/
 		// this should modify exactly one range so it's not so bad. A bug here could lead to infinite recursion
 		// though
 		KeyRangeRef newRange = KeyRangeRef(firstRangeStart, keyRange.begin);
@@ -1929,26 +1896,27 @@ static void changeBlobRange(RatekeeperData* rkData,
 	}
 
 	if (lastRangeActive && keyRange.end < lastRangeEnd) {
-		printf(
-		    "    Truncated last range [%s - %s)\n", keyRange.end.printable().c_str(), lastRangeEnd.printable().c_str());
+		/*printf(
+		    "    Truncated last range [%s - %s)\n", keyRange.end.printable().c_str(),
+		   lastRangeEnd.printable().c_str());*/
 		// this should modify exactly one range so it's not so bad. A bug here could lead to infinite recursion
 		// though
 		KeyRangeRef newRange = KeyRangeRef(keyRange.end, lastRangeEnd);
 		changeBlobRange(rkData, wkData, newRange, constructNewBlobRange(rkData, wkData, newRange));
 	}
 
-	printf("Final result after inserting [%s - %s): %s\n",
+	/*printf("Final result after inserting [%s - %s): %s\n",
 	       keyRange.begin.printable().c_str(),
 	       keyRange.end.printable().c_str(),
-	       newMetadata.isValid() ? "T" : "F");
+	       newMetadata.isValid() ? "T" : "F");*/
 
-	auto rangesFinal = wkData->granuleMetadata.intersectingRanges(keyRange);
+	/*auto rangesFinal = wkData->granuleMetadata.intersectingRanges(keyRange);
 	for (auto& r : rangesFinal) {
-		printf("  [%s - %s): %s\n",
-		       r.begin().printable().c_str(),
-		       r.end().printable().c_str(),
-		       r.value().isValid() ? "T" : "F");
-	}
+	    printf("  [%s - %s): %s\n",
+	           r.begin().printable().c_str(),
+	           r.end().printable().c_str(),
+	           r.value().isValid() ? "T" : "F");
+	}*/
 
 	// don't do this in above loop because modifying range map changes iterator
 
@@ -2082,9 +2050,9 @@ ACTOR Future<Void> blobWorkerCore(RatekeeperData* rkData, BlobWorkerData* bwData
 	try {
 		loop choose {
 			when(BlobGranuleFileRequest req = waitNext(interf.blobGranuleFileRequest.getFuture())) {
-				printf("Got blob granule request [%s - %s)\n",
+				/*printf("Got blob granule request [%s - %s)\n",
 				       req.keyRange.begin.printable().c_str(),
-				       req.keyRange.end.printable().c_str());
+				       req.keyRange.end.printable().c_str());*/
 				handleBlobGranuleFileRequest(bwData, req);
 			}
 			when(KeyRange _rangeToAdd = waitNext(bwData->assignRange.getFuture())) {
@@ -2150,7 +2118,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitNewRange(Reference<ReadYourWrit
 	       estimated.bytes);
 
 	if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
-		printf("  Splitting range\n");
+		// printf("  Splitting range\n");
 		// only split on bytes
 		StorageMetrics splitMetrics;
 		splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
@@ -2162,7 +2130,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitNewRange(Reference<ReadYourWrit
 		    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated));
 		return keys;
 	} else {
-		printf("  Not splitting range\n");
+		// printf("  Not splitting range\n");
 		Standalone<VectorRef<KeyRef>> keys;
 		keys.push_back_deep(keys.arena(), range.begin);
 		keys.push_back_deep(keys.arena(), range.end);
@@ -2243,9 +2211,9 @@ ACTOR Future<Void> blobManagerPoc(RatekeeperData* rkData, LocalityData locality)
 				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
-					printf("BM Got range to add [%s - %s)\n",
+					/*printf("BM Got range to add [%s - %s)\n",
 					       range.begin.printable().c_str(),
-					       range.end.printable().c_str());
+					       range.end.printable().c_str());*/
 					splitFutures.push_back(splitNewRange(tr, range));
 				}
 

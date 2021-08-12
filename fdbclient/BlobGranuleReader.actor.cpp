@@ -39,15 +39,15 @@ ACTOR Future<Arena> readSnapshotFile(Reference<S3BlobStoreEndpoint> bstore,
                                      std::map<KeyRef, ValueRef>* dataMap) {
 	try {
 		state Arena arena;
-		printf("Starting read of snapshot file %s\n", filename.c_str());
+		// printf("Starting read of snapshot file %s\n", filename.c_str());
 		state Reference<AsyncFileS3BlobStoreRead> reader =
 		    makeReference<AsyncFileS3BlobStoreRead>(bstore, bucket, filename);
 		state int64_t size = wait(reader->size());
-		printf("Got snapshot file size %lld\n", size);
+		// printf("Got snapshot file size %lld\n", size);
 		state uint8_t* data = new (arena) uint8_t[size];
-		printf("Reading %lld bytes from snapshot file %s\n", size, filename.c_str());
+		// printf("Reading %lld bytes from snapshot file %s\n", size, filename.c_str());
 		int readSize = wait(reader->read(data, size, 0));
-		printf("Read %lld bytes from snapshot file %s\n", readSize, filename.c_str());
+		// printf("Read %lld bytes from snapshot file %s\n", readSize, filename.c_str());
 		ASSERT(size == readSize);
 
 		// weird stuff for deserializing vector and arenas
@@ -59,7 +59,7 @@ ACTOR Future<Arena> readSnapshotFile(Reference<S3BlobStoreEndpoint> bstore,
 		arena.dependsOn(parseArena);
 
 		// GranuleSnapshot snapshot = ObjectReader::fromStringRef<GranuleSnapshot>(dataRef, Unversioned();)
-		printf("Parsed %d rows from snapshot file %s\n", snapshot.size(), filename.c_str());
+		// printf("Parsed %d rows from snapshot file %s\n", snapshot.size(), filename.c_str());
 
 		// TODO REMOVE sanity check eventually
 		for (int i = 0; i < snapshot.size() - 1; i++) {
@@ -73,24 +73,24 @@ ACTOR Future<Arena> readSnapshotFile(Reference<S3BlobStoreEndpoint> bstore,
 
 		int i = 0;
 		while (i < snapshot.size() && snapshot[i].key < keyRange.begin) {
-			if (snapshot.size() < 10) { // debug
-				printf("  Pruning %s < %s\n", snapshot[i].key.printable().c_str(), keyRange.begin.printable().c_str());
-			}
+			/*if (snapshot.size() < 10) { // debug
+			    printf("  Pruning %s < %s\n", snapshot[i].key.printable().c_str(), keyRange.begin.printable().c_str());
+			}*/
 			i++;
 		}
 		while (i < snapshot.size() && snapshot[i].key < keyRange.end) {
 			dataMap->insert({ snapshot[i].key, snapshot[i].value });
-			if (snapshot.size() < 10) { // debug
-				printf("  Including %s\n", snapshot[i].key.printable().c_str());
-			}
+			/*if (snapshot.size() < 10) { // debug
+			    printf("  Including %s\n", snapshot[i].key.printable().c_str());
+			}*/
 			i++;
 		}
-		if (snapshot.size() < 10) { // debug
-			while (i < snapshot.size()) {
-				printf("  Pruning %s >= %s\n", snapshot[i].key.printable().c_str(), keyRange.end.printable().c_str());
-				i++;
-			}
-		}
+		/*if (snapshot.size() < 10) { // debug
+		    while (i < snapshot.size()) {
+		        printf("  Pruning %s >= %s\n", snapshot[i].key.printable().c_str(), keyRange.end.printable().c_str());
+		        i++;
+		    }
+		}*/
 		printf("Started with %d rows from snapshot file %s after pruning to [%s - %s)\n",
 		       dataMap->size(),
 		       filename.c_str(),
@@ -110,16 +110,16 @@ ACTOR Future<Standalone<GranuleDeltas>> readDeltaFile(Reference<S3BlobStoreEndpo
                                                       KeyRangeRef keyRange,
                                                       Version readVersion) {
 	try {
-		printf("Starting read of delta file %s\n", filename.c_str());
+		// printf("Starting read of delta file %s\n", filename.c_str());
 		state Standalone<GranuleDeltas> result;
 		state Reference<AsyncFileS3BlobStoreRead> reader =
 		    makeReference<AsyncFileS3BlobStoreRead>(bstore, bucket, filename);
 		state int64_t size = wait(reader->size());
-		printf("Got delta file size %lld\n", size);
+		// printf("Got delta file size %lld\n", size);
 		state uint8_t* data = new (result.arena()) uint8_t[size];
-		printf("Reading %lld bytes from delta file %s into %p\n", size, filename.c_str(), data);
+		// printf("Reading %lld bytes from delta file %s into %p\n", size, filename.c_str(), data);
 		int readSize = wait(reader->read(data, size, 0));
-		printf("Read %d bytes from delta file %s\n", readSize, filename.c_str());
+		// printf("Read %d bytes from delta file %s\n", readSize, filename.c_str());
 		ASSERT(size == readSize);
 
 		// Don't do range or version filtering in here since we'd have to copy/rewrite the deltas and it might starve
@@ -310,15 +310,15 @@ ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
 	try {
 		state int i;
 		for (i = 0; i < reply.chunks.size(); i++) {
-			printf("ReadBlobGranules processing chunk %d [%s - %s)\n",
+			/*printf("ReadBlobGranules processing chunk %d [%s - %s)\n",
 			       i,
 			       reply.chunks[i].keyRange.begin.printable().c_str(),
-			       reply.chunks[i].keyRange.end.printable().c_str());
+			       reply.chunks[i].keyRange.end.printable().c_str());*/
 			RangeResult chunkResult =
 			    wait(readBlobGranule(reply.chunks[i], request.keyRange, request.readVersion, bstore, bucket));
 			results.send(std::move(chunkResult));
 		}
-		printf("ReadBlobGranules done, sending EOS\n");
+		// printf("ReadBlobGranules done, sending EOS\n");
 		results.sendError(end_of_stream());
 	} catch (Error& e) {
 		printf("ReadBlobGranules got error %s\n", e.name());

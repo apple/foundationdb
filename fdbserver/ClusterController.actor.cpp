@@ -3096,16 +3096,17 @@ public:
 ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, RatekeeperInterface interf) {
 	state std::string bucket = SERVER_KNOBS->BG_BUCKET;
 	state Reference<S3BlobStoreEndpoint> bstore;
+	state bool doTimeTravel = false;
 
 	// TODO CHANGE BACK
 	// wait(delay(10.0));
 	wait(delay(70.0));
 
-	printf("Initializing CC s3 stuff\n");
+	// printf("Initializing CC s3 stuff\n");
 	try {
-		printf("constructing s3blobstoreendpoint from %s\n", SERVER_KNOBS->BG_URL.c_str());
+		// printf("constructing s3blobstoreendpoint from %s\n", SERVER_KNOBS->BG_URL.c_str());
 		bstore = S3BlobStoreEndpoint::fromString(SERVER_KNOBS->BG_URL);
-		printf("checking if bucket %s exists\n", bucket.c_str());
+		// printf("checking if bucket %s exists\n", bucket.c_str());
 		bool bExists = wait(bstore->bucketExists(bucket));
 		if (!bExists) {
 			printf("Bucket %s does not exist!\n", bucket.c_str());
@@ -3125,11 +3126,19 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 			// state KeyRange keyRange = KeyRange(KeyRangeRef(LiteralStringRef("\x01"), LiteralStringRef("\x02")));
 			// state KeyRange keyRange = KeyRange(KeyRangeRef());
 			state Version v = wait(tr->getReadVersion());
-			if (deterministicRandom()->random01() < 0.3) {
-				v -= 5000000;
-			} else if (deterministicRandom()->random01() < 0.3) {
-				v -= 30000000;
+
+			if (doTimeTravel == 1) {
+				printf("Doing time travel read\n");
+				v -= 60000000;
+			} else if (doTimeTravel) {
+				printf("Doing live read\n");
 			}
+			doTimeTravel = !doTimeTravel;
+			/*if (deterministicRandom()->random01() < 0.3) {
+			    v -= 5000000;
+			} else if (deterministicRandom()->random01() < 0.3) {
+			    v -= 30000000;
+			}*/
 
 			// right now just read whole blob range
 
@@ -3144,14 +3153,14 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 
 			printf("Doing blob granule request @ %lld\n", v);
 
-			printf("blob worker assignments:\n");
+			// printf("blob worker assignments:\n");
 			for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
 				state Key granuleStartKey = blobGranuleMapping[i].key;
 				state Key granuleEndKey = blobGranuleMapping[i + 1].key;
 				if (!blobGranuleMapping[i].value.size()) {
-					printf("Key range [%s - %s) missing worker assignment!\n",
+					/*printf("Key range [%s - %s) missing worker assignment!\n",
 					       granuleStartKey.printable().c_str(),
-					       granuleEndKey.printable().c_str());
+					       granuleEndKey.printable().c_str());*/
 					// TODO probably new exception type instead
 					// TODO ADD BACK
 					// throw transaction_too_old();
@@ -3177,7 +3186,7 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 					Optional<Value> workerInterface = wait(tr->get(blobWorkerListKeyFor(workerId)));
 					ASSERT(workerInterface.present());
 					workerInterfaceCache[workerId] = decodeBlobWorkerListValue(workerInterface.get());
-					printf("    decoded worker interface for %s\n", workerId.toString().c_str());
+					// printf("    decoded worker interface for %s\n", workerId.toString().c_str());
 				}
 
 				state BlobGranuleFileRequest req;
@@ -3216,7 +3225,7 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 				state Future<Void> granuleReader = readBlobGranules(req, rep, bstore, bucket, results);
 				try {
 					loop {
-						printf("Waiting for result chunk\n");
+						// printf("Waiting for result chunk\n");
 						RangeResult result = waitNext(results.getFuture());
 						printf("Result chunk (%d):\n", result.size());
 						int resultIdx = 0;
@@ -3235,7 +3244,8 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 					if (e.code() != error_code_end_of_stream) {
 						printf("granule reader got unexpected error %s\n", e.name());
 					} else {
-						printf("granule reader got end of stream\n");
+						// printf("granule reader got end of stream\n");
+						printf("\n");
 					}
 				}
 			}

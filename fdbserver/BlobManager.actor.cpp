@@ -31,33 +31,11 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            KeyRef rangeStart,
                            KeyRef rangeEnd,
                            bool rangeActive) {
-	printf("db range [%s - %s): %s\n",
+	/*printf("db range [%s - %s): %s\n",
 	       rangeStart.printable().c_str(),
 	       rangeEnd.printable().c_str(),
-	       rangeActive ? "T" : "F");
+	       rangeActive ? "T" : "F");*/
 	KeyRange keyRange(KeyRangeRef(rangeStart, rangeEnd));
-	/*auto ranges = knownBlobRanges->getAffectedRangesAfterInsertion(keyRange, rangeActive);
-	for (int i = 0; i < ranges.size(); i++) {
-	    if (ranges[i].value != rangeActive || ranges[i].begin == rangeStart && ranges[i].end == rangeEnd) {
-	        if (rangeActive) {
-	            printf("BM Adding client range [%s - %s)\n",
-	                   ranges[i].begin.printable().c_str(),
-	                   ranges[i].end.printable().c_str());
-	            rangesToAdd->push_back_deep(ar, KeyRangeRef(ranges[i].begin, ranges[i].end));
-	        } else {
-	            printf("BM Removing client range [%s - %s)\n",
-	                   ranges[i].begin.printable().c_str(),
-	                   ranges[i].end.printable().c_str());
-	            rangesToRemove->push_back_deep(ar, KeyRangeRef(ranges[i].begin, ranges[i].end));
-	        }
-	    } else {
-	        printf("BM range [%s - %s) has same value\n",
-	               ranges[i].begin.printable().c_str(),
-	               ranges[i].end.printable().c_str());
-	    }
-	}
-
-	*/
 	auto allRanges = knownBlobRanges->intersectingRanges(keyRange);
 	for (auto& r : allRanges) {
 		if (r.value() != rangeActive) {
@@ -65,14 +43,14 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
 			KeyRef overlapEnd = (keyRange.end < r.end()) ? keyRange.end : r.end();
 			KeyRangeRef overlap(overlapStart, overlapEnd);
 			if (rangeActive) {
-				printf("BM Adding client range [%s - %s)\n",
+				/*printf("BM Adding client range [%s - %s)\n",
 				       overlapStart.printable().c_str(),
-				       overlapEnd.printable().c_str());
+				       overlapEnd.printable().c_str());*/
 				rangesToAdd->push_back_deep(ar, overlap);
 			} else {
-				printf("BM Removing client range [%s - %s)\n",
+				/*printf("BM Removing client range [%s - %s)\n",
 				       overlapStart.printable().c_str(),
-				       overlapEnd.printable().c_str());
+				       overlapEnd.printable().c_str());*/
 				rangesToRemove->push_back_deep(ar, overlap);
 			}
 		}
@@ -89,11 +67,11 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
                             Arena ar,
                             VectorRef<KeyRangeRef>* rangesToAdd,
                             VectorRef<KeyRangeRef>* rangesToRemove) {
-	printf("Updating %d client blob ranges", dbBlobRanges.size() / 2);
+	/*printf("Updating %d client blob ranges", dbBlobRanges.size() / 2);
 	for (int i = 0; i < dbBlobRanges.size() - 1; i += 2) {
-		printf(" [%s - %s)", dbBlobRanges[i].key.printable().c_str(), dbBlobRanges[i + 1].key.printable().c_str());
+	    printf(" [%s - %s)", dbBlobRanges[i].key.printable().c_str(), dbBlobRanges[i + 1].key.printable().c_str());
 	}
-	printf("\n");
+	printf("\n");*/
 	// essentially do merge diff of current known blob ranges and new ranges, to assign new ranges to
 	// workers and revoke old ranges from workers
 
