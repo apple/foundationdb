@@ -40,6 +40,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
+#include "flow/BooleanParam.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -48,6 +49,8 @@
 class TCTeamInfo;
 struct TCMachineInfo;
 class TCMachineTeamInfo;
+
+FDB_BOOLEAN_PARAM(IsPrimary);
 
 ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self);
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self);
@@ -732,7 +735,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs,
 	                 Future<Void> readyToStart,
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams,
-	                 bool primary,
+	                 IsPrimary primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy,
 	                 PromiseStream<GetMetricsRequest> getShardMetrics,
 	                 Promise<UID> removeFailedServer,
@@ -6031,7 +6034,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 			    readyToStart.getFuture(),
 			    zeroHealthyTeams[0],
-			    true,
+			    IsPrimary::True,
 			    processingUnhealthy,
 			    getShardMetrics,
 			    removeFailedServer,
@@ -6049,7 +6052,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    Optional<std::vector<Optional<Key>>>(),
 				                                    readyToStart.getFuture() && remoteRecovered(self->dbInfo),
 				                                    zeroHealthyTeams[1],
-				                                    false,
+				                                    IsPrimary::False,
 				                                    processingUnhealthy,
 				                                    getShardMetrics,
 				                                    removeFailedServer,
@@ -6529,7 +6532,7 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                           {},
 	                                                           Future<Void>(Void()),
 	                                                           makeReference<AsyncVar<bool>>(true),
-	                                                           true,
+	                                                           IsPrimary::True,
 	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           PromiseStream<GetMetricsRequest>(),
 	                                                           Promise<UID>(),
@@ -6572,7 +6575,7 @@ std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
 	                                                           {},
 	                                                           Future<Void>(Void()),
 	                                                           makeReference<AsyncVar<bool>>(true),
-	                                                           true,
+	                                                           IsPrimary::True,
 	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           PromiseStream<GetMetricsRequest>(),
 	                                                           Promise<UID>(),
