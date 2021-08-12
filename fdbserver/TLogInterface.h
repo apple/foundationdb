@@ -83,7 +83,7 @@ struct TLogInterface {
 		streams.push_back(disablePopRequest.getReceiver());
 		streams.push_back(enablePopRequest.getReceiver());
 		streams.push_back(snapRequest.getReceiver());
-        	streams.push_back(peekStreamMessages.getReceiver(TaskPriority::TLogPeek));
+		streams.push_back(peekStreamMessages.getReceiver(TaskPriority::TLogPeek));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 
@@ -235,7 +235,7 @@ struct TLogPeekStreamRequest {
 	Arena arena;
 	Version begin;
 	Tag tag;
-    bool returnIfBlocked;
+	bool returnIfBlocked;
 	int limitBytes;
 	ReplyPromiseStream<TLogPeekStreamReply> reply;
 

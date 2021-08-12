@@ -41,7 +41,7 @@ public:
 	                                  // often, so that versions always advance smoothly
 
 	// TLogs
-	bool PEEK_USEING_STREAMING;
+	bool PEEK_USING_STREAMING;
 	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
 	double TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS; // Warns if a tlog takes too long to rejoin
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY; // smaller might be better for bug amplification

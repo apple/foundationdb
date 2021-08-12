@@ -1474,7 +1474,9 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			}
 		} catch (Error& e) {
 			self->activePeekStreams--;
-			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId).error(e, true);
+			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .error(e, true);
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);

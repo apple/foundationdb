@@ -573,7 +573,6 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	return Void();
 }
 
-// TODO: enable streaming peek log from log router
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamRequest req) {
 	self->activePeekStreams++;
@@ -600,7 +599,9 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 			}
 		} catch (Error& e) {
 			self->activePeekStreams--;
-			TraceEvent(SevDebug, "TLogPeekStreamEnd", self->dbgid).error(e, true);
+			TraceEvent(SevDebug, "TLogPeekStreamEnd", self->dbgid)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .error(e, true);
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);

@@ -38,7 +38,7 @@ ACTOR Future<Void> tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
 	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(TLogPeekStreamRequest(
 	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max()));
 	TraceEvent(SevDebug, "SPC_StreamCreated", self->randomID)
-	    .detail("PeerAddress", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress())
+	    .detail("PeerAddr", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress())
 	    .detail("PeerToken", self->interf->get().interf().peekStreamMessages.getEndpoint().token);
 	return Void();
 }
@@ -52,11 +52,11 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterf
   : interf(interf), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(begin), end(end),
     poppedVersion(0), hasMsg(false), randomID(deterministicRandom()->randomUniqueID()),
     returnIfBlocked(returnIfBlocked), onlySpilled(false), parallelGetMore(parallelGetMore),
-    usePeekStream(SERVER_KNOBS->PEEK_USEING_STREAMING), sequence(0), lastReset(0), resetCheck(Void()), slowReplies(0),
+    usePeekStream(SERVER_KNOBS->PEEK_USING_STREAMING), sequence(0), lastReset(0), resetCheck(Void()), slowReplies(0),
     fastReplies(0), unknownReplies(0) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
-	TraceEvent(SevDebug, "SPC_Starting", randomID)
+	DisabledTraceEvent(SevDebug, "SPC_Starting", randomID)
 	    .detail("Tag", tag.toString())
 	    .detail("Begin", begin)
 	    .detail("End", end);
@@ -355,7 +355,7 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 					}
 					updateCursorWithReply(self, res);
 					expectedBegin = res.end;
-					TraceEvent(SevDebug, "SPC_GetMoreB", self->randomID)
+					DisabledTraceEvent(SevDebug, "SPC_GetMoreB", self->randomID)
 					    .detail("Has", self->hasMessage())
 					    .detail("End", res.end)
 					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
@@ -367,7 +367,7 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "SPC_GetMoreB_Error").error(e, true);
+			TraceEvent(SevDebug, "SPC_GetMoreB_Error", self->randomID).error(e, true);
 			if (e.code() == error_code_connection_failed || e.code() == error_code_operation_obsolete) {
 				// NOTE: delay in order to avoid the endless retry loop block other tasks
 				self->peekReplyStream.reset();
@@ -424,7 +424,6 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		// TODO: add tagLocalityRemoteLog when log router support streaming peek
 		if (usePeekStream && (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
 			more = serverPeekStreamGetMore(this, taskID);
 		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
