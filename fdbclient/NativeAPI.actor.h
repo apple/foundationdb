@@ -68,6 +68,7 @@ struct NetworkOptions {
 	std::string traceFormat;
 	std::string traceClockSource;
 	std::string traceFileIdentifier;
+	std::string tracePartialFileSuffix;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
@@ -178,6 +179,9 @@ struct TransactionInfo {
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
+
+	// Only available so that Transaction can have a default constructor, for use in state variables
+	TransactionInfo() : taskID(), spanID(), useProvisionalProxies() {}
 
 	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
 	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}

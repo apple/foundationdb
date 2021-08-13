@@ -52,6 +52,7 @@ class ThreadSafeQueue : NonCopyable {
 	struct Node : BaseNode, FastAllocated<Node> {
 		T data;
 		Node(T const& data) : data(data) {}
+		Node(T&& data) : data(std::move(data)) {}
 	};
 	std::atomic<BaseNode*> head;
 	BaseNode* tail;
@@ -131,9 +132,9 @@ public:
 	}
 
 	// If push() returns true, the consumer may be sleeping and should be woken
-	bool push(T const& data) {
-		Node* n = new Node(data);
-		n->data = data;
+	template <class U>
+	bool push(U&& data) {
+		Node* n = new Node(std::forward<U>(data));
 		return pushNode(n) == &sleeping;
 	}
 

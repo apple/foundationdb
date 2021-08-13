@@ -33,7 +33,7 @@ class BackupContainerAzureBlobStore final : public BackupContainerFileSystem,
                                             ReferenceCounted<BackupContainerAzureBlobStore> {
 	using AzureClient = azure::storage_lite::blob_client;
 
-	std::unique_ptr<AzureClient> client;
+	std::shared_ptr<AzureClient> client;
 	std::string containerName;
 	AsyncTaskThread asyncTaskThread;
 
@@ -42,7 +42,7 @@ class BackupContainerAzureBlobStore final : public BackupContainerFileSystem,
 	friend class BackupContainerAzureBlobStoreImpl;
 
 public:
-	BackupContainerAzureBlobStore(const NetworkAddress& address,
+	BackupContainerAzureBlobStore(const std::string& endpoint,
 	                              const std::string& accountName,
 	                              const std::string& containerName,
 	                              const Optional<std::string>& encryptionKeyFileName);

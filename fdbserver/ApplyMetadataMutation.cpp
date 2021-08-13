@@ -131,8 +131,8 @@ void applyMetadataMutations(SpanID const& spanContext,
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivateMutation", dbgid)
-					    .detail("Original", m.toString())
-					    .detail("Privatized", privatized.toString())
+					    .detail("Original", m)
+					    .detail("Privatized", privatized)
 					    .detail("Server", serverKeysDecodeServer(m.param1))
 					    .detail("TagKey", serverTagKeyFor(serverKeysDecodeServer(m.param1)))
 					    .detail("Tag", tag.toString());
@@ -218,8 +218,8 @@ void applyMetadataMutations(SpanID const& spanContext,
 					    (!m.param1.startsWith(failedLocalityPrefix) && m.param1 != failedLocalityVersionKey)) {
 						auto t = txnStateStore->readValue(m.param1).get();
 						TraceEvent("MutationRequiresRestart", dbgid)
-						    .detail("M", m.toString())
-						    .detail("PrevValue", t.present() ? t.get() : LiteralStringRef("(none)"))
+						    .detail("M", m)
+						    .detail("PrevValue", t.orDefault("(none)"_sr))
 						    .detail("ToCommit", toCommit != nullptr);
 						confChange = true;
 					}
@@ -431,7 +431,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 					txnStateStore->clear(range & configKeys);
 				if (!excludedServersKeys.contains(range) && !failedServersKeys.contains(range) &&
 				    !excludedLocalityKeys.contains(range) && !failedLocalityKeys.contains(range)) {
-					TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString());
+					TraceEvent("MutationRequiresRestart", dbgid).detail("M", m);
 					confChange = true;
 				}
 			}

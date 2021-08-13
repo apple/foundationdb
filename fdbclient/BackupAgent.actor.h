@@ -717,11 +717,22 @@ protected:
 
 template <>
 inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
-	return Tuple().append(StringRef(bc->getURL()));
+	Tuple tuple;
+	tuple.append(StringRef(bc->getURL()));
+	if (bc->getEncryptionKeyFileName().present()) {
+		tuple.append(bc->getEncryptionKeyFileName().get());
+	}
+	return tuple;
 }
 template <>
 inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	return IBackupContainer::openContainer(val.getString(0).toString());
+	ASSERT(val.size() == 1 || val.size() == 2);
+	auto url = val.getString(0).toString();
+	Optional<std::string> encryptionKeyFileName;
+	if (val.size() == 2) {
+		encryptionKeyFileName = val.getString(1).toString();
+	}
+	return IBackupContainer::openContainer(url, encryptionKeyFileName);
 }
 
 class BackupConfig : public KeyBackedConfig {
