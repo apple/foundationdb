@@ -91,6 +91,7 @@ set(FLOW_SRCS
   stacktrace.h
   test_memcpy.cpp
   test_memcpy_perf.cpp
+  UringConnection.actor.cpp
   UringReactor.actor.cpp
   UringReactor.h
   version.cpp

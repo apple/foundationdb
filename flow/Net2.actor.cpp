@@ -42,6 +42,7 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/UringReactor.h"
+#include "flow/UringConnection.h"
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SendBufferIterator.h"
@@ -1949,7 +1950,7 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::s
 	}
 #endif
 
-	return Connection::connect(&this->reactor.ios, &this->ureactor, toAddr);
+	return UringConnection::connect(&this->ureactor, toAddr);
 }
 
 Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string& host) {
@@ -2045,7 +2046,7 @@ Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
 		}
 #endif
-		return Reference<IListener>(new Listener(reactor.ios, &ureactor, localAddr));
+		return Reference<IListener>(new UringListener(&ureactor, localAddr));
 	} catch (boost::system::system_error const& e) {
 		Error x;
 		if (e.code().value() == EADDRINUSE)
