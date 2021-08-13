@@ -10,15 +10,37 @@
 #include "flow/flow.h"
 
 
+struct AssertingMutex
+{
+    AssertingMutex()
+        : is_in_use(0)
+    {
+    }
+
+    void lock()
+    {
+        ASSERT(++is_in_use == 1);
+    }
+    void unlock()
+    {
+        ASSERT(--is_in_use == 0);
+    }
+
+private:
+    std::atomic<signed char> is_in_use;
+};
+
 namespace N2 {
 
 class UringReactor {
 private:
     ::io_uring ring;
     int sqeCount;
-    struct __kernel_timespec ts;
-    std::mutex submit;
-    std::mutex consume;
+    int evfd;
+    int64_t fdVal;
+    AssertingMutex submit;
+    AssertingMutex consume;
+    void rearm();
 public:
     UringReactor(unsigned entries, unsigned flags);
     int poll();
@@ -61,8 +83,6 @@ public:
 			return fd;
 		}
 	};
-
-public:
 	static IEventFD* getEventFD() { return static_cast<IEventFD*>((void*)g_network->global(INetwork::enEventFD)); }
 	static EventFD* newEventFD(UringReactor& reactor) { return new EventFD(&reactor); }
 

@@ -10,8 +10,7 @@
 
 namespace N2 {
 
-//: public FastAllocated<OwnedWrite>
-class OwnedWrite{
+class OwnedWrite: public FastAllocated<OwnedWrite>{
 public:
     struct iovec iov[64];
     struct __kernel_timespec ts;
@@ -31,7 +30,26 @@ UringReactor::UringReactor(unsigned entries, unsigned flags){
     int ret = ::io_uring_queue_init(entries, &ring, flags);
     // https://github.com/spacejam/sled/issues/899
     ASSERT(ret==0);
+    evfd = eventfd(0, EFD_CLOEXEC);
+    ASSERT(evfd>0);
+    rearm();
     sqeCount = 0;
+}
+
+void UringReactor::rearm(){
+    OwnedWrite *ow = new OwnedWrite(5, evfd);
+    //printf("add %d %d\n",ow->type,ow->fd);
+    struct iovec *iov = ow->iov;
+    iov[0].iov_base = &fdVal;
+    iov[0].iov_len = sizeof(fdVal);
+    submit.lock();
+    struct io_uring_sqe *sqe = ::io_uring_get_sqe(&ring);
+    ::io_uring_prep_readv(sqe, evfd, iov, 1, 0);
+    ::io_uring_sqe_set_data(sqe, ow);
+    //sqeCount++;
+    int ret = ::io_uring_submit(&ring);
+    submit.unlock();
+    ASSERT(ret>=0);
 }
 
 int UringReactor::poll(){
@@ -61,7 +79,6 @@ int UringReactor::poll(){
             } else if (res == -EAGAIN || res == -EWOULDBLOCK) {
                 p.send(int(0));
             } else {
-                printf("IOERR %d\n",res);
                 p.sendError(connection_failed());
             }
         } else if (ow->type == 2){
@@ -78,6 +95,8 @@ int UringReactor::poll(){
                 ow->other->seen++;
                 delete ow->other;
             }
+        } else if (ow->type == 5){
+            rearm();
         }
         ow->seen++;
         delete ow;
@@ -184,13 +203,9 @@ void UringReactor::sleep(double sleepTime){
 }
 
 void UringReactor::wake(){
-    submit.lock();
-    struct io_uring_sqe *sqe = ::io_uring_get_sqe(&ring);
-    ::io_uring_prep_nop(sqe);
-    ::io_uring_sqe_set_data(sqe, nullptr);
-    int ret = ::io_uring_submit(&ring);
-    submit.unlock();
-    ASSERT(ret>=0);
+    int64_t fdVal = 1;
+    int ret = ::write(evfd, &fdVal, sizeof(fdVal));
+    ASSERT(ret == sizeof(fdVal));
 }
 
 
