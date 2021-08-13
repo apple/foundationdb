@@ -326,8 +326,8 @@ public:
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
 
-	Future<Void> registerRangeFeed(const Key& rangeID, const KeyRange& range);
-	void destroyRangeFeed(const Key& rangeID);
+	Future<Void> registerChangeFeed(const Key& rangeID, const KeyRange& range);
+	void destroyChangeFeed(const Key& rangeID);
 
 	void enableCheckWrites();
 	void addReadConflictRange(KeyRangeRef const& keys);

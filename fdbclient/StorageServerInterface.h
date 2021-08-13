@@ -78,10 +78,10 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
-	RequestStream<struct RangeFeedRequest> rangeFeed;
-	RequestStream<struct RangeFeedStreamRequest> rangeFeedStream;
-	RequestStream<struct OverlappingRangeFeedsRequest> overlappingRangeFeeds;
-	RequestStream<struct RangeFeedPopRequest> rangeFeedPop;
+	RequestStream<struct ChangeFeedRequest> changeFeed;
+	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
+	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
+	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -124,13 +124,13 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				rangeFeed = RequestStream<struct RangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
-				rangeFeedStream =
-				    RequestStream<struct RangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
-				overlappingRangeFeeds =
-				    RequestStream<struct OverlappingRangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
-				rangeFeedPop =
-				    RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				changeFeed = RequestStream<struct ChangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				changeFeedStream =
+				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				overlappingChangeFeeds =
+				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				changeFeedPop =
+				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -173,10 +173,10 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
-		streams.push_back(rangeFeed.getReceiver());
-		streams.push_back(rangeFeedStream.getReceiver());
-		streams.push_back(overlappingRangeFeeds.getReceiver());
-		streams.push_back(rangeFeedPop.getReceiver());
+		streams.push_back(changeFeed.getReceiver());
+		streams.push_back(changeFeedStream.getReceiver());
+		streams.push_back(overlappingChangeFeeds.getReceiver());
+		streams.push_back(changeFeedPop.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -645,34 +645,40 @@ struct MutationsAndVersionRef {
 	  : mutations(to, from.mutations), version(from.version) {}
 	int expectedSize() const { return mutations.expectedSize(); }
 
+	struct OrderByVersion {
+		bool operator()(MutationsAndVersionRef const& a, MutationsAndVersionRef const& b) const {
+			return a.version < b.version;
+		}
+	};
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, mutations, version);
 	}
 };
 
-struct RangeFeedReply {
+struct ChangeFeedReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
 	VectorRef<MutationsAndVersionRef> mutations;
 	bool cached;
 	Arena arena;
 
-	RangeFeedReply() : cached(false) {}
+	ChangeFeedReply() : cached(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, mutations, arena);
 	}
 };
-struct RangeFeedRequest {
+struct ChangeFeedRequest {
 	constexpr static FileIdentifier file_identifier = 10726174;
 	Key rangeID;
 	Version begin = 0;
 	Version end = 0;
-	ReplyPromise<RangeFeedReply> reply;
+	ReplyPromise<ChangeFeedReply> reply;
 
-	RangeFeedRequest() {}
-	explicit RangeFeedRequest(Key const& rangeID) : rangeID(rangeID) {}
+	ChangeFeedRequest() {}
+	explicit ChangeFeedRequest(Key const& rangeID) : rangeID(rangeID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -680,15 +686,15 @@ struct RangeFeedRequest {
 	}
 };
 
-struct RangeFeedStreamReply : public ReplyPromiseStreamReply {
+struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 1783066;
 	Arena arena;
 	VectorRef<MutationsAndVersionRef> mutations;
 
-	RangeFeedStreamReply() {}
-	RangeFeedStreamReply(RangeFeedReply r) : arena(r.arena), mutations(r.mutations) {}
+	ChangeFeedStreamReply() {}
+	ChangeFeedStreamReply(ChangeFeedReply r) : arena(r.arena), mutations(r.mutations) {}
 
-	int expectedSize() const { return sizeof(RangeFeedStreamReply) + mutations.expectedSize(); }
+	int expectedSize() const { return sizeof(ChangeFeedStreamReply) + mutations.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -696,30 +702,30 @@ struct RangeFeedStreamReply : public ReplyPromiseStreamReply {
 	}
 };
 
-struct RangeFeedStreamRequest {
+struct ChangeFeedStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
 	Key rangeID;
 	Version begin = 0;
 	Version end = 0;
-	ReplyPromiseStream<RangeFeedStreamReply> reply;
+	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
-	RangeFeedStreamRequest() {}
+	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, rangeID, begin, end, reply, spanContext, arena);
 	}
 };
 
-struct RangeFeedPopRequest {
+struct ChangeFeedPopRequest {
 	constexpr static FileIdentifier file_identifier = 10726174;
 	Key rangeID;
 	Version version;
 	ReplyPromise<Void> reply;
 
-	RangeFeedPopRequest() {}
-	RangeFeedPopRequest(Key const& rangeID, Version version) : rangeID(rangeID), version(version) {}
+	ChangeFeedPopRequest() {}
+	ChangeFeedPopRequest(Key const& rangeID, Version version) : rangeID(rangeID), version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -727,14 +733,14 @@ struct RangeFeedPopRequest {
 	}
 };
 
-struct OverlappingRangeFeedsReply {
+struct OverlappingChangeFeedsReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
 	std::vector<std::pair<Key, KeyRange>> rangeIds;
 	bool cached;
 	Arena arena;
 
-	OverlappingRangeFeedsReply() : cached(false) {}
-	explicit OverlappingRangeFeedsReply(std::vector<std::pair<Key, KeyRange>> const& rangeIds)
+	OverlappingChangeFeedsReply() : cached(false) {}
+	explicit OverlappingChangeFeedsReply(std::vector<std::pair<Key, KeyRange>> const& rangeIds)
 	  : rangeIds(rangeIds), cached(false) {}
 
 	template <class Ar>
@@ -742,13 +748,13 @@ struct OverlappingRangeFeedsReply {
 		serializer(ar, rangeIds, arena);
 	}
 };
-struct OverlappingRangeFeedsRequest {
+struct OverlappingChangeFeedsRequest {
 	constexpr static FileIdentifier file_identifier = 10726174;
 	KeyRange range;
-	ReplyPromise<OverlappingRangeFeedsReply> reply;
+	ReplyPromise<OverlappingChangeFeedsReply> reply;
 
-	OverlappingRangeFeedsRequest() {}
-	explicit OverlappingRangeFeedsRequest(KeyRange const& range) : range(range) {}
+	OverlappingChangeFeedsRequest() {}
+	explicit OverlappingChangeFeedsRequest(KeyRange const& range) : range(range) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

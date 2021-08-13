@@ -658,8 +658,8 @@ void initHelp() {
 	    CommandHelp("triggerddteaminfolog",
 	                "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
-	helpMap["rangefeed"] =
-	    CommandHelp("rangefeed <register|destroy|get|stream|pop|list> <RANGEID> <BEGIN> <END>", "", "");
+	helpMap["changefeed"] =
+	    CommandHelp("changefeed <register|destroy|get|stream|pop|list> <RANGEID> <BEGIN> <END>", "", "");
 	helpMap["tssq"] =
 	    CommandHelp("tssq start|stop <StorageUID>",
 	                "start/stop tss quarantine",
@@ -1971,21 +1971,21 @@ ACTOR Future<Void> commitTransaction(Reference<ReadYourWritesTransaction> tr) {
 	return Void();
 }
 
-ACTOR Future<Void> rangeFeedList(Database db) {
+ACTOR Future<Void> changeFeedList(Database db) {
 	state ReadYourWritesTransaction tr(db);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			RangeResult result = wait(tr.getRange(rangeFeedKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult result = wait(tr.getRange(changeFeedKeys, CLIENT_KNOBS->TOO_MANY));
 			// shouldn't have many quarantined TSSes
 			ASSERT(!result.more);
 			printf("Found %d range feeds%s\n", result.size(), result.size() == 0 ? "." : ":");
 			for (auto& it : result) {
-				auto range = decodeRangeFeedValue(it.value);
+				auto range = decodeChangeFeedValue(it.value);
 				printf("  %s: %s - %s\n",
-				       it.key.removePrefix(rangeFeedPrefix).toString().c_str(),
+				       it.key.removePrefix(changeFeedPrefix).toString().c_str(),
 				       range.begin.toString().c_str(),
 				       range.end.toString().c_str());
 			}
@@ -3532,7 +3532,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "rangefeed")) {
+				if (tokencmp(tokens[0], "changefeed")) {
 					if (tokens.size() == 1) {
 						printUsage(tokens[0]);
 						is_error = true;
@@ -3544,7 +3544,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
-						wait(rangeFeedList(db));
+						wait(changeFeedList(db));
 						continue;
 					} else if (tokencmp(tokens[1], "register")) {
 						if (tokens.size() != 5) {
@@ -3555,7 +3555,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						trx = Transaction(db);
 						loop {
 							try {
-								wait(trx.registerRangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
+								wait(trx.registerChangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
 								wait(trx.commit());
 								break;
 							} catch (Error& e) {
@@ -3571,7 +3571,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						trx = Transaction(db);
 						loop {
 							try {
-								trx.destroyRangeFeed(tokens[2]);
+								trx.destroyChangeFeed(tokens[2]);
 								wait(trx.commit());
 								break;
 							} catch (Error& e) {
@@ -3604,7 +3604,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						}
 						Standalone<VectorRef<MutationsAndVersionRef>> res =
-						    wait(db->getRangeFeedMutations(tokens[2], begin, end));
+						    wait(db->getChangeFeedMutations(tokens[2], begin, end));
 						printf("\n");
 						for (auto& it : res) {
 							for (auto& it2 : it.mutations) {
@@ -3640,7 +3640,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							warn.cancel();
 						}
 						state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> feedResults;
-						state Future<Void> feed = db->getRangeFeedStream(feedResults, tokens[2], begin, end);
+						state Future<Void> feed = db->getChangeFeedStream(feedResults, tokens[2], begin, end);
 						printf("\n");
 						try {
 							state Future<Void> feedInterrupt = LineNoise::onKeyboardInterrupt();
@@ -3681,7 +3681,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printUsage(tokens[0]);
 							is_error = true;
 						} else {
-							wait(db->popRangeFeedMutations(tokens[2], v));
+							wait(db->popChangeFeedMutations(tokens[2], v));
 						}
 					}
 					continue;

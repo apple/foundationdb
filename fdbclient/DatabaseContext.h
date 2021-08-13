@@ -252,20 +252,20 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutations(
+	Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutations(
 	    StringRef rangeID,
 	    Version begin = 0,
 	    Version end = std::numeric_limits<Version>::max(),
 	    KeyRange range = allKeys);
 
-	Future<Void> getRangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
-	                                StringRef rangeID,
-	                                Version begin = 0,
-	                                Version end = std::numeric_limits<Version>::max(),
-	                                KeyRange range = allKeys);
+	Future<Void> getChangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
+	                                 StringRef rangeID,
+	                                 Version begin = 0,
+	                                 Version end = std::numeric_limits<Version>::max(),
+	                                 KeyRange range = allKeys);
 
-	Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingRangeFeeds(KeyRangeRef ranges, Version minVersion);
-	Future<Void> popRangeFeedMutations(StringRef rangeID, Version version);
+	Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<Void> popChangeFeedMutations(StringRef rangeID, Version version);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,

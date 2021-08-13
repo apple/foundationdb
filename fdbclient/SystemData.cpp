@@ -1030,46 +1030,46 @@ const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
 
-const KeyRangeRef rangeFeedKeys(LiteralStringRef("\xff\x02/feed/"), LiteralStringRef("\xff\x02/feed0"));
-const KeyRef rangeFeedPrefix = rangeFeedKeys.begin;
-const KeyRef rangeFeedPrivatePrefix = LiteralStringRef("\xff\xff\x02/feed/");
+const KeyRangeRef changeFeedKeys(LiteralStringRef("\xff\x02/feed/"), LiteralStringRef("\xff\x02/feed0"));
+const KeyRef changeFeedPrefix = changeFeedKeys.begin;
+const KeyRef changeFeedPrivatePrefix = LiteralStringRef("\xff\xff\x02/feed/");
 
-const Value rangeFeedValue(KeyRangeRef const& range) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
+const Value changeFeedValue(KeyRangeRef const& range) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
 	wr << range;
 	return wr.toValue();
 }
-KeyRange decodeRangeFeedValue(ValueRef const& value) {
+KeyRange decodeChangeFeedValue(ValueRef const& value) {
 	KeyRange range;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> range;
 	return range;
 }
 
-const KeyRangeRef rangeFeedDurableKeys(LiteralStringRef("\xff\xff/rf/"), LiteralStringRef("\xff\xff/rf0"));
-const KeyRef rangeFeedDurablePrefix = rangeFeedDurableKeys.begin;
+const KeyRangeRef changeFeedDurableKeys(LiteralStringRef("\xff\xff/rf/"), LiteralStringRef("\xff\xff/rf0"));
+const KeyRef changeFeedDurablePrefix = changeFeedDurableKeys.begin;
 
-const Value rangeFeedDurableKey(Key const& feed, Version const& version) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withRangeFeed()));
-	wr.serializeBytes(rangeFeedDurablePrefix);
+const Value changeFeedDurableKey(Key const& feed, Version const& version) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
+	wr.serializeBytes(changeFeedDurablePrefix);
 	wr << feed;
 	wr << bigEndian64(version);
 	return wr.toValue();
 }
-std::pair<Key, Version> decodeRangeFeedDurableKey(ValueRef const& key) {
+std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key) {
 	Key feed;
 	Version version;
-	BinaryReader reader(key.removePrefix(rangeFeedDurablePrefix), AssumeVersion(ProtocolVersion::withRangeFeed()));
+	BinaryReader reader(key.removePrefix(changeFeedDurablePrefix), AssumeVersion(ProtocolVersion::withChangeFeed()));
 	reader >> feed;
 	reader >> version;
 	return std::make_pair(feed, bigEndian64(version));
 }
-const Value rangeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
+const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
 	wr << mutations;
 	return wr.toValue();
 }
-Standalone<VectorRef<MutationRef>> decodeRangeFeedDurableValue(ValueRef const& value) {
+Standalone<VectorRef<MutationRef>> decodeChangeFeedDurableValue(ValueRef const& value) {
 	Standalone<VectorRef<MutationRef>> mutations;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> mutations;

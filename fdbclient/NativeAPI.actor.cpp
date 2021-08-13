@@ -4315,23 +4315,23 @@ Future<Standalone<VectorRef<const char*>>> Transaction::getAddressesForKey(const
 	return getAddressesForKeyActor(key, ver, cx, info, options);
 }
 
-ACTOR Future<Void> registerRangeFeedActor(Transaction* tr, Key rangeID, KeyRange range) {
-	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
+ACTOR Future<Void> registerChangeFeedActor(Transaction* tr, Key rangeID, KeyRange range) {
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	Optional<Value> val = wait(tr->get(rangeIDKey));
 	if (!val.present()) {
-		tr->set(rangeIDKey, rangeFeedValue(range));
-	} else if (decodeRangeFeedValue(val.get()) != range) {
+		tr->set(rangeIDKey, changeFeedValue(range));
+	} else if (decodeChangeFeedValue(val.get()) != range) {
 		throw unsupported_operation();
 	}
 	return Void();
 }
 
-Future<Void> Transaction::registerRangeFeed(const Key& rangeID, const KeyRange& range) {
-	return registerRangeFeedActor(this, rangeID, range);
+Future<Void> Transaction::registerChangeFeed(const Key& rangeID, const KeyRange& range) {
+	return registerChangeFeedActor(this, rangeID, range);
 }
 
-void Transaction::destroyRangeFeed(const Key& rangeID) {
-	clear(rangeID.withPrefix(rangeFeedPrefix));
+void Transaction::destroyChangeFeed(const Key& rangeID) {
+	clear(rangeID.withPrefix(changeFeedPrefix));
 }
 
 ACTOR Future<Key> getKeyAndConflictRange(Database cx,
@@ -6531,64 +6531,64 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutationsActor(Reference<DatabaseContext> db,
-                                                                                       StringRef rangeID,
-                                                                                       Version begin,
-                                                                                       Version end,
-                                                                                       KeyRange range) {
+ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutationsActor(Reference<DatabaseContext> db,
+                                                                                        StringRef rangeID,
+                                                                                        Version begin,
+                                                                                        Version end,
+                                                                                        KeyRange range) {
 	state Database cx(db);
 	state Transaction tr(cx);
-	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
-	state Span span("NAPI:GetRangeFeedMutations"_loc);
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+	state Span span("NAPI:GetChangeFeedMutations"_loc);
 	Optional<Value> val = wait(tr.get(rangeIDKey));
 	if (!val.present()) {
 		throw unsupported_operation();
 	}
-	KeyRange keys = decodeRangeFeedValue(val.get());
+	KeyRange keys = decodeChangeFeedValue(val.get());
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
 	                              100,
 	                              Reverse::False,
-	                              &StorageServerInterface::rangeFeed,
+	                              &StorageServerInterface::changeFeed,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
 	if (locations.size() > 1) {
 		throw unsupported_operation();
 	}
 
-	state RangeFeedRequest req;
+	state ChangeFeedRequest req;
 	req.rangeID = rangeID;
 	req.begin = begin;
 	req.end = end;
 
-	RangeFeedReply rep = wait(loadBalance(cx.getPtr(),
-	                                      locations[0].second,
-	                                      &StorageServerInterface::rangeFeed,
-	                                      req,
-	                                      TaskPriority::DefaultPromiseEndpoint,
-	                                      AtMostOnce::False,
-	                                      cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
+	ChangeFeedReply rep = wait(loadBalance(cx.getPtr(),
+	                                       locations[0].second,
+	                                       &StorageServerInterface::changeFeed,
+	                                       req,
+	                                       TaskPriority::DefaultPromiseEndpoint,
+	                                       AtMostOnce::False,
+	                                       cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 	return Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena);
 }
 
-Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getRangeFeedMutations(StringRef rangeID,
-                                                                                             Version begin,
-                                                                                             Version end,
-                                                                                             KeyRange range) {
-	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, begin, end, range);
+Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getChangeFeedMutations(StringRef rangeID,
+                                                                                              Version begin,
+                                                                                              Version end,
+                                                                                              KeyRange range) {
+	return getChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, begin, end, range);
 }
 
-ACTOR Future<Void> getRangeFeedStreamActor(Reference<DatabaseContext> db,
-                                           PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
-                                           StringRef rangeID,
-                                           Version begin,
-                                           Version end,
-                                           KeyRange range) {
+ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
+                                            PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
+                                            StringRef rangeID,
+                                            Version begin,
+                                            Version end,
+                                            KeyRange range) {
 	state Database cx(db);
 	state Transaction tr(cx);
-	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
-	state Span span("NAPI:GetRangeFeedStream"_loc);
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+	state Span span("NAPI:GetChangeFeedStream"_loc);
 	state KeyRange keys;
 	loop {
 		try {
@@ -6597,7 +6597,7 @@ ACTOR Future<Void> getRangeFeedStreamActor(Reference<DatabaseContext> db,
 				results.sendError(unsupported_operation());
 				return Void();
 			}
-			keys = decodeRangeFeedValue(val.get());
+			keys = decodeChangeFeedValue(val.get());
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -6611,7 +6611,7 @@ ACTOR Future<Void> getRangeFeedStreamActor(Reference<DatabaseContext> db,
 			                              keys,
 			                              100,
 			                              Reverse::False,
-			                              &StorageServerInterface::rangeFeed,
+			                              &StorageServerInterface::changeFeed,
 			                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
 			if (locations.size() > 1) {
@@ -6628,7 +6628,7 @@ ACTOR Future<Void> getRangeFeedStreamActor(Reference<DatabaseContext> db,
 				for (int i = 0; i < locations[0].second->size(); i++) {
 					if (!IFailureMonitor::failureMonitor()
 					         .getState(
-					             locations[0].second->get(i, &StorageServerInterface::rangeFeedStream).getEndpoint())
+					             locations[0].second->get(i, &StorageServerInterface::changeFeedStream).getEndpoint())
 					         .failed) {
 						if (deterministicRandom()->random01() <= 1.0 / ++count) {
 							useIdx = i;
@@ -6643,7 +6643,7 @@ ACTOR Future<Void> getRangeFeedStreamActor(Reference<DatabaseContext> db,
 				vector<Future<Void>> ok(locations[0].second->size());
 				for (int i = 0; i < ok.size(); i++) {
 					ok[i] = IFailureMonitor::failureMonitor().onStateEqual(
-					    locations[0].second->get(i, &StorageServerInterface::rangeFeedStream).getEndpoint(),
+					    locations[0].second->get(i, &StorageServerInterface::changeFeedStream).getEndpoint(),
 					    FailureStatus(false));
 				}
 
@@ -6656,19 +6656,19 @@ ACTOR Future<Void> getRangeFeedStreamActor(Reference<DatabaseContext> db,
 				wait(allAlternativesFailedDelay(quorum(ok, 1)));
 			}
 
-			state RangeFeedStreamRequest req;
+			state ChangeFeedStreamRequest req;
 			req.rangeID = rangeID;
 			req.begin = begin;
 			req.end = end;
 
-			state ReplyPromiseStream<RangeFeedStreamReply> replyStream =
-			    locations[0].second->get(useIdx, &StorageServerInterface::rangeFeedStream).getReplyStream(req);
+			state ReplyPromiseStream<ChangeFeedStreamReply> replyStream =
+			    locations[0].second->get(useIdx, &StorageServerInterface::changeFeedStream).getReplyStream(req);
 
 			loop {
 				wait(results.onEmpty());
 				choose {
 					when(wait(cx->connectionFileChanged())) { break; }
-					when(RangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
+					when(ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
 						begin = rep.mutations.back().version + 1;
 						results.send(Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
 					}
@@ -6690,67 +6690,67 @@ ACTOR Future<Void> getRangeFeedStreamActor(Reference<DatabaseContext> db,
 	}
 }
 
-Future<Void> DatabaseContext::getRangeFeedStream(
+Future<Void> DatabaseContext::getChangeFeedStream(
     const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
     StringRef rangeID,
     Version begin,
     Version end,
     KeyRange range) {
-	return getRangeFeedStreamActor(Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range);
+	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range);
 }
 
-ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingRangeFeedsActor(Reference<DatabaseContext> db,
-                                                                                  KeyRangeRef range,
-                                                                                  Version minVersion) {
+ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsActor(Reference<DatabaseContext> db,
+                                                                                   KeyRangeRef range,
+                                                                                   Version minVersion) {
 	state Database cx(db);
 	state Transaction tr(cx);
-	state Span span("NAPI:GetOverlappingRangeFeeds"_loc);
+	state Span span("NAPI:GetOverlappingChangeFeeds"_loc);
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              range,
 	                              100,
 	                              Reverse::False,
-	                              &StorageServerInterface::rangeFeed,
+	                              &StorageServerInterface::changeFeed,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
 	if (locations.size() > 1) {
 		throw unsupported_operation();
 	}
 
-	state OverlappingRangeFeedsRequest req;
+	state OverlappingChangeFeedsRequest req;
 	req.range = range;
 
-	OverlappingRangeFeedsReply rep = wait(loadBalance(cx.getPtr(),
-	                                                  locations[0].second,
-	                                                  &StorageServerInterface::overlappingRangeFeeds,
-	                                                  req,
-	                                                  TaskPriority::DefaultPromiseEndpoint,
-	                                                  AtMostOnce::False,
-	                                                  cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
+	OverlappingChangeFeedsReply rep = wait(loadBalance(cx.getPtr(),
+	                                                   locations[0].second,
+	                                                   &StorageServerInterface::overlappingChangeFeeds,
+	                                                   req,
+	                                                   TaskPriority::DefaultPromiseEndpoint,
+	                                                   AtMostOnce::False,
+	                                                   cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 	return rep.rangeIds;
 }
 
-Future<std::vector<std::pair<Key, KeyRange>>> DatabaseContext::getOverlappingRangeFeeds(KeyRangeRef range,
-                                                                                        Version minVersion) {
-	return getOverlappingRangeFeedsActor(Reference<DatabaseContext>::addRef(this), range, minVersion);
+Future<std::vector<std::pair<Key, KeyRange>>> DatabaseContext::getOverlappingChangeFeeds(KeyRangeRef range,
+                                                                                         Version minVersion) {
+	return getOverlappingChangeFeedsActor(Reference<DatabaseContext>::addRef(this), range, minVersion);
 }
 
-ACTOR Future<Void> popRangeFeedMutationsActor(Reference<DatabaseContext> db, StringRef rangeID, Version version) {
+ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, StringRef rangeID, Version version) {
 	state Database cx(db);
 	state Transaction tr(cx);
-	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
-	state Span span("NAPI:PopRangeFeedMutations"_loc);
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+	state Span span("NAPI:PopChangeFeedMutations"_loc);
 	Optional<Value> val = wait(tr.get(rangeIDKey));
 	if (!val.present()) {
 		throw unsupported_operation();
 	}
-	KeyRange keys = decodeRangeFeedValue(val.get());
+	KeyRange keys = decodeChangeFeedValue(val.get());
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
 	                              100,
 	                              Reverse::False,
-	                              &StorageServerInterface::rangeFeed,
+	                              &StorageServerInterface::changeFeed,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
 	if (locations.size() > 1) {
@@ -6761,14 +6761,14 @@ ACTOR Future<Void> popRangeFeedMutationsActor(Reference<DatabaseContext> db, Str
 	state std::vector<Future<Void>> popRequests;
 	for (int i = 0; i < locations[0].second->size(); i++) {
 		popRequests.push_back(
-		    locations[0].second->getInterface(i).rangeFeedPop.getReply(RangeFeedPopRequest(rangeID, version)));
+		    locations[0].second->getInterface(i).changeFeedPop.getReply(ChangeFeedPopRequest(rangeID, version)));
 	}
 	wait(waitForAll(popRequests));
 	return Void();
 }
 
-Future<Void> DatabaseContext::popRangeFeedMutations(StringRef rangeID, Version version) {
-	return popRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
+Future<Void> DatabaseContext::popChangeFeedMutations(StringRef rangeID, Version version) {
+	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
 }
 ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
 	state ReadYourWritesTransaction tr(cx);

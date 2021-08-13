@@ -408,9 +408,9 @@ void applyMetadataMutations(SpanID const& spanContext,
 				if (!initialCommit)
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
-			} else if (m.param1.startsWith(rangeFeedPrefix)) {
+			} else if (m.param1.startsWith(changeFeedPrefix)) {
 				if (toCommit && keyInfo) {
-					KeyRange r = decodeRangeFeedValue(m.param2);
+					KeyRange r = decodeChangeFeedValue(m.param2);
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					auto ranges = keyInfo->intersectingRanges(r);
@@ -418,7 +418,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 					++firstRange;
 					if (firstRange == ranges.end()) {
 						ranges.begin().value().populateTags();
-						TraceEvent("RangeFeedTags1").detail("Tags", describe(ranges.begin().value().tags));
+						TraceEvent("ChangeFeedTags1").detail("Tags", describe(ranges.begin().value().tags));
 						toCommit->addTags(ranges.begin().value().tags);
 					} else {
 						std::set<Tag> allSources;
@@ -426,7 +426,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 							r.value().populateTags();
 							allSources.insert(r.value().tags.begin(), r.value().tags.end());
 						}
-						TraceEvent("RangeFeedTags2").detail("Tags", describe(allSources));
+						TraceEvent("ChangeFeedTags2").detail("Tags", describe(allSources));
 						toCommit->addTags(allSources);
 					}
 					toCommit->writeTypedMessage(privatized);

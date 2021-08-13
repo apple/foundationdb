@@ -94,7 +94,7 @@ struct AddingShard : NonCopyable {
 	Future<Void> fetchClient; // holds FetchKeys() actor
 	Promise<Void> fetchComplete;
 	Promise<Void> readWrite;
-	PromiseStream<Key> rangeFeedRemovals;
+	PromiseStream<Key> changeFeedRemovals;
 
 	// During the Fetching phase, it saves newer mutations whose version is greater or equal to fetchClient's
 	// fetchVersion, while the shard is still busy catching up with fetchClient. It applies these updates after fetching
@@ -310,7 +310,7 @@ struct FetchInjectionInfo {
 	vector<VerUpdateRef> changes;
 };
 
-struct RangeFeedInfo : ReferenceCounted<RangeFeedInfo> {
+struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	std::deque<Standalone<MutationsAndVersionRef>> mutations;
 	Version storageVersion = invalidVersion;
 	Version durableVersion = invalidVersion;
@@ -584,11 +584,11 @@ public:
 
 	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
 
-	KeyRangeMap<std::vector<Reference<RangeFeedInfo>>> keyRangeFeed;
-	std::map<Key, Reference<RangeFeedInfo>> uidRangeFeed;
-	Deque<std::pair<std::vector<Key>, Version>> rangeFeedVersions;
-	std::map<UID, PromiseStream<Key>> rangeFeedRemovals;
-	std::set<Key> currentRangeFeeds;
+	KeyRangeMap<std::vector<Reference<ChangeFeedInfo>>> keyChangeFeed;
+	std::map<Key, Reference<ChangeFeedInfo>> uidChangeFeed;
+	Deque<std::pair<std::vector<Key>, Version>> changeFeedVersions;
+	std::map<UID, PromiseStream<Key>> changeFeedRemovals;
+	std::set<Key> currentChangeFeeds;
 
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
@@ -1512,16 +1512,16 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 	}
 }
 
-ACTOR Future<Void> rangeFeedPopQ(StorageServer* self, RangeFeedPopRequest req) {
-	auto& feed = self->uidRangeFeed[req.rangeID];
+ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
+	auto& feed = self->uidChangeFeed[req.rangeID];
 	if (req.version - 1 > feed->emptyVersion) {
 		feed->emptyVersion = req.version - 1;
 		while (!feed->mutations.empty() && feed->mutations.front().version < req.version) {
-			self->uidRangeFeed[req.rangeID]->mutations.pop_front();
+			self->uidChangeFeed[req.rangeID]->mutations.pop_front();
 		}
 		if (feed->storageVersion != invalidVersion) {
 			self->storage.clearRange(
-			    KeyRangeRef(rangeFeedDurableKey(feed->id, 0), rangeFeedDurableKey(feed->id, req.version)));
+			    KeyRangeRef(changeFeedDurableKey(feed->id, 0), changeFeedDurableKey(feed->id, req.version)));
 			if (req.version > feed->storageVersion) {
 				feed->storageVersion = invalidVersion;
 				feed->durableVersion = invalidVersion;
@@ -1529,16 +1529,16 @@ ACTOR Future<Void> rangeFeedPopQ(StorageServer* self, RangeFeedPopRequest req) {
 			wait(self->durableVersion.whenAtLeast(self->storageVersion() + 1));
 		}
 	}
-	TraceEvent("RangeFeedPopQuery", self->thisServerID)
+	TraceEvent("ChangeFeedPopQuery", self->thisServerID)
 	    .detail("RangeID", req.rangeID.printable())
 	    .detail("Version", req.version);
 	req.reply.send(Void());
 	return Void();
 }
 
-ACTOR Future<Void> overlappingRangeFeedsQ(StorageServer* data, OverlappingRangeFeedsRequest req) {
+ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChangeFeedsRequest req) {
 	wait(delay(0));
-	auto ranges = data->keyRangeFeed.intersectingRanges(req.range);
+	auto ranges = data->keyChangeFeed.intersectingRanges(req.range);
 	std::map<Key, KeyRange> rangeIds;
 	for (auto r : ranges) {
 		for (auto& it : r.value()) {
@@ -1549,22 +1549,22 @@ ACTOR Future<Void> overlappingRangeFeedsQ(StorageServer* data, OverlappingRangeF
 	for (auto& it : rangeIds) {
 		result.push_back(std::make_pair(it.first, it.second));
 	}
-	OverlappingRangeFeedsReply reply(std::vector<std::pair<Key, KeyRange>>(rangeIds.begin(), rangeIds.end()));
+	OverlappingChangeFeedsReply reply(std::vector<std::pair<Key, KeyRange>>(rangeIds.begin(), rangeIds.end()));
 	req.reply.send(reply);
 	return Void();
 }
 
-ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFeedRequest req) {
-	state RangeFeedReply reply;
+ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, ChangeFeedRequest req) {
+	state ChangeFeedReply reply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 	if (data->version.get() < req.begin) {
 		wait(data->version.whenAtLeast(req.begin));
 	}
-	auto& feedInfo = data->uidRangeFeed[req.rangeID];
+	auto& feedInfo = data->uidChangeFeed[req.rangeID];
 	if (req.end <= feedInfo->emptyVersion + 1) {
 	} else if (feedInfo->durableVersion == invalidVersion || req.begin > feedInfo->durableVersion) {
-		for (auto& it : data->uidRangeFeed[req.rangeID]->mutations) {
+		for (auto& it : data->uidChangeFeed[req.rangeID]->mutations) {
 			if (it.version >= req.end || remainingLimitBytes <= 0) {
 				break;
 			}
@@ -1575,10 +1575,10 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 		}
 	} else {
 		state std::deque<Standalone<MutationsAndVersionRef>> mutationsDeque =
-		    data->uidRangeFeed[req.rangeID]->mutations;
+		    data->uidChangeFeed[req.rangeID]->mutations;
 		state Version startingDurableVersion = feedInfo->durableVersion;
 		RangeResult res = wait(data->storage.readRange(
-		    KeyRangeRef(rangeFeedDurableKey(req.rangeID, req.begin), rangeFeedDurableKey(req.rangeID, req.end)),
+		    KeyRangeRef(changeFeedDurableKey(req.rangeID, req.begin), changeFeedDurableKey(req.rangeID, req.end)),
 		    1 << 30,
 		    remainingLimitBytes));
 
@@ -1586,8 +1586,8 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 		for (auto& kv : res) {
 			Key id;
 			Version version;
-			std::tie(id, version) = decodeRangeFeedDurableKey(kv.key);
-			auto mutations = decodeRangeFeedDurableValue(kv.value);
+			std::tie(id, version) = decodeChangeFeedDurableKey(kv.key);
+			auto mutations = decodeChangeFeedDurableValue(kv.value);
 			reply.mutations.push_back_deep(reply.arena, MutationsAndVersionRef(mutations, version));
 			remainingLimitBytes -=
 			    sizeof(KeyValueRef) +
@@ -1605,23 +1605,23 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 			}
 		}
 		if (reply.mutations.empty()) {
-			auto& feedInfo = data->uidRangeFeed[req.rangeID];
+			auto& feedInfo = data->uidChangeFeed[req.rangeID];
 			if (startingDurableVersion == feedInfo->storageVersion && req.end > startingDurableVersion) {
 				if (req.begin == 0) {
 					feedInfo->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
 				} else {
 					RangeResult emp = wait(data->storage.readRange(
-					    KeyRangeRef(rangeFeedDurableKey(req.rangeID, 0), rangeFeedDurableKey(req.rangeID, req.end)),
+					    KeyRangeRef(changeFeedDurableKey(req.rangeID, 0), changeFeedDurableKey(req.rangeID, req.end)),
 					    -1));
 
-					auto& feedInfo = data->uidRangeFeed[req.rangeID];
+					auto& feedInfo = data->uidChangeFeed[req.rangeID];
 					if (startingDurableVersion == feedInfo->storageVersion) {
 						if (emp.empty()) {
 							feedInfo->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
 						} else {
 							Key id;
 							Version version;
-							std::tie(id, version) = decodeRangeFeedDurableKey(emp[0].key);
+							std::tie(id, version) = decodeChangeFeedDurableKey(emp[0].key);
 							feedInfo->durableVersion = version;
 						}
 					}
@@ -1636,17 +1636,45 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 	return reply;
 }
 
-ACTOR Future<Void> rangeFeedQ(StorageServer* data, RangeFeedRequest req) {
-	RangeFeedReply rep = wait(getRangeFeedMutations(data, req));
+ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
+                                         PromiseStream<Standalone<MutationsAndVersionRef>> results,
+                                         Key rangeID,
+                                         Version begin,
+                                         Version end,
+                                         KeyRange range) {
+	loop {
+		state ChangeFeedRequest feedRequest;
+		feedRequest.rangeID = rangeID;
+		feedRequest.begin = begin;
+		feedRequest.end = end;
+		state ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
+		begin = feedReply.mutations.back().version + 1;
+		state int resultLoc = 0;
+		while (resultLoc < feedReply.mutations.size()) {
+			if (feedReply.mutations[resultLoc].mutations.size() || feedReply.mutations[resultLoc].version == end) {
+				wait(results.onEmpty());
+				results.send(feedReply.mutations[resultLoc]);
+			}
+			resultLoc++;
+		}
+
+		if (begin == end) {
+			return Void();
+		}
+	}
+}
+
+ACTOR Future<Void> changeFeedQ(StorageServer* data, ChangeFeedRequest req) {
+	ChangeFeedReply rep = wait(getChangeFeedMutations(data, req));
 	req.reply.send(rep);
 	return Void();
 }
 
-ACTOR Future<Void> rangeFeedStreamQ(StorageServer* data, RangeFeedStreamRequest req)
+ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
-	state Span span("SS:getRangeFeedStream"_loc, { req.spanContext });
+	state Span span("SS:getChangeFeedStream"_loc, { req.spanContext });
 	state Version begin = req.begin;
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 
@@ -1655,13 +1683,13 @@ ACTOR Future<Void> rangeFeedStreamQ(StorageServer* data, RangeFeedStreamRequest 
 	try {
 		loop {
 			wait(req.reply.onReady());
-			state RangeFeedRequest feedRequest;
+			state ChangeFeedRequest feedRequest;
 			feedRequest.rangeID = req.rangeID;
 			feedRequest.begin = begin;
 			feedRequest.end = req.end;
-			RangeFeedReply feedReply = wait(getRangeFeedMutations(data, feedRequest));
+			ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
 			begin = feedReply.mutations.back().version + 1;
-			req.reply.send(RangeFeedStreamReply(feedReply));
+			req.reply.send(ChangeFeedStreamReply(feedReply));
 			if (feedReply.mutations.back().version == req.end - 1) {
 				req.reply.sendError(end_of_stream());
 				return Void();
@@ -1669,7 +1697,7 @@ ACTOR Future<Void> rangeFeedStreamQ(StorageServer* data, RangeFeedStreamRequest 
 			if (feedReply.mutations.back().mutations.empty()) {
 				choose {
 					when(wait(delay(5.0, TaskPriority::DefaultEndpoint))) {}
-					when(wait(data->uidRangeFeed[req.rangeID]->newMutations.onTrigger())) {}
+					when(wait(data->uidChangeFeed[req.rangeID]->newMutations.onTrigger())) {}
 				}
 			}
 		}
@@ -2796,12 +2824,12 @@ void applyMutation(StorageServer* self,
 		self->watches.trigger(m.param1);
 
 		if (!fromFetch) {
-			for (auto& it : self->keyRangeFeed[m.param1]) {
+			for (auto& it : self->keyChangeFeed[m.param1]) {
 				if (it->mutations.empty() || it->mutations.back().version != version) {
 					it->mutations.push_back(MutationsAndVersionRef(version));
 				}
 				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
-				self->currentRangeFeeds.insert(it->id);
+				self->currentChangeFeeds.insert(it->id);
 			}
 		}
 	} else if (m.type == MutationRef::ClearRange) {
@@ -2812,14 +2840,14 @@ void applyMutation(StorageServer* self,
 		self->watches.triggerRange(m.param1, m.param2);
 
 		if (!fromFetch) {
-			auto ranges = self->keyRangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+			auto ranges = self->keyChangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
 			for (auto& r : ranges) {
 				for (auto& it : r.value()) {
 					if (it->mutations.empty() || it->mutations.back().version != version) {
 						it->mutations.push_back(MutationsAndVersionRef(version));
 					}
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
-					self->currentRangeFeeds.insert(it->id);
+					self->currentChangeFeeds.insert(it->id);
 				}
 			}
 		}
@@ -3057,68 +3085,115 @@ static const KeyRangeRef persistByteSampleSampleKeys =
                 LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS0"));
 static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
 static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "PrimaryLocality");
-static const KeyRangeRef persistRangeFeedKeys =
+static const KeyRangeRef persistChangeFeedKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
-ACTOR Future<Void> fetchRangeFeed(StorageServer* data, Key rangeId, KeyRange range, Version fetchVersion) {
+ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange range, Version fetchVersion) {
+	state bool existing = data->uidChangeFeed.count(rangeId);
+	state Reference<ChangeFeedInfo> changeFeedInfo;
+	wait(delay(0)); // allow this actor to be cancelled by removals
 
-	TraceEvent("FetchRangeFeed", data->thisServerID)
+	TraceEvent("FetchChangeFeed", data->thisServerID)
 	    .detail("RangeID", rangeId.printable())
-	    .detail("Range", range.toString());
-	Reference<RangeFeedInfo> rangeFeedInfo(new RangeFeedInfo());
-	rangeFeedInfo->range = range;
-	rangeFeedInfo->id = rangeId;
-	data->uidRangeFeed[rangeId] = rangeFeedInfo;
-	auto rs = data->keyRangeFeed.modify(range);
-	for (auto r = rs.begin(); r != rs.end(); ++r) {
-		r->value().push_back(rangeFeedInfo);
-	}
-	data->keyRangeFeed.coalesce(range.contents());
-	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-	data->addMutationToMutationLog(mLV,
-	                               MutationRef(MutationRef::SetValue,
-	                                           persistRangeFeedKeys.begin.toString() + rangeId.toString(),
-	                                           rangeFeedValue(range)));
+	    .detail("Range", range.toString())
+	    .detail("Existing", existing);
 
-	state Standalone<VectorRef<MutationsAndVersionRef>> mutations =
-	    wait(data->cx->getRangeFeedMutations(rangeId, 0, fetchVersion, range));
-	state RangeFeedRequest req;
-	req.rangeID = rangeId;
-	req.begin = 0;
-	req.end = fetchVersion;
-	state RangeFeedReply rep = wait(getRangeFeedMutations(data, req));
-	state int mLoc = 0;
-	state int rLoc = 0;
-	while (mLoc < mutations.size() && rLoc < rep.mutations.size()) {
-		if (mutations[mLoc].version < rep.mutations[rLoc].version) {
-			// write mutation to disk
-			mLoc++;
-		} else if (mutations[mLoc].version == rep.mutations[rLoc].version) {
-			// merge mutations and write to disk
-			mLoc++;
-			rLoc++;
-		} else {
-			rLoc++;
+	if (!existing) {
+		changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
+		changeFeedInfo->range = range;
+		changeFeedInfo->id = rangeId;
+		data->uidChangeFeed[rangeId] = changeFeedInfo;
+		auto rs = data->keyChangeFeed.modify(range);
+		for (auto r = rs.begin(); r != rs.end(); ++r) {
+			r->value().push_back(changeFeedInfo);
+		}
+		data->keyChangeFeed.coalesce(range.contents());
+		auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+		data->addMutationToMutationLog(mLV,
+		                               MutationRef(MutationRef::SetValue,
+		                                           persistChangeFeedKeys.begin.toString() + rangeId.toString(),
+		                                           changeFeedValue(range)));
+	} else {
+		changeFeedInfo = data->uidChangeFeed[rangeId];
+	}
+
+	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> feedResults;
+	state Future<Void> feed = data->cx->getChangeFeedStream(
+	    feedResults, rangeId, 0, existing ? fetchVersion + 1 : data->version.get() + 1, range);
+
+	if (!existing) {
+		try {
+			loop {
+				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults.getFuture());
+				for (auto& it : res) {
+					data->storage.writeKeyValue(
+					    KeyValueRef(changeFeedDurableKey(rangeId, it.version), changeFeedDurableValue(it.mutations)));
+				}
+				wait(yield());
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_end_of_stream) {
+				throw;
+			}
 		}
 	}
-	while (mLoc < mutations.size()) {
-		// write mutation to disk
-		mLoc++;
+
+	state PromiseStream<Standalone<MutationsAndVersionRef>> localResults;
+	state Future<Void> localStream = localChangeFeedStream(data, localResults, rangeId, 0, fetchVersion + 2, range);
+	state Standalone<MutationsAndVersionRef> localResult;
+
+	Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
+	localResult = _localResult;
+	try {
+		loop {
+			state Standalone<VectorRef<MutationsAndVersionRef>> remoteResult = waitNext(feedResults.getFuture());
+			state int remoteLoc = 0;
+			while (remoteLoc < remoteResult.size()) {
+				if (remoteResult[remoteLoc].version < localResult.version) {
+					if (remoteResult[remoteLoc].mutations.size()) {
+						data->storage.writeKeyValue(
+						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
+						                changeFeedDurableValue(remoteResult[remoteLoc].mutations)));
+					}
+					remoteLoc++;
+				} else if (remoteResult[remoteLoc].version == localResult.version) {
+					if (remoteResult[remoteLoc].mutations.size()) {
+						ASSERT(localResult.mutations.size());
+						remoteResult[remoteLoc].mutations.append(
+						    remoteResult.arena(), localResult.mutations.begin(), localResult.mutations.size());
+						data->storage.writeKeyValue(
+						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
+						                changeFeedDurableValue(remoteResult[remoteLoc].mutations)));
+					}
+					remoteLoc++;
+					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
+					localResult = _localResult;
+				} else {
+					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
+					localResult = _localResult;
+				}
+			}
+			wait(yield());
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_end_of_stream) {
+			throw;
+		}
 	}
 	return Void();
 }
 
-ACTOR Future<Void> dispatchRangeFeeds(StorageServer* data, UID fetchKeysID, KeyRange keys, Version fetchVersion) {
+ACTOR Future<Void> dispatchChangeFeeds(StorageServer* data, UID fetchKeysID, KeyRange keys, Version fetchVersion) {
 	// find overlapping range feeds
 	state std::map<Key, Future<Void>> feedFetches;
 	state PromiseStream<Key> removals;
-	data->rangeFeedRemovals[fetchKeysID] = removals;
+	data->changeFeedRemovals[fetchKeysID] = removals;
 	try {
 		state std::vector<std::pair<Key, KeyRange>> feeds =
-		    wait(data->cx->getOverlappingRangeFeeds(keys, fetchVersion));
+		    wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
 		for (auto& feed : feeds) {
-			feedFetches[feed.first] = fetchRangeFeed(data, feed.first, feed.second, fetchVersion);
+			feedFetches[feed.first] = fetchChangeFeed(data, feed.first, feed.second, fetchVersion);
 		}
 
 		loop {
@@ -3134,7 +3209,7 @@ ACTOR Future<Void> dispatchRangeFeeds(StorageServer* data, UID fetchKeysID, KeyR
 					}
 				}
 				if (done) {
-					data->rangeFeedRemovals.erase(fetchKeysID);
+					data->changeFeedRemovals.erase(fetchKeysID);
 					return Void();
 				}
 			}
@@ -3146,7 +3221,7 @@ ACTOR Future<Void> dispatchRangeFeeds(StorageServer* data, UID fetchKeysID, KeyR
 
 	} catch (Error& e) {
 		if (!data->shuttingDown) {
-			data->rangeFeedRemovals.erase(fetchKeysID);
+			data->changeFeedRemovals.erase(fetchKeysID);
 		}
 		throw;
 	}
@@ -3370,6 +3445,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// we have written)
 
 		state Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
+		// wait(dispatchChangeFeeds(data, fetchKeysID, keys, fetchVersion));
 
 		holdingFKPL.release();
 		wait(fetchDurable);
@@ -3522,22 +3598,22 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 		updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
 		if (!fromFetch) {
 			if (mutation.type == MutationRef::SetValue) {
-				for (auto& it : server->keyRangeFeed[mutation.param1]) {
+				for (auto& it : server->keyChangeFeed[mutation.param1]) {
 					if (it->mutations.empty() || it->mutations.back().version != version) {
 						it->mutations.push_back(MutationsAndVersionRef(version));
 					}
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
-					server->currentRangeFeeds.insert(it->id);
+					server->currentChangeFeeds.insert(it->id);
 				}
 			} else if (mutation.type == MutationRef::ClearRange) {
-				auto ranges = server->keyRangeFeed.intersectingRanges(KeyRangeRef(mutation.param1, mutation.param2));
+				auto ranges = server->keyChangeFeed.intersectingRanges(KeyRangeRef(mutation.param1, mutation.param2));
 				for (auto& r : ranges) {
 					for (auto& it : r.value()) {
 						if (it->mutations.empty() || it->mutations.back().version != version) {
 							it->mutations.push_back(MutationsAndVersionRef(version));
 						}
 						it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
-						server->currentRangeFeeds.insert(it->id);
+						server->currentChangeFeeds.insert(it->id);
 					}
 				}
 			}
@@ -3860,39 +3936,40 @@ private:
 			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 			data->addMutationToMutationLog(mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2));
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
-		           m.param1.startsWith(rangeFeedPrivatePrefix)) {
+		           m.param1.startsWith(changeFeedPrivatePrefix)) {
 			if (m.type == MutationRef::SetValue) {
-				Key rangeFeedId = m.param1.removePrefix(rangeFeedPrivatePrefix);
-				KeyRange rangeFeedRange = decodeRangeFeedValue(m.param2);
-				TraceEvent("AddingRangeFeed", data->thisServerID)
-				    .detail("RangeID", rangeFeedId.printable())
-				    .detail("Range", rangeFeedRange.toString());
-				Reference<RangeFeedInfo> rangeFeedInfo(new RangeFeedInfo());
-				rangeFeedInfo->range = rangeFeedRange;
-				rangeFeedInfo->id = rangeFeedId;
-				rangeFeedInfo->emptyVersion = currentVersion - 1;
-				data->uidRangeFeed[rangeFeedId] = rangeFeedInfo;
-				auto rs = data->keyRangeFeed.modify(rangeFeedRange);
+				Key changeFeedId = m.param1.removePrefix(changeFeedPrivatePrefix);
+				KeyRange changeFeedRange = decodeChangeFeedValue(m.param2);
+				TraceEvent("AddingChangeFeed", data->thisServerID)
+				    .detail("RangeID", changeFeedId.printable())
+				    .detail("Range", changeFeedRange.toString());
+				Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
+				changeFeedInfo->range = changeFeedRange;
+				changeFeedInfo->id = changeFeedId;
+				changeFeedInfo->emptyVersion = currentVersion - 1;
+				data->uidChangeFeed[changeFeedId] = changeFeedInfo;
+				auto rs = data->keyChangeFeed.modify(changeFeedRange);
 				for (auto r = rs.begin(); r != rs.end(); ++r) {
-					r->value().push_back(rangeFeedInfo);
+					r->value().push_back(changeFeedInfo);
 				}
-				data->keyRangeFeed.coalesce(rangeFeedRange.contents());
+				data->keyChangeFeed.coalesce(changeFeedRange.contents());
 				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 				data->addMutationToMutationLog(
 				    mLV,
 				    MutationRef(MutationRef::SetValue,
-				                persistRangeFeedKeys.begin.toString() + rangeFeedId.toString(),
+				                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
 				                m.param2));
 			} else {
 				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-				auto beginFeed = m.param1.removePrefix(rangeFeedPrivatePrefix);
-				auto endFeed = m.param2.removePrefix(rangeFeedPrivatePrefix);
-				data->addMutationToMutationLog(mLV,
-				                               MutationRef(MutationRef::ClearRange,
-				                                           persistRangeFeedKeys.begin.toString() + beginFeed.toString(),
-				                                           persistRangeFeedKeys.begin.toString() + endFeed.toString()));
-				data->uidRangeFeed.erase(data->uidRangeFeed.lower_bound(beginFeed),
-				                         data->uidRangeFeed.lower_bound(endFeed));
+				auto beginFeed = m.param1.removePrefix(changeFeedPrivatePrefix);
+				auto endFeed = m.param2.removePrefix(changeFeedPrivatePrefix);
+				data->addMutationToMutationLog(
+				    mLV,
+				    MutationRef(MutationRef::ClearRange,
+				                persistChangeFeedKeys.begin.toString() + beginFeed.toString(),
+				                persistChangeFeedKeys.begin.toString() + endFeed.toString()));
+				data->uidChangeFeed.erase(data->uidChangeFeed.lower_bound(beginFeed),
+				                          data->uidChangeFeed.lower_bound(endFeed));
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
@@ -4317,13 +4394,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 			data->desiredOldestVersion.set(proposedOldestVersion);
 
-			if (data->currentRangeFeeds.size()) {
-				data->rangeFeedVersions.push_back(std::make_pair(
-				    std::vector<Key>(data->currentRangeFeeds.begin(), data->currentRangeFeeds.end()), ver));
-				for (auto& it : data->currentRangeFeeds) {
-					data->uidRangeFeed[it]->newMutations.trigger();
+			if (data->currentChangeFeeds.size()) {
+				data->changeFeedVersions.push_back(std::make_pair(
+				    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
+				for (auto& it : data->currentChangeFeeds) {
+					data->uidChangeFeed[it]->newMutations.trigger();
 				}
-				data->currentRangeFeeds.clear();
+				data->currentChangeFeeds.clear();
 			}
 		}
 
@@ -4388,23 +4465,23 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				break;
 		}
 
-		std::set<Key> modifiedRangeFeeds;
-		while (!data->rangeFeedVersions.empty() && data->rangeFeedVersions.front().second < newOldestVersion) {
-			modifiedRangeFeeds.insert(data->rangeFeedVersions.front().first.begin(),
-			                          data->rangeFeedVersions.front().first.end());
-			data->rangeFeedVersions.pop_front();
+		std::set<Key> modifiedChangeFeeds;
+		while (!data->changeFeedVersions.empty() && data->changeFeedVersions.front().second < newOldestVersion) {
+			modifiedChangeFeeds.insert(data->changeFeedVersions.front().first.begin(),
+			                           data->changeFeedVersions.front().first.end());
+			data->changeFeedVersions.pop_front();
 		}
 
-		state std::vector<Key> updatedRangeFeeds(modifiedRangeFeeds.begin(), modifiedRangeFeeds.end());
+		state std::vector<Key> updatedChangeFeeds(modifiedChangeFeeds.begin(), modifiedChangeFeeds.end());
 		state int curFeed = 0;
-		while (curFeed < updatedRangeFeeds.size()) {
-			auto info = data->uidRangeFeed[updatedRangeFeeds[curFeed]];
+		while (curFeed < updatedChangeFeeds.size()) {
+			auto info = data->uidChangeFeed[updatedChangeFeeds[curFeed]];
 			for (auto& it : info->mutations) {
 				if (it.version >= newOldestVersion) {
 					break;
 				}
 				data->storage.writeKeyValue(
-				    KeyValueRef(rangeFeedDurableKey(info->id, it.version), rangeFeedDurableValue(it.mutations)));
+				    KeyValueRef(changeFeedDurableKey(info->id, it.version), changeFeedDurableValue(it.mutations)));
 				info->storageVersion = it.version;
 			}
 			wait(yield(TaskPriority::UpdateStorage));
@@ -4445,8 +4522,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		curFeed = 0;
-		while (curFeed < updatedRangeFeeds.size()) {
-			auto info = data->uidRangeFeed[updatedRangeFeeds[curFeed]];
+		while (curFeed < updatedChangeFeeds.size()) {
+			auto info = data->uidChangeFeed[updatedChangeFeeds[curFeed]];
 			while (!info->mutations.empty() && info->mutations.front().version < newOldestVersion) {
 				info->mutations.pop_front();
 			}
@@ -4741,7 +4818,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
 	state Future<RangeResult> fShardAssigned = storage->readRange(persistShardAssignedKeys);
 	state Future<RangeResult> fShardAvailable = storage->readRange(persistShardAvailableKeys);
-	state Future<RangeResult> fRangeFeeds = storage->readRange(persistRangeFeedKeys);
+	state Future<RangeResult> fChangeFeeds = storage->readRange(persistChangeFeedKeys);
 
 	state Promise<Void> byteSampleSampleRecovered;
 	state Promise<Void> startByteSampleRestore;
@@ -4750,7 +4827,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 
 	TraceEvent("ReadingDurableState", data->thisServerID).log();
 	wait(waitForAll(std::vector{ fFormat, fID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
-	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable, fRangeFeeds }));
+	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable, fChangeFeeds }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
 
@@ -4828,27 +4905,27 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		wait(yield());
 	}
 
-	state RangeResult rangeFeeds = fRangeFeeds.get();
+	state RangeResult changeFeeds = fChangeFeeds.get();
 	state int feedLoc;
-	for (feedLoc = 0; feedLoc < rangeFeeds.size(); feedLoc++) {
-		Key rangeFeedId = rangeFeeds[feedLoc].key.removePrefix(persistRangeFeedKeys.begin);
-		KeyRange rangeFeedRange = decodeRangeFeedValue(rangeFeeds[feedLoc].value);
-		TraceEvent("RestoringRangeFeed", data->thisServerID)
-		    .detail("RangeID", rangeFeedId.printable())
-		    .detail("Range", rangeFeedRange.toString());
-		Reference<RangeFeedInfo> rangeFeedInfo(new RangeFeedInfo());
-		rangeFeedInfo->range = rangeFeedRange;
-		rangeFeedInfo->id = rangeFeedId;
-		rangeFeedInfo->durableVersion = version;
-		rangeFeedInfo->storageVersion = version;
-		data->uidRangeFeed[rangeFeedId] = rangeFeedInfo;
-		auto rs = data->keyRangeFeed.modify(rangeFeedRange);
+	for (feedLoc = 0; feedLoc < changeFeeds.size(); feedLoc++) {
+		Key changeFeedId = changeFeeds[feedLoc].key.removePrefix(persistChangeFeedKeys.begin);
+		KeyRange changeFeedRange = decodeChangeFeedValue(changeFeeds[feedLoc].value);
+		TraceEvent("RestoringChangeFeed", data->thisServerID)
+		    .detail("RangeID", changeFeedId.printable())
+		    .detail("Range", changeFeedRange.toString());
+		Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
+		changeFeedInfo->range = changeFeedRange;
+		changeFeedInfo->id = changeFeedId;
+		changeFeedInfo->durableVersion = version;
+		changeFeedInfo->storageVersion = version;
+		data->uidChangeFeed[changeFeedId] = changeFeedInfo;
+		auto rs = data->keyChangeFeed.modify(changeFeedRange);
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
-			r->value().push_back(rangeFeedInfo);
+			r->value().push_back(changeFeedInfo);
 		}
 		wait(yield());
 	}
-	data->keyRangeFeed.coalesce(allKeys);
+	data->keyChangeFeed.coalesce(allKeys);
 	// TODO: why is this seemingly random delay here?
 	wait(delay(0.0001));
 
@@ -5356,34 +5433,34 @@ ACTOR Future<Void> serveWatchValueRequests(StorageServer* self, FutureStream<Wat
 	}
 }
 
-ACTOR Future<Void> serveRangeFeedRequests(StorageServer* self, FutureStream<RangeFeedRequest> rangeFeed) {
+ACTOR Future<Void> serveChangeFeedRequests(StorageServer* self, FutureStream<ChangeFeedRequest> changeFeed) {
 	loop {
-		RangeFeedRequest req = waitNext(rangeFeed);
-		self->actors.add(self->readGuard(req, rangeFeedQ));
+		ChangeFeedRequest req = waitNext(changeFeed);
+		self->actors.add(self->readGuard(req, changeFeedQ));
 	}
 }
 
-ACTOR Future<Void> serveRangeFeedStreamRequests(StorageServer* self,
-                                                FutureStream<RangeFeedStreamRequest> rangeFeedStream) {
+ACTOR Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
+                                                 FutureStream<ChangeFeedStreamRequest> changeFeedStream) {
 	loop {
-		RangeFeedStreamRequest req = waitNext(rangeFeedStream);
-		self->actors.add(rangeFeedStreamQ(self, req));
+		ChangeFeedStreamRequest req = waitNext(changeFeedStream);
+		self->actors.add(changeFeedStreamQ(self, req));
 	}
 }
 
-ACTOR Future<Void> serveOverlappingRangeFeedsRequests(
+ACTOR Future<Void> serveOverlappingChangeFeedsRequests(
     StorageServer* self,
-    FutureStream<OverlappingRangeFeedsRequest> overlappingRangeFeeds) {
+    FutureStream<OverlappingChangeFeedsRequest> overlappingChangeFeeds) {
 	loop {
-		OverlappingRangeFeedsRequest req = waitNext(overlappingRangeFeeds);
-		self->actors.add(self->readGuard(req, overlappingRangeFeedsQ));
+		OverlappingChangeFeedsRequest req = waitNext(overlappingChangeFeeds);
+		self->actors.add(self->readGuard(req, overlappingChangeFeedsQ));
 	}
 }
 
-ACTOR Future<Void> serveRangeFeedPopRequests(StorageServer* self, FutureStream<RangeFeedPopRequest> rangeFeedPops) {
+ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<ChangeFeedPopRequest> changeFeedPops) {
 	loop {
-		RangeFeedPopRequest req = waitNext(rangeFeedPops);
-		self->actors.add(self->readGuard(req, rangeFeedPopQ));
+		ChangeFeedPopRequest req = waitNext(changeFeedPops);
+		self->actors.add(self->readGuard(req, changeFeedPopQ));
 	}
 }
 
@@ -5436,10 +5513,10 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveGetKeyValuesStreamRequests(self, ssi.getKeyValuesStream.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
-	self->actors.add(serveRangeFeedRequests(self, ssi.rangeFeed.getFuture()));
-	self->actors.add(serveRangeFeedStreamRequests(self, ssi.rangeFeedStream.getFuture()));
-	self->actors.add(serveOverlappingRangeFeedsRequests(self, ssi.overlappingRangeFeeds.getFuture()));
-	self->actors.add(serveRangeFeedPopRequests(self, ssi.rangeFeedPop.getFuture()));
+	self->actors.add(serveChangeFeedRequests(self, ssi.changeFeed.getFuture()));
+	self->actors.add(serveChangeFeedStreamRequests(self, ssi.changeFeedStream.getFuture()));
+	self->actors.add(serveOverlappingChangeFeedsRequests(self, ssi.overlappingChangeFeeds.getFuture()));
+	self->actors.add(serveChangeFeedPopRequests(self, ssi.changeFeedPop.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 

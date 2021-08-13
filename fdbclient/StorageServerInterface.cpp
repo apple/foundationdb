@@ -298,42 +298,42 @@ void TSS_traceMismatch(TraceEvent& event,
 
 // range feed
 template <>
-bool TSS_doCompare(const RangeFeedReply& src, const RangeFeedReply& tss) {
+bool TSS_doCompare(const ChangeFeedReply& src, const ChangeFeedReply& tss) {
 	ASSERT(false);
 	return true;
 }
 
 template <>
-const char* TSS_mismatchTraceName(const RangeFeedRequest& req) {
+const char* TSS_mismatchTraceName(const ChangeFeedRequest& req) {
 	ASSERT(false);
 	return "";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const RangeFeedRequest& req,
-                       const RangeFeedReply& src,
-                       const RangeFeedReply& tss) {
+                       const ChangeFeedRequest& req,
+                       const ChangeFeedReply& src,
+                       const ChangeFeedReply& tss) {
 	ASSERT(false);
 }
 
 template <>
-bool TSS_doCompare(const OverlappingRangeFeedsReply& src, const OverlappingRangeFeedsReply& tss) {
+bool TSS_doCompare(const OverlappingChangeFeedsReply& src, const OverlappingChangeFeedsReply& tss) {
 	ASSERT(false);
 	return true;
 }
 
 template <>
-const char* TSS_mismatchTraceName(const OverlappingRangeFeedsRequest& req) {
+const char* TSS_mismatchTraceName(const OverlappingChangeFeedsRequest& req) {
 	ASSERT(false);
 	return "";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const OverlappingRangeFeedsRequest& req,
-                       const OverlappingRangeFeedsReply& src,
-                       const OverlappingRangeFeedsReply& tss) {
+                       const OverlappingChangeFeedsRequest& req,
+                       const OverlappingChangeFeedsReply& src,
+                       const OverlappingChangeFeedsReply& tss) {
 	ASSERT(false);
 }
 
@@ -376,10 +376,10 @@ template <>
 void TSSMetrics::recordLatency(const GetKeyValuesStreamRequest& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const RangeFeedRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(const ChangeFeedRequest& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const OverlappingRangeFeedsRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(const OverlappingChangeFeedsRequest& req, double ssLatency, double tssLatency) {}
 
 // -------------------
 
