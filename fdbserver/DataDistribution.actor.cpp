@@ -2510,7 +2510,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if (tss_info_by_pair.count(newServer.id())) {
 				tss_info_by_pair[newServer.id()]->onTSSPairRemoved = r->onRemoved;
 				if (tss_info_by_pair[newServer.id()]->wakeUpTracker.canBeSet()) {
-					tss_info_by_pair[newServer.id()]->wakeUpTracker.send(Void());
+					auto p = tss_info_by_pair[newServer.id()]->wakeUpTracker;
+					// This callback could delete tss_info_by_pair[newServer.id()], so use a copy
+					p.send(Void());
 				}
 			}
 
@@ -5129,8 +5131,10 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		if (doRecruit && newServer.isError()) {
 			TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
 			if (!newServer.isError(error_code_recruitment_failed) &&
-			    !newServer.isError(error_code_request_maybe_delivered))
+			    !newServer.isError(error_code_request_maybe_delivered)) {
+				tssState->markComplete();
 				throw newServer.getError();
+			}
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution));
 		}
 
@@ -5248,8 +5252,13 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 				}
 			}
 			int newTssToRecruit = targetTSSInDC - self->tss_info_by_pair.size() - inProgressTSSCount;
+			// FIXME: Should log this if the recruit count stays the same but the other numbers update?
 			if (newTssToRecruit != tssToRecruit) {
-				TraceEvent("TSS_RecruitUpdated", self->distributorId).detail("Count", newTssToRecruit);
+				TraceEvent("TSS_RecruitUpdated", self->distributorId)
+				    .detail("Desired", targetTSSInDC)
+				    .detail("Existing", self->tss_info_by_pair.size())
+				    .detail("InProgress", inProgressTSSCount)
+				    .detail("NotStarted", newTssToRecruit);
 				tssToRecruit = newTssToRecruit;
 
 				// if we need to get rid of some TSS processes, signal to either cancel recruitment or kill existing TSS

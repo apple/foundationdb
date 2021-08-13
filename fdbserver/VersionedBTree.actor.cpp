@@ -1721,7 +1721,7 @@ struct RedwoodMetrics {
 				for (auto& m : metrics) {
 					char c = m.first[0];
 					if (c != 0 && (!skipZeroes || m.second != 0)) {
-						e->detail(format("L%d%s", i + 1, m.first + (c == '-' ? 1 : 0)), m.second);
+						e->detail(format("L%d%s", i, m.first + (c == '-' ? 1 : 0)), m.second);
 					}
 				}
 				metric.events.toTraceEvent(e, i);
