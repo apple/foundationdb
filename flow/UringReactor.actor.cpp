@@ -20,8 +20,10 @@ public:
     int type;
     int fd;
     int seen;
+    OwnedWrite* other;
     OwnedWrite(Promise<int> &&p, int type, int fd) : pi(p), type(type), fd(fd), seen(0) {}
     OwnedWrite(Promise<Void> &&p, int type, int fd) : pv(p), type(type), fd(fd), seen(0) {}
+    OwnedWrite(OwnedWrite* other, int type, int fd) : other(other), type(type), fd(fd), seen(0) {}
     OwnedWrite(int type, int fd) : type(type), fd(fd), seen(0) {}
 };
 
@@ -71,6 +73,11 @@ int UringReactor::poll(){
             }
         } else if (ow->type == 3){
             // pass
+        } else if (ow->type == 4){
+            if(res == 0) {
+                ow->other->seen++;
+                delete ow->other;
+            }
         }
         ow->seen++;
         delete ow;
@@ -140,33 +147,36 @@ void UringReactor::poll(int fd, unsigned int flags, Promise<Void> &&p){
 void UringReactor::sleep(double sleepTime){
     if (poll()) return;
     if (sleepTime > FLOW_KNOBS->BUSY_WAIT_THRESHOLD) {
+        OwnedWrite *ow = nullptr;
         if (sleepTime < 4e12) {
-            ts.tv_sec = 0;
-            ts.tv_nsec = sleepTime * 1e9;
+            ow = new OwnedWrite(3, -1);
+            ow->ts.tv_sec = 0;
+            ow->ts.tv_nsec = 2000; //sleepTime * 1e6;
             submit.lock();
             struct io_uring_sqe *sqe = ::io_uring_get_sqe(&ring);
-            ::io_uring_prep_timeout(sqe, &ts, 0, 0);
-            ::io_uring_sqe_set_data(sqe, nullptr);
+            ::io_uring_prep_timeout(sqe, &ow->ts, 0, 0);
+            ::io_uring_sqe_set_data(sqe, ow);
             int ret = ::io_uring_submit(&ring);
             submit.unlock();
             ASSERT(ret>=0);
         }
-        while(1){
+        {
             struct io_uring_cqe *cqe;
             consume.lock();
             int ret = ::io_uring_wait_cqe(&ring, &cqe);
             consume.unlock();
-            if(ret==-EINTR) continue;
-            ASSERT(ret>=0);
-            break;
+            ASSERT(ret>=0 || ret==-EINTR);
         };
-        submit.lock();
-        struct io_uring_sqe *sqe = ::io_uring_get_sqe(&ring);
-        ::io_uring_prep_timeout_remove(sqe,(uint64_t)nullptr,0);
-        ::io_uring_sqe_set_data(sqe, nullptr);
-        int ret = ::io_uring_submit(&ring);
-        submit.unlock();
-        ASSERT(ret>=0);
+        if (ow&&0){
+            OwnedWrite *ow2 = new OwnedWrite(ow, 4, -1);
+            submit.lock();
+            struct io_uring_sqe *sqe = ::io_uring_get_sqe(&ring);
+            ::io_uring_prep_timeout_remove(sqe,(uint64_t)ow,0);
+            ::io_uring_sqe_set_data(sqe, ow2);
+            int ret = ::io_uring_submit(&ring);
+            submit.unlock();
+            ASSERT(ret>=0);
+        }
 	} else if (sleepTime > 0) {
 		if (!(FLOW_KNOBS->REACTOR_FLAGS & 8))
 			threadYield();
