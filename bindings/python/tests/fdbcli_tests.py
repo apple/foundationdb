@@ -446,8 +446,8 @@ def wait_for_database_available(logger):
     # sometimes the change takes some time to have effect and the database can be unavailable at that time
     # this is to wait until the database is available again
     while not get_value_from_status_json(True, 'client', 'database_status', 'available'):
-        time.sleep(1)
         logger.debug("Database unavailable for now, wait for one second")
+        time.sleep(1)
 
 if __name__ == '__main__':
     # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>
