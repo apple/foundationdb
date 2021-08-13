@@ -1359,7 +1359,8 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
     ureactorSD.assign(ureactor.getFD());
 
 #ifdef __linux__
-	setGlobal(INetwork::enEventFD, (flowGlobalType)N2::ASIOReactor::newEventFD(reactor));
+	//setGlobal(INetwork::enEventFD, (flowGlobalType)N2::ASIOReactor::newEventFD(reactor));
+	setGlobal(INetwork::enEventFD, (flowGlobalType)N2::UringReactor::newEventFD(ureactor));
 #endif
 
 	updateNow();
@@ -1614,8 +1615,9 @@ void Net2::run() {
 				trackAtPriority(TaskPriority::Zero, sleepStart);
 				awakeMetric = false;
 				priorityMetric = 0;
-                ureactorSD.async_read_some(boost::asio::null_buffers(), &nullReadHandler);
-				reactor.sleep(sleepTime);
+                //ureactorSD.async_read_some(boost::asio::null_buffers(), &nullReadHandler);
+				//reactor.sleep(sleepTime);
+                ureactor.sleep(sleepTime);
 				awakeMetric = true;
 			}
 		}
@@ -1623,7 +1625,7 @@ void Net2::run() {
 		tscBegin = timestampCounter();
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
-		reactor.react();
+		//reactor.react();
         ureactor.poll();
 
 		updateNow();
@@ -1934,7 +1936,7 @@ void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 		this->ready.push(OrderedTask(priority - (++tasksIssued), taskID, p));
 	} else {
 		if (threadReady.push(OrderedTask(priority, taskID, p)))
-			reactor.wake();
+			ureactor.wake();
 	}
 }
 
