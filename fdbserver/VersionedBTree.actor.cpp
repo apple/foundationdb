@@ -1936,7 +1936,6 @@ public:
 		evictionOrder.clear();
 		cache.clear();
 		ASSERT(currentSize == 0);
-		wait(delay(0));
 		return Void();
 	}
 
@@ -3423,7 +3422,7 @@ public:
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->pageCache.clear());
-		//wait(delay(0));
+		wait(delay(0));
 
 		debug_printf("DWALPager(%s) shutdown remappedPagesMap: %s\n",
 		             self->filename.c_str(),
