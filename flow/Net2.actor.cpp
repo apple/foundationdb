@@ -1600,7 +1600,7 @@ void Net2::run() {
 				++countCantSleep;
 		} else
 			++countWontSleep;
-		if (b&&0) {
+		if (b) {
 			sleepTime = 1e99;
 			double sleepStart = timer_monotonic();
 			if (!timers.empty()) {

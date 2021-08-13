@@ -82,7 +82,6 @@ int UringReactor::poll(){
                 p.sendError(connection_failed());
             }
         } else if (ow->type == 2){
-            if(!ow->pv.canBeSet())printf("old %d %d\n",ow->type,ow->fd);
             if (res & POLLERR) {
                 ow->pv.sendError(connection_failed());
             } else {
