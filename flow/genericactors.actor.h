@@ -547,14 +547,14 @@ public:
 		}
 	}
 	void clear(K const& k) { set(k, V()); }
-	V const& get(K const& k) {
+	V const& get(K const& k) const {
 		auto it = items.find(k);
 		if (it != items.end())
 			return it->second.value;
 		else
 			return defaultValue;
 	}
-	int count(K const& k) {
+	int count(K const& k) const {
 		auto it = items.find(k);
 		if (it != items.end())
 			return 1;
@@ -566,7 +566,7 @@ public:
 			return destroyOnCancel(this, k, item.change.getFuture());
 		return item.change.getFuture();
 	}
-	std::vector<K> getKeys() {
+	std::vector<K> getKeys() const {
 		std::vector<K> keys;
 		keys.reserve(items.size());
 		for (auto i = items.begin(); i != items.end(); ++i)
