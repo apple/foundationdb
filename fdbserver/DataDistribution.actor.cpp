@@ -1318,8 +1318,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		int maxMatchingServers = 0;
-		auto const& serverID = team[0];
-		for (auto const& usedTeam : machine_info.at(serverID)->machineTeams) {
+		auto it = machine_info.find(team[0]);
+		ASSERT(it != machine_info.end());
+		auto const& machineTeams = it->second->machineTeams;
+		for (auto const& usedTeam : machineTeams) {
 			auto used = usedTeam->machineIDs;
 			int teamIdx = 0;
 			int usedIdx = 0;
