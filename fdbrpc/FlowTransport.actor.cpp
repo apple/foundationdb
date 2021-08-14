@@ -522,7 +522,7 @@ ACTOR Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection>
 		loop {
 			lastWriteTime = now();
 
-			int sent = conn->write(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+			int sent = wait(conn->asyncWrite(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
 			if (sent) {
 				self->bytesSent += sent;
 				self->transport->bytesSent += sent;
@@ -1159,7 +1159,9 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 					readAllBytes = buffer_end - unprocessed_end;
 				}
 
-				state int totalReadBytes = 0;
+				state int totalReadBytes = wait(conn->asyncRead(unprocessed_end, buffer_end));
+				unprocessed_end += totalReadBytes;
+				/*
 				while (true) {
 					const int len = std::min<int>(buffer_end - unprocessed_end, FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 					if (len == 0)
@@ -1171,6 +1173,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 					totalReadBytes += readBytes;
 					unprocessed_end += readBytes;
 				}
+				*/
 				if (peer) {
 					peer->bytesReceived += totalReadBytes;
 				}

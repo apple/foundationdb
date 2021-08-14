@@ -67,6 +67,16 @@ public:
 	}
 };
 
+ACTOR static Future<int> asyncRead(SimExternalConnection* self, uint8_t* begin, uint8_t* end) {
+	wait(self->onReadable());
+	return self->read(begin, end);
+}
+
+ACTOR static Future<int> asyncWrite(SimExternalConnection* self, SendBuffer const* buffer, int limit) {
+	wait(self->onWritable());
+	return self->write(buffer, limit);
+}
+
 void SimExternalConnection::close() {
 	socket.close();
 }
@@ -85,6 +95,14 @@ Future<Void> SimExternalConnection::onWritable() {
 
 Future<Void> SimExternalConnection::onReadable() {
 	return SimExternalConnectionImpl::onReadable(this);
+}
+
+Future<int> SimExternalConnection::asyncRead(uint8_t* begin, uint8_t* end) {
+	return ::asyncRead(this, begin, end);
+}
+
+Future<int> SimExternalConnection::asyncWrite(SendBuffer const* buffer, int limit) {
+	return ::asyncWrite(this, buffer, limit);
 }
 
 int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {

@@ -44,6 +44,8 @@ public:
 	Future<Void> connectHandshake() override;
 	Future<Void> onWritable() override;
 	Future<Void> onReadable() override;
+	Future<int> asyncRead(uint8_t* begin, uint8_t* end) override;
+	Future<int> asyncWrite(SendBuffer const* buffer, int limit) override;
 	int read(uint8_t* begin, uint8_t* end) override;
 	int write(SendBuffer const* buffer, int limit) override;
 	NetworkAddress getPeerAddress() const override;
