@@ -925,7 +925,7 @@ ACTOR Future<Void> storageServer(
         connFile); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 ServerCoordinators serverCoordinators,
                                 LifetimeToken lifetime,
                                 bool forceRecovery);

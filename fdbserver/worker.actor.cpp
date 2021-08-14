@@ -604,7 +604,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 }
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary DC.
-bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	const auto& dbi = dbInfo->get();
 
 	if (dbi.master.addresses().contains(address)) {
@@ -661,7 +661,7 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	return false;
 }
 
-bool addressesInDbAndPrimaryDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+bool addressesInDbAndPrimaryDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return addressInDbAndPrimaryDc(addresses.address, dbInfo) ||
 	       (addresses.secondaryAddress.present() && addressInDbAndPrimaryDc(addresses.secondaryAddress.get(), dbInfo));
 }
@@ -723,10 +723,10 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 } // namespace
 
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
-ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                  WorkerInterface interf,
                                  LocalityData locality,
-                                 Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+                                 Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
 		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
@@ -1212,7 +1212,7 @@ struct SharedLogsValue {
 };
 
 ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
                                 Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                 ProcessClass initialClass,
