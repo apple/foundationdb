@@ -41,6 +41,8 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
+#include "flow/UringReactor.h"
+#include "flow/UringConnection.h"
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SendBufferIterator.h"
@@ -214,6 +216,7 @@ public:
 	// private:
 
 	ASIOReactor reactor;
+	UringReactor ureactor;
 #ifndef TLS_DISABLED
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
@@ -1276,7 +1279,7 @@ struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 // 5MB for loading files into memory
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
-  : useThreadPool(useThreadPool), reactor(this),
+  : useThreadPool(useThreadPool), reactor(this), ureactor(1024, 0),
 #ifndef TLS_DISABLED
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
@@ -1297,7 +1300,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);
 
 #ifdef __linux__
-	setGlobal(INetwork::enEventFD, (flowGlobalType)N2::ASIOReactor::newEventFD(reactor));
+	setGlobal(INetwork::enEventFD, (flowGlobalType)N2::UringReactor::newEventFD(ureactor));
 #endif
 
 	updateNow();
@@ -1558,7 +1561,7 @@ void Net2::run() {
 				trackAtPriority(TaskPriority::Zero, sleepStart);
 				awakeMetric = false;
 				priorityMetric = 0;
-				reactor.sleep(sleepTime);
+				ureactor.sleep(sleepTime);
 				awakeMetric = true;
 			}
 		}
@@ -1566,7 +1569,7 @@ void Net2::run() {
 		tscBegin = timestampCounter();
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
-		reactor.react();
+		ureactor.poll();
 
 		updateNow();
 		double now = this->currentTime;
@@ -1876,7 +1879,7 @@ void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 		this->ready.push(OrderedTask(priority - (++tasksIssued), taskID, p));
 	} else {
 		if (threadReady.push(OrderedTask(priority, taskID, p)))
-			reactor.wake();
+			ureactor.wake();
 	}
 }
 
@@ -1892,7 +1895,7 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::s
 	}
 #endif
 
-	return Connection::connect(&this->reactor.ios, toAddr);
+	return UringConnection::connect(&this->ureactor, toAddr);
 }
 
 Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string& host) {
@@ -1988,7 +1991,7 @@ Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
 		}
 #endif
-		return Reference<IListener>(new Listener(reactor.ios, localAddr));
+		return Reference<IListener>(new UringListener(&ureactor, localAddr));
 	} catch (boost::system::system_error const& e) {
 		Error x;
 		if (e.code().value() == EADDRINUSE)

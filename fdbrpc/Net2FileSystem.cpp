@@ -36,6 +36,7 @@
 #include "fdbrpc/AsyncFileWinASIO.actor.h"
 #include "fdbrpc/AsyncFileKAIO.actor.h"
 #include "flow/AsioReactor.h"
+#include "flow/UringReactor.h"
 #include "flow/Platform.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
 
@@ -112,7 +113,7 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPa
 	Net2AsyncFile::init();
 #ifdef __linux__
 	if (!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
-		AsyncFileKAIO::init(Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout);
+		AsyncFileKAIO::init(Reference<IEventFD>(N2::UringReactor::getEventFD()), ioTimeout);
 
 	if (fileSystemPath.empty()) {
 		checkFileSystem = false;
