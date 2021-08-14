@@ -49,7 +49,7 @@ void UringReactor::rearm(){
     //sqeCount++;
     int ret = ::io_uring_submit(&ring);
     submit.unlock();
-    ASSERT(ret>=0);
+    ASSERT(ret>0);
 }
 
 int UringReactor::poll(){
@@ -129,7 +129,7 @@ void UringReactor::write(int fd, const SendBuffer* buffer, int limit, Promise<in
     ::io_uring_sqe_set_data(sqe, ow);
     //sqeCount++;
     int ret = ::io_uring_submit(&ring);
-    ASSERT(ret>=0);
+    ASSERT(ret>0);
     submit.unlock();
 }
 
@@ -146,7 +146,7 @@ void UringReactor::read(int fd, uint8_t *buff, int limit, Promise<int> &&p){
     //sqeCount++;
     int ret = ::io_uring_submit(&ring);
     submit.unlock();
-    ASSERT(ret>=0);
+    ASSERT(ret>0);
 }
 
 void UringReactor::poll(int fd, unsigned int flags, Promise<Void> &&p){
@@ -159,24 +159,24 @@ void UringReactor::poll(int fd, unsigned int flags, Promise<Void> &&p){
     //sqeCount++;
     int ret = ::io_uring_submit(&ring);
     submit.unlock();
-    ASSERT(ret>=0);
+    ASSERT(ret>0);
 }
 
 void UringReactor::sleep(double sleepTime){
-    if (poll()) return;
+    if (::io_uring_cq_ready(&ring)) return;
     if (sleepTime > FLOW_KNOBS->BUSY_WAIT_THRESHOLD) {
         OwnedWrite *ow = nullptr;
         if (sleepTime < 4e12) {
             ow = new OwnedWrite(3, -1);
             ow->ts.tv_sec = 0;
-            ow->ts.tv_nsec = 2000; //sleepTime * 1e6;
+            ow->ts.tv_nsec = sleepTime * 1e6;
             submit.lock();
             struct io_uring_sqe *sqe = ::io_uring_get_sqe(&ring);
             ::io_uring_prep_timeout(sqe, &ow->ts, 0, 0);
             ::io_uring_sqe_set_data(sqe, ow);
             int ret = ::io_uring_submit(&ring);
             submit.unlock();
-            ASSERT(ret>=0);
+            ASSERT(ret>0);
         }
         {
             struct io_uring_cqe *cqe;
@@ -193,7 +193,7 @@ void UringReactor::sleep(double sleepTime){
             ::io_uring_sqe_set_data(sqe, ow2);
             int ret = ::io_uring_submit(&ring);
             submit.unlock();
-            ASSERT(ret>=0);
+            ASSERT(ret>0);
         }
 	} else if (sleepTime > 0) {
 		if (!(FLOW_KNOBS->REACTOR_FLAGS & 8))

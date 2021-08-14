@@ -1334,7 +1334,7 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 // 5MB for loading files into memory
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
-  : useThreadPool(useThreadPool), network(this), reactor(this), ureactor(256, 0), ureactorSD(reactor.ios), stopped(false), tasksIssued(0),
+  : useThreadPool(useThreadPool), network(this), reactor(this), ureactor(1024, 0), ureactorSD(reactor.ios), stopped(false), tasksIssued(0),
     ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE),
     // Until run() is called, yield() will always yield
     tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield), numYields(0),
