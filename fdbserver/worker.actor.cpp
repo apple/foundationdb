@@ -959,7 +959,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  UID id,
                                                  LocalityData locality,
                                                  bool isTss,
-                                                 Reference<AsyncVar<ServerDBInfo>> db,
+                                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                                  std::string folder,
                                                  ActorCollection* filesClosed,
                                                  int64_t memoryLimit,
@@ -1006,7 +1006,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
                                                 UID id,
                                                 LocalityData locality,
-                                                Reference<AsyncVar<ServerDBInfo>> db) {
+                                                Reference<AsyncVar<ServerDBInfo> const> db) {
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageCache));
 		if (!e.isError()) {
@@ -2044,14 +2044,14 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	}
 }
 
-ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> a,
-                                           Reference<AsyncVar<Optional<ClusterInterface>>> b) {
+ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> in,
+                                           Reference<AsyncVar<Optional<ClusterInterface>>> out) {
 	loop {
-		if (a->get().present())
-			b->set(a->get().get().clientInterface);
+		if (in->get().present())
+			out->set(in->get().get().clientInterface);
 		else
-			b->set(Optional<ClusterInterface>());
-		wait(a->onChange());
+			out->set(Optional<ClusterInterface>());
+		wait(in->onChange());
 	}
 }
 
@@ -2086,7 +2086,7 @@ ACTOR Future<Void> printTimeout() {
 	return Void();
 }
 
-ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInterface>>> ci) {
+ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInterface>> const> ci) {
 	state Future<Void> timeoutFuture = printTimeout();
 	loop {
 		choose {
