@@ -66,8 +66,6 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/genericactors.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 #ifndef __INTEL_COMPILER
 #pragma region Data Structures
 #endif

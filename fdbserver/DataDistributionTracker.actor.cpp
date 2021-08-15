@@ -1048,15 +1048,19 @@ void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> 
 	    .detail("NewTeam", describe(destinationTeam));*/
 
 	auto ranges = shard_teams.intersectingRanges(keys);
+	// [({dest teams}, {prev teams}) : keyrange]
 	std::vector<std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>> modifiedShards;
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 		if (keys.contains(it->range())) {
 			// erase the many teams that were associated with this one shard
 			for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
+				// Remove this keyrange(shard) from the team.
+				// There could be more than 1 team due to HA configuration.
 				erase(*t, it->range());
 			}
 
 			// save this modification for later insertion
+			// prevTeams contains all potential source servers, it is a super-set of the actual source servers.
 			std::vector<Team> prevTeams = it->value().second;
 			prevTeams.insert(prevTeams.end(), it->value().first.begin(), it->value().first.end());
 			uniquify(prevTeams);
