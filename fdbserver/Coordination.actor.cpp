@@ -440,6 +440,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			}
 		}
 		when(wait(notifyCheck)) {
+			TraceEvent te(SevDebug, "CoordinatorNotifyCheck");
+			te.detail("LeaderAvailable", currentNominee.present()).detail("NotifyQueueSize", notify.size());
+			if (!notify.empty()) {
+				te.detail("NotifiedAddress", notify.front().getEndpoint().getPrimaryAddress());
+			}
 			notifyCheck = delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME /
 			                    std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, notify.size()));
 			if (!notify.empty() && currentNominee.present()) {
