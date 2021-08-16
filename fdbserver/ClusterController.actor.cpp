@@ -4858,18 +4858,18 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			++self.getWorkersRequests;
 			vector<WorkerDetails> workers;
 
-			for (auto& it : self.id_worker) {
+			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    self.db.config.isExcludedServer(it.second.details.interf.addresses())) {
+				    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
 					continue;
 				}
 
 				if ((req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) &&
-				    it.second.details.processClass.classType() != ProcessClass::TesterClass) {
+				    worker.details.processClass.classType() != ProcessClass::TesterClass) {
 					continue;
 				}
 
-				workers.push_back(it.second.details);
+				workers.push_back(worker.details);
 			}
 
 			req.reply.send(workers);

@@ -604,7 +604,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 }
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary DC.
-bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	const auto& dbi = dbInfo->get();
 
 	if (dbi.master.addresses().contains(address)) {
@@ -661,7 +661,7 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	return false;
 }
 
-bool addressesInDbAndPrimaryDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+bool addressesInDbAndPrimaryDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return addressInDbAndPrimaryDc(addresses.address, dbInfo) ||
 	       (addresses.secondaryAddress.present() && addressInDbAndPrimaryDc(addresses.secondaryAddress.get(), dbInfo));
 }
@@ -723,10 +723,10 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 } // namespace
 
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
-ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                  WorkerInterface interf,
                                  LocalityData locality,
-                                 Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+                                 Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
 		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
@@ -959,7 +959,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  UID id,
                                                  LocalityData locality,
                                                  bool isTss,
-                                                 Reference<AsyncVar<ServerDBInfo>> db,
+                                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                                  std::string folder,
                                                  ActorCollection* filesClosed,
                                                  int64_t memoryLimit,
@@ -1006,7 +1006,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
                                                 UID id,
                                                 LocalityData locality,
-                                                Reference<AsyncVar<ServerDBInfo>> db) {
+                                                Reference<AsyncVar<ServerDBInfo> const> db) {
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageCache));
 		if (!e.isError()) {
@@ -1212,7 +1212,7 @@ struct SharedLogsValue {
 };
 
 ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
                                 Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                 ProcessClass initialClass,
@@ -2044,14 +2044,14 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	}
 }
 
-ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> a,
-                                           Reference<AsyncVar<Optional<ClusterInterface>>> b) {
+ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> in,
+                                           Reference<AsyncVar<Optional<ClusterInterface>>> out) {
 	loop {
-		if (a->get().present())
-			b->set(a->get().get().clientInterface);
+		if (in->get().present())
+			out->set(in->get().get().clientInterface);
 		else
-			b->set(Optional<ClusterInterface>());
-		wait(a->onChange());
+			out->set(Optional<ClusterInterface>());
+		wait(in->onChange());
 	}
 }
 
@@ -2086,7 +2086,7 @@ ACTOR Future<Void> printTimeout() {
 	return Void();
 }
 
-ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInterface>>> ci) {
+ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInterface>> const> ci) {
 	state Future<Void> timeoutFuture = printTimeout();
 	loop {
 		choose {
