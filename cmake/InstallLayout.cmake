@@ -155,17 +155,31 @@ list(GET FDB_VERSION_LIST 2 FDB_PATCH)
 # Alternatives config
 ################################################################################
 
+set(mv_packaging_dir ${PROJECT_SOURCE_DIR}/packaging/multiversion)
 math(EXPR ALTERNATIVES_PRIORITY "(${PROJECT_VERSION_MAJOR} * 1000) + (${PROJECT_VERSION_MINOR} * 100) + ${PROJECT_VERSION_PATCH}")
 set(script_dir "${PROJECT_BINARY_DIR}/packaging/multiversion/")
 file(MAKE_DIRECTORY "${script_dir}/server" "${script_dir}/clients")
-configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/server/postinst" "${script_dir}/server" @ONLY)
-configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/server/prerm" "${script_dir}/server" @ONLY)
+configure_file("${mv_packaging_dir}/server/postinst" "${script_dir}/server" @ONLY)
+configure_file("${mv_packaging_dir}/server/prerm" "${script_dir}/server" @ONLY)
 set(LIB_DIR lib)
-configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/postinst" "${script_dir}/clients" @ONLY)
+configure_file("${mv_packaging_dir}/clients/postinst" "${script_dir}/clients" @ONLY)
 set(LIB_DIR lib64)
-configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/postinst" "${script_dir}/clients/postinst-el7" @ONLY)
-configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/prerm" "${script_dir}/clients" @ONLY)
+configure_file("${mv_packaging_dir}/clients/postinst" "${script_dir}/clients/postinst-el7" @ONLY)
+configure_file("${mv_packaging_dir}/clients/prerm" "${script_dir}/clients" @ONLY)
 
+#make sure all directories we need exist
+make_directory("${mv_packaging_dir}/clients/usr/lib/foundationdb")
+install(DIRECTORY "${mv_packaging_dir}/clients/usr/lib/foundationdb"
+  DESTINATION usr/lib
+  COMPONENT clients-versioned)
+make_directory("${mv_packaging_dir}/clients/usr/lib/pkgconfig")
+install(DIRECTORY "${mv_packaging_dir}/clients/usr/lib/pkgconfig"
+  DESTINATION usr/lib
+  COMPONENT clients-versioned)
+make_directory("${mv_packaging_dir}/clients/usr/lib/cmake")
+install(DIRECTORY "${mv_packaging_dir}/clients/usr/lib/cmake"
+  DESTINATION usr/lib
+  COMPONENT clients-versioned)
 
 ################################################################################
 # Move Docker Setup
@@ -245,6 +259,7 @@ set(CPACK_RPM_PACKAGE_NAME "foundationdb")
 set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME "foundationdb-clients")
 set(CPACK_RPM_SERVER-EL7_PACKAGE_NAME "foundationdb-server")
 set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_NAME "foundationdb-server-${PROJECT_VERSION}")
+set(CPACK_RPM_CLIENTS-VERSIONED_PACKAGE_NAME "foundationdb-clients-${PROJECT_VERSION}")
 
 set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${rpm-clients-filename}.el7.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 set(CPACK_RPM_CLIENTS-VERSIONED_FILE_NAME "${rpm-clients-filename}.versioned.${CMAKE_SYSTEM_PROCESSOR}.rpm")
@@ -281,7 +296,10 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/lib"
   "/lib/systemd"
   "/lib/systemd/system"
-  "/etc/rc.d/init.d")
+  "/etc/rc.d/init.d"
+  "/usr/lib/pkgconfig"
+  "/usr/lib/foundationdb"
+  "/usr/lib/cmake")
 set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 #set(CPACK_RPM_BUILD_SOURCE_FDB_INSTALL_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
