@@ -191,7 +191,7 @@ struct StorageServerDisk {
 	Future<Void> getError() { return storage->getError(); }
 	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
-	Future<Void> commitAsync(Version version) { return onCommit(storage->commitAsync(version), IKeyValueStore::CommitNotification(version), storage->getNotifyCommit()); }
+	Future<Void> commitAsync(Version version) { return onCommit(storage->commit(version), IKeyValueStore::CommitNotification(version), storage->getNotifyCommit()); }
 
     FutureStream<IKeyValueStore::CommitNotification> commitNotifications() { return storage->getNotifyCommit()->getFuture(); }
 

@@ -26,10 +26,6 @@
 #include "fdbserver/Knobs.h"
 #include "flow/IThreadPool.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-
-
 class IClosable {
 public:
 	// IClosable is a base interface for any disk-backed data structure that needs to support asynchronous errors,
@@ -64,9 +60,9 @@ public:
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
-	virtual Future<Void> commitAsync(Version version, bool sequential = false) {
-		return commit(sequential);
-	}
+	//virtual Future<Void> commitAsync(Version version, bool sequential = false) {
+	//	return commit(sequential);
+	//}
 	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer

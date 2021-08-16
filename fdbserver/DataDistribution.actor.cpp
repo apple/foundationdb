@@ -4360,7 +4360,7 @@ ACTOR Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version adde
 }
 
 ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
-                                               TCServerInfo* server,
+                                               TCServerInfo* server,  // A pure struct.
                                                Database cx,
                                                ServerStatus* status,
                                                Version addedVersion) {
@@ -4401,6 +4401,7 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 
 		self->server_status.set(interf.id(), *status);
 		if (status->isFailed) {
+			// deBouncer avoid sending fast bouncing changes.
 			self->restartRecruiting.trigger();
 		}
 
@@ -5963,6 +5964,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
 					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
 					// easier to just (with low priority) schedule it for movement.
+					// Is there where the placement configuration change is triggered? E.g, RF4->RF2? NO.
 					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;

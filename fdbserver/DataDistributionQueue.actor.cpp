@@ -846,6 +846,9 @@ struct DDQueueData {
 			RelocateData rd(*it);
 
 			// Check if there is an inflight shard that is overlapped with the queued relocateShard (rd)
+			// The takeaway is: as long as the in-flight move hasn't finished fetchKey(), it will be cancelled.
+			// Is using a weighted projected data size for the in-flight move a good idea? Will it cause confusion
+			// for future moves? E.g., the destination shows a log of usage, and DD decides to move them out.
 			bool overlappingInFlight = false;
 			auto intersectingInFlight = inFlight.intersectingRanges(rd.keys);
 			for (auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
@@ -868,6 +871,7 @@ struct DDQueueData {
 
 			// Because the busyness of a server is decreased when a superseding relocation is issued, we
 			//  need to consider what the busyness of a server WOULD be if
+			// Ranges within rd.keys.
 			auto containedRanges = inFlight.containedRanges(rd.keys);
 			std::vector<RelocateData> cancellableRelocations;
 			for (auto it = containedRanges.begin(); it != containedRanges.end(); ++it) {
@@ -1173,6 +1177,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 							                                               TaskPriority::DataDistributionLaunch);
 						}
 						when(wait(signalledTransferComplete ? Never() : dataMovementComplete.getFuture())) {
+							// Is it correct to insert this into fetchKeysComplete? Since this is the end of data
+							// transfer, but not necessarily the end of data move?
+							// I think is never designed to signal the end of data move, but specifically for the
+							// end of data transfer.
 							self->fetchKeysComplete.insert(rd);
 							if (!signalledTransferComplete) {
 								signalledTransferComplete = true;
