@@ -56,7 +56,7 @@ def advanceversion(logger):
     version1 = int(run_fdbcli_command('getversion'))
     logger.debug("Read version: {}".format(version1))
     # advance version to a much larger value compared to the current version
-    version2 = version1 * 10000
+    version2 = version1 * 100
     logger.debug("Advanced to version: " + str(version2))
     run_fdbcli_command('advanceversion', str(version2))
     # after running the advanceversion command,
@@ -71,6 +71,11 @@ def advanceversion(logger):
     version4 = int(run_fdbcli_command('getversion'))
     logger.debug("Read version: {}".format(version4))
     assert version4 >= version3
+    # wait for the recovery to finish
+    # if the database is unavailable, the test will timeout and fail
+    while not get_value_from_status_json(False, 'client', 'database_status', 'available'):
+        logger.debug("Database unavailable after advanceversion, wait for 1 second")
+        time.sleep(1)
 
 @enable_logging()
 def maintenance(logger):
@@ -458,8 +463,7 @@ if __name__ == '__main__':
     # assertions will fail if fdbcli does not work as expected
     process_number = int(sys.argv[3])
     if process_number == 1:
-        # TODO: disable for now, the change can cause the database unavailable
-        #advanceversion()
+        advanceversion()
         cache_range()
         consistencycheck()
         datadistribution()
