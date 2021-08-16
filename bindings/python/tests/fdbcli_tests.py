@@ -341,7 +341,7 @@ def get_fdb_process_addresses(logger):
     assert len(addresses) == process_number
     return addresses
 
-@enable_logging()
+@enable_logging(logging.DEBUG)
 def coordinators(logger):
     # we should only have one coordinator for now
     output1 = run_fdbcli_command('coordinators')
@@ -366,8 +366,9 @@ def coordinators(logger):
     # auto change should go back to 1 coordinator
     run_fdbcli_command('coordinators', 'auto')
     assert len(get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')) == 1
+    wait_for_database_available(logger)
 
-@enable_logging()
+@enable_logging(logging.DEBUG)
 def exclude(logger):
     # get all processes' network addresses
     addresses = get_fdb_process_addresses(logger)
@@ -413,6 +414,7 @@ def exclude(logger):
     # check the include is successful
     output4 = run_fdbcli_command('exclude')
     assert no_excluded_process_output in output4
+    wait_for_database_available(logger)
 
 # read the system key 'k', need to enable the option first
 def read_system_key(k):
@@ -439,6 +441,13 @@ def throttle(logger):
     # verify disabled
     assert enable_flag == "`0'"
     # TODO : test manual throttling, not easy to do now
+
+def wait_for_database_available(logger):
+    # sometimes the change takes some time to have effect and the database can be unavailable at that time
+    # this is to wait until the database is available again
+    while not get_value_from_status_json(True, 'client', 'database_status', 'available'):
+        logger.debug("Database unavailable for now, wait for one second")
+        time.sleep(1)
 
 if __name__ == '__main__':
     # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>
