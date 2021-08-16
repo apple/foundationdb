@@ -348,7 +348,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	bool longLeaderElection = randomize && BUGGIFY;
 	init( MAX_NOTIFICATIONS,                                  100000 );
 	init( MIN_NOTIFICATIONS,                                     100 );
-	init( NOTIFICATION_FULL_CLEAR_TIME,                      1000.0 );
+	init( NOTIFICATION_FULL_CLEAR_TIME,                       1000.0 );
 	init( CANDIDATE_MIN_DELAY,                                  0.05 );
 	init( CANDIDATE_MAX_DELAY,                                   1.0 );
 	init( CANDIDATE_GROWTH_RATE,                                 1.2 );
