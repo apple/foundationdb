@@ -22,6 +22,7 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/PImpl.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/ConfigFollowerInterface.h"
@@ -35,12 +36,10 @@
  * these updates to all workers' local configurations
  */
 class ConfigBroadcaster {
-	std::unique_ptr<class ConfigBroadcasterImpl> _impl;
-	ConfigBroadcasterImpl& impl() { return *_impl; }
-	ConfigBroadcasterImpl const& impl() const { return *_impl; }
+	PImpl<class ConfigBroadcasterImpl> impl;
 
 public:
-	explicit ConfigBroadcaster(ServerCoordinators const&, UseConfigDB);
+	explicit ConfigBroadcaster(ServerCoordinators const&, ConfigDBType);
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();

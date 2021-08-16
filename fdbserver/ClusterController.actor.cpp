@@ -4788,9 +4788,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
                                          LocalityData locality,
-                                         UseConfigDB useConfigDB) {
+                                         ConfigDBType configDBType) {
 	state ClusterControllerData self(interf, locality, coordinators);
-	state ConfigBroadcaster configBroadcaster(coordinators, useConfigDB);
+	state ConfigBroadcaster configBroadcaster(coordinators, configDBType);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
@@ -4800,7 +4800,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
 	                                coordinators,
-	                                (useConfigDB == UseConfigDB::DISABLED) ? nullptr : &configBroadcaster));
+	                                (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
@@ -4852,7 +4852,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			registerWorker(req, &self, (useConfigDB == UseConfigDB::DISABLED) ? nullptr : &configBroadcaster);
+			registerWorker(req, &self, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
@@ -4928,7 +4928,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
-                                     UseConfigDB useConfigDB) {
+                                     ConfigDBType configDBType) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -4955,7 +4955,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, useConfigDB));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -4979,13 +4979,13 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> connFile,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     UseConfigDB useConfigDB) {
+                                     ConfigDBType configDBType) {
 	wait(recoveredDiskFiles);
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators(connFile);
-			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, useConfigDB));
+			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
 				throw; // Expected to terminate fdbserver
