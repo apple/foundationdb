@@ -22,8 +22,6 @@
 #include "fdbclient/PaxosConfigTransaction.h"
 #include "flow/actorcompiler.h" // must be last include
 
-namespace {
-
 // TODO: Some replicas may reply after quorum has already been achieved, and we may want to add them to the readReplicas
 // list
 class GetGenerationQuorum {
@@ -71,8 +69,6 @@ public:
 	Future<Result> getResult() const { return result.getFuture(); }
 	Optional<Version> getLastSeenLiveVersion() const { return lastSeenLiveVersion; }
 };
-
-} // namespace
 
 class PaxosConfigTransactionImpl {
 	ConfigTransactionCommitRequest toCommit;
