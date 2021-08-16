@@ -99,8 +99,11 @@ set(FDBSERVER_SRCS
   RestoreWorkerInterface.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
+  RoleLineage.actor.h
+  RoleLineage.actor.cpp
   ServerDBInfo.actor.h
   ServerDBInfo.h
+  SigStack.cpp
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
   SimulatedCluster.actor.cpp
@@ -305,6 +308,7 @@ else()
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
+# target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)

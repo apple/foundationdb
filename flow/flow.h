@@ -20,6 +20,8 @@
 
 #ifndef FLOW_FLOW_H
 #define FLOW_FLOW_H
+#include "flow/Arena.h"
+#include "flow/FastRef.h"
 #pragma once
 
 #pragma warning(disable : 4244 4267) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int
@@ -29,14 +31,18 @@
 
 #include <vector>
 #include <queue>
+#include <stack>
 #include <map>
 #include <unordered_map>
 #include <set>
 #include <functional>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <algorithm>
+#include <memory>
+#include <mutex>
 
 #include "flow/Platform.h"
 #include "flow/FastAlloc.h"
@@ -46,6 +52,7 @@
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
+#include "flow/WriteOnlySet.h"
 
 #include <boost/version.hpp>
 
@@ -417,6 +424,192 @@ struct SingleCallback {
 	}
 };
 
+struct LineagePropertiesBase {
+	virtual ~LineagePropertiesBase();
+};
+
+// helper class to make implementation of LineageProperties easier
+template <class Derived>
+struct LineageProperties : LineagePropertiesBase {
+	// Contract:
+	//
+	// StringRef name = "SomeUniqueName"_str;
+
+	// this has to be implemented by subclasses
+	// but can't be made virtual.
+	// A user should implement this for any type
+	// within the properies class.
+	template <class Value>
+	bool isSet(Value Derived::*member) const {
+		return true;
+	}
+};
+
+struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage> {
+	friend class LineageReference;
+
+	struct Property {
+		std::string_view name;
+		LineagePropertiesBase* properties;
+	};
+
+private:
+	std::vector<Property> properties;
+	Reference<ActorLineage> parent;
+	mutable std::mutex mutex;
+	using Lock = std::unique_lock<std::mutex>;
+	using Iterator = std::vector<Property>::const_iterator;
+
+	ActorLineage();
+	Iterator find(const std::string_view& name) const {
+		for (auto it = properties.cbegin(); it != properties.cend(); ++it) {
+			if (it->name == name) {
+				return it;
+			}
+		}
+		return properties.end();
+	}
+	Property& findOrInsert(const std::string_view& name) {
+		for (auto& property : properties) {
+			if (property.name == name) {
+				return property;
+			}
+		}
+		properties.emplace_back(Property{ name, nullptr });
+		return properties.back();
+	}
+
+public:
+	~ActorLineage();
+	bool isRoot() const {
+		Lock _{ mutex };
+		return parent.getPtr() == nullptr;
+	}
+	void makeRoot() {
+		Lock _{ mutex };
+		parent.clear();
+	}
+	template <class T, class V>
+	V& modify(V T::*member) {
+		Lock _{ mutex };
+		auto& res = findOrInsert(T::name).properties;
+		if (!res) {
+			res = new T{};
+		}
+		T* map = static_cast<T*>(res);
+		return map->*member;
+	}
+	template <class T, class V>
+	std::optional<V> get(V T::*member) const {
+		Lock _{ mutex };
+		auto current = this;
+		while (current != nullptr) {
+			auto iter = current->find(T::name);
+			if (iter != current->properties.end()) {
+				T const& map = static_cast<T const&>(*iter->properties);
+				if (map.isSet(member)) {
+					return map.*member;
+				}
+			}
+			current = current->parent.getPtr();
+		}
+		return std::optional<V>{};
+	}
+	template <class T, class V>
+	std::vector<V> stack(V T::*member) const {
+		Lock _{ mutex };
+		auto current = this;
+		std::vector<V> res;
+		while (current != nullptr) {
+			auto iter = current->find(T::name);
+			if (iter != current->properties.end()) {
+				T const& map = static_cast<T const&>(*iter->properties);
+				if (map.isSet(member)) {
+					res.push_back(map.*member);
+				}
+			}
+			current = current->parent.getPtr();
+		}
+		return res;
+	}
+	Reference<ActorLineage> getParent() {
+		return parent;
+	}
+};
+
+// A Reference subclass with knowledge on the true owner of the contained
+// ActorLineage object. This class enables lazy allocation of ActorLineages.
+// LineageReference copies are generally made by child actors, which should
+// create their own ActorLineage when attempting to add lineage properties (see
+// getCurrentLineage()).
+class LineageReference : public Reference<ActorLineage> {
+public:
+	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
+	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
+	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+
+	void setActorName(const char* name) { actorName_ = name; }
+	const char* actorName() { return actorName_; }
+	void allocate() {
+		Reference<ActorLineage>::setPtrUnsafe(new ActorLineage());
+		allocated_ = true;
+	}
+	bool isAllocated() { return allocated_; }
+
+private:
+	// The actor name has to be a property of the LineageReference because all
+	// actors store their own LineageReference copy, but not all actors point
+	// to their own ActorLineage.
+	const char* actorName_;
+	bool allocated_;
+};
+
+extern std::atomic<bool> startSampling;
+extern thread_local LineageReference* currentLineage;
+
+#ifdef ENABLE_SAMPLING
+LineageReference getCurrentLineage();
+#else
+#define getCurrentLineage() if (false) (*currentLineage)
+#endif
+void replaceLineage(LineageReference* lineage);
+
+struct StackLineage : LineageProperties<StackLineage> {
+	static const std::string_view name;
+	StringRef actorName;
+};
+
+#ifdef ENABLE_SAMPLING
+struct LineageScope {
+	LineageReference* oldLineage;
+	LineageScope(LineageReference* with) : oldLineage(currentLineage) {
+		replaceLineage(with);
+	}
+	~LineageScope() {
+		replaceLineage(oldLineage);
+	}
+};
+#endif
+
+// This class can be used in order to modify all lineage properties
+// of actors created within a (non-actor) scope
+struct LocalLineage {
+	LineageReference lineage;
+	LineageReference* oldLineage;
+	LocalLineage() {
+#ifdef ENABLE_SAMPLING
+		lineage.allocate();
+		oldLineage = currentLineage;
+		replaceLineage(&lineage);
+#endif
+	}
+	~LocalLineage() {
+#ifdef ENABLE_SAMPLING
+		replaceLineage(oldLineage);
+#endif
+	}
+};
+
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
@@ -458,8 +651,9 @@ public:
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
-		while (Callback<T>::next != this)
+		while (Callback<T>::next != this) {
 			Callback<T>::next->fire(this->value());
+		}
 	}
 
 	void send(Never) {
@@ -470,8 +664,9 @@ public:
 	void sendError(Error err) {
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
 		this->error_state = err;
-		while (Callback<T>::next != this)
+		while (Callback<T>::next != this) {
 			Callback<T>::next->error(err);
+		}
 	}
 
 	template <class U>
@@ -1050,36 +1245,77 @@ static inline void destruct(T& t) {
 
 template <class ReturnValue>
 struct Actor : SAV<ReturnValue> {
+#ifdef ENABLE_SAMPLING
+	LineageReference lineage = *currentLineage;
+#endif
 	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
 	                         // group #
 
-	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/
+	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/ }
+	// ~Actor() { --actorCount; }
+
+#ifdef ENABLE_SAMPLING
+	LineageReference* lineageAddr() {
+		return std::addressof(lineage);
 	}
-	//~Actor() { --actorCount; }
+#endif
 };
 
 template <>
 struct Actor<void> {
 	// This specialization is for a void actor (one not returning a future, hence also uncancellable)
 
+#ifdef ENABLE_SAMPLING
+	LineageReference lineage = *currentLineage;
+#endif
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
-	Actor() : actor_wait_state(0) { /*++actorCount;*/
+	Actor() : actor_wait_state(0) { /*++actorCount;*/ }
+	// ~Actor() { --actorCount; }
+
+#ifdef ENABLE_SAMPLING
+	LineageReference* lineageAddr() {
+		return std::addressof(lineage);
 	}
-	//~Actor() { --actorCount; }
+#endif
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
-	void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
+	virtual void fire(ValueType const& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_fire(this, value);
+	}
+	virtual void error(Error e) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_error(this, e);
+	}
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
-	void fire(ValueType&& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value)); }
-	void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
+	void fire(ValueType const& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_fire(this, value);
+	}
+	void fire(ValueType&& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
+	}
+	void error(Error e) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_error(this, e);
+	}
 };
 inline double now() {
 	return g_network->now();

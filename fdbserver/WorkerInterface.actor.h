@@ -39,6 +39,7 @@
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "flow/actorcompiler.h"
 
 struct WorkerInterface {
@@ -67,6 +68,7 @@ struct WorkerInterface {
 	RequestStream<struct WorkerSnapRequest> workerSnapReq;
 	RequestStream<struct UpdateServerDBInfoRequest> updateServerDBInfo;
 
+	ConfigBroadcastInterface configBroadcastInterface;
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
@@ -117,7 +119,8 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
-		           updateServerDBInfo);
+		           updateServerDBInfo,
+		           configBroadcastInterface);
 	}
 };
 
@@ -376,6 +379,8 @@ struct RegisterWorkerRequest {
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
+	Version lastSeenKnobVersion;
+	ConfigClassSet knobConfigClassSet;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -386,9 +391,12 @@ struct RegisterWorkerRequest {
 	                      Generation generation,
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
-	                      bool degraded)
+	                      bool degraded,
+	                      Version lastSeenKnobVersion,
+	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
-	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
+	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded),
+	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -403,7 +411,9 @@ struct RegisterWorkerRequest {
 		           issues,
 		           incompatiblePeers,
 		           reply,
-		           degraded);
+		           degraded,
+		           lastSeenKnobVersion,
+		           knobConfigClassSet);
 	}
 };
 
@@ -810,6 +820,41 @@ struct Role {
 	std::string roleName;
 	std::string abbreviation;
 	bool includeInTraceRoles;
+
+	static const Role& get(ProcessClass::ClusterRole role) {
+		switch (role) {
+		case ProcessClass::Storage:
+			return STORAGE_SERVER;
+		case ProcessClass::TLog:
+			return TRANSACTION_LOG;
+		case ProcessClass::CommitProxy:
+			return COMMIT_PROXY;
+		case ProcessClass::GrvProxy:
+			return GRV_PROXY;
+		case ProcessClass::Master:
+			return MASTER;
+		case ProcessClass::Resolver:
+			return RESOLVER;
+		case ProcessClass::LogRouter:
+			return LOG_ROUTER;
+		case ProcessClass::ClusterController:
+			return CLUSTER_CONTROLLER;
+		case ProcessClass::DataDistributor:
+			return DATA_DISTRIBUTOR;
+		case ProcessClass::Ratekeeper:
+			return RATEKEEPER;
+		case ProcessClass::StorageCache:
+			return STORAGE_CACHE;
+		case ProcessClass::Backup:
+			return BACKUP;
+		case ProcessClass::Worker:
+			return WORKER;
+		case ProcessClass::NoRole:
+		default:
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
 
 	bool operator==(const Role& r) const { return roleName == r.roleName; }
 	bool operator!=(const Role& r) const { return !(*this == r); }

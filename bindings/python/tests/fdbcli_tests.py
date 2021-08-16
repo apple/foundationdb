@@ -332,15 +332,16 @@ def transaction(logger):
     output7 = run_fdbcli_command('get', 'key')
     assert output7 == "`key': not found"
 
-def get_fdb_process_addresses():
+def get_fdb_process_addresses(logger):
     # get all processes' network addresses
     output = run_fdbcli_command('kill')
+    logger.debug(output)
     # except the first line, each line is one process
     addresses = output.split('\n')[1:]
     assert len(addresses) == process_number
     return addresses
 
-@enable_logging()
+@enable_logging(logging.DEBUG)
 def coordinators(logger):
     # we should only have one coordinator for now
     output1 = run_fdbcli_command('coordinators')
@@ -354,7 +355,7 @@ def coordinators(logger):
     assert coordinator_list[0]['address'] == coordinators
     # verify the cluster description
     assert get_value_from_status_json(True, 'cluster', 'connection_string').startswith('{}:'.format(cluster_description))
-    addresses = get_fdb_process_addresses()
+    addresses = get_fdb_process_addresses(logger)
     # set all 5 processes as coordinators and update the cluster description
     new_cluster_description = 'a_simple_description'
     run_fdbcli_command('coordinators', *addresses, 'description={}'.format(new_cluster_description))
@@ -365,11 +366,12 @@ def coordinators(logger):
     # auto change should go back to 1 coordinator
     run_fdbcli_command('coordinators', 'auto')
     assert len(get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')) == 1
+    wait_for_database_available(logger)
 
-@enable_logging()
+@enable_logging(logging.DEBUG)
 def exclude(logger):
     # get all processes' network addresses
-    addresses = get_fdb_process_addresses()
+    addresses = get_fdb_process_addresses(logger)
     logger.debug("Cluster processes: {}".format(' '.join(addresses)))
     # There should be no excluded process for now
     no_excluded_process_output = 'There are currently no servers or localities excluded from the database.'
@@ -377,16 +379,28 @@ def exclude(logger):
     assert no_excluded_process_output in output1
     # randomly pick one and exclude the process
     excluded_address = random.choice(addresses)
+    # If we see "not enough space" error, use FORCE option to proceed
+    # this should be a safe operation as we do not need any storage space for the test 
+    force = False
     # sometimes we need to retry the exclude
     while True:
         logger.debug("Excluding process: {}".format(excluded_address))
-        error_message = run_fdbcli_command_and_get_error('exclude', excluded_address)
+        if force:
+            error_message = run_fdbcli_command_and_get_error('exclude', 'FORCE', excluded_address)
+        else:
+            error_message = run_fdbcli_command_and_get_error('exclude', excluded_address)
         if error_message == 'WARNING: {} is a coordinator!'.format(excluded_address):
             # exclude coordinator will print the warning, verify the randomly selected process is the coordinator
             coordinator_list = get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')
             assert len(coordinator_list) == 1
             assert coordinator_list[0]['address'] == excluded_address
             break
+        elif 'ERROR: This exclude may cause the total free space in the cluster to drop below 10%.' in error_message:
+            # exclude the process may cause the free space not enough
+            # use FORCE option to ignore it and proceed
+            assert not force
+            force = True
+            logger.debug("Use FORCE option to exclude the process")
         elif not error_message:
             break
         else:
@@ -400,6 +414,7 @@ def exclude(logger):
     # check the include is successful
     output4 = run_fdbcli_command('exclude')
     assert no_excluded_process_output in output4
+    wait_for_database_available(logger)
 
 # read the system key 'k', need to enable the option first
 def read_system_key(k):
@@ -427,6 +442,13 @@ def throttle(logger):
     assert enable_flag == "`0'"
     # TODO : test manual throttling, not easy to do now
 
+def wait_for_database_available(logger):
+    # sometimes the change takes some time to have effect and the database can be unavailable at that time
+    # this is to wait until the database is available again
+    while not get_value_from_status_json(True, 'client', 'database_status', 'available'):
+        logger.debug("Database unavailable for now, wait for one second")
+        time.sleep(1)
+
 if __name__ == '__main__':
     # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>
     assert len(sys.argv) == 4, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>"
@@ -450,10 +472,7 @@ if __name__ == '__main__':
         throttle()
     else:
         assert process_number > 1, "Process number should be positive"
-        # the kill command which used to list processes seems to not work as expected sometime
-        # which makes the test flaky.
-        # We need to figure out the reason and then re-enable these tests
-        #coordinators()
-        #exclude()
+        coordinators()
+        exclude()
 
     
