@@ -144,22 +144,6 @@ class ReadFromLocalConfigEnvironment {
 		}
 	}
 
-	ACTOR static Future<Void> setup(ReadFromLocalConfigEnvironment* self) {
-		wait(self->localConfiguration.initialize());
-		if (self->cbi) {
-			// LocalConfiguration runs in a loop waiting for messages from the
-			// broadcaster. These unit tests use the same
-			// ConfigBroadcastInterface across restarts, so when "killing" the
-			// old LocalConfiguration, it's necessary to make sure it is
-			// completely stopped before starting the second config. This
-			// prevents two actors trying to listen for the same message on the
-			// same interface, causing lots of issues!
-			self->consumer.cancel();
-			self->consumer = self->localConfiguration.consume(self->cbi->get());
-		}
-		return Void();
-	}
-
 public:
 	ReadFromLocalConfigEnvironment(std::string const& dataDir,
 	                               std::string const& configPath,
@@ -167,7 +151,20 @@ public:
 	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::True),
 	    consumer(Never()) {}
 
-	Future<Void> setup() { return setup(this); }
+	Future<Void> setup() {
+		if (cbi) {
+			// LocalConfiguration runs in a loop waiting for messages from the
+			// broadcaster. These unit tests use the same
+			// ConfigBroadcastInterface across restarts, so when "killing" the
+			// old LocalConfiguration, it's necessary to make sure it is
+			// completely stopped before starting the second config. This
+			// prevents two actors trying to listen for the same message on the
+			// same interface, causing lots of issues!
+			consumer.cancel();
+			consumer = localConfiguration.consume(cbi->get());
+		}
+		return Void();
+	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
 		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, IsTest::True);

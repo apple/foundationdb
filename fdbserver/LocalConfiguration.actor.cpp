@@ -44,7 +44,6 @@ KeyRef stringToKeyRef(std::string const& s) {
 class LocalConfigurationImpl {
 	UID id;
 	OnDemandStore kvStore;
-	Future<Void> initFuture;
 	Version lastSeenVersion{ 0 };
 	std::unique_ptr<IKnobCollection> testKnobCollection;
 
@@ -239,7 +238,6 @@ class LocalConfigurationImpl {
 	                                      std::map<ConfigKey, KnobValue> snapshot,
 	                                      Version snapshotVersion) {
 		// TODO: Concurrency control?
-		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		++self->snapshots;
 		self->kvStore->clear(knobOverrideKeys);
 		for (const auto& [configKey, knobValue] : snapshot) {
@@ -259,7 +257,6 @@ class LocalConfigurationImpl {
 	                                     Standalone<VectorRef<VersionedConfigMutationRef>> changes,
 	                                     Version mostRecentVersion) {
 		// TODO: Concurrency control?
-		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		++self->changeRequestsFetched;
 		for (const auto& versionedMutation : changes) {
 			ASSERT_GT(versionedMutation.version, self->lastSeenVersion);
@@ -298,7 +295,6 @@ class LocalConfigurationImpl {
 	}
 
 	ACTOR static Future<Void> consume(LocalConfigurationImpl* self, ConfigBroadcastInterface broadcaster) {
-		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			choose {
 				when(wait(consumeInternal(self, broadcaster))) { ASSERT(false); }
@@ -325,33 +321,23 @@ public:
 		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
 	}
 
-	Future<Void> initialize() {
-		ASSERT(!initFuture.isValid());
-		initFuture = initialize(this);
-		return initFuture;
-	}
-
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes, Version mostRecentVersion) {
 		return addChanges(this, changes, mostRecentVersion);
 	}
 
 	FlowKnobs const& getFlowKnobs() const {
-		ASSERT(initFuture.isValid() && initFuture.isReady());
 		return getKnobs().getFlowKnobs();
 	}
 
 	ClientKnobs const& getClientKnobs() const {
-		ASSERT(initFuture.isValid() && initFuture.isReady());
 		return getKnobs().getClientKnobs();
 	}
 
 	ServerKnobs const& getServerKnobs() const {
-		ASSERT(initFuture.isValid() && initFuture.isReady());
 		return getKnobs().getServerKnobs();
 	}
 
 	TestKnobs const& getTestKnobs() const {
-		ASSERT(initFuture.isValid() && initFuture.isReady());
 		return getKnobs().getTestKnobs();
 	}
 
@@ -419,10 +405,6 @@ LocalConfiguration::LocalConfiguration(LocalConfiguration&&) = default;
 LocalConfiguration& LocalConfiguration::operator=(LocalConfiguration&&) = default;
 
 LocalConfiguration::~LocalConfiguration() = default;
-
-Future<Void> LocalConfiguration::initialize() {
-	return impl->initialize();
-}
 
 FlowKnobs const& LocalConfiguration::getFlowKnobs() const {
 	return impl->getFlowKnobs();

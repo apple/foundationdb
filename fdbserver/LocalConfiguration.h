@@ -54,7 +54,6 @@ public:
 	LocalConfiguration(LocalConfiguration&&);
 	LocalConfiguration& operator=(LocalConfiguration&&);
 	~LocalConfiguration();
-	Future<Void> initialize();
 	FlowKnobs const& getFlowKnobs() const;
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;
