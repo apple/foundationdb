@@ -1159,9 +1159,9 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 					readAllBytes = buffer_end - unprocessed_end;
 				}
 
-				state int totalReadBytes = wait(conn->asyncRead(unprocessed_end, buffer_end));
-				unprocessed_end += totalReadBytes;
-				/*
+				state int totalReadBytes = 0;//wait(conn->asyncRead(unprocessed_end, buffer_end));
+				//unprocessed_end += totalReadBytes;
+				//*
 				while (true) {
 					const int len = std::min<int>(buffer_end - unprocessed_end, FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 					if (len == 0)
@@ -1173,7 +1173,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 					totalReadBytes += readBytes;
 					unprocessed_end += readBytes;
 				}
-				*/
+				//*/
 				if (peer) {
 					peer->bytesReceived += totalReadBytes;
 				}
