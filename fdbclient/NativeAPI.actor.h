@@ -76,8 +76,6 @@ struct NetworkOptions {
 	NetworkOptions();
 };
 
-class ReadYourWritesTransaction; // workaround cyclic dependency
-
 class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
@@ -171,6 +169,7 @@ private:
 	void clear();
 };
 
+class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;

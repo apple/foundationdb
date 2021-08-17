@@ -22,8 +22,6 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 
-#include "flow/FastRef.h"
-#include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 void TagSet::addTag(TransactionTagRef tag) {
