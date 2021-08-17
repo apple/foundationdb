@@ -1,5 +1,5 @@
 /*
- * ConfigNode.h
+ * PImpl.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,18 +20,23 @@
 
 #pragma once
 
-#include <string>
+#include <memory>
 
-#include "fdbclient/ConfigTransactionInterface.h"
-#include "fdbclient/PImpl.h"
-#include "fdbserver/ConfigFollowerInterface.h"
-
-class ConfigNode : public ReferenceCounted<ConfigNode> {
-	PImpl<class ConfigNodeImpl> impl;
+template <class T>
+class PImpl {
+	std::unique_ptr<T> impl;
+	struct ConstructorTag {};
+	template <class... Args>
+	PImpl(ConstructorTag, Args&&... args) : impl(std::make_unique<T>(std::forward<Args>(args)...)) {}
 
 public:
-	ConfigNode(std::string const& folder);
-	~ConfigNode();
-	Future<Void> serve(ConfigTransactionInterface const&);
-	Future<Void> serve(ConfigFollowerInterface const&);
+	PImpl() = default;
+	template <class... Args>
+	static PImpl create(Args&&... args) {
+		return PImpl(ConstructorTag{}, std::forward<Args>(args)...);
+	}
+	T& operator*() { return *impl; }
+	T const& operator*() const { return *impl; }
+	T* operator->() { return impl.get(); }
+	T const* operator->() const { return impl.get(); }
 };
