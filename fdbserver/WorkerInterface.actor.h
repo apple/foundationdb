@@ -880,8 +880,9 @@ class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
                               LockAware = LockAware::False,
                               EnableLocalityLoadBalance = EnableLocalityLoadBalance::True);
-ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
-                                           Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
+ACTOR Future<Void> extractClusterInterface(
+    Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>> const> in,
+    Reference<AsyncVar<Optional<struct ClusterInterface>>> out);
 
 ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         LocalityData localities,
@@ -895,14 +896,14 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         std::string whitelistBinPaths,
                         std::string configPath,
                         std::map<std::string, std::string> manualKnobOverrides,
-                        UseConfigDB useConfigDB);
+                        ConfigDBType configDBType);
 
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     UseConfigDB useConfigDB);
+                                     ConfigDBType configDBType);
 
 // These servers are started by workerServer
 class IKeyValueStore;
@@ -925,7 +926,7 @@ ACTOR Future<Void> storageServer(
         connFile); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 ServerCoordinators serverCoordinators,
                                 LifetimeToken lifetime,
                                 bool forceRecovery);

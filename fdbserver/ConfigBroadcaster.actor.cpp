@@ -254,16 +254,16 @@ public:
 		TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
 	}
 
-	ConfigBroadcasterImpl(ServerCoordinators const& coordinators, UseConfigDB useConfigDB) : ConfigBroadcasterImpl() {
-		if (useConfigDB != UseConfigDB::DISABLED) {
-			if (useConfigDB == UseConfigDB::SIMPLE) {
+	ConfigBroadcasterImpl(ServerCoordinators const& coordinators, ConfigDBType configDBType) : ConfigBroadcasterImpl() {
+		if (configDBType != ConfigDBType::DISABLED) {
+			if (configDBType == ConfigDBType::SIMPLE) {
 				consumer = IConfigConsumer::createSimple(coordinators, 0.5, Optional<double>{});
 			} else {
 				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, Optional<double>{});
 			}
 			TraceEvent(SevDebug, "BroadcasterStartingConsumer", id)
 			    .detail("Consumer", consumer->getID())
-			    .detail("UsingSimpleConsumer", useConfigDB == UseConfigDB::SIMPLE);
+			    .detail("UsingSimpleConsumer", configDBType == ConfigDBType::SIMPLE);
 		}
 	}
 
@@ -330,10 +330,10 @@ public:
 };
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
-  : _impl(std::make_unique<ConfigBroadcasterImpl>(cfi)) {}
+  : impl(PImpl<ConfigBroadcasterImpl>::create(cfi)) {}
 
-ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, UseConfigDB useConfigDB)
-  : _impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, useConfigDB)) {}
+ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, ConfigDBType configDBType)
+  : impl(PImpl<ConfigBroadcasterImpl>::create(coordinators, configDBType)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigBroadcaster&&) = default;
 
@@ -345,13 +345,13 @@ Future<Void> ConfigBroadcaster::registerWorker(Version lastSeenVersion,
                                                ConfigClassSet configClassSet,
                                                Future<Void> watcher,
                                                ConfigBroadcastInterface broadcastInterface) {
-	return impl().registerWorker(this, lastSeenVersion, std::move(configClassSet), watcher, broadcastInterface);
+	return impl->registerWorker(this, lastSeenVersion, std::move(configClassSet), watcher, broadcastInterface);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
                                      Version mostRecentVersion,
                                      Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl().applyChanges(changes, mostRecentVersion, annotations);
+	impl->applyChanges(changes, mostRecentVersion, annotations);
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
@@ -360,7 +360,7 @@ void ConfigBroadcaster::applySnapshotAndChanges(
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl().applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion, annotations);
+	impl->applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion, annotations);
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
@@ -369,21 +369,21 @@ void ConfigBroadcaster::applySnapshotAndChanges(
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl().applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion, annotations);
+	impl->applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion, annotations);
 }
 
 Future<Void> ConfigBroadcaster::getError() const {
-	return impl().getError();
+	return impl->getError();
 }
 
 UID ConfigBroadcaster::getID() const {
-	return impl().getID();
+	return impl->getID();
 }
 
 JsonBuilderObject ConfigBroadcaster::getStatus() const {
-	return impl().getStatus();
+	return impl->getStatus();
 }
 
 void ConfigBroadcaster::compact(Version compactionVersion) {
-	impl().compact(compactionVersion);
+	impl->compact(compactionVersion);
 }

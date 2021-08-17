@@ -79,6 +79,7 @@ set(FDBCLIENT_SRCS
   ParallelStream.actor.h
   PaxosConfigTransaction.actor.cpp
   PaxosConfigTransaction.h
+  PImpl.h
   SimpleConfigTransaction.actor.cpp
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h

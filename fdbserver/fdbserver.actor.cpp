@@ -994,7 +994,7 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
-	UseConfigDB useConfigDB{ UseConfigDB::DISABLED };
+	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1479,7 +1479,7 @@ private:
 				configPath = args.OptionArg();
 				break;
 			case OPT_USE_TEST_CONFIG_DB:
-				useConfigDB = UseConfigDB::SIMPLE;
+				configDBType = ConfigDBType::SIMPLE;
 				break;
 
 #ifndef TLS_DISABLED
@@ -2038,7 +2038,7 @@ int main(int argc, char* argv[]) {
 				                      opts.whitelistBinPaths,
 				                      opts.configPath,
 				                      opts.manualKnobOverrides,
-				                      opts.useConfigDB));
+				                      opts.configDBType));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 

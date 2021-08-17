@@ -38,3 +38,16 @@ ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type
 	ASSERT(false);
 	return nullptr;
 }
+
+Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type, Database const& cx) {
+	Reference<ISingleThreadTransaction> result;
+	if (type == Type::RYW) {
+		result = makeReference<ReadYourWritesTransaction>();
+	} else if (type == Type::SIMPLE_CONFIG) {
+		result = makeReference<SimpleConfigTransaction>();
+	} else {
+		result = makeReference<PaxosConfigTransaction>();
+	}
+	result->setDatabase(cx);
+	return result;
+}

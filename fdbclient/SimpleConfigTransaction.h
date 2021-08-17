@@ -27,6 +27,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IConfigTransaction.h"
+#include "fdbclient/PImpl.h"
 #include "flow/Error.h"
 #include "flow/flow.h"
 
@@ -36,9 +37,7 @@
  * (the lowest coordinator by IP address), so there is no fault tolerance.
  */
 class SimpleConfigTransaction final : public IConfigTransaction, public FastAllocated<SimpleConfigTransaction> {
-	std::unique_ptr<class SimpleConfigTransactionImpl> _impl;
-	SimpleConfigTransactionImpl const& impl() const { return *_impl; }
-	SimpleConfigTransactionImpl& impl() { return *_impl; }
+	PImpl<class SimpleConfigTransactionImpl> impl;
 
 public:
 	SimpleConfigTransaction(ConfigTransactionInterface const&);
