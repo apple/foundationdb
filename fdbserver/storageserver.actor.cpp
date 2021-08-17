@@ -66,6 +66,8 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/genericactors.actor.h"
 
+#include "flow/actorcompiler.h" // This must be the last #include.
+
 #ifndef __INTEL_COMPILER
 #pragma region Data Structures
 #endif
@@ -191,7 +193,7 @@ struct StorageServerDisk {
 	Future<Void> getError() { return storage->getError(); }
 	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
-	Future<Void> commitAsync(Version version) { return onCommit(storage->commit(version), IKeyValueStore::CommitNotification(version), storage->getNotifyCommit()); }
+	Future<Void> commitAsync(Version version) { return onCommit(storage->commit(), IKeyValueStore::CommitNotification(version), storage->getNotifyCommit()); }
 
     FutureStream<IKeyValueStore::CommitNotification> commitNotifications() { return storage->getNotifyCommit()->getFuture(); }
 

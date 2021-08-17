@@ -111,6 +111,8 @@ public:
 
 class KeyRangeActorMap {
 public:
+	// Returns ranges affected by keys, with keys as an independent single range, with potentially
+	// two other ranges from existing overlapping ranges at the beginning and end of keys.
 	void getRangesAffectedByInsertion(const KeyRangeRef& keys, vector<KeyRange>& affectedRanges);
 	void insert(const KeyRangeRef& keys, const Future<Void>& value) { map.insert(keys, value); }
 	void cancel(const KeyRangeRef& keys) { insert(keys, Future<Void>()); }

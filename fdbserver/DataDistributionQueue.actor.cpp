@@ -667,7 +667,10 @@ struct DDQueueData {
 			std::set<RelocateData, std::greater<RelocateData>>::iterator firstRelocationItr;
 			bool foundActiveRelocation = false;
 
+			// ActiveFetching and active relocation do not exist concurrently?
 			if (!foundActiveFetching && rrs.src.size()) {
+				// Why only check the first source?
+				// OK, see line 698.
 				firstQueue = &queue[rrs.src[0]];
 				firstRelocationItr = firstQueue->find(rrs);
 				foundActiveRelocation = firstRelocationItr != firstQueue->end();
@@ -675,6 +678,7 @@ struct DDQueueData {
 
 			// If there is a queued job that wants data relocation which we are about to cancel/modify,
 			//  make sure that we keep the relocation intent for the job that we queue up
+			// If a new data move cancels an existing move, its priority is the max of the two.
 			if (foundActiveFetching || foundActiveRelocation) {
 				rd.wantsNewServers |= rrs.wantsNewServers;
 				rd.startTime = std::min(rd.startTime, rrs.startTime);
@@ -687,6 +691,7 @@ struct DDQueueData {
 				rd.priority = std::max(rd.priority, std::max(rd.boundaryPriority, rd.healthPriority));
 			}
 
+			// Erase the scheduled move.
 			if (rd.keys.contains(rrs.keys)) {
 				if (foundActiveFetching)
 					fetchingSourcesQueue.erase(fetchingSourcesItr);
@@ -697,6 +702,8 @@ struct DDQueueData {
 				}
 			}
 
+			// If we removes some scheduled moves, prepare to launch data move from these known source server.
+			// This is fine, since there is no cross server move task competation.
 			if (foundActiveFetching || foundActiveRelocation) {
 				serversToLaunchFrom.insert(rrs.src.begin(), rrs.src.end());
 				/*TraceEvent(rrs.interval.end(), mi.id()).detail("Result","Cancelled")
@@ -905,6 +912,7 @@ struct DDQueueData {
 
 			// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 			//     make sure that we keep the relocation intent for the job that we launch
+			// How about the moveranges partially overlapping with rd?
 			auto f = inFlight.intersectingRanges(rd.keys);
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				if (inFlightActors.liveActorAt(it->range().begin)) {
@@ -988,6 +996,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 		loop {
 			state int stuckCount = 0;
 			// state int bestTeamStuckThreshold = 50;
+			// Find destination teams, i.e. bestTeams
 			loop {
 				state int tciIndex = 0;
 				state bool foundTeams = true;
@@ -1056,6 +1065,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			state std::vector<UID> extraIds;
 			state std::vector<ShardsAffectedByTeamFailure::Team> destinationTeams;
 
+			// Select dest servers, and healthy servers.
 			for (int i = 0; i < bestTeams.size(); i++) {
 				auto& serverIds = bestTeams[i].first->getServerIDs();
 				destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
@@ -1140,6 +1150,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
+			
+			// This loop is done when doMoveKeys() on destIds and extraIds are done.
 			try {
 				loop {
 					choose {
@@ -1230,6 +1242,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 						dataTransferComplete.send(rd);
 					}
 
+					// This could be used to check the bytes moved successfully.
 					self->bytesWritten += metrics.bytes;
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
