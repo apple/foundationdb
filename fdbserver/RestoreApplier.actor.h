@@ -62,9 +62,8 @@ struct StagingKey {
 	void add(const MutationRef& m, LogMessageVersion newVersion) {
 		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
 		DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
-		    .detail("Version", version.toString())
-		    .detail("NewVersion", newVersion.toString())
-		    .detail("Mutation", m);
+		    .detail("SubVersion", version.toString())
+		    .detail("NewSubVersion", newVersion.toString());
 		if (version == newVersion) {
 			// This could happen because the same mutation can be present in
 			// overlapping mutation logs, because new TLogs can copy mutations
@@ -84,8 +83,8 @@ struct StagingKey {
 			}
 			if (version < newVersion) {
 				DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
-				    .detail("Version", version.toString())
-				    .detail("NewVersion", newVersion.toString())
+				    .detail("SubVersion", version.toString())
+				    .detail("NewSubVersion", newVersion.toString())
 				    .detail("MType", getTypeString(type))
 				    .detail("Key", key)
 				    .detail("Val", val)

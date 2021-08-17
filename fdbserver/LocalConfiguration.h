@@ -24,7 +24,8 @@
 
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbclient/IKnobCollection.h"
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbclient/PImpl.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
@@ -43,9 +44,7 @@ FDB_DECLARE_BOOLEAN_PARAM(IsTest);
  *      - Persist these updates when received, and restart if necessary
  */
 class LocalConfiguration {
-	std::unique_ptr<class LocalConfigurationImpl> _impl;
-	LocalConfigurationImpl& impl() { return *_impl; }
-	LocalConfigurationImpl const& impl() const { return *_impl; }
+	PImpl<class LocalConfigurationImpl> impl;
 
 public:
 	LocalConfiguration(std::string const& dataFolder,
@@ -60,8 +59,10 @@ public:
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;
 	TestKnobs const& getTestKnobs() const;
-	Future<Void> consume(Reference<IAsyncListener<ConfigBroadcastFollowerInterface> const> const& broadcaster);
+	Future<Void> consume(ConfigBroadcastInterface const& broadcastInterface);
 	UID getID() const;
+	Version lastSeenVersion() const;
+	ConfigClassSet configClassSet() const;
 
 public: // Testing
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,

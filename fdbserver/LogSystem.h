@@ -427,7 +427,7 @@ struct ILogSystem {
 
 		TLogPeekReply results;
 		ArenaReader rd;
-		LogMessageVersion messageVersion, end;
+		LogMessageVersion messageVersion, end; // the version of current message; the intended end version of current cursor
 		Version poppedVersion;
 		TagsAndMessage messageAndTags;
 		bool hasMsg;
@@ -437,9 +437,11 @@ struct ILogSystem {
 
 		bool onlySpilled;
 		bool parallelGetMore;
+		bool usePeekStream;
 		int sequence;
 		Deque<Future<TLogPeekReply>> futureResults;
 		Future<Void> interfaceChanged;
+		Optional<ReplyPromiseStream<TLogPeekStreamReply>> peekReplyStream;
 
 		double lastReset;
 		Future<Void> resetCheck;

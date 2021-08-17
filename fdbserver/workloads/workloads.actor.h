@@ -49,7 +49,7 @@ struct WorkloadContext {
 	Standalone<VectorRef<KeyValueRef>> options;
 	int clientId, clientCount;
 	int64_t sharedRandomNumber;
-	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);

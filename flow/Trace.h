@@ -599,4 +599,5 @@ extern TraceBatch g_traceBatch;
 #define DUMPTOKEN(name)                                                                                                \
 	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
+#define DisabledTraceEvent(...) false && TraceEvent()
 #endif

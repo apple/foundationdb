@@ -22,6 +22,9 @@
 #ifndef FDBCLIENT_CLIENTLOGEVENTS_H
 #define FDBCLIENT_CLIENTLOGEVENTS_H
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/CommitProxyInterface.h"
+
 namespace FdbClientLogEvents {
 enum class EventType {
 	GET_VERSION_LATENCY = 0,
@@ -252,7 +255,7 @@ struct EventCommit : public Event {
 			    .setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
-			    .detail("Mutation", mutation.toString());
+			    .detail("Mutation", mutation);
 		}
 
 		TraceEvent("TransactionTrace_Commit")
@@ -316,7 +319,7 @@ struct EventCommit_V2 : public Event {
 			    .setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
-			    .detail("Mutation", mutation.toString());
+			    .detail("Mutation", mutation);
 		}
 
 		TraceEvent("TransactionTrace_Commit")
@@ -430,7 +433,7 @@ struct EventCommitError : public Event {
 			    .setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
-			    .detail("Mutation", mutation.toString());
+			    .detail("Mutation", mutation);
 		}
 
 		TraceEvent("TransactionTrace_CommitError").detail("TransactionID", id).detail("ErrCode", errCode);
