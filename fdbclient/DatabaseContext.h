@@ -276,6 +276,7 @@ public:
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;
 	PromiseStream<UID> tssMismatchStream;
+	Future<Void> grvUpdateHandler;
 	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
@@ -327,6 +328,11 @@ public:
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
+
+	// Database-level read version cache storing the most recent successful GRV
+	Future<Version> cachedReadVersion;
+	double lastGrvUpdateTime;
+	void updateCachedRV(Future<Version> v);
 
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal

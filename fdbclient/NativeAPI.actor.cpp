@@ -53,6 +53,7 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
@@ -166,6 +167,11 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 		queueModel.removeTssEndpoint(ssi.getKeyValues.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.watchValue.getEndpoint().token.first());
 	}
+}
+
+void DatabaseContext::updateCachedRV(Future<Version> v) {
+	lastGrvUpdateTime = now();
+	cachedReadVersion = v;
 }
 
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
@@ -879,6 +885,28 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	}
 }
 
+ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
+	cx->lastGrvUpdateTime = 0.0;
+	state Transaction tr;
+	loop {
+		wait(refreshTransaction(cx, &tr));
+		auto curTime = now();
+		if (curTime - cx->lastGrvUpdateTime > CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
+			try {
+				// Is this what the method should be? Maybe skip transaction
+				// and go straight to proxy like getRawVersion()
+				Version v = wait(tr.getReadVersion());
+				cx->updateCachedRV(v);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed) {
 	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
 		if (detailed) {
@@ -1127,6 +1155,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
+	grvUpdateHandler = backgroundGrvUpdater(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 
@@ -1370,6 +1399,7 @@ DatabaseContext::~DatabaseContext() {
 	monitorProxiesInfoChange.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	grvUpdateHandler.cancel();
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
@@ -3584,6 +3614,7 @@ void Transaction::setVersion(Version v) {
 	if (v <= 0)
 		throw version_invalid();
 	readVersion = v;
+	cx->updateCachedRV(v);
 }
 
 Future<Optional<Value>> Transaction::get(const Key& key, bool snapshot) {
@@ -4059,6 +4090,7 @@ void TransactionOptions::clear() {
 	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
 	expensiveClearCostEstimation = false;
+	useGrvCache = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -4596,6 +4628,8 @@ Future<Void> Transaction::commitMutations() {
 		Future<Void> commitResult =
 		    tryCommit(cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options);
 
+		// Record committed version if successful (failed commit would go to catch block instead(?))
+		cx->updateCachedRV(this->committedVersion);
 		if (isCheckingWrites) {
 			Promise<Void> committed;
 			checkWrites(cx, commitResult, committed, tr, this);
@@ -4823,6 +4857,12 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		options.expensiveClearCostEstimation = true;
 		break;
 
+	case FDBTransactionOptions::USE_GRV_CACHE:
+		// Needs to be a no-op if ratekeeper is throttling
+		validateOptionValue(value, false);
+		options.useGrvCache = true;
+		break;
+
 	default:
 		break;
 	}
@@ -5031,6 +5071,10 @@ ACTOR Future<Version> extractReadVersion(Location location,
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
+		if (options.useGrvCache && cx->cachedReadVersion.isValid() && cx->cachedReadVersion.isReady() &&
+		    !cx->cachedReadVersion.isError()) {
+			return cx->cachedReadVersion;
+		}
 		++cx->transactionReadVersions;
 		flags |= options.getReadVersionFlags;
 		switch (options.priority) {
@@ -5105,6 +5149,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		                                 startTime,
 		                                 metadataVersion,
 		                                 options.tags);
+		cx->updateCachedRV(readVersion);
 	}
 	return readVersion;
 }

@@ -289,6 +289,8 @@ description is not currently required but encouraged.
                 description="Asks storage servers for how many bytes a clear key range contains. Otherwise uses the location cache to roughly estimate this." />
     <Option name="bypass_unreadable" code="1100"
                 description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp." />            
+    <Option name="use_grv_cache" code="1101"
+            description="Allows this transaction to use cached GRV from the database context." />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

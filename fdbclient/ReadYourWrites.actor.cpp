@@ -2239,6 +2239,9 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 		validateOptionValue(value, false);
 		options.bypassUnreadable = true;
 		break;
+	case FDBTransactionOptions::USE_GRV_CACHE:
+		validateOptionValue(value, false);
+		options.useGrvCache = true;
 	default:
 		break;
 	}

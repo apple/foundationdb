@@ -110,6 +110,7 @@ public:
 	int64_t CORE_VERSIONSPERSECOND; // This is defined within the server but used for knobs based on server value
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
+	double MAX_VERSION_CACHE_LAG;
 
 	// Taskbucket
 	double TASKBUCKET_LOGGING_DELAY;
