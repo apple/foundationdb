@@ -1469,11 +1469,13 @@ void commitMessages(TLogData* self,
 					txsBytes += tagData->versionMessages.back().second.expectedSize();
 				}
 
-				auto iter = logData->waitingTags.find(tag);
-				if (iter != logData->waitingTags.end()) {
-					auto promise = iter->second;
-					logData->waitingTags.erase(iter);
-					promise.send(Void());
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+					auto iter = logData->waitingTags.find(tag);
+					if (iter != logData->waitingTags.end()) {
+						auto promise = iter->second;
+						logData->waitingTags.erase(iter);
+						promise.send(Void());
+					}
 				}
 
 				// The factor of VERSION_MESSAGES_OVERHEAD is intended to be an overestimate of the actual memory used
@@ -1533,7 +1535,7 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, TLogPeekRequest* req, double timeout) {
 	self->blockingPeeks += 1;
 	auto tagData = self->getTagData(req->tag);
-	if (tagData.isValid() && !tagData->versionMessages.empty() && tagData->versionMessages.back().first > req->begin) {
+	if (tagData.isValid() && !tagData->versionMessages.empty() && tagData->versionMessages.back().first >= req->begin) {
 		return Void();
 	}
 	choose {
