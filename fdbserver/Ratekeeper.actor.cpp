@@ -528,7 +528,10 @@ struct RatekeeperLimits {
 	    context(context) {}
 };
 
-struct GRVProxyInfo {
+namespace RatekeeperActorCpp {
+
+// Differentiate from GrvProxyInfo in DatabaseContext.h
+struct GrvProxyInfo {
 	int64_t totalTransactions;
 	int64_t batchTransactions;
 	uint64_t lastThrottledTagChangeId;
@@ -536,10 +539,12 @@ struct GRVProxyInfo {
 	double lastUpdateTime;
 	double lastTagPushTime;
 
-	GRVProxyInfo()
+	GrvProxyInfo()
 	  : totalTransactions(0), batchTransactions(0), lastThrottledTagChangeId(0), lastUpdateTime(0), lastTagPushTime(0) {
 	}
 };
+
+}
 
 struct RatekeeperData {
 	UID id;
@@ -548,7 +553,7 @@ struct RatekeeperData {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
-	std::map<UID, GRVProxyInfo> grvProxyInfo;
+	std::map<UID, RatekeeperActorCpp::GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
