@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 import subprocess
 import logging
 import functools
@@ -450,8 +451,14 @@ def wait_for_database_available(logger):
         time.sleep(1)
 
 if __name__ == '__main__':
-    # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>
-    assert len(sys.argv) == 4, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number>"
+    # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number> [external_client_library_path]
+    assert len(sys.argv) == 4 or len(sys.argv) == 5, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number> [external_client_library_path]"
+    # set external client library
+    if len(sys.argv) == 5:
+        external_client_library_path = sys.argv[4]
+        # disable local client and use the external client library
+        os.environ['FDB_NETWORK_OPTION_DISABLE_LOCAL_CLIENT'] = ''
+        os.environ['FDB_NETWORK_OPTION_EXTERNAL_CLIENT_LIBRARY'] = external_client_library_path
     # shell command template
     command_template = [sys.argv[1], '-C', sys.argv[2], '--exec']
     # tests for fdbcli commands
