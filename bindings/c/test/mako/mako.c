@@ -1289,12 +1289,11 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 		// maintains original mako behavior in that
 		// first process does work to one database in the first cluster
 		fdb_create_database(args->cluster_files[0], &process.databases[0]);
-	} else {
-		// added support for multiple databases in multiple clusters
-		// the rest of the databases are divided equally to each cluster
-		for (size_t i = 1; i < args->num_databases; i++) {
-			fdb_create_database(args->cluster_files[worker_id % args->num_fdb_clusters], &process.databases[i]);
-		}
+	}
+	// added support for multiple databases in multiple clusters
+	// the rest of the databases are divided equally to each cluster
+	for (size_t i = 1; i < args->num_databases; i++) {
+		fdb_create_database(args->cluster_files[i % args->num_fdb_clusters], &process.databases[i]);
 	}
 #endif
 
@@ -1314,8 +1313,9 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	for (i = 0; i < args->num_threads; i++) {
 		thread_args[i].thread_id = i;
-		if (worker_id == 0 || args->num_databases == 1) {
-			thread_args[i].database_index = 0;
+		if (worker_id == 0) {
+			// first process or network thread does work to all db
+			thread_args[i].database_index = args->num_databases == 1 ? 0 : (i % args->num_databases);
 		} else {
 			thread_args[i].database_index = i % (args->num_databases-1) + 1;
 		}
