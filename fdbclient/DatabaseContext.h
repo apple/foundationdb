@@ -437,6 +437,10 @@ public:
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
 
+	// Used for template code
+	using TransactionT = ReadYourWritesTransaction;
+	Reference<TransactionT> createTransaction();
+
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 };

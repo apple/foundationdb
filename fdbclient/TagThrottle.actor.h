@@ -244,6 +244,9 @@ extern const KeyRef tagThrottleCountKey;
 
 namespace ThrottleApi {
 
+// The template functions can be called with Native API like DatabaseContext, Transaction/ReadYourWritesTransaction
+// or using IClientAPI like IDatabase, ITransaction
+
 ACTOR template <class Tr>
 Future<bool> getValidAutoEnabled(Reference<Tr> tr) {
 	state bool result;

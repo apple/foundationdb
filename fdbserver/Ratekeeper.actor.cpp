@@ -23,6 +23,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/Knobs.h"
@@ -527,7 +528,7 @@ struct RatekeeperLimits {
 	    context(context) {}
 };
 
-struct GrvProxyInfo {
+struct GRVProxyInfo {
 	int64_t totalTransactions;
 	int64_t batchTransactions;
 	uint64_t lastThrottledTagChangeId;
@@ -535,7 +536,7 @@ struct GrvProxyInfo {
 	double lastUpdateTime;
 	double lastTagPushTime;
 
-	GrvProxyInfo()
+	GRVProxyInfo()
 	  : totalTransactions(0), batchTransactions(0), lastThrottledTagChangeId(0), lastUpdateTime(0), lastTagPushTime(0) {
 	}
 };
@@ -547,7 +548,7 @@ struct RatekeeperData {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
-	std::map<UID, GrvProxyInfo> grvProxyInfo;
+	std::map<UID, GRVProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
@@ -597,7 +598,7 @@ struct RatekeeperData {
 	    autoThrottlingEnabled(false) {
 		expiredTagThrottleCleanup = recurring(
 		    [this]() {
-			    Reference<Database> db = makeReference<Database>(this->db);
+				Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(this->db.getPtr());
 			    ThrottleApi::expire(db);
 		    },
 		    SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
@@ -946,7 +947,7 @@ void tryAutoThrottleTag(RatekeeperData* self,
 			TagSet tags;
 			tags.addTag(tag);
 
-			Reference<Database> db = makeReference<Database>(self->db);
+			Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(self->db.getPtr());
 			self->addActor.send(ThrottleApi::throttleTags(db,
 			                                              tags,
 			                                              clientRate.get(),

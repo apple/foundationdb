@@ -78,7 +78,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 		state TransactionPriority priority = deterministicRandom()->randomChoice(allTransactionPriorities);
 		state double rate = deterministicRandom()->random01() * 20;
 		state double duration = 1 + deterministicRandom()->random01() * 19;
-		state Reference<Database> db = makeReference<Database>(cx);
+		state Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(cx.getPtr());
 
 		TagSet tagSet;
 		tagSet.addTag(tag);
@@ -138,7 +138,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 			}
 		}
 
-		state Reference<Database> db = makeReference<Database>(cx);
+		state Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(cx.getPtr());
 		bool removed = wait(ThrottleApi::unthrottleTags(db, tagSet, throttleType, priority));
 		if (removed) {
 			ASSERT(erased || !throttleType.present() || throttleType.get() == TagThrottleType::AUTO);
@@ -154,7 +154,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 	    Database cx,
 	    std::map<std::pair<TransactionTag, TransactionPriority>, TagThrottleInfo> const* manuallyThrottledTags) {
 
-		state Reference<Database> db = makeReference<Database>(cx);
+		state Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(cx.getPtr());
 		std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY));
 
 		int manualThrottledTags = 0;
@@ -188,7 +188,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> getRecommendedTags(TagThrottleApiWorkload* self, Database cx) {
-		state Reference<Database> db = makeReference<Database>(cx);
+		state Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(cx.getPtr());
 		std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getRecommendedTags(db, CLIENT_KNOBS->TOO_MANY));
 
 		for (auto& tag : tags) {
@@ -205,7 +205,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 		    deterministicRandom()->coinflip() ? Optional<TransactionPriority>()
 		                                      : deterministicRandom()->randomChoice(allTransactionPriorities);
 
-		state Reference<Database> db = makeReference<Database>(cx);
+		state Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(cx.getPtr());
 		bool unthrottled = wait(ThrottleApi::unthrottleAll(db, throttleType, priority));
 		if (!throttleType.present() || throttleType.get() == TagThrottleType::MANUAL) {
 			bool unthrottleExpected = false;
@@ -233,7 +233,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> enableAutoThrottling(TagThrottleApiWorkload* self, Database cx) {
-		state Reference<Database> db = makeReference<Database>(cx);
+		state Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(cx.getPtr());
 		if (deterministicRandom()->coinflip()) {
 			wait(ThrottleApi::enableAuto(db, true));
 			self->autoThrottleEnabled = true;
