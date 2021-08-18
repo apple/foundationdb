@@ -1,9 +1,0 @@
-[[test]]
-testTitle = 'MutationLogReader Test'
-useDB = false
-startDelay = 0
-
-    [[test.workload]]
-    testName = 'UnitTests'
-    maxTestCases = 1
-    testsMatching = '/fdbclient/mutationlogreader/VersionKeyRefConversion'
