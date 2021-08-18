@@ -88,6 +88,7 @@ rocksdb::Options getOptions() {
 	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
+	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
 }
 
