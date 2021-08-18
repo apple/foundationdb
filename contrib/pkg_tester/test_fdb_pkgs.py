@@ -217,6 +217,9 @@ def linux_container_versioned(
             if ubuntu_image_with_fdb_versioned is None:
                 pytest.skip("No debian packages available to test")
             container = Container(ubuntu_image_with_fdb_versioned)
+            container.run(
+                ["service", "foundationdb", "start"]
+            )  # outside docker this shouldn't be necessary
         elif request.param == "centos":
             if centos_image_with_fdb_versioned is None:
                 pytest.skip("No rpm packages available to test")
@@ -233,11 +236,11 @@ def linux_container_versioned(
 
 
 def test_db_available(linux_container: Container):
-    linux_container.run(["fdbcli", "--exec", "status"])
+    linux_container.run(["fdbcli", "--exec", "get x"])
 
 
 def test_versioned_package(linux_container_versioned: Container):
-    linux_container_versioned.run(["fdbcli", "--exec", "status"])
+    linux_container_versioned.run(["fdbcli", "--exec", "get x"])
 
 
 def test_write(linux_container: Container, snapshot):
