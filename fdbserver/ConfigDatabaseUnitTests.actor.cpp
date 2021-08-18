@@ -123,11 +123,11 @@ public:
 class ReadFromLocalConfigEnvironment {
 	UID id;
 	std::string dataDir;
-	LocalConfiguration localConfiguration;
+	Reference<LocalConfiguration> localConfiguration;
 	Reference<AsyncVar<ConfigBroadcastInterface> const> cbi;
 	Future<Void> consumer;
 
-	ACTOR static Future<Void> checkEventually(LocalConfiguration const* localConfiguration,
+	ACTOR static Future<Void> checkEventually(Reference<LocalConfiguration const> localConfiguration,
 	                                          Optional<int64_t> expected) {
 		state double lastMismatchTime = now();
 		loop {
@@ -145,7 +145,7 @@ class ReadFromLocalConfigEnvironment {
 	}
 
 	ACTOR static Future<Void> setup(ReadFromLocalConfigEnvironment* self) {
-		wait(self->localConfiguration.initialize());
+		wait(self->localConfiguration->initialize());
 		if (self->cbi) {
 			// LocalConfiguration runs in a loop waiting for messages from the
 			// broadcaster. These unit tests use the same
@@ -155,7 +155,7 @@ class ReadFromLocalConfigEnvironment {
 			// prevents two actors trying to listen for the same message on the
 			// same interface, causing lots of issues!
 			self->consumer.cancel();
-			self->consumer = self->localConfiguration.consume(self->cbi->get());
+			self->consumer = self->localConfiguration->consume(self->cbi->get());
 		}
 		return Void();
 	}
@@ -164,40 +164,43 @@ public:
 	ReadFromLocalConfigEnvironment(std::string const& dataDir,
 	                               std::string const& configPath,
 	                               std::map<std::string, std::string> const& manualKnobOverrides)
-	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::True),
+	  : dataDir(dataDir),
+	    localConfiguration(makeReference<LocalConfiguration>(dataDir, configPath, manualKnobOverrides, IsTest::True)),
 	    consumer(Never()) {}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, IsTest::True);
+		std::map<std::string, std::string> manualKnobOverrides = {};
+		localConfiguration =
+		    makeReference<LocalConfiguration>(dataDir, newConfigPath, manualKnobOverrides, IsTest::True);
 		return setup();
 	}
 
 	void connectToBroadcaster(Reference<AsyncVar<ConfigBroadcastInterface> const> const& cbi) {
 		this->cbi = cbi;
-		consumer = localConfiguration.consume(cbi->get());
+		consumer = localConfiguration->consume(cbi->get());
 	}
 
 	void checkImmediate(Optional<int64_t> expected) const {
 		if (expected.present()) {
-			ASSERT_EQ(localConfiguration.getTestKnobs().TEST_LONG, expected.get());
+			ASSERT_EQ(localConfiguration->getTestKnobs().TEST_LONG, expected.get());
 		} else {
-			ASSERT_EQ(localConfiguration.getTestKnobs().TEST_LONG, 0);
+			ASSERT_EQ(localConfiguration->getTestKnobs().TEST_LONG, 0);
 		}
 	}
 
 	Future<Void> checkEventually(Optional<int64_t> expected) const {
-		return checkEventually(&localConfiguration, expected);
+		return checkEventually(localConfiguration, expected);
 	}
 
-	LocalConfiguration& getMutableLocalConfiguration() { return localConfiguration; }
+	LocalConfiguration& getMutableLocalConfiguration() { return *localConfiguration; }
 
 	Future<Void> getError() const { return consumer; }
 
-	Version lastSeenVersion() { return localConfiguration.lastSeenVersion(); }
+	Version lastSeenVersion() { return localConfiguration->lastSeenVersion(); }
 
-	ConfigClassSet configClassSet() { return localConfiguration.configClassSet(); }
+	ConfigClassSet configClassSet() { return localConfiguration->configClassSet(); }
 };
 
 class LocalConfigEnvironment {
