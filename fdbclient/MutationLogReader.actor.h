@@ -1,5 +1,5 @@
 /*
- * MutationLogReader.h
+ * MutationLogReader.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -36,7 +36,7 @@
 namespace mutation_log_reader {
 
 // RangeResultBlock is the wrapper of RangeResult. Each PipelinedReader maintains a Deque of RangeResultBlocks, from its
-// getRange results. MutationLogReader maintains a priority queue of RangeResultBlocks, and provides RangeResult
+// getRange results. MutationLogReader maintains a min heap of RangeResultBlocks, and provides RangeResult
 // partially in it to consumer.
 struct RangeResultBlock {
 	RangeResult result;
@@ -46,6 +46,8 @@ struct RangeResultBlock {
 	int prefixLen; // size of keyspace, uid, and hash prefix
 	int indexToRead; // index of first unconsumed record
 
+	// When the consumer reads, provides (partial) RangeResult, from firstVersion to min(lastVersion, firstVersion
+	// rounded up to the nearest 1M), to ensure that no versions out of this RangeResultBlock can be in between.
 	Standalone<RangeResultRef> consume();
 
 	bool empty() { return indexToRead == result.size(); }
@@ -85,6 +87,10 @@ private:
 
 } // namespace mutation_log_reader
 
+// A MutationLogReader has 256 PipelinedReaders, each in charge of one hash value from 0-255. It keeps a min heap of
+// RangeResultBlocks, ordered by their first version. At any time, each PipelinedReader has at most one RangeResultBlock
+// in MutationLogReader's min heap. When the consumer reads from MutationLogReader, the MutationLogReader calls the
+// heap's top RangeResultBlock's consume() function, to make sure it does deliver perfectly ordered mutations.
 class MutationLogReader : public ReferenceCounted<MutationLogReader> {
 public:
 	MutationLogReader() : finished(256) {}
