@@ -2180,6 +2180,11 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 								ASSERT(storageInfo->tag != invalidTag);
 								info.tags.push_back(storageInfo->tag);
 								info.dest_info.push_back(storageInfo);
+								if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+									// Add storage teams of storage servers
+									ASSERT(storageServerToStorageTeam.count(id));
+									info.storageTeams.insert(storageServerToStorageTeam[id]);
+								}
 							}
 							uniquify(info.tags);
 							keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);

@@ -44,6 +44,8 @@ Reference<StorageInfo> getStorageInfo(UID id,
                                       std::map<UID, Reference<StorageInfo>>* storageCache,
                                       IKeyValueStore* txnStateStore);
 
+// Commit proxy calls this function to apply metadata mutations to transaction
+// state store.
 void applyMetadataMutations(SpanID const& spanContext,
                             ProxyCommitData& proxyCommitData,
                             Arena& arena,
@@ -53,6 +55,9 @@ void applyMetadataMutations(SpanID const& spanContext,
                             bool& confChange,
                             Version popVersion,
                             bool initialCommit);
+
+// Master calls this function during recovery to apply recovery transaction and
+// initialize TLog groups.
 void applyMetadataMutations(SpanID const& spanContext,
                             const UID& dbgid,
                             Arena& arena,

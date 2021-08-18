@@ -95,7 +95,7 @@ void applyMetadataMutations(
 					if (k != allKeys.end) {
 						KeyRef end = keyInfo->rangeContaining(k).end();
 						KeyRangeRef insertRange(k, end);
-						vector<UID> src, dest;
+						std::vector<UID> src, dest;
 						// txnStateStore is always an in-memory KVS, and must always be recovered before
 						// applyMetadataMutations is called, so a wait here should never be needed.
 						Future<RangeResult> fResult = txnStateStore->readRange(serverTagKeys);
