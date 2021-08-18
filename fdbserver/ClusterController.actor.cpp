@@ -3957,7 +3957,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 					//       how long it is taking to hear responses from each other component.
 
 					UID debugID = deterministicRandom()->randomUniqueID();
-					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v).detail("Timestamp", currentTime).log();
+					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v).log();
 					tr->debugTransaction(debugID);
 				}
 				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
