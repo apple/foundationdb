@@ -55,4 +55,5 @@ public:
 	void clearTestKnobs() override;
 	Optional<KnobValue> tryParseKnobValue(std::string const& knobName, std::string const& knobValue) const override;
 	bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) override;
+	bool isAtomic(std::string const& knobName) const override;
 };

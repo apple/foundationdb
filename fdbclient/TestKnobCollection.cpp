@@ -56,6 +56,10 @@ bool TestKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef co
 	return serverKnobCollection.trySetKnob(knobName, knobValue) || knobValue.visitSetKnob(knobName, testKnobs);
 }
 
+bool TestKnobCollection::isAtomic(std::string const& knobName) const {
+	return serverKnobCollection.isAtomic(knobName) || testKnobs.isAtomic(knobName);
+}
+
 #define init(knob, value) initKnob(knob, value, #knob)
 
 TestKnobs::TestKnobs() {

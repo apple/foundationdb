@@ -43,22 +43,30 @@ enum class ConfigDBType {
 	PAXOS,
 };
 
+enum class Atomic { YES, NO };
+
 class Knobs {
 protected:
+	template <class T>
+	struct KnobValue {
+		T value;
+		Atomic atomic;
+	};
+
 	Knobs() = default;
 	Knobs(Knobs const&) = delete;
 	Knobs& operator=(Knobs const&) = delete;
-	void initKnob(double& knob, double value, std::string const& name);
-	void initKnob(int64_t& knob, int64_t value, std::string const& name);
-	void initKnob(int& knob, int value, std::string const& name);
-	void initKnob(std::string& knob, const std::string& value, const std::string& name);
-	void initKnob(bool& knob, bool value, std::string const& name);
+	void initKnob(double& knob, double value, std::string const& name, Atomic atomic = Atomic::YES);
+	void initKnob(int64_t& knob, int64_t value, std::string const& name, Atomic atomic = Atomic::YES);
+	void initKnob(int& knob, int value, std::string const& name, Atomic atomic = Atomic::YES);
+	void initKnob(std::string& knob, const std::string& value, const std::string& name, Atomic atomic = Atomic::YES);
+	void initKnob(bool& knob, bool value, std::string const& name, Atomic atomic = Atomic::YES);
 
-	std::map<std::string, double*> double_knobs;
-	std::map<std::string, int64_t*> int64_knobs;
-	std::map<std::string, int*> int_knobs;
-	std::map<std::string, std::string*> string_knobs;
-	std::map<std::string, bool*> bool_knobs;
+	std::map<std::string, KnobValue<double*>> double_knobs;
+	std::map<std::string, KnobValue<int64_t*>> int64_knobs;
+	std::map<std::string, KnobValue<int*>> int_knobs;
+	std::map<std::string, KnobValue<std::string*>> string_knobs;
+	std::map<std::string, KnobValue<bool*>> bool_knobs;
 	std::set<std::string> explicitlySetKnobs;
 
 public:
@@ -68,6 +76,7 @@ public:
 	bool setKnob(std::string const& name, double value);
 	bool setKnob(std::string const& name, std::string const& value);
 	ParsedKnobValue parseKnobValue(std::string const& name, std::string const& value) const;
+	bool isAtomic(std::string const& knob) const;
 	void trace() const;
 };
 

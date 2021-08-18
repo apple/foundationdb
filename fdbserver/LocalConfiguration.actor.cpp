@@ -246,15 +246,20 @@ class LocalConfigurationImpl {
 		}
 		++self->snapshots;
 		self->kvStore->clear(knobOverrideKeys);
+		state bool restartRequired = false;
 		for (const auto& [configKey, knobValue] : snapshot) {
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, knobValue);
 			self->kvStore->set(
 			    KeyValueRef(BinaryWriter::toValue(configKey, IncludeVersion()).withPrefix(knobOverrideKeys.begin),
 			                ObjectWriter::toValue(knobValue, IncludeVersion())));
+			restartRequired |= self->getKnobs().isAtomic(configKey.knobName.toString());
 		}
 		ASSERT_GE(snapshotVersion, self->lastSeenVersion);
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(snapshotVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
+		if (restartRequired) {
+			throw knob_restart_required();
+		}
 		self->updateInMemoryState(snapshotVersion);
 		return Void();
 	}
@@ -264,6 +269,7 @@ class LocalConfigurationImpl {
 	                                     Version mostRecentVersion) {
 		// TODO: Concurrency control?
 		++self->changeRequestsFetched;
+		state bool restartRequired = false;
 		for (const auto& versionedMutation : changes) {
 			if (versionedMutation.version <= self->lastSeenVersion) {
 				TraceEvent(SevWarnAlways, "LocalConfigGotRepeatedChange")
@@ -291,9 +297,13 @@ class LocalConfigurationImpl {
 				self->kvStore->clear(singleKeyRange(serializedKey.withPrefix(knobOverrideKeys.begin)));
 				self->configKnobOverrides.remove(mutation.getConfigClass(), mutation.getKnobName());
 			}
+			restartRequired |= self->getKnobs().isAtomic(mutation.getKnobName().toString());
 		}
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(mostRecentVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
+		if (restartRequired) {
+			throw knob_restart_required();
+		}
 		self->updateInMemoryState(mostRecentVersion);
 		return Void();
 	}
