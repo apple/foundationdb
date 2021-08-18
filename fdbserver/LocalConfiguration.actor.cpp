@@ -226,12 +226,9 @@ class LocalConfigurationImpl {
 
 	void updateInMemoryState(Version lastSeenVersion) {
 		this->lastSeenVersion = lastSeenVersion;
-		// TODO: Support randomization?
-		getKnobs().reset(Randomize::False, g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 		configKnobOverrides.update(getKnobs());
 		manualKnobOverrides.update(getKnobs());
-		// Must reinitialize in order to update dependent knobs
-		getKnobs().initialize(Randomize::False, g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
+		// FIXME: Reinitialize in order to update dependent knobs?
 	}
 
 	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
