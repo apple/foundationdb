@@ -256,7 +256,11 @@ class LocalConfigurationImpl {
 		// TODO: Concurrency control?
 		++self->changeRequestsFetched;
 		for (const auto& versionedMutation : changes) {
-			ASSERT_GT(versionedMutation.version, self->lastSeenVersion);
+			if (versionedMutation.version <= self->lastSeenVersion) {
+				TraceEvent(SevWarnAlways, "LocalConfigGotRepeatedChange")
+				    .detail("NewChangeVersion", versionedMutation.version)
+				    .detail("LastSeenVersion", self->lastSeenVersion);
+			}
 			++self->mutations;
 			const auto& mutation = versionedMutation.mutation;
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
