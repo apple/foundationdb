@@ -106,7 +106,7 @@ class ConfigBroadcasterImpl {
 		TraceEvent(SevDebug, "ConfigBroadcasterSnapshotRequest", id)
 		    .detail("Size", request.snapshot.size())
 		    .detail("Version", request.version);
-		return success(client.broadcastInterface.snapshot.getReply(request));
+		return success(brokenPromiseToNever(client.broadcastInterface.snapshot.getReply(request)));
 	}
 
 	template <class Changes>

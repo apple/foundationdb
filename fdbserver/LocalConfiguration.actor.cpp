@@ -283,7 +283,11 @@ class LocalConfigurationImpl {
 		loop {
 			choose {
 				when(ConfigBroadcastSnapshotRequest snapshotReq = waitNext(broadcaster.snapshot.getFuture())) {
-					ASSERT_GT(snapshotReq.version, self->lastSeenVersion);
+					if (snapshotReq.version <= self->lastSeenVersion) {
+						TraceEvent(SevWarnAlways, "LocalConfigGotOldSnapshot")
+						    .detail("NewSnapshotVersion", snapshotReq.version)
+						    .detail("LastSeenVersion", self->lastSeenVersion);
+					}
 					++self->snapshots;
 					wait(setSnapshot(self, std::move(snapshotReq.snapshot), snapshotReq.version));
 				}
