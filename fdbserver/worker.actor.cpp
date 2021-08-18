@@ -520,7 +520,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
-                                      LocalConfiguration* localConfig) {
+                                      Reference<LocalConfiguration> localConfig) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -625,7 +625,6 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		}
 	}
 
-
 	for (const auto& grvProxy : dbi.client.grvProxies) {
 		if (grvProxy.addresses().contains(address)) {
 			return true;
@@ -707,13 +706,15 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Last, tests that proxies included in the ClientDbInfo are considered as local.
 	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
 	GrvProxyInterface grvProxyInterf;
-	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	grvProxyInterf.getConsistentReadVersion =
+	    RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
 	CommitProxyInterface commitProxyInterf;
-	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	commitProxyInterf.commit =
+	    RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
@@ -1226,7 +1227,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
                                 std::string whitelistBinPaths,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                 ConfigDBType configDBType,
-                                LocalConfiguration* localConfig) {
+                                Reference<LocalConfiguration> localConfig) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
@@ -2373,14 +2374,15 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         ConfigDBType configDBType) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	state LocalConfiguration localConfig(dataFolder, configPath, manualKnobOverrides);
+	state Reference<LocalConfiguration> localConfig =
+	    makeReference<LocalConfiguration>(dataFolder, configPath, manualKnobOverrides);
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
 
 	// FIXME: Initializing here causes simulation issues, these must be fixed
 	/*
 	if (configDBType != ConfigDBType::DISABLED) {
-	    wait(localConfig.initialize());
+	    wait(localConfig->initialize());
 	}
 	*/
 
@@ -2451,7 +2453,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		                                                 whitelistBinPaths,
 		                                                 dbInfo,
 		                                                 configDBType,
-		                                                 &localConfig),
+		                                                 localConfig),
 		                                    "WorkerServer",
 		                                    UID(),
 		                                    &normalWorkerErrors()));
