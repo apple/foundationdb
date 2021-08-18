@@ -60,7 +60,7 @@ bool TestKnobCollection::isAtomic(std::string const& knobName) const {
 	return serverKnobCollection.isAtomic(knobName) || testKnobs.isAtomic(knobName);
 }
 
-#define init(knob, value) initKnob(knob, value, #knob)
+#define init(knob, value) initKnob(knob, value, #knob, Atomic::NO)
 
 TestKnobs::TestKnobs() {
 	initialize();
