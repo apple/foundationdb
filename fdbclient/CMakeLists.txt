@@ -191,6 +191,7 @@ target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
 add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient_sampling fdboptions fdb_c_options)
 target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack)
+add_dependencies(fdbclient_sampling_actors fdbclient_actors)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
 
 if(BUILD_AZURE_BACKUP)
