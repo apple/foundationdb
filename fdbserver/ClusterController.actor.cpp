@@ -3958,7 +3958,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 				int64_t currentTime = (int64_t)now();
 				versionMap.set(tr, currentTime, v);
 				if (!g_network->isSimulated()) {
-					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v).log();
+					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v);
 				}
 				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
 				if (ttl > 0) {
