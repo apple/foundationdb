@@ -3938,15 +3938,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		loop {
 			try {
-				if (!g_network->isSimulated()) {
-					// This is done to provide an arbitrary logged transaction every ~10s.
-					// FIXME: replace or augment this with logging on the proxy which tracks
-					//       how long it is taking to hear responses from each other component.
-
-					UID debugID = deterministicRandom()->randomUniqueID();
-					TraceEvent("TimeKeeperCommit", debugID).log();
-					tr->debugTransaction(debugID);
-				}
+				
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -3959,7 +3951,15 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 				Version v = tr->getReadVersion().get();
 				int64_t currentTime = (int64_t)now();
 				versionMap.set(tr, currentTime, v);
+				if (!g_network->isSimulated()) {
+					// This is done to provide an arbitrary logged transaction every ~10s.
+					// FIXME: replace or augment this with logging on the proxy which tracks
+					//       how long it is taking to hear responses from each other component.
 
+					UID debugID = deterministicRandom()->randomUniqueID();
+					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v).detail("Timestamp", currentTime).log();
+					tr->debugTransaction(debugID);
+				}
 				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
 				if (ttl > 0) {
 					versionMap.erase(tr, 0, ttl);
