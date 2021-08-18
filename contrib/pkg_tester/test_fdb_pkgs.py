@@ -81,8 +81,7 @@ class Container:
         run(["docker", "rm", "-f", self.uid])
 
 
-@pytest.fixture(scope="session")
-def ubuntu_image_with_fdb() -> Iterator[Optional[Image]]:
+def ubuntu_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
     """
     Return an image which has just the fdb deb packages installed.
     """
@@ -92,7 +91,7 @@ def ubuntu_image_with_fdb() -> Iterator[Optional[Image]]:
     debs = [
         deb
         for deb in glob.glob(os.path.join(builddir, "packages", "*.deb"))
-        if "versioned" not in deb
+        if ("versioned" in deb) == versioned
     ]
     if not debs:
         yield None
@@ -116,7 +115,16 @@ def ubuntu_image_with_fdb() -> Iterator[Optional[Image]]:
 
 
 @pytest.fixture(scope="session")
-def centos_image_with_fdb() -> Iterator[Optional[Image]]:
+def ubuntu_image_with_fdb() -> Iterator[Optional[Image]]:
+    yield from ubuntu_image_with_fdb_helper(versioned=False)
+
+
+@pytest.fixture(scope="session")
+def ubuntu_image_with_fdb_versioned() -> Iterator[Optional[Image]]:
+    yield from ubuntu_image_with_fdb_helper(versioned=True)
+
+
+def centos_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
     """
     Return an image which has just the fdb rpm packages installed.
     """
@@ -126,7 +134,7 @@ def centos_image_with_fdb() -> Iterator[Optional[Image]]:
     rpms = [
         rpm
         for rpm in glob.glob(os.path.join(builddir, "packages", "*.rpm"))
-        if "versioned" not in rpm
+        if ("versioned" in rpm) == versioned
     ]
     if not rpms:
         yield None
@@ -149,9 +157,23 @@ def centos_image_with_fdb() -> Iterator[Optional[Image]]:
             image.dispose()
 
 
+@pytest.fixture(scope="session")
+def centos_image_with_fdb() -> Iterator[Optional[Image]]:
+    yield from centos_image_with_fdb_helper(versioned=False)
+
+
+@pytest.fixture(scope="session")
+def centos_image_with_fdb_versioned() -> Iterator[Optional[Image]]:
+    yield from centos_image_with_fdb_helper(versioned=True)
+
+
 def pytest_generate_tests(metafunc):
     if "linux_container" in metafunc.fixturenames:
         metafunc.parametrize("linux_container", ["ubuntu", "centos"], indirect=True)
+    elif "linux_container_versioned" in metafunc.fixturenames:
+        metafunc.parametrize(
+            "linux_container_versioned", ["ubuntu", "centos"], indirect=True
+        )
 
 
 @pytest.fixture()
@@ -182,11 +204,40 @@ def linux_container(
             container.dispose()
 
 
+@pytest.fixture()
+def linux_container_versioned(
+    request, ubuntu_image_with_fdb_versioned, centos_image_with_fdb_versioned
+) -> Iterator[Container]:
+    """
+    Tests which accept this fixture will be run once for each supported platform.
+    """
+    container: Optional[Container] = None
+    try:
+        if request.param == "ubuntu":
+            if ubuntu_image_with_fdb_versioned is None:
+                pytest.skip("No debian packages available to test")
+            container = Container(ubuntu_image_with_fdb_versioned)
+        elif request.param == "centos":
+            if centos_image_with_fdb_versioned is None:
+                pytest.skip("No rpm packages available to test")
+            container = Container(centos_image_with_fdb_versioned, initd=True)
+        else:
+            assert False
+        yield container
+    finally:
+        if container is not None:
+            container.dispose()
+
+
 #################### BEGIN ACTUAL TESTS ####################
 
 
 def test_db_available(linux_container: Container):
     linux_container.run(["fdbcli", "--exec", "status"])
+
+
+def test_versioned_package(linux_container_versioned: Container):
+    linux_container_versioned.run(["fdbcli", "--exec", "status"])
 
 
 def test_write(linux_container: Container, snapshot):
