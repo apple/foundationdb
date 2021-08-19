@@ -339,7 +339,7 @@ struct TLogData : NonCopyable {
 	int64_t targetVolatileBytes; // The number of bytes of mutations this TLog should hold in memory before spilling.
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
-	int activePeekStreams;
+	int activePeekStreams = 0;
 
 	WorkerCache<TLogInterface> tlogCache;
 	FlowLock peekMemoryLimiter;
