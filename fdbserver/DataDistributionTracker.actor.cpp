@@ -271,6 +271,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 			loop {
 				Transaction tr(self()->cx);
 				// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
+				// metrics
 				std::pair<Optional<StorageMetrics>, int> metrics =
 				    wait(tr.waitStorageMetrics(keys,
 				                               bounds.min,
