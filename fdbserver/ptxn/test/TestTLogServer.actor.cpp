@@ -326,8 +326,7 @@ ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> p
 	printTiming << "Generated " << numCommits << " commit requests" << std::endl;
 
 	{
-		std::random_device rd;
-		std::mt19937 g(rd());
+		std::mt19937 g(deterministicRandom()->randomUInt32());
 		std::shuffle(std::begin(requests), std::end(requests), g);
 	}
 
