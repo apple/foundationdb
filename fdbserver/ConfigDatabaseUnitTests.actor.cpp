@@ -657,7 +657,6 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Set") {
 	return Void();
 }
 
-// TODO: Add more atomic knob unit tests
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/AtomicSet") {
 	wait(testAtomicSet<LocalConfigEnvironment>(params));
 	return Void();
