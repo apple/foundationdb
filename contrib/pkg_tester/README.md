@@ -50,7 +50,7 @@ docker, python
 
 - [x] Test rpms
 - [x] Test debs
-- [ ] Test versioned packages
+- [x] Test versioned packages
 - [ ] Test that upgrades preserve data/config
 
 # Development
