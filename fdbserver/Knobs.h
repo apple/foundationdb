@@ -387,6 +387,23 @@ public:
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
 	double CLIENT_REGISTER_INTERVAL;
+	bool CC_ENABLE_WORKER_HEALTH_MONITOR;
+	double CC_WORKER_HEALTH_CHECKING_INTERVAL; // The interval of refreshing the degraded server list.
+	double CC_DEGRADED_LINK_EXPIRATION_INTERVAL; // The time period from the last degradation report after which a
+	                                             // degraded server is considered healthy.
+	double CC_MIN_DEGRADATION_INTERVAL; // The minimum interval that a server is reported as degraded to be considered
+	                                    // as degraded by Cluster Controller.
+	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE; // The maximum number of degraded peers when excluding a server. When the
+	                                        // number of degraded peers is more than this value, we will not exclude
+	                                        // this server since it may because of server overload.
+	int CC_MAX_EXCLUSION_DUE_TO_HEALTH; // The max number of degraded servers to exclude by Cluster Controller due to
+	                                    // degraded health.
+	bool CC_HEALTH_TRIGGER_RECOVERY; // If true, cluster controller will kill the master to trigger recovery when
+	                                 // detecting degraded servers. If false, cluster controller only prints a warning.
+	double CC_TRACKING_HEALTH_RECOVERY_INTERVAL; // The number of recovery count should not exceed
+	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
+	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
+	int CC_MAX_HEALTH_RECOVERY_COUNT;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -552,6 +569,12 @@ public:
 	                                                 // become the leader.
 	double MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS;
 	double DBINFO_FAILED_DELAY;
+	bool ENABLE_WORKER_HEALTH_MONITOR;
+	double WORKER_HEALTH_MONITOR_INTERVAL; // Interval between two health monitor health check.
+	int PEER_LATENCY_CHECK_MIN_POPULATION; // The minimum number of latency samples required to check a peer.
+	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health.
+	double PEER_LATENCY_DEGRADATION_THRESHOLD; // The latency threshold to consider a peer degraded.
+	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD; // The percentage of timeout to consider a peer degraded.
 
 	// Test harness
 	double WORKER_POLL_DELAY;
