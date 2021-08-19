@@ -62,6 +62,7 @@ public:
 	UID getID() const;
 	Version lastSeenVersion() const;
 	ConfigClassSet configClassSet() const;
+	Future<Void> initialize();
 
 public: // Testing
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,

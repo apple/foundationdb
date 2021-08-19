@@ -144,15 +144,9 @@ class ReadFromLocalConfigEnvironment {
 		}
 	}
 
-public:
-	ReadFromLocalConfigEnvironment(std::string const& dataDir,
-	                               std::string const& configPath,
-	                               std::map<std::string, std::string> const& manualKnobOverrides)
-	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::True),
-	    consumer(Never()) {}
-
-	Future<Void> setup() {
-		if (cbi) {
+	ACTOR static Future<Void> setup(ReadFromLocalConfigEnvironment* self) {
+		wait(self->localConfiguration.initialize());
+		if (self->cbi) {
 			// LocalConfiguration runs in a loop waiting for messages from the
 			// broadcaster. These unit tests use the same
 			// ConfigBroadcastInterface across restarts, so when "killing" the
@@ -160,11 +154,20 @@ public:
 			// completely stopped before starting the second config. This
 			// prevents two actors trying to listen for the same message on the
 			// same interface, causing lots of issues!
-			consumer.cancel();
-			consumer = localConfiguration.consume(cbi->get());
+			self->consumer.cancel();
+			self->consumer = self->localConfiguration.consume(self->cbi->get());
 		}
 		return Void();
 	}
+
+public:
+	ReadFromLocalConfigEnvironment(std::string const& dataDir,
+	                               std::string const& configPath,
+	                               std::map<std::string, std::string> const& manualKnobOverrides)
+	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::True),
+	    consumer(Never()) {}
+
+	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
 		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, IsTest::True);

@@ -46,6 +46,7 @@ class LocalConfigurationImpl {
 	OnDemandStore kvStore;
 	Version lastSeenVersion{ 0 };
 	std::unique_ptr<IKnobCollection> testKnobCollection;
+	Future<Void> initFuture;
 
 	class ConfigKnobOverrides {
 		Standalone<VectorRef<KeyRef>> configPath;
@@ -280,6 +281,7 @@ class LocalConfigurationImpl {
 	}
 
 	ACTOR static Future<Void> consumeInternal(LocalConfigurationImpl* self, ConfigBroadcastInterface broadcaster) {
+		wait(self->initialize());
 		loop {
 			choose {
 				when(ConfigBroadcastSnapshotRequest snapshotReq = waitNext(broadcaster.snapshot.getFuture())) {
@@ -355,6 +357,13 @@ public:
 	Version getLastSeenVersion() const { return lastSeenVersion; }
 
 	ConfigClassSet configClassSet() const { return configKnobOverrides.getConfigClassSet(); }
+
+	Future<Void> initialize() {
+		if (!initFuture.isValid()) {
+			initFuture = initialize(this);
+		}
+		return initFuture;
+	}
 
 	static void testManualKnobOverridesInvalidName() {
 		std::map<std::string, std::string> invalidOverrides;
@@ -446,6 +455,10 @@ Version LocalConfiguration::lastSeenVersion() const {
 
 ConfigClassSet LocalConfiguration::configClassSet() const {
 	return impl->configClassSet();
+}
+
+Future<Void> LocalConfiguration::initialize() {
+	return impl->initialize();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ManualKnobOverrides/InvalidName") {
