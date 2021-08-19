@@ -3004,7 +3004,7 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
 			req.spanContext = span.context;
-			cx->getLatestCommitVersions(locations[shard].second, version, req.ssLatestCommitVersions);
+			cx->getLatestCommitVersions(locations[shard].second, req.version, req.ssLatestCommitVersions);
 
 			// keep shard's arena around in case of async tss comparison
 			req.arena.dependsOn(locations[shard].first.arena());
@@ -3325,7 +3325,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
-                        cx->getLatestCommitVersions(beginServer.second, version, req.ssLatestCommitVersions);
+                        cx->getLatestCommitVersions(beginServer.second, req.version, req.ssLatestCommitVersions);
 
 			// In case of async tss comparison, also make req arena depend on begin, end, and/or shard's arena depending
 			// on which  is used
@@ -3762,7 +3762,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
-			cx->getLatestCommitVersions(locations[shard].second, version, req.ssLatestCommitVersions);
+			cx->getLatestCommitVersions(locations[shard].second, req.version, req.ssLatestCommitVersions);
 
 			// keep shard's arena around in case of async tss comparison
 			req.arena.dependsOn(range.arena());

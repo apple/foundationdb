@@ -1229,11 +1229,11 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
-		// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-		self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
-	}
 	if (req.version > self->liveCommittedVersion.get()) {
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
+			// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
+			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
+		}
 		self->databaseLocked = req.locked;
 		self->proxyMetadataVersion = req.metadataVersion;
 		// Note the set call switches context to any waiters on liveCommittedVersion before continuing.
