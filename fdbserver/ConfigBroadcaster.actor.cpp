@@ -124,7 +124,8 @@ class ConfigBroadcasterImpl {
 				te.detail("Version", versionedMutation.version)
 				    .detail("ReqLastSeenVersion", client.lastSeenVersion)
 				    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
-				    .detail("KnobName", versionedMutation.mutation.getKnobName());
+				    .detail("KnobName", versionedMutation.mutation.getKnobName())
+				    .detail("ClientID", client.broadcastInterface.id());
 				if (versionedMutation.mutation.isSet()) {
 					te.detail("Op", "Set").detail("KnobValue", versionedMutation.mutation.getValue().toString());
 				} else {
@@ -175,8 +176,8 @@ class ConfigBroadcasterImpl {
 	}
 
 	template <class Snapshot>
-	Future<Void> setSnapshot(Snapshot& snapshot, Version snapshotVersion) {
-		this->snapshot = snapshot;
+	Future<Void> setSnapshot(Snapshot&& snapshot, Version snapshotVersion) {
+		this->snapshot = std::forward<Snapshot>(snapshot);
 		this->lastCompactedVersion = snapshotVersion;
 		std::vector<Future<Void>> futures;
 		for (const auto& [id, client] : clients) {
@@ -200,6 +201,7 @@ class ConfigBroadcasterImpl {
 
 	ACTOR static Future<Void> waitForFailure(ConfigBroadcasterImpl* self, Future<Void> watcher, UID clientUID) {
 		wait(watcher);
+		TraceEvent(SevDebug, "ConfigBroadcastClientDied", self->id).detail("ClientID", clientUID);
 		self->clients.erase(clientUID);
 		return Void();
 	}
@@ -221,6 +223,10 @@ class ConfigBroadcasterImpl {
 			return Void();
 		}
 
+		TraceEvent(SevDebug, "ConfigBroadcasterRegisteringWorker", impl->id)
+		    .detail("ClientID", broadcastInterface.id())
+		    .detail("MostRecentVersion", impl->mostRecentVersion)
+		    .detail("ClientLastSeenVersion", lastSeenVersion);
 		// Push full snapshot to worker if it isn't up to date.
 		wait(impl->pushSnapshot(impl->mostRecentVersion, client));
 		impl->clients[broadcastInterface.id()] = client;
@@ -276,7 +282,7 @@ public:
 			} else {
 				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, Optional<double>{});
 			}
-			TraceEvent(SevDebug, "BroadcasterStartingConsumer", id)
+			TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id)
 			    .detail("Consumer", consumer->getID())
 			    .detail("UsingSimpleConsumer", configDBType == ConfigDBType::SIMPLE);
 		}

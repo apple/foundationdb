@@ -235,7 +235,12 @@ class LocalConfigurationImpl {
 	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
 	                                      std::map<ConfigKey, KnobValue> snapshot,
 	                                      Version snapshotVersion) {
-		// TODO: Concurrency control?
+		if (snapshotVersion <= self->lastSeenVersion) {
+			TraceEvent(SevWarnAlways, "LocalConfigGotOldSnapshot", self->id)
+			    .detail("NewSnapshotVersion", snapshotVersion)
+			    .detail("LastSeenVersion", self->lastSeenVersion);
+			return Void();
+		}
 		++self->snapshots;
 		self->kvStore->clear(knobOverrideKeys);
 		for (const auto& [configKey, knobValue] : snapshot) {
@@ -261,9 +266,19 @@ class LocalConfigurationImpl {
 				TraceEvent(SevWarnAlways, "LocalConfigGotRepeatedChange")
 				    .detail("NewChangeVersion", versionedMutation.version)
 				    .detail("LastSeenVersion", self->lastSeenVersion);
+				continue;
 			}
 			++self->mutations;
 			const auto& mutation = versionedMutation.mutation;
+			{
+				TraceEvent te(SevDebug, "LocalConfigAddingChange", self->id);
+				te.detail("ConfigClass", mutation.getConfigClass())
+				    .detail("Version", versionedMutation.version)
+				    .detail("KnobName", mutation.getKnobName());
+				if (mutation.isSet()) {
+					te.detail("Op", "Set").detail("KnobValue", mutation.getValue().toString());
+				}
+			}
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
 			if (mutation.isSet()) {
 				self->kvStore->set(KeyValueRef(serializedKey.withPrefix(knobOverrideKeys.begin),
@@ -284,18 +299,13 @@ class LocalConfigurationImpl {
 		wait(self->initialize());
 		loop {
 			choose {
-				when(ConfigBroadcastSnapshotRequest snapshotReq = waitNext(broadcaster.snapshot.getFuture())) {
-					if (snapshotReq.version <= self->lastSeenVersion) {
-						TraceEvent(SevWarnAlways, "LocalConfigGotOldSnapshot")
-						    .detail("NewSnapshotVersion", snapshotReq.version)
-						    .detail("LastSeenVersion", self->lastSeenVersion);
-					}
-					++self->snapshots;
+				when(state ConfigBroadcastSnapshotRequest snapshotReq = waitNext(broadcaster.snapshot.getFuture())) {
 					wait(setSnapshot(self, std::move(snapshotReq.snapshot), snapshotReq.version));
+					snapshotReq.reply.send(ConfigBroadcastSnapshotReply{});
 				}
 				when(state ConfigBroadcastChangesRequest req = waitNext(broadcaster.changes.getFuture())) {
 					wait(self->addChanges(req.changes, req.mostRecentVersion));
-					req.reply.send(ConfigBroadcastChangesReply());
+					req.reply.send(ConfigBroadcastChangesReply{});
 				}
 			}
 		}
