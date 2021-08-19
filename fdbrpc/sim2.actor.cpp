@@ -386,7 +386,7 @@ private:
 
 	void rollRandomClose() {
 		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
-		    deterministicRandom()->random01() < .00001) {
+		    deterministicRandom()->random01() < .00001 && faultInjectionActivated) {
 			g_simulator.lastConnectionFailure = now();
 			double a = deterministicRandom()->random01(), b = deterministicRandom()->random01();
 			TEST(true); // Simulated connection failure
