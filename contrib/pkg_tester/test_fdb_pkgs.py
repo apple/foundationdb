@@ -169,15 +169,23 @@ def centos_image_with_fdb_versioned() -> Iterator[Optional[Image]]:
 
 def pytest_generate_tests(metafunc):
     if "linux_container" in metafunc.fixturenames:
-        metafunc.parametrize("linux_container", ["ubuntu", "centos", "ubuntu-versioned", "centos-versioned"], indirect=True)
+        metafunc.parametrize(
+            "linux_container",
+            ["ubuntu", "centos", "ubuntu-versioned", "centos-versioned"],
+            indirect=True,
+        )
 
 
 @pytest.fixture()
 def linux_container(
-    request, ubuntu_image_with_fdb, centos_image_with_fdb, ubuntu_image_with_fdb_versioned, centos_image_with_fdb_versioned
+    request,
+    ubuntu_image_with_fdb,
+    centos_image_with_fdb,
+    ubuntu_image_with_fdb_versioned,
+    centos_image_with_fdb_versioned,
 ) -> Iterator[Container]:
     """
-    Tests which accept this fixture will be run once for each supported platform.
+    Tests which accept this fixture will be run once for each supported platform, for each type of package (versioned or unversioned).
     """
     container: Optional[Container] = None
     try:
