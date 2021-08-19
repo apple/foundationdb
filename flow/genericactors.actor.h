@@ -1254,10 +1254,22 @@ void tagAndForward(Promise<T>* pOutputPromise, T value, Future<Void> signal) {
 }
 
 ACTOR template <class T>
+void tagAndForward(PromiseStream<T>* pOutput, T value, Future<Void> signal) {
+	wait(signal);
+	pOutput->send(value);
+}
+
+ACTOR template <class T>
 void tagAndForwardError(Promise<T>* pOutputPromise, Error value, Future<Void> signal) {
 	state Promise<T> out(std::move(*pOutputPromise));
 	wait(signal);
 	out.sendError(value);
+}
+
+ACTOR template <class T>
+void tagAndForwardError(PromiseStream<T>* pOutput, Error value, Future<Void> signal) {
+	wait(signal);
+	pOutput->sendError(value);
 }
 
 ACTOR template <class T>
@@ -1543,10 +1555,10 @@ struct BoundedFlowLock : NonCopyable, public ReferenceCounted<BoundedFlowLock> {
 		}
 	};
 
-	BoundedFlowLock() : unrestrictedPermits(1), boundedPermits(0), nextPermitNumber(0), minOutstanding(0) {}
+	BoundedFlowLock() : minOutstanding(0), nextPermitNumber(0), unrestrictedPermits(1), boundedPermits(0) {}
 	explicit BoundedFlowLock(int64_t unrestrictedPermits, int64_t boundedPermits)
-	  : unrestrictedPermits(unrestrictedPermits), boundedPermits(boundedPermits), nextPermitNumber(0),
-	    minOutstanding(0) {}
+	  : minOutstanding(0), nextPermitNumber(0), unrestrictedPermits(unrestrictedPermits),
+	    boundedPermits(boundedPermits) {}
 
 	Future<int64_t> take() { return takeActor(this); }
 	void release(int64_t permitNumber) {
@@ -1611,6 +1623,12 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 	}
 
 	void destroy() override { delete this; }
+
+#ifdef ENABLE_SAMPLING
+	LineageReference* lineageAddr() {
+		return currentLineage;
+	}
+#endif
 
 	void a_callback_fire(ActorCallback<YieldedFutureActor, 1, Void>*, Void) {
 		if (int16_t(in_error_state.code()) == UNSET_ERROR_CODE) {

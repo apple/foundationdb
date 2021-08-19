@@ -44,28 +44,29 @@ const Key DatabaseBackupAgent::keyDatabasesInSync = LiteralStringRef("databases_
 const int DatabaseBackupAgent::LATEST_DR_VERSION = 1;
 
 DatabaseBackupAgent::DatabaseBackupAgent()
-  : subspace(Subspace(databaseBackupPrefixRange.begin)), tagNames(subspace.get(BackupAgentBase::keyTagName)),
-    states(subspace.get(BackupAgentBase::keyStates)), config(subspace.get(BackupAgentBase::keyConfig)),
-    errors(subspace.get(BackupAgentBase::keyErrors)), ranges(subspace.get(BackupAgentBase::keyRanges)),
+  : subspace(Subspace(databaseBackupPrefixRange.begin)), states(subspace.get(BackupAgentBase::keyStates)),
+    config(subspace.get(BackupAgentBase::keyConfig)), errors(subspace.get(BackupAgentBase::keyErrors)),
+    ranges(subspace.get(BackupAgentBase::keyRanges)), tagNames(subspace.get(BackupAgentBase::keyTagName)),
+    sourceStates(subspace.get(BackupAgentBase::keySourceStates)),
+    sourceTagNames(subspace.get(BackupAgentBase::keyTagName)),
     taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks),
                               AccessSystemKeys::True,
                               PriorityBatch::False,
                               LockAware::True)),
-    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::True, LockAware::True)),
-    sourceStates(subspace.get(BackupAgentBase::keySourceStates)),
-    sourceTagNames(subspace.get(BackupAgentBase::keyTagName)) {}
+    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::True, LockAware::True)) {
+}
 
 DatabaseBackupAgent::DatabaseBackupAgent(Database src)
-  : subspace(Subspace(databaseBackupPrefixRange.begin)), tagNames(subspace.get(BackupAgentBase::keyTagName)),
-    states(subspace.get(BackupAgentBase::keyStates)), config(subspace.get(BackupAgentBase::keyConfig)),
-    errors(subspace.get(BackupAgentBase::keyErrors)), ranges(subspace.get(BackupAgentBase::keyRanges)),
+  : subspace(Subspace(databaseBackupPrefixRange.begin)), states(subspace.get(BackupAgentBase::keyStates)),
+    config(subspace.get(BackupAgentBase::keyConfig)), errors(subspace.get(BackupAgentBase::keyErrors)),
+    ranges(subspace.get(BackupAgentBase::keyRanges)), tagNames(subspace.get(BackupAgentBase::keyTagName)),
+    sourceStates(subspace.get(BackupAgentBase::keySourceStates)),
+    sourceTagNames(subspace.get(BackupAgentBase::keyTagName)),
     taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks),
                               AccessSystemKeys::True,
                               PriorityBatch::False,
                               LockAware::True)),
-    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::True, LockAware::True)),
-    sourceStates(subspace.get(BackupAgentBase::keySourceStates)),
-    sourceTagNames(subspace.get(BackupAgentBase::keyTagName)) {
+    futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), AccessSystemKeys::True, LockAware::True)) {
 	taskBucket->src = src;
 }
 
@@ -2354,7 +2355,7 @@ std::string getDRMutationStreamId(StatusObjectReader statusObj, const char* cont
 				}
 			}
 		}
-		TraceEvent(SevWarn, "DBA_TagNotPresentInStatus").detail("Tag", tagName.toString()).detail("Context", context);
+		TraceEvent(SevWarn, "DBA_TagNotPresentInStatus").detail("Tag", tagName).detail("Context", context);
 		throw backup_error();
 	} catch (std::runtime_error& e) {
 		TraceEvent(SevWarn, "DBA_GetDRMutationStreamIdFail").detail("Error", e.what());

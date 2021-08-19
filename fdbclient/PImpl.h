@@ -1,5 +1,5 @@
 /*
- * PaxosConfigDatabaseNode.h
+ * PImpl.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,17 +20,23 @@
 
 #pragma once
 
-#include "fdbserver/IConfigDatabaseNode.h"
+#include <memory>
 
-/*
- * Fault-tolerant configuration database node implementation
- */
-class PaxosConfigDatabaseNode : public IConfigDatabaseNode {
-	std::unique_ptr<class PaxosConfigDatabaseNodeImpl> impl;
+template <class T>
+class PImpl {
+	std::unique_ptr<T> impl;
+	struct ConstructorTag {};
+	template <class... Args>
+	PImpl(ConstructorTag, Args&&... args) : impl(std::make_unique<T>(std::forward<Args>(args)...)) {}
 
 public:
-	PaxosConfigDatabaseNode(std::string const& folder);
-	~PaxosConfigDatabaseNode();
-	Future<Void> serve(ConfigTransactionInterface const&) override;
-	Future<Void> serve(ConfigFollowerInterface const&) override;
+	PImpl() = default;
+	template <class... Args>
+	static PImpl create(Args&&... args) {
+		return PImpl(ConstructorTag{}, std::forward<Args>(args)...);
+	}
+	T& operator*() { return *impl; }
+	T const& operator*() const { return *impl; }
+	T* operator->() { return impl.get(); }
+	T const* operator->() const { return impl.get(); }
 };

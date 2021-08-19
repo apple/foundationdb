@@ -265,43 +265,29 @@ static std::string toLower(std::string const& name) {
 	return lower_name;
 }
 
-template <class T>
-static T parseIntegral(std::string const& value) {
-	T v;
-	int n = 0;
-	if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
-		if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
-			throw invalid_option_value();
-	} else {
-		if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
-			throw invalid_option_value();
-	}
-	return v;
-}
-
 ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const& value) const {
-	if (double_knobs.count(knob)) {
-		double v;
-		int n = 0;
-		if (sscanf(value.c_str(), "%lf%n", &v, &n) != 1 || n != value.size())
-			throw invalid_option_value();
-		return v;
-	} else if (bool_knobs.count(knob)) {
-		if (toLower(value) == "true") {
-			return true;
-		} else if (toLower(value) == "false") {
-			return false;
-		} else {
-			return parseIntegral<bool>(value);
+	try {
+		if (double_knobs.count(knob)) {
+			return std::stod(value);
+		} else if (bool_knobs.count(knob)) {
+			if (toLower(value) == "true") {
+				return true;
+			} else if (toLower(value) == "false") {
+				return false;
+			} else {
+				return (std::stoi(value) != 0);
+			}
+		} else if (int64_knobs.count(knob)) {
+			return static_cast<int64_t>(std::stol(value, nullptr, 0));
+		} else if (int_knobs.count(knob)) {
+			return std::stoi(value, nullptr, 0);
+		} else if (string_knobs.count(knob)) {
+			return value;
 		}
-	} else if (int64_knobs.count(knob)) {
-		return parseIntegral<int64_t>(value);
-	} else if (int_knobs.count(knob)) {
-		return parseIntegral<int>(value);
-	} else if (string_knobs.count(knob)) {
-		return value;
+		return NoKnobFound{};
+	} catch (...) {
+		throw invalid_option_value();
 	}
-	return NoKnobFound{};
 }
 
 bool Knobs::setKnob(std::string const& knob, int value) {

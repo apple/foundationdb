@@ -92,7 +92,7 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	} counters;
 
 	explicit LoaderBatchData(UID nodeID, int batchIndex)
-	  : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT), loadFileReqs(0) {
+	  : vbState(LoaderVersionBatchState::NOT_INIT), loadFileReqs(0), counters(this, nodeID, batchIndex) {
 		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex),
 		                            nodeID,
 		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,

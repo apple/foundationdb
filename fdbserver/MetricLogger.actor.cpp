@@ -29,7 +29,7 @@
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
-	  : enabled(enabled), minLevel(minLevel), namePattern(name) {}
+	  : namePattern(name), enabled(enabled), minLevel(minLevel) {}
 
 	Standalone<StringRef> typePattern;
 	Standalone<StringRef> namePattern;

@@ -48,8 +48,8 @@ using namespace std;
 WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
-  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), dbInfo(r.dbInfo),
-    sharedRandomNumber(r.sharedRandomNumber) {}
+  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
+    dbInfo(r.dbInfo) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -315,7 +315,7 @@ struct CompoundWorkload : TestWorkload {
 
 TestWorkload* getWorkloadIface(WorkloadRequest work,
                                VectorRef<KeyValueRef> options,
-                               Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
@@ -350,7 +350,7 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 	return workload;
 }
 
-TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
@@ -602,7 +602,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 
 ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
                                         Reference<ClusterConnectionFile> ccf,
-                                        Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                        Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                         LocalityData locality) {
 	state WorkloadInterface workIface;
 	state bool replied = false;
@@ -661,7 +661,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                    Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                     LocalityData locality) {
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
@@ -1481,7 +1481,9 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
+			printf("Set perpetual_storage_wiggle=1 ...\n");
 			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
+			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
 	}
 

@@ -73,6 +73,7 @@ set(FLOW_SRCS
   TypeTraits.h
   UnitTest.cpp
   UnitTest.h
+  WriteOnlySet.actor.cpp
   XmlTraceLogFormatter.cpp
   XmlTraceLogFormatter.h
   actorcompiler.h
@@ -124,46 +125,57 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_link_libraries(flow PRIVATE stacktrace)
+
+add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
+target_link_libraries(flow_sampling PRIVATE stacktrace)
+target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
+
 if (NOT APPLE AND NOT WIN32)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
 elseif(WIN32)
   target_link_libraries(flow PUBLIC winmm.lib)
   target_link_libraries(flow PUBLIC psapi.lib)
+  target_link_libraries(flow_sampling PUBLIC winmm.lib)
+  target_link_libraries(flow_sampling PUBLIC psapi.lib)
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   set (FLOW_LIBS ${FLOW_LIBS} execinfo devstat)
   find_library(EIO eio)
   if(EIO)
     target_link_libraries(flow PUBLIC ${EIO})
+    target_link_libraries(flow_sampling PUBLIC ${EIO})
   endif()
 endif()
-
-# For Clang in Linux environment, libatomic is required
-if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
-	set (FLOW_LIBS ${FLOW_LIBS} atomic)
-endif ()
-
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
+target_link_libraries(flow_sampling PRIVATE ${FLOW_LIBS})
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
+  target_link_libraries(flow_sampling PUBLIC Valgrind)
 endif()
 if(NOT WITH_TLS)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
+  target_compile_definitions(flow_sampling PUBLIC TLS_DISABLED)
 else()
   target_link_libraries(flow PUBLIC OpenSSL::SSL)
+  target_link_libraries(flow_sampling PUBLIC OpenSSL::SSL)
 endif()
 target_link_libraries(flow PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(flow_sampling PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 if(USE_SANITIZER)
   target_link_libraries(flow PUBLIC boost_asan)
+  target_link_libraries(flow_sampling PUBLIC boost_asan)
 else()
   target_link_libraries(flow PUBLIC boost_target)
+  target_link_libraries(flow_sampling PUBLIC boost_target)
 endif()
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
+  target_link_libraries(flow_sampling PUBLIC Valgrind)
 endif()
 
 if(APPLE)
   find_library(IO_KIT IOKit)
   find_library(CORE_FOUNDATION CoreFoundation)
   target_link_libraries(flow PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
+  target_link_libraries(flow_sampling PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
 endif()

@@ -35,6 +35,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/WriteOnlySet.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -45,7 +46,6 @@ enum class TaskPriority {
 	WriteSocket = 10000,
 	PollEIO = 9900,
 	DiskIOComplete = 9150,
-	NoDeliverDelay = 9100,
 	LoadBalancedEndpoint = 9000,
 	ReadSocket = 9000,
 	AcceptSocket = 8950,
@@ -507,6 +507,10 @@ public:
 	virtual Future<class Void> delay(double seconds, TaskPriority taskID) = 0;
 	// The given future will be set after seconds have elapsed
 
+	virtual Future<class Void> orderedDelay(double seconds, TaskPriority taskID) = 0;
+	// The given future will be set after seconds have elapsed, delays with the same time and TaskPriority will be
+	// executed in the order they were issues
+
 	virtual Future<class Void> yield(TaskPriority taskID) = 0;
 	// The given future will be set immediately or after higher-priority tasks have executed
 
@@ -567,6 +571,11 @@ public:
 	// If the network has not been run and this function has not been previously called, returns true. Otherwise,
 	// returns false.
 	virtual bool checkRunnable() = 0;
+
+#ifdef ENABLE_SAMPLING
+	// Returns the shared memory data structure used to store actor lineages.
+	virtual ActorLineageSet& getActorLineageSet() = 0;
+#endif
 
 	virtual ProtocolVersion protocolVersion() = 0;
 

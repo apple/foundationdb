@@ -128,15 +128,15 @@ public:
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
 		DBInfo()
-		  : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0),
-		    logGenerations(0), cachePopulated(false), clientInfo(new AsyncVar<ClientDBInfo>()), dbInfoCount(0),
-		    serverInfo(new AsyncVar<ServerDBInfo>()), db(DatabaseContext::create(clientInfo,
-		                                                                         Future<Void>(),
-		                                                                         LocalityData(),
-		                                                                         EnableLocalityLoadBalance::True,
-		                                                                         TaskPriority::DefaultEndpoint,
-		                                                                         LockAware::True)) // SOMEDAY: Locality!
-		{}
+		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
+		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
+		    db(DatabaseContext::create(clientInfo,
+		                               Future<Void>(),
+		                               LocalityData(),
+		                               EnableLocalityLoadBalance::True,
+		                               TaskPriority::DefaultEndpoint,
+		                               LockAware::True)), // SOMEDAY: Locality!
+		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false) {}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -195,6 +195,8 @@ public:
 			}
 
 			loop {
+				tr.reset();
+
 				// Wait for some changes
 				while (!self->anyDelta.get())
 					wait(self->anyDelta.onChange());
@@ -1431,12 +1433,12 @@ public:
 		bool degraded = false;
 
 		RoleFitness(int bestFit, int worstFit, int count, ProcessClass::ClusterRole role)
-		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), count(count),
-		    role(role) {}
+		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), role(role),
+		    count(count) {}
 
 		RoleFitness(int fitness, int count, ProcessClass::ClusterRole role)
-		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), count(count),
-		    role(role) {}
+		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), role(role),
+		    count(count) {}
 
 		RoleFitness()
 		  : bestFit(ProcessClass::NeverAssign), worstFit(ProcessClass::NeverAssign), role(ProcessClass::NoRole),
@@ -3059,9 +3061,9 @@ public:
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators)
-	  : clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
-	    gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
+	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), clusterControllerProcessId(locality.processId()),
+	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
+	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
 	    recruitingDistributor(false), recruitRatekeeper(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
@@ -3146,7 +3148,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				dbInfo.distributor = db->serverInfo->get().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 				dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
-				dbInfo.configBroadcaster = db->serverInfo->get().configBroadcaster;
 
 				TraceEvent("CCWDB", cluster->id)
 				    .detail("Lifetime", dbInfo.masterLifetime.toString())
@@ -3732,7 +3733,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	checkOutstandingRequests(self);
 }
 
-void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
+void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
@@ -3821,6 +3822,13 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
+		if (configBroadcaster != nullptr) {
+			self->addActor.send(configBroadcaster->registerWorker(
+			    req.lastSeenKnobVersion,
+			    req.knobConfigClassSet,
+			    self->id_worker[w.locality.processId()].watcher,
+			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
+		}
 		checkOutstandingRequests(self);
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
@@ -3838,6 +3846,13 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
+		}
+		if (configBroadcaster != nullptr) {
+			self->addActor.send(
+			    configBroadcaster->registerWorker(req.lastSeenKnobVersion,
+			                                      req.knobConfigClassSet,
+			                                      info->second.watcher,
+			                                      info->second.details.interf.configBroadcastInterface));
 		}
 		checkOutstandingRequests(self);
 	} else {
@@ -3923,13 +3938,11 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		loop {
 			try {
+				state UID debugID = deterministicRandom()->randomUniqueID();
 				if (!g_network->isSimulated()) {
 					// This is done to provide an arbitrary logged transaction every ~10s.
 					// FIXME: replace or augment this with logging on the proxy which tracks
-					//       how long it is taking to hear responses from each other component.
-
-					UID debugID = deterministicRandom()->randomUniqueID();
-					TraceEvent("TimeKeeperCommit", debugID).log();
+					// how long it is taking to hear responses from each other component.
 					tr->debugTransaction(debugID);
 				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3944,7 +3957,9 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 				Version v = tr->getReadVersion().get();
 				int64_t currentTime = (int64_t)now();
 				versionMap.set(tr, currentTime, v);
-
+				if (!g_network->isSimulated()) {
+					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v);
+				}
 				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
 				if (ttl > 0) {
 					versionMap.erase(tr, 0, ttl);
@@ -4773,22 +4788,19 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
                                          LocalityData locality,
-                                         UseConfigDB useConfigDB) {
+                                         ConfigDBType configDBType) {
 	state ClusterControllerData self(interf, locality, coordinators);
-	state ConfigBroadcaster configBroadcaster(coordinators, useConfigDB);
+	state ConfigBroadcaster configBroadcaster(coordinators, configDBType);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
-	if (useConfigDB != UseConfigDB::DISABLED) {
-		self.addActor.send(configBroadcaster.serve(self.db.serverInfo->get().configBroadcaster));
-	}
 	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
 	                                coordinators,
-	                                (useConfigDB == UseConfigDB::DISABLED) ? nullptr : &configBroadcaster));
+	                                (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
@@ -4840,24 +4852,24 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			registerWorker(req, &self);
+			registerWorker(req, &self, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
 			vector<WorkerDetails> workers;
 
-			for (auto& it : self.id_worker) {
+			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    self.db.config.isExcludedServer(it.second.details.interf.addresses())) {
+				    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
 					continue;
 				}
 
 				if ((req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) &&
-				    it.second.details.processClass.classType() != ProcessClass::TesterClass) {
+				    worker.details.processClass.classType() != ProcessClass::TesterClass) {
 					continue;
 				}
 
-				workers.push_back(it.second.details);
+				workers.push_back(worker.details);
 			}
 
 			req.reply.send(workers);
@@ -4916,7 +4928,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
-                                     UseConfigDB useConfigDB) {
+                                     ConfigDBType configDBType) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -4943,7 +4955,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, useConfigDB));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -4967,13 +4979,13 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> connFile,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     UseConfigDB useConfigDB) {
+                                     ConfigDBType configDBType) {
 	wait(recoveredDiskFiles);
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators(connFile);
-			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, useConfigDB));
+			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
 				throw; // Expected to terminate fdbserver

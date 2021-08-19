@@ -29,12 +29,11 @@
 struct LocalitySet : public ReferenceCounted<LocalitySet> {
 public:
 	LocalitySet(LocalitySet const& source)
-	  : _entryArray(source._entryArray), _mutableEntryArray(source._mutableEntryArray),
+	  : _keymap(source._keymap), _entryArray(source._entryArray), _mutableEntryArray(source._mutableEntryArray),
 	    _keyValueArray(source._keyValueArray), _keyIndexArray(source._keyIndexArray), _cacheArray(source._cacheArray),
-	    _keymap(source._keymap), _localitygroup(source._localitygroup), _cachehits(source._cachehits),
-	    _cachemisses(source._cachemisses) {}
+	    _localitygroup(source._localitygroup), _cachehits(source._cachehits), _cachemisses(source._cachemisses) {}
 	LocalitySet(LocalitySet& localityGroup)
-	  : _localitygroup(&localityGroup), _keymap(new StringToIntMap()), _cachehits(0), _cachemisses(0) {}
+	  : _keymap(new StringToIntMap()), _localitygroup(&localityGroup), _cachehits(0), _cachemisses(0) {}
 	virtual ~LocalitySet() {}
 
 	virtual void addref() { ReferenceCounted<LocalitySet>::addref(); }

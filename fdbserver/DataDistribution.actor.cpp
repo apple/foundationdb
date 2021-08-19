@@ -87,10 +87,10 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	             bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet,
 	             Version addedVersion = 0)
-	  : id(ssi.id()), collection(collection), lastKnownInterface(ssi), lastKnownClass(processClass),
-	    dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()),
-	    inDesiredDC(inDesiredDC), storeType(KeyValueStoreType::END), onTSSPairRemoved(Never()),
-	    addedVersion(addedVersion) {
+	  : id(ssi.id()), addedVersion(addedVersion), collection(collection), lastKnownInterface(ssi),
+	    lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()),
+	    onRemoved(removed.getFuture()), onTSSPairRemoved(Never()), inDesiredDC(inDesiredDC),
+	    storeType(KeyValueStoreType::END) {
 
 		if (!ssi.isTss()) {
 			localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -187,7 +187,7 @@ public:
 	Future<Void> tracker;
 
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
-	  : servers(servers), healthy(true), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), wrongConfiguration(false),
+	  : servers(servers), healthy(true), wrongConfiguration(false), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY),
 	    id(deterministicRandom()->randomUniqueID()) {
 		if (servers.empty()) {
 			TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers").log();
@@ -377,8 +377,8 @@ struct ServerStatus {
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
 	ServerStatus(bool isFailed, bool isUndesired, bool isWiggling, LocalityData const& locality)
-	  : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false),
-	    initialized(true), isWiggling(isWiggling) {}
+	  : isWiggling(isWiggling), isFailed(isFailed), isUndesired(isUndesired), isWrongConfiguration(false),
+	    initialized(true), locality(locality) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
 	const char* toString() const {
 		return isFailed ? "Failed" : isUndesired ? "Undesired" : isWiggling ? "Wiggling" : "Healthy";
@@ -737,22 +737,22 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 PromiseStream<GetMetricsRequest> getShardMetrics,
 	                 Promise<UID> removeFailedServer,
 	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount)
-	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false),
-	    teamBuilder(Void()), badTeamRemover(Void()), checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()),
-	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(true),
-	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
+	  : cx(cx), distributorId(distributorId), configuration(configuration), doBuildTeams(true),
+	    lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output), unhealthyServers(0),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
-	    healthyTeamCount(0), storageServerSet(new LocalityMap<UID>()),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
-	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
-	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
-	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), isTssRecruiting(false),
-	    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
-	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
-	    getShardMetrics(getShardMetrics), removeFailedServer(removeFailedServer),
-	    getUnhealthyRelocationCount(getUnhealthyRelocationCount) {
+	    recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
+	    zeroHealthyTeams(zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
+	    includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs), primary(primary),
+	    processingUnhealthy(processingUnhealthy), readyToStart(readyToStart),
+	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
+	    checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), storageServerSet(new LocalityMap<UID>()),
+	    clearHealthyZoneFuture(true), medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO),
+	    lastMedianAvailableSpaceUpdate(0), lowestUtilizationTeam(0), highestUtilizationTeam(0),
+	    getShardMetrics(getShardMetrics), getUnhealthyRelocationCount(getUnhealthyRelocationCount),
+	    removeFailedServer(removeFailedServer) {
 		if (!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest("DDTrackerStarting");
 		}
@@ -2510,7 +2510,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if (tss_info_by_pair.count(newServer.id())) {
 				tss_info_by_pair[newServer.id()]->onTSSPairRemoved = r->onRemoved;
 				if (tss_info_by_pair[newServer.id()]->wakeUpTracker.canBeSet()) {
-					tss_info_by_pair[newServer.id()]->wakeUpTracker.send(Void());
+					auto p = tss_info_by_pair[newServer.id()]->wakeUpTracker;
+					// This callback could delete tss_info_by_pair[newServer.id()], so use a copy
+					p.send(Void());
 				}
 			}
 
@@ -3967,7 +3969,6 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
                                                   FutureStream<Void> finishStorageWiggleSignal,
                                                   DDTeamCollection* teamCollection) {
-	state int lastFinishTime = now();
 	loop {
 		choose {
 			when(wait(stopSignal->onChange())) {}
@@ -4047,8 +4048,7 @@ ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, 
 // cluster is unhealthy and restarted once the cluster is healthy again.
 ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
                                            PromiseStream<Void> finishStorageWiggleSignal,
-                                           DDTeamCollection* self,
-                                           const DDEnabledState* ddEnabledState) {
+                                           DDTeamCollection* self) {
 	state Future<Void> watchFuture = Never();
 	state Future<Void> moveFinishFuture = Never();
 	state int extraTeamCount = 0;
@@ -4132,8 +4132,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 // This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by command
 // `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 // `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
-ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection,
-                                                 const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection) {
 	state int speed = 0;
 	state AsyncVar<bool> stopWiggleSignal(true);
 	state PromiseStream<Void> finishStorageWiggleSignal;
@@ -4158,8 +4157,8 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 					stopWiggleSignal.set(false);
 					collection.add(perpetualStorageWiggleIterator(
 					    &stopWiggleSignal, finishStorageWiggleSignal.getFuture(), teamCollection));
-					collection.add(perpetualStorageWiggler(
-					    &stopWiggleSignal, finishStorageWiggleSignal, teamCollection, ddEnabledState));
+					collection.add(
+					    perpetualStorageWiggler(&stopWiggleSignal, finishStorageWiggleSignal, teamCollection));
 					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId).log();
 				} else if (speed == 0) {
 					if (!stopWiggleSignal.get()) {
@@ -4987,7 +4986,7 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	TSSPairState() : active(false) {}
 
 	TSSPairState(const LocalityData& locality)
-	  : active(true), dcId(locality.dcId()), dataHallId(locality.dataHallId()) {}
+	  : dcId(locality.dcId()), dataHallId(locality.dataHallId()), active(true) {}
 
 	bool inDataZone(const LocalityData& locality) {
 		return locality.dcId() == dcId && locality.dataHallId() == dataHallId;
@@ -5132,8 +5131,10 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		if (doRecruit && newServer.isError()) {
 			TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
 			if (!newServer.isError(error_code_recruitment_failed) &&
-			    !newServer.isError(error_code_request_maybe_delivered))
+			    !newServer.isError(error_code_request_maybe_delivered)) {
+				tssState->markComplete();
 				throw newServer.getError();
+			}
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution));
 		}
 
@@ -5251,8 +5252,13 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 				}
 			}
 			int newTssToRecruit = targetTSSInDC - self->tss_info_by_pair.size() - inProgressTSSCount;
+			// FIXME: Should log this if the recruit count stays the same but the other numbers update?
 			if (newTssToRecruit != tssToRecruit) {
-				TraceEvent("TSS_RecruitUpdated", self->distributorId).detail("Count", newTssToRecruit);
+				TraceEvent("TSS_RecruitUpdated", self->distributorId)
+				    .detail("Desired", targetTSSInDC)
+				    .detail("Existing", self->tss_info_by_pair.size())
+				    .detail("InProgress", inProgressTSSCount)
+				    .detail("NotStarted", newTssToRecruit);
 				tssToRecruit = newTssToRecruit;
 
 				// if we need to get rid of some TSS processes, signal to either cancel recruitment or kill existing TSS
@@ -5564,7 +5570,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> te
 		self->addActor.send(waitHealthyZoneChange(self));
 
 		if (self->primary) { // the primary dc also handle the satellite dc's perpetual wiggling
-			self->addActor.send(monitorPerpetualStorageWiggle(self, ddEnabledState));
+			self->addActor.send(monitorPerpetualStorageWiggle(self));
 		}
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 

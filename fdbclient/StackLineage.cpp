@@ -1,9 +1,9 @@
 /*
- * PaxosConfigDatabaseNode.actor.cpp
+ * StackLineage.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,25 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbserver/PaxosConfigDatabaseNode.h"
+#include "fdbclient/StackLineage.h"
 
-class PaxosConfigDatabaseNodeImpl {};
-
-PaxosConfigDatabaseNode::PaxosConfigDatabaseNode(std::string const& folder) {
-	// TODO: Implement
-	ASSERT(false);
+std::vector<StringRef> getActorStackTrace() {
+	return (*currentLineage)->stack(&StackLineage::actorName);
 }
 
-PaxosConfigDatabaseNode::~PaxosConfigDatabaseNode() = default;
-
-Future<Void> PaxosConfigDatabaseNode::serve(ConfigTransactionInterface const& cti) {
-	// TODO: Implement
-	ASSERT(false);
-	return Void();
-}
-
-Future<Void> PaxosConfigDatabaseNode::serve(ConfigFollowerInterface const& cfi) {
-	// TODO: Implement
-	ASSERT(false);
-	return Void();
+namespace {
+// StackLineageCollector stackLineageCollector;
 }

@@ -27,26 +27,48 @@
 #include "fdbrpc/fdbrpc.h"
 #include "flow/flow.h"
 
-struct ConfigTransactionGetVersionReply {
-	static constexpr FileIdentifier file_identifier = 2934851;
-	ConfigTransactionGetVersionReply() = default;
-	explicit ConfigTransactionGetVersionReply(Version version) : version(version) {}
-	Version version;
+struct ConfigGeneration {
+	// The committedVersion of each node is the version of the last commit made durable.
+	// Each committedVersion was previously given to clients as a liveVersion, prior to commit.
+	Version committedVersion{ 0 };
+	// The live version of each node is monotonically increasing
+	Version liveVersion{ 0 };
+
+	bool operator==(ConfigGeneration const&) const;
+	bool operator!=(ConfigGeneration const&) const;
+	bool operator<(ConfigGeneration const&) const;
+	bool operator>(ConfigGeneration const&) const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version);
+		serializer(ar, committedVersion, liveVersion);
 	}
 };
 
-struct ConfigTransactionGetVersionRequest {
-	static constexpr FileIdentifier file_identifier = 138941;
-	ReplyPromise<ConfigTransactionGetVersionReply> reply;
-	ConfigTransactionGetVersionRequest() = default;
+struct ConfigTransactionGetGenerationReply {
+	static constexpr FileIdentifier file_identifier = 2934851;
+	ConfigTransactionGetGenerationReply() = default;
+	explicit ConfigTransactionGetGenerationReply(ConfigGeneration generation) : generation(generation) {}
+	ConfigGeneration generation;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, generation);
+	}
+};
+
+struct ConfigTransactionGetGenerationRequest {
+	static constexpr FileIdentifier file_identifier = 138941;
+	// A hint to catch up lagging nodes:
+	Optional<Version> lastSeenLiveVersion;
+	ReplyPromise<ConfigTransactionGetGenerationReply> reply;
+	ConfigTransactionGetGenerationRequest() = default;
+	explicit ConfigTransactionGetGenerationRequest(Optional<Version> const& lastSeenLiveVersion)
+	  : lastSeenLiveVersion(lastSeenLiveVersion) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, lastSeenLiveVersion, reply);
 	}
 };
 
@@ -64,45 +86,36 @@ struct ConfigTransactionGetReply {
 
 struct ConfigTransactionGetRequest {
 	static constexpr FileIdentifier file_identifier = 923040;
-	Version version;
+	ConfigGeneration generation;
 	ConfigKey key;
 	ReplyPromise<ConfigTransactionGetReply> reply;
 
 	ConfigTransactionGetRequest() = default;
-	explicit ConfigTransactionGetRequest(Version version, ConfigKey key) : version(version), key(key) {}
+	explicit ConfigTransactionGetRequest(ConfigGeneration generation, ConfigKey key)
+	  : generation(generation), key(key) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, key, reply);
+		serializer(ar, generation, key, reply);
 	}
 };
 
 struct ConfigTransactionCommitRequest {
 	static constexpr FileIdentifier file_identifier = 103841;
 	Arena arena;
-	Version version{ ::invalidVersion };
+	ConfigGeneration generation{ ::invalidVersion, ::invalidVersion };
 	VectorRef<ConfigMutationRef> mutations;
 	ConfigCommitAnnotationRef annotation;
 	ReplyPromise<Void> reply;
 
 	size_t expectedSize() const { return mutations.expectedSize() + annotation.expectedSize(); }
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, arena, version, mutations, annotation, reply);
-	}
-};
-
-struct ConfigTransactionGetRangeReply {
-	static constexpr FileIdentifier file_identifier = 430263;
-	Standalone<RangeResultRef> range;
-
-	ConfigTransactionGetRangeReply() = default;
-	explicit ConfigTransactionGetRangeReply(Standalone<RangeResultRef> range) : range(range) {}
+	void set(KeyRef key, ValueRef value);
+	void clear(KeyRef key);
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range);
+		serializer(ar, arena, generation, mutations, annotation, reply);
 	}
 };
 
@@ -122,15 +135,15 @@ struct ConfigTransactionGetConfigClassesReply {
 
 struct ConfigTransactionGetConfigClassesRequest {
 	static constexpr FileIdentifier file_identifier = 7163400;
-	Version version;
+	ConfigGeneration generation;
 	ReplyPromise<ConfigTransactionGetConfigClassesReply> reply;
 
 	ConfigTransactionGetConfigClassesRequest() = default;
-	explicit ConfigTransactionGetConfigClassesRequest(Version version) : version(version) {}
+	explicit ConfigTransactionGetConfigClassesRequest(ConfigGeneration generation) : generation(generation) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version);
+		serializer(ar, generation);
 	}
 };
 
@@ -149,17 +162,17 @@ struct ConfigTransactionGetKnobsReply {
 
 struct ConfigTransactionGetKnobsRequest {
 	static constexpr FileIdentifier file_identifier = 987410;
-	Version version;
+	ConfigGeneration generation;
 	Optional<Key> configClass;
 	ReplyPromise<ConfigTransactionGetKnobsReply> reply;
 
 	ConfigTransactionGetKnobsRequest() = default;
-	explicit ConfigTransactionGetKnobsRequest(Version version, Optional<Key> configClass)
-	  : version(version), configClass(configClass) {}
+	explicit ConfigTransactionGetKnobsRequest(ConfigGeneration generation, Optional<Key> configClass)
+	  : generation(generation), configClass(configClass) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, configClass, reply);
+		serializer(ar, generation, configClass, reply);
 	}
 };
 
@@ -172,7 +185,7 @@ struct ConfigTransactionInterface {
 
 public:
 	static constexpr FileIdentifier file_identifier = 982485;
-	struct RequestStream<ConfigTransactionGetVersionRequest> getVersion;
+	struct RequestStream<ConfigTransactionGetGenerationRequest> getGeneration;
 	struct RequestStream<ConfigTransactionGetRequest> get;
 	struct RequestStream<ConfigTransactionGetConfigClassesRequest> getClasses;
 	struct RequestStream<ConfigTransactionGetKnobsRequest> getKnobs;
@@ -188,6 +201,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getVersion, get, getClasses, getKnobs, commit);
+		serializer(ar, getGeneration, get, getClasses, getKnobs, commit);
 	}
 };

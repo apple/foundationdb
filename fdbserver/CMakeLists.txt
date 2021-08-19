@@ -11,6 +11,8 @@ set(FDBSERVER_SRCS
   ConfigDatabaseUnitTests.actor.cpp
   ConfigFollowerInterface.cpp
   ConfigFollowerInterface.h
+  ConfigNode.actor.cpp
+  ConfigNode.h
   ConflictSet.h
   CoordinatedState.actor.cpp
   CoordinatedState.h
@@ -28,8 +30,6 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
-  IConfigDatabaseNode.cpp
-  IConfigDatabaseNode.h
   IConfigConsumer.cpp
   IConfigConsumer.h
   IDiskQueue.h
@@ -72,8 +72,6 @@ set(FDBSERVER_SRCS
   OnDemandStore.h
   PaxosConfigConsumer.actor.cpp
   PaxosConfigConsumer.h
-  PaxosConfigDatabaseNode.actor.cpp
-  PaxosConfigDatabaseNode.h
   ProxyCommitData.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -101,11 +99,13 @@ set(FDBSERVER_SRCS
   RestoreWorkerInterface.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
+  RoleLineage.actor.h
+  RoleLineage.actor.cpp
   ServerDBInfo.actor.h
   ServerDBInfo.h
+  SigStack.cpp
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
-  SimpleConfigDatabaseNode.actor.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
@@ -147,6 +147,7 @@ set(FDBSERVER_SRCS
   workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
   workloads/ClogSingleConnection.actor.cpp
+  workloads/ConfigIncrement.actor.cpp
   workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
@@ -307,6 +308,7 @@ else()
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
+# target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)

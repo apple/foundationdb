@@ -57,8 +57,8 @@ struct RWTransactor : ITransactor {
 	int keyCount, keyBytes;
 
 	RWTransactor(int reads, int writes, int keyCount, int keyBytes, int minValueBytes, int maxValueBytes)
-	  : reads(reads), writes(writes), keyCount(keyCount), keyBytes(keyBytes), minValueBytes(minValueBytes),
-	    maxValueBytes(maxValueBytes) {
+	  : reads(reads), writes(writes), minValueBytes(minValueBytes), maxValueBytes(maxValueBytes), keyCount(keyCount),
+	    keyBytes(keyBytes) {
 		ASSERT(minValueBytes <= maxValueBytes);
 		valueString = std::string(maxValueBytes, '.');
 	}
@@ -138,7 +138,7 @@ struct ABTransactor : ITransactor {
 	Reference<ITransactor> a, b;
 	double alpha; // 0.0 = all a, 1.0 = all b
 
-	ABTransactor(double alpha, Reference<ITransactor> a, Reference<ITransactor> b) : alpha(alpha), a(a), b(b) {}
+	ABTransactor(double alpha, Reference<ITransactor> a, Reference<ITransactor> b) : a(a), b(b), alpha(alpha) {}
 
 	Future<Void> doTransaction(Database const& db, Stats* stats) override {
 		return deterministicRandom()->random01() >= alpha ? a->doTransaction(db, stats) : b->doTransaction(db, stats);
@@ -154,7 +154,7 @@ struct SweepTransactor : ITransactor {
 	double duration;
 
 	SweepTransactor(double duration, double startDelay, Reference<ITransactor> a, Reference<ITransactor> b)
-	  : a(a), b(b), duration(duration), startTime(-1), startDelay(startDelay) {}
+	  : a(a), b(b), startTime(-1), startDelay(startDelay), duration(duration) {}
 
 	Future<Void> doTransaction(Database const& db, Stats* stats) override {
 		if (startTime == -1)

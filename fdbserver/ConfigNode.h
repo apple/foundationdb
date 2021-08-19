@@ -1,5 +1,5 @@
 /*
- * IConfigDatabaseNode.h
+ * ConfigNode.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,21 +20,18 @@
 
 #pragma once
 
+#include <string>
+
 #include "fdbclient/ConfigTransactionInterface.h"
+#include "fdbclient/PImpl.h"
 #include "fdbserver/ConfigFollowerInterface.h"
-#include "flow/FastRef.h"
-#include "flow/flow.h"
 
-#include <memory>
+class ConfigNode : public ReferenceCounted<ConfigNode> {
+	PImpl<class ConfigNodeImpl> impl;
 
-/*
- * Interface for a single node in the configuration database, run on coordinators
- */
-class IConfigDatabaseNode : public ReferenceCounted<IConfigDatabaseNode> {
 public:
-	virtual Future<Void> serve(ConfigTransactionInterface const&) = 0;
-	virtual Future<Void> serve(ConfigFollowerInterface const&) = 0;
-
-	static Reference<IConfigDatabaseNode> createSimple(std::string const& folder);
-	static Reference<IConfigDatabaseNode> createPaxos(std::string const& folder);
+	ConfigNode(std::string const& folder);
+	~ConfigNode();
+	Future<Void> serve(ConfigTransactionInterface const&);
+	Future<Void> serve(ConfigFollowerInterface const&);
 };
