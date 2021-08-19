@@ -8,9 +8,10 @@ import functools
 import json
 import time
 import random
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
 
-def enable_logging(level=logging.ERROR):
+def enable_logging(level=logging.DEBUG):
     """Enable logging in the function with the specified logging level
 
     Args:
@@ -42,7 +43,7 @@ def run_fdbcli_command(*args):
         string: Console output from fdbcli
     """
     commands = command_template + ["{}".format(' '.join(args))]
-    return subprocess.run(commands, stdout=subprocess.PIPE).stdout.decode('utf-8').strip()
+    return subprocess.run(commands, stdout=subprocess.PIPE, env=fdbcli_env).stdout.decode('utf-8').strip()
 
 
 def run_fdbcli_command_and_get_error(*args):
@@ -52,7 +53,7 @@ def run_fdbcli_command_and_get_error(*args):
         string: Stderr output from fdbcli
     """
     commands = command_template + ["{}".format(' '.join(args))]
-    return subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.decode('utf-8').strip()
+    return subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env).stderr.decode('utf-8').strip()
 
 
 @enable_logging()
@@ -156,7 +157,7 @@ def lockAndUnlock(logger):
     output2 = run_fdbcli_command_and_get_error("lock")
     assert output2 == 'ERROR: Database is locked (1038)'
     # unlock the database
-    process = subprocess.Popen(command_template + ['unlock ' + lock_uid], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    process = subprocess.Popen(command_template + ['unlock ' + lock_uid], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     line1 = process.stdout.readline()
     # The randome passphrease we need to confirm to proceed the unlocking
     line2 = process.stdout.readline()
@@ -180,7 +181,7 @@ def kill(logger):
     # This is currently an issue with fdbcli,
     # where you need to first run 'kill' to initialize processes' list
     # and then specify the certain process to kill
-    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     #
     output2, err = process.communicate(input='kill; kill {}\n'.format(address).encode())
     logger.debug(output2)
@@ -210,7 +211,7 @@ def suspend(logger):
     assert len(pinfo) == 1
     pid = pinfo[0].split(' ')[0]
     logger.debug("Pid: {}".format(pid))
-    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     # suspend the process for enough long time
     output2, err = process.communicate(input='suspend; suspend 3600 {}\n'.format(address).encode())
     # the cluster should be unavailable after the only process being suspended
@@ -295,7 +296,7 @@ def transaction(logger):
     """
     err1 = run_fdbcli_command_and_get_error('set', 'key', 'value')
     assert err1 == 'ERROR: writemode must be enabled to set or clear keys in the database.'
-    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     transaction_flow = ['writemode on', 'begin', 'getversion', 'set key value', 'get key', 'commit']
     output1, _ = process.communicate(input='\n'.join(transaction_flow).encode())
     # split the output into lines
@@ -314,7 +315,7 @@ def transaction(logger):
     output2 = run_fdbcli_command('get', 'key')
     assert output2 == "`key' is `value'"
     # test rollback and read-your-write behavior
-    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     transaction_flow = [
         'writemode on', 'begin', 'getrange a z',
         'clear key', 'get key',
@@ -331,7 +332,7 @@ def transaction(logger):
     output4 = run_fdbcli_command('get', 'key')
     assert output4 == "`key' is `value'"
     # test read_your_write_disable option and clear the inserted key
-    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     transaction_flow = [
         'writemode on', 'begin',
         'option on READ_YOUR_WRITES_DISABLE',
@@ -354,7 +355,7 @@ def get_fdb_process_addresses(logger):
     logger.debug(output)
     # except the first line, each line is one process
     addresses = output.split('\n')[1:]
-    assert len(addresses) == process_number
+    assert len(addresses) == args.process_number
     return addresses
 
 
@@ -450,7 +451,9 @@ def read_system_key(k):
 def throttle(logger):
     # no throttled tags at the beginning
     no_throttle_tags_output = 'There are no throttled tags'
-    assert run_fdbcli_command('throttle', 'list') == no_throttle_tags_output
+    output = run_fdbcli_command('throttle', 'list')
+    logger.debug(output)
+    assert output == no_throttle_tags_output
     # test 'throttle enable auto'
     run_fdbcli_command('throttle', 'enable', 'auto')
     # verify the change is applied by reading the system key
@@ -473,21 +476,34 @@ def wait_for_database_available(logger):
 
 
 if __name__ == '__main__':
-    # fdbcli_tests.py <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number> [external_client_library_path]
-    assert len(sys.argv) == 4 or len(
-        sys.argv) == 5, "Please pass arguments: <path_to_fdbcli_binary> <path_to_fdb_cluster_file> <process_number> [external_client_library_path]"
-    # set external client library
-    if len(sys.argv) == 5:
-        external_client_library_path = sys.argv[4]
+    parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
+                            description="""
+    The test calls fdbcli commands through fdbcli --exec "<command>" interactively using subprocess.
+    The outputs from fdbcli are returned and compared to predefined results.
+    Consequently, changing fdbcli outputs or breaking any commands will casue the test to fail.
+    Commands that are easy to test will run against a single process cluster.
+    For complex commands like exclude, they will run against a cluster with multiple(current set to 5) processes.
+    If external_client_library is given, we will disable the local client and use the external client to run fdbcli.
+    """)
+    parser.add_argument('build_dir', metavar='BUILD_DIRECTORY', help='FDB build directory')
+    parser.add_argument('cluster_file', metavar='CLUSTER_FILE', help='FDB cluster file')
+    parser.add_argument('process_number', nargs='?', metavar='PROCESS_NUMBER', help="Number of fdb processes", type=int, default=1)
+    parser.add_argument('--external-client-library', '-e', metavar='EXTERNAL_CLIENT_LIBRARY_PATH', help="External client library path")
+    args = parser.parse_args()
+
+    # keep current environment variables
+    fdbcli_env = os.environ.copy()
+    # set external client library if provided
+    if args.external_client_library:
         # disable local client and use the external client library
-        os.environ['FDB_NETWORK_OPTION_DISABLE_LOCAL_CLIENT'] = ''
-        os.environ['FDB_NETWORK_OPTION_EXTERNAL_CLIENT_LIBRARY'] = external_client_library_path
+        fdbcli_env['FDB_NETWORK_OPTION_DISABLE_LOCAL_CLIENT'] = ''
+        fdbcli_env['FDB_NETWORK_OPTION_EXTERNAL_CLIENT_LIBRARY'] = args.external_client_library
+
     # shell command template
-    command_template = [sys.argv[1], '-C', sys.argv[2], '--exec']
+    command_template = [args.build_dir + '/bin/fdbcli', '-C', args.cluster_file, '--exec']
     # tests for fdbcli commands
     # assertions will fail if fdbcli does not work as expected
-    process_number = int(sys.argv[3])
-    if process_number == 1:
+    if args.process_number == 1:
         # TODO: disable for now, the change can cause the database unavailable
         # advanceversion()
         cache_range()
@@ -501,6 +517,6 @@ if __name__ == '__main__':
         transaction()
         throttle()
     else:
-        assert process_number > 1, "Process number should be positive"
+        assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
