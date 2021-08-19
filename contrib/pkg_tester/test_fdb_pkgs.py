@@ -169,16 +169,12 @@ def centos_image_with_fdb_versioned() -> Iterator[Optional[Image]]:
 
 def pytest_generate_tests(metafunc):
     if "linux_container" in metafunc.fixturenames:
-        metafunc.parametrize("linux_container", ["ubuntu", "centos"], indirect=True)
-    elif "linux_container_versioned" in metafunc.fixturenames:
-        metafunc.parametrize(
-            "linux_container_versioned", ["ubuntu", "centos"], indirect=True
-        )
+        metafunc.parametrize("linux_container", ["ubuntu", "centos", "ubuntu-versioned", "centos-versioned"], indirect=True)
 
 
 @pytest.fixture()
 def linux_container(
-    request, ubuntu_image_with_fdb, centos_image_with_fdb
+    request, ubuntu_image_with_fdb, centos_image_with_fdb, ubuntu_image_with_fdb_versioned, centos_image_with_fdb_versioned
 ) -> Iterator[Container]:
     """
     Tests which accept this fixture will be run once for each supported platform.
@@ -190,39 +186,22 @@ def linux_container(
                 pytest.skip("No debian packages available to test")
             container = Container(ubuntu_image_with_fdb)
             container.run(
-                ["service", "foundationdb", "start"]
+                ["/etc/init.d/foundationdb", "start"]
             )  # outside docker this shouldn't be necessary
         elif request.param == "centos":
             if centos_image_with_fdb is None:
                 pytest.skip("No rpm packages available to test")
             container = Container(centos_image_with_fdb, initd=True)
-        else:
-            assert False
-        yield container
-    finally:
-        if container is not None:
-            container.dispose()
-
-
-@pytest.fixture()
-def linux_container_versioned(
-    request, ubuntu_image_with_fdb_versioned, centos_image_with_fdb_versioned
-) -> Iterator[Container]:
-    """
-    Tests which accept this fixture will be run once for each supported platform.
-    """
-    container: Optional[Container] = None
-    try:
-        if request.param == "ubuntu":
-            if ubuntu_image_with_fdb_versioned is None:
-                pytest.skip("No debian packages available to test")
+        elif request.param == "ubuntu-versioned":
+            if ubuntu_image_with_fdb is None:
+                pytest.skip("No versioned debian packages available to test")
             container = Container(ubuntu_image_with_fdb_versioned)
             container.run(
-                ["service", "foundationdb", "start"]
+                ["/etc/init.d/foundationdb", "start"]
             )  # outside docker this shouldn't be necessary
-        elif request.param == "centos":
-            if centos_image_with_fdb_versioned is None:
-                pytest.skip("No rpm packages available to test")
+        elif request.param == "centos-versioned":
+            if centos_image_with_fdb is None:
+                pytest.skip("No versioned rpm packages available to test")
             container = Container(centos_image_with_fdb_versioned, initd=True)
         else:
             assert False
@@ -237,10 +216,6 @@ def linux_container_versioned(
 
 def test_db_available(linux_container: Container):
     linux_container.run(["fdbcli", "--exec", "get x"])
-
-
-def test_versioned_package(linux_container_versioned: Container):
-    linux_container_versioned.run(["fdbcli", "--exec", "get x"])
 
 
 def test_write(linux_container: Container, snapshot):

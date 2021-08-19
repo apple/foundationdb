@@ -15,6 +15,8 @@ fi
 getent group foundationdb >/dev/null || addgroup --system foundationdb
 getent passwd foundationdb >/dev/null || adduser --system --disabled-login --ingroup foundationdb --no-create-home --home /var/lib/foundationdb --gecos "FoundationDB" --shell /bin/false foundationdb
 
+mkdir -p /usr/@LIB_DIR@/foundationdb/backup_agent
+
 update-alternatives --install /usr/bin/fdbcli fdbclients /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbcli @ALTERNATIVES_PRIORITY@ \
     --slave /usr/bin/fdbbackup fdbbackup /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
     --slave /usr/bin/fdbrestore fdbrestore /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \

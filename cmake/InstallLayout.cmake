@@ -159,7 +159,11 @@ set(mv_packaging_dir ${PROJECT_SOURCE_DIR}/packaging/multiversion)
 math(EXPR ALTERNATIVES_PRIORITY "(${PROJECT_VERSION_MAJOR} * 1000) + (${PROJECT_VERSION_MINOR} * 100) + ${PROJECT_VERSION_PATCH}")
 set(script_dir "${PROJECT_BINARY_DIR}/packaging/multiversion/")
 file(MAKE_DIRECTORY "${script_dir}/server" "${script_dir}/clients")
-configure_file("${mv_packaging_dir}/server/postinst" "${script_dir}/server" @ONLY)
+
+# Needs to to be named postinst for debian
+configure_file("${mv_packaging_dir}/server/postinst-deb" "${script_dir}/server/postinst" @ONLY)
+
+configure_file("${mv_packaging_dir}/server/postinst-rpm" "${script_dir}/server" @ONLY)
 configure_file("${mv_packaging_dir}/server/prerm" "${script_dir}/server" @ONLY)
 set(LIB_DIR lib)
 configure_file("${mv_packaging_dir}/clients/postinst" "${script_dir}/clients" @ONLY)
@@ -210,6 +214,8 @@ set(CPACK_COMPONENT_SERVER-EL7_DEPENDS clients-el7)
 set(CPACK_COMPONENT_SERVER-DEB_DEPENDS clients-deb)
 set(CPACK_COMPONENT_SERVER-TGZ_DEPENDS clients-tgz)
 set(CPACK_COMPONENT_SERVER-VERSIONED_DEPENDS clients-versioned)
+set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_REQUIRES
+  "foundationdb-clients-${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH} = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 
 set(CPACK_COMPONENT_SERVER-EL7_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-DEB_DISPLAY_NAME "foundationdb-server")
@@ -323,7 +329,7 @@ set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
   "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 
 set(CPACK_RPM_SERVER-VERSIONED_POST_INSTALL_SCRIPT_FILE
-  ${CMAKE_BINARY_DIR}/packaging/multiversion/server/postinst)
+  ${CMAKE_BINARY_DIR}/packaging/multiversion/server/postinst-rpm)
 
 set(CPACK_RPM_SERVER-VERSIONED_PRE_UNINSTALL_SCRIPT_FILE
   ${CMAKE_BINARY_DIR}/packaging/multiversion/server/prerm)
