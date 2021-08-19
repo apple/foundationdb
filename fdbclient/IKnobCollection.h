@@ -54,6 +54,7 @@ public:
 	virtual ClientKnobs const& getClientKnobs() const = 0;
 	virtual ServerKnobs const& getServerKnobs() const = 0;
 	virtual class TestKnobs const& getTestKnobs() const = 0;
+	virtual void clearTestKnobs() {}
 	virtual Optional<KnobValue> tryParseKnobValue(std::string const& knobName, std::string const& knobValue) const = 0;
 	KnobValue parseKnobValue(std::string const& knobName, std::string const& knobValue) const;
 	static KnobValue parseKnobValue(std::string const& knobName, std::string const& knobValue, Type);

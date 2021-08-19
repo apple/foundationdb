@@ -227,6 +227,9 @@ class LocalConfigurationImpl {
 
 	void updateInMemoryState(Version lastSeenVersion) {
 		this->lastSeenVersion = lastSeenVersion;
+		if (g_network->isSimulated()) {
+			getKnobs().clearTestKnobs();
+		}
 		configKnobOverrides.update(getKnobs());
 		manualKnobOverrides.update(getKnobs());
 		// FIXME: Reinitialize in order to update dependent knobs?
