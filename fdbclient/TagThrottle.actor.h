@@ -35,10 +35,6 @@
 #include "fdbclient/CommitTransaction.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-class Database;
-
-namespace ThrottleApi {}
-
 typedef StringRef TransactionTagRef;
 typedef Standalone<TransactionTagRef> TransactionTag;
 

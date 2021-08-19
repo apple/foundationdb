@@ -544,7 +544,7 @@ struct GrvProxyInfo {
 	}
 };
 
-}
+} // namespace RatekeeperActorCpp
 
 struct RatekeeperData {
 	UID id;
@@ -601,12 +601,8 @@ struct RatekeeperData {
 	                SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
 	                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
 	    autoThrottlingEnabled(false) {
-		expiredTagThrottleCleanup = recurring(
-		    [this]() {
-				Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(this->db.getPtr());
-			    ThrottleApi::expire(db);
-		    },
-		    SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
+		expiredTagThrottleCleanup = recurring([this]() { ThrottleApi::expire(this->db.getReference()); },
+		                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
 	}
 };
 
