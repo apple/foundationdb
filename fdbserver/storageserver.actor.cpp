@@ -4587,6 +4587,7 @@ void StorageServer::byteSampleApplyClear(KeyRangeRef range, Version ver) {
 	}
 }
 
+// Wait metrics.
 ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Future<Void> timeout) {
 	state PromiseStream<StorageMetrics> change;
 	state StorageMetrics metrics = self->getMetrics(req.keys);
