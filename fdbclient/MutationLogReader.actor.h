@@ -87,10 +87,12 @@ private:
 
 } // namespace mutation_log_reader
 
-// A MutationLogReader has 256 PipelinedReaders, each in charge of one hash value from 0-255. It keeps a min heap of
-// RangeResultBlocks, ordered by their first version. At any time, each PipelinedReader has at most one RangeResultBlock
-// in MutationLogReader's min heap. When the consumer reads from MutationLogReader, the MutationLogReader calls the
-// heap's top RangeResultBlock's consume() function, to make sure it does deliver perfectly ordered mutations.
+// MutationLogReader provides a strictly version ordered stream of KV pairs that represent mutation log chunks written
+// by the FDB backup log feature. A MutationLogReader has 256 PipelinedReaders, each in charge of one hash value from
+// 0-255. It keeps a min heap of RangeResultBlocks, ordered by their first version. At any time, each PipelinedReader
+// has at most one RangeResultBlock in MutationLogReader's min heap. When the consumer reads from MutationLogReader, the
+// MutationLogReader calls the heap's top RangeResultBlock's consume() function, to make sure it does deliver perfectly
+// ordered mutations.
 class MutationLogReader : public ReferenceCounted<MutationLogReader> {
 public:
 	MutationLogReader() : finished(256) {}
