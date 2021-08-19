@@ -26,7 +26,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
-import com.foundationdb.*;
 import com.apple.foundationdb.async.AsyncUtil;
 
 class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {

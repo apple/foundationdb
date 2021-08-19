@@ -26,7 +26,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 
-import com.foundationdb.*;
 import com.apple.foundationdb.EventKeeper.Events;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
@@ -97,7 +96,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		///////////////////
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end, int limit, boolean reverse,
-												StreamingMode mode) {
+				StreamingMode mode) {
 			return new RangeQuery(FDBTransaction.this, true, begin, end, limit, reverse, mode, eventKeeper);
 		}
 		@Override

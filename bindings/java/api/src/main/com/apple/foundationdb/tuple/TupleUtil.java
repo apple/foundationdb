@@ -200,20 +200,6 @@ class TupleUtil {
 		return (bitLength + 7) / 8;
 	}
 
-	private static void adjustVersionPosition300(byte[] packed, int delta) {
-		int offsetOffset = packed.length - Short.BYTES;
-		ByteBuffer buffer = ByteBuffer.wrap(packed, offsetOffset, Short.BYTES).order(ByteOrder.LITTLE_ENDIAN);
-		int versionPosition = buffer.getShort() + delta;
-		if(versionPosition > 0xffff) {
-			throw new IllegalArgumentException("Tuple has incomplete version at position " + versionPosition + " which is greater than the maximum " + 0xffff);
-		}
-		if(versionPosition < 0) {
-			throw new IllegalArgumentException("Tuple has an incomplete version at a negative position");
-		}
-		buffer.position(offsetOffset);
-		buffer.putShort((short)versionPosition);
-	}
-
 	static void adjustVersionPosition(byte[] packed, int delta) {
 		int offsetOffset = packed.length - Integer.BYTES;
 		ByteBuffer buffer = ByteBuffer.wrap(packed, offsetOffset, Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN);
