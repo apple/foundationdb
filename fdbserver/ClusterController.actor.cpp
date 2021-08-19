@@ -3938,13 +3938,11 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		loop {
 			try {
+				state UID debugID = deterministicRandom()->randomUniqueID();
 				if (!g_network->isSimulated()) {
 					// This is done to provide an arbitrary logged transaction every ~10s.
 					// FIXME: replace or augment this with logging on the proxy which tracks
-					//       how long it is taking to hear responses from each other component.
-
-					UID debugID = deterministicRandom()->randomUniqueID();
-					TraceEvent("TimeKeeperCommit", debugID).log();
+					// how long it is taking to hear responses from each other component.
 					tr->debugTransaction(debugID);
 				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3959,7 +3957,9 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 				Version v = tr->getReadVersion().get();
 				int64_t currentTime = (int64_t)now();
 				versionMap.set(tr, currentTime, v);
-
+				if (!g_network->isSimulated()) {
+					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v);
+				}
 				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
 				if (ttl > 0) {
 					versionMap.erase(tr, 0, ttl);
@@ -4858,18 +4858,18 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			++self.getWorkersRequests;
 			vector<WorkerDetails> workers;
 
-			for (auto& it : self.id_worker) {
+			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    self.db.config.isExcludedServer(it.second.details.interf.addresses())) {
+				    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
 					continue;
 				}
 
 				if ((req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) &&
-				    it.second.details.processClass.classType() != ProcessClass::TesterClass) {
+				    worker.details.processClass.classType() != ProcessClass::TesterClass) {
 					continue;
 				}
 
-				workers.push_back(it.second.details);
+				workers.push_back(worker.details);
 			}
 
 			req.reply.send(workers);

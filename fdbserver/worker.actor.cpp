@@ -520,7 +520,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
-                                      LocalConfiguration* localConfig) {
+                                      Reference<LocalConfiguration> localConfig) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -604,7 +604,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 }
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary DC.
-bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	const auto& dbi = dbInfo->get();
 
 	if (dbi.master.addresses().contains(address)) {
@@ -624,7 +624,6 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 			return true;
 		}
 	}
-
 
 	for (const auto& grvProxy : dbi.client.grvProxies) {
 		if (grvProxy.addresses().contains(address)) {
@@ -661,7 +660,7 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	return false;
 }
 
-bool addressesInDbAndPrimaryDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+bool addressesInDbAndPrimaryDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return addressInDbAndPrimaryDc(addresses.address, dbInfo) ||
 	       (addresses.secondaryAddress.present() && addressInDbAndPrimaryDc(addresses.secondaryAddress.get(), dbInfo));
 }
@@ -707,13 +706,15 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Last, tests that proxies included in the ClientDbInfo are considered as local.
 	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
 	GrvProxyInterface grvProxyInterf;
-	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	grvProxyInterf.getConsistentReadVersion =
+	    RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
 	CommitProxyInterface commitProxyInterf;
-	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	commitProxyInterf.commit =
+	    RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
@@ -723,10 +724,10 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 } // namespace
 
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
-ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                  WorkerInterface interf,
                                  LocalityData locality,
-                                 Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+                                 Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
 		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
@@ -959,7 +960,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  UID id,
                                                  LocalityData locality,
                                                  bool isTss,
-                                                 Reference<AsyncVar<ServerDBInfo>> db,
+                                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                                  std::string folder,
                                                  ActorCollection* filesClosed,
                                                  int64_t memoryLimit,
@@ -1006,7 +1007,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
                                                 UID id,
                                                 LocalityData locality,
-                                                Reference<AsyncVar<ServerDBInfo>> db) {
+                                                Reference<AsyncVar<ServerDBInfo> const> db) {
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageCache));
 		if (!e.isError()) {
@@ -1212,7 +1213,7 @@ struct SharedLogsValue {
 };
 
 ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
                                 Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                 ProcessClass initialClass,
@@ -1226,7 +1227,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
                                 std::string whitelistBinPaths,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                 ConfigDBType configDBType,
-                                LocalConfiguration* localConfig) {
+                                Reference<LocalConfiguration> localConfig) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
@@ -1912,6 +1913,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				startRole(Role::LOG_ROUTER, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.peekMessages);
+				DUMPTOKEN(recruited.peekStreamMessages);
 				DUMPTOKEN(recruited.popMessages);
 				DUMPTOKEN(recruited.commit);
 				DUMPTOKEN(recruited.lock);
@@ -2044,14 +2046,14 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	}
 }
 
-ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> a,
-                                           Reference<AsyncVar<Optional<ClusterInterface>>> b) {
+ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> in,
+                                           Reference<AsyncVar<Optional<ClusterInterface>>> out) {
 	loop {
-		if (a->get().present())
-			b->set(a->get().get().clientInterface);
+		if (in->get().present())
+			out->set(in->get().get().clientInterface);
 		else
-			b->set(Optional<ClusterInterface>());
-		wait(a->onChange());
+			out->set(Optional<ClusterInterface>());
+		wait(in->onChange());
 	}
 }
 
@@ -2086,7 +2088,7 @@ ACTOR Future<Void> printTimeout() {
 	return Void();
 }
 
-ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInterface>>> ci) {
+ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInterface>> const> ci) {
 	state Future<Void> timeoutFuture = printTimeout();
 	loop {
 		choose {
@@ -2372,14 +2374,15 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         ConfigDBType configDBType) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	state LocalConfiguration localConfig(dataFolder, configPath, manualKnobOverrides);
+	state Reference<LocalConfiguration> localConfig =
+	    makeReference<LocalConfiguration>(dataFolder, configPath, manualKnobOverrides);
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
 
 	// FIXME: Initializing here causes simulation issues, these must be fixed
 	/*
 	if (configDBType != ConfigDBType::DISABLED) {
-	    wait(localConfig.initialize());
+	    wait(localConfig->initialize());
 	}
 	*/
 
@@ -2450,7 +2453,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		                                                 whitelistBinPaths,
 		                                                 dbInfo,
 		                                                 configDBType,
-		                                                 &localConfig),
+		                                                 localConfig),
 		                                    "WorkerServer",
 		                                    UID(),
 		                                    &normalWorkerErrors()));
