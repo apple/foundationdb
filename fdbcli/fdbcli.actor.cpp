@@ -36,7 +36,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -3195,10 +3195,10 @@ ACTOR template <class T>
 Future<T> stopNetworkAfter(Future<T> what) {
 	try {
 		T t = wait(what);
-		g_network->stop();
+		API->stopNetwork();
 		return t;
 	} catch (...) {
-		g_network->stop();
+		API->stopNetwork();
 		throw;
 	}
 }
@@ -4685,7 +4685,7 @@ int main(int argc, char** argv) {
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);
-		runNetwork();
+		API->runNetwork();
 
 		if (cliFuture.isReady()) {
 			return cliFuture.get();

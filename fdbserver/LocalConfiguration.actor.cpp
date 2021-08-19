@@ -427,10 +427,6 @@ LocalConfiguration::LocalConfiguration(std::string const& dataFolder,
                                        IsTest isTest)
   : impl(PImpl<LocalConfigurationImpl>::create(dataFolder, configPath, manualKnobOverrides, isTest)) {}
 
-LocalConfiguration::LocalConfiguration(LocalConfiguration&&) = default;
-
-LocalConfiguration& LocalConfiguration::operator=(LocalConfiguration&&) = default;
-
 LocalConfiguration::~LocalConfiguration() = default;
 
 FlowKnobs const& LocalConfiguration::getFlowKnobs() const {
