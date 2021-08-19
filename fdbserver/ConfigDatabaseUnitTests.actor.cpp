@@ -542,6 +542,30 @@ Future<Void> testClear(UnitTestParameters params) {
 }
 
 ACTOR template <class Env>
+Future<Void> testAtomicClear(UnitTestParameters params) {
+	state Env env(params.getDataDir(), "class-A", {}, TestKnobType::ATOMIC);
+	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
+	state bool restarted = false;
+	try {
+		wait(set(env, "class-A"_sr, int64_t{ 1 }));
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_knob_restart_required);
+		restarted = true;
+	}
+	ASSERT(restarted);
+	restarted = false;
+	try {
+		wait(clear(env, "class-A"_sr));
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_knob_restart_required);
+		restarted = true;
+	}
+	ASSERT(restarted);
+	wait(check(env, Optional<int64_t>{}));
+	return Void();
+}
+
+ACTOR template <class Env>
 Future<Void> testGlobalSet(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
@@ -651,6 +675,11 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/RestartFresh") {
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Clear") {
 	wait(testClear<LocalConfigEnvironment>(params));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/AtomicClear") {
+	wait(testAtomicClear<LocalConfigEnvironment>(params));
 	return Void();
 }
 
