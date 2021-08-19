@@ -33,19 +33,20 @@ public:
 	std::string TEST_STRING;
 	bool operator==(TestKnobs const&) const;
 	bool operator!=(TestKnobs const&) const;
-	void initialize();
+	void initialize(Atomic);
 };
 
 /*
- * Stores both flow knobs, client knobs, server knobs, and test knobs. As the name implies, this class is only meant to
- * be used for testing
+ * Stores both flow knobs, client knobs, server knobs, and test knobs. As the
+ * name implies, this class is only meant to be used for testing.
  */
 class TestKnobCollection : public IKnobCollection {
 	ServerKnobCollection serverKnobCollection;
 	TestKnobs testKnobs;
+	Atomic atomic;
 
 public:
-	TestKnobCollection(Randomize randomize, IsSimulated isSimulated);
+	TestKnobCollection(Randomize randomize, IsSimulated isSimulated, Atomic atomic);
 	void initialize(Randomize randomize, IsSimulated isSimulated) override;
 	void reset(Randomize randomize, IsSimulated isSimulated) override;
 	FlowKnobs const& getFlowKnobs() const override { return serverKnobCollection.getFlowKnobs(); }

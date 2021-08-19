@@ -20,19 +20,19 @@
 
 #include "fdbclient/TestKnobCollection.h"
 
-TestKnobCollection::TestKnobCollection(Randomize randomize, IsSimulated isSimulated)
-  : serverKnobCollection(randomize, isSimulated) {
+TestKnobCollection::TestKnobCollection(Randomize randomize, IsSimulated isSimulated, Atomic atomic)
+  : serverKnobCollection(randomize, isSimulated), atomic(atomic) {
 	initialize(randomize, isSimulated);
 }
 
 void TestKnobCollection::initialize(Randomize randomize, IsSimulated isSimulated) {
 	serverKnobCollection.initialize(randomize, isSimulated);
-	testKnobs.initialize();
+	testKnobs.initialize(atomic);
 }
 
 void TestKnobCollection::reset(Randomize randomize, IsSimulated isSimulated) {
 	serverKnobCollection.reset(randomize, isSimulated);
-	testKnobs.reset();
+	testKnobs.reset(atomic);
 }
 
 void TestKnobCollection::clearTestKnobs() {
@@ -60,18 +60,18 @@ bool TestKnobCollection::isAtomic(std::string const& knobName) const {
 	return serverKnobCollection.isAtomic(knobName) || testKnobs.isAtomic(knobName);
 }
 
-#define init(knob, value) initKnob(knob, value, #knob, Atomic::NO)
+#define init(knob, value, atomic) initKnob(knob, value, #knob, atomic)
 
 TestKnobs::TestKnobs() {
-	initialize();
+	initialize(Atomic::NO);
 }
 
-void TestKnobs::initialize() {
-	init(TEST_LONG, 0);
-	init(TEST_INT, 0);
-	init(TEST_DOUBLE, 0.0);
-	init(TEST_BOOL, false);
-	init(TEST_STRING, "");
+void TestKnobs::initialize(Atomic atomic) {
+	init(TEST_LONG, 0, atomic);
+	init(TEST_INT, 0, atomic);
+	init(TEST_DOUBLE, 0.0, atomic);
+	init(TEST_BOOL, false, atomic);
+	init(TEST_STRING, "", atomic);
 }
 
 bool TestKnobs::operator==(TestKnobs const& rhs) const {

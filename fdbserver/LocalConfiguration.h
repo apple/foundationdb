@@ -30,7 +30,7 @@
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(IsTest);
+enum class TestKnobType { DISABLED, ATOMIC, NONATOMIC };
 
 /*
  * Each worker maintains a LocalConfiguration object used to update its knob collection.
@@ -50,7 +50,7 @@ public:
 	LocalConfiguration(std::string const& dataFolder,
 	                   std::string const& configPath,
 	                   std::map<std::string, std::string> const& manualKnobOverrides,
-	                   IsTest = IsTest::False);
+	                   TestKnobType = TestKnobType::DISABLED);
 	~LocalConfiguration();
 	FlowKnobs const& getFlowKnobs() const;
 	ClientKnobs const& getClientKnobs() const;

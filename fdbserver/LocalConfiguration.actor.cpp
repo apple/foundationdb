@@ -27,8 +27,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(IsTest);
-
 namespace {
 
 const KeyRef configPathKey = "configPath"_sr;
@@ -121,8 +119,8 @@ class LocalConfigurationImpl {
 		explicit ManualKnobOverrides(std::map<std::string, std::string> const& overrides) {
 			for (const auto& [knobName, knobValueString] : overrides) {
 				try {
-					auto knobValue =
-					    IKnobCollection::parseKnobValue(knobName, knobValueString, IKnobCollection::Type::TEST);
+					auto knobValue = IKnobCollection::parseKnobValue(
+					    knobName, knobValueString, IKnobCollection::Type::NONATOMIC_TEST);
 					this->overrides[stringToKeyRef(knobName)] = knobValue;
 				} catch (Error& e) {
 					if (e.code() == error_code_invalid_option) {
@@ -337,13 +335,14 @@ public:
 	LocalConfigurationImpl(std::string const& dataFolder,
 	                       std::string const& configPath,
 	                       std::map<std::string, std::string> const& manualKnobOverrides,
-	                       IsTest isTest)
+	                       TestKnobType testKnobType)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"),
 	    configKnobOverrides(configPath), manualKnobOverrides(manualKnobOverrides), cc("LocalConfiguration"),
 	    snapshots("Snapshots", cc), changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc) {
-		if (isTest) {
+		if (testKnobType != TestKnobType::DISABLED) {
 			testKnobCollection =
-			    IKnobCollection::create(IKnobCollection::Type::TEST,
+			    IKnobCollection::create(testKnobType == TestKnobType::NONATOMIC ? IKnobCollection::Type::NONATOMIC_TEST
+			                                                                    : IKnobCollection::Type::ATOMIC_TEST,
 			                            Randomize::False,
 			                            g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 		}
@@ -416,7 +415,7 @@ public:
 		configKnobOverrides.set(
 		    {}, "knob_name_that_does_not_exist"_sr, KnobValueRef::create(ParsedKnobValue(int{ 1 })));
 		auto testKnobCollection =
-		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::False, IsSimulated::False);
+		    IKnobCollection::create(IKnobCollection::Type::NONATOMIC_TEST, Randomize::False, IsSimulated::False);
 		// Should only trace and not throw an error:
 		configKnobOverrides.update(*testKnobCollection);
 	}
@@ -425,7 +424,7 @@ public:
 		ConfigKnobOverrides configKnobOverrides;
 		configKnobOverrides.set({}, "test_int"_sr, KnobValueRef::create(ParsedKnobValue("not_an_int")));
 		auto testKnobCollection =
-		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::False, IsSimulated::False);
+		    IKnobCollection::create(IKnobCollection::Type::NONATOMIC_TEST, Randomize::False, IsSimulated::False);
 		// Should only trace and not throw an error:
 		configKnobOverrides.update(*testKnobCollection);
 	}
@@ -434,8 +433,8 @@ public:
 LocalConfiguration::LocalConfiguration(std::string const& dataFolder,
                                        std::string const& configPath,
                                        std::map<std::string, std::string> const& manualKnobOverrides,
-                                       IsTest isTest)
-  : impl(PImpl<LocalConfigurationImpl>::create(dataFolder, configPath, manualKnobOverrides, isTest)) {}
+                                       TestKnobType testKnobType)
+  : impl(PImpl<LocalConfigurationImpl>::create(dataFolder, configPath, manualKnobOverrides, testKnobType)) {}
 
 LocalConfiguration::~LocalConfiguration() = default;
 

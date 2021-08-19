@@ -163,17 +163,18 @@ class ReadFromLocalConfigEnvironment {
 public:
 	ReadFromLocalConfigEnvironment(std::string const& dataDir,
 	                               std::string const& configPath,
-	                               std::map<std::string, std::string> const& manualKnobOverrides)
+	                               std::map<std::string, std::string> const& manualKnobOverrides,
+								   TestKnobType testKnobType = TestKnobType::NONATOMIC)
 	  : dataDir(dataDir),
-	    localConfiguration(makeReference<LocalConfiguration>(dataDir, configPath, manualKnobOverrides, IsTest::True)),
+	    localConfiguration(makeReference<LocalConfiguration>(dataDir, configPath, manualKnobOverrides, testKnobType)),
 	    consumer(Never()) {}
 
 	Future<Void> setup() { return setup(this); }
 
-	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
+	Future<Void> restartLocalConfig(std::string const& newConfigPath, TestKnobType testKnobType) {
 		std::map<std::string, std::string> manualKnobOverrides = {};
 		localConfiguration =
-		    makeReference<LocalConfiguration>(dataDir, newConfigPath, manualKnobOverrides, IsTest::True);
+		    makeReference<LocalConfiguration>(dataDir, newConfigPath, manualKnobOverrides, testKnobType);
 		return setup();
 	}
 
@@ -216,11 +217,13 @@ class LocalConfigEnvironment {
 public:
 	LocalConfigEnvironment(std::string const& dataDir,
 	                       std::string const& configPath,
-	                       std::map<std::string, std::string> const& manualKnobOverrides = {})
-	  : readFrom(dataDir, configPath, manualKnobOverrides) {}
+	                       std::map<std::string, std::string> const& manualKnobOverrides = {},
+	                       TestKnobType testKnobType = TestKnobType::NONATOMIC)
+	  : readFrom(dataDir, configPath, manualKnobOverrides, testKnobType) {}
 	Future<Void> setup(ConfigClassSet const& configClassSet) { return readFrom.setup(); }
-	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		return readFrom.restartLocalConfig(newConfigPath);
+	Future<Void> restartLocalConfig(std::string const& newConfigPath,
+	                                TestKnobType testKnobType = TestKnobType::NONATOMIC) {
+		return readFrom.restartLocalConfig(newConfigPath, testKnobType);
 	}
 	Future<Void> getError() const { return Never(); }
 	Future<Void> clear(Optional<KeyRef> configClass) { return addMutation(configClass, {}); }
@@ -276,8 +279,9 @@ public:
 		    broadcaster.registerWorker(readFrom.lastSeenVersion(), readFrom.configClassSet(), Never(), cbi->get());
 	}
 
-	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		return readFrom.restartLocalConfig(newConfigPath);
+	Future<Void> restartLocalConfig(std::string const& newConfigPath,
+	                                TestKnobType testKnobType = TestKnobType::NONATOMIC) {
+		return readFrom.restartLocalConfig(newConfigPath, testKnobType);
 	}
 
 	void compact() { broadcaster.compact(lastWrittenVersion); }
@@ -402,8 +406,9 @@ public:
 		    broadcaster.registerWorker(readFrom.lastSeenVersion(), readFrom.configClassSet(), Never(), cbi->get());
 	}
 
-	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		return readFrom.restartLocalConfig(newConfigPath);
+	Future<Void> restartLocalConfig(std::string const& newConfigPath,
+	                                TestKnobType testKnobType = TestKnobType::NONATOMIC) {
+		return readFrom.restartLocalConfig(newConfigPath, testKnobType);
 	}
 
 	Future<Void> compact() { return writeTo.compact(); }
@@ -510,6 +515,23 @@ Future<Void> testSet(UnitTestParameters params) {
 }
 
 ACTOR template <class Env>
+Future<Void> testAtomicSet(UnitTestParameters params) {
+	state Env env(params.getDataDir(), "class-A", {}, TestKnobType::ATOMIC);
+	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
+	state bool restarted = false;
+	try {
+		wait(set(env, "class-A"_sr, int64_t{ 1 }));
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_knob_restart_required);
+		restarted = true;
+	}
+	ASSERT(restarted);
+	wait(env.restartLocalConfig("class-A", TestKnobType::ATOMIC));
+	wait(check(env, int64_t{ 1 }));
+	return Void();
+}
+
+ACTOR template <class Env>
 Future<Void> testClear(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
@@ -608,6 +630,12 @@ ACTOR Future<Void> testGetKnobs(UnitTestParameters params, bool global, bool doC
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Set") {
 	wait(testSet<LocalConfigEnvironment>(params));
+	return Void();
+}
+
+// TODO: Add more atomic knob unit tests
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/AtomicSet") {
+	wait(testAtomicSet<LocalConfigEnvironment>(params));
 	return Void();
 }
 

@@ -28,8 +28,10 @@ std::unique_ptr<IKnobCollection> IKnobCollection::create(Type type, Randomize ra
 		return std::make_unique<ClientKnobCollection>(randomize, isSimulated);
 	} else if (type == Type::SERVER) {
 		return std::make_unique<ServerKnobCollection>(randomize, isSimulated);
-	} else if (type == Type::TEST) {
-		return std::make_unique<TestKnobCollection>(randomize, isSimulated);
+	} else if (type == Type::ATOMIC_TEST) {
+		return std::make_unique<TestKnobCollection>(randomize, isSimulated, Atomic::YES);
+	} else if (type == Type::NONATOMIC_TEST) {
+		return std::make_unique<TestKnobCollection>(randomize, isSimulated, Atomic::NO);
 	}
 	UNSTOPPABLE_ASSERT(false);
 }
@@ -64,7 +66,7 @@ KnobValue IKnobCollection::parseKnobValue(std::string const& knobName, std::stri
 			serverKnobCollection = create(type, Randomize::False, IsSimulated::False);
 		}
 		return serverKnobCollection->parseKnobValue(knobName, knobValue);
-	} else if (type == Type::TEST) {
+	} else if (type == Type::ATOMIC_TEST || type == Type::NONATOMIC_TEST) {
 		if (!testKnobCollection) {
 			testKnobCollection = create(type, Randomize::False, IsSimulated::False);
 		}
