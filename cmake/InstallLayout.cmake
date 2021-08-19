@@ -64,6 +64,7 @@ list(GET FDB_VERSION_LIST 2 FDB_PATCH)
 # Alternatives config
 ################################################################################
 
+set(mv_packaging_dir ${PROJECT_SOURCE_DIR}/packaging/multiversion)
 math(EXPR ALTERNATIVES_PRIORITY "(${PROJECT_VERSION_MAJOR} * 1000) + (${PROJECT_VERSION_MINOR} * 100) + ${PROJECT_VERSION_PATCH}")
 set(script_dir "${PROJECT_BINARY_DIR}/packaging/multiversion/")
 file(MAKE_DIRECTORY "${script_dir}/server" "${script_dir}/clients")
