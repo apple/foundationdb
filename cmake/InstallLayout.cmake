@@ -75,11 +75,24 @@ configure_file("${mv_packaging_dir}/server/postinst-deb" "${script_dir}/server/p
 configure_file("${mv_packaging_dir}/server/postinst-rpm" "${script_dir}/server" @ONLY)
 configure_file("${mv_packaging_dir}/server/prerm" "${script_dir}/server" @ONLY)
 set(LIB_DIR lib)
-configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/postinst" "${script_dir}/clients" @ONLY)
+configure_file("${mv_packaging_dir}/clients/postinst" "${script_dir}/clients" @ONLY)
 set(LIB_DIR lib64)
-configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/postinst" "${script_dir}/clients/postinst-el7" @ONLY)
-configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/prerm" "${script_dir}/clients" @ONLY)
+configure_file("${mv_packaging_dir}/clients/postinst" "${script_dir}/clients/postinst-el7" @ONLY)
+configure_file("${mv_packaging_dir}/clients/prerm" "${script_dir}/clients" @ONLY)
 
+#make sure all directories we need exist
+make_directory("${mv_packaging_dir}/clients/usr/lib/foundationdb")
+install(DIRECTORY "${mv_packaging_dir}/clients/usr/lib/foundationdb"
+  DESTINATION usr/lib
+  COMPONENT clients-versioned)
+make_directory("${mv_packaging_dir}/clients/usr/lib/pkgconfig")
+install(DIRECTORY "${mv_packaging_dir}/clients/usr/lib/pkgconfig"
+  DESTINATION usr/lib
+  COMPONENT clients-versioned)
+make_directory("${mv_packaging_dir}/clients/usr/lib/cmake")
+install(DIRECTORY "${mv_packaging_dir}/clients/usr/lib/cmake"
+  DESTINATION usr/lib
+  COMPONENT clients-versioned)
 
 ################################################################################
 # Move Docker Setup
@@ -161,16 +174,17 @@ set(CPACK_RPM_PACKAGE_NAME "foundationdb")
 set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME "foundationdb-clients")
 set(CPACK_RPM_SERVER-EL7_PACKAGE_NAME "foundationdb-server")
 set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_NAME "foundationdb-server-${PROJECT_VERSION}")
+set(CPACK_RPM_CLIENTS-VERSIONED_PACKAGE_NAME "foundationdb-clients-${PROJECT_VERSION}")
 
-set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${rpm-clients-filename}.el7.x86_64.rpm")
-set(CPACK_RPM_CLIENTS-VERSIONED_FILE_NAME "${rpm-clients-filename}.versioned.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL7_FILE_NAME "${rpm-server-filename}.el7.x86_64.rpm")
-set(CPACK_RPM_SERVER-VERSIONED_FILE_NAME "${rpm-server-filename}.versioned.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${rpm-clients-filename}.el7.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_CLIENTS-VERSIONED_FILE_NAME "${rpm-clients-filename}.versioned.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_SERVER-EL7_FILE_NAME "${rpm-server-filename}.el7.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_SERVER-VERSIONED_FILE_NAME "${rpm-server-filename}.versioned.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 
-set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el7-debuginfo.x86_64.rpm")
-set(CPACK_RPM_CLIENTS-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.versioned-debuginfo.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el7-debuginfo.x86_64.rpm")
-set(CPACK_RPM_SERVER-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-server-filename}.versioned-debuginfo.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el7-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_CLIENTS-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.versioned-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el7-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_SERVER-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-server-filename}.versioned-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
@@ -197,7 +211,10 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/lib"
   "/lib/systemd"
   "/lib/systemd/system"
-  "/etc/rc.d/init.d")
+  "/etc/rc.d/init.d"
+  "/usr/lib/pkgconfig"
+  "/usr/lib/foundationdb"
+  "/usr/lib/cmake")
 set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 #set(CPACK_RPM_BUILD_SOURCE_FDB_INSTALL_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
@@ -236,10 +253,17 @@ set(CPACK_RPM_CLIENTS-VERSIONED_PRE_UNINSTALL_SCRIPT_FILE
 # Configuration for DEB
 ################################################################################
 
-set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_amd64.deb")
-set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_amd64.deb")
-set(CPACK_DEBIAN_CLIENTS-VERSIONED_FILE_NAME "${deb-clients-filename}.versioned_amd64.deb")
-set(CPACK_DEBIAN_SERVER-VERSIONED_FILE_NAME "${deb-server-filename}.versioned_amd64.deb")
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_amd64.deb")
+  set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_amd64.deb")
+  set(CPACK_DEBIAN_CLIENTS-VERSIONED_FILE_NAME "${deb-clients-filename}.versioned_amd64.deb")
+  set(CPACK_DEBIAN_SERVER-VERSIONED_FILE_NAME "${deb-server-filename}.versioned_amd64.deb")
+else()
+  set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_${CMAKE_SYSTEM_PROCESSOR}.deb")
+  set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_${CMAKE_SYSTEM_PROCESSOR}.deb")
+  set(CPACK_DEBIAN_CLIENTS-VERSIONED_FILE_NAME "${deb-clients-filename}.versioned_${CMAKE_SYSTEM_PROCESSOR}.deb")
+  set(CPACK_DEBIAN_SERVER-VERSIONED_FILE_NAME "${deb-server-filename}.versioned_${CMAKE_SYSTEM_PROCESSOR}.deb")
+endif()
 
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
@@ -276,8 +300,8 @@ set(CPACK_DEBIAN_SERVER-VERSIONED_PACKAGE_CONTROL_EXTRA
 ################################################################################
 
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-set(CPACK_ARCHIVE_CLIENTS-TGZ_FILE_NAME "${deb-clients-filename}.x86_64")
-set(CPACK_ARCHIVE_SERVER-TGZ_FILE_NAME "${deb-server-filename}.x86_64")
+set(CPACK_ARCHIVE_CLIENTS-TGZ_FILE_NAME "${deb-clients-filename}.${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_ARCHIVE_SERVER-TGZ_FILE_NAME "${deb-server-filename}.${CMAKE_SYSTEM_PROCESSOR}")
 
 ################################################################################
 # Server configuration

@@ -48,7 +48,7 @@
 ---
 # name: test_fdbcli_help_text[centos-versioned]
   '
-  FoundationDB CLI 7.1 (v7.1.0)
+  FoundationDB CLI 6.3 (v6.3.19)
   usage: fdbcli [OPTIONS]
   
     -C CONNFILE    The path of a file containing the connection string for the
@@ -83,7 +83,6 @@
                    Changes a knob option. KNOBNAME should be lowercase.
     --debug-tls    Prints the TLS configuration and certificate chain, then exits.
                    Useful in reporting and diagnosing TLS issues.
-    --build_flags  Print build information and exit.
     -v, --version  Print FoundationDB CLI version information and exit.
     -h, --help     Display this help and exit.
   
@@ -91,7 +90,7 @@
 ---
 # name: test_fdbcli_help_text[centos]
   '
-  FoundationDB CLI 7.1 (v7.1.0)
+  FoundationDB CLI 6.3 (v6.3.19)
   usage: fdbcli [OPTIONS]
   
     -C CONNFILE    The path of a file containing the connection string for the
@@ -126,7 +125,6 @@
                    Changes a knob option. KNOBNAME should be lowercase.
     --debug-tls    Prints the TLS configuration and certificate chain, then exits.
                    Useful in reporting and diagnosing TLS issues.
-    --build_flags  Print build information and exit.
     -v, --version  Print FoundationDB CLI version information and exit.
     -h, --help     Display this help and exit.
   
@@ -134,7 +132,7 @@
 ---
 # name: test_fdbcli_help_text[ubuntu-versioned]
   '
-  FoundationDB CLI 7.1 (v7.1.0)
+  FoundationDB CLI 6.3 (v6.3.19)
   usage: fdbcli [OPTIONS]
   
     -C CONNFILE    The path of a file containing the connection string for the
@@ -169,7 +167,6 @@
                    Changes a knob option. KNOBNAME should be lowercase.
     --debug-tls    Prints the TLS configuration and certificate chain, then exits.
                    Useful in reporting and diagnosing TLS issues.
-    --build_flags  Print build information and exit.
     -v, --version  Print FoundationDB CLI version information and exit.
     -h, --help     Display this help and exit.
   
@@ -177,7 +174,7 @@
 ---
 # name: test_fdbcli_help_text[ubuntu]
   '
-  FoundationDB CLI 7.1 (v7.1.0)
+  FoundationDB CLI 6.3 (v6.3.19)
   usage: fdbcli [OPTIONS]
   
     -C CONNFILE    The path of a file containing the connection string for the
@@ -212,7 +209,6 @@
                    Changes a knob option. KNOBNAME should be lowercase.
     --debug-tls    Prints the TLS configuration and certificate chain, then exits.
                    Useful in reporting and diagnosing TLS issues.
-    --build_flags  Print build information and exit.
     -v, --version  Print FoundationDB CLI version information and exit.
     -h, --help     Display this help and exit.
   
