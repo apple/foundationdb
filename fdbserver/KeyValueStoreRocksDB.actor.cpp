@@ -329,7 +329,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
-			if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT) {
+			if (g_network->isSimulated() &&
+			    timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT) {
 				TraceEvent(SevWarn, "RocksDBError")
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
@@ -377,7 +378,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT) {
+			if (g_network->isSimulated() &&
+			    timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT) {
 				TraceEvent(SevWarn, "RocksDBError")
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
@@ -422,7 +424,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
-			if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT) {
+			if (g_network->isSimulated() &&
+			    timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT) {
 				TraceEvent(SevWarn, "RocksDBError")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
@@ -459,7 +462,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
 					}
-					if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT) {
+					if (g_network->isSimulated() &&
+					    timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT) {
 						TraceEvent(SevWarn, "RocksDBError")
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
@@ -486,7 +490,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					if (result.size() >= -a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
 					}
-					if (timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT) {
+					if (g_network->isSimulated() &&
+					    timer_monotonic() - a.startTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT) {
 						TraceEvent(SevWarn, "RocksDBError")
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
