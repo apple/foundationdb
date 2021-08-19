@@ -4,4 +4,14 @@
 export ASAN_OPTIONS="detect_leaks=0"
 
 OLDBINDIR="${OLDBINDIR:-/app/deploy/global_data/oldBinaries}"
-mono bin/TestHarness.exe joshua-run "${OLDBINDIR}" false
+FAULT_INJECTION=true
+BUGGIFY=true
+
+for var in "$@"; do
+    case "$var" in
+    "--buggify-disabled") BUGGIFY=false ;;
+    "--fault-injection-disabled") FAULT_INJECTION=false ;;
+    esac
+done
+
+mono bin/TestHarness.exe joshua-run "${OLDBINDIR}" false 3 $BUGGIFY $FAULT_INJECTION
