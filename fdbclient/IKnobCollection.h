@@ -44,8 +44,7 @@ public:
 	enum class Type {
 		CLIENT,
 		SERVER,
-		ATOMIC_TEST,
-		NONATOMIC_TEST,
+		TEST,
 	};
 
 	static std::unique_ptr<IKnobCollection> create(Type, Randomize, IsSimulated);

@@ -20,19 +20,19 @@
 
 #include "fdbclient/TestKnobCollection.h"
 
-TestKnobCollection::TestKnobCollection(Randomize randomize, IsSimulated isSimulated, Atomic atomic)
-  : serverKnobCollection(randomize, isSimulated), atomic(atomic) {
+TestKnobCollection::TestKnobCollection(Randomize randomize, IsSimulated isSimulated)
+  : serverKnobCollection(randomize, isSimulated) {
 	initialize(randomize, isSimulated);
 }
 
 void TestKnobCollection::initialize(Randomize randomize, IsSimulated isSimulated) {
 	serverKnobCollection.initialize(randomize, isSimulated);
-	testKnobs.initialize(atomic);
+	testKnobs.initialize();
 }
 
 void TestKnobCollection::reset(Randomize randomize, IsSimulated isSimulated) {
 	serverKnobCollection.reset(randomize, isSimulated);
-	testKnobs.reset(atomic);
+	testKnobs.reset();
 }
 
 void TestKnobCollection::clearTestKnobs() {
@@ -63,20 +63,29 @@ bool TestKnobCollection::isAtomic(std::string const& knobName) const {
 #define init(knob, value, atomic) initKnob(knob, value, #knob, atomic)
 
 TestKnobs::TestKnobs() {
-	initialize(Atomic::NO);
+	initialize();
 }
 
-void TestKnobs::initialize(Atomic atomic) {
-	init(TEST_LONG, 0, atomic);
-	init(TEST_INT, 0, atomic);
-	init(TEST_DOUBLE, 0.0, atomic);
-	init(TEST_BOOL, false, atomic);
-	init(TEST_STRING, "", atomic);
+void TestKnobs::initialize() {
+	init(TEST_LONG, 0, Atomic::NO);
+	init(TEST_INT, 0, Atomic::NO);
+	init(TEST_DOUBLE, 0.0, Atomic::NO);
+	init(TEST_BOOL, false, Atomic::NO);
+	init(TEST_STRING, "", Atomic::NO);
+
+	init(TEST_ATOMIC_LONG, 0, Atomic::YES);
+	init(TEST_ATOMIC_INT, 0, Atomic::YES);
+	init(TEST_ATOMIC_DOUBLE, 0.0, Atomic::YES);
+	init(TEST_ATOMIC_BOOL, false, Atomic::YES);
+	init(TEST_ATOMIC_STRING, "", Atomic::YES);
 }
 
 bool TestKnobs::operator==(TestKnobs const& rhs) const {
 	return (TEST_LONG == rhs.TEST_LONG) && (TEST_INT == rhs.TEST_INT) && (TEST_DOUBLE == rhs.TEST_DOUBLE) &&
-	       (TEST_BOOL == rhs.TEST_BOOL) && (TEST_STRING == rhs.TEST_STRING);
+	       (TEST_BOOL == rhs.TEST_BOOL) && (TEST_STRING == rhs.TEST_STRING) &&
+	       (TEST_ATOMIC_LONG == rhs.TEST_ATOMIC_LONG) && (TEST_ATOMIC_INT == rhs.TEST_ATOMIC_INT) &&
+	       (TEST_ATOMIC_DOUBLE == rhs.TEST_ATOMIC_DOUBLE) && (TEST_ATOMIC_BOOL == rhs.TEST_ATOMIC_BOOL) &&
+	       (TEST_ATOMIC_STRING == rhs.TEST_ATOMIC_STRING);
 }
 
 bool TestKnobs::operator!=(TestKnobs const& rhs) const {

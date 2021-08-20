@@ -26,14 +26,26 @@
 class TestKnobs : public KnobsImpl<TestKnobs> {
 public:
 	TestKnobs();
+
+	// Nonatomic test knobs
 	int64_t TEST_LONG;
 	int TEST_INT;
 	double TEST_DOUBLE;
 	bool TEST_BOOL;
 	std::string TEST_STRING;
+
+	// Atomic test knobs
+	int64_t TEST_ATOMIC_LONG;
+	int TEST_ATOMIC_INT;
+	double TEST_ATOMIC_DOUBLE;
+	bool TEST_ATOMIC_BOOL;
+	std::string TEST_ATOMIC_STRING;
+
 	bool operator==(TestKnobs const&) const;
 	bool operator!=(TestKnobs const&) const;
-	void initialize(Atomic);
+	void initialize();
+
+	bool isAtomic(std::string const& knob) const { return knob.find("atomic") != std::string::npos; }
 };
 
 /*
@@ -43,10 +55,9 @@ public:
 class TestKnobCollection : public IKnobCollection {
 	ServerKnobCollection serverKnobCollection;
 	TestKnobs testKnobs;
-	Atomic atomic;
 
 public:
-	TestKnobCollection(Randomize randomize, IsSimulated isSimulated, Atomic atomic);
+	TestKnobCollection(Randomize randomize, IsSimulated isSimulated);
 	void initialize(Randomize randomize, IsSimulated isSimulated) override;
 	void reset(Randomize randomize, IsSimulated isSimulated) override;
 	FlowKnobs const& getFlowKnobs() const override { return serverKnobCollection.getFlowKnobs(); }

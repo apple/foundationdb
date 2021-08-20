@@ -77,7 +77,7 @@ void ConfigTransactionCommitRequest::set(KeyRef key, ValueRef value) {
 	} else {
 		ConfigKey configKey = ConfigKeyRef::decodeKey(key);
 		auto knobValue = IKnobCollection::parseKnobValue(
-		    configKey.knobName.toString(), value.toString(), IKnobCollection::Type::NONATOMIC_TEST);
+		    configKey.knobName.toString(), value.toString(), IKnobCollection::Type::TEST);
 		mutations.emplace_back_deep(arena, configKey, knobValue.contents());
 	}
 }
