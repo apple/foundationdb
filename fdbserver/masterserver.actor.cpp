@@ -1892,7 +1892,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	self->addActor.send(waitGrvProxyFailure(self->grvProxies));
 	self->addActor.send(provideVersions(self));
 	self->addActor.send(serveLiveCommittedVersion(self));
-	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
+	//self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 
 	wait(discardCommit(self->txnStateStore, self->txnStateLogAdapter));
@@ -1963,7 +1963,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	    .detail("AvailableAtVersion", self->version)
 	    .trackLatest("MasterRecoveryAvailable");
 
-	if (self->resolvers.size() > 1)
+	if ( self->resolvers.size() > 1)
 		self->addActor.send(resolutionBalancing(self));
 
 	self->addActor.send(changeCoordinators(self));
@@ -2008,7 +2008,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
 
 	try {
-		state Future<Void> core = masterCore(self);
+		state Future<Void> core = SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY ? Void() : masterCore(self);
+
 		loop choose {
 			when(wait(core)) { break; }
 			when(wait(onDBChange)) {
@@ -2058,5 +2059,10 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 		}
 		throw err;
 	}
+
+	if (SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY && self->resolvers.size() > 1) {
+		self->addActor.send(resolutionBalancing(self));
+	}
+
 	return Void();
 }

@@ -679,6 +679,7 @@ public:
 	double FASTRESTORE_WRITE_BW_MB; // target aggregated write bandwidth from all appliers
 	double FASTRESTORE_RATE_UPDATE_SECONDS; // how long to update appliers target write rate
 
+	// Redwood storage engine
 	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
@@ -701,6 +702,9 @@ public:
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
+
+	// Cluster recovery
+	bool CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY; // ClusterController drives recovery state machine
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

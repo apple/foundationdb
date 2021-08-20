@@ -736,6 +736,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FASTRESTORE_WRITE_BW_MB,                                70 ); if( randomize && BUGGIFY ) { FASTRESTORE_WRITE_BW_MB = deterministicRandom()->random01() < 0.5 ? 2 : 100;}
 	init( FASTRESTORE_RATE_UPDATE_SECONDS,                       1.0 ); if( randomize && BUGGIFY ) { FASTRESTORE_RATE_UPDATE_SECONDS = deterministicRandom()->random01() < 0.5 ? 0.1 : 2;}
 
+	// Redwood storage engine
 	init( REDWOOD_DEFAULT_PAGE_SIZE,                            4096 );
 	init( REDWOOD_DEFAULT_EXTENT_SIZE,              32 * 1024 * 1024 );
 	init( REDWOOD_DEFAULT_EXTENT_READ_SIZE,              1024 * 1024 );
@@ -754,6 +755,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
+
+	// Cluster recovery
+	init( CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY,          true );
 
 	// clang-format on
 
