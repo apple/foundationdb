@@ -70,6 +70,8 @@ set(FDBCLIENT_SRCS
   MultiVersionTransaction.actor.cpp
   MultiVersionTransaction.h
   MutationList.h
+  MutationLogReader.actor.cpp
+  MutationLogReader.actor.h
   NameLineage.h
   NameLineage.cpp
   NativeAPI.actor.cpp
