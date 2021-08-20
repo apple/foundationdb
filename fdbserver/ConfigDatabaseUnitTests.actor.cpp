@@ -401,7 +401,8 @@ class TransactionToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerWorker(0, configClassSet, Never(), self->cbi->get());
+		self->broadcastServer =
+		    self->broadcaster.registerWorker(0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
 		return Void();
 	}
 
