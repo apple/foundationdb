@@ -1770,7 +1770,7 @@ public:
 		for (auto& [workerAddress, health] : workerHealth) {
 			for (auto it = health.degradedPeers.begin(); it != health.degradedPeers.end();) {
 				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL) {
-					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("peer", it->first);
+					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("Peer", it->first);
 					health.degradedPeers.erase(it++);
 				} else {
 					++it;
@@ -1780,7 +1780,7 @@ public:
 
 		for (auto it = workerHealth.begin(); it != workerHealth.end();) {
 			if (it->second.degradedPeers.empty()) {
-				TraceEvent("WorkerAllPeerHealthRecovered").detail("worker", it->first);
+				TraceEvent("WorkerAllPeerHealthRecovered").detail("Worker", it->first);
 				workerHealth.erase(it++);
 			} else {
 				++it;
