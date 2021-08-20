@@ -246,12 +246,14 @@ class BroadcasterToLocalConfigEnvironment {
 	ConfigBroadcaster broadcaster;
 	Version lastWrittenVersion{ 0 };
 	Future<Void> broadcastServer;
+	Promise<Void> workerFailure;
 
 	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self, ConfigClassSet configClassSet) {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerWorker(0, configClassSet, Never(), self->cbi->get());
+		self->broadcastServer =
+		    self->broadcaster.registerWorker(0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
 		return Void();
 	}
 
@@ -284,13 +286,17 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer =
-		    broadcaster.registerWorker(readFrom.lastSeenVersion(), readFrom.configClassSet(), Never(), cbi->get());
+		broadcastServer = broadcaster.registerWorker(
+		    readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), cbi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
 		return readFrom.restartLocalConfig(newConfigPath);
 	}
+
+	void killLocalConfig() { workerFailure.send(Void()); }
+
+	Future<Void> workerFailed() { return broadcaster.getClientFailure(cbi->get().id()); }
 
 	void compact() { broadcaster.compact(lastWrittenVersion); }
 
@@ -389,6 +395,7 @@ class TransactionToLocalConfigEnvironment {
 	Reference<AsyncVar<ConfigBroadcastInterface>> cbi;
 	ConfigBroadcaster broadcaster;
 	Future<Void> broadcastServer;
+	Promise<Void> workerFailure;
 
 	ACTOR static Future<Void> setup(TransactionToLocalConfigEnvironment* self, ConfigClassSet configClassSet) {
 		wait(self->readFrom.setup());
@@ -418,6 +425,10 @@ public:
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
 		return readFrom.restartLocalConfig(newConfigPath);
 	}
+
+	void killLocalConfig() { workerFailure.send(Void()); }
+
+	Future<Void> workerFailed() { return broadcaster.getClientFailure(cbi->get().id()); }
 
 	Future<Void> compact() { return writeTo.compact(); }
 
@@ -513,6 +524,16 @@ Future<Void> testNewLocalConfigAfterCompaction(UnitTestParameters params) {
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	wait(set(env, "class-A"_sr, "test_long"_sr, 2));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+ACTOR template <class Env>
+Future<Void> testKillWorker(UnitTestParameters params) {
+	state Env env(params.getDataDir(), "class-A");
+	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
+	env.killLocalConfig();
+	// Make sure broadcaster detects worker death in a timely manner.
+	wait(timeoutError(env.workerFailed(), 3));
 	return Void();
 }
 
@@ -760,6 +781,11 @@ TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfiguratio
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/KillWorker") {
+	wait(testKillWorker<BroadcasterToLocalConfigEnvironment>(params));
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Set") {
 	wait(testSet<TransactionToLocalConfigEnvironment>(params));
 	return Void();
@@ -801,6 +827,11 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/CompactNode") {
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigurationAfterCompaction") {
 	wait(testNewLocalConfigAfterCompaction<TransactionToLocalConfigEnvironment>(params));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalconfig/KillWorker") {
+	wait(testKillWorker<TransactionToLocalConfigEnvironment>(params));
 	return Void();
 }
 
