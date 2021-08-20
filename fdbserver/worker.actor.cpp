@@ -2380,9 +2380,11 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
 
 	// FIXME: Initializing here causes simulation issues, these must be fixed
+	/*
 	if (configDBType != ConfigDBType::DISABLED) {
 	    wait(localConfig->initialize());
 	}
+	*/
 
 	actors.push_back(serveProtocolInfo());
 	actors.push_back(serveProcess());
