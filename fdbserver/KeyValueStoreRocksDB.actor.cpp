@@ -182,8 +182,10 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 }
 
 Error statusToError(const rocksdb::Status& s) {
-	if (s == rocksdb::Status::IOError()) {
+	if (s.IsIOError()) {
 		return io_error();
+	} else if (s.IsTimedOut()) {
+		return transaction_too_old();
 	} else {
 		return unknown_error();
 	}
