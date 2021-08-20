@@ -50,6 +50,18 @@ class TCTeamInfo;
 struct TCMachineInfo;
 class TCMachineTeamInfo;
 
+namespace {
+
+// Helper function for STL containers, with flow-friendly error handling
+template <class MapContainer, class K>
+auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
+	auto it = m.find(k);
+	ASSERT(it != m.end());
+	return it->second;
+}
+
+} // namespace
+
 FDB_BOOLEAN_PARAM(IsPrimary);
 
 ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self);
@@ -1353,7 +1365,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		Standalone<StringRef> machineID = machineIDs[0];
-		for (auto& machineTeam : machine_info.at(machineID)->machineTeams) {
+		for (auto& machineTeam : get(machine_info, machineID)->machineTeams) {
 			if (machineTeam->machineIDs == machineIDs) {
 				return machineTeam;
 			}
@@ -1513,10 +1525,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerStatus", distributorId)
 			    .detail("ServerID", uid)
 			    .detail("Healthy", !server_status.get(uid).isUnhealthy())
-			    .detail("MachineIsValid", server_info.at(uid)->machine.isValid())
+			    .detail("MachineIsValid", get(server_info, uid)->machine.isValid())
 			    .detail("MachineTeamSize",
-			            server_info.at(uid)->machine.isValid() ? server_info.at(uid)->machine->machineTeams.size()
-			                                                   : -1);
+			            get(server_info, uid)->machine.isValid() ? get(server_info, uid)->machine->machineTeams.size()
+			                                                     : -1);
 		}
 	}
 
@@ -1806,7 +1818,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			return false;
 
 		for (auto& id : machineIDs) {
-			auto& machine = machine_info.at(id);
+			auto& machine = get(machine_info, id);
 			if (isMachineHealthy(machine)) {
 				healthyNum++;
 			}
@@ -3075,7 +3087,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				const UID& uid = server->first;
 				TraceEvent("ServerStatus", self->distributorId)
 				    .detail("ServerUID", uid)
-				    .detail("Healthy", !server_status.at(uid).isUnhealthy())
+				    .detail("Healthy", !get(server_status, uid).isUnhealthy())
 				    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 				    .detail("MachineTeamSize",
 				            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
@@ -3116,7 +3128,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 				// Healthy machine has at least one healthy server
 				for (auto& server : _machine->serversOnMachine) {
-					if (!server_status.at(server->id).isUnhealthy()) {
+					if (!get(server_status, server->id).isUnhealthy()) {
 						isMachineHealthy = true;
 					}
 				}
