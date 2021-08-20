@@ -248,6 +248,7 @@ bool schemaMatch(json_spirit::mValue const& schema,
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
+// Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
 
 ACTOR template <class DB>
