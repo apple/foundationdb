@@ -88,6 +88,98 @@ rocksdb::ReadOptions getReadOptions() {
 	return options;
 }
 
+ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> statistics, rocksdb::DB* db) {
+	state std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats = {
+		{ "StallMicros", rocksdb::STALL_MICROS, 0 },
+		{ "BytesRead", rocksdb::BYTES_READ, 0 },
+		{ "IterBytesRead", rocksdb::ITER_BYTES_READ, 0 },
+		{ "BytesWritten", rocksdb::BYTES_WRITTEN, 0 },
+		{ "BlockCacheMisses", rocksdb::BLOCK_CACHE_MISS, 0 },
+		{ "BlockCacheHits", rocksdb::BLOCK_CACHE_HIT, 0 },
+		{ "BloomFilterUseful", rocksdb::BLOOM_FILTER_USEFUL, 0 },
+		{ "BloomFilterFullPositive", rocksdb::BLOOM_FILTER_FULL_POSITIVE, 0 },
+		{ "BloomFilterTruePositive", rocksdb::BLOOM_FILTER_FULL_TRUE_POSITIVE, 0 },
+		{ "BloomFilterMicros", rocksdb::BLOOM_FILTER_MICROS, 0 },
+		{ "MemtableHit", rocksdb::MEMTABLE_HIT, 0 },
+		{ "MemtableMiss", rocksdb::MEMTABLE_MISS, 0 },
+		{ "GetHitL0", rocksdb::GET_HIT_L0, 0 },
+		{ "GetHitL1", rocksdb::GET_HIT_L1, 0 },
+		{ "GetHitL2AndUp", rocksdb::GET_HIT_L2_AND_UP, 0 },
+		{ "CountKeysWritten", rocksdb::NUMBER_KEYS_WRITTEN, 0 },
+		{ "CountKeysRead", rocksdb::NUMBER_KEYS_READ, 0 },
+		{ "CountDBSeek", rocksdb::NUMBER_DB_SEEK, 0 },
+		{ "CountDBNext", rocksdb::NUMBER_DB_NEXT, 0 },
+		{ "CountDBPrev", rocksdb::NUMBER_DB_PREV, 0 },
+		{ "BloomFilterPrefixChecked", rocksdb::BLOOM_FILTER_PREFIX_CHECKED, 0 },
+		{ "BloomFilterPrefixUseful", rocksdb::BLOOM_FILTER_PREFIX_USEFUL, 0 },
+		{ "BlockCacheCompressedMiss", rocksdb::BLOCK_CACHE_COMPRESSED_MISS, 0 },
+		{ "BlockCacheCompressedHit", rocksdb::BLOCK_CACHE_COMPRESSED_HIT, 0 },
+		{ "CountWalFileSyncs", rocksdb::WAL_FILE_SYNCED, 0 },
+		{ "CountWalFileBytes", rocksdb::WAL_FILE_BYTES, 0 },
+		{ "CompactReadBytes", rocksdb::COMPACT_READ_BYTES, 0 },
+		{ "CompactWriteBytes", rocksdb::COMPACT_WRITE_BYTES, 0 },
+		{ "FlushWriteBytes", rocksdb::FLUSH_WRITE_BYTES, 0 },
+		{ "CountBlocksCompressed", rocksdb::NUMBER_BLOCK_COMPRESSED, 0 },
+		{ "CountBlocksDecompressed", rocksdb::NUMBER_BLOCK_DECOMPRESSED, 0 },
+		{ "RowCacheHit", rocksdb::ROW_CACHE_HIT, 0 },
+		{ "RowCacheMiss", rocksdb::ROW_CACHE_MISS, 0 },
+		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
+
+	};
+	state std::vector<std::pair<const char*, std::string>> propertyStats = {
+		{ "NumCompactionsRunning", rocksdb::DB::Properties::kNumRunningCompactions },
+		{ "NumImmutableMemtables", rocksdb::DB::Properties::kNumImmutableMemTable },
+		{ "NumImmutableMemtablesFlushed", rocksdb::DB::Properties::kNumImmutableMemTableFlushed },
+		{ "IsMemtableFlushPending", rocksdb::DB::Properties::kMemTableFlushPending },
+		{ "NumRunningFlushes", rocksdb::DB::Properties::kNumRunningFlushes },
+		{ "IsCompactionPending", rocksdb::DB::Properties::kCompactionPending },
+		{ "NumRunningCompactions", rocksdb::DB::Properties::kNumRunningCompactions },
+		{ "CumulativeBackgroundErrors", rocksdb::DB::Properties::kBackgroundErrors },
+		{ "CurrentSizeActiveMemtable", rocksdb::DB::Properties::kCurSizeActiveMemTable },
+		{ "AllMemtablesBytes", rocksdb::DB::Properties::kCurSizeAllMemTables },
+		{ "ActiveMemtableBytes", rocksdb::DB::Properties::kSizeAllMemTables },
+		{ "CountEntriesActiveMemtable", rocksdb::DB::Properties::kNumEntriesActiveMemTable },
+		{ "CountEntriesImmutMemtables", rocksdb::DB::Properties::kNumEntriesImmMemTables },
+		{ "CountDeletesActiveMemtable", rocksdb::DB::Properties::kNumDeletesActiveMemTable },
+		{ "CountDeletesImmutMemtables", rocksdb::DB::Properties::kNumDeletesImmMemTables },
+		{ "EstimatedCountKeys", rocksdb::DB::Properties::kEstimateNumKeys },
+		{ "EstimateSstReaderBytes", rocksdb::DB::Properties::kEstimateTableReadersMem },
+		{ "CountActiveSnapshots", rocksdb::DB::Properties::kNumSnapshots },
+		{ "OldestSnapshotTime", rocksdb::DB::Properties::kOldestSnapshotTime },
+		{ "CountLiveVersions", rocksdb::DB::Properties::kNumLiveVersions },
+		{ "EstimateLiveDataSize", rocksdb::DB::Properties::kEstimateLiveDataSize },
+		{ "BaseLevel", rocksdb::DB::Properties::kBaseLevel },
+		{ "EstPendCompactBytes", rocksdb::DB::Properties::kEstimatePendingCompactionBytes },
+	};
+	loop {
+		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+		TraceEvent e("RocksDBMetrics");
+		for (auto& t : tickerStats) {
+			auto& [name, ticker, cum] = t;
+			uint64_t val = statistics->getTickerCount(ticker);
+			e.detail(name, val - cum);
+			cum = val;
+		}
+
+		for (auto& p : propertyStats) {
+			auto& [name, property] = p;
+			uint64_t stat = 0;
+			ASSERT(db->GetIntProperty(property, &stat));
+			e.detail(name, stat);
+		}
+	}
+}
+
+Error statusToError(const rocksdb::Status& s) {
+	if (s.IsIOError()) {
+		return io_error();
+	} else if (s.IsTimedOut()) {
+		return transaction_too_old();
+	} else {
+		return unknown_error();
+	}
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -105,14 +197,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		void init() override {}
-
-		Error statusToError(const rocksdb::Status& s) {
-			if (s == rocksdb::Status::IOError()) {
-				return io_error();
-			} else {
-				return unknown_error();
-			}
-		}
 
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
