@@ -533,7 +533,7 @@ Future<Void> testAtomicSet(UnitTestParameters params) {
 	try {
 		wait(set(env, "class-A"_sr, "test_atomic_long"_sr, int64_t{ 1 }));
 	} catch (Error& e) {
-		ASSERT(e.code() == error_code_knob_restart_required);
+		ASSERT(e.code() == error_code_local_config_changed);
 		restarted = true;
 	}
 	ASSERT(restarted);
@@ -560,7 +560,7 @@ Future<Void> testAtomicClear(UnitTestParameters params) {
 	try {
 		wait(set(env, "class-A"_sr, "test_atomic_long"_sr, int64_t{ 1 }));
 	} catch (Error& e) {
-		ASSERT(e.code() == error_code_knob_restart_required);
+		ASSERT(e.code() == error_code_local_config_changed);
 		restarted = true;
 	}
 	ASSERT(restarted);
@@ -568,7 +568,7 @@ Future<Void> testAtomicClear(UnitTestParameters params) {
 	try {
 		wait(clear(env, "class-A"_sr, "test_atomic_long"_sr));
 	} catch (Error& e) {
-		ASSERT(e.code() == error_code_knob_restart_required);
+		ASSERT(e.code() == error_code_local_config_changed);
 		restarted = true;
 	}
 	ASSERT(restarted);

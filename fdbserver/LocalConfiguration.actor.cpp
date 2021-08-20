@@ -258,7 +258,7 @@ class LocalConfigurationImpl {
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(snapshotVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
 		if (restartRequired) {
-			throw knob_restart_required();
+			throw local_config_changed();
 		}
 		self->updateInMemoryState(snapshotVersion);
 		return Void();
@@ -302,7 +302,7 @@ class LocalConfigurationImpl {
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(mostRecentVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
 		if (restartRequired) {
-			throw knob_restart_required();
+			throw local_config_changed();
 		}
 		self->updateInMemoryState(mostRecentVersion);
 		return Void();
