@@ -1248,6 +1248,13 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 		}
 	}
 
+	if (args->client_threads_per_version > 0) {
+		err = fdb_network_set_option(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*) &args->client_threads_per_version, sizeof(int64_t));
+		if (err) {
+			fprintf(stderr, "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) (%d): %s\n", (uint8_t*) &args->client_threads_per_version, fdb_get_error(err));
+		}
+	}
+
 	/* Network thread must be setup before doing anything */
 	fprintf(debugme, "DEBUG: fdb_setup_network\n");
 	err = fdb_setup_network();
@@ -1285,15 +1292,11 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fdb_future_destroy(f);
 
 #else /* >= 610 */
-	if (worker_id == 0 || args->num_fdb_clusters <= 1) {
-		// maintains original mako behavior in that
-		// first process does work to one database in the first cluster
-		fdb_create_database(args->cluster_files[0], &process.databases[0]);
-	}
 	// added support for multiple databases in multiple clusters
 	// the rest of the databases are divided equally to each cluster
-	for (size_t i = 1; i < args->num_databases; i++) {
-		fdb_create_database(args->cluster_files[i % args->num_fdb_clusters], &process.databases[i]);
+	for (size_t i = 0; i < args->num_databases; i++) {
+		size_t cluster_index = args->num_fdb_clusters <= 1 ? 0 : i % args->num_fdb_clusters;
+		fdb_create_database(args->cluster_files[cluster_index], &process.databases[i]);
 	}
 #endif
 
@@ -1313,12 +1316,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	for (i = 0; i < args->num_threads; i++) {
 		thread_args[i].thread_id = i;
-		if (worker_id == 0) {
-			// first process or network thread does work to all db
-			thread_args[i].database_index = args->num_databases == 1 ? 0 : (i % args->num_databases);
-		} else {
-			thread_args[i].database_index = i % (args->num_databases-1) + 1;
-		}
+		thread_args[i].database_index = i % args->num_databases;
 
 		for (int op = 0; op < MAX_OP; op++) {
 			if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
@@ -1422,6 +1420,7 @@ int init_args(mako_args_t* args) {
 	for (i = 0; i < MAX_OP; i++) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
+	args->client_threads_per_version = 0;
 	return 0;
 }
 
@@ -1587,6 +1586,7 @@ void usage() {
 	printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
+	printf("%-24s %s\n", "    --client_threads_per_version", "Spawns multiple worker threads for each version of the client that is loaded.  Setting this to a number greater than one implies disable_local_client.");
 }
 
 /* parse benchmark paramters */
@@ -1633,6 +1633,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
 			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			                                    { "version", no_argument, NULL, ARG_VERSION },
+												{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
 			                                    { NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1790,6 +1791,10 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 				exit(0);
 			}
 			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
+			break;
+		}
+		case ARG_CLIENT_THREADS_PER_VERSION: {
+			args->client_threads_per_version = atoi(optarg);
 			break;
 		}
 		}
