@@ -204,7 +204,6 @@ class ConfigBroadcasterImpl {
 		wait(watcher);
 		TraceEvent(SevDebug, "ConfigBroadcastClientDied", self->id).detail("ClientID", clientUID);
 		self->clients.erase(clientUID);
-		// TODO: Erase clientUID from clientFailures at some point
 		return Void();
 	}
 
@@ -223,6 +222,18 @@ class ConfigBroadcasterImpl {
 		if (impl->clients.count(broadcastInterface.id())) {
 			// Client already registered
 			return Void();
+		}
+
+		// Clean up clientFailures futures. The values in this map should only
+		// be used for testing, and cleaning them up here ensures tests still
+		// have enough time to read the future while making sure the map
+		// doesn't grow unbounded.
+		for (auto it = impl->clientFailures.begin(); it != impl->clientFailures.end();) {
+			if (it->second.isReady()) {
+				it = impl->clientFailures.erase(it);
+			} else {
+				++it;
+			}
 		}
 
 		TraceEvent(SevDebug, "ConfigBroadcasterRegisteringWorker", impl->id)

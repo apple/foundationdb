@@ -910,5 +910,3 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/BadRangeRead") {
 	}
 	return Void();
 }
-
-// TODO: Test worker failure detection on ConfigBroadcaster
