@@ -210,6 +210,66 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
+template <>
+bool TSS_doCompare(const SplitMetricsReply& src, const SplitMetricsReply& tss) {
+	// We duplicate split metrics just for load, no need to validate replies.
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const SplitMetricsRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const SplitMetricsRequest& req,
+                       const SplitMetricsReply& src,
+                       const SplitMetricsReply& tss) {
+	ASSERT(false);
+}
+
+template <>
+bool TSS_doCompare(const ReadHotSubRangeReply& src, const ReadHotSubRangeReply& tss) {
+	// We duplicate read hot sub range metrics just for load, no need to validate replies.
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const ReadHotSubRangeRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const ReadHotSubRangeRequest& req,
+                       const ReadHotSubRangeReply& src,
+                       const ReadHotSubRangeReply& tss) {
+	ASSERT(false);
+}
+
+template <>
+bool TSS_doCompare(const SplitRangeReply& src, const SplitRangeReply& tss) {
+	// We duplicate read hot sub range metrics just for load, no need to validate replies.
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const SplitRangeRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const SplitRangeRequest& req,
+                       const SplitRangeReply& src,
+                       const SplitRangeReply& tss) {
+	ASSERT(false);
+}
+
 // template specializations for metrics replies that should never be called because these requests aren't duplicated
 
 // storage metrics
@@ -230,69 +290,6 @@ void TSS_traceMismatch(TraceEvent& event,
                        const WaitMetricsRequest& req,
                        const StorageMetrics& src,
                        const StorageMetrics& tss) {
-	ASSERT(false);
-}
-
-// split metrics
-template <>
-bool TSS_doCompare(const SplitMetricsReply& src, const SplitMetricsReply& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const SplitMetricsRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const SplitMetricsRequest& req,
-                       const SplitMetricsReply& src,
-                       const SplitMetricsReply& tss) {
-	ASSERT(false);
-}
-
-// read hot sub range
-template <>
-bool TSS_doCompare(const ReadHotSubRangeReply& src, const ReadHotSubRangeReply& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const ReadHotSubRangeRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const ReadHotSubRangeRequest& req,
-                       const ReadHotSubRangeReply& src,
-                       const ReadHotSubRangeReply& tss) {
-	ASSERT(false);
-}
-
-// split range
-template <>
-bool TSS_doCompare(const SplitRangeReply& src, const SplitRangeReply& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const SplitRangeRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const SplitRangeRequest& req,
-                       const SplitRangeReply& src,
-                       const SplitRangeReply& tss) {
 	ASSERT(false);
 }
 

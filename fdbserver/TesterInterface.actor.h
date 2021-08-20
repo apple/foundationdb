@@ -114,7 +114,7 @@ struct TesterInterface {
 
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>> serverDBInfo,
+                                    Reference<AsyncVar<struct ServerDBInfo> const> serverDBInfo,
                                     LocalityData locality);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };

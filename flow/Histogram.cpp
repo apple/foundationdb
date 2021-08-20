@@ -117,10 +117,12 @@ void Histogram::writeToLog() {
 	TraceEvent e(SevInfo, "Histogram");
 	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper[(size_t)unit]);
 
+	int totalCount = 0;
 	for (uint32_t i = 0; i < 32; i++) {
 		uint64_t value = uint64_t(1) << (i + 1);
 
 		if (buckets[i]) {
+			totalCount += buckets[i];
 			switch (unit) {
 			case Unit::microseconds:
 				e.detail(format("LessThan%u.%03u", value / 1000, value % 1000), buckets[i]);
@@ -140,6 +142,7 @@ void Histogram::writeToLog() {
 			}
 		}
 	}
+	e.detail("TotalCount", totalCount);
 }
 
 std::string Histogram::drawHistogram() {
