@@ -35,6 +35,10 @@ void TestKnobCollection::reset(Randomize randomize, IsSimulated isSimulated) {
 	testKnobs.reset();
 }
 
+void TestKnobCollection::clearTestKnobs() {
+	testKnobs.reset();
+}
+
 Optional<KnobValue> TestKnobCollection::tryParseKnobValue(std::string const& knobName,
                                                           std::string const& knobValue) const {
 	auto result = serverKnobCollection.tryParseKnobValue(knobName, knobValue);
