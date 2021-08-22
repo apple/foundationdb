@@ -97,10 +97,6 @@ func (monitor *Monitor) LoadConfiguration() {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 
-	if configuration.ServerCount == 0 {
-		configuration.ServerCount = 1
-	}
-
 	if monitor.ProcessesIDs == nil {
 		monitor.ProcessesIDs = make([]int, configuration.ServerCount+1)
 	} else {
@@ -125,6 +121,15 @@ func (monitor *Monitor) LoadConfiguration() {
 func (monitor *Monitor) RunProcess(processNumber int) {
 	log.Printf("Starting run loop for subprocess %d", processNumber)
 	for {
+		monitor.Mutex.Lock()
+		if monitor.ActiveConfiguration.ServerCount < processNumber {
+			log.Printf("Terminating run loop for subprocess %d", processNumber)
+			monitor.ProcessesIDs[processNumber] = 0
+			monitor.Mutex.Unlock()
+			return
+		}
+		monitor.Mutex.Unlock()
+
 		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, nil)
 		arguments = append([]string{monitor.FDBServerPath}, arguments...)
 		if err != nil {
@@ -160,12 +165,6 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 
 		monitor.Mutex.Lock()
 		monitor.ProcessesIDs[processNumber] = -1
-		if monitor.ActiveConfiguration.ServerCount < processNumber {
-			log.Printf("Terminating run loop for subprocess %d", processNumber)
-			monitor.ProcessesIDs[processNumber] = 0
-			monitor.Mutex.Unlock()
-			return
-		}
 		monitor.Mutex.Unlock()
 
 		log.Printf("Subprocess #%d will restart in %d seconds", processNumber, errorBackoffSeconds)
@@ -182,7 +181,13 @@ func (monitor *Monitor) WatchConfiguration(watcher *fsnotify.Watcher) {
 				return
 			}
 			log.Printf("Detected event on monitor conf file: %v", event)
-			if event.Op&fsnotify.Write == fsnotify.Write {
+			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
+				monitor.LoadConfiguration()
+			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
+				err := watcher.Add(monitor.ConfigFile)
+				if err != nil {
+					panic(err)
+				}
 				monitor.LoadConfiguration()
 			}
 		case err, ok := <-watcher.Errors:
