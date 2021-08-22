@@ -1,5 +1,6 @@
 {
 	"version": "6.3.0",
+	"serverCount": 1,
 	"arguments": [
 		{"value": "--cluster_file"},
 		{"value": ".testdata/fdb.cluster"},

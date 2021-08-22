@@ -23,19 +23,7 @@
 # This is not a recommended way to run production clusters, but it can be useful
 # to test the image in development.
 #
-# To start a cluster with this example, run the following steps:
-# 1.  Apply this file.
-# 2.  Wait for all pods to start.
-# 3.  Generate a connection string, using the following bash command:
-#     ips=$(kubectl get pod -l app=fdb-kubernetes-example -o json | jq -j '[[.items|.[]|select(.status.podIP!="")]|limit(3;.[])|.status.podIP+":4501"]|join(",")'); echo test:test@$ips
-#     echo test:test@$ips
-# 4.  Update the ConfigMap below to have the results of that echo statement as
-#     the `fdb.cluster` entry, and change the `serverCount` field to `1`.
-# 5.  Apply the file again.
-# 6.  Watch the logs for the fdb-kubernetes-example pods to confirm that they
-#     have launched the fdbserver processes.
-# 7.  Exec into one of the pods, and run `fdbcli --exec "configure new double ssd"`.
-
+# For more information on using this file, see fdbkubernetesmonitor/doc.go
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -55,8 +43,17 @@ spec:
     spec:
       containers:
         - name: foundationdb
-          image: foundationdb/foundationdb-kubernetes:6.3.15
+          image: foundationdb/foundationdb-kubernetes:latest
+          imagePullPolicy: IfNotPresent
           env:
+            - name: FDB_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: FDB_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: FDB_CLUSTER_FILE
               value: /var/fdb/data/fdb.cluster
             - name: FDB_PUBLIC_IP
@@ -87,6 +84,7 @@ spec:
               mountPath: /var/fdb/dynamic-conf
             - name: data
               mountPath: /var/fdb/data
+      serviceAccountName: fdb-kubernetes-example
       volumes:
         - name: dynamic-conf
           configMap:
@@ -109,7 +107,7 @@ data:
   fdb.cluster: ""
   config.json: |
     {
-      "serverCount": 0
+      "serverCount": 0,
       "version": "6.3.15",
       "arguments": [
         {"value": "--cluster_file"},
@@ -147,3 +145,36 @@ data:
         ]}
       ]
     }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fdb-kubernetes-example
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fdb-kubernetes-example
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - "pods"
+    verbs:
+      - "get"
+      - "watch"
+      - "update"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fdb-kubernetes-example
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fdb-kubernetes-example
+subjects:
+- kind: ServiceAccount
+  name: fdb-kubernetes-example
+
+

@@ -52,6 +52,10 @@ type Monitor struct {
 	// configuration.
 	ActiveConfigurationBytes []byte
 
+	// LastConfigurationTime is the last time we successfully reloaded the
+	// configuration file.
+	LastConfigurationTime time.Time
+
 	// ProcessIDs stores the PIDs of the processes that are running. A PID of
 	// zero will indicate that a process does not have a run loop. A PID of -1
 	// will indicate that a process has a run loop but is not currently running
@@ -60,11 +64,26 @@ type Monitor struct {
 
 	// Mutex defines a mutex around working with configuration.
 	Mutex sync.Mutex
+
+	// PodClient is a client for posting updates about this pod to
+	// Kubernetes.
+	PodClient *PodClient
 }
 
 // StartMonitor starts the monitor loop.
 func StartMonitor(configFile string, fdbserverPath string) {
-	monitor := &Monitor{ConfigFile: configFile, FDBServerPath: fdbserverPath}
+	podClient, err := CreatePodClient()
+	if err != nil {
+		panic(err)
+	}
+
+	monitor := &Monitor{
+		ConfigFile:    configFile,
+		FDBServerPath: fdbserverPath,
+		PodClient:     podClient,
+	}
+
+	go func() { monitor.WatchPodTimestamps() }()
 	monitor.Run()
 }
 
@@ -107,6 +126,7 @@ func (monitor *Monitor) LoadConfiguration() {
 
 	monitor.ActiveConfiguration = configuration
 	monitor.ActiveConfigurationBytes = configurationBytes
+	monitor.LastConfigurationTime = time.Now()
 
 	for processNumber := 1; processNumber <= configuration.ServerCount; processNumber++ {
 		if monitor.ProcessesIDs[processNumber] == 0 {
@@ -114,6 +134,11 @@ func (monitor *Monitor) LoadConfiguration() {
 			tempNumber := processNumber
 			go func() { monitor.RunProcess(tempNumber) }()
 		}
+	}
+
+	err = monitor.PodClient.UpdateAnnotations(monitor)
+	if err != nil {
+		log.Printf("Error updating pod annotations: %s", err)
 	}
 }
 
@@ -240,4 +265,12 @@ func (monitor *Monitor) Run() {
 	go func() { monitor.WatchConfiguration(watcher) }()
 
 	<-done
+}
+
+func (monitor *Monitor) WatchPodTimestamps() {
+	for timestamp := range monitor.PodClient.TimestampFeed {
+		if timestamp > monitor.LastConfigurationTime.Unix() {
+			monitor.LoadConfiguration()
+		}
+	}
 }
