@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CoordinationInterface.h"
 #include "fdbrpc/FlowTransport.h"
 #include "flow/network.h"
 
