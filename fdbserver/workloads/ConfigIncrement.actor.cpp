@@ -146,6 +146,7 @@ public:
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
+		m.emplace_back("Last Known Value", lastKnownValue, false);
 	}
 };
 
