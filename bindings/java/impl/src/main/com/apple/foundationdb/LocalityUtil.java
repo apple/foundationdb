@@ -106,7 +106,7 @@ public class LocalityUtil {
 	public static CompletableFuture<String[]> getAddressesForKey(Transaction tr, byte[] key) {
 		if (!(tr instanceof FDBTransaction)) {
 			CompletableFuture<String[]> future = new CompletableFuture<>();
-			future.completeExceptionally(new FDBException("locality_information_unavailable", 1033));
+			future.completeExceptionally(new FDBExceptionImpl("locality_information_unavailable", 1033));
 			return future;
 		}
 		return ((FDBTransaction)tr).getAddressesForKey(key);

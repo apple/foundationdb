@@ -130,7 +130,7 @@ public class FDB {
 			return singleton;
 		}
 		else {
-			throw new FDBException("API version is not set", 2200);
+			throw new FDBExceptionImpl("API version is not set", 2200);
 		}
 	}
 

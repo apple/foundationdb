@@ -258,7 +258,7 @@ public class FDBExceptionImpl extends FDBException {
 
                 string className = s.ToString();
                 if (scopeDocOptions[s].isSettableOption) className += "s";
-                string filePath = Path.Combine(outputDirectory, (s == Scope.ErrorPredicate ? "FDBException" : className) + ".java");
+                string filePath = Path.Combine(outputDirectory, (s == Scope.ErrorPredicate ? "FDBExceptionImpl" : className) + ".java");
                 using (var javaFile = System.IO.File.Open(filePath,
                                 System.IO.FileMode.Create, System.IO.FileAccess.Write))
                 {

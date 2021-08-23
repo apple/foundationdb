@@ -20,8 +20,6 @@
 
 package com.apple.foundationdb;
 
-import com.foundationdb.OptionsSet;
-
 /**
  * A set of options that can be set on a {@link Cluster}.
  * 

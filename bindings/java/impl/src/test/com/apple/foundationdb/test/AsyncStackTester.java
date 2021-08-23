@@ -36,6 +36,7 @@ import java.util.function.Function;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.FDBException;
+import com.apple.foundationdb.FDBExceptionImpl;
 import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.MutationType;
@@ -60,7 +61,7 @@ public class AsyncStackTester {
 			return tr.getRange(Range.startsWith(prefix)).asList().thenAcceptAsync(list -> {
 				if(list.size() > 0) {
 					//System.out.println(" - Throwing new fake commit error...");
-					throw new FDBException("ERROR: Fake commit conflict", 1020);
+					throw new FDBExceptionImpl("ERROR: Fake commit conflict", 1020);
 				}
 			}, FDB.DEFAULT_EXECUTOR);
 		}
@@ -327,7 +328,7 @@ public class AsyncStackTester {
 				//  a failed state and we should rethrow the error. Otherwise, throw the original error.
 				boolean filteredError = errorCode == 1102 || errorCode == 2015;
 
-				FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
+				FDBException err = new FDBExceptionImpl("Fake testing error", filteredError ? 1020 : errorCode);
 				final Transaction oldTr = inst.tr;
 				CompletableFuture<Void> f = oldTr.onError(err).whenComplete((tr, t) -> {
 					if(t != null) {
@@ -340,7 +341,7 @@ public class AsyncStackTester {
 
 				if(filteredError) {
 					f.join();
-					throw new FDBException("Fake testing error", errorCode);
+					throw new FDBExceptionImpl("Fake testing error", errorCode);
 				}
 
 				inst.push(f);
@@ -533,8 +534,8 @@ public class AsyncStackTester {
 				tr.options().setLockAware();
 				tr.options().setIncludePortInAddress();
 
-				if(!(new FDBException("Fake", 1020)).isRetryable() ||
-						(new FDBException("Fake", 10)).isRetryable())
+				if(!(new FDBExceptionImpl("Fake", 1020)).isRetryable() ||
+						(new FDBExceptionImpl("Fake", 10)).isRetryable())
 					throw new RuntimeException("Unit test failed: Error predicate incorrect");
 
 				byte[] test = {(byte)0xff};

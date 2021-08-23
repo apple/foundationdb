@@ -37,6 +37,7 @@ import java.util.function.Function;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.FDBException;
+import com.apple.foundationdb.FDBExceptionImpl;
 import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.KeyArrayResult;
@@ -69,7 +70,7 @@ public class StackTester {
 			List<KeyValue> asList = tr.getRange(Range.startsWith(prefix)).asList().join();
 			if(asList.size() > 0) {
 				//System.out.println(" - Throwing new fake commit error...");
-				throw new FDBException("ERROR: Fake commit conflict", 1020);
+				throw new FDBExceptionImpl("ERROR: Fake commit conflict", 1020);
 			}
 			return null;
 		}
@@ -296,7 +297,7 @@ public class StackTester {
 				//  a failed state and we should rethrow the error. Otherwise, throw the original error.
 				boolean filteredError = errorCode == 1102 || errorCode == 2015;
 
-				FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
+				FDBException err = new FDBExceptionImpl("Fake testing error", filteredError ? 1020 : errorCode);
 
 				try {
 					Transaction tr = inst.tr.onError(err).join();
@@ -310,7 +311,7 @@ public class StackTester {
 				}
 
 				if(filteredError) {
-					throw new FDBException("Fake testing error", errorCode);
+					throw new FDBExceptionImpl("Fake testing error", errorCode);
 				}
 
 				inst.push(CompletableFuture.completedFuture((Void)null));
@@ -478,8 +479,8 @@ public class StackTester {
 						tr.options().setLockAware();
 						tr.options().setIncludePortInAddress();
 
-						if(!(new FDBException("Fake", 1020)).isRetryable() ||
-								(new FDBException("Fake", 10)).isRetryable())
+						if(!(new FDBExceptionImpl("Fake", 1020)).isRetryable() ||
+								(new FDBExceptionImpl("Fake", 10)).isRetryable())
 							throw new RuntimeException("Unit test failed: Error predicate incorrect");
 
 						byte[] test = {(byte) 0xff};
