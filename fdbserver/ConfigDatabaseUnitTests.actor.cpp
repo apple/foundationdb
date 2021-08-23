@@ -247,6 +247,7 @@ class BroadcasterToLocalConfigEnvironment {
 	Version lastWrittenVersion{ 0 };
 	Future<Void> broadcastServer;
 	Promise<Void> workerFailure;
+	Future<Void> workerFailed_;
 
 	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self, ConfigClassSet configClassSet) {
 		wait(self->readFrom.setup());
@@ -294,9 +295,15 @@ public:
 		return readFrom.restartLocalConfig(newConfigPath);
 	}
 
-	void killLocalConfig() { workerFailure.send(Void()); }
+	void killLocalConfig() {
+		workerFailed_ = broadcaster.getClientFailure(cbi->get().id());
+		workerFailure.send(Void());
+	}
 
-	Future<Void> workerFailed() { return broadcaster.getClientFailure(cbi->get().id()); }
+	Future<Void> workerFailed() {
+		ASSERT(workerFailed_.isValid());
+		return workerFailed_;
+	}
 
 	void compact() { broadcaster.compact(lastWrittenVersion); }
 
@@ -396,6 +403,7 @@ class TransactionToLocalConfigEnvironment {
 	ConfigBroadcaster broadcaster;
 	Future<Void> broadcastServer;
 	Promise<Void> workerFailure;
+	Future<Void> workerFailed_;
 
 	ACTOR static Future<Void> setup(TransactionToLocalConfigEnvironment* self, ConfigClassSet configClassSet) {
 		wait(self->readFrom.setup());
@@ -427,9 +435,15 @@ public:
 		return readFrom.restartLocalConfig(newConfigPath);
 	}
 
-	void killLocalConfig() { workerFailure.send(Void()); }
+	void killLocalConfig() {
+		workerFailed_ = broadcaster.getClientFailure(cbi->get().id());
+		workerFailure.send(Void());
+	}
 
-	Future<Void> workerFailed() { return broadcaster.getClientFailure(cbi->get().id()); }
+	Future<Void> workerFailed() {
+		ASSERT(workerFailed_.isValid());
+		return workerFailed_;
+	}
 
 	Future<Void> compact() { return writeTo.compact(); }
 
