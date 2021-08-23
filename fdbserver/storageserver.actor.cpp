@@ -194,6 +194,12 @@ struct StorageServerDisk {
 	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
 
+	Future<Void> commitAsync(Version version) {
+		return onCommit(storage->commit(), IKeyValueStore::CommitNotification(version), &notifyCommit);
+	}
+
+	FutureStream<IKeyValueStore::CommitNotification> commitNotifications() { return notifyCommit.getFuture(); }
+
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	Future<Key> readNextKeyInclusive(KeyRef key) { return readFirstKey(storage, KeyRangeRef(key, allKeys.end)); }
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) {
@@ -223,6 +229,21 @@ private:
 		else
 			return range.end;
 	}
+
+	ACTOR static Future<Void> onCommit(Future<Void> commit,
+	                                   IKeyValueStore::CommitNotification notification,
+	                                   ThreadReturnPromiseStream<IKeyValueStore::CommitNotification>* notifyCommit) {
+		try {
+			wait(commit);
+		} catch (Error& e) {
+			TraceEvent("HeLiuDebugOnCommit").error(e, true);
+			throw e;
+		}
+		notifyCommit->send(notification);
+		return Void();
+	}
+
+	ThreadReturnPromiseStream<IKeyValueStore::CommitNotification> notifyCommit;
 };
 
 struct UpdateEagerReadInfo {
@@ -1278,7 +1299,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		DEBUG_MUTATION("ShardGetValue",
 		               version,
 		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")),
-					   data->thisServerID);
+		               data->thisServerID);
 		DEBUG_MUTATION("ShardGetPath",
 		               version,
 		               MutationRef(MutationRef::DebugKey,
@@ -1286,7 +1307,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		                           path == 0   ? LiteralStringRef("0")
 		                           : path == 1 ? LiteralStringRef("1")
 		                                       : LiteralStringRef("2")),
-					   data->thisServerID);
+		               data->thisServerID);
 
 		/*
 		StorageMetrics m;
@@ -1395,7 +1416,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent
 			    MutationRef(MutationRef::DebugKey,
 			                metadata->key,
 			                reply.value.present() ? StringRef(reply.value.get()) : LiteralStringRef("<null>")),
-				data->thisServerID);
+			    data->thisServerID);
 
 			if (metadata->debugID.present())
 				g_traceBatch.addEvent(
@@ -2943,9 +2964,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("More", this_block.more);
 
 					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
-					if(MUTATION_TRACKING_ENABLED) {
+					if (MUTATION_TRACKING_ENABLED) {
 						for (auto k = this_block.begin(); k != this_block.end(); ++k) {
-							DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value), data->thisServerID);
+							DEBUG_MUTATION("fetch",
+							               fetchVersion,
+							               MutationRef(MutationRef::SetValue, k->key, k->value),
+							               data->thisServerID);
 						}
 					}
 
@@ -3110,7 +3134,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		for (auto b = batch->changes.begin() + startSize; b != batch->changes.end(); ++b) {
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
-			if(MUTATION_TRACKING_ENABLED) {
+			if (MUTATION_TRACKING_ENABLED) {
 				for (auto& m : b->mutations) {
 					DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
 				}
@@ -4047,47 +4071,65 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
-		if (newOldestVersion > data->rebootAfterDurableVersion) {
-			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
-			    .detail("NewOldestVersion", newOldestVersion)
-			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
-			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
-			// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
-			// Otherwise, in the race situation when storage server receives both reboot and
-			// brokenPromise of durableInProgress, the worker of the storage server will die.
-			// We will eventually end up with no worker for storage server role.
-			// The data distributor's buildTeam() will get stuck in building a team
-			durableInProgress.sendError(please_reboot());
-			throw please_reboot();
-		}
-
 		durableInProgress.send(Void());
 		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to shut
 		                                             // down, so delay to check for cancellation
-
-		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
-		// effective and are applied after we change the durable version. Also ensure that we have to lock while calling
-		// changeDurableVersion, because otherwise the latest version of mutableData might be partially loaded.
-		state double beforeSSDurableVersionUpdate = now();
-		wait(data->durableVersionLock.take());
-		data->popVersion(data->durableVersion.get() + 1);
-
-		while (!changeDurableVersion(data, newOldestVersion)) {
-			if (g_network->check_yield(TaskPriority::UpdateStorage)) {
-				data->durableVersionLock.release();
-				wait(delay(0, TaskPriority::UpdateStorage));
-				wait(data->durableVersionLock.take());
-			}
-		}
-
-		data->durableVersionLock.release();
-		data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
 
 		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 		data->fetchKeysBytesBudget = SERVER_KNOBS->STORAGE_FETCH_BYTES;
 		data->fetchKeysBudgetUsed.set(false);
 		if (!data->fetchKeysBudgetUsed.get()) {
 			wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
+		}
+	}
+}
+
+ACTOR Future<Void> onDataPersisted(StorageServer* data,
+                                   FutureStream<IKeyValueStore::CommitNotification> dataPersisted) {
+	loop {
+		try {
+			IKeyValueStore::CommitNotification persistedData = waitNext(dataPersisted);
+			state Version lastPersistedVersion = persistedData.version;
+			TraceEvent("OnDataPersisted", data->thisServerID).detail("PersistedVersion", lastPersistedVersion);
+			// Promise<Void> durableInProgress;
+			// data->durableInProgress = durableInProgress.getFuture();
+
+			if (lastPersistedVersion > data->rebootAfterDurableVersion) {
+				TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
+				    .detail("NewOldestVersion", lastPersistedVersion)
+				    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+				// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this
+				// process) never sets durableInProgress, we should set durableInProgress before send the
+				// please_reboot() error. Otherwise, in the race situation when storage server receives both reboot and
+				// brokenPromise of durableInProgress, the worker of the storage server will die.
+				// We will eventually end up with no worker for storage server role.
+				// The data distributor's buildTeam() will get stuck in building a team
+				// durableInProgress.sendError(please_reboot());
+				throw please_reboot();
+			}
+
+			// durableInProgress.send(Void());
+			// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
+			// effective and are applied after we change the durable version. Also ensure that we have to lock while
+			// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
+			// loaded.
+			state double beforeSSDurableVersionUpdate = now();
+			wait(data->durableVersionLock.take());
+			data->popVersion(data->durableVersion.get() + 1);
+
+			while (!changeDurableVersion(data, lastPersistedVersion)) {
+				if (g_network->check_yield(TaskPriority::UpdateStorage)) {
+					data->durableVersionLock.release();
+					wait(delay(0, TaskPriority::UpdateStorage));
+					wait(data->durableVersionLock.take());
+				}
+			}
+
+			data->durableVersionLock.release();
+			data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
+		} catch (Error& e) {
+			TraceEvent("OnDataPersisted", data->thisServerID).error(e, true);
+			throw e;
 		}
 	}
 }
@@ -4985,6 +5027,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	self->actors.add(updateStorage(self));
+	self->actors.add(onDataPersisted(self, self->storage.commitNotifications()));
 	self->actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
 	self->actors.add(self->otherError.getFuture());
 	self->actors.add(metricsCore(self, ssi));

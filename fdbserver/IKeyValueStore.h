@@ -41,6 +41,16 @@ public:
 
 class IKeyValueStore : public IClosable {
 public:
+	struct CommitNotification {
+		enum Type {
+			BufferWrite,
+			Persist,
+		};
+		CommitNotification(Version version) : type(Persist), version(version) {}
+		Type type;
+		Version version;
+	};
+
 	virtual KeyValueStoreType getType() const = 0;
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
