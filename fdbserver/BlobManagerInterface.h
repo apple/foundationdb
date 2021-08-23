@@ -22,11 +22,17 @@
 #define FDBSERVER_BLOBMANAGERINTERFACE_H
 #pragma once
 
+#include "fdbserver/ServerDBInfo.h"
+
+// TODO everything below here should go away once blob manager isn't embedded in another role
+
 // TODO add actual interface, remove functionality stuff hack for ratekeeper
 void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
                             RangeResult dbBlobRanges,
                             Arena a,
                             VectorRef<KeyRangeRef>* rangesToAdd,
                             VectorRef<KeyRangeRef>* rangesToRemove);
+
+Future<Void> blobManager(const LocalityData& locality, const Reference<AsyncVar<ServerDBInfo> const>& dbInfo);
 
 #endif

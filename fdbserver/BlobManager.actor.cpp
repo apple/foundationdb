@@ -18,9 +18,16 @@
  * limitations under the License.
  */
 
-#include "fdbclient/SystemData.h"
+#include "fdbclient/AsyncFileS3BlobStore.actor.h"
+#include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/S3BlobStore.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/BlobManagerInterface.h"
+#include "fdbserver/BlobWorker.actor.h"
+#include "fdbserver/Knobs.h"
+#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -133,6 +140,183 @@ void getRanges(std::vector<std::pair<KeyRangeRef, bool>>& results, KeyRangeMap<b
 		printf("  [%s - %s): %s\n", r.begin().printable().c_str(), r.end().printable().c_str(), r.value() ? "T" : "F");
 	}
 }
+
+struct BlobManagerData {
+	UID id;
+	Database db;
+
+	BlobManagerData(UID id, Database db) : id(id), db(db) {}
+	~BlobManagerData() { printf("Destroying blob manager data for %s\n", id.toString().c_str()); }
+};
+
+// TODO REMOVE eventually
+ACTOR Future<Void> nukeBlobWorkerData(BlobManagerData* bmData) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	loop {
+		try {
+			tr->clear(blobWorkerListKeys);
+			tr->clear(blobGranuleMappingKeys);
+			tr->clear(rangeFeedKeys);
+
+			return Void();
+		} catch (Error& e) {
+			printf("Nuking blob worker data got error %s\n", e.name());
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<KeyRef>>> splitNewRange(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
+	// TODO is it better to just pass empty metrics to estimated?
+	// TODO handle errors here by pulling out into its own transaction instead of the main loop's transaction, and
+	// retrying
+	printf("Splitting new range [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+	StorageMetrics estimated = wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
+
+	printf("Estimated bytes for [%s - %s): %lld\n",
+	       range.begin.printable().c_str(),
+	       range.end.printable().c_str(),
+	       estimated.bytes);
+
+	if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
+		// printf("  Splitting range\n");
+		// only split on bytes
+		StorageMetrics splitMetrics;
+		splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
+		splitMetrics.bytesPerKSecond = splitMetrics.infinity;
+		splitMetrics.iosPerKSecond = splitMetrics.infinity;
+		splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
+
+		Standalone<VectorRef<KeyRef>> keys =
+		    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated));
+		return keys;
+	} else {
+		// printf("  Not splitting range\n");
+		Standalone<VectorRef<KeyRef>> keys;
+		keys.push_back_deep(keys.arena(), range.begin);
+		keys.push_back_deep(keys.arena(), range.end);
+		return keys;
+	}
+}
+
+ACTOR Future<Void> doRangeAssignment(BlobWorkerInterface bwInterf,
+                                     KeyRange range,
+                                     Version assignVersion,
+                                     bool isAssign) {
+	AssignBlobRangeRequest req;
+	req.keyRange = KeyRangeRef(StringRef(req.arena, range.begin), StringRef(req.arena, range.end));
+	req.assignVersion = assignVersion;
+	req.isAssign = isAssign;
+
+	printf("BM %s %s range [%s - %s) @ %lld\n",
+	       bwInterf.id().toString().c_str(),
+	       req.isAssign ? "assigning" : "revoking",
+	       req.keyRange.begin.printable().c_str(),
+	       req.keyRange.end.printable().c_str(),
+	       req.assignVersion);
+
+	wait(bwInterf.assignBlobRangeRequest.getReply(req));
+	return Void();
+}
+
+// TODO MOVE ELSEWHERE
+// TODO replace locality with full BlobManagerInterface eventually
+ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state BlobManagerData self(deterministicRandom()->randomUniqueID(),
+	                           openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
+
+	state KeyRangeMap<bool> knownBlobRanges(false, normalKeys.end);
+	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> collection = actorCollection(addActor.getFuture());
+
+	// TODO remove once we have persistence + failure detection
+	printf("Blob manager nuking previous workers and range assignments on startup\n");
+	wait(nukeBlobWorkerData(&self));
+	printf("Blob manager nuked previous workers and range assignments\n");
+
+	state BlobWorkerInterface bwInterf(locality, deterministicRandom()->randomUniqueID());
+	bwInterf.initEndpoints();
+	state Future<Void> bwFuture = blobWorker(bwInterf, dbInfo);
+
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self.db);
+
+		printf("Blob manager checking for range updates\n");
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				state Version assignVersion = wait(tr->getReadVersion());
+
+				// TODO probably knobs here? This should always be pretty small though
+				RangeResult results = wait(krmGetRanges(
+				    tr, blobRangeKeys.begin, KeyRange(normalKeys), 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+
+				state Arena ar;
+				ar.dependsOn(results.arena());
+				VectorRef<KeyRangeRef> rangesToAdd;
+				VectorRef<KeyRangeRef> rangesToRemove;
+				// TODO hack for simulation
+				if (g_network->isSimulated()) {
+					printf("Hacking blob ranges!\n");
+					RangeResult fakeResults;
+					KeyValueRef one =
+					    KeyValueRef(StringRef(ar, LiteralStringRef("\x01")), StringRef(ar, LiteralStringRef("1")));
+					KeyValueRef two = KeyValueRef(StringRef(ar, LiteralStringRef("\x02")), StringRef());
+					fakeResults.push_back(fakeResults.arena(), one);
+					fakeResults.push_back(fakeResults.arena(), two);
+					updateClientBlobRanges(&knownBlobRanges, fakeResults, ar, &rangesToAdd, &rangesToRemove);
+				} else {
+					updateClientBlobRanges(&knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
+				}
+
+				for (KeyRangeRef range : rangesToRemove) {
+					printf("BM Got range to revoke [%s - %s)\n",
+					       range.begin.printable().c_str(),
+					       range.end.printable().c_str());
+
+					addActor.send(doRangeAssignment(bwInterf, range, assignVersion, false));
+				}
+
+				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
+				// Divide new ranges up into equal chunks by using SS byte sample
+				for (KeyRangeRef range : rangesToAdd) {
+					/*printf("BM Got range to add [%s - %s)\n",
+					       range.begin.printable().c_str(),
+					       range.end.printable().c_str());*/
+					splitFutures.push_back(splitNewRange(tr, range));
+				}
+
+				for (auto f : splitFutures) {
+					Standalone<VectorRef<KeyRef>> splits = wait(f);
+					printf("Split client range [%s - %s) into %d ranges:\n",
+					       splits[0].printable().c_str(),
+					       splits[splits.size() - 1].printable().c_str(),
+					       splits.size() - 1);
+					for (int i = 0; i < splits.size() - 1; i++) {
+						KeyRange range = KeyRange(KeyRangeRef(splits[i], splits[i + 1]));
+						printf("    [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+						addActor.send(doRangeAssignment(bwInterf, range, assignVersion, true));
+					}
+				}
+
+				state Future<Void> watchFuture = tr->watch(blobRangeChangeKey);
+				wait(tr->commit());
+				printf("Blob manager done processing client ranges, awaiting update\n");
+				wait(watchFuture);
+				break;
+			} catch (Error& e) {
+				printf("Blob manager got error looking for range updates %s\n", e.name());
+				wait(tr->onError(e));
+			}
+		}
+	}
+}
+
 // Test:
 // start empty
 // DB has [A - B). That should show up in knownBlobRanges and should be in added
