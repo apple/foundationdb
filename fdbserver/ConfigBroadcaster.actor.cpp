@@ -81,6 +81,7 @@ class ConfigBroadcasterImpl {
 	Future<Void> consumerFuture;
 	ActorCollection actors{ false };
 	std::map<UID, BroadcastClientDetails> clients;
+	std::map<UID, Future<Void>> clientFailures;
 
 	UID id;
 	CounterCollection cc;
@@ -203,6 +204,7 @@ class ConfigBroadcasterImpl {
 		wait(watcher);
 		TraceEvent(SevDebug, "ConfigBroadcastClientDied", self->id).detail("ClientID", clientUID);
 		self->clients.erase(clientUID);
+		self->clientFailures.erase(clientUID);
 		return Void();
 	}
 
@@ -230,7 +232,7 @@ class ConfigBroadcasterImpl {
 		// Push full snapshot to worker if it isn't up to date.
 		wait(impl->pushSnapshot(impl->mostRecentVersion, client));
 		impl->clients[broadcastInterface.id()] = client;
-		impl->actors.add(waitForFailure(impl, watcher, broadcastInterface.id()));
+		impl->clientFailures[broadcastInterface.id()] = waitForFailure(impl, watcher, broadcastInterface.id());
 		return Void();
 	}
 
@@ -345,6 +347,8 @@ public:
 
 	Future<Void> getError() const { return consumerFuture || actors.getResult(); }
 
+	Future<Void> getClientFailure(UID clientUID) const { return clientFailures.find(clientUID)->second; }
+
 	UID getID() const { return id; }
 
 	static void runPendingRequestStoreTest(bool includeGlobalMutation, int expectedMatches);
@@ -395,6 +399,10 @@ void ConfigBroadcaster::applySnapshotAndChanges(
 
 Future<Void> ConfigBroadcaster::getError() const {
 	return impl->getError();
+}
+
+Future<Void> ConfigBroadcaster::getClientFailure(UID clientUID) const {
+	return impl->getClientFailure(clientUID);
 }
 
 UID ConfigBroadcaster::getID() const {
