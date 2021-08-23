@@ -1,6 +1,6 @@
+add_subdirectory(c)
 if(NOT OPEN_FOR_IDE)
   # flow bindings currently doesn't support that
-  add_subdirectory(c)
   add_subdirectory(flow)
 endif()
 if(WITH_PYTHON_BINDING)
