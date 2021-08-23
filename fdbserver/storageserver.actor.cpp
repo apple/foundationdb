@@ -195,10 +195,13 @@ struct StorageServerDisk {
 	Future<Void> commit() { return storage->commit(); }
 
 	Future<Void> commitAsync(Version version) {
-		return onCommit(storage->commit(), IKeyValueStore::CommitNotification(version), &notifyCommit);
+		return onCommit(
+		    storage->commit(), IKeyValueStore::PersistNotification(version), storage->getPersistPromiseStream());
 	}
 
-	FutureStream<IKeyValueStore::CommitNotification> commitNotifications() { return notifyCommit.getFuture(); }
+	FutureStream<IKeyValueStore::PersistNotification> getPersistFutureStream() {
+		return storage->getPersistFutureStream();
+	}
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	Future<Key> readNextKeyInclusive(KeyRef key) { return readFirstKey(storage, KeyRangeRef(key, allKeys.end)); }
@@ -231,19 +234,19 @@ private:
 	}
 
 	ACTOR static Future<Void> onCommit(Future<Void> commit,
-	                                   IKeyValueStore::CommitNotification notification,
-	                                   ThreadReturnPromiseStream<IKeyValueStore::CommitNotification>* notifyCommit) {
+	                                   IKeyValueStore::PersistNotification notification,
+	                                   ThreadReturnPromiseStream<IKeyValueStore::PersistNotification>* persist) {
 		try {
 			wait(commit);
 		} catch (Error& e) {
 			TraceEvent("HeLiuDebugOnCommit").error(e, true);
 			throw e;
 		}
-		notifyCommit->send(notification);
+		TraceEvent("HeLiuDebugSendingCommitNote").detail("Version", notification.version).log();
+		if (persist != nullptr)
+			persist->send(notification);
 		return Void();
 	}
-
-	ThreadReturnPromiseStream<IKeyValueStore::CommitNotification> notifyCommit;
 };
 
 struct UpdateEagerReadInfo {
@@ -4022,7 +4025,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
 	loop {
-		ASSERT(data->durableVersion.get() == data->storageVersion());
+		// ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
 			double endTime =
 			    g_simulator.checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
@@ -4064,7 +4067,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
-		state Future<Void> durable = data->storage.commit();
+		state Future<Void> durable = data->storage.commitAsync(newOldestVersion);
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0) {
@@ -4090,10 +4093,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 }
 
 ACTOR Future<Void> onDataPersisted(StorageServer* data,
-                                   FutureStream<IKeyValueStore::CommitNotification> dataPersisted) {
+                                   FutureStream<IKeyValueStore::PersistNotification> dataPersisted) {
 	loop {
 		try {
-			IKeyValueStore::CommitNotification persistedData = waitNext(dataPersisted);
+			IKeyValueStore::PersistNotification persistedData = waitNext(dataPersisted);
 			state Version lastPersistedVersion = persistedData.version;
 			TraceEvent("OnDataPersisted", data->thisServerID).detail("PersistedVersion", lastPersistedVersion);
 			// Promise<Void> durableInProgress;
@@ -5032,7 +5035,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	self->actors.add(updateStorage(self));
-	self->actors.add(onDataPersisted(self, self->storage.commitNotifications()));
+	self->actors.add(onDataPersisted(self, self->storage.getPersistFutureStream()));
 	self->actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
 	self->actors.add(self->otherError.getFuture());
 	self->actors.add(metricsCore(self, ssi));

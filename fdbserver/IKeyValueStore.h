@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
+#include "flow/IThreadPool.h"
 
 class IClosable {
 public:
@@ -41,12 +42,12 @@ public:
 
 class IKeyValueStore : public IClosable {
 public:
-	struct CommitNotification {
+	struct PersistNotification {
 		enum Type {
 			BufferWrite,
 			Persist,
 		};
-		CommitNotification(Version version) : type(Persist), version(version) {}
+		PersistNotification(Version version) : type(Persist), version(version) {}
 		Type type;
 		Version version;
 	};
@@ -100,8 +101,13 @@ public:
 	// of a rollback.
 	virtual Future<Void> init() { return Void(); }
 
+	virtual ThreadReturnPromiseStream<PersistNotification>* getPersistPromiseStream() { return &persist; }
+	virtual FutureStream<PersistNotification> getPersistFutureStream() { return persist.getFuture(); }
+
 protected:
 	virtual ~IKeyValueStore() {}
+
+	ThreadReturnPromiseStream<PersistNotification> persist;
 };
 
 extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
