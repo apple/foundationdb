@@ -23,7 +23,10 @@ go 1.16
 
 require (
 	github.com/fsnotify/fsnotify v1.5.0
+	github.com/go-logr/logr v0.4.0
+	github.com/go-logr/zapr v0.4.0
 	github.com/spf13/pflag v1.0.5
+	go.uber.org/zap v1.19.0
 	k8s.io/api v0.20.2
 	k8s.io/apimachinery v0.20.2
 	k8s.io/client-go v0.20.2

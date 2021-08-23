@@ -23,10 +23,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -61,6 +61,9 @@ type PodClient struct {
 	// TimestampFeed is a channel where the pod client will send updates with
 	// the values from OutdatedConfigMapAnnotation.
 	TimestampFeed chan int64
+
+	// Logger is the logger we use for this client.
+	Logger logr.Logger
 }
 
 // CreatePodClient creates a new client for working with the pod object.
@@ -155,7 +158,7 @@ func (client *PodClient) watchPod() error {
 			if event.Type == watch.Modified {
 				pod, valid := event.Object.(*corev1.Pod)
 				if !valid {
-					log.Printf("Error getting pod information from watch: %v", event)
+					client.Logger.Error(nil, "Error getting pod information from watch", "event", event)
 				}
 				client.processPodUpdate(pod)
 			}
@@ -177,7 +180,7 @@ func (client *PodClient) processPodUpdate(pod *corev1.Pod) {
 	}
 	timestamp, err := strconv.ParseInt(annotation, 10, 64)
 	if err != nil {
-		log.Printf("Error parsing annotation %s: %s", annotation, err)
+		client.Logger.Error(err, "Error parsing annotation", "key", OutdatedConfigMapAnnotation, "rawAnnotation", annotation, err)
 		return
 	}
 

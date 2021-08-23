@@ -69,8 +69,15 @@ RUN	rm -rf /mnt/website && rm -r /var/fdb/tmp
 # Install the kubernetes monitor binary
 COPY --from=go-build /fdb-kubernetes-monitor /usr/bin/
 
-VOLUME /var/fdb/data
+# Set up a non-root user
+
+RUN groupadd --gid 4059 fdb && \
+	useradd --gid 4059 --uid 4059 --no-create-home --shell /bin/bash fdb && \
+	chown -R fdb:fdb /var/fdb
 
 # Runtime Configuration Options
 
+USER fdb
+WORKDIR /var/fdb
 ENTRYPOINT ["/usr/bin/fdb-kubernetes-monitor"]
+VOLUME /var/fdb/data

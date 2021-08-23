@@ -24,6 +24,9 @@ import (
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/go-logr/zapr"
+	"go.uber.org/zap"
 )
 
 func loadConfigFromFile(path string) (*ProcessConfiguration, error) {
@@ -99,4 +102,13 @@ func TestGeneratingArgumentForEnvironmentVariable(t *testing.T) {
 		t.Fail()
 		return
 	}
+
+	zapLogger, err := zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
+
+	log := zapr.NewLogger(zapLogger)
+	log.Info("JPB test", "key", "value")
+	t.Fail()
 }

@@ -20,9 +20,9 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -31,11 +31,14 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/go-logr/logr"
 )
 
 // errorBackoffSeconds is the time to wait after a process fails before starting
 // another process.
-const errorBackoffSeconds = 5
+// This delay will only be applied when there has been more than one failure
+// within this time window.
+const errorBackoffSeconds = 60
 
 // Monitor provides the main monitor loop
 type Monitor struct {
@@ -60,7 +63,7 @@ type Monitor struct {
 	// zero will indicate that a process does not have a run loop. A PID of -1
 	// will indicate that a process has a run loop but is not currently running
 	// the subprocess.
-	ProcessesIDs []int
+	ProcessIDs []int
 
 	// Mutex defines a mutex around working with configuration.
 	Mutex sync.Mutex
@@ -68,10 +71,13 @@ type Monitor struct {
 	// PodClient is a client for posting updates about this pod to
 	// Kubernetes.
 	PodClient *PodClient
+
+	// Logger is the logger instance for this monitor.
+	Logger logr.Logger
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(configFile string, fdbserverPath string) {
+func StartMonitor(logger logr.Logger, configFile string, fdbserverPath string) {
 	podClient, err := CreatePodClient()
 	if err != nil {
 		panic(err)
@@ -81,6 +87,7 @@ func StartMonitor(configFile string, fdbserverPath string) {
 		ConfigFile:    configFile,
 		FDBServerPath: fdbserverPath,
 		PodClient:     podClient,
+		Logger:        logger,
 	}
 
 	go func() { monitor.WatchPodTimestamps() }()
@@ -91,36 +98,36 @@ func StartMonitor(configFile string, fdbserverPath string) {
 func (monitor *Monitor) LoadConfiguration() {
 	file, err := os.Open(monitor.ConfigFile)
 	if err != nil {
-		log.Print(err.Error())
+		monitor.Logger.Error(err, "Error reading monitor config file", "monitorConfigPath", monitor.ConfigFile)
 		return
 	}
 	defer file.Close()
 	configuration := &ProcessConfiguration{}
 	configurationBytes, err := io.ReadAll(file)
 	if err != nil {
-		log.Print(err.Error())
+		monitor.Logger.Error(err, "Error reading monitor configuration", "monitorConfigPath", monitor.ConfigFile)
 	}
 	err = json.Unmarshal(configurationBytes, configuration)
 	if err != nil {
-		log.Print(err)
+		monitor.Logger.Error(err, "Error parsing monitor configuration", "rawConfiguration", string(configurationBytes))
 		return
 	}
 
 	_, err = configuration.GenerateArguments(1, nil)
 	if err != nil {
-		log.Print(err)
+		monitor.Logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration)
 		return
 	}
 
-	log.Printf("Received new configuration file")
+	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 
-	if monitor.ProcessesIDs == nil {
-		monitor.ProcessesIDs = make([]int, configuration.ServerCount+1)
+	if monitor.ProcessIDs == nil {
+		monitor.ProcessIDs = make([]int, configuration.ServerCount+1)
 	} else {
-		for len(monitor.ProcessesIDs) <= configuration.ServerCount {
-			monitor.ProcessesIDs = append(monitor.ProcessesIDs, 0)
+		for len(monitor.ProcessIDs) <= configuration.ServerCount {
+			monitor.ProcessIDs = append(monitor.ProcessIDs, 0)
 		}
 	}
 
@@ -129,8 +136,8 @@ func (monitor *Monitor) LoadConfiguration() {
 	monitor.LastConfigurationTime = time.Now()
 
 	for processNumber := 1; processNumber <= configuration.ServerCount; processNumber++ {
-		if monitor.ProcessesIDs[processNumber] == 0 {
-			monitor.ProcessesIDs[processNumber] = -1
+		if monitor.ProcessIDs[processNumber] == 0 {
+			monitor.ProcessIDs[processNumber] = -1
 			tempNumber := processNumber
 			go func() { monitor.RunProcess(tempNumber) }()
 		}
@@ -138,18 +145,20 @@ func (monitor *Monitor) LoadConfiguration() {
 
 	err = monitor.PodClient.UpdateAnnotations(monitor)
 	if err != nil {
-		log.Printf("Error updating pod annotations: %s", err)
+		monitor.Logger.Error(err, "Error updating pod annotations")
 	}
 }
 
 // RunProcess runs a loop to continually start and watch a process.
 func (monitor *Monitor) RunProcess(processNumber int) {
-	log.Printf("Starting run loop for subprocess %d", processNumber)
+	pid := 0
+	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "RunProcess")
+	logger.Info("Starting run loop")
 	for {
 		monitor.Mutex.Lock()
 		if monitor.ActiveConfiguration.ServerCount < processNumber {
-			log.Printf("Terminating run loop for subprocess %d", processNumber)
-			monitor.ProcessesIDs[processNumber] = 0
+			logger.Info("Terminating run loop")
+			monitor.ProcessIDs[processNumber] = 0
 			monitor.Mutex.Unlock()
 			return
 		}
@@ -158,42 +167,85 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, nil)
 		arguments = append([]string{monitor.FDBServerPath}, arguments...)
 		if err != nil {
-			log.Print(err)
+			logger.Error(err, "Error generating arguments for subprocess", "configuration", monitor.ActiveConfiguration)
 			time.Sleep(errorBackoffSeconds * time.Second)
 		}
 		cmd := exec.Cmd{
-			Path:   arguments[0],
-			Args:   arguments,
-			Stdout: os.Stdout,
-			Stderr: os.Stderr,
+			Path: arguments[0],
+			Args: arguments,
 		}
 
-		log.Printf("Starting subprocess #%d: %v", processNumber, arguments)
+		logger.Info("Starting subprocess", "arguments", arguments)
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			logger.Error(err, "Error getting stdout from subprocess")
+		}
+
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			logger.Error(err, "Error getting stderr from subprocess")
+		}
+
 		err = cmd.Start()
 		if err != nil {
-			log.Printf("Error from subprocess %d: %s", processNumber, err.Error())
-			log.Printf("Subprocess #%d will restart in %d seconds", processNumber, errorBackoffSeconds)
+			logger.Error(err, "Error starting subprocess")
 			time.Sleep(errorBackoffSeconds * time.Second)
 			continue
 		}
 
-		monitor.Mutex.Lock()
-		monitor.ProcessesIDs[processNumber] = cmd.Process.Pid
-		monitor.Mutex.Unlock()
-
-		err = cmd.Wait()
-		log.Printf("Subprocess #%d terminated", processNumber)
-
-		if err != nil {
-			log.Printf("Error from subprocess #%d: %s", processNumber, err.Error())
+		if cmd.Process != nil {
+			pid = cmd.Process.Pid
+		} else {
+			logger.Error(nil, "No Process information availale for subprocess")
 		}
 
+		startTime := time.Now()
+		logger.Info("Subprocess started", "PID", pid)
+
 		monitor.Mutex.Lock()
-		monitor.ProcessesIDs[processNumber] = -1
+		monitor.ProcessIDs[processNumber] = pid
 		monitor.Mutex.Unlock()
 
-		log.Printf("Subprocess #%d will restart in %d seconds", processNumber, errorBackoffSeconds)
-		time.Sleep(errorBackoffSeconds * time.Second)
+		if stdout != nil {
+			stdoutScanner := bufio.NewScanner(stdout)
+			go func() {
+				for stdoutScanner.Scan() {
+					logger.Info("Subprocess output", "msg", stdoutScanner.Text(), "PID", pid)
+				}
+			}()
+		}
+
+		if stderr != nil {
+			stderrScanner := bufio.NewScanner(stderr)
+			go func() {
+				for stderrScanner.Scan() {
+					logger.Error(nil, "Subprocess error log", "msg", stderrScanner.Text(), "PID", pid)
+				}
+			}()
+		}
+
+		err = cmd.Wait()
+		if err != nil {
+			logger.Error(err, "Error from subprocess", "PID", pid)
+		}
+		exitCode := -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+
+		logger.Info("Subprocess terminated", "exitCode", exitCode, "PID", pid)
+
+		endTime := time.Now()
+		monitor.Mutex.Lock()
+		monitor.ProcessIDs[processNumber] = -1
+		monitor.Mutex.Unlock()
+
+		processDuration := endTime.Sub(startTime)
+		if processDuration.Seconds() < errorBackoffSeconds {
+			logger.Info("Backing off from restarting subprocess", "backOffTimeSeconds", errorBackoffSeconds, "lastExecutionDurationSeconds", processDuration)
+			time.Sleep(errorBackoffSeconds * time.Second)
+		}
 	}
 }
 
@@ -205,7 +257,7 @@ func (monitor *Monitor) WatchConfiguration(watcher *fsnotify.Watcher) {
 			if !ok {
 				return
 			}
-			log.Printf("Detected event on monitor conf file: %v", event)
+			monitor.Logger.Info("Detected event on monitor conf file", "event", event)
 			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
 				monitor.LoadConfiguration()
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
@@ -219,7 +271,7 @@ func (monitor *Monitor) WatchConfiguration(watcher *fsnotify.Watcher) {
 			if !ok {
 				return
 			}
-			log.Print(err)
+			monitor.Logger.Error(err, "Error watching for file system events")
 		}
 	}
 }
@@ -232,18 +284,19 @@ func (monitor *Monitor) Run() {
 
 	go func() {
 		latestSignal := <-signals
-		log.Printf("Received signal %v", latestSignal)
-		for processNumber, processID := range monitor.ProcessesIDs {
+		monitor.Logger.Info("Received system signal", "signal", latestSignal)
+		for processNumber, processID := range monitor.ProcessIDs {
 			if processID > 0 {
+				subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
 				process, err := os.FindProcess(processID)
 				if err != nil {
-					log.Printf("Error finding subprocess #%d (PID %d): %s", processNumber, processID, err.Error())
+					subprocessLogger.Error(err, "Error finding subprocess")
 					continue
 				}
-				log.Printf("Sending signal %v to subprocess #%d (PID %d)", latestSignal, processNumber, processID)
+				subprocessLogger.Info("Sending signal to subprocess", "signal", latestSignal)
 				err = process.Signal(latestSignal)
 				if err != nil {
-					log.Printf("Error signaling subprocess #%d (PID %d): %s", processNumber, processID, err.Error())
+					subprocessLogger.Error(err, "Error signaling subprocess")
 					continue
 				}
 			}
