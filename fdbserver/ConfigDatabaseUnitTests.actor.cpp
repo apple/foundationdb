@@ -831,7 +831,7 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfiguratio
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalconfig/KillWorker") {
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/KillWorker") {
 	wait(testKillWorker<TransactionToLocalConfigEnvironment>(params));
 	return Void();
 }
