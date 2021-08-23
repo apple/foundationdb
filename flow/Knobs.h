@@ -49,7 +49,7 @@ class Knobs {
 protected:
 	template <class T>
 	struct KnobValue {
-		T value;
+		T* value;
 		Atomic atomic;
 	};
 
@@ -62,11 +62,11 @@ protected:
 	void initKnob(std::string& knob, const std::string& value, const std::string& name, Atomic atomic = Atomic::YES);
 	void initKnob(bool& knob, bool value, std::string const& name, Atomic atomic = Atomic::YES);
 
-	std::map<std::string, KnobValue<double*>> double_knobs;
-	std::map<std::string, KnobValue<int64_t*>> int64_knobs;
-	std::map<std::string, KnobValue<int*>> int_knobs;
-	std::map<std::string, KnobValue<std::string*>> string_knobs;
-	std::map<std::string, KnobValue<bool*>> bool_knobs;
+	std::map<std::string, KnobValue<double>> double_knobs;
+	std::map<std::string, KnobValue<int64_t>> int64_knobs;
+	std::map<std::string, KnobValue<int>> int_knobs;
+	std::map<std::string, KnobValue<std::string>> string_knobs;
+	std::map<std::string, KnobValue<bool>> bool_knobs;
 	std::set<std::string> explicitlySetKnobs;
 
 public:

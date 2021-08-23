@@ -357,35 +357,35 @@ bool Knobs::isAtomic(std::string const& knob) const {
 void Knobs::initKnob(double& knob, double value, std::string const& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		double_knobs[toLower(name)] = KnobValue<double*>{ &knob, atomic };
+		double_knobs[toLower(name)] = KnobValue<double>{ &knob, atomic };
 	}
 }
 
 void Knobs::initKnob(int64_t& knob, int64_t value, std::string const& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		int64_knobs[toLower(name)] = KnobValue<int64_t*>{ &knob, atomic };
+		int64_knobs[toLower(name)] = KnobValue<int64_t>{ &knob, atomic };
 	}
 }
 
 void Knobs::initKnob(int& knob, int value, std::string const& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		int_knobs[toLower(name)] = KnobValue<int*>{ &knob, atomic };
+		int_knobs[toLower(name)] = KnobValue<int>{ &knob, atomic };
 	}
 }
 
 void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		string_knobs[toLower(name)] = KnobValue<std::string*>{ &knob, atomic };
+		string_knobs[toLower(name)] = KnobValue<std::string>{ &knob, atomic };
 	}
 }
 
 void Knobs::initKnob(bool& knob, bool value, std::string const& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		bool_knobs[toLower(name)] = KnobValue<bool*>{ &knob, atomic };
+		bool_knobs[toLower(name)] = KnobValue<bool>{ &knob, atomic };
 	}
 }
 
