@@ -4780,6 +4780,9 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "ClusterControllerHealthMonitorError").error(e);
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 		}
 	}
 }

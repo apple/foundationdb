@@ -22,7 +22,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
-constexpr UID WLTOKEN_PROCESS(-1, 12);
+constexpr UID WLTOKEN_PROCESS(-1, 21);
 
 struct ProcessInterface {
 	constexpr static FileIdentifier file_identifier = 985636;

@@ -52,6 +52,7 @@ public:
 	ClientKnobs const& getClientKnobs() const override { return serverKnobCollection.getClientKnobs(); }
 	ServerKnobs const& getServerKnobs() const override { return serverKnobCollection.getServerKnobs(); }
 	TestKnobs const& getTestKnobs() const override { return testKnobs; }
+	void clearTestKnobs() override;
 	Optional<KnobValue> tryParseKnobValue(std::string const& knobName, std::string const& knobValue) const override;
 	bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) override;
 };

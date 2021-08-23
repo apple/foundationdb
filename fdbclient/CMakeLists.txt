@@ -70,6 +70,8 @@ set(FDBCLIENT_SRCS
   MultiVersionTransaction.actor.cpp
   MultiVersionTransaction.h
   MutationList.h
+  MutationLogReader.actor.cpp
+  MutationLogReader.actor.h
   NameLineage.h
   NameLineage.cpp
   NativeAPI.actor.cpp
@@ -113,7 +115,7 @@ set(FDBCLIENT_SRCS
   SystemData.cpp
   SystemData.h
   TagThrottle.actor.cpp
-  TagThrottle.h
+  TagThrottle.actor.h
   TaskBucket.actor.cpp
   TaskBucket.h
   TestKnobCollection.cpp
