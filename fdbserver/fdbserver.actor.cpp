@@ -1680,6 +1680,13 @@ int main(int argc, char* argv[]) {
 		const auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
+#ifdef _WIN32
+		//For now, ignore all tests for Windows
+		if (role == ServerRole::Simulation || role == ServerRole::UnitTests || role == ServerRole::Test) {
+			flushAndExit(FDB_EXIT_SUCCESS);
+		}
+#endif
+
 		if (role == ServerRole::Simulation)
 			printf("Random seed is %u...\n", opts.randomSeed);
 
