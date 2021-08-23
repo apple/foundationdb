@@ -146,7 +146,7 @@ public:
 
 	Future<Void> onError(Error const& e) {
 		// TODO: Improve this:
-		if (e.code() == error_code_transaction_too_old) {
+		if (e.code() == error_code_transaction_too_old || e.code() == error_code_not_committed) {
 			reset();
 			return delay((1 << numRetries++) * 0.01 * deterministicRandom()->random01());
 		}
