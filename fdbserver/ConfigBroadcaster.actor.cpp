@@ -201,6 +201,18 @@ class ConfigBroadcasterImpl {
 	}
 
 	ACTOR static Future<Void> waitForFailure(ConfigBroadcasterImpl* self, Future<Void> watcher, UID clientUID) {
+		// Clean up clientFailures futures. The values in this map should only
+		// be used for testing, and cleaning them up here ensures tests still
+		// have enough time to read the future while making sure the map
+		// doesn't grow unbounded.
+		for (auto it = self->clientFailures.begin(); it != self->clientFailures.end();) {
+			if (it->second.isReady()) {
+				it = self->clientFailures.erase(it);
+			} else {
+				++it;
+			}
+		}
+
 		wait(watcher);
 		TraceEvent(SevDebug, "ConfigBroadcastClientDied", self->id).detail("ClientID", clientUID);
 		self->clients.erase(clientUID);
@@ -222,18 +234,6 @@ class ConfigBroadcasterImpl {
 		if (impl->clients.count(broadcastInterface.id())) {
 			// Client already registered
 			return Void();
-		}
-
-		// Clean up clientFailures futures. The values in this map should only
-		// be used for testing, and cleaning them up here ensures tests still
-		// have enough time to read the future while making sure the map
-		// doesn't grow unbounded.
-		for (auto it = impl->clientFailures.begin(); it != impl->clientFailures.end();) {
-			if (it->second.isReady()) {
-				it = impl->clientFailures.erase(it);
-			} else {
-				++it;
-			}
 		}
 
 		TraceEvent(SevDebug, "ConfigBroadcasterRegisteringWorker", impl->id)
