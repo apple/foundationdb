@@ -113,7 +113,8 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 		var present bool
 		if env != nil {
 			value, present = env[argument.Source]
-		} else {
+		}
+		if !present {
 			value, present = os.LookupEnv(argument.Source)
 		}
 		if !present {

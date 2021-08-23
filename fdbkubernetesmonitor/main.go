@@ -20,11 +20,14 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 
+	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
@@ -47,6 +50,7 @@ var (
 	requiredCopyFiles       []string
 	mainContainerVersion    string
 	currentContainerVersion string
+	additionalEnvFile       string
 )
 
 type executionMode string
@@ -73,6 +77,7 @@ func main() {
 	pflag.StringVar(&copyPrimaryLibrary, "copy-primary-library", "", "A library to copy from /usr/lib/fdb/multiversion to $(output-dir)/lib. This file will be renamed to libfdb_c.so")
 	pflag.StringArrayVar(&requiredCopyFiles, "require-not-empty", nil, "When copying this file, exit with an error if the file is empty")
 	pflag.StringVar(&mainContainerVersion, "main-container-version", "", "For sidecar mode, this specifies the version of the main container. If this is equal to the current container version, no files will be copied")
+	pflag.StringVar(&additionalEnvFile, "additional-env-file", "", "A file with additional environment variables to use when interpreting the monitor configuration")
 	pflag.Parse()
 
 	zapConfig := zap.NewProductionConfig()
@@ -99,7 +104,12 @@ func main() {
 
 	mode := executionMode(executionModeString)
 	if mode == executionModeLauncher {
-		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), fdbserverPath)
+		customEnvironment, err := loadAdditionalEnvironment(logger)
+		if err != nil {
+			logger.Error(err, "Error loading additional environment")
+			os.Exit(1)
+		}
+		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment)
 	} else if mode == executionModeInit {
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
@@ -152,4 +162,27 @@ func getCopyDetails() (map[string]string, map[string]bool, error) {
 		requiredCopyMap[fullFilePath] = true
 	}
 	return copyDetails, requiredCopyMap, nil
+}
+
+func loadAdditionalEnvironment(logger logr.Logger) (map[string]string, error) {
+	var customEnvironment = make(map[string]string)
+	environmentPattern := regexp.MustCompile(`export ([A-Za-z0-9_]+)=([^\n]*)`)
+	if additionalEnvFile != "" {
+		file, err := os.Open(additionalEnvFile)
+		if err != nil {
+			return nil, err
+		}
+
+		envScanner := bufio.NewScanner(file)
+		for envScanner.Scan() {
+			envLine := envScanner.Text()
+			matches := environmentPattern.FindStringSubmatch(envLine)
+			if matches == nil || envLine == "" {
+				logger.Error(nil, "Environment file contains line that we cannot parse", "line", envLine, "environmentPattern", environmentPattern)
+				continue
+			}
+			customEnvironment[matches[1]] = matches[2]
+		}
+	}
+	return customEnvironment, nil
 }

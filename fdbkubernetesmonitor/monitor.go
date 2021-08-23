@@ -46,8 +46,9 @@ type Monitor struct {
 	// ConfigFile defines the path to the config file to load.
 	ConfigFile string
 
-	// FDBServerPath defines the path to the fdbserver binary.
-	FDBServerPath string
+	// CustomEnvironment defines the custom environment variables to use when
+	// interpreting the monitor configuration.
+	CustomEnvironment map[string]string
 
 	// ActiveConfiguration defines the active process configuration.
 	ActiveConfiguration *ProcessConfiguration
@@ -78,17 +79,17 @@ type Monitor struct {
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(logger logr.Logger, configFile string, fdbserverPath string) {
+func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string) {
 	podClient, err := CreatePodClient()
 	if err != nil {
 		panic(err)
 	}
 
 	monitor := &Monitor{
-		ConfigFile:    configFile,
-		FDBServerPath: fdbserverPath,
-		PodClient:     podClient,
-		Logger:        logger,
+		ConfigFile:        configFile,
+		PodClient:         podClient,
+		Logger:            logger,
+		CustomEnvironment: customEnvironment,
 	}
 
 	go func() { monitor.WatchPodTimestamps() }()
@@ -115,7 +116,7 @@ func (monitor *Monitor) LoadConfiguration() {
 	}
 
 	if currentContainerVersion == configuration.Version {
-		configuration.BinaryPath = monitor.FDBServerPath
+		configuration.BinaryPath = fdbserverPath
 	} else {
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version, "fdbserver")
 	}
@@ -130,7 +131,7 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 
-	_, err = configuration.GenerateArguments(1, nil)
+	_, err = configuration.GenerateArguments(1, monitor.CustomEnvironment)
 	if err != nil {
 		monitor.Logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return
@@ -181,7 +182,7 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 		}
 		monitor.Mutex.Unlock()
 
-		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, nil)
+		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, monitor.CustomEnvironment)
 		if err != nil {
 			logger.Error(err, "Error generating arguments for subprocess", "configuration", monitor.ActiveConfiguration)
 			time.Sleep(errorBackoffSeconds * time.Second)
