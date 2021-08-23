@@ -4663,8 +4663,10 @@ public:
 	}
 
 	Future<Void> commit() {
-		if (m_pBuffer == nullptr)
+		if (m_pBuffer == nullptr) {
+			TraceEvent("HeLiuDebugMTree").log();
 			return m_latestCommit;
+		}
 		return commit_impl(this);
 	}
 
@@ -6521,9 +6523,16 @@ private:
 		Future<Void> previousCommit = self->m_latestCommit;
 		self->m_latestCommit = committed.getFuture();
 
+		TraceEvent("HeLiuDebugVersionedBtree0").log();
 		// Wait for the latest commit to be finished.
-		wait(previousCommit);
+		try {
+			wait(previousCommit);
+		} catch (Error& e) {
+			TraceEvent("HeLiuDebugVersionedBTreeWaitPreCommit").error(e, true);
+			throw e;
+		}
 
+		TraceEvent("HeLiuDebugVersionedBtree1").log();
 		self->m_pager->setOldestVersion(self->m_newOldestVersion);
 		debug_printf("%s: Beginning commit of version %" PRId64 ", new oldest version set to %" PRId64 "\n",
 		             self->m_name.c_str(),
@@ -6547,7 +6556,7 @@ private:
 		--mBegin;
 		MutationBuffer::const_iterator mEnd = mutations->lower_bound(all.subtreeUpperBound.key);
 
-		wait(commitSubtree(self,
+		try {wait(commitSubtree(self,
 		                   self->m_pager->getReadSnapshot(latestVersion),
 		                   mutations,
 		                   rootPageID,
@@ -6555,7 +6564,12 @@ private:
 		                   mBegin,
 		                   mEnd,
 		                   &all));
+		} catch (Error& e) {
+			TraceEvent("HeLiuDebugVerionedBtreeCatch1").error(e, true);
+			throw e;
+		}
 
+		TraceEvent("HeLiuDebugVersionedBtree3").log();
 		// If the old root was deleted, write a new empty tree root node and free the old roots
 		if (all.childrenChanged) {
 			if (all.newLinks.empty()) {
@@ -6579,6 +6593,7 @@ private:
 			}
 		}
 
+		TraceEvent("HeLiuDebugVersionedBtree4").log();
 		debug_printf("new root %s\n", toString(rootPageID).c_str());
 		self->m_pHeader->root.set(rootPageID, self->m_headerSpace - sizeof(MetaKey));
 
@@ -6586,17 +6601,26 @@ private:
 		wait(success(self->m_lazyClearActor));
 		debug_printf("Lazy delete freed %u pages\n", self->m_lazyClearActor.get());
 
+		TraceEvent("HeLiuDebugVersionedBtree5").log();
 		self->m_pager->setCommitVersion(writeVersion);
 
 		wait(self->m_lazyClearQueue.flush());
 		self->m_pHeader->lazyDeleteQueue = self->m_lazyClearQueue.getState();
+		TraceEvent("HeLiuDebugVersionedBtree6").log();
 
 		debug_printf("Setting metakey\n");
 		self->m_pager->setMetaKey(self->m_pHeader->asKeyRef());
 
 		debug_printf("%s: Committing pager %" PRId64 "\n", self->m_name.c_str(), writeVersion);
-		wait(self->m_pager->commit());
+		try {
+			wait(self->m_pager->commit());
+		} catch (Error& e)  {
+			TraceEvent("HeLiuDebugVerionedBTreeCommitErrorOut").error(e, true);
+			throw e;
+		}
 		debug_printf("%s: Committed version %" PRId64 "\n", self->m_name.c_str(), writeVersion);
+
+		TraceEvent("HeLiuDebugVersionedBtree7").log();
 
 		// Now that everything is committed we must delete the mutation buffer.
 		// Our buffer's start version should be the oldest mutation buffer version in the map.
@@ -6981,6 +7005,7 @@ public:
 		TraceEvent(SevInfo, "RedwoodShutdownComplete")
 		    .detail("FilePrefix", self->m_filePrefix)
 		    .detail("Dispose", dispose);
+		
 		delete self;
 	}
 

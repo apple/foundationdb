@@ -203,18 +203,26 @@ ACTOR Future<Void> forwardError(PromiseStream<ErrorInfo> errors, Role role, UID 
 
 ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void()) {
 	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
+	TraceEvent("HeLiuDebug", id).detail("actor is ready?", (actor.isReady() ? "Ready" : "Not ready")).log();
 	choose {
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
+			TraceEvent("HeLiuDebug", id).detail("location", "1");
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
+				TraceEvent("HeLiuDebug", id).error(e.getError(), true);
 				// no need to wait.
 			} else {
+				if (e.isError()) TraceEvent("HeLiuDebug", id).error(e.getError(), true);
+				TraceEvent("HeLiuDebug", id).detail("location", "2");
 				wait(onClosed);
 			}
 			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
+				TraceEvent("HeLiuDebug", id).detail("location", "3");
 				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
 			}
-			if (storeError.isReady())
+			if (storeError.isReady()) {
+				TraceEvent("HeLiuDebug", id).detail("location", "4");
 				throw storeError.get().getError();
+			}
 			if (e.isError())
 				throw e.getError();
 			else
@@ -625,7 +633,6 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		}
 	}
 
-
 	for (const auto& grvProxy : dbi.client.grvProxies) {
 		if (grvProxy.addresses().contains(address)) {
 			return true;
@@ -707,13 +714,15 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Last, tests that proxies included in the ClientDbInfo are considered as local.
 	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
 	GrvProxyInterface grvProxyInterf;
-	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	grvProxyInterf.getConsistentReadVersion =
+	    RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
 	CommitProxyInterface commitProxyInterf;
-	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	commitProxyInterf.commit =
+	    RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
@@ -969,8 +978,10 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
 		if (!e.isError())
 			return Void();
-		else if (e.getError().code() != error_code_please_reboot)
+		else if (e.getError().code() != error_code_please_reboot) {
+			TraceEvent("HeLiuDebugRebooterErrorOut", id).error(e.getError(), true);
 			throw e.getError();
+		}
 
 		TraceEvent("StorageServerRequestedReboot", id).log();
 

@@ -106,13 +106,8 @@ public:
 	// of a rollback.
 	virtual Future<Void> init() { return Void(); }
 
-	ThreadReturnPromiseStream<CommitNotification>* getNotifyCommit() { return &notifyCommit; }
-
 protected:
 	virtual ~IKeyValueStore() {}
-
-private:
-	ThreadReturnPromiseStream<CommitNotification> notifyCommit; 
 };
 
 extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,

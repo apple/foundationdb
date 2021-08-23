@@ -194,12 +194,10 @@ struct StorageServerDisk {
 	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
 	Future<Void> commitAsync(Version version) {
-		return onCommit(storage->commit(), IKeyValueStore::CommitNotification(version), storage->getNotifyCommit());
+		return onCommit(storage->commit(), IKeyValueStore::CommitNotification(version), &notifyCommit);
 	}
 
-	FutureStream<IKeyValueStore::CommitNotification> commitNotifications() {
-		return storage->getNotifyCommit()->getFuture();
-	}
+	FutureStream<IKeyValueStore::CommitNotification> commitNotifications() { return notifyCommit.getFuture(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	Future<Key> readNextKeyInclusive(KeyRef key) { return readFirstKey(storage, KeyRangeRef(key, allKeys.end)); }
@@ -234,10 +232,18 @@ private:
 	ACTOR static Future<Void> onCommit(Future<Void> commit,
 	                                   IKeyValueStore::CommitNotification notification,
 	                                   ThreadReturnPromiseStream<IKeyValueStore::CommitNotification>* notifyCommit) {
-		wait(commit);
+		try {
+			wait(commit);
+		} catch (Error& e) {
+			TraceEvent("HeLiuDebugOnCommit").error(e, true);
+			throw e;
+		}
 		notifyCommit->send(notification);
 		return Void();
 	}
+
+private:
+	ThreadReturnPromiseStream<IKeyValueStore::CommitNotification> notifyCommit;
 };
 
 struct UpdateEagerReadInfo {
@@ -603,7 +609,9 @@ public:
 	                                                  // that were only partly available (due to cancelled fetchKeys)
 
 	// The following are in rough order from newest to oldest
-	Version lastTLogVersion, lastVersionWithData, restoredVersion;
+	Version lastTLogVersion;
+	Version lastVersionWithData; // Used for rollback.
+	Version restoredVersion; // The version SS was restored from, it is the last persisted version before restarting.
 	NotifiedVersion version;
 	NotifiedVersion desiredOldestVersion; // We can increase oldestVersion (and then durableVersion) to this version
 	                                      // when the disk permits
@@ -912,6 +920,7 @@ public:
 
 	// This is the maximum version that might be read from storage (the minimum version is durableVersion)
 	Version storageVersion() const { return oldestVersion.get(); }
+	Version persistedVersion() const { return durableVersion.get(); }
 
 	bool isReadable(KeyRangeRef const& keys) {
 		auto sh = shards.intersectingRanges(keys);
@@ -2902,6 +2911,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// Fetch keys gets called while the update actor is processing mutations. data->version will not be updated
 		// until all mutations for a version have been processed. We need to take the durableVersionLock to ensure
 		// data->version is greater than the version of the mutation which caused the fetch to be initiated.
+		// Otherwise, the new shard could lose data since the mutations have not been propagated to the new shard yet.
 		wait(data->durableVersionLock.take());
 
 		shard->phase = AddingShard::Fetching;
@@ -3522,13 +3532,15 @@ private:
 			BinaryReader br(m.param2, Unversioned());
 			br >> rollbackVersion;
 
+			// If the rollback version is smaller than the last applied version, the SS needs restarting.
 			if (rollbackVersion < fromVersion && rollbackVersion > restoredVersion) {
 				TEST(true); // ShardApplyPrivateData shard rollback
 				TraceEvent(SevWarn, "Rollback", data->thisServerID)
 				    .detail("FromVersion", fromVersion)
 				    .detail("ToVersion", rollbackVersion)
 				    .detail("AtVersion", currentVersion)
-				    .detail("StorageVersion", data->storageVersion());
+				    .detail("StorageVersion", data->storageVersion())
+				    .detail("DurableVersion", data->persistedVersion());
 				ASSERT(rollbackVersion >= data->storageVersion());
 				rollback(data, rollbackVersion, currentVersion);
 			}
@@ -3912,11 +3924,18 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
 
+		// If we have seen new versions from the cursor, i.e., version > data->version.
+		// Even if the data was not applied to VersionedData, i.e., all data is cached for addingShard.
 		if (ver != invalidVersion) {
 			data->lastVersionWithData = ver;
 		}
 		ver = cloneCursor2->version().version - 1;
 
+		// All the injected changes are applied @(data->version + 1)
+		// It doesn't matter if there are new updates from the cursor, the lastVersionWithData should be
+		// cloneCursor2->version(). E.g., if there are new updates, then the current lastVersionWithData
+		// will be incorrect.
+		// TODO(heliu): Check the correctness with a simulation test.
 		if (injectedChanges)
 			data->lastVersionWithData = ver;
 
@@ -4000,10 +4019,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		return Void(); // update will get called again ASAP
 	} catch (Error& err) {
 		state Error e = err;
+		TraceEvent("HeLiuDebugUpdateOriginError", data->thisServerID).error(e).backtrace();
 		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot) {
 			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(e).backtrace();
 		} else if (e.code() == error_code_please_reboot) {
+			TraceEvent("HeLiuDebugUpdate()Error", data->thisServerID).error(e).backtrace();
 			wait(data->durableInProgress);
+			TraceEvent("HeLiuDebugWaitedDurableInprogress", data->thisServerID).error(e).backtrace();
 		}
 		throw e;
 	}
@@ -4021,6 +4043,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 		wait(data->desiredOldestVersion.whenAtLeast(data->storageVersion() + 1));
 		wait(delay(0, TaskPriority::UpdateStorage));
+
+		state Promise<Void> durableInProgress;
+		data->durableInProgress = durableInProgress.getFuture();
 
 		state Version startOldestVersion = data->storageVersion();
 		state Version newOldestVersion = data->storageVersion();
@@ -4062,6 +4087,16 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
+		durableInProgress.send(Void());
+		TraceEvent("HeLiuDebugDurableInProgressSent", data->thisServerID).detail("DurableInProgressSent", "Yes");
+		try {
+			wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server
+			                                             // to shut down, so delay to check for cancellation
+		} catch (Error& e) {
+			TraceEvent("HeLiuDebugOnDataPersistedWaitError", data->thisServerID).error(e, true);
+			throw e;
+		}
+
 		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 		data->fetchKeysBytesBudget = SERVER_KNOBS->STORAGE_FETCH_BYTES;
 		data->fetchKeysBudgetUsed.set(false);
@@ -4073,13 +4108,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 ACTOR Future<Void> onDataPersisted(StorageServer* data,
                                    FutureStream<IKeyValueStore::CommitNotification> dataPersisted) {
-
-	try {
-		loop {
+	loop {
+		try {
 			IKeyValueStore::CommitNotification persistedData = waitNext(dataPersisted);
 			state Version lastPersistedVersion = persistedData.version;
-			Promise<Void> durableInProgress;
-			data->durableInProgress = durableInProgress.getFuture();
+			TraceEvent("OnDataPersisted", data->thisServerID).detail("PersistedVersion", lastPersistedVersion);
+			// Promise<Void> durableInProgress;
+			// data->durableInProgress = durableInProgress.getFuture();
 
 			if (lastPersistedVersion > data->rebootAfterDurableVersion) {
 				TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
@@ -4091,14 +4126,11 @@ ACTOR Future<Void> onDataPersisted(StorageServer* data,
 				// brokenPromise of durableInProgress, the worker of the storage server will die.
 				// We will eventually end up with no worker for storage server role.
 				// The data distributor's buildTeam() will get stuck in building a team
-				durableInProgress.sendError(please_reboot());
+				// durableInProgress.sendError(please_reboot());
 				throw please_reboot();
 			}
 
-			durableInProgress.send(Void());
-			wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to
-			                                             // shut down, so delay to check for cancellation
-
+			// durableInProgress.send(Void());
 			// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
 			// effective and are applied after we change the durable version. Also ensure that we have to lock while
 			// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
@@ -4117,13 +4149,10 @@ ACTOR Future<Void> onDataPersisted(StorageServer* data,
 
 			data->durableVersionLock.release();
 			data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
+		} catch (Error& e) {
+			TraceEvent("OnDataPersisted", data->thisServerID).error(e, true);
+			throw e;
 		}
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw; // This is only cancelled when the main loop had exited...no need in this case to clean up
-			       // self
-		error = e;
-		break;
 	}
 }
 
@@ -5181,6 +5210,7 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 			}
 		} catch (Error& e) {
 			state Error err = e;
+			TraceEvent("HeLiuDebugMemoryStoreRecovery").error(err);
 			wait(tr->onError(e));
 			TraceEvent("RemoveStorageServerRetrying").error(err);
 		}
@@ -5398,19 +5428,32 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		state double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
-		wait(self.storage.init());
-		choose {
-			// after a rollback there might be uncommitted changes.
-			// for memory storage engine type, wait until recovery is done before commit
-			when(wait(self.storage.commit())) {}
-
-			when(wait(memoryStoreRecover(persistentData, connFile, self.thisServerID))) {
-				TraceEvent("DisposeStorageServer", self.thisServerID).log();
-				throw worker_removed();
-			}
+		try {
+			wait(self.storage.init());
+		} catch (Error& e) {
+			TraceEvent("HeLiuDebug1", self.thisServerID).error(e, true);
+			throw e;
 		}
+		TraceEvent("HeLiuDebugRestoreInti", self.thisServerID).log();
+		try {
+			choose {
+				// after a rollback there might be uncommitted changes.
+				// for memory storage engine type, wait until recovery is done before commit
+				when(wait(self.storage.commit())) { TraceEvent("HeLiuDebugRestoreCommit", self.thisServerID).log(); }
+
+				when(wait(memoryStoreRecover(persistentData, connFile, self.thisServerID))) {
+					TraceEvent("DisposeStorageServer", self.thisServerID).log();
+					throw worker_removed();
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("HeLiuDebugCatch", self.thisServerID).error(e, true);
+			throw e;
+		}
+		TraceEvent("HeLiuDebugRestoreCommitComplete", self.thisServerID).log();
 
 		bool ok = wait(self.storage.restoreDurableState());
+		TraceEvent("HeLiuDebugRestoreDurable", self.thisServerID).log();
 		if (!ok) {
 			if (recovered.canBeSet())
 				recovered.send(Void());
@@ -5440,6 +5483,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (self.isTss()) {
 			wait(replaceTSSInterface(&self, ssi));
 		} else {
+			// Wait until itself is registered?
 			wait(replaceInterface(&self, ssi));
 		}
 
