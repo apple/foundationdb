@@ -366,10 +366,10 @@
          "released_transactions_per_second":0,
          "throttled_tags":{
             "auto" : {
-                "count" : 0,
+               "count":0,
             },
-            "manual" : {
-                "count" : 0
+            "manual":{
+               "count":0
             }
          },
          "limiting_queue_bytes_storage_server":0,
