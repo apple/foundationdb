@@ -84,8 +84,31 @@ spec:
           volumeMounts:
             - name: dynamic-conf
               mountPath: /var/fdb/dynamic-conf
+            - name: shared-binaries
+              mountPath: /var/fdb/shared-binaries
             - name: data
               mountPath: /var/fdb/data
+            - name: logs
+              mountPath: /var/fdb/logs
+        - name: foundationdb-sidecar
+          image: foundationdb/foundationdb-kubernetes:latest-sidecar
+          imagePullPolicy: IfNotPresent
+          args:
+            - --mode
+            - sidecar
+            - --main-container-version
+            - 6.3.13
+            - --output-dir
+            - /var/fdb/shared-binaries
+            - --copy-binary
+            - fdbserver
+            - --copy-binary
+            - fdbcli
+            - --log-path
+            - /var/fdb/logs/sidecar.log
+          volumeMounts:
+            - name: shared-binaries
+              mountPath: /var/fdb/shared-binaries
             - name: logs
               mountPath: /var/fdb/logs
       serviceAccountName: fdb-kubernetes-example
@@ -94,6 +117,8 @@ spec:
           configMap:
             name: fdb-kubernetes-example-config
         - name: logs
+          emptyDir: {}
+        - name: shared-binaries
           emptyDir: {}
   volumeClaimTemplates:
     - metadata:
@@ -114,7 +139,7 @@ data:
   config.json: |
     {
       "serverCount": 0,
-      "version": "6.3.15",
+      "version": "6.3.13",
       "arguments": [
         {"value": "--cluster_file"},
         {"value": "/var/fdb/data/fdb.cluster"},
@@ -186,3 +211,75 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: fdb-kubernetes-example
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fdb-kubernetes-example-client
+spec:
+  replicas: 2
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: fdb-kubernetes-example-client
+  template:
+    metadata:
+      labels:
+        app: fdb-kubernetes-example-client
+      name: fdb-kubernetes-example-client
+    spec:
+      volumes:
+        - name: config-map
+          configMap:
+            name: fdb-kubernetes-example-config
+            items:
+              - key: fdb.cluster
+                path: fdb.cluster
+        - name: dynamic-conf
+          emptyDir: {}
+      initContainers:
+        - name: foundationdb-kubernetes-init
+          image: foundationdb/foundationdb-kubernetes:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--mode"
+            - "init"
+            - "--input-dir"
+            - "/var/input-files"
+            - "--output-dir"
+            - "/var/output-files"
+            - "--copy-file"
+            - "fdb.cluster"
+            - "--require-not-empty"
+            - "fdb.cluster"
+            - "--copy-library"
+            - "6.1"
+            - "--copy-library"
+            - "6.2"
+            - "--copy-primary-library"
+            - "6.3"
+            - "--copy-binary"
+            - "fdbcli"
+          volumeMounts:
+            - name: config-map
+              mountPath: /var/input-files
+            - name: dynamic-conf
+              mountPath: /var/output-files
+      containers:
+        - name: client
+          image: foundationdb/foundationdb-sample-python-app:latest
+          imagePullPolicy: Always
+          env:
+            - name: FDB_CLUSTER_FILE
+              value: /var/dynamic-conf/fdb.cluster
+            - name: FDB_API_VERSION
+              value: "610"
+            - name: FDB_NETWORK_OPTION_TRACE_LOG_GROUP
+              value: fdb-kubernetes-example-client
+            - name: FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY
+              value: /var/dynamic-conf/lib/multiversion
+            - name: LD_LIBRARY_PATH
+              value: /var/dynamic-conf/lib
+          volumeMounts:
+            - name: dynamic-conf
+              mountPath: /var/dynamic-conf

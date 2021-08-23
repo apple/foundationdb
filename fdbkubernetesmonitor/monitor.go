@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"sync"
 	"syscall"
 	"time"
@@ -113,9 +114,25 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 
+	if currentContainerVersion == configuration.Version {
+		configuration.BinaryPath = monitor.FDBServerPath
+	} else {
+		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version, "fdbserver")
+	}
+
+	binaryStat, err := os.Stat(configuration.BinaryPath)
+	if err != nil {
+		monitor.Logger.Error(err, "Error checking binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
+		return
+	}
+	if binaryStat.Mode()&0o100 == 0 {
+		monitor.Logger.Error(nil, "New binary path is not executable", "configuration", configuration, "binaryPath", configuration.BinaryPath)
+		return
+	}
+
 	_, err = configuration.GenerateArguments(1, nil)
 	if err != nil {
-		monitor.Logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration)
+		monitor.Logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return
 	}
 
@@ -165,7 +182,6 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 		monitor.Mutex.Unlock()
 
 		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, nil)
-		arguments = append([]string{monitor.FDBServerPath}, arguments...)
 		if err != nil {
 			logger.Error(err, "Error generating arguments for subprocess", "configuration", monitor.ActiveConfiguration)
 			time.Sleep(errorBackoffSeconds * time.Second)

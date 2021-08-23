@@ -57,11 +57,12 @@ COPY packaging/docker/website /mnt/website/
 RUN mkdir -p /var/fdb/logs && mkdir -p /var/fdb/tmp && \
 	curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz | tar zxf - --strip-components=1 && \
 	chmod u+x fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent && \
-	mv fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent /usr/bin
+	mv fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent /usr/bin && \
+	echo ${FDB_VERSION} > /var/fdb/version
 
 # Install additional FoundationDB Client Libraries
-ADD packaging/docker/release/download_multiversion_libraries.bash /var/fdb/tmp
-RUN	bash /var/fdb/tmp/download_multiversion_libraries.bash $FDB_WEBSITE $FDB_LIBRARY_VERSIONS
+RUN mkdir -p /usr/lib/fdb/multiversion && \
+    for version in $FDB_LIBRARY_VERSIONS; do curl $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so; done
 
 # Clean up temporary directories
 RUN	rm -rf /mnt/website && rm -r /var/fdb/tmp

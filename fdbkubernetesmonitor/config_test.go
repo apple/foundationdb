@@ -24,9 +24,6 @@ import (
 	"os"
 	"reflect"
 	"testing"
-
-	"github.com/go-logr/zapr"
-	"go.uber.org/zap"
 )
 
 func loadConfigFromFile(path string) (*ProcessConfiguration, error) {
@@ -74,6 +71,33 @@ func TestGeneratingArgumentsForDefaultConfig(t *testing.T) {
 		t.Logf("Expected arguments %v, but got arguments %v", expectedArguments, arguments)
 		t.Fail()
 	}
+
+	config.BinaryPath = "/usr/bin/fdbserver"
+
+	arguments, err = config.GenerateArguments(1, map[string]string{
+		"FDB_PUBLIC_IP":   "10.0.0.1",
+		"FDB_POD_IP":      "192.168.0.1",
+		"FDB_ZONE_ID":     "zone1",
+		"FDB_INSTANCE_ID": "storage-1",
+	})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	expectedArguments = []string{
+		"/usr/bin/fdbserver",
+		"--cluster_file", ".testdata/fdb.cluster",
+		"--public_address", "10.0.0.1:4501", "--listen_address", "192.168.0.1:4501",
+		"--datadir", ".testdata/data/1", "--class", "storage",
+		"--locality_zoneid", "zone1", "--locality_instance-id", "storage-1",
+		"--locality_process-id", "storage-1-1",
+	}
+
+	if !reflect.DeepEqual(arguments, expectedArguments) {
+		t.Logf("Expected arguments %v, but got arguments %v", expectedArguments, arguments)
+		t.Fail()
+	}
 }
 
 func TestGeneratingArgumentForEnvironmentVariable(t *testing.T) {
@@ -102,13 +126,4 @@ func TestGeneratingArgumentForEnvironmentVariable(t *testing.T) {
 		t.Fail()
 		return
 	}
-
-	zapLogger, err := zap.NewDevelopment()
-	if err != nil {
-		panic(err)
-	}
-
-	log := zapr.NewLogger(zapLogger)
-	log.Info("JPB test", "key", "value")
-	t.Fail()
 }

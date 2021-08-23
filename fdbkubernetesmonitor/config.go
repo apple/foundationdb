@@ -33,6 +33,9 @@ type ProcessConfiguration struct {
 	// ServerCount defines the number of processes to start.
 	ServerCount int `json:"serverCount,omitempty"`
 
+	// BinaryPath provides the path to the binary to launch.
+	BinaryPath string `json:"-"`
+
 	// Arguments provides the arugments to the process.
 	Arguments []Argument `json:"arguments,omitempty"`
 }
@@ -125,13 +128,16 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 // GenerateArguments intreprets the arguments in the process configuration and
 // generates a command invocation.
 func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, env map[string]string) ([]string, error) {
-	results := make([]string, len(configuration.Arguments))
-	for indexOfArgument, argument := range configuration.Arguments {
+	results := make([]string, 0, len(configuration.Arguments)+1)
+	if configuration.BinaryPath != "" {
+		results = append(results, configuration.BinaryPath)
+	}
+	for _, argument := range configuration.Arguments {
 		result, err := argument.GenerateArgument(processNumber, env)
 		if err != nil {
 			return nil, err
 		}
-		results[indexOfArgument] = result
+		results = append(results, result)
 	}
 	return results, nil
 }

@@ -4,7 +4,8 @@ This package provides a launcher program for running FoundationDB in Kubernetes.
 To test this, run the following commands from the root of the FoundationDB
 repository:
 
-		docker build -t foundationdb/foundationdb-kubernetes:latest --build-arg FDB_VERSION=6.3.15 --build-arg FDB_LIBRARY_VERSIONS="6.3.15 6.2.30 6.1.13" -f packaging/docker/kubernetes/Dockerfile .
+		docker build -t foundationdb/foundationdb-kubernetes:latest --build-arg FDB_VERSION=6.3.13 --build-arg FDB_LIBRARY_VERSIONS="6.3.13 6.2.30 6.1.13" -f packaging/docker/kubernetes/Dockerfile .
+		docker build -t foundationdb/foundationdb-kubernetes:latest-sidecar --build-arg FDB_VERSION=6.3.15 --build-arg FDB_LIBRARY_VERSIONS="6.3.15 6.2.30 6.1.13" -f packaging/docker/kubernetes/Dockerfile .
 		kubectl apply -f packaging/docker/kubernetes/test_config.yaml
 		# Wait for the pods to become ready
 		ips=$(kubectl get pod -l app=fdb-kubernetes-example -o json | jq -j '[[.items|.[]|select(.status.podIP!="")]|limit(3;.[])|.status.podIP+":4501"]|join(",")')
