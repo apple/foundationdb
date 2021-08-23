@@ -44,8 +44,6 @@ public:
 	bool operator==(TestKnobs const&) const;
 	bool operator!=(TestKnobs const&) const;
 	void initialize();
-
-	bool isAtomic(std::string const& knob) const { return knob.find("atomic") != std::string::npos; }
 };
 
 /*
