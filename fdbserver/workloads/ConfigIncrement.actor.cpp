@@ -84,7 +84,9 @@ class ConfigIncrementWorkload : public TestWorkload {
 					TraceEvent(SevDebug, "ConfigIncrementError")
 					    .detail("LastKnownValue", self->lastKnownValue)
 					    .error(e);
-					wait(tr->onError(e));
+					// TODO: Fix onError function
+					// wait(tr->onError(e));
+					wait(delay(0.1));
 					++self->retries;
 				}
 			}
