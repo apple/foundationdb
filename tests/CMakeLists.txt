@@ -15,13 +15,18 @@ set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
 # to test upgrades
 if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
-    fdbserver
+    fdbserver fdbserver.exe
     HINTS /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
-    set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
-    set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
+    if(WIN32)
+      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/@CTEST_CONFIGURATION_TYPE@/fdbserver.exe)
+      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
+    else()
+      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
+      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
+    endif()
     message(WARNING "\
   No old fdbserver binary found - using ${fdbserver_location} \
   It is recommended to install the current stable version from https://www.foundationdb.org/download/ \
