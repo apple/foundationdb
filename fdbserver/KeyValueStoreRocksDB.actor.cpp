@@ -181,6 +181,16 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 	}
 }
 
+Error statusToError(const rocksdb::Status& s) {
+	if (s.IsIOError()) {
+		return io_error();
+	} else if (s.IsTimedOut()) {
+		return transaction_too_old();
+	} else {
+		return unknown_error();
+	}
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -198,14 +208,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		void init() override {}
-
-		Error statusToError(const rocksdb::Status& s) {
-			if (s == rocksdb::Status::IOError()) {
-				return io_error();
-			} else {
-				return unknown_error();
-			}
-		}
 
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
@@ -309,16 +311,33 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	struct Reader : IThreadPoolReceiver {
 		DB& db;
+		double readValueTimeout;
+		double readValuePrefixTimeout;
+		double readRangeTimeout;
 
-		explicit Reader(DB& db) : db(db) {}
+		explicit Reader(DB& db) : db(db) {
+			if (g_network->isSimulated()) {
+				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
+				// very high load and single read thread cannot process all the load within the timeouts.
+				readValueTimeout = 5 * 60;
+				readValuePrefixTimeout = 5 * 60;
+				readRangeTimeout = 5 * 60;
+			} else {
+				readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
+				readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
+				readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
+			}
+		}
 
 		void init() override {}
 
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
 			Optional<UID> debugID;
+			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(KeyRef key, Optional<UID> debugID) : key(key), debugID(debugID) {}
+			ReadValueAction(KeyRef key, Optional<UID> debugID)
+			  : key(key), debugID(debugID), startTime(timer_monotonic()) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
@@ -327,19 +346,32 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
+			if (timer_monotonic() - a.startTime > readValueTimeout) {
+				TraceEvent(SevWarn, "RocksDBError")
+				    .detail("Error", "Read value request timedout")
+				    .detail("Method", "ReadValueAction")
+				    .detail("Timeout value", readValueTimeout);
+				a.result.sendError(transaction_too_old());
+				return;
+			}
 			rocksdb::PinnableSlice value;
-			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto options = getReadOptions();
+			uint64_t deadlineMircos =
+			    db->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 				traceBatch.get().dump();
 			}
 			if (s.ok()) {
 				a.result.send(Value(toStringRef(value)));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
@@ -347,13 +379,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Key key;
 			int maxLength;
 			Optional<UID> debugID;
+			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), debugID(debugID){};
+			  : key(key), maxLength(maxLength), debugID(debugID), startTime(timer_monotonic()){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
-			rocksdb::PinnableSlice value;
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
 				traceBatch = { TraceBatch{} };
@@ -361,7 +393,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
+			if (timer_monotonic() - a.startTime > readValuePrefixTimeout) {
+				TraceEvent(SevWarn, "RocksDBError")
+				    .detail("Error", "Read value prefix request timedout")
+				    .detail("Method", "ReadValuePrefixAction")
+				    .detail("Timeout value", readValuePrefixTimeout);
+				a.result.sendError(transaction_too_old());
+				return;
+			}
+			rocksdb::PinnableSlice value;
+			auto options = getReadOptions();
+			uint64_t deadlineMircos =
+			    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValuePrefixDebug",
 				                          a.debugID.get().first(),
@@ -371,25 +417,33 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
 				                              std::min(value.size(), size_t(a.maxLength)))));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError")
-					    .detail("Error", s.ToString())
-					    .detail("Method", "ReadValuePrefix");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
+			double startTime;
 			ThreadReturnPromise<RangeResult> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
+			if (timer_monotonic() - a.startTime > readRangeTimeout) {
+				TraceEvent(SevWarn, "RocksDBError")
+				    .detail("Error", "Read range request timedout")
+				    .detail("Method", "ReadRangeAction")
+				    .detail("Timeout value", readRangeTimeout);
+				a.result.sendError(transaction_too_old());
+				return;
+			}
+
 			RangeResult result;
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				a.result.send(result);
@@ -397,6 +451,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
 			auto options = getReadOptions();
+			uint64_t deadlineMircos =
+			    db->GetEnv()->NowMicros() + (readRangeTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			// When using a prefix extractor, ensure that keys are returned in order even if they cross
 			// a prefix boundary.
 			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
@@ -412,6 +470,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
 					if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
+					}
+					if (timer_monotonic() - a.startTime > readRangeTimeout) {
+						TraceEvent(SevWarn, "RocksDBError")
+						    .detail("Error", "Read range request timedout")
+						    .detail("Method", "ReadRangeAction")
+						    .detail("Timeout value", readRangeTimeout);
+						a.result.sendError(transaction_too_old());
+						return;
 					}
 					cursor->Next();
 				}
@@ -432,6 +498,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					if (result.size() >= -a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
 					}
+					if (timer_monotonic() - a.startTime > readRangeTimeout) {
+						TraceEvent(SevWarn, "RocksDBError")
+						    .detail("Error", "Read range request timedout")
+						    .detail("Method", "ReadRangeAction")
+						    .detail("Timeout value", readRangeTimeout);
+						a.result.sendError(transaction_too_old());
+						return;
+					}
 					cursor->Prev();
 				}
 				s = cursor->status();
@@ -439,6 +513,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
+				a.result.sendError(statusToError(s));
+				return;
 			}
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);

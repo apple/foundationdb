@@ -44,7 +44,7 @@ public:
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
 	Future<Void> registerWorker(Version lastSeenVersion,
-	                            ConfigClassSet configClassSet,
+	                            ConfigClassSet const& configClassSet,
 	                            Future<Void> watcher,
 	                            ConfigBroadcastInterface worker);
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
