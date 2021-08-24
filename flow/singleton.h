@@ -27,6 +27,11 @@
 #include <cstdlib>
 #include <cassert>
 
+#ifdef WIN32
+#include <system_error>
+#include <Windows.h>
+#endif
+
 namespace crossbow {
 
 /**
@@ -36,6 +41,39 @@ namespace crossbow {
  * This can be used to disable synchronization in the singleton
  * holder.
  */
+
+#ifdef _WIN32
+class WinLockGuard {
+	HANDLE& mutex;
+
+public:
+	explicit WinLockGuard(HANDLE& mutex) : mutex(mutex) {
+		HANDLE result = CreateMutexA(NULL, FALSE, NULL);
+		if (result == NULL) {
+			throw std::system_error(GetLastError(), std::system_category(), nullptr);
+		}
+		mutex = result;
+		if (WaitForSingleObject(mutex, INFINITE) != WAIT_OBJECT_0) {
+			throw std::system_error(GetLastError(), std::system_category(), nullptr);
+		}
+	}
+
+	~WinLockGuard() noexcept {
+		if (!ReleaseMutex(mutex)) {
+			throw std::system_error(GetLastError(), std::system_category(), nullptr);
+		}
+	}
+
+	WinLockGuard(const WinLockGuard&) = delete;
+	WinLockGuard& operator=(const WinLockGuard&) = delete;
+};
+#define MUTEX_GUARD WinLockGuard
+#define MUTEX_TYPE HANDLE
+#else
+#define MUTEX_GUARD std::lock_guard<Mutex>
+#define MUTEX_TYPE std::mutex
+#endif
+
 struct no_locking {
 	void lock() {}
 	void unlock() {}
@@ -146,7 +184,7 @@ struct lifetime_traits<default_lifetime<T>> {
 template <typename Type,
           typename Create = create_static<Type>,
           typename LifetimePolicy = default_lifetime<Type>,
-          typename Mutex = std::mutex>
+          typename Mutex = MUTEX_TYPE>
 class singleton {
 public:
 	typedef Type value_type;
@@ -173,7 +211,7 @@ public:
 		static_assert(Create::supports_recreation || !lifetime_traits<LifetimePolicy>::supports_recreation,
 		              "The creation policy does not support instance recreation, while the lifetime does support it.");
 		if (!instance_) {
-			std::lock_guard<Mutex> l(mutex_);
+			MUTEX_GUARD l(mutex_);
 			if (!instance_) {
 				if (destroyed_) {
 					destroyed_ = false;
