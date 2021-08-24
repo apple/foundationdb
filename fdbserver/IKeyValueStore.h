@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IThreadPool.h"
+#include "flow/Error.h"
 
 class IClosable {
 public:
@@ -57,6 +58,10 @@ public:
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
+
+	virtual Future<Void> commitAsync(Version version, bool sequential = false) {
+		throw internal_error_msg("Not Implemented Yet.");
+	}
 
 	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) = 0;
 

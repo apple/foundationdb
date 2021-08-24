@@ -7,6 +7,7 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
+#include <rocksdb/types.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
@@ -14,6 +15,7 @@
 #include "flow/ThreadHelper.actor.h"
 
 #include <memory>
+#include <mutex>
 #include <tuple>
 #include <vector>
 
@@ -254,6 +256,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		struct CommitAction : TypedAction<Writer, CommitAction> {
 			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
 			ThreadReturnPromise<Void> done;
+			RocksDBKeyValueStore* kv;
+			Version version;
+			ThreadReturnPromiseStream<PersistNotification>* persist;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
@@ -270,6 +275,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
+				if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+					ASSERT(a.kv != nullptr && a.version != invalidVersion && a.persist != nullptr);
+					kv->addVersionPair(db->GetLatestSequenceNumber(), a.version);
+					a.persist->send(PersistNotification(version));
+				}
 				for (const auto& keyRange : deletes) {
 					auto begin = toSlice(keyRange.begin);
 					auto end = toSlice(keyRange.end);
@@ -624,6 +634,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
+	Future<Void> commitAsync(Version version, bool sequential) override {
+		// If there is nothing to write, don't write.
+		if (writeBatch == nullptr) {
+			return Void();
+		}
+		auto a = new Writer::CommitAction();
+		a->batchToCommit = std::move(writeBatch);
+		auto res = a->done.getFuture();
+		a->kv = this;
+		a->version = version;
+		a->persist = getPersistPromiseStream();
+		writeThread->post(a);
+		return res;
+	}
+
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override {
 		auto a = new Reader::ReadValueAction(key, debugID);
 		auto res = a->result.getFuture();
@@ -655,6 +680,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		return StorageBytes(free, total, live, free);
 	}
+
+	void addVersionPair(const rocksdb::SequenceNumber seqno, const Version version) {
+		std::lock_guard<std::mutex> lock(mu);
+		versionMap[seqno] = version;
+	}
+
+	Version getVersion(const rocksdb::SequenceNumber seqno) {
+		std::lock_guard<std::mutex> lock(mu);
+		const auto it = versionMap.find(seqno);
+		if (it == versionMap.end()) {
+			return -1;
+		}
+		return it->second;
+	}
+
+private:
+	std::mutex mu;
+	std::unordered_map<rocksdb::SequenceNumber, Version version> versionMap;
 };
 
 } // namespace

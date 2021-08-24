@@ -194,10 +194,7 @@ struct StorageServerDisk {
 	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
 
-	Future<Void> commitAsync(Version version) {
-		return onCommit(
-		    storage->commit(), IKeyValueStore::PersistNotification(version), storage->getPersistPromiseStream());
-	}
+	Future<Void> commitAsync(Version version) { return storage->commitAsync(version); }
 
 	FutureStream<IKeyValueStore::PersistNotification> getPersistFutureStream() {
 		return storage->getPersistFutureStream();
@@ -4067,7 +4064,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
-		state Future<Void> durable = data->storage.commitAsync(newOldestVersion);
+		state Future<Void> durable =
+		    SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT ? data->storage.commitAsync(newOldestVersion) : data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0) {
@@ -4079,9 +4077,43 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
+		if (!SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT && newOldestVersion > data->rebootAfterDurableVersion) {
+			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
+			    .detail("NewOldestVersion", newOldestVersion)
+			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
+			// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
+			// Otherwise, in the race situation when storage server receives both reboot and
+			// brokenPromise of durableInProgress, the worker of the storage server will die.
+			// We will eventually end up with no worker for storage server role.
+			// The data distributor's buildTeam() will get stuck in building a team
+			durableInProgress.sendError(please_reboot());
+			throw please_reboot();
+		}
+
 		durableInProgress.send(Void());
 		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to shut
 		                                             // down, so delay to check for cancellation
+		if (!SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+			// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
+			// effective and are applied after we change the durable version. Also ensure that we have to lock while
+			// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
+			// loaded.
+			state double beforeSSDurableVersionUpdate = now();
+			wait(data->durableVersionLock.take());
+			data->popVersion(data->durableVersion.get() + 1);
+
+			while (!changeDurableVersion(data, newOldestVersion)) {
+				if (g_network->check_yield(TaskPriority::UpdateStorage)) {
+					data->durableVersionLock.release();
+					wait(delay(0, TaskPriority::UpdateStorage));
+					wait(data->durableVersionLock.take());
+				}
+			}
+
+			data->durableVersionLock.release();
+			data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
+		}
 
 		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 		data->fetchKeysBytesBudget = SERVER_KNOBS->STORAGE_FETCH_BYTES;
@@ -5035,7 +5067,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	self->actors.add(updateStorage(self));
-	self->actors.add(onDataPersisted(self, self->storage.getPersistFutureStream()));
+	if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+		self->actors.add(onDataPersisted(self, self->storage.getPersistFutureStream()));
+	}
 	self->actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
 	self->actors.add(self->otherError.getFuture());
 	self->actors.add(metricsCore(self, ssi));
