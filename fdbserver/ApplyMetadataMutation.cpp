@@ -53,6 +53,34 @@ inline bool isSystemKey(KeyRef key) {
 // will be done on all commit proxies at the same time. Otherwise, the data stored in txnStateStore will become
 // corrupted.
 class ApplyMetadataMutationsImpl {
+
+public:
+	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
+	                           const UID& dbgid_,
+	                           Arena& arena_,
+	                           const VectorRef<MutationRef>& mutations_,
+	                           IKeyValueStore* txnStateStore_)
+	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
+	    confChange(dummyConfChange) {}
+
+	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
+	                           Arena& arena_,
+	                           const VectorRef<MutationRef>& mutations_,
+	                           ProxyCommitData& proxyCommitData_,
+	                           Reference<ILogSystem> logSystem_,
+	                           LogPushData* toCommit_,
+	                           bool& confChange_,
+	                           Version popVersion_,
+	                           bool initialCommit_)
+	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
+	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
+	    logSystem(logSystem_), popVersion(popVersion_), vecBackupKeys(&proxyCommitData_.vecBackupKeys),
+	    keyInfo(&proxyCommitData_.keyInfo), cacheInfo(&proxyCommitData_.cacheInfo),
+	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
+	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), commitVersion(&proxyCommitData_.committedVersion),
+	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
+	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_) {}
+
 private:
 	// The following variables are incoming parameters
 
@@ -334,10 +362,7 @@ private:
 	}
 
 	void checkSetTSSQuarantineKeys(MutationRef m) {
-		if (!m.param1.startsWith(tssQuarantineKeys.begin)) {
-			return;
-		}
-		if (initialCommit) {
+		if (!m.param1.startsWith(tssQuarantineKeys.begin) || initialCommit) {
 			return;
 		}
 		txnStateStore->set(KeyValueRef(m.param1, m.param2));
@@ -814,10 +839,7 @@ private:
 	}
 
 	void checkClearTssQuarantineKeys(MutationRef m, KeyRangeRef range) {
-		if (!tssQuarantineKeys.intersects(range)) {
-			return;
-		}
-		if (initialCommit) {
+		if (!tssQuarantineKeys.intersects(range) || initialCommit) {
 			return;
 		}
 
@@ -936,32 +958,6 @@ private:
 	}
 
 public:
-	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
-	                           const UID& dbgid_,
-	                           Arena& arena_,
-	                           const VectorRef<MutationRef>& mutations_,
-	                           IKeyValueStore* txnStateStore_)
-	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
-	    confChange(dummyConfChange) {}
-
-	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
-	                           Arena& arena_,
-	                           const VectorRef<MutationRef>& mutations_,
-	                           ProxyCommitData& proxyCommitData_,
-	                           Reference<ILogSystem> logSystem_,
-	                           LogPushData* toCommit_,
-	                           bool& confChange_,
-	                           Version popVersion_,
-	                           bool initialCommit_)
-	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
-	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
-	    logSystem(logSystem_), popVersion(popVersion_), vecBackupKeys(&proxyCommitData_.vecBackupKeys),
-	    keyInfo(&proxyCommitData_.keyInfo), cacheInfo(&proxyCommitData_.cacheInfo),
-	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
-	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), commitVersion(&proxyCommitData_.committedVersion),
-	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_) {}
-
 	void apply() {
 		for (auto const& m : mutations) {
 			if (toCommit) {
