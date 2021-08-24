@@ -639,11 +639,6 @@ void initHelp() {
 	                                 "namespace for all the profiling-related commands.",
 	                                 "Different types support different actions.  Run `profile` to get a list of "
 	                                 "types, and iteratively explore the help.\n");
-	helpMap["cache_range"] = CommandHelp(
-	    "cache_range <set|clear> <BEGINKEY> <ENDKEY>",
-	    "Mark a key range to add to or remove from storage caches.",
-	    "Use the storage caches to assist in balancing hot read shards. Set the appropriate ranges when experiencing "
-	    "heavy load, and clear them when they are no longer necessary.");
 	helpMap["lock"] = CommandHelp(
 	    "lock",
 	    "lock the database with a randomly generated lockUID",
@@ -4406,20 +4401,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "cache_range")) {
-					if (tokens.size() != 4) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(cacheRangeCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-						continue;
-					}
-					KeyRangeRef cacheRange(tokens[2], tokens[3]);
-					if (tokencmp(tokens[1], "set")) {
-						wait(makeInterruptable(addCachedRange(db, cacheRange)));
-					} else if (tokencmp(tokens[1], "clear")) {
-						wait(makeInterruptable(removeCachedRange(db, cacheRange)));
-					} else {
-						printUsage(tokens[0]);
-						is_error = true;
-					}
 					continue;
 				}
 
