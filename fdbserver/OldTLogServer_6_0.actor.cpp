@@ -1157,7 +1157,7 @@ Version poppedVersion(Reference<LogData> self, Tag tag) {
 		if (tag == txsTag || tag.locality == tagLocalityTxs) {
 			return 0;
 		}
-		return self->recoveredAt;
+		return self->recoveredAt + 1;
 	}
 	return tagData->popped;
 }
