@@ -3103,9 +3103,14 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 
 	printf("Initializing CC s3 stuff\n");
 	try {
-		printf("CC constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
-		bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
-		printf("CC constructed backup container\n");
+		if (g_network->isSimulated()) {
+			printf("CC constructing simulated backup container\n");
+			bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
+		} else {
+			printf("CC constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+			bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+			printf("CC constructed backup container\n");
+		}
 	} catch (Error& e) {
 		printf("CC got backup container init error %s\n", e.name());
 		return Void();

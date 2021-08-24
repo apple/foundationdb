@@ -18,22 +18,20 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/simulator.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Tuple.h"
-
-// #include "fdbclient/S3BlobStore.h"
-// #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbserver/BlobWorker.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/Arena.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-// TODO might need to use IBackupFile instead of blob store interface to support non-s3 things like azure?
+// TODO add comments + documentation
 struct BlobFileIndex {
 	Version version;
 	std::string filename;
@@ -694,9 +692,14 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 
 	printf("Initializing blob worker s3 stuff\n");
 	try {
-		printf("BW constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
-		self.bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
-		printf("BW constructed backup container\n");
+		if (g_network->isSimulated()) {
+			printf("BW constructing simulated backup container\n");
+			self.bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
+		} else {
+			printf("BW constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+			self.bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+			printf("BW constructed backup container\n");
+		}
 	} catch (Error& e) {
 		printf("BW got backup container init error %s\n", e.name());
 		return Void();

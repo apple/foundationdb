@@ -29,6 +29,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// TODO add comments + documentation
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena ar,
                            VectorRef<KeyRangeRef>* rangesToAdd,
@@ -262,9 +263,8 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 				if (g_network->isSimulated()) {
 					printf("Hacking blob ranges!\n");
 					RangeResult fakeResults;
-					KeyValueRef one =
-					    KeyValueRef(StringRef(ar, LiteralStringRef("\x01")), StringRef(ar, LiteralStringRef("1")));
-					KeyValueRef two = KeyValueRef(StringRef(ar, LiteralStringRef("\x02")), StringRef());
+					KeyValueRef one = KeyValueRef(normalKeys.begin, StringRef(ar, LiteralStringRef("1")));
+					KeyValueRef two = KeyValueRef(normalKeys.end, StringRef());
 					fakeResults.push_back(fakeResults.arena(), one);
 					fakeResults.push_back(fakeResults.arena(), two);
 					updateClientBlobRanges(&knownBlobRanges, fakeResults, ar, &rangesToAdd, &rangesToRemove);
