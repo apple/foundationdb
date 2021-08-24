@@ -20,7 +20,7 @@
 
 #include "fdbclient/ServerKnobs.h"
 
-#define init(knob, value) initKnob(knob, value, #knob)
+#define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
 ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	initialize(randomize, clientKnobs, isSimulated);

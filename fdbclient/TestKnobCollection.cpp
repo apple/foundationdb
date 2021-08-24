@@ -56,23 +56,36 @@ bool TestKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef co
 	return serverKnobCollection.trySetKnob(knobName, knobValue) || knobValue.visitSetKnob(knobName, testKnobs);
 }
 
-#define init(knob, value) initKnob(knob, value, #knob)
+bool TestKnobCollection::isAtomic(std::string const& knobName) const {
+	return serverKnobCollection.isAtomic(knobName) || testKnobs.isAtomic(knobName);
+}
+
+#define init(knob, value, atomic) initKnob(knob, value, #knob, atomic)
 
 TestKnobs::TestKnobs() {
 	initialize();
 }
 
 void TestKnobs::initialize() {
-	init(TEST_LONG, 0);
-	init(TEST_INT, 0);
-	init(TEST_DOUBLE, 0.0);
-	init(TEST_BOOL, false);
-	init(TEST_STRING, "");
+	init(TEST_LONG, 0, Atomic::NO);
+	init(TEST_INT, 0, Atomic::NO);
+	init(TEST_DOUBLE, 0.0, Atomic::NO);
+	init(TEST_BOOL, false, Atomic::NO);
+	init(TEST_STRING, "", Atomic::NO);
+
+	init(TEST_ATOMIC_LONG, 0, Atomic::YES);
+	init(TEST_ATOMIC_INT, 0, Atomic::YES);
+	init(TEST_ATOMIC_DOUBLE, 0.0, Atomic::YES);
+	init(TEST_ATOMIC_BOOL, false, Atomic::YES);
+	init(TEST_ATOMIC_STRING, "", Atomic::YES);
 }
 
 bool TestKnobs::operator==(TestKnobs const& rhs) const {
 	return (TEST_LONG == rhs.TEST_LONG) && (TEST_INT == rhs.TEST_INT) && (TEST_DOUBLE == rhs.TEST_DOUBLE) &&
-	       (TEST_BOOL == rhs.TEST_BOOL) && (TEST_STRING == rhs.TEST_STRING);
+	       (TEST_BOOL == rhs.TEST_BOOL) && (TEST_STRING == rhs.TEST_STRING) &&
+	       (TEST_ATOMIC_LONG == rhs.TEST_ATOMIC_LONG) && (TEST_ATOMIC_INT == rhs.TEST_ATOMIC_INT) &&
+	       (TEST_ATOMIC_DOUBLE == rhs.TEST_ATOMIC_DOUBLE) && (TEST_ATOMIC_BOOL == rhs.TEST_ATOMIC_BOOL) &&
+	       (TEST_ATOMIC_STRING == rhs.TEST_ATOMIC_STRING);
 }
 
 bool TestKnobs::operator!=(TestKnobs const& rhs) const {
