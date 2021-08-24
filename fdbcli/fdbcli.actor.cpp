@@ -639,11 +639,6 @@ void initHelp() {
 	                                 "namespace for all the profiling-related commands.",
 	                                 "Different types support different actions.  Run `profile` to get a list of "
 	                                 "types, and iteratively explore the help.\n");
-	helpMap["throttle"] =
-	    CommandHelp("throttle <on|off|enable auto|disable auto|list> [ARGS]",
-	                "view and control throttled tags",
-	                "Use `on' and `off' to manually throttle or unthrottle tags. Use `enable auto' or `disable auto' "
-	                "to enable or disable automatic tag throttling. Use `list' to print the list of throttled tags.\n");
 	helpMap["lock"] = CommandHelp(
 	    "lock",
 	    "lock the database with a randomly generated lockUID",
