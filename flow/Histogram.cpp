@@ -102,12 +102,8 @@ void HistogramRegistry::clear() {
 
 #pragma region Histogram
 
-const char* const Histogram::UnitToStringMapper[] = { "microseconds",
-	                                                  "bytes",
-	                                                  "bytes_per_second",
-	                                                  "percentage",
-	                                                  "count", 
-													  "none"};
+const char* const Histogram::UnitToStringMapper[] = { "microseconds", "bytes", "bytes_per_second",
+	                                                  "percentage",   "count", "none" };
 
 void Histogram::writeToLog(double elapsed) {
 	bool active = false;
