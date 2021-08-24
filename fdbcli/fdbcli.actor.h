@@ -61,6 +61,9 @@ struct CommandFactory {
 extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
+// datadistribution
+extern const KeyRef ddModeSpecialKey;
+extern const KeyRef ddIgnoreRebalanceSpecialKey;
 // maintenance
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
@@ -79,9 +82,15 @@ void printUsage(StringRef command);
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens);
+// datadistribution command
+ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // maintenance command
+ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
+ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
+                                    bool printWarning = false,
+                                    bool clearSSFailureZoneString = false);
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
