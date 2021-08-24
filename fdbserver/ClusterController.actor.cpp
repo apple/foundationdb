@@ -3094,26 +3094,20 @@ public:
 
 // TODO REMOVE!!!!
 ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, RatekeeperInterface interf) {
-	state std::string bucket = SERVER_KNOBS->BG_BUCKET;
-	state Reference<S3BlobStoreEndpoint> bstore;
+	state Reference<BackupContainerFileSystem> bstore;
 	state bool doTimeTravel = false;
 
 	// TODO CHANGE BACK
 	// wait(delay(10.0));
 	wait(delay(70.0));
 
-	// printf("Initializing CC s3 stuff\n");
+	printf("Initializing CC s3 stuff\n");
 	try {
-		// printf("constructing s3blobstoreendpoint from %s\n", SERVER_KNOBS->BG_URL.c_str());
-		bstore = S3BlobStoreEndpoint::fromString(SERVER_KNOBS->BG_URL);
-		// printf("checking if bucket %s exists\n", bucket.c_str());
-		bool bExists = wait(bstore->bucketExists(bucket));
-		if (!bExists) {
-			printf("Bucket %s does not exist!\n", bucket.c_str());
-			return Void();
-		}
+		printf("CC constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+		bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+		printf("CC constructed backup container\n");
 	} catch (Error& e) {
-		printf("CC got s3 init error %s\n", e.name());
+		printf("CC got backup container init error %s\n", e.name());
 		return Void();
 	}
 
@@ -3224,7 +3218,7 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 					printf("\n\n");
 				}
 				state PromiseStream<RangeResult> results;
-				state Future<Void> granuleReader = readBlobGranules(req, rep, bstore, bucket, results);
+				state Future<Void> granuleReader = readBlobGranules(req, rep, bstore, results);
 				try {
 					loop {
 						// printf("Waiting for result chunk\n");

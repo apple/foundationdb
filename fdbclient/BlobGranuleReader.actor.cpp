@@ -32,16 +32,14 @@
 // TODO could refactor the file reading code from here and the delta file function into another actor,
 // then this part would also be testable? but meh
 
-ACTOR Future<Arena> readSnapshotFile(Reference<S3BlobStoreEndpoint> bstore,
-                                     std::string bucket,
+ACTOR Future<Arena> readSnapshotFile(Reference<BackupContainerFileSystem> bstore,
                                      BlobFilenameRef f,
                                      KeyRangeRef keyRange,
                                      std::map<KeyRef, ValueRef>* dataMap) {
 	try {
 		state Arena arena;
 		// printf("Starting read of snapshot file %s\n", filename.c_str());
-		state Reference<AsyncFileS3BlobStoreRead> reader =
-		    makeReference<AsyncFileS3BlobStoreRead>(bstore, bucket, f.filename.toString());
+		state Reference<IAsyncFile> reader = wait(bstore->readFile(f.filename.toString()));
 		// printf("Got snapshot file size %lld\n", size);
 		state uint8_t* data = new (arena) uint8_t[f.length];
 		// printf("Reading %lld bytes from snapshot file %s\n", size, filename.c_str());
@@ -103,16 +101,14 @@ ACTOR Future<Arena> readSnapshotFile(Reference<S3BlobStoreEndpoint> bstore,
 	}
 }
 
-ACTOR Future<Standalone<GranuleDeltas>> readDeltaFile(Reference<S3BlobStoreEndpoint> bstore,
-                                                      std::string bucket,
+ACTOR Future<Standalone<GranuleDeltas>> readDeltaFile(Reference<BackupContainerFileSystem> bstore,
                                                       BlobFilenameRef f,
                                                       KeyRangeRef keyRange,
                                                       Version readVersion) {
 	try {
 		// printf("Starting read of delta file %s\n", filename.c_str());
 		state Standalone<GranuleDeltas> result;
-		state Reference<AsyncFileS3BlobStoreRead> reader =
-		    makeReference<AsyncFileS3BlobStoreRead>(bstore, bucket, f.filename.toString());
+		state Reference<IAsyncFile> reader = wait(bstore->readFile(f.filename.toString()));
 		// printf("Got delta file size %lld\n", size);
 		state uint8_t* data = new (result.arena()) uint8_t[f.length];
 		// printf("Reading %lld bytes from delta file %s into %p\n", size, filename.c_str(), data);
@@ -255,8 +251,7 @@ static void applyDeltas(std::map<KeyRef, ValueRef>* dataMap,
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version readVersion,
-                                          Reference<S3BlobStoreEndpoint> bstore,
-                                          std::string bucket) {
+                                          Reference<BackupContainerFileSystem> bstore) {
 	// TODO REMOVE with V2 of protocol
 	ASSERT(readVersion == chunk.includedVersion);
 	// Arena to hold all allocations for applying deltas. Most of it, and the arenas produced by reading the files,
@@ -269,14 +264,13 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 	try {
 		state std::map<KeyRef, ValueRef> dataMap;
 
-		Future<Arena> readSnapshotFuture =
-		    chunk.snapshotFile.present()
-		        ? readSnapshotFile(bstore, bucket, chunk.snapshotFile.get(), keyRange, &dataMap)
-		        : Future<Arena>(Arena());
+		Future<Arena> readSnapshotFuture = chunk.snapshotFile.present()
+		                                       ? readSnapshotFile(bstore, chunk.snapshotFile.get(), keyRange, &dataMap)
+		                                       : Future<Arena>(Arena());
 		state std::vector<Future<Standalone<GranuleDeltas>>> readDeltaFutures;
 		readDeltaFutures.reserve(chunk.deltaFiles.size());
 		for (BlobFilenameRef deltaFile : chunk.deltaFiles) {
-			readDeltaFutures.push_back(readDeltaFile(bstore, bucket, deltaFile, keyRange, readVersion));
+			readDeltaFutures.push_back(readDeltaFile(bstore, deltaFile, keyRange, readVersion));
 		}
 
 		Arena snapshotArena = wait(readSnapshotFuture);
@@ -309,8 +303,7 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 // TODO probably should add things like limit/bytelimit at some point?
 ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
                                     BlobGranuleFileReply reply,
-                                    Reference<S3BlobStoreEndpoint> bstore,
-                                    std::string bucket,
+                                    Reference<BackupContainerFileSystem> bstore,
                                     PromiseStream<RangeResult> results) {
 	// TODO for large amount of chunks, this should probably have some sort of buffer limit like ReplyPromiseStream.
 	// Maybe just use ReplyPromiseStream instead of PromiseStream?
@@ -322,7 +315,7 @@ ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
 			       reply.chunks[i].keyRange.begin.printable().c_str(),
 			       reply.chunks[i].keyRange.end.printable().c_str());*/
 			RangeResult chunkResult =
-			    wait(readBlobGranule(reply.chunks[i], request.keyRange, request.readVersion, bstore, bucket));
+			    wait(readBlobGranule(reply.chunks[i], request.keyRange, request.readVersion, bstore));
 			results.send(std::move(chunkResult));
 		}
 		// printf("ReadBlobGranules done, sending EOS\n");

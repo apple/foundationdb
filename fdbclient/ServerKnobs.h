@@ -700,7 +700,6 @@ public:
 	// TODO better place to put this or wire up blob config?
 
 	std::string BG_URL;
-	std::string BG_BUCKET;
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;

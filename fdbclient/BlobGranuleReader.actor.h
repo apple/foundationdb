@@ -29,7 +29,7 @@
 #define BLOB_GRANULE_READER_CLIENT_H
 
 #include "fdbclient/BlobWorkerInterface.h"
-#include "fdbclient/S3BlobStore.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -38,13 +38,11 @@
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version readVersion,
-                                          Reference<S3BlobStoreEndpoint> bstore,
-                                          std::string bucket);
+                                          Reference<BackupContainerFileSystem> bstore);
 
 ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
                                     BlobGranuleFileReply reply,
-                                    Reference<S3BlobStoreEndpoint> bstore,
-                                    std::string bucket,
+                                    Reference<BackupContainerFileSystem> bstore,
                                     PromiseStream<RangeResult> results);
 
 #include "flow/unactorcompiler.h"

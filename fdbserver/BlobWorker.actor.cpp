@@ -18,13 +18,15 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Tuple.h"
-#include "fdbclient/S3BlobStore.h"
-#include "fdbclient/AsyncFileS3BlobStore.actor.h"
+
+// #include "fdbclient/S3BlobStore.h"
+// #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbserver/BlobWorker.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WaitFailure.h"
@@ -80,8 +82,11 @@ struct BlobWorkerData {
 
 	LocalityData locality;
 
-	Reference<S3BlobStoreEndpoint> bstore;
-	std::string bucket;
+	// FIXME: refactor out the parts of this that are just for interacting with blob stores from the backup business
+	// logic
+	Reference<BackupContainerFileSystem> bstore;
+	// Reference<S3BlobStoreEndpoint> bstore;
+	// std::string bucket;
 
 	KeyRangeMap<Reference<GranuleMetadata>> granuleMetadata;
 
@@ -108,11 +113,9 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 
 	state Value serialized = ObjectWriter::toValue(*deltasToWrite, Unversioned());
 
-	// write to s3 using multi part upload
-	state Reference<AsyncFileS3BlobStoreWrite> objectFile =
-	    makeReference<AsyncFileS3BlobStoreWrite>(bwData->bstore, bwData->bucket, fname);
-	wait(objectFile->write(serialized.begin(), serialized.size(), 0));
-	wait(objectFile->sync());
+	state Reference<IBackupFile> objectFile = wait(bwData->bstore->writeFile(fname));
+	wait(objectFile->append(serialized.begin(), serialized.size()));
+	wait(objectFile->finish());
 
 	// update FDB with new file
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
@@ -185,10 +188,9 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 	state Value serialized = ObjectWriter::toValue(snapshot, Unversioned());
 
 	// write to s3 using multi part upload
-	state Reference<AsyncFileS3BlobStoreWrite> objectFile =
-	    makeReference<AsyncFileS3BlobStoreWrite>(bwData->bstore, bwData->bucket, fname);
-	wait(objectFile->write(serialized.begin(), serialized.size(), 0));
-	wait(objectFile->sync());
+	state Reference<IBackupFile> objectFile = wait(bwData->bstore->writeFile(fname));
+	wait(objectFile->append(serialized.begin(), serialized.size()));
+	wait(objectFile->finish());
 
 	// object uploaded successfully, save it to system key space
 	// TODO add conflict range for writes?
@@ -212,7 +214,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 	} catch (Error& e) {
 		// if transaction throws non-retryable error, delete s3 file before exiting
 		printf("deleting s3 object %s after error %s\n", fname.c_str(), e.name());
-		bwData->bstore->deleteObject(bwData->bucket, fname);
+		bwData->bstore->deleteFile(fname);
 		throw e;
 	}
 
@@ -307,7 +309,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(BlobWorkerData* bwData, KeyRange key
 		try {
 			state PromiseStream<RangeResult> rowsStream;
 			state Future<BlobFileIndex> snapshotWriter = writeSnapshot(bwData, keyRange, version, rowsStream);
-			RangeResult newGranule = wait(readBlobGranule(chunk, keyRange, version, bwData->bstore, bwData->bucket));
+			RangeResult newGranule = wait(readBlobGranule(chunk, keyRange, version, bwData->bstore));
 			rowsStream.send(std::move(newGranule));
 			rowsStream.sendError(end_of_stream());
 
@@ -689,24 +691,17 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 	state BlobWorkerData self(bwInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	self.id = bwInterf.id();
 	self.locality = bwInterf.locality;
-	self.bucket = SERVER_KNOBS->BG_BUCKET;
 
 	printf("Initializing blob worker s3 stuff\n");
 	try {
-		printf("BW constructing s3blobstoreendpoint from %s\n", SERVER_KNOBS->BG_URL.c_str());
-		self.bstore = S3BlobStoreEndpoint::fromString(SERVER_KNOBS->BG_URL);
-		printf("BW checking if bucket %s exists\n", self.bucket.c_str());
-		bool bExists = wait(self.bstore->bucketExists(self.bucket));
-		if (!bExists) {
-			printf("BW Bucket %s does not exist!\n", self.bucket.c_str());
-			return Void();
-		}
+		printf("BW constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+		self.bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+		printf("BW constructed backup container\n");
 	} catch (Error& e) {
-		printf("BW got s3 init error %s\n", e.name());
+		printf("BW got backup container init error %s\n", e.name());
 		return Void();
 	}
 
-	printf("BW starting for bucket %s\n", self.bucket.c_str());
 	wait(registerBlobWorker(&self, bwInterf));
 
 	state PromiseStream<Future<Void>> addActor;

@@ -18,11 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/S3BlobStore.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/BlobWorker.actor.h"

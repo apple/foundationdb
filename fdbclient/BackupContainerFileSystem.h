@@ -79,6 +79,12 @@ public:
 	Future<Void> create() override = 0;
 	Future<bool> exists() override = 0;
 
+	// FIXME: this is kinda hacky, should refactor more of this to separate out the "deal with blob store" stuff from
+	// the backup business logic
+	static Reference<BackupContainerFileSystem> openContainerFS(
+	    const std::string& url,
+	    const Optional<std::string>& encryptionKeyFileName = {});
+
 	// Get a list of fileNames and their sizes in the container under the given path
 	// Although not required, an implementation can avoid traversing unwanted subfolders
 	// by calling folderPathFilter(absoluteFolderPath) and checking for a false return value.

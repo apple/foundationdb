@@ -751,7 +751,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Blob granlues
 	init( BG_URL,                                                 "" );
-	init( BG_BUCKET,                                              "" );
 	// TODO CHANGE BACK
 	// init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 );
 	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    1000000 );

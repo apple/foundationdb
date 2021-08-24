@@ -1435,12 +1435,10 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	    recurring([selfPtr]() { refreshStorageServerCommitCost(selfPtr); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	// TODO MOVE eventually
-	if (SERVER_KNOBS->BG_URL == "" || SERVER_KNOBS->BG_BUCKET == "") {
-		printf("not starting blob manager poc, no url/bucket configured\n");
+	if (SERVER_KNOBS->BG_URL == "") {
+		printf("Not starting blob manager poc, no url configured\n");
 	} else {
-		printf("Starting blob manager with url=%s and bucket=%s\n",
-		       SERVER_KNOBS->BG_URL.c_str(),
-		       SERVER_KNOBS->BG_BUCKET.c_str());
+		printf("Starting blob manager with url=%s\n", SERVER_KNOBS->BG_URL.c_str());
 		self.addActor.send(blobManager(rkInterf.locality, dbInfo));
 	}
 
