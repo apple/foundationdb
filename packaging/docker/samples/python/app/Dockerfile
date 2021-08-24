@@ -31,7 +31,7 @@ COPY --from=fdb /usr/lib/libfdb_c.so /usr/lib
 COPY --from=fdb /usr/bin/fdbcli /usr/bin/
 COPY --from=fdb /var/fdb/scripts/create_cluster_file.bash /app
 
-ARG FDB_WEBSITE=https://foundationdb.org
+ARG FDB_WEBSITE=https://www.foundationdb.org
 ARG FDB_ADDITIONAL_VERSIONS
 ENV FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY=/usr/lib/fdb-multiversion
 RUN mkdir /usr/lib/fdb-multiversion; \
