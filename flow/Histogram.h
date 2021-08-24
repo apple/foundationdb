@@ -71,7 +71,6 @@ public:
 
 		ASSERT(unit <= Unit::MAXHISTOGRAMUNIT);
 		ASSERT(upperBound >= lowerBound);
-
 		clear();
 	}
 

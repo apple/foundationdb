@@ -1556,36 +1556,43 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() {
-		RedwoodRegistry = Reference<HistogramRegistry>(new HistogramRegistry());
-		kvSizeWritten =
-		    Reference<Histogram>(new Histogram(RedwoodRegistry, "kvSize", "Written", Histogram::Unit::bytes));
-		kvSizeReadByGet =
-		    Reference<Histogram>(new Histogram(RedwoodRegistry, "kvSize", "ReadByGet", Histogram::Unit::bytes));
-		kvSizeReadByGetRange =
-		    Reference<Histogram>(new Histogram(RedwoodRegistry, "kvSize", "ReadByGetRange", Histogram::Unit::bytes));
+		// All histograms have reset their buckets to 0 in the contructor.
+		kvSizeWritten = Reference<Histogram>(
+		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "Written", Histogram::Unit::bytes));
+		kvSizeReadByGet = Reference<Histogram>(
+		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "ReadByGet", Histogram::Unit::bytes));
+		kvSizeReadByGetRange = Reference<Histogram>(
+		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "ReadByGetRange", Histogram::Unit::bytes));
 
 		// These histograms are used for Btree events, hence level > 0
 		unsigned int levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
 			if (levelCounter > 0) {
 				std::string levelString = "L" + std::to_string(levelCounter);
-				level.buildFillPctSketch = Reference<Histogram>(
-				    new Histogram(RedwoodRegistry, "buildFillPct", levelString, Histogram::Unit::percentage));
-				level.modifyFillPctSketch = Reference<Histogram>(
-				    new Histogram(RedwoodRegistry, "modifyFillPct", levelString, Histogram::Unit::percentage));
-				level.buildStoredPctSketch = Reference<Histogram>(
-				    new Histogram(RedwoodRegistry, "buildStoredPct", levelString, Histogram::Unit::percentage));
-				level.modifyStoredPctSketch = Reference<Histogram>(
-				    new Histogram(RedwoodRegistry, "modifyStoredPct", levelString, Histogram::Unit::percentage));
-				level.buildItemCountSketch = Reference<Histogram>(new Histogram(
-				    RedwoodRegistry, "buildItemCount", levelString, Histogram::Unit::count, 0, maxRecordCount));
-				level.modifyItemCountSketch = Reference<Histogram>(new Histogram(
-				    RedwoodRegistry, "modifyItemCount", levelString, Histogram::Unit::count, 0, maxRecordCount));
+				level.buildFillPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "buildFillPct", levelString, Histogram::Unit::percentage));
+				level.modifyFillPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "modifyFillPct", levelString, Histogram::Unit::percentage));
+				level.buildStoredPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "buildStoredPct", levelString, Histogram::Unit::percentage));
+				level.modifyStoredPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "modifyStoredPct", levelString, Histogram::Unit::percentage));
+				level.buildItemCountSketch = Reference<Histogram>(new Histogram(Reference<HistogramRegistry>(),
+				                                                                "buildItemCount",
+				                                                                levelString,
+				                                                                Histogram::Unit::count,
+				                                                                0,
+				                                                                maxRecordCount));
+				level.modifyItemCountSketch = Reference<Histogram>(new Histogram(Reference<HistogramRegistry>(),
+				                                                                 "modifyItemCount",
+				                                                                 levelString,
+				                                                                 Histogram::Unit::count,
+				                                                                 0,
+				                                                                 maxRecordCount));
 			}
 			++levelCounter;
 		}
 		clear();
-		RedwoodRegistry->clear();
 	}
 
 	void clear() {
@@ -1628,6 +1635,25 @@ struct RedwoodMetrics {
 				level.buildItemCountSketch->updateUpperBound(maxRecordCount);
 				level.modifyItemCountSketch->updateUpperBound(maxRecordCount);
 			}
+		}
+	}
+
+	void logHistograms(double elapsed) {
+		// All histograms have reset their buckets to 0 after writeToLog.
+		kvSizeWritten->writeToLog(elapsed);
+		kvSizeReadByGet->writeToLog(elapsed);
+		kvSizeReadByGetRange->writeToLog(elapsed);
+		unsigned int levelCounter = 0;
+		for (RedwoodMetrics::Level& level : levels) {
+			if (levelCounter > 0) {
+				level.buildFillPctSketch->writeToLog(elapsed);
+				level.modifyFillPctSketch->writeToLog(elapsed);
+				level.buildStoredPctSketch->writeToLog(elapsed);
+				level.modifyStoredPctSketch->writeToLog(elapsed);
+				level.buildItemCountSketch->writeToLog(elapsed);
+				level.modifyItemCountSketch->writeToLog(elapsed);
+			}
+			++levelCounter;
 		}
 	}
 
@@ -1757,22 +1783,19 @@ int RedwoodMetrics::maxRecordCount = 315;
 RedwoodMetrics g_redwoodMetrics = {};
 Future<Void> g_redwoodMetricsActor;
 
-ACTOR Future<Void> redwoodHistogramsLogger(Reference<HistogramRegistry> registry, double interval) {
-	ASSERT(registry.isValid());
-	registry->clear();
+ACTOR Future<Void> redwoodHistogramsLogger(double interval) {
 	state double currTime;
 	loop {
 		currTime = now();
 		wait(delay(interval));
 		double elapsed = now() - currTime;
-		registry->logReport(elapsed);
+		g_redwoodMetrics.logHistograms(elapsed);
 	}
 }
 
 ACTOR Future<Void> redwoodMetricsLogger() {
 	g_redwoodMetrics.clear();
-	state Future<Void> loggingFuture =
-	    redwoodHistogramsLogger(g_redwoodMetrics.RedwoodRegistry, SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL);
+	state Future<Void> loggingFuture = redwoodHistogramsLogger(SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL);
 	loop {
 		wait(delay(SERVER_KNOBS->REDWOOD_METRICS_INTERVAL));
 
