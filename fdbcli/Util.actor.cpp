@@ -1,5 +1,5 @@
 /*
- * Util.cpp
+ * Util.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,8 +19,13 @@
  */
 
 #include "fdbcli/fdbcli.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/Schemas.h"
+#include "fdbclient/Status.h"
 
 #include "flow/Arena.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -38,6 +43,20 @@ void printUsage(StringRef command) {
 		printf("Usage: %s\n", i->second.usage.c_str());
 	else
 		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
+}
+
+ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
+	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(tr->get(fdb_cli::errorMsgSpecialKey)));
+	// Error message should be present
+	ASSERT(errorMsg.present());
+	// Read the json string
+	auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+	// verify schema
+	auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+	std::string errorStr;
+	ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+	// return the error message
+	return valueObj["message"].get_str();
 }
 
 } // namespace fdb_cli

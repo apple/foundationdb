@@ -70,12 +70,17 @@ extern const KeyRef ignoreSSFailureSpecialKey;
 // setclass
 extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
+// Other special keys
+inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
 // help functions (Copied from fdbcli.actor.cpp)
 
 // compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
 // print the usage of the specified command
 void printUsage(StringRef command);
+// Pre: tr failed with special_keys_api_failure error
+// Read the error message special key and return the message
+ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
 
 // All fdbcli commands (alphabetically)
 // advanceversion command

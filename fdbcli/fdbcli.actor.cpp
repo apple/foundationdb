@@ -44,6 +44,7 @@
 #include "flow/Platform.h"
 
 #include "flow/TLSConfig.actor.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
@@ -1963,6 +1964,16 @@ ACTOR Future<Void> commitTransaction(Reference<ReadYourWritesTransaction> tr) {
 	return Void();
 }
 
+ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
+	wait(makeInterruptable(safeThreadFutureToFuture(tr->commit())));
+	auto ver = tr->getCommittedVersion();
+	if (ver != invalidVersion)
+		printf("Committed (%" PRId64 ")\n", ver);
+	else
+		printf("Nothing to commit\n");
+	return Void();
+}
+
 ACTOR Future<bool> configure(Database db,
                              std::vector<StringRef> tokens,
                              Reference<ClusterConnectionFile> ccf,
@@ -3442,7 +3453,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "waitopen")) {
-					wait(success(getTransaction(db, tr, options, intrans)->getReadVersion()));
+					wait(success(
+					    safeThreadFutureToFuture(getTransaction(db, tr, tr2, options, intrans)->getReadVersion())));
 					continue;
 				}
 
@@ -3652,7 +3664,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
-						getTransaction(db, tr, options, false);
+						getTransaction(db, tr, tr2, options, false);
 						intrans = true;
 						printf("Transaction started\n");
 					}
@@ -3667,7 +3679,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						fprintf(stderr, "ERROR: No active transaction\n");
 						is_error = true;
 					} else {
-						wait(commitTransaction(tr));
+						wait(commitTransaction(tr2));
 						intrans = false;
 						options = &globalOptions;
 					}
@@ -3684,9 +3696,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						tr->reset();
+						tr2->reset();
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
 						options->apply(tr);
+						options->apply(tr2);
 						printf("Transaction reset\n");
 					}
 					continue;
@@ -3712,8 +3726,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						Optional<Standalone<StringRef>> v =
-						    wait(makeInterruptable(getTransaction(db, tr, options, intrans)->get(tokens[1])));
+						Optional<Standalone<StringRef>> v = wait(makeInterruptable(
+						    safeThreadFutureToFuture(getTransaction(db, tr, tr2, options, intrans)->get(tokens[1]))));
 
 						if (v.present())
 							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
@@ -3728,7 +3742,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						Version v = wait(makeInterruptable(getTransaction(db, tr, options, intrans)->getReadVersion()));
+						Version v = wait(makeInterruptable(
+						    safeThreadFutureToFuture(getTransaction(db, tr, tr2, options, intrans)->getReadVersion())));
 						printf("%ld\n", v);
 					}
 					continue;
@@ -4233,7 +4248,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 
 						RangeResult kvs = wait(makeInterruptable(
-						    getTransaction(db, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit)));
+						    safeThreadFutureToFuture(getTransaction(db, tr, tr2, options, intrans)
+						                                 ->getRange(KeyRangeRef(tokens[1], endKey), limit))));
 
 						printf("\nRange limited to %d keys\n", limit);
 						for (auto iter = kvs.begin(); iter < kvs.end(); iter++) {
@@ -4276,11 +4292,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db, tr, options, intrans);
-						tr->set(tokens[1], tokens[2]);
+						getTransaction(db, tr, tr2, options, intrans);
+						tr2->set(tokens[1], tokens[2]);
 
 						if (!intrans) {
-							wait(commitTransaction(tr));
+							wait(commitTransaction(tr2));
 						}
 					}
 					continue;
@@ -4297,11 +4313,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db, tr, options, intrans);
-						tr->clear(tokens[1]);
+						getTransaction(db, tr, tr2, options, intrans);
+						tr2->clear(tokens[1]);
 
 						if (!intrans) {
-							wait(commitTransaction(tr));
+							wait(commitTransaction(tr2));
 						}
 					}
 					continue;
@@ -4318,11 +4334,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db, tr, options, intrans);
-						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
+						getTransaction(db, tr, tr2, options, intrans);
+						tr2->clear(KeyRangeRef(tokens[1], tokens[2]));
 
 						if (!intrans) {
-							wait(commitTransaction(tr));
+							wait(commitTransaction(tr2));
 						}
 					}
 					continue;
@@ -4422,6 +4438,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				intrans = false;
 				options = &globalOptions;
 				options->apply(tr);
+				options->apply(tr2);
 			}
 		}
 
