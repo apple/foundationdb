@@ -2933,8 +2933,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::vector<Tag> localTags = getLocalTags(primaryLocality, allTags);
 		state LogSystemConfig oldLogSystemConfig = oldLogSystem->getLogSystemConfig();
 
-		state vector<Future<TLogInterface>> initializationReplies;
-		state vector<InitializeTLogRequest> reqs = vector<InitializeTLogRequest>(recr.tLogs.size());
+		state std::vector<Future<TLogInterface>> initializationReplies;
+		state std::vector<InitializeTLogRequest> reqs(recr.tLogs.size());
+
+		state std::vector<Future<ptxn::TLogInterface_PassivelyPull>> ptxnInitializationReplies;
+		state std::vector<ptxn::InitializePtxnTLogRequest> ptxnReqs(recr.tLogs.size());
 
 		logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
 		logSystem->tLogs[0]->logServers.resize(
@@ -2983,36 +2986,59 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
-		for (int i = 0; i < recr.tLogs.size(); i++) {
-			InitializeTLogRequest& req = reqs[i];
-			req.recruitmentID = logSystem->recruitmentID;
-			req.logVersion = configuration.tLogVersion;
-			req.storeType = configuration.tLogDataStoreType;
-			req.spillType = configuration.tLogSpillType;
-			req.recoverFrom = oldLogSystemConfig;
-			req.recoverAt = oldLogSystem->recoverAt.get();
-			req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
-			req.epoch = recoveryCount;
-			req.locality = primaryLocality;
-			req.remoteTag = Tag(tagLocalityRemoteLog, i);
-			req.isPrimary = true;
-			req.allTags = localTags;
-			req.startVersion = logSystem->tLogs[0]->startVersion;
-			req.logRouterTags = logSystem->logRouterTags;
-			req.txsTags = logSystem->txsTags;
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			for (int i = 0; i < recr.tLogs.size(); i++) {
+				ptxn::InitializePtxnTLogRequest& req = ptxnReqs[i];
+				req.recruitmentID = logSystem->recruitmentID;
+				req.logVersion = configuration.tLogVersion;
+				req.storeType = configuration.tLogDataStoreType;
+				req.spillType = configuration.tLogSpillType;
+				req.recoverFrom = oldLogSystem->getLogSystemConfig();
+				req.recoverAt = oldLogSystem->recoverAt.get();
+				req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
+				req.epoch = recoveryCount;
+				req.locality = primaryLocality;
+				req.remoteTag = Tag(tagLocalityRemoteLog, i);
+				req.isPrimary = true;
+				req.allTags = localTags;
+				req.startVersion = logSystem->tLogs[0]->startVersion;
+				req.logRouterTags = logSystem->logRouterTags;
+				req.txsTags = logSystem->txsTags;
 
-			// Add TLogGroup here
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 				UID serverId = recr.tLogs[i].id();
 				std::vector<ptxn::TLogGroup> groups;
 				for (TLogGroupRef tlogGroup : tlogServerIdToTlogGroups[serverId]) {
 					groups.push_back(ptxn::TLogGroup(tlogGroup->id()));
 				}
 				req.tlogGroups = groups;
+				std::cout << req.tlogGroups.size() << std::endl;
 			}
-		}
-
-		if (!SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			ptxnInitializationReplies.reserve(recr.tLogs.size());
+			for (int i = 0; i < recr.tLogs.size(); ++i) {
+				ptxnInitializationReplies.push_back(transformErrors(
+				    throwErrorOr(recr.tLogs[i].ptxnTLog.getReplyUnlessFailedFor(
+				        ptxnReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+				    master_recovery_failed()));
+			}
+		} else {
+			for (int i = 0; i < recr.tLogs.size(); i++) {
+				InitializeTLogRequest& req = reqs[i];
+				req.recruitmentID = logSystem->recruitmentID;
+				req.logVersion = configuration.tLogVersion;
+				req.storeType = configuration.tLogDataStoreType;
+				req.spillType = configuration.tLogSpillType;
+				req.recoverFrom = oldLogSystem->getLogSystemConfig();
+				req.recoverAt = oldLogSystem->recoverAt.get();
+				req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
+				req.epoch = recoveryCount;
+				req.locality = primaryLocality;
+				req.remoteTag = Tag(tagLocalityRemoteLog, i);
+				req.isPrimary = true;
+				req.allTags = localTags;
+				req.startVersion = logSystem->tLogs[0]->startVersion;
+				req.logRouterTags = logSystem->logRouterTags;
+				req.txsTags = logSystem->txsTags;
+			}
 			initializationReplies.reserve(recr.tLogs.size());
 			for (int i = 0; i < recr.tLogs.size(); i++)
 				initializationReplies.push_back(transformErrors(
@@ -3025,7 +3051,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		if (region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
 			state vector<Future<TLogInterface>> satelliteInitializationReplies;
-			vector<InitializeTLogRequest> sreqs(recr.satelliteTLogs.size());
+			std::vector<InitializeTLogRequest> sreqs(recr.satelliteTLogs.size());
 			std::vector<Tag> satelliteTags;
 
 			if (logSystem->logRouterTags) {
@@ -3104,7 +3130,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				    master_recovery_failed()));
 		}
 
-		wait(waitForAll(initializationReplies) || oldRouterRecruitment);
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			wait(waitForAll(ptxnInitializationReplies) || oldRouterRecruitment);
+		} else {
+			wait(waitForAll(initializationReplies) || oldRouterRecruitment);
+		}
 
 		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 			state std::unordered_map<UID, ptxn::TLogInterface_PassivelyPull> id2Interface;
