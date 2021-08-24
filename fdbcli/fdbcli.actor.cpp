@@ -36,7 +36,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -566,15 +566,6 @@ void initHelp() {
 	    "pair in <ADDRESS...> or any LocalityData (like dcid, zoneid, machineid, processid), removes any "
 	    "matching exclusions from the excluded servers and localities list. "
 	    "(A specified IP will match all IP:* exclusion entries)");
-	helpMap["setclass"] =
-	    CommandHelp("setclass [<ADDRESS> <CLASS>]",
-	                "change the class of a process",
-	                "If no address and class are specified, lists the classes of all servers.\n\nSetting the class to "
-	                "`default' resets the process class to the class specified on the command line. The available "
-	                "classes are `unset', `storage', `transaction', `resolution', `commit_proxy', `grv_proxy', "
-	                "`master', `test', "
-	                "`stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', "
-	                "`coordinator', `ratekeeper', `storage_cache', `backup', and `default'.");
 	helpMap["status"] =
 	    CommandHelp("status [minimal|details|json]",
 	                "get the status of a FoundationDB cluster",
@@ -648,11 +639,6 @@ void initHelp() {
 	                                 "namespace for all the profiling-related commands.",
 	                                 "Different types support different actions.  Run `profile` to get a list of "
 	                                 "types, and iteratively explore the help.\n");
-	helpMap["cache_range"] = CommandHelp(
-	    "cache_range <set|clear> <BEGINKEY> <ENDKEY>",
-	    "Mark a key range to add to or remove from storage caches.",
-	    "Use the storage caches to assist in balancing hot read shards. Set the appropriate ranges when experiencing "
-	    "heavy load, and clear them when they are no longer necessary.");
 	helpMap["lock"] = CommandHelp(
 	    "lock",
 	    "lock the database with a randomly generated lockUID",
@@ -2742,45 +2728,6 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	return false;
 }
 
-ACTOR Future<bool> setClass(Database db, std::vector<StringRef> tokens) {
-	if (tokens.size() == 1) {
-		vector<ProcessData> _workers = wait(makeInterruptable(getWorkers(db)));
-		auto workers = _workers; // strip const
-
-		if (!workers.size()) {
-			printf("No processes are registered in the database.\n");
-			return false;
-		}
-
-		std::sort(workers.begin(), workers.end(), ProcessData::sort_by_address());
-
-		printf("There are currently %zu processes in the database:\n", workers.size());
-		for (const auto& w : workers)
-			printf("  %s: %s (%s)\n",
-			       w.address.toString().c_str(),
-			       w.processClass.toString().c_str(),
-			       w.processClass.sourceString().c_str());
-		return false;
-	}
-
-	AddressExclusion addr = AddressExclusion::parse(tokens[1]);
-	if (!addr.isValid()) {
-		fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", tokens[1].toString().c_str());
-		if (tokens[1].toString().find(":tls") != std::string::npos)
-			printf("        Do not include the `:tls' suffix when naming a process\n");
-		return true;
-	}
-
-	ProcessClass processClass(tokens[2].toString(), ProcessClass::DBSource);
-	if (processClass.classType() == ProcessClass::InvalidClass && tokens[2] != LiteralStringRef("default")) {
-		fprintf(stderr, "ERROR: '%s' is not a valid process class\n", tokens[2].toString().c_str());
-		return true;
-	}
-
-	wait(makeInterruptable(setClass(db, addr, processClass)));
-	return false;
-};
-
 Reference<ReadYourWritesTransaction> getTransaction(Database db,
                                                     Reference<ReadYourWritesTransaction>& tr,
                                                     FdbOptions* options,
@@ -3243,10 +3190,10 @@ ACTOR template <class T>
 Future<T> stopNetworkAfter(Future<T> what) {
 	try {
 		T t = wait(what);
-		g_network->stop();
+		API->stopNetwork();
 		return t;
 	} catch (...) {
-		g_network->stop();
+		API->stopNetwork();
 		throw;
 	}
 }
@@ -3689,14 +3636,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "setclass")) {
-					if (tokens.size() != 3 && tokens.size() != 1) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(setClassCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						bool err = wait(setClass(db, tokens));
-						if (err)
-							is_error = true;
-					}
 					continue;
 				}
 
@@ -4387,47 +4329,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "datadistribution")) {
-					if (tokens.size() != 2 && tokens.size() != 3) {
-						printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-						       "<ssfailure|rebalance>>\n");
+					bool _result = wait(makeInterruptable(dataDistributionCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						if (tokencmp(tokens[1], "on")) {
-							wait(success(setDDMode(db, 1)));
-							printf("Data distribution is turned on.\n");
-						} else if (tokencmp(tokens[1], "off")) {
-							wait(success(setDDMode(db, 0)));
-							printf("Data distribution is turned off.\n");
-						} else if (tokencmp(tokens[1], "disable")) {
-							if (tokencmp(tokens[2], "ssfailure")) {
-								wait(success(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0))));
-								printf("Data distribution is disabled for storage server failures.\n");
-							} else if (tokencmp(tokens[2], "rebalance")) {
-								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
-								printf("Data distribution is disabled for rebalance.\n");
-							} else {
-								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-								       "<ssfailure|rebalance>>\n");
-								is_error = true;
-							}
-						} else if (tokencmp(tokens[1], "enable")) {
-							if (tokencmp(tokens[2], "ssfailure")) {
-								wait(success(makeInterruptable(clearHealthyZone(db, false, true))));
-								printf("Data distribution is enabled for storage server failures.\n");
-							} else if (tokencmp(tokens[2], "rebalance")) {
-								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));
-								printf("Data distribution is enabled for rebalance.\n");
-							} else {
-								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-								       "<ssfailure|rebalance>>\n");
-								is_error = true;
-							}
-						} else {
-							printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-							       "<ssfailure|rebalance>>\n");
-							is_error = true;
-						}
-					}
 					continue;
 				}
 
@@ -4497,20 +4401,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "cache_range")) {
-					if (tokens.size() != 4) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(cacheRangeCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-						continue;
-					}
-					KeyRangeRef cacheRange(tokens[2], tokens[3]);
-					if (tokencmp(tokens[1], "set")) {
-						wait(makeInterruptable(addCachedRange(db, cacheRange)));
-					} else if (tokencmp(tokens[1], "clear")) {
-						wait(makeInterruptable(removeCachedRange(db, cacheRange)));
-					} else {
-						printUsage(tokens[0]);
-						is_error = true;
-					}
 					continue;
 				}
 
@@ -4738,7 +4631,7 @@ int main(int argc, char** argv) {
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);
-		runNetwork();
+		API->runNetwork();
 
 		if (cliFuture.isReady()) {
 			return cliFuture.get();

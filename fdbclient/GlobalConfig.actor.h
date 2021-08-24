@@ -28,6 +28,7 @@
 
 #include <any>
 #include <map>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -48,6 +49,9 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
+
+extern const KeyRef samplingFrequency;
+extern const KeyRef samplingWindow;
 
 // Structure used to hold the values stored by global configuration. The arena
 // is used as memory to store both the key and the value (the value is only
@@ -78,6 +82,7 @@ public:
 			g_network->setGlobal(INetwork::enGlobalConfig, config);
 			config->_updater = updater(config, dbInfo);
 			// Bind changes in `db` to the `dbInfoChanged` AsyncTrigger.
+			// TODO: Change AsyncTrigger to a Reference
 			forward(db, std::addressof(config->dbInfoChanged));
 		} else {
 			GlobalConfig* config = reinterpret_cast<GlobalConfig*>(g_network->global(INetwork::enGlobalConfig));
@@ -108,7 +113,6 @@ public:
 	// the key.
 	template <typename T, typename std::enable_if<std::is_arithmetic<T>{}, bool>::type = true>
 	const T get(KeyRef name, T defaultVal) {
-		TraceEvent(SevInfo, "GlobalConfig_Get").detail("Key", name);
 		try {
 			auto configValue = get(name);
 			if (configValue.isValid()) {
@@ -138,9 +142,11 @@ public:
 	Future<Void> onChange();
 
 	// Calls \ref fn when the value associated with \ref key is changed. \ref
-	// fn is passed the updated value for the key, or an empty optional if the
-	// key has been cleared. If the value is an allocated object, its memory
-	// remains in the control of the global configuration.
+	// key should be one of the string literals defined at the top of
+	// GlobalConfig.actor.cpp, to ensure memory validity. \ref fn is passed the
+	// updated value for the key, or an empty optional if the key has been
+	// cleared. If the value is an allocated object, its memory remains in the
+	// control of global configuration.
 	void trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn);
 
 private:
@@ -172,6 +178,7 @@ private:
 	AsyncTrigger configChanged;
 	std::unordered_map<StringRef, Reference<ConfigValue>> data;
 	Version lastUpdate;
+	// The key should be a global config string literal key (see the top of this class).
 	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;
 };
 

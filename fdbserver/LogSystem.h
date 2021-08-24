@@ -31,6 +31,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/Histogram.h"
 #include "flow/IndexedSet.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -57,6 +58,7 @@ public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
+	std::vector<Reference<Histogram>> tlogPushDistTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector<LocalityData> tLogLocalities; // Stores the localities of the log servers
@@ -425,7 +427,7 @@ struct ILogSystem {
 
 		TLogPeekReply results;
 		ArenaReader rd;
-		LogMessageVersion messageVersion, end;
+		LogMessageVersion messageVersion, end; // the version of current message; the intended end version of current cursor
 		Version poppedVersion;
 		TagsAndMessage messageAndTags;
 		bool hasMsg;
@@ -435,9 +437,11 @@ struct ILogSystem {
 
 		bool onlySpilled;
 		bool parallelGetMore;
+		bool usePeekStream;
 		int sequence;
 		Deque<Future<TLogPeekReply>> futureResults;
 		Future<Void> interfaceChanged;
+		Optional<ReplyPromiseStream<TLogPeekStreamReply>> peekReplyStream;
 
 		double lastReset;
 		Future<Void> resetCheck;

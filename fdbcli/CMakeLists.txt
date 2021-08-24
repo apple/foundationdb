@@ -2,11 +2,14 @@ set(FDBCLI_SRCS
   fdbcli.actor.cpp
   fdbcli.actor.h
   AdvanceVersionCommand.actor.cpp
+  CacheRangeCommand.actor.cpp
   ConsistencyCheckCommand.actor.cpp
+  DataDistributionCommand.actor.cpp
   FlowLineNoise.actor.cpp
   FlowLineNoise.h
   ForceRecoveryWithDataLossCommand.actor.cpp
   MaintenanceCommand.actor.cpp
+  SetClassCommand.actor.cpp
   SnapshotCommand.actor.cpp
   ThrottleCommand.actor.cpp
   Util.cpp
