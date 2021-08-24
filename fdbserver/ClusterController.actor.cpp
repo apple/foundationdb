@@ -2533,6 +2533,8 @@ ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, 
 				return Void();
 			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
 				// recruitment not good enough, try again
+				TraceEvent("RecruitFromConfigurationRetry", self->id).error(e)
+					.detail("GoodRecruitmentTimeReady", self->goodRecruitmentTime.isReady());
 			} else {
 				TraceEvent(SevError, "RecruitFromConfigurationError", self->id).error(e);
 				throw; // goodbye, cluster controller
@@ -2558,6 +2560,8 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration(ClusterControllerData* 
 				return Void();
 			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
 				// recruitment not good enough, try again
+				TraceEvent("RecruitRemoteFromConfigurationRetry", self->id).error(e)
+					.detail("GoodRecruitmentTimeReady", self->goodRemoteRecruitmentTime.isReady());
 			} else {
 				TraceEvent(SevError, "RecruitRemoteFromConfigurationError", self->id).error(e);
 				throw; // goodbye, cluster controller
