@@ -62,6 +62,7 @@ packaging/msi/obj
 simfdb
 tests/oldBinaries
 trace.*.xml
+.venv
 
 # Editor files
 *.iml
