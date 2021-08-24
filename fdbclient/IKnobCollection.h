@@ -54,12 +54,14 @@ public:
 	virtual ClientKnobs const& getClientKnobs() const = 0;
 	virtual ServerKnobs const& getServerKnobs() const = 0;
 	virtual class TestKnobs const& getTestKnobs() const = 0;
+	virtual void clearTestKnobs() {}
 	virtual Optional<KnobValue> tryParseKnobValue(std::string const& knobName, std::string const& knobValue) const = 0;
 	KnobValue parseKnobValue(std::string const& knobName, std::string const& knobValue) const;
 	static KnobValue parseKnobValue(std::string const& knobName, std::string const& knobValue, Type);
 	// Result indicates whether or not knob was successfully set:
 	virtual bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) = 0;
 	void setKnob(std::string const& knobName, KnobValueRef const& knobValue);
+	virtual bool isAtomic(std::string const& knobName) const = 0;
 
 	static void setGlobalKnobCollection(Type, Randomize, IsSimulated);
 	static IKnobCollection const& getGlobalKnobCollection();

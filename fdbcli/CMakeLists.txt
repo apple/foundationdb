@@ -4,6 +4,7 @@ set(FDBCLI_SRCS
   AdvanceVersionCommand.actor.cpp
   CacheRangeCommand.actor.cpp
   ConsistencyCheckCommand.actor.cpp
+  DataDistributionCommand.actor.cpp
   FlowLineNoise.actor.cpp
   FlowLineNoise.h
   ForceRecoveryWithDataLossCommand.actor.cpp

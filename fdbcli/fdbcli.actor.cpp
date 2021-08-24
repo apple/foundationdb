@@ -4329,47 +4329,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "datadistribution")) {
-					if (tokens.size() != 2 && tokens.size() != 3) {
-						printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-						       "<ssfailure|rebalance>>\n");
+					bool _result = wait(makeInterruptable(dataDistributionCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						if (tokencmp(tokens[1], "on")) {
-							wait(success(setDDMode(db, 1)));
-							printf("Data distribution is turned on.\n");
-						} else if (tokencmp(tokens[1], "off")) {
-							wait(success(setDDMode(db, 0)));
-							printf("Data distribution is turned off.\n");
-						} else if (tokencmp(tokens[1], "disable")) {
-							if (tokencmp(tokens[2], "ssfailure")) {
-								wait(success(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0))));
-								printf("Data distribution is disabled for storage server failures.\n");
-							} else if (tokencmp(tokens[2], "rebalance")) {
-								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
-								printf("Data distribution is disabled for rebalance.\n");
-							} else {
-								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-								       "<ssfailure|rebalance>>\n");
-								is_error = true;
-							}
-						} else if (tokencmp(tokens[1], "enable")) {
-							if (tokencmp(tokens[2], "ssfailure")) {
-								wait(success(makeInterruptable(clearHealthyZone(db, false, true))));
-								printf("Data distribution is enabled for storage server failures.\n");
-							} else if (tokencmp(tokens[2], "rebalance")) {
-								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));
-								printf("Data distribution is enabled for rebalance.\n");
-							} else {
-								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-								       "<ssfailure|rebalance>>\n");
-								is_error = true;
-							}
-						} else {
-							printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-							       "<ssfailure|rebalance>>\n");
-							is_error = true;
-						}
-					}
 					continue;
 				}
 

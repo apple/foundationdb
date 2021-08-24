@@ -62,6 +62,14 @@ class ConfigBroadcasterImpl {
 			       broadcastInterface == rhs.broadcastInterface;
 		}
 		bool operator!=(BroadcastClientDetails const& rhs) const { return !(*this == rhs); }
+
+		BroadcastClientDetails() = default;
+		BroadcastClientDetails(Future<Void> watcher,
+		                       ConfigClassSet const& configClassSet,
+		                       Version lastSeenVersion,
+		                       ConfigBroadcastInterface broadcastInterface)
+		  : watcher(watcher), configClassSet(configClassSet), lastSeenVersion(lastSeenVersion),
+		    broadcastInterface(broadcastInterface) {}
 	};
 
 	std::map<ConfigKey, KnobValue> snapshot;
@@ -72,7 +80,8 @@ class ConfigBroadcasterImpl {
 	std::unique_ptr<IConfigConsumer> consumer;
 	Future<Void> consumerFuture;
 	ActorCollection actors{ false };
-	std::vector<BroadcastClientDetails> clients;
+	std::map<UID, BroadcastClientDetails> clients;
+	std::map<UID, Future<Void>> clientFailures;
 
 	UID id;
 	CounterCollection cc;
@@ -82,16 +91,14 @@ class ConfigBroadcasterImpl {
 	Counter snapshotRequest;
 	Future<Void> logger;
 
-	Future<Void> pushSnapshot(ConfigBroadcasterImpl* self,
-	                          Version snapshotVersion,
-	                          BroadcastClientDetails const& client) {
+	Future<Void> pushSnapshot(Version snapshotVersion, BroadcastClientDetails const& client) {
 		if (client.lastSeenVersion >= snapshotVersion) {
 			return Void();
 		}
 
 		++snapshotRequest;
 		ConfigBroadcastSnapshotRequest request;
-		for (const auto& [key, value] : self->snapshot) {
+		for (const auto& [key, value] : snapshot) {
 			if (matchesConfigClass(client.configClassSet, key.configClass)) {
 				request.snapshot[key] = value;
 			}
@@ -100,7 +107,7 @@ class ConfigBroadcasterImpl {
 		TraceEvent(SevDebug, "ConfigBroadcasterSnapshotRequest", id)
 		    .detail("Size", request.snapshot.size())
 		    .detail("Version", request.version);
-		return success(client.broadcastInterface.snapshot.getReply(request));
+		return success(brokenPromiseToNever(client.broadcastInterface.snapshot.getReply(request)));
 	}
 
 	template <class Changes>
@@ -118,7 +125,8 @@ class ConfigBroadcasterImpl {
 				te.detail("Version", versionedMutation.version)
 				    .detail("ReqLastSeenVersion", client.lastSeenVersion)
 				    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
-				    .detail("KnobName", versionedMutation.mutation.getKnobName());
+				    .detail("KnobName", versionedMutation.mutation.getKnobName())
+				    .detail("ClientID", client.broadcastInterface.id());
 				if (versionedMutation.mutation.isSet()) {
 					te.detail("Op", "Set").detail("KnobValue", versionedMutation.mutation.getValue().toString());
 				} else {
@@ -163,18 +171,18 @@ class ConfigBroadcasterImpl {
 			}
 		}
 
-		for (auto& client : clients) {
+		for (auto& [id, client] : clients) {
 			actors.add(brokenPromiseToNever(pushChanges(client, changes)));
 		}
 	}
 
 	template <class Snapshot>
-	Future<Void> setSnapshot(Snapshot& snapshot, Version snapshotVersion) {
-		this->snapshot = snapshot;
+	Future<Void> setSnapshot(Snapshot&& snapshot, Version snapshotVersion) {
+		this->snapshot = std::forward<Snapshot>(snapshot);
 		this->lastCompactedVersion = snapshotVersion;
 		std::vector<Future<Void>> futures;
-		for (const auto& client : clients) {
-			futures.push_back(brokenPromiseToNever(pushSnapshot(this, snapshotVersion, client)));
+		for (const auto& [id, client] : clients) {
+			futures.push_back(brokenPromiseToNever(pushSnapshot(snapshotVersion, client)));
 		}
 		return waitForAll(futures);
 	}
@@ -192,34 +200,49 @@ class ConfigBroadcasterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> waitForFailure(ConfigBroadcasterImpl* self,
+	ACTOR static Future<Void> waitForFailure(ConfigBroadcasterImpl* self, Future<Void> watcher, UID clientUID) {
+		wait(watcher);
+		TraceEvent(SevDebug, "ConfigBroadcastClientDied", self->id).detail("ClientID", clientUID);
+		self->clients.erase(clientUID);
+		self->clientFailures.erase(clientUID);
+		return Void();
+	}
+
+	ACTOR static Future<Void> registerWorker(ConfigBroadcaster* self,
+	                                         ConfigBroadcasterImpl* impl,
+	                                         Version lastSeenVersion,
+	                                         ConfigClassSet configClassSet,
 	                                         Future<Void> watcher,
-	                                         BroadcastClientDetails* client) {
-		wait(success(watcher));
-		self->clients.erase(std::remove(self->clients.begin(), self->clients.end(), *client));
+	                                         ConfigBroadcastInterface broadcastInterface) {
+		state BroadcastClientDetails client(
+		    watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface));
+		if (!impl->consumerFuture.isValid()) {
+			impl->consumerFuture = impl->consumer->consume(*self);
+		}
+
+		if (impl->clients.count(broadcastInterface.id())) {
+			// Client already registered
+			return Void();
+		}
+
+		TraceEvent(SevDebug, "ConfigBroadcasterRegisteringWorker", impl->id)
+		    .detail("ClientID", broadcastInterface.id())
+		    .detail("MostRecentVersion", impl->mostRecentVersion)
+		    .detail("ClientLastSeenVersion", lastSeenVersion);
+		// Push full snapshot to worker if it isn't up to date.
+		wait(impl->pushSnapshot(impl->mostRecentVersion, client));
+		impl->clients[broadcastInterface.id()] = client;
+		impl->clientFailures[broadcastInterface.id()] = waitForFailure(impl, watcher, broadcastInterface.id());
 		return Void();
 	}
 
 public:
-	Future<Void> registerWorker(ConfigBroadcaster* self,
+	Future<Void> registerWorker(ConfigBroadcaster& self,
 	                            Version lastSeenVersion,
 	                            ConfigClassSet configClassSet,
 	                            Future<Void> watcher,
 	                            ConfigBroadcastInterface broadcastInterface) {
-		if (!consumerFuture.isValid()) {
-			consumerFuture = consumer->consume(*self);
-		}
-
-		auto client = BroadcastClientDetails{
-			watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface)
-		};
-
-		// Push all dynamic knobs to worker if it isn't up to date.
-		Future<Void> result = pushSnapshot(this, mostRecentVersion, client);
-
-		clients.push_back(std::move(client));
-		actors.add(waitForFailure(this, watcher, &clients.back()));
-		return result;
+		return registerWorker(&self, this, lastSeenVersion, configClassSet, watcher, broadcastInterface);
 	}
 
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
@@ -261,7 +284,7 @@ public:
 			} else {
 				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, Optional<double>{});
 			}
-			TraceEvent(SevDebug, "BroadcasterStartingConsumer", id)
+			TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id)
 			    .detail("Consumer", consumer->getID())
 			    .detail("UsingSimpleConsumer", configDBType == ConfigDBType::SIMPLE);
 		}
@@ -324,6 +347,8 @@ public:
 
 	Future<Void> getError() const { return consumerFuture || actors.getResult(); }
 
+	Future<Void> getClientFailure(UID clientUID) const { return clientFailures.find(clientUID)->second; }
+
 	UID getID() const { return id; }
 
 	static void runPendingRequestStoreTest(bool includeGlobalMutation, int expectedMatches);
@@ -342,10 +367,10 @@ ConfigBroadcaster& ConfigBroadcaster::operator=(ConfigBroadcaster&&) = default;
 ConfigBroadcaster::~ConfigBroadcaster() = default;
 
 Future<Void> ConfigBroadcaster::registerWorker(Version lastSeenVersion,
-                                               ConfigClassSet configClassSet,
+                                               ConfigClassSet const& configClassSet,
                                                Future<Void> watcher,
                                                ConfigBroadcastInterface broadcastInterface) {
-	return impl->registerWorker(this, lastSeenVersion, std::move(configClassSet), watcher, broadcastInterface);
+	return impl->registerWorker(*this, lastSeenVersion, configClassSet, watcher, broadcastInterface);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
@@ -374,6 +399,10 @@ void ConfigBroadcaster::applySnapshotAndChanges(
 
 Future<Void> ConfigBroadcaster::getError() const {
 	return impl->getError();
+}
+
+Future<Void> ConfigBroadcaster::getClientFailure(UID clientUID) const {
+	return impl->getClientFailure(clientUID);
 }
 
 UID ConfigBroadcaster::getID() const {
