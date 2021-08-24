@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "flow/network.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKERINTERFACE_ACTOR_G_H)
 #define FDBSERVER_WORKERINTERFACE_ACTOR_G_H
 #include "fdbserver/WorkerInterface.actor.g.h"
@@ -40,11 +41,84 @@
 #include "fdbserver/RecoveryState.h"
 #include "flow/actorcompiler.h"
 
+namespace ptxn {
+
+struct TLogGroup {
+	TLogGroupID logGroupId;
+	std::unordered_map<StorageTeamID, std::vector<Tag>> storageTeams;
+
+	TLogGroup() {}
+	explicit TLogGroup(TLogGroupID logGroupId) : logGroupId(logGroupId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, logGroupId, storageTeams);
+	}
+};
+
+struct InitializePtxnTLogRequest {
+	constexpr static FileIdentifier file_identifier = 15604387;
+	UID recruitmentID;
+	LogSystemConfig recoverFrom;
+	Version knownCommittedVersion;
+	Version startVersion;
+	// This log generation need to store [startVersion, recoverAt] either from old disk queue or
+	// other TLogs.
+	Version recoverAt;
+	LogEpoch epoch;
+	std::vector<Tag> recoverTags; // The tags we need to recover for the above version range.
+	std::vector<Tag> allTags;
+	TLogVersion logVersion;
+	KeyValueStoreType storeType;
+	TLogSpillType spillType;
+	Tag remoteTag;
+	int8_t locality;
+	bool isPrimary;
+
+	int logRouterTags;
+	int txsTags;
+
+	LogSystemType logSystemType; // can be group partitioned.
+	ReplyPromise<struct ptxn::TLogInterface_PassivelyPull> reply;
+
+	// ptxn related state
+	std::vector<ptxn::TLogGroup> tlogGroups;
+
+	InitializePtxnTLogRequest() : recoverFrom(0) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           recruitmentID,
+		           recoverFrom,
+		           recoverAt,
+		           knownCommittedVersion,
+		           epoch,
+		           recoverTags,
+		           allTags,
+		           storeType,
+		           remoteTag,
+		           locality,
+		           isPrimary,
+		           startVersion,
+		           logRouterTags,
+		           reply,
+		           logVersion,
+		           spillType,
+		           txsTags,
+		           logSystemType,
+		           tlogGroups);
+	}
+};
+
+} // namespace ptxn
+
 struct WorkerInterface {
 	constexpr static FileIdentifier file_identifier = 14712718;
 	ClientWorkerInterface clientInterface;
 	LocalityData locality;
 	RequestStream<struct InitializeTLogRequest> tLog;
+	RequestStream<ptxn::InitializePtxnTLogRequest> ptxnTLog;
 	RequestStream<struct RecruitMasterRequest> master;
 	RequestStream<struct InitializeCommitProxyRequest> commitProxy;
 	RequestStream<struct InitializeGrvProxyRequest> grvProxy;
@@ -80,6 +154,7 @@ struct WorkerInterface {
 	void initEndpoints() {
 		clientInterface.initEndpoints();
 		tLog.getEndpoint(TaskPriority::Worker);
+		ptxnTLog.getEndpoint(TaskPriority::Worker);
 		master.getEndpoint(TaskPriority::Worker);
 		commitProxy.getEndpoint(TaskPriority::Worker);
 		grvProxy.getEndpoint(TaskPriority::Worker);
@@ -97,6 +172,7 @@ struct WorkerInterface {
 		           clientInterface,
 		           locality,
 		           tLog,
+		           ptxnTLog,
 		           master,
 		           commitProxy,
 		           grvProxy,
@@ -421,23 +497,6 @@ struct GetWorkersRequest {
 		serializer(ar, flags, reply);
 	}
 };
-
-namespace ptxn {
-
-struct TLogGroup {
-	TLogGroupID logGroupId;
-	std::unordered_map<StorageTeamID, std::vector<Tag>> storageTeams;
-
-	TLogGroup() {}
-	explicit TLogGroup(TLogGroupID logGroupId) : logGroupId(logGroupId) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, logGroupId, storageTeams);
-	}
-};
-
-} // namespace ptxn
 
 struct UpdateWorkerHealthRequest {
 	constexpr static FileIdentifier file_identifier = 5789927;

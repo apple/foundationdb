@@ -1687,6 +1687,9 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				}
 				activeSharedTLog->set(logData.uid);
 			}
+			when(ptxn::InitializePtxnTLogRequest req = waitNext(interf.ptxnTLog.getFuture())) {
+				// TODO.
+			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
 				// We want to prevent double recruiting on a worker unless we try to recruit something
 				// with a different storage engine (otherwise storage migration won't work for certain
