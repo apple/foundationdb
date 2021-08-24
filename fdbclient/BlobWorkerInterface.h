@@ -22,7 +22,8 @@
 #define FDBCLIENT_BLOBWORKERINTERFACE_H
 #pragma once
 
-#include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/StorageServerInterface.h" // just for MutationsAndVersion, TODO pull that out maybe?
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -51,26 +52,11 @@ struct BlobWorkerInterface {
 	}
 };
 
-struct MutationAndVersion {
-	constexpr static FileIdentifier file_identifier = 4268041;
-	MutationRef m;
-	Version v;
-
-	MutationAndVersion() {}
-	MutationAndVersion(Arena& to, MutationRef m, Version v) : m(to, m), v(v) {}
-	MutationAndVersion(Arena& to, const MutationAndVersion& from) : m(to, from.m), v(from.v) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, m, v);
-	}
-};
-
 // TODO should name all things that don't have their own arena *Ref
 // file format of actual blob files
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
 
-	constexpr static FileIdentifier file_identifier = 4268040;
+	constexpr static FileIdentifier file_identifier = 1300395;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -78,12 +64,35 @@ struct GranuleSnapshot : VectorRef<KeyValueRef> {
 	}
 };
 
-struct GranuleDeltas : VectorRef<MutationAndVersion> {
-	constexpr static FileIdentifier file_identifier = 4268042;
+struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
+	constexpr static FileIdentifier file_identifier = 8563013;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((VectorRef<MutationAndVersion>&)*this));
+		serializer(ar, ((VectorRef<MutationsAndVersionRef>&)*this));
+	}
+};
+
+// TODO better name?
+struct BlobFilenameRef {
+	constexpr static FileIdentifier file_identifier = 5253554;
+	StringRef filename;
+	int64_t offset;
+	int64_t length;
+
+	BlobFilenameRef() {}
+	BlobFilenameRef(Arena& to, std::string filename, int64_t offset, int64_t length)
+	  : filename(to, filename), offset(offset), length(length) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, filename, offset, length);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << filename.toString() << ":" << offset << ":" << length;
+		return std::move(ss).str();
 	}
 };
 
@@ -91,16 +100,17 @@ struct GranuleDeltas : VectorRef<MutationAndVersion> {
 // TODO could filter out delta files that don't intersect the key range being requested?
 // TODO since client request passes version, we don't need to include the version of each mutation in the response if we
 // pruned it there
-struct BlobGranuleChunk {
+struct BlobGranuleChunkRef {
 	constexpr static FileIdentifier file_identifier = 991434;
 	KeyRangeRef keyRange;
-	StringRef snapshotFileName;
-	VectorRef<StringRef> deltaFileNames;
+	Version includedVersion;
+	Optional<BlobFilenameRef> snapshotFile; // not set if it's an incremental read
+	VectorRef<BlobFilenameRef> deltaFiles;
 	GranuleDeltas newDeltas;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, snapshotFileName, deltaFileNames, newDeltas);
+		serializer(ar, keyRange, includedVersion, snapshotFile, deltaFiles, newDeltas);
 	}
 };
 
@@ -108,7 +118,7 @@ struct BlobGranuleFileReply {
 	// TODO is there a "proper" way to generate file_identifier?
 	constexpr static FileIdentifier file_identifier = 6858612;
 	Arena arena;
-	VectorRef<BlobGranuleChunk> chunks;
+	VectorRef<BlobGranuleChunkRef> chunks;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -119,10 +129,10 @@ struct BlobGranuleFileReply {
 // TODO could do a reply promise stream of file mutations to bound memory requirements?
 // Have to load whole snapshot file into memory though so it doesn't actually matter too much
 struct BlobGranuleFileRequest {
-
 	constexpr static FileIdentifier file_identifier = 4150141;
 	Arena arena;
 	KeyRangeRef keyRange;
+	Version beginVersion = 0;
 	Version readVersion;
 	ReplyPromise<BlobGranuleFileReply> reply;
 
@@ -130,12 +140,12 @@ struct BlobGranuleFileRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, readVersion, reply, arena);
+		serializer(ar, keyRange, beginVersion, readVersion, reply, arena);
 	}
 };
 
 struct AssignBlobRangeRequest {
-	constexpr static FileIdentifier file_identifier = 4150141;
+	constexpr static FileIdentifier file_identifier = 4844288;
 	Arena arena;
 	KeyRangeRef keyRange;
 	Version assignVersion;

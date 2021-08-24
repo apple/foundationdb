@@ -35,7 +35,7 @@
 
 // Reads the fileset in the reply using the provided blob store, and filters data and mutations by key + version from
 // the request
-ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunk chunk,
+ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version readVersion,
                                           Reference<S3BlobStoreEndpoint> bstore,

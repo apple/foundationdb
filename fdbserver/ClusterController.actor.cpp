@@ -3208,17 +3208,19 @@ ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, Ratekeeper
 					       chunk.keyRange.begin.printable().c_str(),
 					       chunk.keyRange.end.printable().c_str());
 
-					printf("  SnapshotFile:\n    %s\n", chunk.snapshotFileName.toString().c_str());
+					printf("  SnapshotFile:\n    %s\n",
+					       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
 					printf("  DeltaFiles:\n");
-					for (auto& df : chunk.deltaFileNames) {
+					for (auto& df : chunk.deltaFiles) {
 						printf("    %s\n", df.toString().c_str());
 					}
 					printf("  Deltas: (%d)", chunk.newDeltas.size());
 					if (chunk.newDeltas.size() > 0) {
 						printf(" with version [%lld - %lld]",
-						       chunk.newDeltas[0].v,
-						       chunk.newDeltas[chunk.newDeltas.size() - 1].v);
+						       chunk.newDeltas[0].version,
+						       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
 					}
+					printf("  IncludedVersion: %lld\n", chunk.includedVersion);
 					printf("\n\n");
 				}
 				state PromiseStream<RangeResult> results;
