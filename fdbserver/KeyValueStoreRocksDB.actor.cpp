@@ -277,8 +277,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.send(Void());
 				if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
 					ASSERT(a.kv != nullptr && a.version != invalidVersion && a.persist != nullptr);
-					kv->addVersionPair(db->GetLatestSequenceNumber(), a.version);
-					a.persist->send(PersistNotification(version));
+					a.kv->addVersionPair(db->GetLatestSequenceNumber(), a.version);
+					a.persist->send(PersistNotification(a.version));
 				}
 				for (const auto& keyRange : deletes) {
 					auto begin = toSlice(keyRange.begin);
@@ -697,7 +697,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 private:
 	std::mutex mu;
-	std::unordered_map<rocksdb::SequenceNumber, Version version> versionMap;
+	std::unordered_map<rocksdb::SequenceNumber, Version> versionMap;
 };
 
 } // namespace

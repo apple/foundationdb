@@ -4064,8 +4064,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
+		state bool async_enabled = (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT &&
+		                            data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1);
 		state Future<Void> durable =
-		    SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT ? data->storage.commitAsync(newOldestVersion) : data->storage.commit();
+		    async_enabled ? data->storage.commitAsync(newOldestVersion) : data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0) {
@@ -4077,7 +4079,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
-		if (!SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT && newOldestVersion > data->rebootAfterDurableVersion) {
+		if (!async_enabled && newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
 			    .detail("NewOldestVersion", newOldestVersion)
 			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
@@ -4094,7 +4096,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		durableInProgress.send(Void());
 		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to shut
 		                                             // down, so delay to check for cancellation
-		if (!SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+		if (!async_enabled) {
 			// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
 			// effective and are applied after we change the durable version. Also ensure that we have to lock while
 			// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
