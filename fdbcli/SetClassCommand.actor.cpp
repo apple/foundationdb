@@ -23,8 +23,6 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/Schemas.h"
-#include "fdbclient/Status.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -83,13 +81,9 @@ ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_addre
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				Optional<Value> errorMsg = wait(safeThreadFutureToFuture(tr->get(fdb_cli::errorMsgSpecialKey)));
-				ASSERT(errorMsg.present());
-				std::string errorMsgStr;
-				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
 				// error message already has \n at the end
-				fprintf(stderr, "%s", valueObj["message"].get_str().c_str());
+				fprintf(stderr, "%s", errorMsgStr.c_str());
 				return false;
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));

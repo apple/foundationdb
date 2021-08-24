@@ -10,7 +10,7 @@ set(FDBCLI_SRCS
   SetClassCommand.actor.cpp
   SnapshotCommand.actor.cpp
   ThrottleCommand.actor.cpp
-  Util.cpp
+  Util.actor.cpp
   linenoise/linenoise.h)
 
 if(NOT WIN32)

@@ -75,6 +75,9 @@ inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_messag
 bool tokencmp(StringRef token, const char* command);
 // print the usage of the specified command
 void printUsage(StringRef command);
+// Pre: tr failed with special_keys_api_failure error
+// Read the error message special key and return the message
+ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
 
 // All fdbcli commands (alphabetically)
 // advanceversion command
