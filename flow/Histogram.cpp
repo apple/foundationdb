@@ -85,9 +85,15 @@ Histogram* HistogramRegistry::lookupHistogram(std::string const& name) {
 	return h->second;
 }
 
-void HistogramRegistry::logReport() {
+void HistogramRegistry::logReport(double elapsed) {
 	for (auto& i : histograms) {
-		i.second->writeToLog();
+		i.second->writeToLog(elapsed);
+		i.second->clear();
+	}
+}
+
+void HistogramRegistry::clear() {
+	for (auto& i : histograms) {
 		i.second->clear();
 	}
 }
@@ -103,7 +109,7 @@ const char* const Histogram::UnitToStringMapper[] = { "microseconds",
 	                                                  "count", 
 													  "none"};
 
-void Histogram::writeToLog() {
+void Histogram::writeToLog(double elapsed) {
 	bool active = false;
 	for (uint32_t i = 0; i < 32; i++) {
 		if (buckets[i]) {
@@ -117,7 +123,7 @@ void Histogram::writeToLog() {
 
 	TraceEvent e(SevInfo, "Histogram");
 	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper[(size_t)unit]);
-
+	e.detail("Elapsed", elapsed);
 	int totalCount = 0;
 	for (uint32_t i = 0; i < 32; i++) {
 		uint64_t value = uint64_t(1) << (i + 1);

@@ -23,12 +23,10 @@
 #pragma once
 
 #include <flow/Arena.h>
-
 #include <string>
 #include <map>
 #include <unordered_map>
 #include <iomanip>
-
 #ifdef _WIN32
 #include <intrin.h>
 #pragma intrinsic(_BitScanReverse)
@@ -41,7 +39,8 @@ public:
 	void registerHistogram(Histogram* h);
 	void unregisterHistogram(Histogram* h);
 	Histogram* lookupHistogram(std::string const& name);
-	void logReport();
+	void logReport(double elapsed = -1.0);
+	void clear();
 
 private:
 	// This map is ordered by key so that ops within the same group end up
@@ -164,7 +163,7 @@ public:
 			i = 0;
 		}
 	}
-	void writeToLog();
+	void writeToLog(double elapsed = -1.0);
 
 	std::string name() const { return generateName(this->group, this->op); }
 
