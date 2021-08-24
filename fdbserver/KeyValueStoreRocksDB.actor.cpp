@@ -272,11 +272,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
+				// errorPromise.sendError();
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
-				if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
-					ASSERT(a.kv != nullptr && a.version != invalidVersion && a.persist != nullptr);
+				if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT && a.kv != nullptr && a.version != invalidVersion &&
+				    a.persist != nullptr) {
 					a.kv->addVersionPair(db->GetLatestSequenceNumber(), a.version);
 					a.persist->send(PersistNotification(a.version));
 				}
