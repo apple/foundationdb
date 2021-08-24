@@ -50,18 +50,18 @@ class Container:
             assert isinstance(image, str)
             image_name = image
 
-        # minimal privilege required to run systemd
-        # https://github.com/docker/for-linux/issues/106#issuecomment-330518243
-        extra_privilege = []
+        # minimal extra args required to run systemd
+        # https://developers.redhat.com/blog/2016/09/13/running-systemd-in-a-non-privileged-container#the_quest
+        extra_initd_args = []
         if initd:
-            extra_privilege = "--cap-add=SYS_ADMIN -e container=docker -v /sys/fs/cgroup:/sys/fs/cgroup".split()
+            extra_initd_args = "--tmpfs /tmp --tmpfs /run -v /sys/fs/cgroup:/sys/fs/cgroup:ro".split()
 
         self.uid = str(uuid.uuid4())
 
         run(
             ["docker", "run"]
             + ["-t", "-d", "--name", self.uid]
-            + extra_privilege
+            + extra_initd_args
             + [image_name]
             + ["/usr/sbin/init" for _ in range(1) if initd]
         ).rstrip()
@@ -102,9 +102,9 @@ def ubuntu_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
     try:
         container = Container("ubuntu")
         for deb in debs:
-            container.copy_to(deb, "/tmp")
-        container.run(["bash", "-c", "dpkg -i /tmp/*.deb"])
-        container.run(["bash", "-c", "rm /tmp/*.deb"])
+            container.copy_to(deb, "/opt")
+        container.run(["bash", "-c", "dpkg -i /opt/*.deb"])
+        container.run(["bash", "-c", "rm /opt/*.deb"])
         image = container.commit()
         yield image
     finally:
@@ -145,9 +145,9 @@ def centos_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
     try:
         container = Container("centos", initd=True)
         for rpm in rpms:
-            container.copy_to(rpm, "/tmp")
-        container.run(["bash", "-c", "yum install -y /tmp/*.rpm"])
-        container.run(["bash", "-c", "rm /tmp/*.rpm"])
+            container.copy_to(rpm, "/opt")
+        container.run(["bash", "-c", "yum install -y /opt/*.rpm"])
+        container.run(["bash", "-c", "rm /opt/*.rpm"])
         image = container.commit()
         yield image
     finally:
