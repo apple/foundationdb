@@ -144,12 +144,8 @@ def setclass(logger):
             assert random_class_type in line
             # check class source
             assert 'set_class' in line
-    # set back to default
-    run_fdbcli_command('setclass', random_address, 'default')
-    output3 = run_fdbcli_command('setclass')
-    logger.debug(output3)
-    # everything should be back to the same as before
-    assert output1 == output3
+    # set back to unset
+    run_fdbcli_command('setclass', random_address, 'unset')
 
 
 @enable_logging()
