@@ -478,21 +478,21 @@ def wait_for_database_available(logger):
 @enable_logging()
 def profile(logger):
     # profile list should return the same list as kill
-    addresses = get_fdb_process_addresses()
+    addresses = get_fdb_process_addresses(logger)
     output1 = run_fdbcli_command('profile', 'list')
     assert output1.split('\n') == addresses
     # check default output
     default_profile_client_get_output = 'Client profiling rate is set to default and size limit is set to default.'
     output2 = run_fdbcli_command('profile', 'client', 'get')
     assert output2 == default_profile_client_get_output
-    # TODO: this test is now failing, the implementation needs to be fixed
     # set rate and size limit
-    # run_fdbcli_command('profile', 'client', 'set', '0.5', 'default')
-    # output3 = run_fdbcli_command('profile', 'client', 'get')
-    # logger.debug(output3)
-    # output3_list = output3.split(' ')
-    # assert float(output3_list[6]) == 0.5
-    # assert output3_list[-1] == '1000000000.'
+    run_fdbcli_command('profile', 'client', 'set', '0.5', '1GB')
+    output3 = run_fdbcli_command('profile', 'client', 'get')
+    logger.debug(output3)
+    output3_list = output3.split(' ')
+    assert float(output3_list[6]) == 0.5
+    # size limit should be 1GB
+    assert output3_list[-1] == '1000000000.'
     # change back to default value and check
     run_fdbcli_command('profile', 'client', 'set', 'default', 'default')
     assert run_fdbcli_command('profile', 'client', 'get') == default_profile_client_get_output
