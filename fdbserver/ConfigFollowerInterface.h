@@ -150,6 +150,20 @@ struct ConfigFollowerCompactRequest {
 	}
 };
 
+struct ConfigFollowerRollbackRequest {
+	static constexpr FileIdentifier file_identifier = 765456;
+	Version version{ 0 };
+	ReplyPromise<Void> reply;
+
+	ConfigFollowerRollbackRequest() = default;
+	explicit ConfigFollowerRollbackRequest(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, reply);
+	}
+};
+
 struct ConfigFollowerGetCommittedVersionReply {
 	static constexpr FileIdentifier file_identifier = 9214735;
 	Version version;
@@ -185,6 +199,7 @@ public:
 	RequestStream<ConfigFollowerGetSnapshotAndChangesRequest> getSnapshotAndChanges;
 	RequestStream<ConfigFollowerGetChangesRequest> getChanges;
 	RequestStream<ConfigFollowerCompactRequest> compact;
+	RequestStream<ConfigFollowerRollbackRequest> rollback;
 	RequestStream<ConfigFollowerGetCommittedVersionRequest> getCommittedVersion;
 
 	ConfigFollowerInterface();
@@ -196,6 +211,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact, getCommittedVersion);
+		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact, rollback, getCommittedVersion);
 	}
 };

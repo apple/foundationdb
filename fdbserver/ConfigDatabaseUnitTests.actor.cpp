@@ -108,6 +108,8 @@ public:
 
 	Future<Void> compact() { return cfi.compact.getReply(ConfigFollowerCompactRequest{ lastWrittenVersion }); }
 
+	Future<Void> rollback(Version version) { return cfi.rollback.getReply(ConfigFollowerRollbackRequest{ version }); }
+
 	void restartNode() {
 		cfiServer.cancel();
 		ctiServer.cancel();
@@ -404,6 +406,7 @@ public:
 	}
 
 	Future<Void> compact() { return writeTo.compact(); }
+	Future<Void> rollback(Version version) { return writeTo.rollback(version); }
 	Future<Void> getError() const { return writeTo.getError(); }
 };
 
@@ -510,6 +513,10 @@ Future<Void> compact(Env& env) {
 Future<Void> compact(BroadcasterToLocalConfigEnvironment& env) {
 	env.compact();
 	return Void();
+}
+template <class Env, class... Args>
+Future<Void> rollback(Env& env, Args&&... args) {
+	return waitOrError(env.rollback(std::forward<Args>(args)...), env.getError());
 }
 
 ACTOR template <class Env>
@@ -901,6 +908,36 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactNode") {
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/Rollback") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	// Rollback to version 0 should undo the set.
+	wait(rollback(env, 0));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
+	// Make sure sets still work after rollback.
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollbackToCurrentVersion") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	// Rollback to the latest written version shouldn't undo anything.
+	wait(rollback(env, 1));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollbackToNewerVersion") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	// Rollback to the a version not yet committed should have no effect.
+	wait(rollback(env, 999));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
 	return Void();
 }
 
