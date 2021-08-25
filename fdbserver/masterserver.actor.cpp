@@ -255,6 +255,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Future<Void> logger;
 
+	// A version that advances normally in simulation to keep pace, but isn't used as the next commit version
+	Version simNormalVersion;
+
 	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	           MasterInterface const& myInterface,
 	           ServerCoordinators const& coordinators,
@@ -275,7 +278,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
-	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
+	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc), simNormalVersion(invalidVersion) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
@@ -1157,6 +1160,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		if (self->version == invalidVersion) {
 			self->lastVersionTime = now();
 			self->version = self->recoveryTransactionVersion;
+			self->simNormalVersion = self->recoveryTransactionVersion;
 			rep.prevVersion = self->lastEpochEnd;
 		} else {
 			double t1 = now();
@@ -1164,10 +1168,37 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				t1 = self->lastVersionTime;
 			}
 			rep.prevVersion = self->version;
-			self->version +=
-			    std::max<Version>(1,
-			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
-			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
+
+			if (!g_network->isSimulated()) {
+				self->version += std::max<Version>(
+				    1,
+				    std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
+				                      SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
+			} else {
+				// In simulation, the simNormalVersion moves with time normally but to find edge cases involving
+				// version comparisons we force versions to increment monotonically between 1 version-second boundaries
+
+				// Get the second of the current normal version
+				Version previousSecond = self->simNormalVersion / SERVER_KNOBS->VERSIONS_PER_SECOND;
+
+				// Calculate the next normal version
+				self->simNormalVersion += std::max<Version>(
+				    1,
+				    std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
+				                      SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
+
+				// Get the second of the new normal version
+				Version newSecond = self->simNormalVersion / SERVER_KNOBS->VERSIONS_PER_SECOND;
+
+				// Set the actual next commit version to pass out
+				// When simNormalVersion advancement has moved to a new version-second, set version to that
+				// version-second. When it doesn't, just increment it by 1.
+				if (newSecond != previousSecond) {
+					self->version = newSecond * SERVER_KNOBS->VERSIONS_PER_SECOND;
+				} else {
+					self->version += 1;
+				}
+			}
 
 			TEST(self->version - rep.prevVersion == 1); // Minimum possible version gap
 
