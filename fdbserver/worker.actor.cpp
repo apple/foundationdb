@@ -410,7 +410,8 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 	case TLogVersion::V6:
 		return tLog;
 	case TLogVersion::V7:
-		return ptxn::tLog;
+		// ptxn::tLog uses ptxn::InitializePtxnTLogRequest and is incompatiable
+		// return ptxn::tLog;
 	default:
 		ASSERT(false);
 	}
@@ -1161,11 +1162,14 @@ public:
 struct SharedLogsValue {
 	Future<Void> actor = Void();
 	UID uid = UID();
-	PromiseStream<InitializeTLogRequest> requests;
+	PromiseStream<InitializeTLogRequest> requests; // Non-ptxn TLogs use this
+	PromiseStream<ptxn::InitializePtxnTLogRequest> ptxnRequests; // PTXN TLogs use this
 
 	SharedLogsValue() = default;
 	SharedLogsValue(Future<Void> actor, UID uid, PromiseStream<InitializeTLogRequest> requests)
 	  : actor(actor), uid(uid), requests(requests) {}
+	SharedLogsValue(Future<Void> actor, UID uid, PromiseStream<ptxn::InitializePtxnTLogRequest> requests)
+	  : actor(actor), uid(uid), ptxnRequests(requests) {}
 };
 
 ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
@@ -1648,7 +1652,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					// different role type for the shared actor
 					startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
 
-					// TODO: create kv and disk queue per TLog group.
 					std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
 					const StringRef prefix =
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
@@ -1688,7 +1691,63 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				activeSharedTLog->set(logData.uid);
 			}
 			when(ptxn::InitializePtxnTLogRequest req = waitNext(interf.ptxnTLog.getFuture())) {
-				// TODO.
+				if (req.logVersion < TLogVersion::MIN_RECRUITABLE) {
+					TraceEvent(SevError, "InitializeTLogInvalidLogVersion")
+					    .detail("Version", req.logVersion)
+					    .detail("MinRecruitable", TLogVersion::MIN_RECRUITABLE);
+					req.reply.sendError(internal_error());
+				}
+				TLogOptions tLogOptions(req.logVersion, req.spillType);
+				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
+				logData.ptxnRequests.send(req);
+				if (!logData.actor.isValid() || logData.actor.isReady()) {
+					UID logId = deterministicRandom()->randomUniqueID();
+					std::map<std::string, std::string> details;
+					details["ForMaster"] = req.recruitmentID.shortString();
+					details["StorageEngine"] = req.storeType.toString();
+
+					// FIXME: start role for every tlog instance, rather that just for the shared actor, also use a
+					// different role type for the shared actor
+					startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
+
+					// TODO: create kv and disk queue per TLog group.
+					std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
+					const StringRef prefix =
+					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
+					std::string filename =
+					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
+					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
+					const DiskQueueVersion dqv =
+					    tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
+					IDiskQueue* queue = openDiskQueue(
+					    joinPath(folder,
+					             fileLogQueuePrefix.toString() + tLogOptions.toPrefix() + logId.toString() + "-"),
+					    tlogQueueExtension.toString(),
+					    logId,
+					    dqv);
+					filesClosed.add(data->onClosed());
+					filesClosed.add(queue->onClosed());
+
+					persistentDataAndQueues.emplace_back(data, queue);
+					Future<Void> tLogCore = ptxn::tLog(persistentDataAndQueues,
+					                                   dbInfo,
+					                                   locality,
+					                                   logData.ptxnRequests,
+					                                   logId,
+					                                   interf.id(),
+					                                   false,
+					                                   Promise<Void>(),
+					                                   Promise<Void>(),
+					                                   folder,
+					                                   degraded,
+					                                   activeSharedTLog);
+					tLogCore = handleIOErrors(tLogCore, data, logId);
+					tLogCore = handleIOErrors(tLogCore, queue, logId);
+					errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
+					logData.actor = tLogCore;
+					logData.uid = logId;
+				}
+				activeSharedTLog->set(logData.uid);
 			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
 				// We want to prevent double recruiting on a worker unless we try to recruit something

@@ -533,13 +533,7 @@ struct InitializeTLogRequest {
 	int logRouterTags;
 	int txsTags;
 
-	LogSystemType logSystemType; // can be group partitioned.
-
 	ReplyPromise<struct TLogInterface> reply;
-
-	// ptxn related state
-	std::vector<ptxn::TLogGroup> tlogGroups;
-	ReplyPromise<struct ptxn::TLogInterface_PassivelyPull> ptxnReply;
 
 	InitializeTLogRequest() : recoverFrom(0) {}
 
@@ -562,10 +556,7 @@ struct InitializeTLogRequest {
 		           reply,
 		           logVersion,
 		           spillType,
-		           txsTags,
-		           logSystemType,
-		           tlogGroups,
-		           ptxnReply);
+		           txsTags);
 	}
 };
 
@@ -1052,7 +1043,7 @@ namespace ptxn {
 ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
                         Reference<AsyncVar<ServerDBInfo>> db,
                         LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests,
+                        PromiseStream<InitializePtxnTLogRequest> tlogRequests,
                         UID tlogId,
                         UID workerID,
                         bool restoreFromDisk,

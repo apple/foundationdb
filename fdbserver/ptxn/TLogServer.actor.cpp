@@ -1413,7 +1413,7 @@ ACTOR Future<Void> tlogGroupStart(Reference<TLogGroupData> self, Reference<LogGe
 }
 
 // Start the tLog role for a worker
-ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogRequest req, LocalityData locality) {
+ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogRequest req, LocalityData locality) {
 	ASSERT(req.isPrimary);
 	// we start the new tlog server
 	state TLogInterface_PassivelyPull recruited(self->dbgid, locality);
@@ -1459,7 +1459,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 	}
 
 	wait(waitForAll(tlogGroupStarts));
-	req.ptxnReply.send(recruited);
+	req.reply.send(recruited);
 
 	TraceEvent("TLogStart", recruited.id());
 	wait(tLogCore(self, activeGeneration, recruited));
@@ -1470,7 +1470,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
                         Reference<AsyncVar<ServerDBInfo>> db,
                         LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests,
+                        PromiseStream<InitializePtxnTLogRequest> tlogRequests,
                         UID tlogId,
                         UID workerID,
                         bool restoreFromDisk,
@@ -1492,9 +1492,9 @@ ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> per
 
 		loop choose {
 			// TODO: restore old tlog groups from disk and build overlapping tlog groups from the restore
-			when(state InitializeTLogRequest req = waitNext(tlogRequests.getFuture())) {
+			when(state InitializePtxnTLogRequest req = waitNext(tlogRequests.getFuture())) {
 				if (!self->tlogCache.exists(req.recruitmentID)) {
-					self->tlogCache.set(req.recruitmentID, req.ptxnReply.getFuture());
+					self->tlogCache.set(req.recruitmentID, req.reply.getFuture());
 
 					std::vector<Future<Void>> tlogGroupRecoveries;
 					for (auto& group : req.tlogGroups) {
@@ -1537,7 +1537,7 @@ ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> per
 					// start the new generation
 					self->sharedActors.send(tLogStart(self, req, locality));
 				} else {
-					forwardPromise(req.ptxnReply, self->tlogCache.get(req.recruitmentID));
+					forwardPromise(req.reply, self->tlogCache.get(req.recruitmentID));
 				}
 			}
 			when(wait(error)) { throw internal_error(); }

@@ -3140,11 +3140,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			state std::unordered_map<UID, ptxn::TLogInterface_PassivelyPull> id2Interface;
 			state int i = 0;
 			for (i = 0; i < reqs.size(); i++) {
-				ASSERT(reqs[i].isPrimary);
+				ASSERT(ptxnReqs[i].isPrimary);
 				// wait for interfaces being built from TLogServer, then construct id -> interface mapping
 				// cannot use more standard `getReplyUnlessFailedFor`, because it is waiting on `reply` field, here we
 				// have ptxn.reply
-				state ptxn::TLogInterface_PassivelyPull serverNew = wait(reqs[i].ptxnReply.getFuture());
+				state ptxn::TLogInterface_PassivelyPull serverNew = wait(ptxnReqs[i].reply.getFuture());
 				tLogGroupCollection->addWorkers({ serverNew });
 				logSystem->tLogs[0]->logServersPtxn[i] =
 				    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
