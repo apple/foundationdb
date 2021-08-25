@@ -19,7 +19,6 @@
  */
 
 #pragma once
-#include "flow/network.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKERINTERFACE_ACTOR_G_H)
 #define FDBSERVER_WORKERINTERFACE_ACTOR_G_H
 #include "fdbserver/WorkerInterface.actor.g.h"
@@ -39,7 +38,9 @@
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "fdbserver/RecoveryState.h"
-#include "flow/actorcompiler.h"
+#include "flow/network.h"
+
+#include "flow/actorcompiler.h" // This must be the last include
 
 namespace ptxn {
 
@@ -78,10 +79,7 @@ struct InitializePtxnTLogRequest {
 	int logRouterTags;
 	int txsTags;
 
-	LogSystemType logSystemType; // can be group partitioned.
 	ReplyPromise<struct ptxn::TLogInterface_PassivelyPull> reply;
-
-	// ptxn related state
 	std::vector<ptxn::TLogGroup> tlogGroups;
 
 	InitializePtxnTLogRequest() : recoverFrom(0) {}
@@ -106,7 +104,6 @@ struct InitializePtxnTLogRequest {
 		           logVersion,
 		           spillType,
 		           txsTags,
-		           logSystemType,
 		           tlogGroups);
 	}
 };
