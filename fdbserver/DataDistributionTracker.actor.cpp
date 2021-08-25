@@ -858,7 +858,7 @@ ACTOR Future<Void> fetchShardMetrics(DataDistributionTracker* self, GetMetricsRe
 		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT, TaskPriority::DataDistribution))) {
 			TEST(true); // DD_SHARD_METRICS_TIMEOUT
 			StorageMetrics largeMetrics;
-			largeMetrics.bytes = SERVER_KNOBS->MAX_SHARD_BYTES;
+			largeMetrics.bytes = getMaxShardSize(self->dbSizeEstimate->get());
 			req.reply.send(largeMetrics);
 		}
 	}

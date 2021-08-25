@@ -33,6 +33,7 @@ void forceLinkStreamCipherTests();
 #endif
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
+void forceLinkMutationLogReaderTests();
 void forceLinkIThreadPoolTests();
 
 struct UnitTestWorkload : TestWorkload {
@@ -77,6 +78,7 @@ struct UnitTestWorkload : TestWorkload {
 #endif
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
+		forceLinkMutationLogReaderTests();
 		forceLinkIThreadPoolTests();
 	}
 

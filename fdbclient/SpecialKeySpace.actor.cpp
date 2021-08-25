@@ -1964,16 +1964,29 @@ void parse(StringRef& val, WaitState& w) {
 
 void parse(StringRef& val, time_t& t) {
 	struct tm tm = { 0 };
+#ifdef _WIN32
+	std::istringstream s(val.toString());
+	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
+	s >> std::get_time(&tm, "%FT%T%z");
+	if (s.fail()) {
+		throw std::invalid_argument("failed to parse ISO 8601 datetime");
+	}
+	long timezone;
+	if (_get_timezone(&timezone) != 0) {
+		throw std::runtime_error("failed to convert ISO 8601 datetime");
+	}
+	timezone = -timezone;
+#else
 	if (strptime(val.toString().c_str(), "%FT%T%z", &tm) == nullptr) {
 		throw std::invalid_argument("failed to parse ISO 8601 datetime");
 	}
-
 	long timezone = tm.tm_gmtoff;
 	t = timegm(&tm);
 	if (t == -1) {
 		throw std::runtime_error("failed to convert ISO 8601 datetime");
 	}
 	t -= timezone;
+#endif
 }
 
 void parse(StringRef& val, NetworkAddress& a) {

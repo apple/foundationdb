@@ -3592,6 +3592,8 @@ ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, 
 				return Void();
 			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
 				// recruitment not good enough, try again
+				TraceEvent("RecruitFromConfigurationRetry", self->id).error(e)
+					.detail("GoodRecruitmentTimeReady", self->goodRecruitmentTime.isReady());
 			} else {
 				TraceEvent(SevError, "RecruitFromConfigurationError", self->id).error(e);
 				throw; // goodbye, cluster controller
@@ -3617,6 +3619,8 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration(ClusterControllerData* 
 				return Void();
 			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
 				// recruitment not good enough, try again
+				TraceEvent("RecruitRemoteFromConfigurationRetry", self->id).error(e)
+					.detail("GoodRecruitmentTimeReady", self->goodRemoteRecruitmentTime.isReady());
 			} else {
 				TraceEvent(SevError, "RecruitRemoteFromConfigurationError", self->id).error(e);
 				throw; // goodbye, cluster controller
@@ -3938,13 +3942,11 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		loop {
 			try {
+				state UID debugID = deterministicRandom()->randomUniqueID();
 				if (!g_network->isSimulated()) {
 					// This is done to provide an arbitrary logged transaction every ~10s.
 					// FIXME: replace or augment this with logging on the proxy which tracks
-					//       how long it is taking to hear responses from each other component.
-
-					UID debugID = deterministicRandom()->randomUniqueID();
-					TraceEvent("TimeKeeperCommit", debugID).log();
+					// how long it is taking to hear responses from each other component.
 					tr->debugTransaction(debugID);
 				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3959,7 +3961,9 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 				Version v = tr->getReadVersion().get();
 				int64_t currentTime = (int64_t)now();
 				versionMap.set(tr, currentTime, v);
-
+				if (!g_network->isSimulated()) {
+					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v);
+				}
 				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
 				if (ttl > 0) {
 					versionMap.erase(tr, 0, ttl);
@@ -4780,6 +4784,9 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "ClusterControllerHealthMonitorError").error(e);
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 		}
 	}
 }
