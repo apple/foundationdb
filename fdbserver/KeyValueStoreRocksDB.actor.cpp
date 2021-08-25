@@ -3,6 +3,7 @@
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
+#include <rocksdb/listener.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
@@ -27,6 +28,20 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
+class FlushNotifier : public rocksdb::EventListener {
+public:
+	FlushNotifier(RocksDBKeyValueStore* kv) : kv(kv) {}
+	~FlushNotifier() override {}
+
+	void OnFlushCompleted(DB* /*db*/, const FlushJobInfo& info) override {
+		std::lock_guard<std::mutex> lock(mu);
+		kv->notifyPersist(info.largest_seqno;);
+	}
+
+private:
+	RocksDBKeyValueStore* kv;
+	ThreadReturnPromiseStream<PersistNotification>* persist;
+};
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -215,7 +230,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			ThreadReturnPromise<Void> done;
 			Optional<Future<Void>>& metrics;
-			OpenAction(std::string path, Optional<Future<Void>>& metrics) : path(std::move(path)), metrics(metrics) {}
+			std::shared_ptr<FlushNotifier> notifier;
+			OpenAction(std::string path, Optional<Future<Void>>& metrics, std::shared_ptr<FlushNotifier> notifier)
+			  : path(std::move(path)), metrics(metrics), notifier(notifier) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -224,6 +241,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
+			options.listeners.emplace_back(a.notifier.get());
 			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
@@ -258,7 +276,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Void> done;
 			RocksDBKeyValueStore* kv;
 			Version version;
-			ThreadReturnPromiseStream<PersistNotification>* persist;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
@@ -276,10 +293,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
-				if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT && a.kv != nullptr && a.version != invalidVersion &&
-				    a.persist != nullptr) {
+				if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT && a.kv != nullptr && a.version != invalidVersion) {
 					a.kv->addVersionPair(db->GetLatestSequenceNumber(), a.version);
-					a.persist->send(PersistNotification(a.version));
 				}
 				for (const auto& keyRange : deletes) {
 					auto begin = toSlice(keyRange.begin);
@@ -569,6 +584,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
 		}
+		flushNotifier = std::make_shared<FlushNotifier>(this);
 	}
 
 	Future<Void> getError() override { return errorPromise.getFuture(); }
@@ -602,7 +618,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
-		auto a = std::make_unique<Writer::OpenAction>(path, metrics);
+		auto a = std::make_unique<Writer::OpenAction>(path, metrics, this->flushNotifier);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;
@@ -645,7 +661,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto res = a->done.getFuture();
 		a->kv = this;
 		a->version = version;
-		a->persist = getPersistPromiseStream();
 		writeThread->post(a);
 		return res;
 	}
@@ -687,18 +702,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		versionMap[seqno] = version;
 	}
 
-	Version getVersion(const rocksdb::SequenceNumber seqno) {
+	void notifyPersist(const rocksdb::SequenceNubmer seqno) {
 		std::lock_guard<std::mutex> lock(mu);
 		const auto it = versionMap.find(seqno);
 		if (it == versionMap.end()) {
-			return -1;
+			return;
 		}
-		return it->second;
+		getPersistPromiseStream()->send(PersistNotification(it.second));
+		versionMap.erase(it);
 	}
 
 private:
 	std::mutex mu;
 	std::unordered_map<rocksdb::SequenceNumber, Version> versionMap;
+	std::shared_ptr<rocksdb::EventListener> flushNotifier;
 };
 
 } // namespace
