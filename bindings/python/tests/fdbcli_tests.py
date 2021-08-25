@@ -134,6 +134,8 @@ def setclass(logger):
     assert random_class_type in class_type_line_2
     # check class source
     assert 'set_class' in class_type_line_2
+    # wait for everything to settle down
+    wait_for_database_available(logger)
     # set back to default
     run_fdbcli_command('setclass', network_address, 'default')
     # everything should be back to the same as before
