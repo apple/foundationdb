@@ -100,6 +100,8 @@ class ConfigNodeImpl {
 
 	// Follower counters
 	Counter compactRequests;
+	Counter rollbackRequests;
+	Counter rollforwardRequests;
 	Counter successfulChangeRequests;
 	Counter failedChangeRequests;
 	Counter snapshotRequests;
@@ -443,6 +445,16 @@ class ConfigNodeImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> rollback(ConfigNodeImpl* self, ConfigFollowerRollbackRequest req) {
+		state ConfigGeneration generation = wait(getGeneration(self));
+		if (req.version < generation.committedVersion) {
+			generation.committedVersion = req.version;
+			self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
+		}
+		req.reply.send(Void());
+		return Void();
+	}
+
 	ACTOR static Future<Void> getCommittedVersion(ConfigNodeImpl* self, ConfigFollowerGetCommittedVersionRequest req) {
 		ConfigGeneration generation = wait(getGeneration(self));
 		req.reply.send(ConfigFollowerGetCommittedVersionReply{ generation.committedVersion });
@@ -464,6 +476,10 @@ class ConfigNodeImpl {
 					++self->compactRequests;
 					wait(compact(self, req));
 				}
+				when(ConfigFollowerRollbackRequest req = waitNext(cfi->rollback.getFuture())) {
+					++self->rollbackRequests;
+					wait(rollback(self, req));
+				}
 				when(ConfigFollowerGetCommittedVersionRequest req = waitNext(cfi->getCommittedVersion.getFuture())) {
 					++self->getCommittedVersionRequests;
 					wait(getCommittedVersion(self, req));
@@ -476,7 +492,8 @@ class ConfigNodeImpl {
 public:
 	ConfigNodeImpl(std::string const& folder)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigNode"),
-	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
+	    compactRequests("CompactRequests", cc), rollbackRequests("RollbackRequests", cc),
+	    rollforwardRequests("RollforwardRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
 	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), successfulCommits("SuccessfulCommits", cc),
 	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
