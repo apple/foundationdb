@@ -31,6 +31,7 @@
 #include "fdbrpc/TimedRequest.h"
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/CommitTransaction.h"
 #include "flow/UnitTest.h"
 
@@ -628,26 +629,6 @@ struct SplitRangeRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, chunkSize, reply, arena);
-	}
-};
-
-struct MutationsAndVersionRef {
-	VectorRef<MutationRef> mutations;
-	Version version;
-
-	MutationsAndVersionRef() {}
-	explicit MutationsAndVersionRef(Version version) : version(version) {}
-	MutationsAndVersionRef(VectorRef<MutationRef> mutations, Version version)
-	  : mutations(mutations), version(version) {}
-	MutationsAndVersionRef(Arena& to, VectorRef<MutationRef> mutations, Version version)
-	  : mutations(to, mutations), version(version) {}
-	MutationsAndVersionRef(Arena& to, const MutationsAndVersionRef& from)
-	  : mutations(to, from.mutations), version(from.version) {}
-	int expectedSize() const { return mutations.expectedSize(); }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, mutations, version);
 	}
 };
 

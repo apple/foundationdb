@@ -22,8 +22,7 @@
 #define FDBCLIENT_BLOBWORKERINTERFACE_H
 #pragma once
 
-#include "fdbclient/CommitTransaction.h"
-#include "fdbclient/StorageServerInterface.h" // just for MutationsAndVersion, TODO pull that out maybe?
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -45,72 +44,11 @@ struct BlobWorkerInterface {
 	NetworkAddress address() const { return blobGranuleFileRequest.getEndpoint().getPrimaryAddress(); }
 	bool operator==(const BlobWorkerInterface& r) const { return id() == r.id(); }
 	bool operator!=(const BlobWorkerInterface& r) const { return !(*this == r); }
+	std::string toString() const { return id().shortString(); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar, waitFailure, blobGranuleFileRequest, assignBlobRangeRequest, locality, myId);
-	}
-};
-
-// TODO should name all things that don't have their own arena *Ref
-// file format of actual blob files
-struct GranuleSnapshot : VectorRef<KeyValueRef> {
-
-	constexpr static FileIdentifier file_identifier = 1300395;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ((VectorRef<KeyValueRef>&)*this));
-	}
-};
-
-struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
-	constexpr static FileIdentifier file_identifier = 8563013;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ((VectorRef<MutationsAndVersionRef>&)*this));
-	}
-};
-
-// TODO better name?
-struct BlobFilenameRef {
-	constexpr static FileIdentifier file_identifier = 5253554;
-	StringRef filename;
-	int64_t offset;
-	int64_t length;
-
-	BlobFilenameRef() {}
-	BlobFilenameRef(Arena& to, std::string filename, int64_t offset, int64_t length)
-	  : filename(to, filename), offset(offset), length(length) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, filename, offset, length);
-	}
-
-	std::string toString() {
-		std::stringstream ss;
-		ss << filename.toString() << ":" << offset << ":" << length;
-		return std::move(ss).str();
-	}
-};
-
-// the assumption of this response is that the client will deserialize the files and apply the mutations themselves
-// TODO could filter out delta files that don't intersect the key range being requested?
-// TODO since client request passes version, we don't need to include the version of each mutation in the response if we
-// pruned it there
-struct BlobGranuleChunkRef {
-	constexpr static FileIdentifier file_identifier = 991434;
-	KeyRangeRef keyRange;
-	Version includedVersion;
-	Optional<BlobFilenameRef> snapshotFile; // not set if it's an incremental read
-	VectorRef<BlobFilenameRef> deltaFiles;
-	GranuleDeltas newDeltas;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, keyRange, includedVersion, snapshotFile, deltaFiles, newDeltas);
 	}
 };
 

@@ -42,8 +42,6 @@
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/BlobWorkerInterface.h" // TODO REMOVE
-#include "fdbclient/BlobGranuleReader.actor.h" // TODO REMOVE
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -3092,172 +3090,6 @@ public:
 	}
 };
 
-// TODO REMOVE!!!!
-ACTOR Future<Void> doBlobGranuleRequests(ClusterControllerData* self, RatekeeperInterface interf) {
-	state Reference<BackupContainerFileSystem> bstore;
-	state bool doTimeTravel = false;
-
-	// TODO CHANGE BACK
-	// wait(delay(10.0));
-	wait(delay(70.0));
-
-	printf("Initializing CC s3 stuff\n");
-	try {
-		if (g_network->isSimulated()) {
-			printf("CC constructing simulated backup container\n");
-			bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
-		} else {
-			printf("CC constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
-			bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
-			printf("CC constructed backup container\n");
-		}
-	} catch (Error& e) {
-		printf("CC got backup container init error %s\n", e.name());
-		return Void();
-	}
-
-	state std::unordered_map<UID, BlobWorkerInterface> workerInterfaceCache;
-	state int i;
-	loop {
-		try {
-			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			// state KeyRange keyRange = KeyRange(KeyRangeRef(LiteralStringRef("\x01"), LiteralStringRef("\x02")));
-			// state KeyRange keyRange = KeyRange(KeyRangeRef());
-			state Version v = wait(tr->getReadVersion());
-
-			if (doTimeTravel == 1) {
-				printf("Doing time travel read\n");
-				v -= 60000000;
-			} else if (doTimeTravel) {
-				printf("Doing live read\n");
-			}
-			doTimeTravel = !doTimeTravel;
-			/*if (deterministicRandom()->random01() < 0.3) {
-			    v -= 5000000;
-			} else if (deterministicRandom()->random01() < 0.3) {
-			    v -= 30000000;
-			}*/
-
-			// right now just read whole blob range
-
-			state RangeResult blobGranuleMapping = wait(krmGetRanges(
-			    tr, blobGranuleMappingKeys.begin, normalKeys /*keyRange*/, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-			ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
-
-			if (blobGranuleMapping.size() == 0) {
-				printf("no blob worker assignments yet \n");
-				throw transaction_too_old();
-			}
-
-			printf("Doing blob granule request @ %lld\n", v);
-
-			// printf("blob worker assignments:\n");
-			for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
-				state Key granuleStartKey = blobGranuleMapping[i].key;
-				state Key granuleEndKey = blobGranuleMapping[i + 1].key;
-				if (!blobGranuleMapping[i].value.size()) {
-					/*printf("Key range [%s - %s) missing worker assignment!\n",
-					       granuleStartKey.printable().c_str(),
-					       granuleEndKey.printable().c_str());*/
-					// TODO probably new exception type instead
-					// TODO ADD BACK
-					// throw transaction_too_old();
-					continue;
-				}
-
-				state UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-				printf("  [%s - %s): %s\n",
-				       granuleStartKey.printable().c_str(),
-				       granuleEndKey.printable().c_str(),
-				       workerId.toString().c_str());
-
-				// TODO CHANGE BACK!!
-				// prune first/last granules to requested range
-				/*if (i == 0) {
-				    granuleStartKey = keyRange.begin;
-				}
-				if (i == blobGranuleMapping.size() - 2) {
-				    granuleEndKey = keyRange.end;
-				}*/
-
-				if (!workerInterfaceCache.count(workerId)) {
-					Optional<Value> workerInterface = wait(tr->get(blobWorkerListKeyFor(workerId)));
-					ASSERT(workerInterface.present());
-					workerInterfaceCache[workerId] = decodeBlobWorkerListValue(workerInterface.get());
-					// printf("    decoded worker interface for %s\n", workerId.toString().c_str());
-				}
-
-				state BlobGranuleFileRequest req;
-				req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
-				req.readVersion = v;
-				ErrorOr<BlobGranuleFileReply> _rep =
-				    wait(workerInterfaceCache[workerId].blobGranuleFileRequest.tryGetReply(req));
-				if (_rep.isError()) {
-					throw _rep.getError();
-				}
-				BlobGranuleFileReply rep = _rep.get();
-				printf("Blob granule request for [%s - %s) @ %lld got reply from %s:\n",
-				       granuleStartKey.printable().c_str(),
-				       granuleEndKey.printable().c_str(),
-				       v,
-				       workerId.toString().c_str());
-				for (auto& chunk : rep.chunks) {
-					printf("[%s - %s)\n",
-					       chunk.keyRange.begin.printable().c_str(),
-					       chunk.keyRange.end.printable().c_str());
-
-					printf("  SnapshotFile:\n    %s\n",
-					       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-					printf("  DeltaFiles:\n");
-					for (auto& df : chunk.deltaFiles) {
-						printf("    %s\n", df.toString().c_str());
-					}
-					printf("  Deltas: (%d)", chunk.newDeltas.size());
-					if (chunk.newDeltas.size() > 0) {
-						printf(" with version [%lld - %lld]",
-						       chunk.newDeltas[0].version,
-						       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
-					}
-					printf("  IncludedVersion: %lld\n", chunk.includedVersion);
-					printf("\n\n");
-				}
-				state PromiseStream<RangeResult> results;
-				state Future<Void> granuleReader = readBlobGranules(req, rep, bstore, results);
-				try {
-					loop {
-						// printf("Waiting for result chunk\n");
-						RangeResult result = waitNext(results.getFuture());
-						printf("Result chunk (%d):\n", result.size());
-						int resultIdx = 0;
-						for (auto& it : result) {
-							printf("  %s=%s\n", it.key.printable().c_str(), it.value.printable().c_str());
-							resultIdx++;
-							if (resultIdx >= 10) {
-								break;
-							}
-						}
-						if (resultIdx >= 10) {
-							printf("  ...\n");
-						}
-					}
-				} catch (Error& e) {
-					if (e.code() != error_code_end_of_stream) {
-						printf("granule reader got unexpected error %s\n", e.name());
-					} else {
-						// printf("granule reader got end of stream\n");
-						printf("\n");
-					}
-				}
-			}
-		} catch (Error& e) {
-			printf("blob granule file request got error %s\n", e.name());
-		}
-
-		wait(delay(5.0 + 5.0 * deterministicRandom()->random01()));
-	}
-}
-
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterControllerData::DBInfo* db) {
 	state MasterInterface iMaster;
 
@@ -4806,8 +4638,6 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
 				}
 				if (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
 					self->db.setRatekeeper(interf.get());
-					// TODO REMOVE
-					self->ac.add(doBlobGranuleRequests(self, interf.get()));
 				}
 				checkOutstandingRequests(self);
 				return Void();
