@@ -126,6 +126,9 @@ TLogSet::TLogSet(const LogSet& rhs)
 	for (const auto& tlog : rhs.logServers) {
 		tLogs.push_back(tlog->get());
 	}
+	for (const auto& ptxnTlog : rhs.logServersPtxn) {
+		tLogsPtxn.push_back(ptxnTlog->get());
+	}
 	tLogGroupIDs = rhs.tLogGroupIDs;
 	for (const auto& logGroupId : tLogGroupIDs) {
 		ptxnTLogGroups.emplace_back();
@@ -3145,7 +3148,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				// cannot use more standard `getReplyUnlessFailedFor`, because it is waiting on `reply` field, here we
 				// have ptxn.reply
 				state ptxn::TLogInterface_PassivelyPull serverNew = wait(ptxnReqs[i].reply.getFuture());
-				tLogGroupCollection->addWorkers({ serverNew });
+				// tLogGroupCollection uses workerInterface to build groups during master recruitment,
+				// so this call should be deprecated.
+				// tLogGroupCollection->addWorkers({ serverNew });
 				logSystem->tLogs[0]->logServersPtxn[i] =
 				    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
 				        OptionalInterface<ptxn::TLogInterface_PassivelyPull>(serverNew));

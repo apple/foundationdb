@@ -88,6 +88,9 @@ public:
 	// equal to number of groups currently recruited/active.
 	int targetGroupSize() const;
 
+	// TODO: The ones taking TLogInterface_PassivelyPull should be derpecated.
+	// Only the one with WorkerInterface should be kept.
+
 	// Add 'logWorkers' to current collection of workers that can be recruited into a TLogGroup.
 	void addWorkers(const std::vector<ptxn::TLogInterface_PassivelyPull>& logWorkers);
 	void addWorkers(const std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>& logWorkers);

@@ -85,9 +85,16 @@ struct serializable_traits<OptionalInterface<Interface>> : std::true_type {
 struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
+
+	// TODO: redundant information in "tLogsPtxn" and "ptxnTLogGroups".
+	//       We could use map<TLogGroupID, std::vector<int>> instead.
+
 	std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>> tLogsPtxn;
+	// A list of TLog Group IDs
 	std::vector<ptxn::TLogGroupID> tLogGroupIDs;
+	// A list of interface sets, one for each group of "tLogGroupIDs"
 	std::vector<std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>> ptxnTLogGroups;
+
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
 	std::vector<OptionalInterface<BackupInterface>> backupWorkers;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
@@ -121,7 +128,8 @@ struct TLogSet {
 		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor ||
 		    isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
 		    startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality ||
-		    tLogsPtxn.size() != rhs.tLogsPtxn.size() || logRouters.size() != rhs.logRouters.size() ||
+		    tLogsPtxn.size() != rhs.tLogsPtxn.size() || tLogGroupIDs.size() != rhs.tLogGroupIDs.size() ||
+		    ptxnTLogGroups.size() != rhs.ptxnTLogGroups.size() || logRouters.size() != rhs.logRouters.size() ||
 		    backupWorkers.size() != rhs.backupWorkers.size()) {
 			return false;
 		}
@@ -143,6 +151,23 @@ struct TLogSet {
 			    (log.present() &&
 			     rhsLog.interf().commit.getEndpoint().token != rhsLog.interf().commit.getEndpoint().token)) {
 				return false;
+			}
+		}
+		for (int j = 0; j < tLogGroupIDs.size(); j++) {
+			if (tLogGroupIDs[j] != rhs.tLogGroupIDs[j]) {
+				return false;
+			}
+		}
+		for (int j = 0; j < ptxnTLogGroups.size(); j++) {
+			const auto& g1 = ptxnTLogGroups[j];
+			const auto& g2 = rhs.ptxnTLogGroups[j];
+			if (g1.size() != g2.size()) {
+				return false;
+			}
+			for (int k = 0; k < g1.size(); k++) {
+				if (g1[k].id() != g2[k].id()) {
+					return false;
+				}
 			}
 		}
 
