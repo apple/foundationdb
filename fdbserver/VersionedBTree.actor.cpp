@@ -1607,7 +1607,6 @@ struct RedwoodMetrics {
 	Level levels[btreeLevels + 1];
 	metrics metric;
 
-	Reference<HistogramRegistry> RedwoodRegistry;
 	Reference<Histogram> kvSizeWritten;
 	Reference<Histogram> kvSizeReadByGet;
 	Reference<Histogram> kvSizeReadByGetRange;
