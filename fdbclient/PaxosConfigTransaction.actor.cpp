@@ -29,7 +29,12 @@ class CommitQuorum {
 	size_t successful{ 0 };
 	size_t maybeCommitted{ 0 };
 	Promise<Void> result;
-	ConfigTransactionCommitRequest toCommit;
+	Standalone<VectorRef<ConfigMutationRef>> mutations;
+	ConfigCommitAnnotation annotation;
+
+	ConfigTransactionCommitRequest getCommitRequest(ConfigGeneration generation) const {
+		return ConfigTransactionCommitRequest(generation, mutations, annotation);
+	}
 
 	void updateResult() {
 		if (successful >= ctis.size() / 2 + 1 && !result.isSet()) {
@@ -46,9 +51,11 @@ class CommitQuorum {
 		}
 	}
 
-	ACTOR static Future<Void> addRequestActor(CommitQuorum* self, ConfigTransactionInterface cti) {
+	ACTOR static Future<Void> addRequestActor(CommitQuorum* self,
+	                                          ConfigGeneration generation,
+	                                          ConfigTransactionInterface cti) {
 		try {
-			wait(cti.commit.getReply(self->toCommit));
+			wait(cti.commit.getReply(self->getCommitRequest(generation)));
 			++self->successful;
 		} catch (Error& e) {
 			if (e.code() == error_code_request_maybe_delivered) {
@@ -66,16 +73,29 @@ public:
 	explicit CommitQuorum(std::vector<ConfigTransactionInterface> const& ctis) : ctis(ctis) {
 		futures.reserve(ctis.size());
 	}
-	void set(KeyRef key, ValueRef value) { toCommit.set(key, value); }
-	void clear(KeyRef key) { toCommit.clear(key); }
-	void setGeneration(ConfigGeneration generation) { toCommit.generation = generation; }
-	void setTimestamp() { toCommit.annotation.timestamp = now(); }
-	size_t expectedSize() const { return toCommit.expectedSize(); }
-	Future<Void> commit() {
+	void set(KeyRef key, ValueRef value) {
+		if (key == configTransactionDescriptionKey) {
+			annotation.description = ValueRef(annotation.arena(), value);
+		} else {
+			mutations.emplace_back_deep(mutations.arena(),
+			                            IKnobCollection::createSetMutation(mutations.arena(), key, value));
+		}
+	}
+	void clear(KeyRef key) {
+		if (key == configTransactionDescriptionKey) {
+			annotation.description = ""_sr;
+		} else {
+			mutations.emplace_back_deep(mutations.arena(),
+			                            IKnobCollection::createClearMutation(mutations.arena(), key));
+		}
+	}
+	void setTimestamp() { annotation.timestamp = now(); }
+	size_t expectedSize() const { return annotation.expectedSize() + mutations.expectedSize(); }
+	Future<Void> commit(ConfigGeneration generation) {
 		// Send commit message to all replicas, even those that did not return the used replica.
 		// This way, slow replicas are kept up date.
 		for (const auto& cti : ctis) {
-			futures.push_back(addRequestActor(this, cti));
+			futures.push_back(addRequestActor(this, generation, cti));
 		}
 		return result.getFuture();
 	}
@@ -210,9 +230,8 @@ class PaxosConfigTransactionImpl {
 
 	ACTOR static Future<Void> commit(PaxosConfigTransactionImpl* self) {
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-		self->commitQuorum.setGeneration(generation);
 		self->commitQuorum.setTimestamp();
-		wait(self->commitQuorum.commit());
+		wait(self->commitQuorum.commit(generation));
 		return Void();
 	}
 

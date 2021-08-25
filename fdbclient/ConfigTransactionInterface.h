@@ -108,6 +108,12 @@ struct ConfigTransactionCommitRequest {
 	ConfigCommitAnnotationRef annotation;
 	ReplyPromise<Void> reply;
 
+	ConfigTransactionCommitRequest() = default;
+	explicit ConfigTransactionCommitRequest(ConfigGeneration generation,
+	                                        VectorRef<ConfigMutationRef> mutations,
+	                                        ConfigCommitAnnotationRef annotation)
+	  : generation(generation), mutations(arena, mutations), annotation(arena, annotation) {}
+
 	size_t expectedSize() const { return mutations.expectedSize() + annotation.expectedSize(); }
 
 	void set(KeyRef key, ValueRef value);
