@@ -202,14 +202,18 @@ class ConfigNodeImpl {
 	// serializability
 	ACTOR static Future<Void> getNewGeneration(ConfigNodeImpl* self, ConfigTransactionGetGenerationRequest req) {
 		state ConfigGeneration generation = wait(getGeneration(self));
+		TraceEvent("GetNewGenImpl0");
 		++generation.liveVersion;
+		TraceEvent("GetNewGenImpl1");
 		if (req.lastSeenLiveVersion.present()) {
 			TEST(req.lastSeenLiveVersion.get() >= generation.liveVersion); // Node is lagging behind some other node
 			generation.liveVersion = std::max(generation.liveVersion, req.lastSeenLiveVersion.get() + 1);
 		}
 		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
+		TraceEvent("GetNewGenImpl3");
 		wait(self->kvStore->commit());
 		req.reply.send(ConfigTransactionGetGenerationReply{ generation });
+		TraceEvent("GetNewGenImpl4");
 		return Void();
 	}
 

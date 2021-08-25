@@ -23,8 +23,8 @@
 #include "flow/actorcompiler.h" // must be last include
 
 class CommitQuorum {
+	ActorCollection actors{ false };
 	std::vector<ConfigTransactionInterface> ctis;
-	std::vector<Future<Void>> futures;
 	size_t failed{ 0 };
 	size_t successful{ 0 };
 	size_t maybeCommitted{ 0 };
@@ -37,15 +37,15 @@ class CommitQuorum {
 	}
 
 	void updateResult() {
-		if (successful >= ctis.size() / 2 + 1 && !result.isSet()) {
+		if (successful >= ctis.size() / 2 + 1 && result.canBeSet()) {
 			result.send(Void());
-		} else if (failed >= ctis.size() / 2 + 1 && !result.isError()) {
+		} else if (failed >= ctis.size() / 2 + 1 && result.canBeSet()) {
 			result.sendError(not_committed());
 		} else {
 			// Check if it is possible to ever receive quorum agreement
 			auto totalRequestsOutstanding = ctis.size() - (failed + successful + maybeCommitted);
 			if ((failed + totalRequestsOutstanding < ctis.size() / 2 + 1) &&
-			    (successful + totalRequestsOutstanding < ctis.size() / 2 + 1) && !result.isError()) {
+			    (successful + totalRequestsOutstanding < ctis.size() / 2 + 1) && result.canBeSet()) {
 				result.sendError(commit_unknown_result());
 			}
 		}
@@ -70,9 +70,7 @@ class CommitQuorum {
 
 public:
 	CommitQuorum() = default;
-	explicit CommitQuorum(std::vector<ConfigTransactionInterface> const& ctis) : ctis(ctis) {
-		futures.reserve(ctis.size());
-	}
+	explicit CommitQuorum(std::vector<ConfigTransactionInterface> const& ctis) : ctis(ctis) {}
 	void set(KeyRef key, ValueRef value) {
 		if (key == configTransactionDescriptionKey) {
 			annotation.description = ValueRef(annotation.arena(), value);
@@ -95,7 +93,7 @@ public:
 		// Send commit message to all replicas, even those that did not return the used replica.
 		// This way, slow replicas are kept up date.
 		for (const auto& cti : ctis) {
-			futures.push_back(addRequestActor(this, generation, cti));
+			actors.add(addRequestActor(this, generation, cti));
 		}
 		return result.getFuture();
 	}
@@ -103,8 +101,8 @@ public:
 };
 
 class GetGenerationQuorum {
+	ActorCollection actors{ false };
 	std::vector<ConfigTransactionInterface> ctis;
-	std::vector<Future<Void>> futures;
 	std::map<ConfigGeneration, std::vector<ConfigTransactionInterface>> seenGenerations;
 	Promise<ConfigGeneration> result;
 	size_t totalRepliesReceived{ 0 };
@@ -115,6 +113,7 @@ class GetGenerationQuorum {
 	ACTOR static Future<Void> addRequestActor(GetGenerationQuorum* self, ConfigTransactionInterface cti) {
 		ConfigTransactionGetGenerationReply reply =
 		    wait(cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }));
+
 		++self->totalRepliesReceived;
 		auto gen = reply.generation;
 		self->lastSeenLiveVersion = std::max(gen.liveVersion, self->lastSeenLiveVersion.orDefault(::invalidVersion));
@@ -136,17 +135,19 @@ class GetGenerationQuorum {
 		state int retries = 0;
 		loop {
 			for (const auto& cti : self->ctis) {
-				self->futures.push_back(addRequestActor(self, cti));
+				self->actors.add(addRequestActor(self, cti));
 			}
 			try {
-				ConfigGeneration generation = wait(self->result.getFuture());
-				return generation;
+				choose {
+					when(ConfigGeneration generation = wait(self->result.getFuture())) { return generation; }
+					when(wait(self->actors.getResult())) { ASSERT(false); }
+				}
 			} catch (Error& e) {
 				if (e.code() == error_code_failed_to_reach_quorum) {
 					TEST(true); // Failed to reach quorum getting generation
 					wait(delayJittered(0.01 * (1 << retries)));
 					++retries;
-					self->futures.clear();
+					self->actors.clear(false);
 				} else {
 					throw e;
 				}
@@ -158,9 +159,7 @@ public:
 	GetGenerationQuorum() = default;
 	explicit GetGenerationQuorum(std::vector<ConfigTransactionInterface> const& ctis,
 	                             Optional<Version> const& lastSeenLiveVersion = {})
-	  : ctis(ctis), lastSeenLiveVersion(lastSeenLiveVersion) {
-		futures.reserve(ctis.size());
-	}
+	  : ctis(ctis), lastSeenLiveVersion(lastSeenLiveVersion) {}
 	Future<ConfigGeneration> getGeneration() {
 		if (!getGenerationFuture.isValid()) {
 			getGenerationFuture = getGenerationActor(this);
