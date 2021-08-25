@@ -748,7 +748,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
-	init( LATENCY_METRICS_LOGGING_INTERVAL,                    60.0 );
+	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
 	// clang-format on
 
