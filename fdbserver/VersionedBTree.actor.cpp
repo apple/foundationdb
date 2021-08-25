@@ -1626,7 +1626,7 @@ struct RedwoodMetrics {
 		// Level 0 is for operations that are not BTree level specific, as many of the metrics are the same
 		// Level 0 - btreeLevels correspond to BTree node height, however heights above btreeLevels are combined
 		//           into the level at btreeLevels
-		return levels[std::min((unsigned int)level, btreeLevels)];
+		return levels[std::min(level, btreeLevels)];
 	}
 
 	void updateMaxRecordCount(int maxRecords) {
