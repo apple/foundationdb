@@ -1475,7 +1475,10 @@ ACTOR Future<Void> moveKeys(Database cx,
 
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
-void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers) {
+void seedShardServers(Arena& arena,
+                      CommitTransactionRef& tr,
+                      std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers,
+                      const std::vector<StringRef>& keySplits) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
 	int8_t nextLocality = 0;
@@ -1515,14 +1518,51 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<std::p
 		serverSrcUID.push_back(s.id());
 	}
 
+	/*
 	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
 	                                                    : keyServersValue(RangeResult(), serverSrcUID);
+	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, allKeys, ksValue, serverKeysFalse);
 	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a
 	// change to a specific
 	//   key (keyServersKeyServersKey)
-	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
+	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, allKeys, ksValue, serverKeysFalse);
 
 	for (const auto& [s, _] : servers) {
-		krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+	    krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+	} */
+
+	auto getServerID = [&](int serverIndex) -> Value {
+		return CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
+		           ? keyServersValue({ serverTags[serverIndex] })
+		           : keyServersValue(RangeResult(), { servers[serverIndex].first.id() });
+	};
+
+	const int numServers = servers.size();
+	const int numKeyRanges = keySplits.size() + 1;
+	ASSERT(numKeyRanges > 1);
+	ASSERT(numKeyRanges >= numServers);
+
+	int serverIndex = 0;
+	StringRef keyRangeStart = allKeys.begin;
+	for (int index = 0; index < keySplits.size(); ++index) {
+		auto keyRange = KeyRangeRef(keyRangeStart, keySplits[index]);
+		krmSetPreviouslyEmptyRange(
+		    tr, arena, serverKeysPrefixFor(servers[serverIndex].first.id()), keyRange, serverKeysTrue, serverKeysFalse);
+		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, keyRange, getServerID(serverIndex), serverKeysFalse);
+		++serverIndex;
+		serverIndex %= numServers;
+		keyRangeStart = keySplits[index];
 	}
+	krmSetPreviouslyEmptyRange(tr,
+	                           arena,
+	                           serverKeysPrefixFor(servers[serverIndex].first.id()),
+	                           KeyRangeRef(keySplits.back(), allKeys.end),
+	                           serverKeysTrue,
+	                           serverKeysFalse);
+	krmSetPreviouslyEmptyRange(tr,
+	                           arena,
+	                           keyServersPrefix,
+	                           KeyRangeRef(keySplits.back(), allKeys.end),
+	                           getServerID(serverIndex),
+	                           serverKeysFalse);
 }

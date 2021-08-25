@@ -41,7 +41,6 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
-#include "fdbserver/ProxyCommitData.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogGroup.actor.h"
@@ -427,10 +426,9 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 	return Void();
 }
 
-ACTOR Future<Void> newSeedServers(
-    Reference<MasterData> self,
-    RecruitFromConfigurationReply recruits,
-    std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>* servers) {
+ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
+                                  RecruitFromConfigurationReply recruits,
+                                  std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>* servers) {
 	// This is only necessary if the database is at version 0
 	servers->clear();
 	if (self->lastEpochEnd)
@@ -794,11 +792,12 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
 	wait(newSeedServers(self, recruits, seedServers));
 	state vector<Standalone<CommitTransactionRef>> confChanges;
-	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
-	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
+	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits));
 
 	// Recruit TLog groups
 	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		// Let the tLogGroupCollection have the tLog objects
+		self->tLogGroupCollection->addWorkers(recruits.tLogs);
 		self->tLogGroupCollection->setPolicy(self->configuration.tLogPolicy,
 		                                     SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
 		                                     self->configuration.tLogReplicationFactor);
@@ -810,6 +809,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(
 			self->tLogGroupCollection->assignStorageTeam(teamId, group);
 		}
 	}
+	wait(newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
 	return confChanges;
 }
@@ -1134,7 +1134,7 @@ ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
 	// configuration so that we can finish recovery.
 
 	state std::map<Optional<Value>, int8_t> originalLocalityMap = self->dcId_locality;
-	state Future<vector<Standalone<CommitTransactionRef>>> recruitments =
+	state Future<std::vector<Standalone<CommitTransactionRef>>> recruitments =
 	    recruitEverything(self, seedServers, oldLogSystem);
 	state double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
 	loop {
@@ -1142,7 +1142,7 @@ ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
 		provisionalDelay =
 		    std::min(SERVER_KNOBS->PROVISIONAL_MAX_DELAY, provisionalDelay * SERVER_KNOBS->PROVISIONAL_DELAY_GROWTH);
 		choose {
-			when(vector<Standalone<CommitTransactionRef>> confChanges = wait(recruitments)) {
+			when(std::vector<Standalone<CommitTransactionRef>> confChanges = wait(recruitments)) {
 				initialConfChanges->insert(initialConfChanges->end(), confChanges.begin(), confChanges.end());
 				provisional.cancel();
 				break;
@@ -1922,14 +1922,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	} else {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
-		for (const auto& s : self->configuration.splits) {
-			TraceEvent("InitialSplitPoint", self->dbgid).detail("Point", s.toString());
-		}
-		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
-
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-			self->tLogGroupCollection->seedTLogGroupAssignment(recoveryCommitRequest.arena, tr, seedServers);
-		}
+		seedShardServers(recoveryCommitRequest.arena, tr, seedServers, self->configuration.splits);
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely

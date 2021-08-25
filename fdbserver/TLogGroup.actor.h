@@ -92,6 +92,7 @@ public:
 	// Only the one with WorkerInterface should be kept.
 
 	// Add 'logWorkers' to current collection of workers that can be recruited into a TLogGroup.
+	void addWorkers(const std::vector<WorkerInterface>& logWorkers);
 	void addWorkers(const std::vector<ptxn::TLogInterface_PassivelyPull>& logWorkers);
 	void addWorkers(const std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>& logWorkers);
 
@@ -134,7 +135,10 @@ public:
 	// Called by the master server to write the very first transaction to the database establishing
 	// the first storage team to tLogGroup mapping. TLogGroups should be created by the time this is
 	// called during recovery. Gives ID to first storage server team, and assigns a TLogGroup to it.
-	void seedTLogGroupAssignment(Arena& arena, CommitTransactionRef& tr, std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers);
+	void seedTLogGroupAssignment(
+	    Arena& arena,
+	    CommitTransactionRef& tr,
+	    const std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>& servers);
 
 private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers
@@ -226,19 +230,11 @@ struct TLogWorkerData : public ReferenceCounted<TLogWorkerData> {
 	  : id(id), address(addr), locality(locality) {}
 
 	// Converts a TLogInterface to TLogWorkerData.
-	static TLogWorkerDataRef fromInterface(const ptxn::TLogInterface_PassivelyPull& interf) {
-		return makeReference<TLogWorkerData>(interf.id(), interf.address(), interf.getLocality());
-	}
-	// Converts a WorkerInterface to TLogWorkerData.
-	static TLogWorkerDataRef fromInterface(const OptionalInterface<ptxn::TLogInterface_PassivelyPull>& interf) {
-		if (interf.present()) {
-			auto inf = interf.interf();
-			return makeReference<TLogWorkerData>(inf.id(), inf.address(), inf.getLocality());
-		} else {
-			// TODO (Vishesh) Figure out how to find out locality later?
-			return makeReference<TLogWorkerData>(interf.id());
-		}
-	}
+	// TODO Convert the interface overloading to a concept template
+	static TLogWorkerDataRef fromInterface(const ptxn::TLogInterface_PassivelyPull& interf);
+	static TLogWorkerDataRef fromInterface(const WorkerInterface& interface);
+	// Converts a TLogInterface to TLogWorkerData.
+	static TLogWorkerDataRef fromInterface(const OptionalInterface<ptxn::TLogInterface_PassivelyPull>& interf);
 
 	// Returns user-readable string representation of this object.
 	std::string toString() const;
