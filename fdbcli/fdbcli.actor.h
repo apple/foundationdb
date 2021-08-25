@@ -86,6 +86,13 @@ void printUsage(StringRef command);
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
+// Using \xff\xff/worker_interfaces/ special key, get all worker interfaces
+ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
+                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+// Deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> k-v pair and verify by a RPC call
+ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                         Reference<FlowLock> connectLock,
+                                         KeyValue kv);
 
 // All fdbcli commands (alphabetically)
 // advanceversion command

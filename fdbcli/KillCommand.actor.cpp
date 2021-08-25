@@ -37,19 +37,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	state bool result = true;
 	if (tokens.size() == 1) {
-		// Hold the reference to the standalone's memory
-		state ThreadFuture<RangeResult> kvsFuture =
-		    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-		                             LiteralStringRef("\xff\xff/worker_interfaces0")),
-		                 CLIENT_KNOBS->TOO_MANY);
-		RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
-		ASSERT(!kvs.more);
-		auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
-		std::vector<Future<Void>> addInterfs;
-		for (auto it : kvs) {
-			addInterfs.push_back(addInterface(address_interface, connectLock, it));
-		}
-		wait(waitForAll(addInterfs));
+		wait(getWorkerInterfaces(tr, address_interface));
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
 		if (address_interface->size() == 0) {
