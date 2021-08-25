@@ -259,7 +259,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
-			options.listeners.emplace_back(a.notifier);
+			if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+				options.listeners.emplace_back(a.notifier);
+			}
 			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");

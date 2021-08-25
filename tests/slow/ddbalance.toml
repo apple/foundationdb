@@ -1,5 +1,8 @@
+[configuration]
+storageEngineType = 4
+
 [[test]]
-testTitle = 'DDBalance_Test'
+[conTitle = 'DDBalance_Test'
 
     [[test.workload]]
     testName = 'DDBalance'
