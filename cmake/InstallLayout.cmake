@@ -172,15 +172,15 @@ configure_file("${mv_packaging_dir}/clients/postinst" "${script_dir}/clients/pos
 configure_file("${mv_packaging_dir}/clients/prerm" "${script_dir}/clients" @ONLY)
 
 #make sure all directories we need exist
-make_directory("${mv_packaging_dir}/clients/usr/lib/foundationdb")
+file(MAKE_DIRECTORY "${mv_packaging_dir}/clients/usr/lib/foundationdb")
 install(DIRECTORY "${mv_packaging_dir}/clients/usr/lib/foundationdb"
   DESTINATION usr/lib
   COMPONENT clients-versioned)
-make_directory("${mv_packaging_dir}/clients/usr/lib/pkgconfig")
+file(MAKE_DIRECTORY "${mv_packaging_dir}/clients/usr/lib/pkgconfig")
 install(DIRECTORY "${mv_packaging_dir}/clients/usr/lib/pkgconfig"
   DESTINATION usr/lib
   COMPONENT clients-versioned)
-make_directory("${mv_packaging_dir}/clients/usr/lib/cmake")
+file(MAKE_DIRECTORY "${mv_packaging_dir}/clients/usr/lib/cmake")
 install(DIRECTORY "${mv_packaging_dir}/clients/usr/lib/cmake"
   DESTINATION usr/lib
   COMPONENT clients-versioned)
