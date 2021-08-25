@@ -1,5 +1,5 @@
 /*
- * SnapshotCommand.actor.cpp
+ * CacheRangeCommand.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,10 @@
 
 #include "fdbcli/fdbcli.actor.h"
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/SystemData.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -29,36 +32,30 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	state bool result = true;
-	if (tokens.size() < 2) {
+ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() != 4) {
 		printUsage(tokens[0]);
-		result = false;
+		return false;
 	} else {
-		Standalone<StringRef> snap_cmd;
-		state Key uid(deterministicRandom()->randomUniqueID().toString());
-		for (int i = 1; i < tokens.size(); i++) {
-			snap_cmd = snap_cmd.withSuffix(tokens[i]);
-			if (i != tokens.size() - 1) {
-				snap_cmd = snap_cmd.withSuffix(LiteralStringRef(" "));
-			}
-		}
-		try {
-			wait(safeThreadFutureToFuture(db->createSnapshot(uid, snap_cmd)));
-			printf("Snapshot command succeeded with UID %s\n", uid.toString().c_str());
-		} catch (Error& e) {
-			fprintf(stderr,
-			        "Snapshot command failed %d (%s)."
-			        " Please cleanup any instance level snapshots created with UID %s.\n",
-			        e.code(),
-			        e.what(),
-			        uid.toString().c_str());
-			result = false;
+		state KeyRangeRef cacheRange(tokens[2], tokens[3]);
+		if (tokencmp(tokens[1], "set")) {
+			wait(ManagementAPI::addCachedRange(db, cacheRange));
+		} else if (tokencmp(tokens[1], "clear")) {
+			wait(ManagementAPI::removeCachedRange(db, cacheRange));
+		} else {
+			printUsage(tokens[0]);
+			return false;
 		}
 	}
-	return result;
+	return true;
 }
 
-// hidden commands, no help text for now
-CommandFactory snapshotFactory("snapshot");
+CommandFactory cacheRangeFactory(
+    "cache_range",
+    CommandHelp(
+        "cache_range <set|clear> <BEGINKEY> <ENDKEY>",
+        "Mark a key range to add to or remove from storage caches.",
+        "Use the storage caches to assist in balancing hot read shards. Set the appropriate ranges when experiencing "
+        "heavy load, and clear them when they are no longer necessary."));
+
 } // namespace fdb_cli

@@ -71,15 +71,22 @@ ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
 };
 
 ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_address, KeyRef class_type) {
-    state Reference<ITransaction> tr = db->createTransaction();
+	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-            tr->set(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin), class_type);
-            wait(safeThreadFutureToFuture(tr->commit()));
-            return true;
-        } catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			tr->set(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin), class_type);
+			wait(safeThreadFutureToFuture(tr->commit()));
+			return true;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				// error message already has \n at the end
+				fprintf(stderr, "%s", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
 	}
 }
@@ -103,8 +110,8 @@ ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<Str
 	} else if (tokens.size() == 1) {
 		wait(printProcessClass(db));
 	} else {
-        bool successful = wait(setProcessClass(db, tokens[1], tokens[2]));
-        return successful;
+		bool successful = wait(setProcessClass(db, tokens[1], tokens[2]));
+		return successful;
 	}
 	return true;
 }
