@@ -2943,9 +2943,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state std::vector<ptxn::InitializePtxnTLogRequest> ptxnReqs(recr.tLogs.size());
 
 		logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
-		logSystem->tLogs[0]->logServers.resize(
-		    recr.tLogs.size()); // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
-		logSystem->tLogs[0]->logServersPtxn.resize(recr.tLogs.size());
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			logSystem->tLogs[0]->logServersPtxn.resize(recr.tLogs.size());
+		} else {
+			// Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
+			logSystem->tLogs[0]->logServers.resize(recr.tLogs.size());
+		}
 		logSystem->tLogs[0]->updateLocalitySet(localities);
 
 		std::vector<int> locations;
