@@ -1556,7 +1556,7 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() {
-		// All histograms have reset their buckets to 0 in the contructor.
+		// All histograms have reset their buckets to 0 in the constructor.
 		kvSizeWritten = Reference<Histogram>(
 		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "Written", Histogram::Unit::bytes));
 		kvSizeReadByGet = Reference<Histogram>(
