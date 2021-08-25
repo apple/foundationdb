@@ -1640,6 +1640,7 @@ struct RedwoodMetrics {
 
 	void logHistograms(double elapsed) {
 		// All histograms have reset their buckets to 0 after writeToLog.
+		wait(yield());
 		kvSizeWritten->writeToLog(elapsed);
 		kvSizeReadByGet->writeToLog(elapsed);
 		kvSizeReadByGetRange->writeToLog(elapsed);
@@ -1654,6 +1655,7 @@ struct RedwoodMetrics {
 				level.modifyItemCountSketch->writeToLog(elapsed);
 			}
 			++levelCounter;
+			wait(yield());
 		}
 	}
 
