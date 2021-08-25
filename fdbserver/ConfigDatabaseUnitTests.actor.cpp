@@ -110,6 +110,10 @@ public:
 
 	Future<Void> rollback(Version version) { return cfi.rollback.getReply(ConfigFollowerRollbackRequest{ version }); }
 
+	Future<Void> rollforward(Version version, Standalone<VectorRef<VersionedConfigMutationRef>> mutations) {
+		return cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{ version, mutations });
+	}
+
 	void restartNode() {
 		cfiServer.cancel();
 		ctiServer.cancel();
@@ -407,6 +411,9 @@ public:
 
 	Future<Void> compact() { return writeTo.compact(); }
 	Future<Void> rollback(Version version) { return writeTo.rollback(version); }
+	Future<Void> rollforward(Version version, Standalone<VectorRef<VersionedConfigMutationRef>> mutations) {
+		return writeTo.rollforward(version, mutations);
+	}
 	Future<Void> getError() const { return writeTo.getError(); }
 };
 
@@ -517,6 +524,10 @@ Future<Void> compact(BroadcasterToLocalConfigEnvironment& env) {
 template <class Env, class... Args>
 Future<Void> rollback(Env& env, Args&&... args) {
 	return waitOrError(env.rollback(std::forward<Args>(args)...), env.getError());
+}
+template <class Env, class... Args>
+Future<Void> rollforward(Env& env, Args&&... args) {
+	return waitOrError(env.rollforward(std::forward<Args>(args)...), env.getError());
 }
 
 ACTOR template <class Env>
@@ -938,6 +949,44 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/RollbackToNewerVersion") {
 	// Rollback to the a version not yet committed should have no effect.
 	wait(rollback(env, 999));
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/Rollforward") {
+	state TransactionEnvironment env(params.getDataDir());
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 0, "class-A"_sr, "test_long_v0"_sr, KnobValueRef::create(int64_t{ 1 }).contents());
+	appendVersionedMutation(
+	    mutations, 1, "class-B"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	wait(rollforward(env, 1, mutations));
+	wait(check(env, "class-A"_sr, "test_long_v0"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-B"_sr, "test_long_v1"_sr, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithExistingMutations") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 1, "class-A"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	wait(rollforward(env, 1, mutations));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithInvalidMutation") {
+	state TransactionEnvironment env(params.getDataDir());
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 1, "class-A"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 1 }).contents());
+	appendVersionedMutation(
+	    mutations, 10, "class-A"_sr, "test_long_v10"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	wait(rollforward(env, 5, mutations));
+	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-A"_sr, "test_long_v10"_sr, Optional<int64_t>{}));
 	return Void();
 }
 
