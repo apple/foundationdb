@@ -6564,3 +6564,7 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 	}
 	return Void();
 }
+
+Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
+	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));
+}

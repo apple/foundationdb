@@ -36,7 +36,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -44,6 +44,7 @@
 #include "flow/Platform.h"
 
 #include "flow/TLSConfig.actor.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
@@ -639,11 +640,6 @@ void initHelp() {
 	                                 "namespace for all the profiling-related commands.",
 	                                 "Different types support different actions.  Run `profile` to get a list of "
 	                                 "types, and iteratively explore the help.\n");
-	helpMap["cache_range"] = CommandHelp(
-	    "cache_range <set|clear> <BEGINKEY> <ENDKEY>",
-	    "Mark a key range to add to or remove from storage caches.",
-	    "Use the storage caches to assist in balancing hot read shards. Set the appropriate ranges when experiencing "
-	    "heavy load, and clear them when they are no longer necessary.");
 	helpMap["lock"] = CommandHelp(
 	    "lock",
 	    "lock the database with a randomly generated lockUID",
@@ -1968,6 +1964,16 @@ ACTOR Future<Void> commitTransaction(Reference<ReadYourWritesTransaction> tr) {
 	return Void();
 }
 
+ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
+	wait(makeInterruptable(safeThreadFutureToFuture(tr->commit())));
+	auto ver = tr->getCommittedVersion();
+	if (ver != invalidVersion)
+		printf("Committed (%" PRId64 ")\n", ver);
+	else
+		printf("Nothing to commit\n");
+	return Void();
+}
+
 ACTOR Future<bool> configure(Database db,
                              std::vector<StringRef> tokens,
                              Reference<ClusterConnectionFile> ccf,
@@ -3195,10 +3201,10 @@ ACTOR template <class T>
 Future<T> stopNetworkAfter(Future<T> what) {
 	try {
 		T t = wait(what);
-		g_network->stop();
+		API->stopNetwork();
 		return t;
 	} catch (...) {
-		g_network->stop();
+		API->stopNetwork();
 		throw;
 	}
 }
@@ -3447,7 +3453,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "waitopen")) {
-					wait(success(getTransaction(db, tr, options, intrans)->getReadVersion()));
+					wait(success(
+					    safeThreadFutureToFuture(getTransaction(db, tr, tr2, options, intrans)->getReadVersion())));
 					continue;
 				}
 
@@ -3657,7 +3664,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
-						getTransaction(db, tr, options, false);
+						getTransaction(db, tr, tr2, options, false);
 						intrans = true;
 						printf("Transaction started\n");
 					}
@@ -3672,7 +3679,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						fprintf(stderr, "ERROR: No active transaction\n");
 						is_error = true;
 					} else {
-						wait(commitTransaction(tr));
+						wait(commitTransaction(tr2));
 						intrans = false;
 						options = &globalOptions;
 					}
@@ -3689,9 +3696,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						tr->reset();
+						tr2->reset();
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
 						options->apply(tr);
+						options->apply(tr2);
 						printf("Transaction reset\n");
 					}
 					continue;
@@ -3717,8 +3726,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						Optional<Standalone<StringRef>> v =
-						    wait(makeInterruptable(getTransaction(db, tr, options, intrans)->get(tokens[1])));
+						Optional<Standalone<StringRef>> v = wait(makeInterruptable(
+						    safeThreadFutureToFuture(getTransaction(db, tr, tr2, options, intrans)->get(tokens[1]))));
 
 						if (v.present())
 							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
@@ -3733,7 +3742,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						Version v = wait(makeInterruptable(getTransaction(db, tr, options, intrans)->getReadVersion()));
+						Version v = wait(makeInterruptable(
+						    safeThreadFutureToFuture(getTransaction(db, tr, tr2, options, intrans)->getReadVersion())));
 						printf("%ld\n", v);
 					}
 					continue;
@@ -4238,7 +4248,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 
 						RangeResult kvs = wait(makeInterruptable(
-						    getTransaction(db, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit)));
+						    safeThreadFutureToFuture(getTransaction(db, tr, tr2, options, intrans)
+						                                 ->getRange(KeyRangeRef(tokens[1], endKey), limit))));
 
 						printf("\nRange limited to %d keys\n", limit);
 						for (auto iter = kvs.begin(); iter < kvs.end(); iter++) {
@@ -4281,11 +4292,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db, tr, options, intrans);
-						tr->set(tokens[1], tokens[2]);
+						getTransaction(db, tr, tr2, options, intrans);
+						tr2->set(tokens[1], tokens[2]);
 
 						if (!intrans) {
-							wait(commitTransaction(tr));
+							wait(commitTransaction(tr2));
 						}
 					}
 					continue;
@@ -4302,11 +4313,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db, tr, options, intrans);
-						tr->clear(tokens[1]);
+						getTransaction(db, tr, tr2, options, intrans);
+						tr2->clear(tokens[1]);
 
 						if (!intrans) {
-							wait(commitTransaction(tr));
+							wait(commitTransaction(tr2));
 						}
 					}
 					continue;
@@ -4323,58 +4334,20 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db, tr, options, intrans);
-						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
+						getTransaction(db, tr, tr2, options, intrans);
+						tr2->clear(KeyRangeRef(tokens[1], tokens[2]));
 
 						if (!intrans) {
-							wait(commitTransaction(tr));
+							wait(commitTransaction(tr2));
 						}
 					}
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "datadistribution")) {
-					if (tokens.size() != 2 && tokens.size() != 3) {
-						printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-						       "<ssfailure|rebalance>>\n");
+					bool _result = wait(makeInterruptable(dataDistributionCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						if (tokencmp(tokens[1], "on")) {
-							wait(success(setDDMode(db, 1)));
-							printf("Data distribution is turned on.\n");
-						} else if (tokencmp(tokens[1], "off")) {
-							wait(success(setDDMode(db, 0)));
-							printf("Data distribution is turned off.\n");
-						} else if (tokencmp(tokens[1], "disable")) {
-							if (tokencmp(tokens[2], "ssfailure")) {
-								wait(success(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0))));
-								printf("Data distribution is disabled for storage server failures.\n");
-							} else if (tokencmp(tokens[2], "rebalance")) {
-								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
-								printf("Data distribution is disabled for rebalance.\n");
-							} else {
-								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-								       "<ssfailure|rebalance>>\n");
-								is_error = true;
-							}
-						} else if (tokencmp(tokens[1], "enable")) {
-							if (tokencmp(tokens[2], "ssfailure")) {
-								wait(success(makeInterruptable(clearHealthyZone(db, false, true))));
-								printf("Data distribution is enabled for storage server failures.\n");
-							} else if (tokencmp(tokens[2], "rebalance")) {
-								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));
-								printf("Data distribution is enabled for rebalance.\n");
-							} else {
-								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-								       "<ssfailure|rebalance>>\n");
-								is_error = true;
-							}
-						} else {
-							printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-							       "<ssfailure|rebalance>>\n");
-							is_error = true;
-						}
-					}
 					continue;
 				}
 
@@ -4444,20 +4417,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "cache_range")) {
-					if (tokens.size() != 4) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(cacheRangeCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-						continue;
-					}
-					KeyRangeRef cacheRange(tokens[2], tokens[3]);
-					if (tokencmp(tokens[1], "set")) {
-						wait(makeInterruptable(addCachedRange(db, cacheRange)));
-					} else if (tokencmp(tokens[1], "clear")) {
-						wait(makeInterruptable(removeCachedRange(db, cacheRange)));
-					} else {
-						printUsage(tokens[0]);
-						is_error = true;
-					}
 					continue;
 				}
 
@@ -4476,6 +4438,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				intrans = false;
 				options = &globalOptions;
 				options->apply(tr);
+				options->apply(tr2);
 			}
 		}
 
@@ -4685,7 +4648,7 @@ int main(int argc, char** argv) {
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);
-		runNetwork();
+		API->runNetwork();
 
 		if (cliFuture.isReady()) {
 			return cliFuture.get();

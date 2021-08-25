@@ -41,6 +41,7 @@ public:
 	                                  // often, so that versions always advance smoothly
 
 	// TLogs
+	bool PEEK_USING_STREAMING;
 	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
 	double TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS; // Warns if a tlog takes too long to rejoin
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY; // smaller might be better for bug amplification
@@ -275,6 +276,9 @@ public:
 	int ROCKSDB_PREFIX_LEN;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
 	double ROCKSDB_METRICS_DELAY;
+	double ROCKSDB_READ_VALUE_TIMEOUT;
+	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
+	double ROCKSDB_READ_RANGE_TIMEOUT;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -563,6 +567,7 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
+	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
