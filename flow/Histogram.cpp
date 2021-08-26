@@ -136,7 +136,7 @@ void Histogram::writeToLog() {
 				break;
 			case Unit::count:
 				value = uint64_t((i + 1) * ((upperBound - lowerBound) / 31.0));
-				e.detail(format("LessThan%u", value), buckets[i]);
+				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
 				break;
 			default:
 				ASSERT(false);
