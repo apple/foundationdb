@@ -116,9 +116,6 @@ struct ConfigTransactionCommitRequest {
 
 	size_t expectedSize() const { return mutations.expectedSize() + annotation.expectedSize(); }
 
-	void set(KeyRef key, ValueRef value);
-	void clear(KeyRef key);
-
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, arena, generation, mutations, annotation, reply);

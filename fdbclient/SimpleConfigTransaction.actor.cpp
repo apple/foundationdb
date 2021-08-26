@@ -123,9 +123,14 @@ public:
 
 	SimpleConfigTransactionImpl(ConfigTransactionInterface const& cti) : cti(cti) {}
 
-	void set(KeyRef key, ValueRef value) { toCommit.set(key, value); }
+	void set(KeyRef key, ValueRef value) {
+		toCommit.mutations.push_back_deep(toCommit.arena,
+		                                  IKnobCollection::createSetMutation(toCommit.arena, key, value));
+	}
 
-	void clear(KeyRef key) { toCommit.clear(key); }
+	void clear(KeyRef key) {
+		toCommit.mutations.push_back_deep(toCommit.arena, IKnobCollection::createClearMutation(toCommit.arena, key));
+	}
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
 

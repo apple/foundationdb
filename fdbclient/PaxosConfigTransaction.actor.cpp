@@ -75,16 +75,15 @@ public:
 		if (key == configTransactionDescriptionKey) {
 			annotation.description = ValueRef(annotation.arena(), value);
 		} else {
-			mutations.emplace_back_deep(mutations.arena(),
-			                            IKnobCollection::createSetMutation(mutations.arena(), key, value));
+			mutations.push_back_deep(mutations.arena(),
+			                         IKnobCollection::createSetMutation(mutations.arena(), key, value));
 		}
 	}
 	void clear(KeyRef key) {
 		if (key == configTransactionDescriptionKey) {
 			annotation.description = ""_sr;
 		} else {
-			mutations.emplace_back_deep(mutations.arena(),
-			                            IKnobCollection::createClearMutation(mutations.arena(), key));
+			mutations.push_back_deep(mutations.arena(), IKnobCollection::createClearMutation(mutations.arena(), key));
 		}
 	}
 	void setTimestamp() { annotation.timestamp = now(); }
