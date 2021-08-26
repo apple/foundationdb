@@ -32,16 +32,19 @@ class FlushNotifier : public rocksdb::EventListener {
 public:
 	FlushNotifier() : persist(nullptr) {}
 	FlushNotifier(ThreadReturnPromiseStream<IKeyValueStore::PersistNotification>* persist, UID id)
-	  : persist(persist), id(id) {}
+	  : persist(persist), id(id) {
+		TraceEvent("RocksDBFlushNotifierConstructed", id).log();
+	}
 	~FlushNotifier() override {}
 
 	void OnFlushCompleted(rocksdb::DB* /*db*/, const rocksdb::FlushJobInfo& info) override {
+		TraceEvent(SevWarn, "RocksDBFlushedCompleteBegin", id).detail("RocksDbSeqNo", info.largest_seqno);
 		Version version = invalidVersion;
 		{
 			std::lock_guard<std::mutex> lock(mu);
 			const auto it = versionMap.find(info.largest_seqno);
 			if (it == versionMap.end()) {
-				TraceEvent(SevWarn, "RocksDBFlushed", id).detail(info.largest_seqno);
+				TraceEvent(SevWarn, "RocksDBFlushedVersionMissing", id).detail("RocksDbSeqNo", info.largest_seqno);
 				return;
 			}
 			version = it->second;
@@ -52,7 +55,7 @@ public:
 	}
 
 	void CommitCompleted(Version version) {
-		TraceEvent(SevDebug, "RocksDBCommitCompleted").detail("Version", version);
+		TraceEvent(SevError, "RocksDBCommitCompleted").detail("Version", version);
 		persist->send(IKeyValueStore::PersistNotification(version));
 	}
 
@@ -262,12 +265,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
-			TraceEvent(SevDebug, "OPenRocksDB").detail("Path", a.path);
+			TraceEvent(SevError, "OpenRocksDB").detail("Path", a.path);
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
 			if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+				TraceEvent(SevError, "AddingListener").detail("Path", a.path);
 				options.listeners.emplace_back(a.notifier);
 			}
 			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
@@ -307,25 +311,34 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
+			TraceEvent(SevError, "RocksDBDoCommit").detail("Version", a.version);
 			Standalone<VectorRef<KeyRangeRef>> deletes;
 			DeleteVisitor dv(deletes, deletes.arena());
 			ASSERT(a.batchToCommit->Iterate(&dv).ok());
 			// If there are any range deletes, we should have added them to be deleted.
 			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
-			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC && !SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT;
-			options.disableWAL = SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT;
+			const bool async_enabled = SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT && a.kv != nullptr;
+			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC && !async_enabled;
+			options.disableWAL = async_enabled;
+			TraceEvent(SevError, "RocksDBWriteOptions")
+			    .detail("Sync", options.sync)
+			    .detail("DisabledWAL", options.disableWAL)
+			    .detail("AsyncCommit", async_enabled);
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
-				// errorPromise.sendError();
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
+				rocksdb::FlushOptions flushOptions;
+				s = db->Flush(flushOptions);
 				if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT && a.kv != nullptr && a.version != invalidVersion) {
-					TraceEvent(SevDebug, "RocksDBCommit").detail("Version", a.version).log();
-					a.kv->addVersion(db->GetLatestSequenceNumber(), a.version);
-					a.kv->flushNotifier->CommitCompleted(a.version);
+					const rocksdb::SequenceNumber seqno = db->GetLatestSequenceNumber();
+					a.kv->addVersion(seqno, a.version);
+					TraceEvent(SevError, "RocksDBCommitVersions")
+					    .detail("Version", a.version)
+					    .detail("RocksSeqNo", seqno);
 				}
 				for (const auto& keyRange : deletes) {
 					auto begin = toSlice(keyRange.begin);
@@ -684,6 +697,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> commitAsync(Version version, bool sequential) override {
 		// If there is nothing to write, don't write.
+		TraceEvent("RocksDBCommitAsyncBegin", id).detail("Version", version).log();
 		if (writeBatch == nullptr) {
 			return Void();
 		}
@@ -693,6 +707,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		a->kv = this;
 		a->version = version;
 		writeThread->post(a);
+		TraceEvent("RocksDBCommitAsyncEnd", id).detail("Version", version).log();
 		return res;
 	}
 
