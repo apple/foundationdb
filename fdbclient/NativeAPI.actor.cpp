@@ -6548,14 +6548,22 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 
 ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
 	state ReadYourWritesTransaction tr(cx);
+	state UID debugId = deterministicRandom()->randomUniqueID();
+
 	loop {
 		try {
+			debugId = deterministicRandom()->randomUniqueID();
+
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.debugTransaction(debugId);
 			if (lockAware) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
 
 			tr.set(perpetualStorageWiggleKey, enable ? "1"_sr : "0"_sr);
+
+			TraceEvent("SetPerpetualStorageWiggle").detail("debugId", debugId.toString());
+
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
