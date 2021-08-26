@@ -6771,6 +6771,8 @@ Future<Void> DatabaseContext::popRangeFeedMutations(StringRef rangeID, Version v
 	return popRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
 }
 
+#define BG_REQUEST_DEBUG false
+
 // FIXME: code for discovering blob granules is similar enough that it could be refactored? It's pretty simple though
 ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db,
                                                    PromiseStream<KeyRange> results,
@@ -6778,10 +6780,14 @@ ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db
 	state Database cx(db);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state KeyRange currentRange = keyRange;
-	printf(
-	    "Getting Blob Granules for [%s - %s)\n", keyRange.begin.printable().c_str(), keyRange.end.printable().c_str());
+	if (BG_REQUEST_DEBUG) {
+		printf("Getting Blob Granules for [%s - %s)\n",
+		       keyRange.begin.printable().c_str(),
+		       keyRange.end.printable().c_str());
+	}
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			state RangeResult blobGranuleMapping = wait(krmGetRanges(
 			    tr, blobGranuleMappingKeys.begin, currentRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 
@@ -6831,8 +6837,6 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				// state KeyRange keyRange = KeyRange(KeyRangeRef(LiteralStringRef("\x01"), LiteralStringRef("\x02")));
-				// state KeyRange keyRange = KeyRange(KeyRangeRef());
 				if (end.present()) {
 					endVersion = end.get();
 				} else {
@@ -6859,9 +6863,10 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 					throw transaction_too_old();
 				}
 
-				printf("Doing blob granule request @ %lld\n", endVersion);
-
-				printf("blob worker assignments:\n");
+				if (BG_REQUEST_DEBUG) {
+					printf("Doing blob granule request @ %lld\n", endVersion);
+					printf("blob worker assignments:\n");
+				}
 
 				for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
 					granuleStartKey = blobGranuleMapping[i].key;
@@ -6875,16 +6880,20 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 					}
 
 					workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-					printf("  [%s - %s): %s\n",
-					       granuleStartKey.printable().c_str(),
-					       granuleEndKey.printable().c_str(),
-					       workerId.toString().c_str());
+					if (BG_REQUEST_DEBUG) {
+						printf("  [%s - %s): %s\n",
+						       granuleStartKey.printable().c_str(),
+						       granuleEndKey.printable().c_str(),
+						       workerId.toString().c_str());
+					}
 
 					if (!cx->blobWorker_interf.count(workerId)) {
 						Optional<Value> workerInterface = wait(tr->get(blobWorkerListKeyFor(workerId)));
 						ASSERT(workerInterface.present());
 						cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
-						printf("    decoded worker interface for %s\n", workerId.toString().c_str());
+						if (BG_REQUEST_DEBUG) {
+							printf("    decoded worker interface for %s\n", workerId.toString().c_str());
+						}
 					}
 				}
 				break;
@@ -6894,7 +6903,7 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 		}
 
 		// Make request for each granule
-		for (i = 0; i < blobGranuleMapping.size(); i++) {
+		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
 			granuleStartKey = blobGranuleMapping[i].key;
 			granuleEndKey = blobGranuleMapping[i + 1].key;
 			workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
@@ -6929,29 +6938,35 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 			    throw _rep.getError();
 			}
 			BlobGranuleFileReply rep = _rep.get();*/
-			printf("Blob granule request for [%s - %s) @ %lld - %lld got reply from %s:\n",
-			       granuleStartKey.printable().c_str(),
-			       granuleEndKey.printable().c_str(),
-			       begin,
-			       endVersion,
-			       workerId.toString().c_str());
+			if (BG_REQUEST_DEBUG) {
+				printf("Blob granule request for [%s - %s) @ %lld - %lld got reply from %s:\n",
+				       granuleStartKey.printable().c_str(),
+				       granuleEndKey.printable().c_str(),
+				       begin,
+				       endVersion,
+				       workerId.toString().c_str());
+			}
 			for (auto& chunk : rep.chunks) {
-				printf("[%s - %s)\n", chunk.keyRange.begin.printable().c_str(), chunk.keyRange.end.printable().c_str());
+				if (BG_REQUEST_DEBUG) {
+					printf("[%s - %s)\n",
+					       chunk.keyRange.begin.printable().c_str(),
+					       chunk.keyRange.end.printable().c_str());
 
-				printf("  SnapshotFile:\n    %s\n",
-				       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-				printf("  DeltaFiles:\n");
-				for (auto& df : chunk.deltaFiles) {
-					printf("    %s\n", df.toString().c_str());
+					printf("  SnapshotFile:\n    %s\n",
+					       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
+					printf("  DeltaFiles:\n");
+					for (auto& df : chunk.deltaFiles) {
+						printf("    %s\n", df.toString().c_str());
+					}
+					printf("  Deltas: (%d)", chunk.newDeltas.size());
+					if (chunk.newDeltas.size() > 0) {
+						printf(" with version [%lld - %lld]",
+						       chunk.newDeltas[0].version,
+						       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+					}
+					printf("  IncludedVersion: %lld\n", chunk.includedVersion);
+					printf("\n\n");
 				}
-				printf("  Deltas: (%d)", chunk.newDeltas.size());
-				if (chunk.newDeltas.size() > 0) {
-					printf(" with version [%lld - %lld]",
-					       chunk.newDeltas[0].version,
-					       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
-				}
-				printf("  IncludedVersion: %lld\n", chunk.includedVersion);
-				printf("\n\n");
 				Arena a;
 				a.dependsOn(rep.arena);
 				results.send(Standalone<BlobGranuleChunkRef>(chunk, a));

@@ -260,17 +260,7 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 				VectorRef<KeyRangeRef> rangesToAdd;
 				VectorRef<KeyRangeRef> rangesToRemove;
 				// TODO hack for simulation
-				if (g_network->isSimulated()) {
-					printf("Hacking blob ranges!\n");
-					RangeResult fakeResults;
-					KeyValueRef one = KeyValueRef(normalKeys.begin, StringRef(ar, LiteralStringRef("1")));
-					KeyValueRef two = KeyValueRef(normalKeys.end, StringRef());
-					fakeResults.push_back(fakeResults.arena(), one);
-					fakeResults.push_back(fakeResults.arena(), two);
-					updateClientBlobRanges(&knownBlobRanges, fakeResults, ar, &rangesToAdd, &rangesToRemove);
-				} else {
-					updateClientBlobRanges(&knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
-				}
+				updateClientBlobRanges(&knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
 
 				for (KeyRangeRef range : rangesToRemove) {
 					printf("BM Got range to revoke [%s - %s)\n",

@@ -32,6 +32,8 @@
 // TODO could refactor the file reading code from here and the delta file function into another actor,
 // then this part would also be testable? but meh
 
+#define BG_READ_DEBUG false
+
 ACTOR Future<Arena> readSnapshotFile(Reference<BackupContainerFileSystem> bstore,
                                      BlobFilenameRef f,
                                      KeyRangeRef keyRange,
@@ -88,11 +90,13 @@ ACTOR Future<Arena> readSnapshotFile(Reference<BackupContainerFileSystem> bstore
 		        i++;
 		    }
 		}*/
-		printf("Started with %d rows from snapshot file %s after pruning to [%s - %s)\n",
-		       dataMap->size(),
-		       f.toString().c_str(),
-		       keyRange.begin.printable().c_str(),
-		       keyRange.end.printable().c_str());
+		if (BG_READ_DEBUG) {
+			printf("Started with %d rows from snapshot file %s after pruning to [%s - %s)\n",
+			       dataMap->size(),
+			       f.toString().c_str(),
+			       keyRange.begin.printable().c_str(),
+			       keyRange.end.printable().c_str());
+		}
 
 		return arena;
 	} catch (Error& e) {
@@ -126,8 +130,9 @@ ACTOR Future<Standalone<GranuleDeltas>> readDeltaFile(Reference<BackupContainerF
 		rdr.deserialize(FileIdentifierFor<GranuleDeltas>::value, result.contents(), parseArena);
 		result.arena().dependsOn(parseArena);
 
-		// result.contents() = ObjectReader::fromStringRef<GranuleDeltas>(dataRef, Unversioned());
-		printf("Parsed %d deltas from delta file %s\n", result.size(), f.toString().c_str());
+		if (BG_READ_DEBUG) {
+			printf("Parsed %d deltas from delta file %s\n", result.size(), f.toString().c_str());
+		}
 
 		// TODO REMOVE sanity check
 		for (int i = 0; i < result.size() - 1; i++) {
@@ -276,14 +281,18 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 		Arena snapshotArena = wait(readSnapshotFuture);
 		arena.dependsOn(snapshotArena);
 
-		printf("Applying %d delta files\n", readDeltaFutures.size());
+		if (BG_READ_DEBUG) {
+			printf("Applying %d delta files\n", readDeltaFutures.size());
+		}
 		for (Future<Standalone<GranuleDeltas>> deltaFuture : readDeltaFutures) {
 			Standalone<GranuleDeltas> result = wait(deltaFuture);
 			arena.dependsOn(result.arena());
 			applyDeltas(&dataMap, arena, result, keyRange, readVersion);
 			wait(yield());
 		}
-		printf("Applying %d memory deltas\n", chunk.newDeltas.size());
+		if (BG_READ_DEBUG) {
+			printf("Applying %d memory deltas\n", chunk.newDeltas.size());
+		}
 		applyDeltas(&dataMap, arena, chunk.newDeltas, keyRange, readVersion);
 		wait(yield());
 

@@ -117,8 +117,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 
 	// update FDB with new file
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			Tuple deltaFileKey;
 			deltaFileKey.append(keyRange.begin).append(keyRange.end);
@@ -197,9 +197,10 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 	snapshotFileKey.append(LiteralStringRef("snapshot")).append(version);
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
 	try {
 		loop {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
 				tr->set(snapshotFileKey.getDataAsStandalone().withPrefix(blobGranuleFileKeys.begin),
 				        getFileValue(fname, 0, serialized.size()));
@@ -230,9 +231,9 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(BlobWorkerData* bwData, K
 	       keyRange.begin.printable().c_str(),
 	       keyRange.end.printable().c_str());
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			state Version readVersion = wait(tr->getReadVersion());
 			state PromiseStream<RangeResult> rowsStream;
@@ -291,6 +292,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(BlobWorkerData* bwData, KeyRange key
 		chunk.deltaFiles.emplace_back_deep(filenameArena, deltaF.filename, deltaF.offset, deltaF.length);
 		deltaIdx++;
 	}
+	chunk.includedVersion = version;
 
 	printf("Re-snapshotting [%s - %s) @ %lld\n",
 	       keyRange.begin.printable().c_str(),
@@ -328,9 +330,10 @@ ACTOR Future<BlobFileIndex> compactFromBlob(BlobWorkerData* bwData, KeyRange key
 ACTOR Future<std::pair<Key, Version>> createRangeFeed(BlobWorkerData* bwData, KeyRange keyRange) {
 	state Key rangeFeedID = StringRef(deterministicRandom()->randomUniqueID().toString());
 	state Transaction tr(bwData->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(tr.registerRangeFeed(rangeFeedID, keyRange));
 			wait(tr.commit());
 			return std::pair<Key, Version>(rangeFeedID, tr.getCommittedVersion());
@@ -370,19 +373,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations = waitNext(rangeFeedStream.getFuture());
 			for (auto& deltas : mutations) {
 				if (!deltas.mutations.empty()) {
-					metadata->currentDeltas.emplace_back_deep(metadata->deltaArena, deltas);
+					metadata->currentDeltas.push_back_deep(metadata->deltaArena, deltas);
+					for (auto& delta : deltas.mutations) {
+						// FIXME: add mutation tracking here
+						// 8 for version, 1 for type, 4 for each param length then actual param size
+						metadata->currentDeltaBytes += 17 + delta.param1.size() + delta.param2.size();
+					}
 				}
-				for (auto& delta : deltas.mutations) {
-					// TODO REMOVE!!! Just for initial debugging
-					/*printf("BlobWorker [%s - %s) Got Mutation @ %lld: %s\n",
-					       metadata->keyRange.begin.printable().c_str(),
-					       metadata->keyRange.end.printable().c_str(),
-					       deltas.version,
-					       delta.toString().c_str());*/
 
-					// 8 for version, 1 for type, 4 for each param length then actual param size
-					metadata->currentDeltaBytes += 17 + delta.param1.size() + delta.param2.size();
-				}
 				ASSERT(metadata->currentDeltaVersion <= deltas.version);
 				metadata->currentDeltaVersion = deltas.version;
 
@@ -632,9 +630,9 @@ static void handleRevokedRange(BlobWorkerData* bwData, KeyRange keyRange, Versio
 
 ACTOR Future<Void> registerBlobWorker(BlobWorkerData* bwData, BlobWorkerInterface interf) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
 			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
 			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
@@ -654,11 +652,11 @@ ACTOR Future<Void> registerBlobWorker(BlobWorkerData* bwData, BlobWorkerInterfac
 // TODO list of key ranges in the future to batch
 ACTOR Future<Void> persistAssignWorkerRange(BlobWorkerData* bwData, KeyRange keyRange, Version assignVersion) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 	loop {
 		try {
-
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			wait(krmSetRangeCoalescing(
 			    tr, blobGranuleMappingKeys.begin, keyRange, KeyRange(allKeys), blobGranuleMappingValueFor(bwData->id)));
 

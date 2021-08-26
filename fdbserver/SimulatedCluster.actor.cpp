@@ -254,7 +254,8 @@ public:
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	// Set true to simplify simulation configs for easier debugging
-	bool simpleConfig = false;
+	// TODO CHANGE BACK
+	bool simpleConfig = true;
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
@@ -1582,7 +1583,14 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 	if (testConfig.machineCount.present()) {
 		machine_count = testConfig.machineCount.get();
-	} else if (generateFearless && testConfig.minimumReplication > 1) {
+	}
+	/// TODO REMOVE!
+	else if (testConfig.simpleConfig) {
+		printf("Setting machine count to 1\n");
+		machine_count = 1;
+	}
+	//
+	else if (generateFearless && testConfig.minimumReplication > 1) {
 		// low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that
 		// is down during failures).
 		machine_count = 16;
@@ -1628,7 +1636,7 @@ void SimulationConfig::setCoordinators(const TestConfig& testConfig) {
 void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 	if (testConfig.processesPerMachine.present()) {
 		processes_per_machine = testConfig.processesPerMachine.get();
-	} else if (generateFearless) {
+	} else if (generateFearless || testConfig.simpleConfig) { // TODO CHANGE BACK
 		processes_per_machine = 1;
 	} else {
 		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28) / machine_count + 2);

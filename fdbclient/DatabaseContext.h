@@ -268,10 +268,11 @@ public:
 	Future<Void> popRangeFeedMutations(StringRef rangeID, Version version);
 
 	Future<Void> getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range);
+	// TODO add optional for end version so it can do a GRV in the transaction it already has to do
 	Future<Void> readBlobGranulesStream(const PromiseStream<Standalone<BlobGranuleChunkRef>>& results,
 	                                    KeyRange range,
-	                                    Version begin = 0,
-	                                    Version end = std::numeric_limits<Version>::max());
+	                                    Version begin,
+	                                    Version end);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
