@@ -60,7 +60,6 @@
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/Util.h"
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void failAfter(Future<Void> trigger, Endpoint e);
@@ -5107,13 +5106,13 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				newMaster.locality = db->serverInfo->get().myLocality;
 				newMaster.initEndpoints();
 
-				DUMPTOKEN_PROCESS(iMaster, newMaster.waitFailure);
-				DUMPTOKEN_PROCESS(iMaster, newMaster.tlogRejoin);
-				DUMPTOKEN_PROCESS(iMaster, newMaster.changeCoordinators);
-				DUMPTOKEN_PROCESS(iMaster, newMaster.getCommitVersion);
-				DUMPTOKEN_PROCESS(iMaster, newMaster.getLiveCommittedVersion);
-				DUMPTOKEN_PROCESS(iMaster, newMaster.reportLiveCommittedVersion);
-				DUMPTOKEN_PROCESS(iMaster, newMaster.notifyBackupWorkerDone);
+				DUMPTOKEN_PROCESS(newMaster, newMaster.waitFailure);
+				DUMPTOKEN_PROCESS(newMaster, newMaster.tlogRejoin);
+				DUMPTOKEN_PROCESS(newMaster, newMaster.changeCoordinators);
+				DUMPTOKEN_PROCESS(newMaster, newMaster.getCommitVersion);
+				DUMPTOKEN_PROCESS(newMaster, newMaster.getLiveCommittedVersion);
+				DUMPTOKEN_PROCESS(newMaster, newMaster.reportLiveCommittedVersion);
+				DUMPTOKEN_PROCESS(newMaster, newMaster.notifyBackupWorkerDone);
 
 				TraceEvent("ClusterRecovery init master interface", cluster->id)
 				    .detail("Address", iMaster.address())
