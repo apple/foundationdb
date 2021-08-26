@@ -34,6 +34,42 @@ static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 :
 
 namespace {
 
+class RocksDBErrorListener : public rocksdb::EventListener {
+public:
+	RocksDBErrorListener(ThreadReturnPromise<Void>* promise) : errorPromise(promise){};
+	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
+		TraceEvent(SevError, "RocksDBBGError")
+		    .detail("Reason", reason)
+		    .detail("RocksDBSeverity", bg_error->severity())
+		    .detail("Status", bg_error->ToString());
+		std::unique_lock<std::mutex> lock(mutex);
+		if (isSet)
+			return;
+		// RocksDB generates two types of background errors, IO Error and Corruption
+		// Error type and severity map could be found at
+		// https://github.com/facebook/rocksdb/blob/2e09a54c4fb82e88bcaa3e7cfa8ccbbbbf3635d5/db/error_handler.cc#L138.
+		// All background errors will be treated as storage engine failure. Send the error to storage server.
+		if (bg_error->IsIOError()) {
+			errorPromise->sendError(io_error());
+		} else if (bg_error->IsCorruption()) {
+			errorPromise->sendError(file_corrupt());
+		} else {
+			errorPromise->sendError(unknown_error());
+		}
+		isSet = true;
+	}
+	~RocksDBErrorListener() {
+		if (isSet)
+			return;
+		errorPromise->send(Void());
+	}
+
+private:
+	ThreadReturnPromise<Void>* errorPromise;
+	bool isSet = false;
+	std::mutex mutex;
+};
+
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
 }
@@ -229,7 +265,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			ThreadReturnPromise<Void> done;
 			Optional<Future<Void>>& metrics;
-			OpenAction(std::string path, Optional<Future<Void>>& metrics) : path(std::move(path)), metrics(metrics) {}
+			ThreadReturnPromise<Void>* errorPromise;
+			OpenAction(std::string path, Optional<Future<Void>>& metrics, ThreadReturnPromise<Void>* errorPromise)
+			  : path(std::move(path)), metrics(metrics), errorPromise(errorPromise) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -238,6 +276,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
+			options.listeners.push_back(std::make_shared<RocksDBErrorListener>(a.errorPromise));
 			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
@@ -551,7 +590,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
-	Promise<Void> errorPromise;
+	ThreadReturnPromise<Void> errorPromise;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
@@ -595,8 +634,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		wait(self->writeThread->stop());
 		if (self->closePromise.canBeSet())
 			self->closePromise.send(Void());
-		if (self->errorPromise.canBeSet())
-			self->errorPromise.send(Never());
 		delete self;
 	}
 
@@ -612,7 +649,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
-		auto a = std::make_unique<Writer::OpenAction>(path, metrics);
+		auto a = std::make_unique<Writer::OpenAction>(path, metrics, &errorPromise);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;
