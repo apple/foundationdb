@@ -1637,9 +1637,8 @@ struct RedwoodMetrics {
 		}
 	}
 
-	ACTOR Future<Void> logHistograms(double elapsed) {
+	void logHistograms(double elapsed) {
 		// All histograms have reset their buckets to 0 after writeToLog.
-		wait(yield());
 		kvSizeWritten->writeToLog(elapsed);
 		kvSizeReadByGet->writeToLog(elapsed);
 		kvSizeReadByGetRange->writeToLog(elapsed);
@@ -1654,7 +1653,6 @@ struct RedwoodMetrics {
 				level.modifyItemCountSketch->writeToLog(elapsed);
 			}
 			++levelCounter;
-			wait(yield());
 		}
 	}
 
@@ -1790,7 +1788,7 @@ ACTOR Future<Void> redwoodHistogramsLogger(double interval) {
 		currTime = now();
 		wait(delay(interval));
 		double elapsed = now() - currTime;
-		wait(g_redwoodMetrics.logHistograms(elapsed));
+		g_redwoodMetrics.logHistograms(elapsed);
 	}
 }
 
