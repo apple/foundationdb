@@ -242,6 +242,17 @@ Error statusToError(const rocksdb::Status& s) {
 	}
 }
 
+ACTOR Future<Void> rocksDBFlushTicker(rocksdb::DB* db, rocksdb::FlushOptions options, UID id) {
+	loop {
+		wait(delay(SERVER_KNOBS->ROCKSDB_FLUSH_TICKER_DELAY));
+		TraceEvent e("RocksDBFlushTickerCheck");
+		rocksdb::Status s = db->Flush(options);
+		if (!s.ok()) {
+			TraceEvent("RocksDBFlushFailure", id).error(statusToError(s), true);
+		}
+	}
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -265,13 +276,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Void> done;
 			Optional<Future<Void>>& metrics;
 			rocksdb::EventListener* notifier;
-			OpenAction(std::string path, Optional<Future<Void>>& metrics, rocksdb::EventListener* notifier)
-			  : path(std::move(path)), metrics(metrics), notifier(notifier) {}
+			Optional<Future<Void>>& flushTicker;
+			OpenAction(std::string path,
+			           Optional<Future<Void>>& metrics,
+			           rocksdb::EventListener* notifier,
+			           Optional<Future<Void>>& flushTicker)
+			  : path(std::move(path)), metrics(metrics), notifier(notifier), flushTicker(flushTicker) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
-			TraceEvent(SevError, "OpenRocksDB").detail("Path", a.path);
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
@@ -279,6 +293,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
 				TraceEvent(SevError, "AddingListener").detail("Path", a.path);
 				options.listeners.emplace_back(a.notifier);
+				options.env->SetBackgroundThreads(2, rocksdb::Env::Priority::HIGH);
 			}
 			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
@@ -288,6 +303,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
 				onMainThread([&] {
 					a.metrics = rocksDBMetricLogger(options.statistics, db);
+					rocksdb::FlushOptions options;
+					options.wait = false;
+					a.flushTicker = rocksDBFlushTicker(db, options, id);
 					return Future<bool>(true);
 				}).blockUntilReady();
 				a.done.send(Void());
@@ -609,6 +627,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	Optional<Future<Void>> metrics;
+	Optional<Future<Void>> flushTicker;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
 	  : path(path), id(id), flushNotifier(std::make_shared<FlushNotifier>(getPersistPromiseStream(), id)) {
@@ -640,6 +659,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
 		self->metrics.reset();
+		self->flushTicker.reset();
 
 		wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction(self->path, deleteOnClose);
@@ -666,7 +686,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
-		auto a = std::make_unique<Writer::OpenAction>(path, metrics, this->flushNotifier.get());
+		auto a = std::make_unique<Writer::OpenAction>(path, metrics, this->flushNotifier.get(), flushTicker);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;
