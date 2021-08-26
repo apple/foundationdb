@@ -37,10 +37,10 @@ namespace {
 ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     std::shared_ptr<ptxn::test::TestDriverContext> pContext,
                                     std::string folder) {
-	state std::vector<InitializeTLogRequest> tLogInitializations;
+	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
 	state int i = 0;
 	for (; i < pContext->numTLogs; i++) {
-		PromiseStream<InitializeTLogRequest> initializeTLog;
+		PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLog;
 		Promise<Void> recovered;
 		tLogInitializations.emplace_back();
 		tLogInitializations.back().isPrimary = true;
@@ -67,7 +67,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	// replace fake TLogInterface with recruited interface
 	std::vector<Future<ptxn::TLogInterface_PassivelyPull>> interfaceFutures(pContext->numTLogs);
 	for (i = 0; i < pContext->numTLogs; i++) {
-		interfaceFutures[i] = tLogInitializations[i].ptxnReply.getFuture();
+		interfaceFutures[i] = tLogInitializations[i].reply.getFuture();
 	}
 	std::vector<ptxn::TLogInterface_PassivelyPull> interfaces = wait(getAll(interfaceFutures));
 	for (i = 0; i < pContext->numTLogs; i++) {
