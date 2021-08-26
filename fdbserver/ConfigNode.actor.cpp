@@ -332,6 +332,7 @@ class ConfigNodeImpl {
 				latestVersion = mutation.version;
 				index = 0;
 			}
+			// TODO: This ASSERT might be unnecessary since compaction destroys annotations
 			ASSERT(annotations.find(mutation.version) != annotations.end());
 			Key key = versionedMutationKey(mutation.version, index++);
 			Value value = ObjectWriter::toValue(mutation.mutation, IncludeVersion());
@@ -472,11 +473,18 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> rollback(ConfigNodeImpl* self, ConfigFollowerRollbackRequest req) {
-		// TODO: Actually delete mutations from kvstore (similar to compact)
 		state ConfigGeneration generation = wait(getGeneration(self));
 		if (req.version < generation.committedVersion) {
+			Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
+			    wait(getMutations(self, req.version + 1, generation.committedVersion));
+			self->kvStore->clear(KeyRangeRef(versionedMutationKey(req.version + 1, 0),
+			                                 versionedMutationKey(generation.committedVersion + 1, 0)));
+			self->kvStore->clear(KeyRangeRef(versionedAnnotationKey(req.version + 1),
+			                                 versionedAnnotationKey(generation.committedVersion + 1)));
+
 			generation.committedVersion = req.version;
 			self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
+			wait(self->kvStore->commit());
 		}
 		req.reply.send(Void());
 		return Void();
