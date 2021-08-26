@@ -318,14 +318,22 @@ class ConfigNodeImpl {
 
 	ACTOR static Future<Void> commitMutations(ConfigNodeImpl* self,
 	                                          Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
-	                                          std::unordered_map<Version, int> versionIndex,
-	                                          Version commitVersion,
-	                                          ConfigCommitAnnotationRef annotation) {
+	                                          std::map<Version, ConfigCommitAnnotationRef> annotations,
+	                                          Version commitVersion) {
+		Version latestVersion = 0;
+		int index = 0;
 		for (const auto& mutation : mutations) {
 			if (mutation.version > commitVersion) {
 				continue;
 			}
-			Key key = versionedMutationKey(mutation.version, versionIndex[mutation.version]++);
+			// Mutations should be in ascending version order.
+			ASSERT(mutation.version >= latestVersion);
+			if (mutation.version > latestVersion) {
+				latestVersion = mutation.version;
+				index = 0;
+			}
+			ASSERT(annotations.find(mutation.version) != annotations.end());
+			Key key = versionedMutationKey(mutation.version, index++);
 			Value value = ObjectWriter::toValue(mutation.mutation, IncludeVersion());
 			if (mutation.mutation.isSet()) {
 				TraceEvent("ConfigNodeSetting")
@@ -339,8 +347,10 @@ class ConfigNodeImpl {
 			}
 			self->kvStore->set(KeyValueRef(key, value));
 		}
-		self->kvStore->set(
-		    KeyValueRef(versionedAnnotationKey(commitVersion), BinaryWriter::toValue(annotation, IncludeVersion())));
+		for (const auto& [version, annotation] : annotations) {
+			self->kvStore->set(
+			    KeyValueRef(versionedAnnotationKey(version), BinaryWriter::toValue(annotation, IncludeVersion())));
+		}
 		ConfigGeneration newGeneration = { commitVersion, commitVersion };
 		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(newGeneration, IncludeVersion())));
 		wait(self->kvStore->commit());
@@ -363,7 +373,8 @@ class ConfigNodeImpl {
 		for (const auto& mutation : req.mutations) {
 			mutations.emplace_back_deep(mutations.arena(), req.generation.liveVersion, mutation);
 		}
-		wait(commitMutations(self, mutations, {}, req.generation.liveVersion, req.annotation));
+		wait(commitMutations(
+		    self, mutations, { { req.generation.liveVersion, req.annotation } }, req.generation.liveVersion));
 		req.reply.send(Void());
 		return Void();
 	}
@@ -472,18 +483,13 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> rollforward(ConfigNodeImpl* self, ConfigFollowerRollforwardRequest req) {
-		state std::unordered_map<Version, int> versionIndex;
-		state int i;
-		for (i = 0; i < req.mutations.size(); ++i) {
-			state VersionedConfigMutationRef mutation = req.mutations[i];
-			if (versionIndex.find(mutation.version) == versionIndex.end()) {
-				Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
-				    wait(getMutations(self, mutation.version, mutation.version));
-				versionIndex[mutation.version] = versionedMutations.size();
-			}
+		ConfigGeneration currentGeneration = wait(getGeneration(self));
+		if (req.beginVersion != currentGeneration.committedVersion) {
+			++self->failedCommits;
+			req.reply.sendError(transaction_too_old());
+			return Void();
 		}
-		wait(commitMutations(
-		    self, req.mutations, versionIndex, req.version, ConfigCommitAnnotationRef("rollforward"_sr, now())));
+		wait(commitMutations(self, req.mutations, req.annotations, req.endVersion));
 		req.reply.send(Void());
 		return Void();
 	}
