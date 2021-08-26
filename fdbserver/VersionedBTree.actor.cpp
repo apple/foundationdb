@@ -10114,26 +10114,23 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 	{
 		// Time needed to log 33 histograms.
 		std::vector<Reference<Histogram>> histograms;
-		for(int i = 0; i<33; i++){
+		for (int i = 0; i < 33; i++) {
 			std::string levelString = "L" + std::to_string(i);
-			histograms.push_back(
-				Histogram::getHistogram(
-					LiteralStringRef("histogramTest"), LiteralStringRef("levelString"), Histogram::Unit::bytes)
-			);
+			histograms.push_back(Histogram::getHistogram(
+			    LiteralStringRef("histogramTest"), LiteralStringRef("levelString"), Histogram::Unit::bytes));
 		}
-		for(int i = 0; i<33; i++){
-			for(int j = 0; j<32; j++){
+		for (int i = 0; i < 33; i++) {
+			for (int j = 0; j < 32; j++) {
 				histograms[i]->sample(std::pow(2, j));
 			}
 		}
 		auto t_start = std::chrono::high_resolution_clock::now();
-		for(int i = 0; i<33; i++){
+		for (int i = 0; i < 33; i++) {
 			histograms[i]->writeToLog(30.0);
 		}
 		auto t_end = std::chrono::high_resolution_clock::now();
 		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 		std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
-
 	}
 	{
 		std::cout << "Histogram Unit bytes" << std::endl;
@@ -10158,7 +10155,7 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		std::cout << "Histogram Unit percentage: " << std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
 		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentageLinaer);
+		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentageLinear);
 		ASSERT(uniform.size() == inputSize);
 		for (size_t i = 0; i < uniform.size(); i++) {
 			h->samplePercentage((double)uniform[i] / UINT32_MAX);
