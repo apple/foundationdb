@@ -31,6 +31,9 @@
 
 namespace fdb_cli {
 
+// The command is used to send a data check request to the specified process
+// The check request is accomplished by rebooting the process
+
 ACTOR Future<bool> expensiveDataCheckCommandActor(
     Reference<IDatabase> db,
     Reference<ITransaction> tr,
@@ -38,6 +41,7 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	state bool result = true;
 	if (tokens.size() == 1) {
+		// initialize worker interfaces
 		wait(getWorkerInterfaces(tr, address_interface));
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {

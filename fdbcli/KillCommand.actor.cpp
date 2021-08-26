@@ -35,8 +35,10 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     Reference<ITransaction> tr,
                                     std::vector<StringRef> tokens,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
+	ASSERT(tokens.size() >= 1);
 	state bool result = true;
 	if (tokens.size() == 1) {
+		// initialize worker interfaces
 		wait(getWorkerInterfaces(tr, address_interface));
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
