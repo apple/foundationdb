@@ -64,10 +64,10 @@ public:
 		auto res =
 		    versionMap.emplace(std::piecewise_construct, std::forward_as_tuple(seqno), std::forward_as_tuple(version));
 		if (!res.second) {
-			TraceEvent(SevWarn, "RocksDBSeuNoAlreadyExist").detail("RocksDBSeqNo", seqno)..detail("Version", version);
-			it->second = version;
+			TraceEvent(SevWarn, "RocksDBSeuNoAlreadyExist").detail("RocksDBSeqNo", seqno).detail("Version", version);
+			res.first->second = version;
 		}
-		TraceEvent("AddedVersionMapEntry")..detail("RocksDBSeqNo", seqno)..detail("Version", version);
+		TraceEvent("AddedVersionMapEntry").detail("RocksDBSeqNo", seqno).detail("Version", version);
 	}
 
 private:
@@ -337,8 +337,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
-				rocksdb::FlushOptions flushOptions;
-				s = db->Flush(flushOptions);
 				if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT && a.kv != nullptr && a.version != invalidVersion) {
 					const rocksdb::SequenceNumber seqno = db->GetLatestSequenceNumber();
 					a.kv->addVersion(seqno, a.version);
