@@ -114,16 +114,16 @@ private:
 template <class T>
 class ThreadReturnPromiseStream : NonCopyable {
 public:
-	ThreadReturnPromiseStream() : promiseStream(std::make_shared<PromiseStream<T>>()) {}
+	ThreadReturnPromiseStream() {}
 	~ThreadReturnPromiseStream() {}
 
 	FutureStream<T> getFuture() { // Call only on the originating thread!
-		return promiseStream->getFuture();
+		return promiseStream.getFuture();
 	}
 
 	void send(T const& t) { // Can be called safely from another thread.
 		Promise<Void> signal;
-		tagAndForward(promiseStream, t, signal.getFuture());
+		tagAndForward(&promiseStream, t, signal.getFuture());
 		g_network->onMainThread(std::move(signal),
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
 		                                                    : TaskPriority::DefaultOnMainThread);
@@ -131,14 +131,14 @@ public:
 
 	void sendError(Error const& e) { // Can be called safely from another thread.
 		Promise<Void> signal;
-		tagAndForwardError(promiseStream, e, signal.getFuture());
+		tagAndForwardError(&promiseStream, e, signal.getFuture());
 		g_network->onMainThread(std::move(signal),
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
 		                                                    : TaskPriority::DefaultOnMainThread);
 	}
 
 private:
-	std::shared_ptr<PromiseStream<T>> promiseStream;
+	PromiseStream<T> promiseStream;
 };
 
 Reference<IThreadPool> createGenericThreadPool(int stackSize = 0);

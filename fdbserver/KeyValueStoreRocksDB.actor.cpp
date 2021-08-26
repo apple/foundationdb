@@ -42,14 +42,14 @@ public:
 		Version version = invalidVersion;
 		{
 			std::lock_guard<std::mutex> lock(mu);
-			const auto it = versionMap.find(info.largest_seqno);
+			const auto it = versionMap.upper_bound(info.largest_seqno);
 			if (it == versionMap.end()) {
-				TraceEvent(SevWarn, "RocksDBFlushedVersionMissing", id).detail("RocksDbSeqNo", info.largest_seqno);
+				TraceEvent(SevWarn, "RocksDBFlushedVersionNotFound", id).detail("RocksDbSeqNo", info.largest_seqno);
 				return;
 			}
 			version = it->second;
 			persist->send(IKeyValueStore::PersistNotification(version));
-			versionMap.erase(it);
+			versionMap.erase(it, versionMap.end());
 		}
 		TraceEvent("RocksDBFlushed", id).detail("Version", version);
 	}
@@ -61,13 +61,19 @@ public:
 
 	void addVersion(const rocksdb::SequenceNumber seqno, const Version version) {
 		std::lock_guard<std::mutex> lock(mu);
-		versionMap[seqno] = version;
+		auto res =
+		    versionMap.emplace(std::piecewise_construct, std::forward_as_tuple(seqno), std::forward_as_tuple(version));
+		if (!res.second) {
+			TraceEvent(SevWarn, "RocksDBSeuNoAlreadyExist").detail("RocksDBSeqNo", seqno)..detail("Version", version);
+			it->second = version;
+		}
+		TraceEvent("AddedVersionMapEntry")..detail("RocksDBSeqNo", seqno)..detail("Version", version);
 	}
 
 private:
 	std::mutex mu;
 	UID id;
-	std::unordered_map<rocksdb::SequenceNumber, Version> versionMap;
+	std::map<rocksdb::SequenceNumber, Version, std::greater<rocksdb::SequenceNumber>> versionMap;
 	ThreadReturnPromiseStream<IKeyValueStore::PersistNotification>* persist;
 };
 
