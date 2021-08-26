@@ -427,7 +427,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			KeyRange keys;
 			int rowLimit, byteLimit;
 			double startTime;
-			ThreadReturnPromise<Standalone<RangeResult>> result;
+			ThreadReturnPromise<Standalone<RangeResultRef>> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()) {}
 			double getTimeEstimate() override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
@@ -442,7 +442,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			RangeResult result;
+			Standalone<RangeResultRef> result;
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				a.result.send(result);
 			}
