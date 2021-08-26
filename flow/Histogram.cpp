@@ -125,18 +125,18 @@ void Histogram::writeToLog() {
 			totalCount += buckets[i];
 			switch (unit) {
 			case Unit::microseconds:
-				e.detail(format("LessThan%u.%03u", value / 1000, value % 1000), buckets[i]);
+				e.detail(format("LessThan%u.%03u", int(value / 1000), int(value % 1000)), buckets[i]);
 				break;
 			case Unit::bytes:
 			case Unit::bytes_per_second:
-				e.detail(format("LessThan%u", value), buckets[i]);
+				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
 				break;
 			case Unit::percentage:
 				e.detail(format("LessThan%f", (i + 1) * 0.04), buckets[i]);
 				break;
 			case Unit::count:
 				value = uint64_t((i + 1) * ((upperBound - lowerBound) / 31.0));
-				e.detail(format("LessThan%u", value), buckets[i]);
+				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
 				break;
 			default:
 				ASSERT(false);
