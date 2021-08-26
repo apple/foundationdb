@@ -1638,7 +1638,7 @@ struct RedwoodMetrics {
 		}
 	}
 
-	void logHistograms(double elapsed) {
+	ACTOR Future<Void> logHistograms(double elapsed) {
 		// All histograms have reset their buckets to 0 after writeToLog.
 		wait(yield());
 		kvSizeWritten->writeToLog(elapsed);
@@ -1791,7 +1791,7 @@ ACTOR Future<Void> redwoodHistogramsLogger(double interval) {
 		currTime = now();
 		wait(delay(interval));
 		double elapsed = now() - currTime;
-		g_redwoodMetrics.logHistograms(elapsed);
+		wait(g_redwoodMetrics.logHistograms(elapsed));
 	}
 }
 
@@ -10114,6 +10114,30 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		uniform.push_back(distribution(generator));
 	}
 	std::cout << "size of input: " << uniform.size() << std::endl;
+	{
+		// Time needed to log 33 histograms.
+		std::vector<Reference<Histogram>> histograms;
+		for(int i = 0; i<33; i++){
+			std::string levelString = "L" + std::to_string(i);
+			histograms.push_back(
+				Histogram::getHistogram(
+					LiteralStringRef("histogramTest"), LiteralStringRef("levelString"), Histogram::Unit::bytes)
+			);
+		}
+		for(int i = 0; i<33; i++){
+			for(int j = 0; j<32; j++){
+				histograms[i]->sample(std::pow(2, j));
+			}
+		}
+		auto t_start = std::chrono::high_resolution_clock::now();
+		for(int i = 0; i<33; i++){
+			histograms[i]->writeToLog(30.0);
+		}
+		auto t_end = std::chrono::high_resolution_clock::now();
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+		std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
+
+	}
 	{
 		std::cout << "Histogram Unit bytes" << std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
