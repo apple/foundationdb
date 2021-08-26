@@ -1535,17 +1535,17 @@ struct RedwoodMetrics {
 				if (!buildFillPctSketch) {
 					std::string levelString = format("L%d", level);
 					buildFillPctSketch = Histogram::getHistogram(
-					    LiteralStringRef("buildFillPct"), levelString, Histogram::Unit::percentage);
+					    LiteralStringRef("buildFillPct"), levelString, Histogram::Unit::percentageLinear);
 					modifyFillPctSketch = Histogram::getHistogram(
-					    LiteralStringRef("modifyFillPct"), levelString, Histogram::Unit::percentage);
+					    LiteralStringRef("modifyFillPct"), levelString, Histogram::Unit::percentageLinear);
 					buildStoredPctSketch = Histogram::getHistogram(
-					    LiteralStringRef("buildStoredPct"), levelString, Histogram::Unit::percentage);
+					    LiteralStringRef("buildStoredPct"), levelString, Histogram::Unit::percentageLinear);
 					modifyStoredPctSketch = Histogram::getHistogram(
-					    LiteralStringRef("modifyStoredPct"), levelString, Histogram::Unit::percentage);
+					    LiteralStringRef("modifyStoredPct"), levelString, Histogram::Unit::percentageLinear);
 					buildItemCountSketch = Histogram::getHistogram(
-					    LiteralStringRef("buildItemCount"), levelString, Histogram::Unit::count, 0, maxRecordCount);
+					    LiteralStringRef("buildItemCount"), levelString, Histogram::Unit::countLinear, 0, maxRecordCount);
 					modifyItemCountSketch = Histogram::getHistogram(
-					    LiteralStringRef("modifyItemCount"), levelString, Histogram::Unit::count, 0, maxRecordCount);
+					    LiteralStringRef("modifyItemCount"), levelString, Histogram::Unit::countLinear, 0, maxRecordCount);
 				}
 
 				buildFillPctSketch->clear();
@@ -10108,7 +10108,7 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		std::cout << "Histogram Unit percentage: " << std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
 		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentage);
+		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentageLinaer);
 		ASSERT(uniform.size() == inputSize);
 		for (size_t i = 0; i < uniform.size(); i++) {
 			h->samplePercentage((double)uniform[i] / UINT32_MAX);
