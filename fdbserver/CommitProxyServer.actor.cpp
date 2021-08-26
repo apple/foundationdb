@@ -1271,7 +1271,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state Span span("MP:reply"_loc, self->span.context);
 
-	const Optional<UID>& debugID = self->debugID;
+	state const Optional<UID>& debugID = self->debugID;
 
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
@@ -1422,6 +1422,8 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	++context.pProxyCommitData->stats.commitBatchIn;
 	context.setupTraceBatch();
 
+	TraceEvent("commitBatch before phase 1").log();
+
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined
 	/// and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	wait(CommitBatch::preresolutionProcessing(&context));
@@ -1430,19 +1432,29 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 		return Void();
 	}
 
+	TraceEvent("commitBatch before phase 2").log();
+
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
 	wait(CommitBatch::getResolution(&context));
+
+	TraceEvent("commitBatch before phase 3").log();
 
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but
 	/// doesn't need to be)
 	wait(CommitBatch::postResolution(&context));
 
+	TraceEvent("commitBatch before phase 4").log();
+
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
 	wait(CommitBatch::transactionLogging(&context));
+
+	TraceEvent("commitBatch before phase 5").log();
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for
 	/// latency)
 	wait(CommitBatch::reply(&context));
+
+	TraceEvent("commitBatch done").log();
 
 	return Void();
 }

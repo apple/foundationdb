@@ -3621,6 +3621,8 @@ ACTOR Future<Void> getVersion(Reference<ClusterRecoveryData> self, GetCommitVers
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
+	TraceEvent("Getversion").detail("getCommitVersionReqs", self->getCommitVersionRequests.getValue()).log();
+
 	++self->getCommitVersionRequests;
 
 	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
@@ -3687,6 +3689,8 @@ ACTOR Future<Void> getVersion(Reference<ClusterRecoveryData> self, GetCommitVers
 		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
 		proxyItr->second.latestRequestNum.set(req.requestNum);
 	}
+
+	TraceEvent("Getversion done").detail("version", self->version).log();
 
 	return Void();
 }
