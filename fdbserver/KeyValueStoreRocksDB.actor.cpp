@@ -31,17 +31,24 @@ namespace {
 class FlushNotifier : public rocksdb::EventListener {
 public:
 	FlushNotifier() : persist(nullptr) {}
-	FlushNotifier(ThreadReturnPromiseStream<IKeyValueStore::PersistNotification>* persist) : persist(persist) {}
+	FlushNotifier(ThreadReturnPromiseStream<IKeyValueStore::PersistNotification>* persist, UID id)
+	  : persist(persist), id(id) {}
 	~FlushNotifier() override {}
 
 	void OnFlushCompleted(rocksdb::DB* /*db*/, const rocksdb::FlushJobInfo& info) override {
-		std::lock_guard<std::mutex> lock(mu);
-		const auto it = versionMap.find(info.largest_seqno);
-		if (it == versionMap.end()) {
-			return;
+		Version version = invalidVersion;
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			const auto it = versionMap.find(info.largest_seqno);
+			if (it == versionMap.end()) {
+				TraceEvent(SevWarn, "RocksDBFlushed", id).detail(info.largest_seqno);
+				return;
+			}
+			version = it->second;
+			persist->send(IKeyValueStore::PersistNotification(version));
+			versionMap.erase(it);
 		}
-		persist->send(IKeyValueStore::PersistNotification(it->second));
-		versionMap.erase(it);
+		TraceEvent("RocksDBFlushed", id).detail("Version", version);
 	}
 
 	void CommitCompleted(Version version) {
@@ -56,6 +63,7 @@ public:
 
 private:
 	std::mutex mu;
+	UID id;
 	std::unordered_map<rocksdb::SequenceNumber, Version> versionMap;
 	ThreadReturnPromiseStream<IKeyValueStore::PersistNotification>* persist;
 };
@@ -305,7 +313,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			// If there are any range deletes, we should have added them to be deleted.
 			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
-			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC && !SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT;
+			options.disableWAL = SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT;
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
@@ -584,7 +593,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	Optional<Future<Void>> metrics;
 
-	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
+	explicit RocksDBKeyValueStore(const std::string& path, UID id)
+	  : path(path), id(id), flushNotifier(std::make_shared<FlushNotifier>(getPersistPromiseStream(), id)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
@@ -606,7 +616,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
 		}
-		flushNotifier = std::shared_ptr<FlushNotifier>(new FlushNotifier(this->getPersistPromiseStream()));
 	}
 
 	Future<Void> getError() override { return errorPromise.getFuture(); }

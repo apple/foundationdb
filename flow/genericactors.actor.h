@@ -1254,9 +1254,9 @@ void tagAndForward(Promise<T>* pOutputPromise, T value, Future<Void> signal) {
 }
 
 ACTOR template <class T>
-void tagAndForward(PromiseStream<T>* pOutput, T value, Future<Void> signal) {
+void tagAndForward(std::shared_ptr<PromiseStream<T>> output, T value, Future<Void> signal) {
 	wait(signal);
-	pOutput->send(value);
+	output->send(value);
 }
 
 ACTOR template <class T>
@@ -1267,9 +1267,9 @@ void tagAndForwardError(Promise<T>* pOutputPromise, Error value, Future<Void> si
 }
 
 ACTOR template <class T>
-void tagAndForwardError(PromiseStream<T>* pOutput, Error value, Future<Void> signal) {
+void tagAndForwardError(std::shared_ptr<PromiseStream<T>> output, Error value, Future<Void> signal) {
 	wait(signal);
-	pOutput->sendError(value);
+	output->sendError(value);
 }
 
 ACTOR template <class T>
@@ -1625,9 +1625,7 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 	void destroy() override { delete this; }
 
 #ifdef ENABLE_SAMPLING
-	LineageReference* lineageAddr() {
-		return currentLineage;
-	}
+	LineageReference* lineageAddr() { return currentLineage; }
 #endif
 
 	void a_callback_fire(ActorCallback<YieldedFutureActor, 1, Void>*, Void) {
