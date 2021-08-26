@@ -299,9 +299,9 @@ else()
   endif()
 
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-    # Graviton or later
+    # Graviton2 or later
     # https://github.com/aws/aws-graviton-gettting-started
-    add_compile_options(-march=armv8-a+crc+simd)
+    add_compile_options(-march=armv8.2-a+crc+simd)
   endif()
 
   # Check whether we can use dtrace probes
