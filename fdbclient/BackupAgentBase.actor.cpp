@@ -229,6 +229,16 @@ Key getApplyKey(Version version, Key backupUid) {
 	return k2.withPrefix(applyLogKeys.begin);
 }
 
+Key getLogKey(Version version, Key backupUid) {
+	int64_t vblock = (version - 1) / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+	uint64_t v = bigEndian64(version);
+	uint32_t data = vblock & 0xffffffff;
+	uint8_t hash = (uint8_t)hashlittle(&data, sizeof(uint32_t), 0);
+	Key k1 = StringRef((uint8_t*)&v, sizeof(uint64_t)).withPrefix(StringRef(&hash, sizeof(uint8_t)));
+	Key k2 = k1.withPrefix(backupUid);
+	return k2.withPrefix(backupLogKeys.begin);
+}
+
 Version getLogKeyVersion(Key key) {
 	return bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t)));
 }

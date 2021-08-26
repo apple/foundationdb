@@ -276,6 +276,9 @@ public:
 	int ROCKSDB_PREFIX_LEN;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
 	double ROCKSDB_METRICS_DELAY;
+	double ROCKSDB_READ_VALUE_TIMEOUT;
+	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
+	double ROCKSDB_READ_RANGE_TIMEOUT;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -564,6 +567,7 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
+	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -691,7 +695,8 @@ public:
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
 	                                  // the window size
-	double REDWOOD_LOGGING_INTERVAL;
+	double REDWOOD_METRICS_INTERVAL;
+	double REDWOOD_HISTOGRAM_INTERVAL;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;

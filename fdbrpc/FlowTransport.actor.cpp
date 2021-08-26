@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CoordinationInterface.h"
 #include "fdbrpc/FlowTransport.h"
 #include "flow/network.h"
 
@@ -51,7 +50,7 @@ constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
-static constexpr int WLTOKEN_COUNTS = 21; // number of wellKnownEndpoints
+static constexpr int WLTOKEN_COUNTS = 22; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:

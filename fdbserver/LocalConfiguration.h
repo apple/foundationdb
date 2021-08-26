@@ -52,7 +52,6 @@ public:
 	                   std::map<std::string, std::string> const& manualKnobOverrides,
 	                   IsTest = IsTest::False);
 	~LocalConfiguration();
-	Future<Void> initialize();
 	FlowKnobs const& getFlowKnobs() const;
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;
@@ -61,6 +60,7 @@ public:
 	UID getID() const;
 	Version lastSeenVersion() const;
 	ConfigClassSet configClassSet() const;
+	Future<Void> initialize();
 
 public: // Testing
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,

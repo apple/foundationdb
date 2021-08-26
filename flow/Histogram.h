@@ -23,12 +23,10 @@
 #pragma once
 
 #include <flow/Arena.h>
-
 #include <string>
 #include <map>
 #include <unordered_map>
 #include <iomanip>
-
 #ifdef _WIN32
 #include <intrin.h>
 #pragma intrinsic(_BitScanReverse)
@@ -36,12 +34,13 @@
 
 class Histogram;
 
-class HistogramRegistry {
+class HistogramRegistry : public ReferenceCounted<HistogramRegistry> {
 public:
 	void registerHistogram(Histogram* h);
 	void unregisterHistogram(Histogram* h);
 	Histogram* lookupHistogram(std::string const& name);
-	void logReport();
+	void logReport(double elapsed = -1.0);
+	void clear();
 
 private:
 	// This map is ordered by key so that ops within the same group end up
@@ -62,25 +61,29 @@ public:
 	enum class Unit { microseconds = 0, bytes, bytes_per_second, percentageLinear, countLinear, MAXHISTOGRAMUNIT };
 	static const char* const UnitToStringMapper[];
 
-private:
-	Histogram(std::string const& group,
-	          std::string const& op,
-	          Unit unit,
-	          HistogramRegistry& registry,
-	          uint32_t lower,
-	          uint32_t upper)
-	  : group(group), op(op), unit(unit), registry(registry), lowerBound(lower), upperBound(upper) {
+	Histogram(Reference<HistogramRegistry> regis,
+	          std::string const& group = "",
+	          std::string const& op = "",
+	          Unit unit = Unit::MAXHISTOGRAMUNIT,
+	          uint32_t lower = 0,
+	          uint32_t upper = UINT32_MAX)
+	  : group(group), op(op), unit(unit), registry(regis), lowerBound(lower), upperBound(upper) {
 
-		ASSERT(unit < Unit::MAXHISTOGRAMUNIT);
+		ASSERT(unit <= Unit::MAXHISTOGRAMUNIT);
 		ASSERT(upperBound >= lowerBound);
-
 		clear();
 	}
 
+private:
 	static std::string generateName(std::string const& group, std::string const& op) { return group + ":" + op; }
 
 public:
-	~Histogram() { registry.unregisterHistogram(this); }
+	~Histogram() {
+		if (registry.isValid() && unit != Unit::MAXHISTOGRAMUNIT) {
+			registry->unregisterHistogram(this);
+		}
+		registry.clear();
+	}
 
 	static Reference<Histogram> getHistogram(StringRef group,
 	                                         StringRef op,
@@ -93,7 +96,7 @@ public:
 		HistogramRegistry& registry = GetHistogramRegistry();
 		Histogram* h = registry.lookupHistogram(name);
 		if (!h) {
-			h = new Histogram(group_str, op_str, unit, registry, lower, upper);
+			h = new Histogram(Reference<HistogramRegistry>::addRef(&registry), group_str, op_str, unit, lower, upper);
 			registry.registerHistogram(h);
 			return Reference<Histogram>(h);
 		} else {
@@ -159,7 +162,7 @@ public:
 			i = 0;
 		}
 	}
-	void writeToLog();
+	void writeToLog(double elapsed = -1.0);
 
 	std::string name() const { return generateName(this->group, this->op); }
 
@@ -168,7 +171,7 @@ public:
 	std::string const group;
 	std::string const op;
 	Unit const unit;
-	HistogramRegistry& registry;
+	Reference<HistogramRegistry> registry;
 	uint32_t buckets[32];
 	uint32_t lowerBound;
 	uint32_t upperBound;
