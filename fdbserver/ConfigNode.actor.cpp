@@ -461,7 +461,7 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> rollback(ConfigNodeImpl* self, ConfigFollowerRollbackRequest req) {
-		// TODO: Actaully delete mutations from kvstore (similar to compact)
+		// TODO: Actually delete mutations from kvstore (similar to compact)
 		state ConfigGeneration generation = wait(getGeneration(self));
 		if (req.version < generation.committedVersion) {
 			generation.committedVersion = req.version;
