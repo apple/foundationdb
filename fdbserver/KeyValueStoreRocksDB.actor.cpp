@@ -11,6 +11,7 @@
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
+#include "flow/Histogram.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
 
@@ -335,8 +336,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		double readValueTimeout;
 		double readValuePrefixTimeout;
 		double readRangeTimeout;
+		Reference<Histogram> readValueDist;
+		Reference<Histogram> readValuePrefixDist;
+		Reference<Histogram> readValueRangeDist;
 
-		explicit Reader(DB& db) : db(db) {
+		explicit Reader(DB& db)
+		  : db(db), readValueDist(Histogram::getHistogram(LiteralStringRef("RocksDBLatency"),
+		                                                  LiteralStringRef("ReadValue"),
+		                                                  Histogram::Unit::microseconds)),
+		    readValuePrefixDist(Histogram::getHistogram(LiteralStringRef("RocksDBLatency"),
+		                                                LiteralStringRef("ReadValuePrefix"),
+		                                                Histogram::Unit::microseconds)),
+		    readValueRangeDist(Histogram::getHistogram(LiteralStringRef("RocksDBLatency"),
+		                                               LiteralStringRef("ReadValueRange"),
+		                                               Histogram::Unit::microseconds)) {
 			if (g_network->isSimulated()) {
 				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
 				// very high load and single read thread cannot process all the load within the timeouts.
@@ -367,7 +380,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
-			if (timer_monotonic() - a.startTime > readValueTimeout) {
+			auto actionStart = timer_monotonic();
+			if (actionStart - a.startTime > readValueTimeout) {
 				TraceEvent(SevWarn, "RocksDBError")
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
@@ -382,6 +396,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
 			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			readValueDist->sampleSeconds(timer_monotonic() - actionStart);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 				traceBatch.get().dump();
@@ -414,7 +429,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			if (timer_monotonic() - a.startTime > readValuePrefixTimeout) {
+			auto actionStart = timer_monotonic();
+			if (actionStart - a.startTime > readValuePrefixTimeout) {
 				TraceEvent(SevWarn, "RocksDBError")
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
@@ -435,6 +451,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                          "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
 				traceBatch.get().dump();
 			}
+			readValuePrefixDist->sampleSeconds(timer_monotonic() - actionStart);
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
 				                              std::min(value.size(), size_t(a.maxLength)))));
@@ -456,7 +473,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
-			if (timer_monotonic() - a.startTime > readRangeTimeout) {
+			auto actionStart = timer_monotonic();
+
+			if (actionStart - a.startTime > readRangeTimeout) {
 				TraceEvent(SevWarn, "RocksDBError")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
@@ -537,6 +556,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.result.sendError(statusToError(s));
 				return;
 			}
+			readValueRangeDist->sampleSeconds(timer_monotonic() - actionStart);
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
 			if (result.more) {
