@@ -130,7 +130,7 @@ ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringR
 		printUsage(tokens[0]);
 		return false;
 	}
-    return true;
+	return true;
 }
 
 CommandFactory tssqFactory(
