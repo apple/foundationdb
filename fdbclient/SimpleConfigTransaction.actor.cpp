@@ -114,6 +114,16 @@ class SimpleConfigTransactionImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> onError(SimpleConfigTransactionImpl* self, Error e) {
+		// TODO: Improve this:
+		if (e.code() == error_code_transaction_too_old || e.code() == error_code_not_committed) {
+			wait(delay((1 << self->numRetries++) * 0.01 * deterministicRandom()->random01()));
+			self->reset();
+			return Void();
+		}
+		throw e;
+	}
+
 public:
 	SimpleConfigTransactionImpl(Database const& cx) : cx(cx) {
 		auto coordinators = cx->getConnectionFile()->getConnectionString().coordinators();
@@ -149,14 +159,7 @@ public:
 
 	Future<Void> commit() { return commit(this); }
 
-	Future<Void> onError(Error const& e) {
-		// TODO: Improve this:
-		if (e.code() == error_code_transaction_too_old || e.code() == error_code_not_committed) {
-			reset();
-			return delay((1 << numRetries++) * 0.01 * deterministicRandom()->random01());
-		}
-		throw e;
-	}
+	Future<Void> onError(Error const& e) { return onError(this, e); }
 
 	Future<Version> getReadVersion() {
 		if (!getGenerationFuture.isValid())

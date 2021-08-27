@@ -234,6 +234,17 @@ class PaxosConfigTransactionImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> onError(PaxosConfigTransactionImpl* self, Error e) {
+		// TODO: Improve this:
+		TraceEvent("ConfigIncrementOnError").error(e).detail("NumRetries", self->numRetries);
+		if (e.code() == error_code_transaction_too_old || e.code() == error_code_not_committed) {
+			wait(delay((1 << self->numRetries++) * 0.01 * deterministicRandom()->random01()));
+			self->reset();
+			return Void();
+		}
+		throw e;
+	}
+
 public:
 	Future<Version> getReadVersion() {
 		return map(getGenerationQuorum.getGeneration(), [](auto const& gen) { return gen.committedVersion; });
@@ -274,15 +285,7 @@ public:
 		}
 	}
 
-	Future<Void> onError(Error const& e) {
-		// TODO: Improve this:
-		TraceEvent("ConfigIncrementOnError").error(e).detail("NumRetries", numRetries);
-		if (e.code() == error_code_transaction_too_old || e.code() == error_code_not_committed) {
-			reset();
-			return delay((1 << numRetries++) * 0.01 * deterministicRandom()->random01());
-		}
-		throw e;
-	}
+	Future<Void> onError(Error const& e) { return onError(this, e); }
 
 	void debugTransaction(UID dID) { this->dID = dID; }
 

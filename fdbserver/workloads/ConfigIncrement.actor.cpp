@@ -85,14 +85,7 @@ class ConfigIncrementWorkload : public TestWorkload {
 						TraceEvent(SevDebug, "ConfigIncrementError")
 						    .detail("LastKnownValue", self->lastKnownValue)
 						    .error(e, true /* include cancelled  */);
-						// TODO: Fix and enable the onError function
-						// wait(tr->onError(e));
-						if (e.code() == error_code_not_committed || e.code() == error_code_transaction_too_old) {
-							wait(delayJittered(0.1));
-							tr->reset();
-						} else {
-							throw e;
-						}
+						wait(tr->onError(e));
 						++self->retries;
 					}
 				}
@@ -113,12 +106,12 @@ class ConfigIncrementWorkload : public TestWorkload {
 		state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
 		loop {
 			try {
+				// TODO: Reenable once rollforward and rollback are supported
 				// state int currentValue = wait(get(tr));
 				// auto expectedValue = self->incrementActors * self->incrementsPerActor;
-				//TraceEvent("ConfigIncrementCheck")
+				// TraceEvent("ConfigIncrementCheck")
 				//    .detail("CurrentValue", currentValue)
 				//    .detail("ExpectedValue", expectedValue);
-				// TODO: Reenable once rollforward and rollback are supported
 				// return currentValue >= expectedValue; // >= because we may have maybe_committed errors
 				return true;
 			} catch (Error& e) {
