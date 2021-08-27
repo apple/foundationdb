@@ -4763,7 +4763,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	state TraceInterval recoveryInterval("ClusterRecovery");
 	state double recoverStartTime = now();
 
-	state Future<Void> collection = actorCollection(self->addActor.getFuture());
+	//state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
 	self->addActor.send(waitFailureServer(self->masterInterface.waitFailure.getFuture()));
 
