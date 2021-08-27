@@ -144,6 +144,9 @@ struct BlobManagerData {
 	UID id;
 	Database db;
 
+	int64_t epoch = -1;
+	int64_t seqNo = 1;
+
 	BlobManagerData(UID id, Database db) : id(id), db(db) {}
 	~BlobManagerData() { printf("Destroying blob manager data for %s\n", id.toString().c_str()); }
 };
@@ -200,24 +203,60 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitNewRange(Reference<ReadYourWrit
 	}
 }
 
-ACTOR Future<Void> doRangeAssignment(BlobWorkerInterface bwInterf,
+ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData,
+                                     BlobWorkerInterface bwInterf,
                                      KeyRange range,
-                                     Version assignVersion,
+                                     Promise<Void> iAmReplaced,
                                      bool isAssign) {
 	AssignBlobRangeRequest req;
 	req.keyRange = KeyRangeRef(StringRef(req.arena, range.begin), StringRef(req.arena, range.end));
-	req.assignVersion = assignVersion;
+	req.managerEpoch = bmData->epoch;
+	req.managerSeqno = bmData->seqNo;
 	req.isAssign = isAssign;
 
-	printf("BM %s %s range [%s - %s) @ %lld\n",
+	++bmData->seqNo;
+
+	printf("BM %s %s range [%s - %s) @ (%lld, %lld)\n",
 	       bwInterf.id().toString().c_str(),
 	       req.isAssign ? "assigning" : "revoking",
 	       req.keyRange.begin.printable().c_str(),
 	       req.keyRange.end.printable().c_str(),
-	       req.assignVersion);
+	       req.managerEpoch,
+	       req.managerSeqno);
 
-	wait(bwInterf.assignBlobRangeRequest.getReply(req));
+	AssignBlobRangeReply rep = wait(bwInterf.assignBlobRangeRequest.getReply(req));
+	if (!rep.epochOk) {
+		printf("BM heard from BW that there is a new manager with higher epoch\n");
+		iAmReplaced.send(Void());
+	}
 	return Void();
+}
+
+// TODO eventually CC should probably do this and pass it as part of recruitment?
+ACTOR Future<int64_t> acquireManagerLock(BlobManagerData* bmData) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	loop {
+		try {
+			// TODO verify: this should automatically have a read conflict range for blobManagerEpochKey, right?
+			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
+			state int64_t newEpoch;
+			if (oldEpoch.present()) {
+				newEpoch = decodeBlobManagerEpochValue(oldEpoch.get()) + 1;
+			} else {
+				newEpoch = 1; // start at 1
+			}
+
+			tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
+
+			wait(tr->commit());
+			return newEpoch;
+		} catch (Error& e) {
+			printf("Acquiring blob manager lock got error %s\n", e.name());
+			wait(tr->onError(e));
+		}
+	}
 }
 
 // TODO MOVE ELSEWHERE
@@ -235,9 +274,15 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 	wait(nukeBlobWorkerData(&self));
 	printf("Blob manager nuked previous workers and range assignments\n");
 
+	printf("Blob manager taking lock\n");
+	int64_t _epoch = wait(acquireManagerLock(&self));
+	self.epoch = _epoch;
+	printf("Blob manager acquired lock at epoch %lld\n", _epoch);
+
 	state BlobWorkerInterface bwInterf(locality, deterministicRandom()->randomUniqueID());
 	bwInterf.initEndpoints();
 	state Future<Void> bwFuture = blobWorker(bwInterf, dbInfo);
+	state Promise<Void> iAmReplaced; // TODO finish
 
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self.db);
@@ -247,8 +292,6 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-				state Version assignVersion = wait(tr->getReadVersion());
 
 				// TODO probably knobs here? This should always be pretty small though
 				RangeResult results = wait(krmGetRanges(
@@ -267,15 +310,12 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 					       range.begin.printable().c_str(),
 					       range.end.printable().c_str());
 
-					addActor.send(doRangeAssignment(bwInterf, range, assignVersion, false));
+					addActor.send(doRangeAssignment(&self, bwInterf, range, iAmReplaced, false));
 				}
 
 				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
-					/*printf("BM Got range to add [%s - %s)\n",
-					       range.begin.printable().c_str(),
-					       range.end.printable().c_str());*/
 					splitFutures.push_back(splitNewRange(tr, range));
 				}
 
@@ -288,14 +328,20 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 					for (int i = 0; i < splits.size() - 1; i++) {
 						KeyRange range = KeyRange(KeyRangeRef(splits[i], splits[i + 1]));
 						printf("    [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
-						addActor.send(doRangeAssignment(bwInterf, range, assignVersion, true));
+						addActor.send(doRangeAssignment(&self, bwInterf, range, iAmReplaced, true));
 					}
 				}
 
 				state Future<Void> watchFuture = tr->watch(blobRangeChangeKey);
 				wait(tr->commit());
 				printf("Blob manager done processing client ranges, awaiting update\n");
-				wait(watchFuture);
+				choose {
+					when(wait(watchFuture)) {}
+					when(wait(iAmReplaced.getFuture())) {
+						printf("Blob Manager exiting because it is replaced\n");
+						return Void();
+					}
+				}
 				break;
 			} catch (Error& e) {
 				printf("Blob manager got error looking for range updates %s\n", e.name());

@@ -82,19 +82,33 @@ struct BlobGranuleFileRequest {
 	}
 };
 
+struct AssignBlobRangeReply {
+	constexpr static FileIdentifier file_identifier = 6431923;
+	bool epochOk; // false if the worker has seen a new manager
+
+	AssignBlobRangeReply() {}
+	explicit AssignBlobRangeReply(bool epochOk) : epochOk(epochOk) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, epochOk);
+	}
+};
+
 struct AssignBlobRangeRequest {
 	constexpr static FileIdentifier file_identifier = 4844288;
 	Arena arena;
 	KeyRangeRef keyRange;
-	Version assignVersion;
+	int64_t managerEpoch;
+	int64_t managerSeqno;
 	bool isAssign; // true if assignment, false if revoke
-	ReplyPromise<Void> reply;
+	ReplyPromise<AssignBlobRangeReply> reply;
 
 	AssignBlobRangeRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, assignVersion, isAssign, reply, arena);
+		serializer(ar, keyRange, managerEpoch, managerSeqno, isAssign, reply, arena);
 	}
 };
 

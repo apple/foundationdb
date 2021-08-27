@@ -1082,15 +1082,28 @@ const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
 
 // key to watch for changes in active blob ranges + KeyRangeMap of active blob ranges
+// TODO go over which of these should be \xff/ and \xff\x02/
 const KeyRef blobRangeChangeKey = LiteralStringRef("\xff\x02/blobRangeChange");
 const KeyRangeRef blobRangeKeys(LiteralStringRef("\xff/blobRange/"), LiteralStringRef("\xff/blobRange0"));
+const KeyRef blobManagerEpochKey = LiteralStringRef("\xff\x02/blobRangeChange");
+
+const Value blobManagerEpochValueFor(int64_t epoch) {
+	BinaryWriter wr(Unversioned());
+	wr << epoch;
+	return wr.toValue();
+}
+
+int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
+	int64_t epoch;
+	BinaryReader reader(value, Unversioned());
+	reader >> epoch;
+	return epoch;
+}
 
 // blob range file data
-const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff/blobGranuleFiles/"),
-                                      LiteralStringRef("\xff/blobGranuleFiles0"));
-
-const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff/blobGranuleMapping/"),
-                                         LiteralStringRef("\xff/blobGranuleMapping0"));
+const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff/bgf/"), LiteralStringRef("\xff/bgf0"));
+const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff/bgm/"), LiteralStringRef("\xff/bgm0"));
+const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff/bgl/"), LiteralStringRef("\xff/bgl0"));
 
 const Value blobGranuleMappingValueFor(UID const& workerID) {
 	BinaryWriter wr(Unversioned());
@@ -1105,8 +1118,22 @@ UID decodeBlobGranuleMappingValue(ValueRef const& value) {
 	return workerID;
 }
 
-const KeyRangeRef blobWorkerListKeys(LiteralStringRef("\xff/blobWorkerList/"),
-                                     LiteralStringRef("\xff/blobWorkerList0"));
+const Value blobGranuleLockValueFor(int64_t epochNum, int64_t seqNum) {
+	BinaryWriter wr(Unversioned());
+	wr << epochNum;
+	wr << seqNum;
+	return wr.toValue();
+}
+
+std::pair<int64_t, int64_t> decodeBlobGranuleLockValue(const ValueRef& value) {
+	int64_t epochNum, seqNum;
+	BinaryReader reader(value, Unversioned());
+	reader >> epochNum;
+	reader >> seqNum;
+	return std::pair(epochNum, seqNum);
+}
+
+const KeyRangeRef blobWorkerListKeys(LiteralStringRef("\xff/bwList/"), LiteralStringRef("\xff/bwList0"));
 
 const Key blobWorkerListKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());

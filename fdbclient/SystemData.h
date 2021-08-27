@@ -519,18 +519,25 @@ extern const KeyRangeRef configClassKeys;
 // blob range special keys
 extern const KeyRef blobRangeChangeKey;
 extern const KeyRangeRef blobRangeKeys;
+extern const KeyRef blobManagerEpochKey;
+
+const Value blobManagerEpochValueFor(int64_t epoch);
+int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 
 // blob granule keys
 
-// TODO probably want to add key range of file here so we can prune requests
-// TODO this also technically means clients don't have to go through the blob worker for time-travel reads if they're
-// older than the last delta file.
-// \xff/blobGranuleFiles/(startKey, endKey, {snapshot|delta}, version) = [[filename]]
+// \xff/bgf/(startKey, endKey, {snapshot|delta}, version) = [[filename]]
 extern const KeyRangeRef blobGranuleFileKeys;
 
 // TODO could shrink the size of this keyspace by using something similar to tags instead of UIDs
-// \xff/blobGranuleMapping/[[begin]] = [[BlobWorkerID]]
+// \xff/bgm/[[begin]] = [[BlobWorkerID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
+
+// \xff/bgl/(begin,end) = (epochNum, seqNum)
+extern const KeyRangeRef blobGranuleLockKeys;
+
+const Value blobGranuleLockValueFor(int64_t epochNum, int64_t sequenceNum);
+std::pair<int64_t, int64_t> decodeBlobGranuleLockValue(ValueRef const& value);
 
 const Value blobGranuleMappingValueFor(UID const& workerID);
 UID decodeBlobGranuleMappingValue(ValueRef const& value);
