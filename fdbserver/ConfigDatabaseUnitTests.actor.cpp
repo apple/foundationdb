@@ -427,8 +427,8 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer =
-		    broadcaster.registerWorker(readFrom.lastSeenVersion(), readFrom.configClassSet(), Never(), cbi->get());
+		broadcastServer = broadcaster.registerWorker(
+		    readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), cbi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -546,6 +546,8 @@ ACTOR template <class Env>
 Future<Void> testKillWorker(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	env.killLocalConfig();
 	// Make sure broadcaster detects worker death in a timely manner.
 	wait(timeoutError(env.workerFailed(), 3));
