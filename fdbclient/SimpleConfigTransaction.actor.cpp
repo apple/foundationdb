@@ -43,7 +43,7 @@ class SimpleConfigTransactionImpl {
 		}
 		ConfigTransactionGetGenerationRequest req;
 		ConfigTransactionGetGenerationReply reply =
-		    wait(self->cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{}));
+		    wait(retryBrokenPromise(self->cti.getGeneration, ConfigTransactionGetGenerationRequest{}));
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGotReadVersion", self->dID.get())
 			    .detail("Version", reply.generation.liveVersion);
@@ -63,7 +63,7 @@ class SimpleConfigTransactionImpl {
 			    .detail("KnobName", configKey.knobName);
 		}
 		ConfigTransactionGetReply reply =
-		    wait(self->cti.get.getReply(ConfigTransactionGetRequest{ generation, configKey }));
+		    wait(retryBrokenPromise(self->cti.get, ConfigTransactionGetRequest{ generation, configKey }));
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGotValue", self->dID.get())
 			    .detail("Value", reply.value.get().toString());
@@ -81,7 +81,7 @@ class SimpleConfigTransactionImpl {
 		}
 		ConfigGeneration generation = wait(self->getGenerationFuture);
 		ConfigTransactionGetConfigClassesReply reply =
-		    wait(self->cti.getClasses.getReply(ConfigTransactionGetConfigClassesRequest{ generation }));
+		    wait(retryBrokenPromise(self->cti.getClasses, ConfigTransactionGetConfigClassesRequest{ generation }));
 		RangeResult result;
 		for (const auto& configClass : reply.configClasses) {
 			result.push_back_deep(result.arena(), KeyValueRef(configClass, ""_sr));
@@ -95,7 +95,7 @@ class SimpleConfigTransactionImpl {
 		}
 		ConfigGeneration generation = wait(self->getGenerationFuture);
 		ConfigTransactionGetKnobsReply reply =
-		    wait(self->cti.getKnobs.getReply(ConfigTransactionGetKnobsRequest{ generation, configClass }));
+		    wait(retryBrokenPromise(self->cti.getKnobs, ConfigTransactionGetKnobsRequest{ generation, configClass }));
 		RangeResult result;
 		for (const auto& knobName : reply.knobNames) {
 			result.push_back_deep(result.arena(), KeyValueRef(knobName, ""_sr));
@@ -109,7 +109,7 @@ class SimpleConfigTransactionImpl {
 		}
 		wait(store(self->toCommit.generation, self->getGenerationFuture));
 		self->toCommit.annotation.timestamp = now();
-		wait(self->cti.commit.getReply(self->toCommit));
+		wait(retryBrokenPromise(self->cti.commit, self->toCommit));
 		self->committed = true;
 		return Void();
 	}

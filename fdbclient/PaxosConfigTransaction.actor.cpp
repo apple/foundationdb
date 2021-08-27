@@ -55,13 +55,13 @@ class CommitQuorum {
 	                                          ConfigGeneration generation,
 	                                          ConfigTransactionInterface cti) {
 		try {
-			wait(cti.commit.getReply(self->getCommitRequest(generation)));
+			wait(retryBrokenPromise(cti.commit, self->getCommitRequest(generation)));
 			++self->successful;
 		} catch (Error& e) {
-			if (e.code() == error_code_request_maybe_delivered) {
-				++self->maybeCommitted;
-			} else {
+			if (e.code() == error_code_not_committed) {
 				++self->failed;
+			} else {
+				++self->maybeCommitted;
 			}
 		}
 		self->updateResult();
@@ -110,8 +110,8 @@ class GetGenerationQuorum {
 	Future<ConfigGeneration> getGenerationFuture;
 
 	ACTOR static Future<Void> addRequestActor(GetGenerationQuorum* self, ConfigTransactionInterface cti) {
-		ConfigTransactionGetGenerationReply reply =
-		    wait(cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }));
+		ConfigTransactionGetGenerationReply reply = wait(
+		    retryBrokenPromise(cti.getGeneration, ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }));
 
 		++self->totalRepliesReceived;
 		auto gen = reply.generation;
@@ -190,8 +190,8 @@ class PaxosConfigTransactionImpl {
 		state ConfigKey configKey = ConfigKey::decodeKey(key);
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 		// TODO: Load balance
-		ConfigTransactionGetReply reply = wait(self->getGenerationQuorum.getReadReplicas()[0].get.getReply(
-		    ConfigTransactionGetRequest{ generation, configKey }));
+		ConfigTransactionGetReply reply = wait(retryBrokenPromise(
+		    self->getGenerationQuorum.getReadReplicas()[0].get, ConfigTransactionGetRequest{ generation, configKey }));
 		if (reply.value.present()) {
 			return reply.value.get().toValue();
 		} else {
@@ -203,8 +203,8 @@ class PaxosConfigTransactionImpl {
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 		// TODO: Load balance
 		ConfigTransactionGetConfigClassesReply reply =
-		    wait(self->getGenerationQuorum.getReadReplicas()[0].getClasses.getReply(
-		        ConfigTransactionGetConfigClassesRequest{ generation }));
+		    wait(retryBrokenPromise(self->getGenerationQuorum.getReadReplicas()[0].getClasses,
+		                            ConfigTransactionGetConfigClassesRequest{ generation }));
 		RangeResult result;
 		result.reserve(result.arena(), reply.configClasses.size());
 		for (const auto& configClass : reply.configClasses) {
@@ -216,8 +216,9 @@ class PaxosConfigTransactionImpl {
 	ACTOR static Future<RangeResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 		// TODO: Load balance
-		ConfigTransactionGetKnobsReply reply = wait(self->getGenerationQuorum.getReadReplicas()[0].getKnobs.getReply(
-		    ConfigTransactionGetKnobsRequest{ generation, configClass }));
+		ConfigTransactionGetKnobsReply reply =
+		    wait(retryBrokenPromise(self->getGenerationQuorum.getReadReplicas()[0].getKnobs,
+		                            ConfigTransactionGetKnobsRequest{ generation, configClass }));
 		RangeResult result;
 		result.reserve(result.arena(), reply.knobNames.size());
 		for (const auto& knobName : reply.knobNames) {

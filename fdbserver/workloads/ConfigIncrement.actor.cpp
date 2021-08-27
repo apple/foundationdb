@@ -34,7 +34,7 @@ class ConfigIncrementWorkload : public TestWorkload {
 	static KeyRef const testKnobName;
 	static Key configKey;
 
-	PerfIntCounter transactions, retries;
+	PerfIntCounter transactions, retries, commitUnknownResult;
 
 	static Key getConfigKey() {
 		Tuple tuple;
@@ -62,32 +62,44 @@ class ConfigIncrementWorkload : public TestWorkload {
 		TraceEvent(SevDebug, "ConfigIncrementStartIncrementActor");
 		state int trsComplete = 0;
 		while (trsComplete < self->incrementsPerActor) {
-			loop {
-				try {
-					state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
-					state int currentValue = wait(get(tr));
-					ASSERT_GE(currentValue, self->lastKnownValue);
-					set(tr, currentValue + 1);
-					wait(delay(deterministicRandom()->random01() * 2 * self->meanSleepWithinTransactions));
-					wait(tr->commit());
-					ASSERT_GT(tr->getCommittedVersion(), self->lastKnownCommittedVersion);
-					self->lastKnownCommittedVersion = tr->getCommittedVersion();
-					self->lastKnownValue = currentValue + 1;
-					TraceEvent("ConfigIncrementSucceeded")
-					    .detail("CommittedVersion", self->lastKnownCommittedVersion)
-					    .detail("CommittedValue", self->lastKnownValue);
-					++self->transactions;
-					++trsComplete;
-					wait(delay(deterministicRandom()->random01() * 2 * self->meanSleepBetweenTransactions));
-					break;
-				} catch (Error& e) {
-					TraceEvent(SevDebug, "ConfigIncrementError")
-					    .detail("LastKnownValue", self->lastKnownValue)
-					    .error(e);
-					// TODO: Fix onError function
-					// wait(tr->onError(e));
-					wait(delay(0.1));
-					++self->retries;
+			try {
+				loop {
+					try {
+						state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
+						state int currentValue = wait(get(tr));
+						ASSERT_GE(currentValue, self->lastKnownValue);
+						set(tr, currentValue + 1);
+						wait(delay(deterministicRandom()->random01() * 2 * self->meanSleepWithinTransactions));
+						wait(tr->commit());
+						ASSERT_GT(tr->getCommittedVersion(), self->lastKnownCommittedVersion);
+						self->lastKnownCommittedVersion = tr->getCommittedVersion();
+						self->lastKnownValue = currentValue + 1;
+						TraceEvent("ConfigIncrementSucceeded")
+						    .detail("CommittedVersion", self->lastKnownCommittedVersion)
+						    .detail("CommittedValue", self->lastKnownValue);
+						++self->transactions;
+						++trsComplete;
+						wait(delay(deterministicRandom()->random01() * 2 * self->meanSleepBetweenTransactions));
+						break;
+					} catch (Error& e) {
+						TraceEvent(SevDebug, "ConfigIncrementError")
+						    .detail("LastKnownValue", self->lastKnownValue)
+						    .error(e);
+						// TODO: Fix and enable the onError function
+						// wait(tr->onError(e));
+						if (e.code() == error_code_not_committed || e.code() == error_code_transaction_too_old) {
+							wait(delayJittered(0.1));
+						} else {
+							throw e;
+						}
+						++self->retries;
+					}
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_commit_unknown_result) {
+					++self->commitUnknownResult;
+				} else {
+					throw e;
 				}
 			}
 		}
@@ -120,7 +132,8 @@ class ConfigIncrementWorkload : public TestWorkload {
 
 public:
 	ConfigIncrementWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries") {
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"),
+	    commitUnknownResult("CommitUnknownResult") {
 		incrementActors = getOption(options, "incrementActors"_sr, 10);
 		incrementsPerActor = getOption(options, "incrementsPerActor"_sr, 10);
 		meanSleepWithinTransactions = getOption(options, "meanSleepWithinTransactions"_sr, 0.01);
@@ -146,6 +159,7 @@ public:
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
+		m.push_back(commitUnknownResult.getMetric());
 		m.emplace_back("Last Known Value", lastKnownValue, false);
 	}
 };
