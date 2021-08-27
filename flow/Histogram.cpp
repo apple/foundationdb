@@ -87,8 +87,8 @@ Histogram* HistogramRegistry::lookupHistogram(std::string const& name) {
 
 void HistogramRegistry::logReport(double elapsed) {
 	for (auto& i : histograms) {
+		// Reset all buckets in writeToLog function
 		i.second->writeToLog(elapsed);
-		i.second->clear();
 	}
 }
 
