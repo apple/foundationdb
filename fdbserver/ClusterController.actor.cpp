@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <cstddef>
 #include <iterator>
 #include <map>
 #include <set>
@@ -59,6 +60,8 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -3621,8 +3624,6 @@ ACTOR Future<Void> getVersion(Reference<ClusterRecoveryData> self, GetCommitVers
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
-	TraceEvent("Getversion").detail("getCommitVersionReqs", self->getCommitVersionRequests.getValue()).log();
-
 	++self->getCommitVersionRequests;
 
 	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
@@ -3689,8 +3690,6 @@ ACTOR Future<Void> getVersion(Reference<ClusterRecoveryData> self, GetCommitVers
 		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
 		proxyItr->second.latestRequestNum.set(req.requestNum);
 	}
-
-	TraceEvent("Getversion done").detail("version", self->version).log();
 
 	return Void();
 }
@@ -4760,28 +4759,15 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 	return Void();
 }
 
-ACTOR Future<Void> clusterRecoveryCore(ClusterControllerData* cluster,
-                                       Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                       ServerCoordinators coordinators,
-                                       bool forceRecovery) {
+ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	state TraceInterval recoveryInterval("ClusterRecovery");
 	state double recoverStartTime = now();
 
-	TraceEvent("ClusterRecoveryState").log();
-
-	state PromiseStream<Future<Void>> addActor;
-	state Reference<ClusterRecoveryData> self(new ClusterRecoveryData(cluster,
-	                                                                  dbInfo,
-	                                                                  dbInfo->get().master,
-	                                                                  coordinators,
-	                                                                  dbInfo->get().clusterInterface,
-	                                                                  LiteralStringRef(""),
-	                                                                  addActor,
-	                                                                  forceRecovery));
+	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
 	self->addActor.send(waitFailureServer(self->masterInterface.waitFailure.getFuture()));
 
-	TraceEvent(recoveryInterval.begin(), self->dbgid);
+	TraceEvent(recoveryInterval.begin(), self->dbgid).log();
 
 	self->recoveryState = RecoveryState::READING_CSTATE;
 	TraceEvent("ClusterRecoveryState", self->dbgid)
@@ -5092,6 +5078,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 	state WorkerFitnessInfo masterWorker;
 	state MasterInterface iMaster;
 
+
 	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
 
@@ -5151,10 +5138,27 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
 
-			state Future<Void> recoveryCore = SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY
-			                                      ? ClusterControllerRecovery::clusterRecoveryCore(
-			                                            cluster, db->serverInfo, coordinators, db->forceRecovery)
-			                                      : Never();
+			state Future<Void> recoveryCore;
+			state Reference<ClusterControllerRecovery::ClusterRecoveryData> recoveryData;
+			state PromiseStream<Future<Void>> addActor;
+			state Future<Void> collection;
+
+			if (SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
+				recoveryData = makeReference<ClusterControllerRecovery::ClusterRecoveryData>(
+				    cluster,
+				    db->serverInfo,
+				    db->serverInfo->get().master,
+				    coordinators,
+				    db->serverInfo->get().clusterInterface,
+				    LiteralStringRef(""),
+				    addActor,
+				    db->forceRecovery);
+
+				collection = actorCollection(recoveryData->addActor.getFuture());
+				recoveryCore = ClusterControllerRecovery::clusterRecoveryCore(recoveryData);
+			} else {
+				recoveryCore = Never();
+			}
 
 			// Master failure detection is pretty sensitive, but if we are in the middle of a very long recovery we
 			// really don't want to have to start over
@@ -5172,6 +5176,17 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					break;
 				}
 				when(wait(db->serverInfo->onChange())) {}
+				when(BackupWorkerDoneRequest req = waitNext(iMaster.notifyBackupWorkerDone.getFuture())) {
+					if (recoveryData->logSystem.isValid() && recoveryData->logSystem->removeBackupWorker(req)) {
+						recoveryData->registrationTrigger.trigger();
+					}
+					++recoveryData->backupWorkerDoneRequests;
+					req.reply.send(Void());
+				}
+				when(wait(collection)) {
+					cluster->db.forceMasterFailure.trigger();
+					TraceEvent("CCWDB forceMasterFailure", cluster->id).detail("MasterId", cluster->db.serverInfo->get().master.id());
+				}
 			}
 			wait(spinDelay);
 
