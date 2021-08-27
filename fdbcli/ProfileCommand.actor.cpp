@@ -45,6 +45,7 @@ ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<S
 			fprintf(stderr, "ERROR: Usage: profile client <get|set>\n");
 			return false;
 		}
+		wait(GlobalConfig::globalConfig().onInitialized());
 		if (tokencmp(tokens[2], "get")) {
 			if (tokens.size() != 3) {
 				fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
