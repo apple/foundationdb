@@ -151,6 +151,7 @@ void Histogram::writeToLog(double elapsed) {
 		}
 	}
 	e.detail("TotalCount", totalCount);
+	clear();
 }
 
 std::string Histogram::drawHistogram() {
