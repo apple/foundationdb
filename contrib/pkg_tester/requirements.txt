@@ -1,0 +1,13 @@
+attrs==21.2.0
+colored==1.4.2
+importlib-metadata==4.0.1
+iniconfig==1.1.1
+packaging==20.9
+pluggy==0.13.1
+py==1.10.0
+pyparsing==2.4.7
+pytest==6.2.4
+syrupy==1.2.3
+toml==0.10.2
+typing-extensions==3.10.0.0
+zipp==3.4.1
