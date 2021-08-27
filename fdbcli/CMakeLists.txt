@@ -16,6 +16,8 @@ set(FDBCLI_SRCS
   SnapshotCommand.actor.cpp
   SuspendCommand.actor.cpp
   ThrottleCommand.actor.cpp
+  TriggerDDTeamInfoLogCommand.actor.cpp
+  TssqCommand.actor.cpp
   Util.actor.cpp
   linenoise/linenoise.h)
 

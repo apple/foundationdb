@@ -137,6 +137,10 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// triggerteaminfolog command
+ACTOR Future<Void> triggerddteaminfologCommandActor(Reference<IDatabase> db);
+// tssq command
+ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 
