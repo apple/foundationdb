@@ -842,7 +842,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			clientInfo->set(ni);
 			successIdx = idx;
 		} else {
-			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cannot talk to cluster controller
+			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
 			idx = (idx + 1) % addrs.size();
 			if (idx == successIdx) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));

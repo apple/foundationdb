@@ -81,8 +81,7 @@ bool BackupTLSConfig::setupTLS() {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, tlsVerifyPeers);
 		} catch (Error& e) {
-			std::cerr << "ERROR: cannot set TLS peer verification to " << tlsVerifyPeers << " (" << e.what()
-						<< ")\n";
+			std::cerr << "ERROR: cannot set TLS peer verification to " << tlsVerifyPeers << " (" << e.what() << ")\n";
 			return false;
 		}
 	}

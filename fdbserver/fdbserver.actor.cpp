@@ -1847,7 +1847,7 @@ int main(int argc, char* argv[]) {
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
-			.detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
+		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
 		    .trackLatest("ProgramStart");
 
