@@ -318,7 +318,7 @@ class ConfigNodeImpl {
 
 	ACTOR static Future<Void> commitMutations(ConfigNodeImpl* self,
 	                                          Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
-	                                          std::map<Version, ConfigCommitAnnotationRef> annotations,
+	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations,
 	                                          Version commitVersion) {
 		Version latestVersion = 0;
 		int index = 0;
@@ -332,8 +332,6 @@ class ConfigNodeImpl {
 				latestVersion = mutation.version;
 				index = 0;
 			}
-			// TODO: This ASSERT might be unnecessary since compaction destroys annotations
-			ASSERT(annotations.find(mutation.version) != annotations.end());
 			Key key = versionedMutationKey(mutation.version, index++);
 			Value value = ObjectWriter::toValue(mutation.mutation, IncludeVersion());
 			if (mutation.mutation.isSet()) {
@@ -348,9 +346,9 @@ class ConfigNodeImpl {
 			}
 			self->kvStore->set(KeyValueRef(key, value));
 		}
-		for (const auto& [version, annotation] : annotations) {
-			self->kvStore->set(
-			    KeyValueRef(versionedAnnotationKey(version), BinaryWriter::toValue(annotation, IncludeVersion())));
+		for (const auto& annotation : annotations) {
+			self->kvStore->set(KeyValueRef(versionedAnnotationKey(annotation.version),
+			                               BinaryWriter::toValue(annotation.annotation, IncludeVersion())));
 		}
 		ConfigGeneration newGeneration = { commitVersion, commitVersion };
 		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(newGeneration, IncludeVersion())));
@@ -374,8 +372,9 @@ class ConfigNodeImpl {
 		for (const auto& mutation : req.mutations) {
 			mutations.emplace_back_deep(mutations.arena(), req.generation.liveVersion, mutation);
 		}
-		wait(commitMutations(
-		    self, mutations, { { req.generation.liveVersion, req.annotation } }, req.generation.liveVersion));
+		Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+		annotations.emplace_back_deep(annotations.arena(), req.generation.liveVersion, req.annotation);
+		wait(commitMutations(self, mutations, annotations, req.generation.liveVersion));
 		req.reply.send(Void());
 		return Void();
 	}
@@ -492,12 +491,13 @@ class ConfigNodeImpl {
 
 	ACTOR static Future<Void> rollforward(ConfigNodeImpl* self, ConfigFollowerRollforwardRequest req) {
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
-		if (req.beginVersion != currentGeneration.committedVersion) {
+		if (req.lastKnownCommitted != currentGeneration.committedVersion) {
 			++self->failedCommits;
-			req.reply.sendError(transaction_too_old());
+			req.reply.sendError(not_committed());
 			return Void();
 		}
-		wait(commitMutations(self, req.mutations, req.annotations, req.endVersion));
+		ASSERT(req.mutations[0].version > currentGeneration.committedVersion);
+		wait(commitMutations(self, req.mutations, req.annotations, req.target));
 		req.reply.send(Void());
 		return Void();
 	}
