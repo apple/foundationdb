@@ -280,8 +280,8 @@ ACTOR Future<Void> newProxies(Reference<MasterData> self, RecruitFromConfigurati
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
 		TraceEvent("ProxyReplies", self->dbgid)
-			.detail("WorkerID", recr.proxies[i].id())
-			.detail("FirstProxy", req.firstProxy ? "True" : "False");
+		    .detail("WorkerID", recr.proxies[i].id())
+		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.proxies[i].masterProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -886,9 +886,9 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 	}
 	wait(waitForAll(txnReplies));
 	TraceEvent("RecoveryInternal", self->dbgid)
- 		.detail("StatusCode", RecoveryStatus::recovery_transaction)
- 		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
- 		.detail("Step", "SentTxnStateStoreToCommitProxies");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "SentTxnStateStoreToCommitProxies");
 
 	vector<Future<ResolveTransactionBatchReply>> replies;
 	for (auto& r : self->resolvers) {
@@ -902,9 +902,9 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 
 	wait(waitForAll(replies));
 	TraceEvent("RecoveryInternal", self->dbgid)
- 		.detail("StatusCode", RecoveryStatus::recovery_transaction)
- 		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
- 		.detail("Step", "InitializedAllResolvers");
+	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+	    .detail("Step", "InitializedAllResolvers");
 	return Void();
 }
 

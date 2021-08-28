@@ -872,10 +872,10 @@ void getDiskStatistics(std::string const& directory,
 
 			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("Ignore", ignore).detail("RdIos", rd_ios)
 			//	.detail("RdMerges", rd_merges).detail("RdSectors", rd_sectors).detail("RdTicks",
-			//rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges) 	.detail("WrSectors",
-			//wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq",
-			//aveq) 	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads",
-			//reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
+			// rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges) 	.detail("WrSectors",
+			// wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq",
+			// aveq) 	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads",
+			// reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
 			//  .detail("ReadSectors", readSectors);
 			return;
 		} else

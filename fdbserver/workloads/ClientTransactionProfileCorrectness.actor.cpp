@@ -327,7 +327,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		// FIXME: Find a way to check that contentsSize is not greater than a certain limit.
 		// if (counter != contentsSize) {
 		//	TraceEvent(SevError, "ClientTransactionProfilingIncorrectCtrVal").detail("Counter",
-		//counter).detail("ContentsSize", contentsSize); 	return false;
+		// counter).detail("ContentsSize", contentsSize); 	return false;
 		//}
 		TraceEvent(SevInfo, "ClientTransactionProfilingCtrval").detail("Counter", counter);
 		TraceEvent(SevInfo, "ClientTransactionProfilingContentsSize").detail("ContentsSize", contentsSize);

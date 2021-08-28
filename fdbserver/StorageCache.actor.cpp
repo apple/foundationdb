@@ -293,7 +293,7 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 	//--data->readQueueSizeMetric;
 	// if(data->latencyBandConfig.present()) {
 	//	int maxReadBytes =
-	//data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
+	// data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
 	//	data->counters.readLatencyBands.addMeasurement(timer() - req.requestTime(), resultSize > maxReadBytes);
 	//}
 
@@ -479,8 +479,8 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 		if (!selectorInRange(req.end, cachedKeyRange) &&
 		    !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == cachedKeyRange.end)) {
 			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
-			//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
-			//shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -842,8 +842,8 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		// TODO understand this, should we add delay here?
 		// if (g_network->isSimulated()) {
 		//	double endTime = g_simulator.checkDisabled(format("%s/compactCache",
-		//data->thisServerID.toString().c_str())); 	if(endTime > now()) { 		wait(delay(endTime - now(),
-		//TaskPriority::CompactCache));
+		// data->thisServerID.toString().c_str())); 	if(endTime > now()) { 		wait(delay(endTime - now(),
+		// TaskPriority::CompactCache));
 		//	}
 		//}
 

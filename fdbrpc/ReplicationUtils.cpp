@@ -776,8 +776,8 @@ std::vector<Reference<IReplicationPolicy>> const& getStaticPolicies() {
 
 			// '(dc^1 x 1) + (sz^1 x 1) + (machine^1 x 1)'
 			//	Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "dc",
-			//Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "sz",
-			//Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1,
+			// Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "sz",
+			// Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1,
 			//"zoneid", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
 
 			// '(dc^1 x sz^3 x 1)'
@@ -813,9 +813,9 @@ std::vector<Reference<IReplicationPolicy>> const& getStaticPolicies() {
 
 			// 'dc^1 x (az^2 x 1) + (sz^2 x 1)'
 			//	Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>(new
-			//PolicyAnd({Reference<IReplicationPolicy>(new PolicyAcross(2, "az", Reference<IReplicationPolicy>(new
-			//PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new
-			//PolicyOne())))}))) ),
+			// PolicyAnd({Reference<IReplicationPolicy>(new PolicyAcross(2, "az", Reference<IReplicationPolicy>(new
+			// PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new
+			// PolicyOne())))}))) ),
 
 			// Require backtracking
 			Reference<IReplicationPolicy>(new PolicyAcross(
