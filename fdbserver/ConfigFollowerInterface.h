@@ -166,22 +166,22 @@ struct ConfigFollowerRollbackRequest {
 
 struct ConfigFollowerRollforwardRequest {
 	static constexpr FileIdentifier file_identifier = 678894;
-	Version beginVersion{ 0 };
-	Version endVersion{ 0 };
+	Version lastKnownCommitted{ 0 };
+	Version target{ 0 };
 	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
-	std::map<Version, ConfigCommitAnnotationRef> annotations;
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
 	ReplyPromise<Void> reply;
 
 	ConfigFollowerRollforwardRequest() = default;
-	explicit ConfigFollowerRollforwardRequest(Version beginVersion,
-	                                          Version endVersion,
+	explicit ConfigFollowerRollforwardRequest(Version lastKnownCommitted,
+	                                          Version target,
 	                                          Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
-	                                          std::map<Version, ConfigCommitAnnotationRef> annotations)
-	  : beginVersion(beginVersion), endVersion(endVersion), mutations(mutations), annotations(annotations) {}
+	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations)
+	  : lastKnownCommitted(lastKnownCommitted), target(target), mutations(mutations), annotations(annotations) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, beginVersion, endVersion, mutations, annotations, reply);
+		serializer(ar, lastKnownCommitted, target, mutations, annotations, reply);
 	}
 };
 
