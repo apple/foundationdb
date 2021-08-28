@@ -900,6 +900,7 @@ public:
 	}
 	bool isSet() const { return sav->isSet(); }
 	bool canBeSet() const { return sav->canBeSet(); }
+	bool isError() const { return sav->isError(); }
 
 	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
