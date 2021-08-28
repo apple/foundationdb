@@ -954,8 +954,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					pProxyCommitData->singleKeyMutationEvent->log();
 				}
 
-				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
-				    .detail("To", tags);
+				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
 				self->toCommit.addTags(tags);
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
@@ -1292,7 +1291,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// self->committedVersion by reporting commit version first before updating self->committedVersion. Otherwise, a
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
-	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // A later version was reported committed first
+	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // later version was reported committed first
 	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 		    ReportRawCommittedVersionRequest(self->commitVersion,
@@ -1875,8 +1874,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.resolvers = commitData.db->get().resolvers;
 	ASSERT(commitData.resolvers.size() != 0);
 	for (int i = 0; i < commitData.resolvers.size(); ++i) {
-		commitData.stats.resolverDist.push_back(Histogram::getHistogram(
-		    LiteralStringRef("CommitProxy"), "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::microseconds));
+		commitData.stats.resolverDist.push_back(
+		    Histogram::getHistogram(LiteralStringRef("CommitProxy"),
+		                            "ToResolver_" + commitData.resolvers[i].id().toString(),
+		                            Histogram::Unit::microseconds));
 	}
 	auto rs = commitData.keyResolvers.modify(allKeys);
 	for (auto r = rs.begin(); r != rs.end(); ++r)

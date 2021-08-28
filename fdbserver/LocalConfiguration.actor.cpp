@@ -355,21 +355,13 @@ public:
 		return addChanges(this, changes, mostRecentVersion);
 	}
 
-	FlowKnobs const& getFlowKnobs() const {
-		return getKnobs().getFlowKnobs();
-	}
+	FlowKnobs const& getFlowKnobs() const { return getKnobs().getFlowKnobs(); }
 
-	ClientKnobs const& getClientKnobs() const {
-		return getKnobs().getClientKnobs();
-	}
+	ClientKnobs const& getClientKnobs() const { return getKnobs().getClientKnobs(); }
 
-	ServerKnobs const& getServerKnobs() const {
-		return getKnobs().getServerKnobs();
-	}
+	ServerKnobs const& getServerKnobs() const { return getKnobs().getServerKnobs(); }
 
-	TestKnobs const& getTestKnobs() const {
-		return getKnobs().getTestKnobs();
-	}
+	TestKnobs const& getTestKnobs() const { return getKnobs().getTestKnobs(); }
 
 	Future<Void> consume(ConfigBroadcastInterface const& broadcastInterface) {
 		return consume(this, broadcastInterface);

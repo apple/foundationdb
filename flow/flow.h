@@ -532,9 +532,7 @@ public:
 		}
 		return res;
 	}
-	Reference<ActorLineage> getParent() {
-		return parent;
-	}
+	Reference<ActorLineage> getParent() { return parent; }
 };
 
 // A Reference subclass with knowledge on the true owner of the contained
@@ -570,7 +568,9 @@ extern thread_local LineageReference* currentLineage;
 #ifdef ENABLE_SAMPLING
 LineageReference getCurrentLineage();
 #else
-#define getCurrentLineage() if (false) (*currentLineage)
+#define getCurrentLineage()                                                                                            \
+	if (false)                                                                                                         \
+	(*currentLineage)
 #endif
 void replaceLineage(LineageReference* lineage);
 
@@ -582,12 +582,8 @@ struct StackLineage : LineageProperties<StackLineage> {
 #ifdef ENABLE_SAMPLING
 struct LineageScope {
 	LineageReference* oldLineage;
-	LineageScope(LineageReference* with) : oldLineage(currentLineage) {
-		replaceLineage(with);
-	}
-	~LineageScope() {
-		replaceLineage(oldLineage);
-	}
+	LineageScope(LineageReference* with) : oldLineage(currentLineage) { replaceLineage(with); }
+	~LineageScope() { replaceLineage(oldLineage); }
 };
 #endif
 
@@ -1251,13 +1247,12 @@ struct Actor : SAV<ReturnValue> {
 	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
 	                         // group #
 
-	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/ }
+	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/
+	}
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING
-	LineageReference* lineageAddr() {
-		return std::addressof(lineage);
-	}
+	LineageReference* lineageAddr() { return std::addressof(lineage); }
 #endif
 };
 
@@ -1270,13 +1265,12 @@ struct Actor<void> {
 #endif
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
-	Actor() : actor_wait_state(0) { /*++actorCount;*/ }
+	Actor() : actor_wait_state(0) { /*++actorCount;*/
+	}
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING
-	LineageReference* lineageAddr() {
-		return std::addressof(lineage);
-	}
+	LineageReference* lineageAddr() { return std::addressof(lineage); }
 #endif
 };
 

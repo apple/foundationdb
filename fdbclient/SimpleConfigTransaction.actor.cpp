@@ -183,9 +183,7 @@ public:
 
 	size_t getApproximateSize() const { return toCommit.expectedSize(); }
 
-	void debugTransaction(UID dID) {
-		this->dID = dID;
-	}
+	void debugTransaction(UID dID) { this->dID = dID; }
 
 	void checkDeferredError(Error const& deferredError) const {
 		if (deferredError.code() != invalid_error_code) {
