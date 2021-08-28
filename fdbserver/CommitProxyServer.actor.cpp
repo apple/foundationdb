@@ -954,8 +954,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					pProxyCommitData->singleKeyMutationEvent->log();
 				}
 
-				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
-				    .detail("To", tags);
+				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
 				self->toCommit.addTags(tags);
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
@@ -1875,8 +1874,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.resolvers = commitData.db->get().resolvers;
 	ASSERT(commitData.resolvers.size() != 0);
 	for (int i = 0; i < commitData.resolvers.size(); ++i) {
-		commitData.stats.resolverDist.push_back(Histogram::getHistogram(
-		    LiteralStringRef("CommitProxy"), "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::microseconds));
+		commitData.stats.resolverDist.push_back(
+		    Histogram::getHistogram(LiteralStringRef("CommitProxy"),
+		                            "ToResolver_" + commitData.resolvers[i].id().toString(),
+		                            Histogram::Unit::microseconds));
 	}
 	auto rs = commitData.keyResolvers.modify(allKeys);
 	for (auto r = rs.begin(); r != rs.end(); ++r)
