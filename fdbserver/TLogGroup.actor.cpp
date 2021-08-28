@@ -99,10 +99,17 @@ TLogGroupRef TLogGroupCollection::getGroup(UID groupId, bool create) {
 	return Reference<TLogGroup>();
 }
 
+void TLogGroupCollection::addWorkers(const std::vector<WorkerInterface>& logWorkers) {
+	for (const auto& worker : logWorkers) {
+		TraceEvent("TLogGroupAddWorker").detail("WorkerID", worker.id()).detail("Address", worker.address());
+		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
+	}
+}
+
 void TLogGroupCollection::addWorkers(
     const std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>& logWorkers) {
 	for (const auto& worker : logWorkers) {
-		TraceEvent("TLogGroupAddWorker").detail("ID", worker.id());
+		TraceEvent("TLogGroupAddWorker").detail("WorkerID", worker.id());
 		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
 	}
 }
@@ -239,7 +246,8 @@ void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store) {
 void TLogGroupCollection::seedTLogGroupAssignment(
     Arena& arena,
     CommitTransactionRef& tr,
-    std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers) {
+    const std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>& servers) {
+
 	// TODO: construct teams w.r.t. replication policy, instead of 1 SS per team
 	for (const auto& pair : servers) {
 		// Collect UID of SS
@@ -334,6 +342,24 @@ std::string TLogWorkerData::toString() const {
 	              id.toString().c_str(),
 	              address.toString().c_str(),
 	              locality.toString().c_str());
+}
+
+TLogWorkerDataRef TLogWorkerData::fromInterface(const ptxn::TLogInterface_PassivelyPull& interf) {
+	return makeReference<TLogWorkerData>(interf.id(), interf.address(), interf.getLocality());
+}
+
+TLogWorkerDataRef TLogWorkerData::fromInterface(const WorkerInterface& interface) {
+	return makeReference<TLogWorkerData>(interface.id(), interface.address(), interface.locality);
+}
+
+TLogWorkerDataRef TLogWorkerData::fromInterface(const OptionalInterface<ptxn::TLogInterface_PassivelyPull>& interf) {
+	if (interf.present()) {
+		auto inf = interf.interf();
+		return makeReference<TLogWorkerData>(inf.id(), inf.address(), inf.getLocality());
+	} else {
+		// TODO (Vishesh) Figure out how to find out locality later?
+		return makeReference<TLogWorkerData>(interf.id());
+	}
 }
 
 //-------------------------------------------------------------------------------------------------------------------

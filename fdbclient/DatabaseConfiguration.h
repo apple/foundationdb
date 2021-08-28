@@ -247,7 +247,7 @@ struct DatabaseConfiguration {
 	// Perpetual Storage Setting
 	int32_t perpetualStorageWiggleSpeed;
 
-	// Initial shard split boundaries
+	// Initial shard split boundaries, like ["a", "b", "c"]
 	std::vector<StringRef> splits;
 
 	// Excluded servers (no state should be here)
