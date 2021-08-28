@@ -1092,9 +1092,7 @@ struct LogPushData : NonCopyable {
 		next_message_tags.clear();
 	}
 
-	Standalone<StringRef> getMessages(int loc) {
-		return messagesWriter[loc].toValue();
-	}
+	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
 
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.
