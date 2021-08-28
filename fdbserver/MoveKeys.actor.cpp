@@ -1518,19 +1518,6 @@ void seedShardServers(Arena& arena,
 		serverSrcUID.push_back(s.id());
 	}
 
-	/*
-	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
-	                                                    : keyServersValue(RangeResult(), serverSrcUID);
-	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, allKeys, ksValue, serverKeysFalse);
-	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a
-	// change to a specific
-	//   key (keyServersKeyServersKey)
-	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, allKeys, ksValue, serverKeysFalse);
-
-	for (const auto& [s, _] : servers) {
-	    krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
-	} */
-
 	auto getServerID = [&](int serverIndex) -> Value {
 		return CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
 		           ? keyServersValue({ serverTags[serverIndex] })
@@ -1539,13 +1526,17 @@ void seedShardServers(Arena& arena,
 
 	const int numServers = servers.size();
 	const int numKeyRanges = keySplits.size() + 1;
-	ASSERT(numKeyRanges > 1);
-	ASSERT(numKeyRanges >= numServers);
+
+	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		ASSERT(numKeyRanges > 1);
+		ASSERT(numKeyRanges >= numServers);
+	}
 
 	int serverIndex = 0;
 	StringRef keyRangeStart = allKeys.begin;
 	for (int index = 0; index < keySplits.size(); ++index) {
 		auto keyRange = KeyRangeRef(keyRangeStart, keySplits[index]);
+		std::cout << " loop: Assigning range " << keyRange.toString() << " to " << servers[serverIndex].first.id().toString() << std::endl;
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, serverKeysPrefixFor(servers[serverIndex].first.id()), keyRange, serverKeysTrue, serverKeysFalse);
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, keyRange, getServerID(serverIndex), serverKeysFalse);
@@ -1553,16 +1544,19 @@ void seedShardServers(Arena& arena,
 		serverIndex %= numServers;
 		keyRangeStart = keySplits[index];
 	}
+	if (keySplits.size() != 0) {
+		keyRangeStart = keySplits.back();
+	}
 	krmSetPreviouslyEmptyRange(tr,
 	                           arena,
 	                           serverKeysPrefixFor(servers[serverIndex].first.id()),
-	                           KeyRangeRef(keySplits.back(), allKeys.end),
+	                           KeyRangeRef(keyRangeStart, allKeys.end),
 	                           serverKeysTrue,
 	                           serverKeysFalse);
 	krmSetPreviouslyEmptyRange(tr,
 	                           arena,
 	                           keyServersPrefix,
-	                           KeyRangeRef(keySplits.back(), allKeys.end),
+	                           KeyRangeRef(keyRangeStart, allKeys.end),
 	                           getServerID(serverIndex),
 	                           serverKeysFalse);
 }
