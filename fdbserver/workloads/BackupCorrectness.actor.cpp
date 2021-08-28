@@ -68,7 +68,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
-		restorePrefixesToInclude = getOption(options, LiteralStringRef("restorePrefixesToInclude"), std::vector<std::string>());
+		restorePrefixesToInclude =
+		    getOption(options, LiteralStringRef("restorePrefixesToInclude"), std::vector<std::string>());
 		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
 
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
@@ -117,8 +118,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					    .detail("BackupRange", printable(range))
 					    .detail("Intersection", intersection);
 				}
-				// If the backup range intersects with restorePrefixesToInclude or a coin flip is true then use it as a restore
-				// range as well, otherwise skip it.
+				// If the backup range intersects with restorePrefixesToInclude or a coin flip is true then use it as a
+				// restore range as well, otherwise skip it.
 				if (intersection || deterministicRandom()->coinflip()) {
 					restoreRanges.push_back_deep(restoreRanges.arena(), range);
 				} else {
@@ -129,8 +130,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			restoreRanges = backupRanges;
 		}
 
-		// If no random backup ranges intersected with restorePrefixesToInclude or won the coin flip then restoreRanges will be
-		// empty, so move an item from skippedRestoreRanges to restoreRanges.
+		// If no random backup ranges intersected with restorePrefixesToInclude or won the coin flip then restoreRanges
+		// will be empty, so move an item from skippedRestoreRanges to restoreRanges.
 		if (restoreRanges.empty()) {
 			ASSERT(!skippedRestoreRanges.empty());
 			restoreRanges.push_back_deep(restoreRanges.arena(), skippedRestoreRanges.back());

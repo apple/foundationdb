@@ -40,32 +40,31 @@ extern bool g_crashOnError;
 namespace file_converter {
 
 void printDecodeUsage() {
-	std::cout
-	    << "Decoder for FoundationDB backup mutation logs.\n"
-	       "Usage: fdbdecode  [OPTIONS]\n"
-	       "  -r, --container URL\n"
-	       "                 Backup container URL, e.g., file:///some/path/.\n"
-	       "  -i, --input    FILE\n"
-	       "                 Log file filter, only matched files are decoded.\n"
-	       "  --log          Enables trace file logging for the CLI session.\n"
-	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
-	       "                 unspecified, defaults to the current directory. Has\n"
-	       "                 no effect unless --log is specified.\n"
-	       "  --loggroup     LOG_GROUP\n"
-	       "                 Sets the LogGroup field with the specified value for all\n"
-	       "                 events in the trace output (defaults to `default').\n"
-	       "  --trace_format FORMAT\n"
-	       "                 Select the format of the trace files, xml (the default) or json.\n"
-	       "                 Has no effect unless --log is specified.\n"
-	       "  --crash        Crash on serious error.\n"
-	       "  --blob_credentials FILE\n"
-	       "                 File containing blob credentials in JSON format.\n"
-	       "                 The same credential format/file fdbbackup uses.\n"
+	std::cout << "Decoder for FoundationDB backup mutation logs.\n"
+	             "Usage: fdbdecode  [OPTIONS]\n"
+	             "  -r, --container URL\n"
+	             "                 Backup container URL, e.g., file:///some/path/.\n"
+	             "  -i, --input    FILE\n"
+	             "                 Log file filter, only matched files are decoded.\n"
+	             "  --log          Enables trace file logging for the CLI session.\n"
+	             "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	             "                 unspecified, defaults to the current directory. Has\n"
+	             "                 no effect unless --log is specified.\n"
+	             "  --loggroup     LOG_GROUP\n"
+	             "                 Sets the LogGroup field with the specified value for all\n"
+	             "                 events in the trace output (defaults to `default').\n"
+	             "  --trace_format FORMAT\n"
+	             "                 Select the format of the trace files, xml (the default) or json.\n"
+	             "                 Has no effect unless --log is specified.\n"
+	             "  --crash        Crash on serious error.\n"
+	             "  --blob_credentials FILE\n"
+	             "                 File containing blob credentials in JSON format.\n"
+	             "                 The same credential format/file fdbbackup uses.\n"
 #ifndef TLS_DISABLED
 	    TLS_HELP
 #endif
-	       "  --build_flags  Print build information and exit.\n"
-	       "\n";
+	             "  --build_flags  Print build information and exit.\n"
+	             "\n";
 	return;
 }
 
@@ -99,8 +98,6 @@ struct DecodeParams {
 		}
 		return s;
 	}
-
-
 };
 
 int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
