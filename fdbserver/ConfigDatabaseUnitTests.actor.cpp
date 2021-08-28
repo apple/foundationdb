@@ -110,12 +110,12 @@ public:
 
 	Future<Void> rollback(Version version) { return cfi.rollback.getReply(ConfigFollowerRollbackRequest{ version }); }
 
-	Future<Void> rollforward(Version beginVersion,
-	                         Version endVersion,
+	Future<Void> rollforward(Version lastKnownCommitted,
+	                         Version target,
 	                         Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
-	                         const std::map<Version, ConfigCommitAnnotationRef>& annotations) {
+	                         Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
 		return cfi.rollforward.getReply(
-		    ConfigFollowerRollforwardRequest{ beginVersion, endVersion, mutations, annotations });
+		    ConfigFollowerRollforwardRequest{ lastKnownCommitted, target, mutations, annotations });
 	}
 
 	void restartNode() {
@@ -415,11 +415,11 @@ public:
 
 	Future<Void> compact() { return writeTo.compact(); }
 	Future<Void> rollback(Version version) { return writeTo.rollback(version); }
-	Future<Void> rollforward(Version beginVersion,
-	                         Version endVersion,
+	Future<Void> rollforward(Version lastKnownCommitted,
+	                         Version target,
 	                         Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
-	                         const std::map<Version, ConfigCommitAnnotationRef>& annotations) {
-		return writeTo.rollforward(beginVersion, endVersion, mutations, annotations);
+	                         Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
+		return writeTo.rollforward(lastKnownCommitted, target, mutations, annotations);
 	}
 	Future<Void> getError() const { return writeTo.getError(); }
 };
@@ -963,16 +963,15 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Rollforward") {
 	state TransactionEnvironment env(params.getDataDir());
 	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
 	appendVersionedMutation(
-	    mutations, 0, "class-A"_sr, "test_long_v0"_sr, KnobValueRef::create(int64_t{ 1 }).contents());
+	    mutations, 1, "class-A"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 1 }).contents());
 	appendVersionedMutation(
-	    mutations, 1, "class-B"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
-	std::map<Version, ConfigCommitAnnotationRef> annotations = {
-		{ 0, ConfigCommitAnnotationRef{ "unit_test"_sr, now() } },
-		{ 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() } }
-	};
-	wait(rollforward(env, 0, 1, mutations, annotations));
-	wait(check(env, "class-A"_sr, "test_long_v0"_sr, Optional<int64_t>{ 1 }));
-	wait(check(env, "class-B"_sr, "test_long_v1"_sr, Optional<int64_t>{ 2 }));
+	    mutations, 2, "class-B"_sr, "test_long_v2"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	annotations.emplace_back_deep(annotations.arena(), 2, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, 0, 2, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-B"_sr, "test_long_v2"_sr, Optional<int64_t>{ 2 }));
 	return Void();
 }
 
@@ -981,18 +980,16 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithExistingMutation") {
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
 	appendVersionedMutation(
-	    mutations, 1, "class-A"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	    mutations, 2, "class-A"_sr, "test_long_v2"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
 	appendVersionedMutation(
-	    mutations, 2, "class-A"_sr, "test_long_v2"_sr, KnobValueRef::create(int64_t{ 3 }).contents());
-	std::map<Version, ConfigCommitAnnotationRef> annotations = {
-		{ 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() } },
-		{ 2, ConfigCommitAnnotationRef{ "unit_test"_sr, now() } }
-	};
-	wait(rollforward(env, 1, 2, mutations, annotations));
-	// Existing mutations will be overwritten by the rollforward request.
-	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
-	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 2 }));
-	wait(check(env, "class-A"_sr, "test_long_v2"_sr, Optional<int64_t>{ 3 }));
+	    mutations, 3, "class-A"_sr, "test_long_v3"_sr, KnobValueRef::create(int64_t{ 3 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 2, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	annotations.emplace_back_deep(annotations.arena(), 3, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, 1, 3, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-A"_sr, "test_long_v2"_sr, Optional<int64_t>{ 2 }));
+	wait(check(env, "class-A"_sr, "test_long_v3"_sr, Optional<int64_t>{ 3 }));
 	return Void();
 }
 
@@ -1003,12 +1000,27 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithInvalidMutation") {
 	    mutations, 1, "class-A"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 1 }).contents());
 	appendVersionedMutation(
 	    mutations, 10, "class-A"_sr, "test_long_v10"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
-	std::map<Version, ConfigCommitAnnotationRef> annotations = {
-		{ 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() } }
-	};
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
 	wait(rollforward(env, 0, 5, mutations, annotations));
 	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 1 }));
 	wait(check(env, "class-A"_sr, "test_long_v10"_sr, Optional<int64_t>{}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollbackThenRollforward") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(rollback(env, 0));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 1, "class-B"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, 0, 1, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
+	wait(check(env, "class-B"_sr, "test_long_v1"_sr, Optional<int64_t>{ 2 }));
 	return Void();
 }
 
