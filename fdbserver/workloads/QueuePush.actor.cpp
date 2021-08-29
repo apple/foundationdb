@@ -60,22 +60,22 @@ struct QueuePushWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		int writes = transactions.getValue();
-		m.emplace_back("Measured Duration", duration, true);
-		m.emplace_back("Operations/sec", writes / duration, false);
+		m.emplace_back("Measured Duration", duration, Averaged::True);
+		m.emplace_back("Operations/sec", writes / duration, Averaged::False);
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 
-		m.emplace_back("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true);
-		m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true);
-		m.emplace_back("90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(0.90), true);
-		m.emplace_back("98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(0.98), true);
+		m.emplace_back("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), Averaged::True);
+		m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), Averaged::True);
+		m.emplace_back("90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(0.90), Averaged::True);
+		m.emplace_back("98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(0.98), Averaged::True);
 
-		m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true);
-		m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true);
-		m.emplace_back("90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(0.90), true);
-		m.emplace_back("98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(0.98), true);
+		m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), Averaged::True);
+		m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), Averaged::True);
+		m.emplace_back("90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(0.90), Averaged::True);
+		m.emplace_back("98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(0.98), Averaged::True);
 
-		m.emplace_back("Bytes written/sec", (writes * (keyBytes + valueBytes)) / duration, false);
+		m.emplace_back("Bytes written/sec", (writes * (keyBytes + valueBytes)) / duration, Averaged::False);
 	}
 
 	static Key keyForIndex(int base, int offset) { return StringRef(format("%08x%08x", base, offset)); }

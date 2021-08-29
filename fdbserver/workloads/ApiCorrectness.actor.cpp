@@ -140,7 +140,8 @@ public:
 	std::string description() const override { return "ApiCorrectness"; }
 
 	void getMetrics(vector<PerfMetric>& m) override {
-		m.push_back(PerfMetric("Number of Random Operations Performed", numRandomOperations.getValue(), false));
+		m.emplace_back(
+		    PerfMetric("Number of Random Operations Performed", numRandomOperations.getValue(), Averaged::False));
 	}
 
 	ACTOR Future<Void> performSetup(Database cx, ApiCorrectnessWorkload* self) {

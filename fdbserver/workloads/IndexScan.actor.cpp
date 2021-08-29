@@ -61,13 +61,13 @@ struct IndexScanWorkload : KVWorkload {
 		if (singleProcess && clientId != 0)
 			return;
 
-		m.push_back(PerfMetric("FailedTransactions", failedTransactions, false));
-		m.push_back(PerfMetric("RowsRead", rowsRead, false));
-		m.push_back(PerfMetric("Scans", scans, false));
-		m.push_back(PerfMetric("Chunks", chunks, false));
-		m.push_back(PerfMetric("TimeFetching", totalTimeFetching, true));
-		m.push_back(PerfMetric("Rows/sec", totalTimeFetching == 0 ? 0 : rowsRead / totalTimeFetching, true));
-		m.push_back(PerfMetric("Rows/chunk", chunks == 0 ? 0 : rowsRead / (double)chunks, true));
+		m.emplace_back("FailedTransactions", failedTransactions, Averaged::False);
+		m.emplace_back("RowsRead", rowsRead, Averaged::False);
+		m.emplace_back("Scans", scans, Averaged::False);
+		m.emplace_back("Chunks", chunks, Averaged::False);
+		m.emplace_back("TimeFetching", totalTimeFetching, Averaged::True);
+		m.emplace_back("Rows/sec", totalTimeFetching == 0 ? 0 : rowsRead / totalTimeFetching, Averaged::True);
+		m.emplace_back("Rows/chunk", chunks == 0 ? 0 : rowsRead / (double)chunks, Averaged::True);
 	}
 
 	ACTOR Future<Void> _start(Database cx, IndexScanWorkload* self) {
