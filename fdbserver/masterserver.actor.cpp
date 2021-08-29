@@ -1440,12 +1440,14 @@ ACTOR Future<Void> changeCoordinators(Reference<MasterData> self) {
 	}
 }
 
+/*
 ACTOR Future<Void> rejoinRequestHandler(Reference<MasterData> self) {
 	loop {
 		TLogRejoinRequest req = waitNext(self->myInterface.tlogRejoin.getFuture());
 		req.reply.send(true);
 	}
 }
+*/
 
 // Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
@@ -1509,7 +1511,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
 
 		if (finalUpdate) {
 			oldLogSystems->get()->stopRejoins();
-			rejoinRequests = rejoinRequestHandler(self);
+			rejoinRequests = Void(); //rejoinRequestHandler(self);
 			return Void();
 		}
 
@@ -1730,12 +1732,12 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	}
 
 	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems(new AsyncVar<Reference<ILogSystem>>);
-	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems,
+	state Future<Void> recoverAndEndEpoch = Void(); /*ILogSystem::recoverAndEndEpoch(oldLogSystems,
 	                                                                       self->dbgid,
 	                                                                       self->cstate.prevDBState,
 	                                                                       self->myInterface.tlogRejoin.getFuture(),
 	                                                                       self->myInterface.locality,
-	                                                                       &self->forceRecovery);
+	                                                                       &self->forceRecovery);*/
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;

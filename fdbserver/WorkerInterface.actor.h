@@ -156,6 +156,8 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct GetServerDBInfoRequest>
 	    getServerDBInfo; // only used by testers; the cluster controller will send the serverDBInfo to workers
 	RequestStream<struct UpdateWorkerHealthRequest> updateWorkerHealth;
+	RequestStream<struct TLogRejoinRequest>
+	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new controller
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -166,7 +168,7 @@ struct ClusterControllerFullInterface {
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
 		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
-		       updateWorkerHealth.getFuture().isReady();
+		       updateWorkerHealth.getFuture().isReady() || tlogRejoin.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -179,6 +181,7 @@ struct ClusterControllerFullInterface {
 		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
 		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
 		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
+		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
 	}
 
 	template <class Ar>
@@ -195,7 +198,8 @@ struct ClusterControllerFullInterface {
 		           getWorkers,
 		           registerMaster,
 		           getServerDBInfo,
-		           updateWorkerHealth);
+		           updateWorkerHealth,
+				   tlogRejoin);
 	}
 };
 
@@ -446,6 +450,36 @@ struct UpdateWorkerHealthRequest {
 		serializer(ar, address, degradedPeers);
 	}
 };
+
+struct TLogRejoinReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	// false means someone else registered, so we should re-register.  true means this master is recovered, so don't
+	// send again to the same master.
+	bool masterIsRecovered;
+	TLogRejoinReply() = default;
+	explicit TLogRejoinReply(bool masterIsRecovered) : masterIsRecovered(masterIsRecovered) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, masterIsRecovered);
+	}
+};
+
+struct TLogRejoinRequest {
+	constexpr static FileIdentifier file_identifier = 15692200;
+	TLogInterface myInterface;
+	ReplyPromise<TLogRejoinReply> reply;
+
+	TLogRejoinRequest() {}
+	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, myInterface, reply);
+	}
+};
+
+
 
 struct InitializeTLogRequest {
 	constexpr static FileIdentifier file_identifier = 15604392;

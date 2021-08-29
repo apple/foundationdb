@@ -3748,7 +3748,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<ClusterRecoveryData> self
 
 ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 	loop {
-		TLogRejoinRequest req = waitNext(self->masterInterface.tlogRejoin.getFuture());
+		TLogRejoinRequest req = waitNext(self->clusterController.tlogRejoin.getFuture());
 		req.reply.send(true);
 	}
 }
@@ -4824,8 +4824,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems,
 	                                                                       self->dbgid,
 	                                                                       self->cstate.prevDBState,
-	                                                                       self->masterInterface.tlogRejoin.getFuture(),
-	                                                                       self->masterInterface.locality,
+	                                                                       self->clusterController.tlogRejoin.getFuture(),
+	                                                                       self->dbInfo->get().myLocality,
 	                                                                       &self->forceRecovery);
 
 	DBCoreState newState = self->cstate.myDBState;
@@ -5098,7 +5098,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				newMaster.initEndpoints();
 
 				DUMPTOKEN_PROCESS(newMaster, newMaster.waitFailure);
-				DUMPTOKEN_PROCESS(newMaster, newMaster.tlogRejoin);
+				//DUMPTOKEN_PROCESS(newMaster, newMaster.tlogRejoin);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.changeCoordinators);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.getCommitVersion);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.getLiveCommittedVersion);

@@ -34,8 +34,8 @@ struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
 	LocalityData locality;
 	RequestStream<ReplyPromise<Void>> waitFailure;
-	RequestStream<struct TLogRejoinRequest>
-	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
+	//RequestStream<struct TLogRejoinRequest>
+	//    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
 	RequestStream<struct GetCommitVersionRequest> getCommitVersion;
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
@@ -55,24 +55,24 @@ struct MasterInterface {
 		}
 		serializer(ar, locality, waitFailure);
 		if (Archive::isDeserializing) {
-			tlogRejoin = RequestStream<struct TLogRejoinRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
+			//tlogRejoin = RequestStream<struct TLogRejoinRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
 			changeCoordinators =
-			    RequestStream<struct ChangeCoordinatorsRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
+			    RequestStream<struct ChangeCoordinatorsRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
 			getCommitVersion =
-			    RequestStream<struct GetCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			    RequestStream<struct GetCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
 			notifyBackupWorkerDone =
-			    RequestStream<struct BackupWorkerDoneRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
+			    RequestStream<struct BackupWorkerDoneRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
 			getLiveCommittedVersion =
-			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(5));
+			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
 			reportLiveCommittedVersion = RequestStream<struct ReportRawCommittedVersionRequest>(
-			    waitFailure.getEndpoint().getAdjustedEndpoint(6));
+			    waitFailure.getEndpoint().getAdjustedEndpoint(5));
 		}
 	}
 
 	void initEndpoints() {
 		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
 		streams.push_back(waitFailure.getReceiver());
-		streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
+		//streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
 		streams.push_back(changeCoordinators.getReceiver());
 		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
 		streams.push_back(notifyBackupWorkerDone.getReceiver());
@@ -82,6 +82,7 @@ struct MasterInterface {
 	}
 };
 
+/*
 struct TLogRejoinReply {
 	constexpr static FileIdentifier file_identifier = 11;
 
@@ -109,6 +110,7 @@ struct TLogRejoinRequest {
 		serializer(ar, myInterface, reply);
 	}
 };
+*/
 
 struct ChangeCoordinatorsRequest {
 	constexpr static FileIdentifier file_identifier = 13605416;

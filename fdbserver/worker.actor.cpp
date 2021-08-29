@@ -1600,7 +1600,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				startRole(Role::MASTER, recruited.id(), interf.id());
 
 				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.tlogRejoin);
+				//DUMPTOKEN(recruited.tlogRejoin);
 				DUMPTOKEN(recruited.changeCoordinators);
 				DUMPTOKEN(recruited.getCommitVersion);
 				DUMPTOKEN(recruited.getLiveCommittedVersion);
