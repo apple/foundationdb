@@ -5098,12 +5098,12 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				newMaster.initEndpoints();
 
 				DUMPTOKEN_PROCESS(newMaster, newMaster.waitFailure);
-				//DUMPTOKEN_PROCESS(newMaster, newMaster.tlogRejoin);
+				// DUMPTOKEN_PROCESS(newMaster, newMaster.tlogRejoin);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.changeCoordinators);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.getCommitVersion);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.getLiveCommittedVersion);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.reportLiveCommittedVersion);
-				DUMPTOKEN_PROCESS(newMaster, newMaster.notifyBackupWorkerDone);
+				// DUMPTOKEN_PROCESS(newMaster, newMaster.notifyBackupWorkerDone);
 
 				TraceEvent("ClusterRecovery init master interface", cluster->id)
 				    .detail("Address", iMaster.address())
@@ -5176,7 +5176,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					break;
 				}
 				when(wait(db->serverInfo->onChange())) {}
-				when(BackupWorkerDoneRequest req = waitNext(iMaster.notifyBackupWorkerDone.getFuture())) {
+				when(BackupWorkerDoneRequest req =
+				         waitNext(db->serverInfo->get().clusterInterface.notifyBackupWorkerDone.getFuture())) {
 					if (recoveryData->logSystem.isValid() && recoveryData->logSystem->removeBackupWorker(req)) {
 						recoveryData->registrationTrigger.trigger();
 					}
@@ -5185,7 +5186,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				}
 				when(wait(collection)) {
 					cluster->db.forceMasterFailure.trigger();
-					TraceEvent("CCWDB forceMasterFailure", cluster->id).detail("MasterId", cluster->db.serverInfo->get().master.id());
+					TraceEvent("CCWDB forceMasterFailure", cluster->id)
+					    .detail("MasterId", cluster->db.serverInfo->get().master.id());
 				}
 			}
 			wait(spinDelay);

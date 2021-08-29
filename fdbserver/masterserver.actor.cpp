@@ -2027,13 +2027,14 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 					throw worker_removed();
 				}
 			}
+			/*
 			when(BackupWorkerDoneRequest req = waitNext(mi.notifyBackupWorkerDone.getFuture())) {
 				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {
 					self->registrationTrigger.trigger();
 				}
 				++self->backupWorkerDoneRequests;
 				req.reply.send(Void());
-			}
+			}*/
 			when(wait(collection)) {
 				ASSERT(false);
 				throw internal_error();

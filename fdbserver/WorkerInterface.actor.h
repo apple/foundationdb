@@ -158,6 +158,7 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct UpdateWorkerHealthRequest> updateWorkerHealth;
 	RequestStream<struct TLogRejoinRequest>
 	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new controller
+	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -168,7 +169,8 @@ struct ClusterControllerFullInterface {
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
 		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
-		       updateWorkerHealth.getFuture().isReady() || tlogRejoin.getFuture().isReady();
+		       updateWorkerHealth.getFuture().isReady() || tlogRejoin.getFuture().isReady() ||
+			   notifyBackupWorkerDone.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -182,6 +184,7 @@ struct ClusterControllerFullInterface {
 		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
 		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
 		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
+		notifyBackupWorkerDone.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -199,7 +202,8 @@ struct ClusterControllerFullInterface {
 		           registerMaster,
 		           getServerDBInfo,
 		           updateWorkerHealth,
-				   tlogRejoin);
+				   tlogRejoin,
+				   notifyBackupWorkerDone);
 	}
 };
 
@@ -479,7 +483,20 @@ struct TLogRejoinRequest {
 	}
 };
 
+struct BackupWorkerDoneRequest {
+	constexpr static FileIdentifier file_identifier = 8736351;
+	UID workerUID;
+	LogEpoch backupEpoch;
+	ReplyPromise<Void> reply;
 
+	BackupWorkerDoneRequest() : workerUID(), backupEpoch(-1) {}
+	BackupWorkerDoneRequest(UID id, LogEpoch epoch) : workerUID(id), backupEpoch(epoch) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, workerUID, backupEpoch, reply);
+	}
+};
 
 struct InitializeTLogRequest {
 	constexpr static FileIdentifier file_identifier = 15604392;

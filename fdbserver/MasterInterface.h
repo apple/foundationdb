@@ -38,7 +38,7 @@ struct MasterInterface {
 	//    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
 	RequestStream<struct GetCommitVersionRequest> getCommitVersion;
-	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
+	// RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 	// Get the centralized live committed version reported by commit proxies.
 	RequestStream<struct GetRawCommittedVersionRequest> getLiveCommittedVersion;
 	// Report a proxy's committed version.
@@ -60,22 +60,22 @@ struct MasterInterface {
 			    RequestStream<struct ChangeCoordinatorsRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
 			getCommitVersion =
 			    RequestStream<struct GetCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
-			notifyBackupWorkerDone =
-			    RequestStream<struct BackupWorkerDoneRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			/* notifyBackupWorkerDone =
+			    RequestStream<struct BackupWorkerDoneRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3)); */
 			getLiveCommittedVersion =
-			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
+			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
 			reportLiveCommittedVersion = RequestStream<struct ReportRawCommittedVersionRequest>(
-			    waitFailure.getEndpoint().getAdjustedEndpoint(5));
+			    waitFailure.getEndpoint().getAdjustedEndpoint(4));
 		}
 	}
 
 	void initEndpoints() {
 		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
 		streams.push_back(waitFailure.getReceiver());
-		//streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
+		// streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
 		streams.push_back(changeCoordinators.getReceiver());
 		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
-		streams.push_back(notifyBackupWorkerDone.getReceiver());
+		// streams.push_back(notifyBackupWorkerDone.getReceiver());
 		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetLiveCommittedVersion));
 		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ReportLiveCommittedVersion));
 		FlowTransport::transport().addEndpoints(streams);
@@ -209,6 +209,7 @@ struct ReportRawCommittedVersionRequest {
 	}
 };
 
+/*
 struct BackupWorkerDoneRequest {
 	constexpr static FileIdentifier file_identifier = 8736351;
 	UID workerUID;
@@ -223,6 +224,7 @@ struct BackupWorkerDoneRequest {
 		serializer(ar, workerUID, backupEpoch, reply);
 	}
 };
+*/
 
 struct LifetimeToken {
 	UID ccID;
