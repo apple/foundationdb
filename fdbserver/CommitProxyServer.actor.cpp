@@ -2130,7 +2130,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			addActor.send(proxyCheckSafeExclusion(db, exclCheckReq));
 		}
 		when(TxnStateRequest request = waitNext(proxy.txnState.getFuture())) {
-			wait(processTransactionStateRequestPart(&transactionStateResolveContext, request));
+			addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request));
 		}
 	}
 }
