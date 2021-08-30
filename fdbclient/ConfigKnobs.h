@@ -199,8 +199,5 @@ struct ConfigCommitAnnotationRef {
 };
 using ConfigCommitAnnotation = Standalone<ConfigCommitAnnotationRef>;
 
-enum class UseConfigDB {
-	DISABLED,
-	SIMPLE,
-	PAXOS,
-};
+ConfigDBType configDBTypeFromString(std::string const&);
+std::string configDBTypeToString(ConfigDBType);

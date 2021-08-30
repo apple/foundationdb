@@ -258,13 +258,13 @@ struct SerializabilityWorkload : TestWorkload {
 			} else if (ops[opNum].mutationOp.present()) {
 				auto& op = ops[opNum].mutationOp.get();
 				if (op.type == MutationRef::SetValue) {
-					//TraceEvent("SRL_Set").detail("Mutation", op.toString());
+					//TraceEvent("SRL_Set").detail("Mutation", op);
 					tr->set(op.param1, op.param2);
 				} else if (op.type == MutationRef::ClearRange) {
-					//TraceEvent("SRL_Clear").detail("Mutation", op.toString());
+					//TraceEvent("SRL_Clear").detail("Mutation", op);
 					tr->clear(KeyRangeRef(op.param1, op.param2));
 				} else {
-					//TraceEvent("SRL_AtomicOp").detail("Mutation", op.toString());
+					//TraceEvent("SRL_AtomicOp").detail("Mutation", op);
 					tr->atomicOp(op.param1, op.param2, op.type);
 				}
 			} else if (ops[opNum].readConflictOp.present()) {

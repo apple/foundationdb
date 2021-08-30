@@ -29,8 +29,10 @@ static StreamCipher::IV getRandomIV() {
 	return iv;
 }
 
-static inline Standalone<StringRef> encrypt(const StreamCipher::Key& key, const StreamCipher::IV& iv,
-                                            unsigned char const* data, size_t len) {
+static inline Standalone<StringRef> encrypt(const StreamCipher::Key& key,
+                                            const StreamCipher::IV& iv,
+                                            unsigned char const* data,
+                                            size_t len) {
 	EncryptionStreamCipher encryptor(key, iv);
 	Arena arena;
 	auto encrypted = encryptor.encrypt(data, len, arena);

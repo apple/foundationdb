@@ -23,12 +23,11 @@
 #include <string>
 
 #include "fdbclient/ConfigTransactionInterface.h"
+#include "fdbclient/PImpl.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 
 class ConfigNode : public ReferenceCounted<ConfigNode> {
-	std::unique_ptr<class ConfigNodeImpl> _impl;
-	ConfigNodeImpl const& impl() const { return *_impl; }
-	ConfigNodeImpl& impl() { return *_impl; }
+	PImpl<class ConfigNodeImpl> impl;
 
 public:
 	ConfigNode(std::string const& folder);

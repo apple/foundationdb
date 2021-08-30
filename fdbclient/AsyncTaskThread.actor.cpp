@@ -32,7 +32,11 @@ public:
 	bool isTerminate() const override { return true; }
 };
 
-ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread, std::atomic<int> *sum, int count, int clientId, double meanSleep) {
+ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread,
+                                         std::atomic<int>* sum,
+                                         int count,
+                                         int clientId,
+                                         double meanSleep) {
 	state int i = 0;
 	state double randomSleep = 0.0;
 	for (; i < count; ++i) {
@@ -43,11 +47,11 @@ ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread, std::
 			return Void();
 		}));
 		TraceEvent("AsyncTaskThreadIncrementedSum")
-			.detail("Index", i)
-			.detail("Sum", sum->load())
-			.detail("ClientId", clientId)
-			.detail("RandomSleep", randomSleep)
-			.detail("MeanSleep", meanSleep);
+		    .detail("Index", i)
+		    .detail("Sum", sum->load())
+		    .detail("ClientId", clientId)
+		    .detail("RandomSleep", randomSleep)
+		    .detail("MeanSleep", meanSleep);
 	}
 	return Void();
 }
@@ -93,7 +97,8 @@ TEST_CASE("/asynctaskthread/add") {
 	std::vector<Future<Void>> clients;
 	clients.reserve(numClients);
 	for (int clientId = 0; clientId < numClients; ++clientId) {
-		clients.push_back(asyncTaskThreadClient(&asyncTaskThread, &sum, incrementsPerClient, clientId, deterministicRandom()->random01() * 0.01));
+		clients.push_back(asyncTaskThreadClient(
+		    &asyncTaskThread, &sum, incrementsPerClient, clientId, deterministicRandom()->random01() * 0.01));
 	}
 	wait(waitForAll(clients));
 	ASSERT_EQ(sum.load(), numClients * incrementsPerClient);
@@ -103,12 +108,12 @@ TEST_CASE("/asynctaskthread/add") {
 TEST_CASE("/asynctaskthread/error") {
 	state AsyncTaskThread asyncTaskThread;
 	try {
-		wait(asyncTaskThread.execAsync([]{
+		wait(asyncTaskThread.execAsync([] {
 			throw operation_failed();
 			return Void();
 		}));
 		ASSERT(false);
-	} catch (Error &e) {
+	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_operation_failed);
 	}
 	return Void();

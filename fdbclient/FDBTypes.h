@@ -42,8 +42,8 @@ typedef UID SpanID;
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,
-	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
-	tagLocalityUpgraded = -4,
+	tagLocalityRemoteLog = -3, // tag created by log router for remote (aka. not in Primary DC) tLogs
+	tagLocalityUpgraded = -4, // tlogs with old log format
 	tagLocalitySatellite = -5,
 	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,

@@ -28,18 +28,20 @@
 #include "flow/flow.h"
 
 struct ConfigGeneration {
-	// The live version of each node is monotonically increasing
-	Version liveVersion{ 0 };
 	// The committedVersion of each node is the version of the last commit made durable.
 	// Each committedVersion was previously given to clients as a liveVersion, prior to commit.
 	Version committedVersion{ 0 };
+	// The live version of each node is monotonically increasing
+	Version liveVersion{ 0 };
 
 	bool operator==(ConfigGeneration const&) const;
 	bool operator!=(ConfigGeneration const&) const;
+	bool operator<(ConfigGeneration const&) const;
+	bool operator>(ConfigGeneration const&) const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, liveVersion, committedVersion);
+		serializer(ar, committedVersion, liveVersion);
 	}
 };
 
@@ -57,12 +59,16 @@ struct ConfigTransactionGetGenerationReply {
 
 struct ConfigTransactionGetGenerationRequest {
 	static constexpr FileIdentifier file_identifier = 138941;
+	// A hint to catch up lagging nodes:
+	Optional<Version> lastSeenLiveVersion;
 	ReplyPromise<ConfigTransactionGetGenerationReply> reply;
 	ConfigTransactionGetGenerationRequest() = default;
+	explicit ConfigTransactionGetGenerationRequest(Optional<Version> const& lastSeenLiveVersion)
+	  : lastSeenLiveVersion(lastSeenLiveVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, lastSeenLiveVersion, reply);
 	}
 };
 
@@ -102,10 +108,13 @@ struct ConfigTransactionCommitRequest {
 	ConfigCommitAnnotationRef annotation;
 	ReplyPromise<Void> reply;
 
-	size_t expectedSize() const { return mutations.expectedSize() + annotation.expectedSize(); }
+	ConfigTransactionCommitRequest() = default;
+	explicit ConfigTransactionCommitRequest(ConfigGeneration generation,
+	                                        VectorRef<ConfigMutationRef> mutations,
+	                                        ConfigCommitAnnotationRef annotation)
+	  : generation(generation), mutations(arena, mutations), annotation(arena, annotation) {}
 
-	void set(KeyRef key, ValueRef value);
-	void clear(KeyRef key);
+	size_t expectedSize() const { return mutations.expectedSize() + annotation.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
