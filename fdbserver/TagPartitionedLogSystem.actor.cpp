@@ -464,6 +464,19 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						changes.push_back(t->onChange());
 					}
 				}
+				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+					for (auto& t : it->logServersPtxn) {
+						if (t->get().present()) {
+							failed.push_back(waitFailureClient(t->get().interf().waitFailure,
+							                                   SERVER_KNOBS->TLOG_TIMEOUT,
+							                                   -SERVER_KNOBS->TLOG_TIMEOUT /
+							                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+							                                   /*trace=*/true));
+						} else {
+							changes.push_back(t->onChange());
+						}
+					}
+				}
 				for (auto& t : it->logRouters) {
 					if (t->get().present()) {
 						failed.push_back(waitFailureClient(t->get().interf().waitFailure,
