@@ -427,7 +427,8 @@ struct ILogSystem {
 
 		TLogPeekReply results;
 		ArenaReader rd;
-		LogMessageVersion messageVersion, end; // the version of current message; the intended end version of current cursor
+		LogMessageVersion messageVersion,
+		    end; // the version of current message; the intended end version of current cursor
 		Version poppedVersion;
 		TagsAndMessage messageAndTags;
 		bool hasMsg;
@@ -1094,9 +1095,7 @@ struct LogPushData : NonCopyable {
 		next_message_tags.clear();
 	}
 
-	Standalone<StringRef> getMessages(int loc) {
-		return messagesWriter[loc].toValue();
-	}
+	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
 
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.

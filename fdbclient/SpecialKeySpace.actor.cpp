@@ -2122,8 +2122,11 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 		dt = datetime;
 
 		for (const auto& [waitState, data] : sample.data) {
-			if (seq < seqStart) { continue; }
-			else if (seq >= seqEnd) { break; }
+			if (seq < seqStart) {
+				continue;
+			} else if (seq >= seqEnd) {
+				break;
+			}
 
 			std::ostringstream streamKey;
 			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
