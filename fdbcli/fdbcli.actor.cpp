@@ -165,14 +165,16 @@ std::string lineWrap(const char* text, int col) {
 class FdbOptions {
 public:
 	// Prints an error and throws invalid_option or invalid_option_value if the option could not be set
+	// TODO: remove Reference<ReadYourWritesTransaction> after we refactor all fdbcli code
 	void setOption(Reference<ReadYourWritesTransaction> tr,
+	               Reference<ITransaction> tr2,
 	               StringRef optionStr,
 	               bool enabled,
 	               Optional<StringRef> arg,
 	               bool intrans) {
 		auto transactionItr = transactionOptions.legalOptions.find(optionStr.toString());
 		if (transactionItr != transactionOptions.legalOptions.end())
-			setTransactionOption(tr, transactionItr->second, enabled, arg, intrans);
+			setTransactionOption(tr, tr2, transactionItr->second, enabled, arg, intrans);
 		else {
 			fprintf(stderr,
 			        "ERROR: invalid option '%s'. Try `help options' for a list of available options.\n",
@@ -215,7 +217,9 @@ public:
 
 private:
 	// Sets a transaction option. If intrans == true, then this option is also applied to the passed in transaction.
+	// TODO: remove Reference<ReadYourWritesTransaction> after we refactor all fdbcli code
 	void setTransactionOption(Reference<ReadYourWritesTransaction> tr,
+	                          Reference<ITransaction> tr2,
 	                          FDBTransactionOptions::Option option,
 	                          bool enabled,
 	                          Optional<StringRef> arg,
@@ -225,8 +229,10 @@ private:
 			throw invalid_option_value();
 		}
 
-		if (intrans)
+		if (intrans) {
 			tr->setOption(option, arg);
+			tr2->setOption(option, arg);
+		}
 
 		transactionOptions.setOption(option, enabled, arg.castTo<StringRef>());
 	}
@@ -623,10 +629,6 @@ void initHelp() {
 	helpMap["writemode"] = CommandHelp("writemode <on|off>",
 	                                   "enables or disables sets and clears",
 	                                   "Setting or clearing keys from the CLI is not recommended.");
-	helpMap["profile"] = CommandHelp("profile <client|list|flow|heap> <action> <ARGS>",
-	                                 "namespace for all the profiling-related commands.",
-	                                 "Different types support different actions.  Run `profile` to get a list of "
-	                                 "types, and iteratively explore the help.\n");
 	helpMap["lock"] = CommandHelp(
 	    "lock",
 	    "lock the database with a randomly generated lockUID",
@@ -636,16 +638,6 @@ void initHelp() {
 	                "unlock the database with the provided lockUID",
 	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
 	                "user will be asked to enter a passphrase to confirm their intent.");
-	helpMap["triggerddteaminfolog"] =
-	    CommandHelp("triggerddteaminfolog",
-	                "trigger the data distributor teams logging",
-	                "Trigger the data distributor to log detailed information about its teams.");
-	helpMap["tssq"] =
-	    CommandHelp("tssq start|stop <StorageUID>",
-	                "start/stop tss quarantine",
-	                "Toggles Quarantine mode for a Testing Storage Server. Quarantine will happen automatically if the "
-	                "TSS is detected to have incorrect data, but can also be initiated manually. You can also remove a "
-	                "TSS from quarantine once your investigation is finished, which will destroy the TSS process.");
 }
 
 void printVersion() {
@@ -1822,92 +1814,6 @@ int printStatusFromJSON(std::string const& jsonFileName) {
 		printf("Unknown exception printing status.\n");
 		return 3;
 	}
-}
-
-ACTOR Future<Void> triggerDDTeamInfoLog(Database db) {
-	state ReadYourWritesTransaction tr(db);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			std::string v = deterministicRandom()->randomUniqueID().toString();
-			tr.set(triggerDDTeamInfoPrintKey, v);
-			wait(tr.commit());
-			printf("Triggered team info logging in data distribution.\n");
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-ACTOR Future<Void> tssQuarantineList(Database db) {
-	state ReadYourWritesTransaction tr(db);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			RangeResult result = wait(tr.getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY));
-			// shouldn't have many quarantined TSSes
-			ASSERT(!result.more);
-			printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");
-			for (auto& it : result) {
-				printf("  %s\n", decodeTssQuarantineKey(it.key).toString().c_str());
-			}
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-ACTOR Future<bool> tssQuarantine(Database db, bool enable, UID tssId) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			// Do some validation first to make sure the command is valid
-			Optional<Value> serverListValue = wait(tr->get(serverListKeyFor(tssId)));
-			if (!serverListValue.present()) {
-				printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
-				return false;
-			}
-			state StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
-			if (!ssi.isTss()) {
-				printf("Cannot quarantine Non-TSS storage ID %s!\n", tssId.toString().c_str());
-				return false;
-			}
-
-			Optional<Value> currentQuarantineValue = wait(tr->get(tssQuarantineKeyFor(tssId)));
-			if (enable && currentQuarantineValue.present()) {
-				printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
-				return false;
-			} else if (!enable && !currentQuarantineValue.present()) {
-				printf("TSS %s is not in quarantine, cannot remove from quarantine!.\n", tssId.toString().c_str());
-				return false;
-			}
-
-			if (enable) {
-				tr->set(tssQuarantineKeyFor(tssId), LiteralStringRef(""));
-				// remove server from TSS mapping when quarantine is enabled
-				tssMapDB.erase(tr, ssi.tssPairID.get());
-			} else {
-				tr->clear(tssQuarantineKeyFor(tssId));
-			}
-
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-	printf("Successfully %s TSS %s\n", enable ? "quarantined" : "removed", tssId.toString().c_str());
-	return true;
 }
 
 ACTOR Future<Void> timeWarning(double when, const char* msg) {
@@ -3460,32 +3366,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
-					wait(triggerDDTeamInfoLog(db));
+					wait(triggerddteaminfologCommandActor(db2));
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "tssq")) {
-					if (tokens.size() == 2) {
-						if (tokens[1] != LiteralStringRef("list")) {
-							printUsage(tokens[0]);
-							is_error = true;
-						} else {
-							wait(tssQuarantineList(db));
-						}
-					}
-					if (tokens.size() == 3) {
-						if ((tokens[1] != LiteralStringRef("start") && tokens[1] != LiteralStringRef("stop")) ||
-						    (tokens[2].size() != 32) || !std::all_of(tokens[2].begin(), tokens[2].end(), &isxdigit)) {
-							printUsage(tokens[0]);
-							is_error = true;
-						} else {
-							bool enable = tokens[1] == LiteralStringRef("start");
-							UID tssId = UID::fromString(tokens[2].toString());
-							bool err = wait(tssQuarantine(db, enable, tssId));
-							if (err)
-								is_error = true;
-						}
-					}
+					bool _result = wait(makeInterruptable(tssqCommandActor(db2, tokens)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
@@ -3742,246 +3630,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					getTransaction(db, tr, tr2, options, intrans);
-					bool _result = wait(makeInterruptable(consistencyCheckCommandActor(tr2, tokens)));
+					bool _result = wait(makeInterruptable(consistencyCheckCommandActor(tr2, tokens, intrans)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "profile")) {
-					if (tokens.size() == 1) {
-						fprintf(stderr, "ERROR: Usage: profile <client|list|flow|heap>\n");
+					getTransaction(db, tr, tr2, options, intrans);
+					bool _result = wait(makeInterruptable(profileCommandActor(tr2, tokens, intrans)));
+					if (!_result)
 						is_error = true;
-						continue;
-					}
-					if (tokencmp(tokens[1], "client")) {
-						getTransaction(db, tr, options, intrans);
-						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						if (tokens.size() == 2) {
-							fprintf(stderr, "ERROR: Usage: profile client <get|set>\n");
-							is_error = true;
-							continue;
-						}
-						wait(makeInterruptable(GlobalConfig::globalConfig().onInitialized()));
-						if (tokencmp(tokens[2], "get")) {
-							if (tokens.size() != 3) {
-								fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
-								is_error = true;
-								continue;
-							}
-							const double sampleRateDbl = GlobalConfig::globalConfig().get<double>(
-							    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
-							const int64_t sizeLimit =
-							    GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
-							std::string sampleRateStr = "default", sizeLimitStr = "default";
-							if (!std::isinf(sampleRateDbl)) {
-								sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);
-							}
-							if (sizeLimit != -1) {
-								sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
-							}
-							printf("Client profiling rate is set to %s and size limit is set to %s.\n",
-							       sampleRateStr.c_str(),
-							       sizeLimitStr.c_str());
-							continue;
-						}
-						if (tokencmp(tokens[2], "set")) {
-							if (tokens.size() != 5) {
-								fprintf(stderr, "ERROR: Usage: profile client set <RATE|default> <SIZE|default>\n");
-								is_error = true;
-								continue;
-							}
-							double sampleRate;
-							if (tokencmp(tokens[3], "default")) {
-								sampleRate = std::numeric_limits<double>::infinity();
-							} else {
-								char* end;
-								sampleRate = std::strtod((const char*)tokens[3].begin(), &end);
-								if (!std::isspace(*end)) {
-									fprintf(stderr, "ERROR: %s failed to parse.\n", printable(tokens[3]).c_str());
-									is_error = true;
-									continue;
-								}
-							}
-							int64_t sizeLimit;
-							if (tokencmp(tokens[4], "default")) {
-								sizeLimit = -1;
-							} else {
-								Optional<uint64_t> parsed = parse_with_suffix(tokens[4].toString());
-								if (parsed.present()) {
-									sizeLimit = parsed.get();
-								} else {
-									fprintf(stderr, "ERROR: `%s` failed to parse.\n", printable(tokens[4]).c_str());
-									is_error = true;
-									continue;
-								}
-							}
-
-							Tuple rate = Tuple().appendDouble(sampleRate);
-							Tuple size = Tuple().append(sizeLimit);
-							tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-							tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
-							tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
-							if (!intrans) {
-								wait(commitTransaction(tr));
-							}
-							continue;
-						}
-						fprintf(stderr, "ERROR: Unknown action: %s\n", printable(tokens[2]).c_str());
-						is_error = true;
-						continue;
-					}
-					if (tokencmp(tokens[1], "list")) {
-						if (tokens.size() != 2) {
-							fprintf(stderr, "ERROR: Usage: profile list\n");
-							is_error = true;
-							continue;
-						}
-						getTransaction(db, tr, options, intrans);
-						RangeResult kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-						                                   CLIENT_KNOBS->TOO_MANY)));
-						ASSERT(!kvs.more);
-						for (const auto& pair : kvs) {
-							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
-							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
-							                    : pair.key)
-							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
-							printf("%s\n", printable(ip_port).c_str());
-						}
-						continue;
-					}
-					if (tokencmp(tokens[1], "flow")) {
-						if (tokens.size() == 2) {
-							fprintf(stderr, "ERROR: Usage: profile flow <run>\n");
-							is_error = true;
-							continue;
-						}
-						if (tokencmp(tokens[2], "run")) {
-							if (tokens.size() < 6) {
-								fprintf(
-								    stderr,
-								    "ERROR: Usage: profile flow run <DURATION_IN_SECONDS> <FILENAME> <PROCESS...>\n");
-								is_error = true;
-								continue;
-							}
-							getTransaction(db, tr, options, intrans);
-							RangeResult kvs = wait(makeInterruptable(
-							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-							                             LiteralStringRef("\xff\xff/worker_interfaces0")),
-							                 CLIENT_KNOBS->TOO_MANY)));
-							ASSERT(!kvs.more);
-							char* duration_end;
-							int duration = std::strtol((const char*)tokens[3].begin(), &duration_end, 10);
-							if (!std::isspace(*duration_end)) {
-								fprintf(
-								    stderr, "ERROR: Failed to parse %s as an integer.", printable(tokens[3]).c_str());
-								is_error = true;
-								continue;
-							}
-							std::map<Key, ClientWorkerInterface> interfaces;
-							state std::vector<Key> all_profiler_addresses;
-							state std::vector<Future<ErrorOr<Void>>> all_profiler_responses;
-							for (const auto& pair : kvs) {
-								auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
-								                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
-								                    : pair.key)
-								                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
-								interfaces.emplace(
-								    ip_port,
-								    BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
-							}
-							if (tokens.size() == 6 && tokencmp(tokens[5], "all")) {
-								for (const auto& pair : interfaces) {
-									ProfilerRequest profileRequest(
-									    ProfilerRequest::Type::FLOW, ProfilerRequest::Action::RUN, duration);
-									profileRequest.outputFile = tokens[4];
-									all_profiler_addresses.push_back(pair.first);
-									all_profiler_responses.push_back(pair.second.profiler.tryGetReply(profileRequest));
-								}
-							} else {
-								for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
-									auto element = interfaces.find(tokens[tokenidx]);
-									if (element == interfaces.end()) {
-										fprintf(stderr,
-										        "ERROR: process '%s' not recognized.\n",
-										        printable(tokens[tokenidx]).c_str());
-										is_error = true;
-									}
-								}
-								if (!is_error) {
-									for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
-										ProfilerRequest profileRequest(
-										    ProfilerRequest::Type::FLOW, ProfilerRequest::Action::RUN, duration);
-										profileRequest.outputFile = tokens[4];
-										all_profiler_addresses.push_back(tokens[tokenidx]);
-										all_profiler_responses.push_back(
-										    interfaces[tokens[tokenidx]].profiler.tryGetReply(profileRequest));
-									}
-								}
-							}
-							if (!is_error) {
-								wait(waitForAll(all_profiler_responses));
-								for (int i = 0; i < all_profiler_responses.size(); i++) {
-									const ErrorOr<Void>& err = all_profiler_responses[i].get();
-									if (err.isError()) {
-										fprintf(stderr,
-										        "ERROR: %s: %s: %s\n",
-										        printable(all_profiler_addresses[i]).c_str(),
-										        err.getError().name(),
-										        err.getError().what());
-									}
-								}
-							}
-							all_profiler_addresses.clear();
-							all_profiler_responses.clear();
-							continue;
-						}
-					}
-					if (tokencmp(tokens[1], "heap")) {
-						if (tokens.size() != 3) {
-							fprintf(stderr, "ERROR: Usage: profile heap <PROCESS>\n");
-							is_error = true;
-							continue;
-						}
-						getTransaction(db, tr, options, intrans);
-						RangeResult kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-						                                   CLIENT_KNOBS->TOO_MANY)));
-						ASSERT(!kvs.more);
-						std::map<Key, ClientWorkerInterface> interfaces;
-						for (const auto& pair : kvs) {
-							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
-							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
-							                    : pair.key)
-							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
-							interfaces.emplace(
-							    ip_port,
-							    BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
-						}
-						state Key ip_port = tokens[2];
-						if (interfaces.find(ip_port) == interfaces.end()) {
-							fprintf(stderr, "ERROR: host %s not found\n", printable(ip_port).c_str());
-							is_error = true;
-							continue;
-						}
-						ProfilerRequest profileRequest(
-						    ProfilerRequest::Type::GPROF_HEAP, ProfilerRequest::Action::RUN, 0);
-						profileRequest.outputFile = LiteralStringRef("heapz");
-						ErrorOr<Void> response = wait(interfaces[ip_port].profiler.tryGetReply(profileRequest));
-						if (response.isError()) {
-							fprintf(stderr,
-							        "ERROR: %s: %s: %s\n",
-							        printable(ip_port).c_str(),
-							        response.getError().name(),
-							        response.getError().what());
-						}
-						continue;
-					}
-					fprintf(stderr, "ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
-					is_error = true;
 					continue;
 				}
 
@@ -4194,7 +3853,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						Optional<StringRef> arg = (tokens.size() > 3) ? tokens[3] : Optional<StringRef>();
 
 						try {
-							options->setOption(tr, tokens[2], isOn, arg, intrans);
+							options->setOption(tr, tr2, tokens[2], isOn, arg, intrans);
 							printf("Option %s for %s\n",
 							       isOn ? "enabled" : "disabled",
 							       intrans ? "current transaction" : "all transactions");
