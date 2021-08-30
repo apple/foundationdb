@@ -147,6 +147,9 @@ void getRanges(std::vector<std::pair<KeyRangeRef, bool>>& results, KeyRangeMap<b
 struct RangeAssignment {
 	KeyRange keyRange;
 	bool isAssign;
+
+	RangeAssignment() {}
+	explicit RangeAssignment(KeyRange keyRange, bool isAssign) : keyRange(keyRange), isAssign(isAssign) {}
 };
 
 struct BlobManagerData {
@@ -225,11 +228,14 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitNewRange(Reference<ReadYourWrit
 static UID pickWorkerForAssign(BlobManagerData* bmData) {
 	// FIXME: Right now just picks a random worker, this is very suboptimal
 	int idx = deterministicRandom()->randomInt(0, bmData->workersById.size());
+	printf("picked random worker %d: ", idx);
 
 	auto it = bmData->workersById.begin();
-	while (idx > 0 && it != bmData->workersById.end()) {
+	while (idx > 0) {
 		idx--;
+		it++;
 	}
+	printf("%s\n", it->first.toString().c_str());
 	return it->first;
 }
 
@@ -240,8 +246,6 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 	req.managerEpoch = bmData->epoch;
 	req.managerSeqno = seqNo;
 	req.isAssign = assignment.isAssign;
-
-	++bmData->seqNo;
 
 	printf("BM %s %s range [%s - %s) @ (%lld, %lld)\n",
 	       workerID.toString().c_str(),
@@ -267,10 +271,7 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 			       assignment.keyRange.begin.printable().c_str(),
 			       assignment.keyRange.end.printable().c_str());
 			// re-send revoke to queue to handle range being un-assigned from that worker before the new one
-			RangeAssignment failedRevoke;
-			failedRevoke.keyRange = assignment.keyRange;
-			failedRevoke.isAssign = false;
-			bmData->rangesToAssign.send(failedRevoke);
+			bmData->rangesToAssign.send(RangeAssignment(assignment.keyRange, false));
 			bmData->rangesToAssign.send(assignment);
 			// FIXME: improvement would be to add history of failed workers to assignment so it can try other ones first
 		} else {
@@ -314,7 +315,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 			for (auto& it : currentAssignments) {
 				// ensure range doesn't truncate existing ranges
 				ASSERT(it.begin() >= assignment.keyRange.begin);
-				ASSERT(it.end() <= assignment.keyRange.begin);
+				ASSERT(it.end() <= assignment.keyRange.end);
 
 				// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part of
 				// the same logical change
@@ -380,11 +381,7 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 					       range.begin.printable().c_str(),
 					       range.end.printable().c_str());
 
-					RangeAssignment assignment;
-					assignment.keyRange = range;
-					assignment.isAssign = false;
-
-					bmData->rangesToAssign.send(assignment);
+					bmData->rangesToAssign.send(RangeAssignment(range, false));
 				}
 
 				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
@@ -405,11 +402,7 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 						KeyRange range = KeyRange(KeyRangeRef(splits[i], splits[i + 1]));
 						printf("    [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
 
-						RangeAssignment assignment;
-						assignment.keyRange = range;
-						assignment.isAssign = true;
-
-						bmData->rangesToAssign.send(assignment);
+						bmData->rangesToAssign.send(RangeAssignment(range, true));
 					}
 				}
 
@@ -422,6 +415,36 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 				printf("Blob manager got error looking for range updates %s\n", e.name());
 				wait(tr->onError(e));
 			}
+		}
+	}
+}
+
+// TODO this is only for chaos testing right now!! REMOVE LATER
+ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
+	loop {
+		wait(delay(30.0));
+
+		if (bmData->workersById.size() > 1) {
+			int tries = 10;
+			while (tries > 0) {
+				tries--;
+				auto randomRange = bmData->workerAssignments.randomRange();
+				if (randomRange.value() != UID()) {
+					printf("Range mover moving range [%s - %s): %s\n",
+					       randomRange.begin().printable().c_str(),
+					       randomRange.end().printable().c_str(),
+					       randomRange.value().toString().c_str());
+
+					bmData->rangesToAssign.send(RangeAssignment(randomRange.range(), false));
+					bmData->rangesToAssign.send(RangeAssignment(randomRange.range(), true));
+					break;
+				}
+			}
+			if (tries == 0) {
+				printf("Range mover couldn't find range to move, skipping\n");
+			}
+		} else {
+			printf("Range mover found %d workers, skipping\n", bmData->workerAssignments.size());
 		}
 	}
 }
@@ -455,6 +478,7 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 
 	addActor.send(monitorClientRanges(&self));
 	addActor.send(rangeAssigner(&self));
+	addActor.send(rangeMover(&self));
 
 	// TODO probably other things here eventually
 	loop choose {
