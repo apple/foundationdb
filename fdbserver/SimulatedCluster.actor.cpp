@@ -1240,7 +1240,7 @@ void SimulationConfig::setRandomConfig() {
 	// 	.detail("GRVProxyCount", db.grvProxyCount)
 	// 	.detail("ResolverCount", db.resolverCount);
 
-	if (deterministicRandom()->random01() < 0.5) {
+	if (deterministicRandom()->random01() < 0.5 || !faultInjectionActivated) {
 		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 0);
 		set_config("perpetual_storage_wiggle=0");
 	} else {
