@@ -62,6 +62,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -3749,6 +3750,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<ClusterRecoveryData> self
 ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 	loop {
 		TLogRejoinRequest req = waitNext(self->clusterController.tlogRejoin.getFuture());
+		TraceEvent("TLogRejoinRequestHandler").detail("MasterLifeTime", self->dbInfo->get().masterLifetime.toString());
 		req.reply.send(true);
 	}
 }
@@ -5054,12 +5056,10 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("AvailableAtVersion", self->version)
 	    .trackLatest("ClusterRecoveryAvailable");
 
-	/* 
 	if ( self->resolvers.size() > 1)
 		self->addActor.send(resolutionBalancing(self));
 
-	self->addActor.send(changeCoordinators(self));
-	*/
+	//self->addActor.send(changeCoordinators(self));
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {

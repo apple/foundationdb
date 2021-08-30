@@ -2003,17 +2003,14 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	state PromiseStream<Future<Void>> addActor;
 	state Reference<MasterData> self(new MasterData(
 	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));
-	state Future<Void> collection = actorCollection(self->addActor.getFuture());
+	state Future<Void> collection = actorCollection(addActor.getFuture());
 	self->addActor.send(traceRole(Role::MASTER, mi.id()));
 
 	TEST(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())); // Master born doomed
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
 
 	if (SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
-		if (self->resolvers.size() > 1)
-			self->addActor.send(resolutionBalancing(self));
-
-		self->addActor.send(changeCoordinators(self));
+		addActor.send(changeCoordinators(self));
 	}
 
 	try {

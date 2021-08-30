@@ -2201,7 +2201,8 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 		}
 
 		if (registerWithCC.isReady()) {
-			if (self->dbInfo->get().masterLifetime.count != lastMasterLifetime.count) {
+			if (self->dbInfo->get().masterLifetime.ccID.compare(lastMasterLifetime.ccID) != 0 ||
+				self->dbInfo->get().masterLifetime.count != lastMasterLifetime.count) {
 				// The TLogRejoinRequest is needed to establish communications with a new cluster-controller, 
 				// which doesn't have our TLogInterface
 				TLogRejoinRequest req(tli);

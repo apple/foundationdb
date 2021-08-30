@@ -1255,7 +1255,7 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
                                            TLogInterface tli,
                                            DBRecoveryCount recoveryCount,
                                            Future<Void> registerWithCC) {
-	state LifetimeToken lastMasterLifeTime;
+	state LifetimeToken lastMasterLifetime;
 	loop {
 		auto const& inf = self->dbInfo->get();
 		bool isDisplaced =
@@ -1277,7 +1277,8 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 		}
 
 		if (registerWithCC.isReady()) {
-			if (self->dbInfo->get().masterLifetime.count != lastMasterLifeTime.count) {
+			if (self->dbInfo->get().masterLifetime.ccID.compare(lastMasterLifetime.ccID) != 0 ||
+				self->dbInfo->get().masterLifetime.count != lastMasterLifetime.count) {
 				// The TLogRejoinRequest is needed to establish communications with a new cluster-controller, 
 				// which doesn't have our TLogInterface
 				TLogRejoinRequest req;
@@ -1289,7 +1290,7 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 					when(TLogRejoinReply rep = wait(
 					         brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)))) {
 						if (rep.masterIsRecovered)
-							lastMasterLifeTime = self->dbInfo->get().masterLifetime;
+							lastMasterLifetime = self->dbInfo->get().masterLifetime;
 					}
 					when(wait(self->dbInfo->onChange())) {}
 				}

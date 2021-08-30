@@ -2249,13 +2249,15 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 		}
 
 		if (registerWithCC.isReady()) {
-			if (self->dbInfo->get().masterLifetime.count != lastMasterLifetime.count) {
+			if (self->dbInfo->get().masterLifetime.ccID.compare(lastMasterLifetime.ccID) != 0 ||
+				self->dbInfo->get().masterLifetime.count != lastMasterLifetime.count) {
 				// The TLogRejoinRequest is needed to establish communications with a new cluster-contriller, 
 				// which doesn't have our TLogInterface
 				TLogRejoinRequest req(tli);
 				TraceEvent("TLogRejoining", tli.id())
 				    .detail("ClusterController", self->dbInfo->get().clusterInterface.id())
-					.detail("MasterLifeTimeToken", self->dbInfo->get().masterLifetime.toString());
+					.detail("MasterLifeTimeToken", self->dbInfo->get().masterLifetime.toString())
+					.detail("ExistingLifeTimeToken", lastMasterLifetime.toString());
 				choose {
 					when(TLogRejoinReply rep = wait(
 					         brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)))) {
