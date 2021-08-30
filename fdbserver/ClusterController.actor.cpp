@@ -5054,10 +5054,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("AvailableAtVersion", self->version)
 	    .trackLatest("ClusterRecoveryAvailable");
 
+	/* 
 	if ( self->resolvers.size() > 1)
 		self->addActor.send(resolutionBalancing(self));
 
 	self->addActor.send(changeCoordinators(self));
+	*/
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {
@@ -5088,7 +5090,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			state double recoveryStart = now();
 			state MasterInterface newMaster;
 
-			if (!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
+			if (1) { //!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
 				TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
 				wait(ClusterControllerRecovery::recruitNewMaster(cluster, db, &newMaster));
 			} else {

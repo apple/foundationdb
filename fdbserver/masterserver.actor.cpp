@@ -2009,11 +2009,18 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	TEST(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())); // Master born doomed
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
 
+	if (SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
+		if (self->resolvers.size() > 1)
+			self->addActor.send(resolutionBalancing(self));
+
+		self->addActor.send(changeCoordinators(self));
+	}
+
 	try {
-		state Future<Void> core = SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY ? Void() : masterCore(self);
+		// state Future<Void> core = SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY ? Never() : masterCore(self);
 
 		loop choose {
-			when(wait(core)) { break; }
+			// when(wait(core)) { break; }
 			when(wait(onDBChange)) {
 				onDBChange = db->onChange();
 				if (!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())) {
@@ -2063,9 +2070,5 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 		throw err;
 	}
 
-	if (SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY && self->resolvers.size() > 1) {
-		self->addActor.send(resolutionBalancing(self));
-	}
-
-	return Void();
+	// return Void();
 }
