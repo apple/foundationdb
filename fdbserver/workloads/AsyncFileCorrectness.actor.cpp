@@ -428,8 +428,8 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		if (enabled) {
-			m.push_back(PerfMetric("Number of Operations Performed", numOperations.getValue(), false));
-			m.push_back(PerfMetric("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, false));
+			m.emplace_back("Number of Operations Performed", numOperations.getValue(), Averaged::False);
+			m.emplace_back("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, Averaged::False);
 		}
 	}
 };
