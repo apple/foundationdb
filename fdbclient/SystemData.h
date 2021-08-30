@@ -529,11 +529,13 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 // \xff/bgf/(startKey, endKey, {snapshot|delta}, version) = [[filename]]
 extern const KeyRangeRef blobGranuleFileKeys;
 
-// TODO could shrink the size of this keyspace by using something similar to tags instead of UIDs
-// \xff/bgm/[[begin]] = [[BlobWorkerID]]
+// TODO could shrink the size of the mapping keyspace by using something similar to tags instead of UIDs. We'd probably
+// want to do that in V1 or it'd be a big migration.
+
+// \xff/bgm/[[begin]] = [[BlobWorkerUID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
 
-// \xff/bgl/(begin,end) = (epochNum, seqNum)
+// \xff/bgl/(begin,end) = (epoch, seqno)
 extern const KeyRangeRef blobGranuleLockKeys;
 
 const Value blobGranuleLockValueFor(int64_t epochNum, int64_t sequenceNum);

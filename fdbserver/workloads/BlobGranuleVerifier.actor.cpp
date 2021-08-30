@@ -93,8 +93,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-				wait(krmSetRangeCoalescing(
-				    tr, blobRangeKeys.begin, KeyRange(normalKeys), KeyRange(normalKeys), LiteralStringRef("1")));
+				wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(normalKeys), LiteralStringRef("1")));
 				wait(tr->commit());
 				printf("Successfully set up blob granule range for normalKeys\n");
 				return Void();

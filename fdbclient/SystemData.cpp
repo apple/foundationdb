@@ -1118,19 +1118,19 @@ UID decodeBlobGranuleMappingValue(ValueRef const& value) {
 	return workerID;
 }
 
-const Value blobGranuleLockValueFor(int64_t epochNum, int64_t seqNum) {
+const Value blobGranuleLockValueFor(int64_t epoch, int64_t seqno) {
 	BinaryWriter wr(Unversioned());
-	wr << epochNum;
-	wr << seqNum;
+	wr << epoch;
+	wr << seqno;
 	return wr.toValue();
 }
 
 std::pair<int64_t, int64_t> decodeBlobGranuleLockValue(const ValueRef& value) {
-	int64_t epochNum, seqNum;
+	int64_t epoch, seqno;
 	BinaryReader reader(value, Unversioned());
-	reader >> epochNum;
-	reader >> seqNum;
-	return std::pair(epochNum, seqNum);
+	reader >> epoch;
+	reader >> seqno;
+	return std::pair(epoch, seqno);
 }
 
 const KeyRangeRef blobWorkerListKeys(LiteralStringRef("\xff/bwList/"), LiteralStringRef("\xff/bwList0"));

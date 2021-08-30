@@ -140,14 +140,33 @@ void getRanges(std::vector<std::pair<KeyRangeRef, bool>>& results, KeyRangeMap<b
 	}
 }
 
+// Assigns and revokes have slightly different semantics. Revokes are idempotent revoking from a particular worker, and
+// will be retried to the same worker. Assigns are not to a specific worker. An initial worker will be chosen, and if it
+// fails, the range will be revoked from that worker and put back in the queue, where it will then eventually be
+// assigned to a different worker.
+struct RangeAssignment {
+	KeyRange keyRange;
+	bool isAssign;
+};
+
 struct BlobManagerData {
 	UID id;
 	Database db;
 
+	std::map<UID, BlobWorkerInterface> workersById;
+	KeyRangeMap<UID> workerAssignments;
+	KeyRangeMap<bool> knownBlobRanges;
+
 	int64_t epoch = -1;
 	int64_t seqNo = 1;
 
-	BlobManagerData(UID id, Database db) : id(id), db(db) {}
+	Promise<Void> iAmReplaced;
+
+	// The order maintained here is important. The order ranges are put into the promise stream is the order they get
+	// assigned sequence numbers
+	PromiseStream<RangeAssignment> rangesToAssign;
+
+	BlobManagerData(UID id, Database db) : id(id), db(db), knownBlobRanges(false, normalKeys.end) {}
 	~BlobManagerData() { printf("Destroying blob manager data for %s\n", id.toString().c_str()); }
 };
 
@@ -203,33 +222,108 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitNewRange(Reference<ReadYourWrit
 	}
 }
 
-ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData,
-                                     BlobWorkerInterface bwInterf,
-                                     KeyRange range,
-                                     Promise<Void> iAmReplaced,
-                                     bool isAssign) {
+static UID pickWorkerForAssign(BlobManagerData* bmData) {
+	// FIXME: Right now just picks a random worker, this is very suboptimal
+	int idx = deterministicRandom()->randomInt(0, bmData->workersById.size());
+
+	auto it = bmData->workersById.begin();
+	while (idx > 0 && it != bmData->workersById.end()) {
+		idx--;
+	}
+	return it->first;
+}
+
+ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment assignment, UID workerID, int64_t seqNo) {
 	AssignBlobRangeRequest req;
-	req.keyRange = KeyRangeRef(StringRef(req.arena, range.begin), StringRef(req.arena, range.end));
+	req.keyRange =
+	    KeyRangeRef(StringRef(req.arena, assignment.keyRange.begin), StringRef(req.arena, assignment.keyRange.end));
 	req.managerEpoch = bmData->epoch;
-	req.managerSeqno = bmData->seqNo;
-	req.isAssign = isAssign;
+	req.managerSeqno = seqNo;
+	req.isAssign = assignment.isAssign;
 
 	++bmData->seqNo;
 
 	printf("BM %s %s range [%s - %s) @ (%lld, %lld)\n",
-	       bwInterf.id().toString().c_str(),
+	       workerID.toString().c_str(),
 	       req.isAssign ? "assigning" : "revoking",
 	       req.keyRange.begin.printable().c_str(),
 	       req.keyRange.end.printable().c_str(),
 	       req.managerEpoch,
 	       req.managerSeqno);
 
-	AssignBlobRangeReply rep = wait(bwInterf.assignBlobRangeRequest.getReply(req));
-	if (!rep.epochOk) {
-		printf("BM heard from BW that there is a new manager with higher epoch\n");
-		iAmReplaced.send(Void());
+	try {
+		AssignBlobRangeReply rep = wait(bmData->workersById[workerID].assignBlobRangeRequest.getReply(req));
+		if (!rep.epochOk) {
+			printf("BM heard from BW that there is a new manager with higher epoch\n");
+			if (bmData->iAmReplaced.canBeSet()) {
+				bmData->iAmReplaced.send(Void());
+			}
+		}
+	} catch (Error& e) {
+		// TODO confirm: using reliable delivery this should only trigger if the worker is marked as failed, right?
+		// So assignment needs to be retried elsewhere, and a revoke is trivially complete
+		if (assignment.isAssign) {
+			printf("BM got error assigning range [%s - %s) to worker %s, requeueing\n",
+			       assignment.keyRange.begin.printable().c_str(),
+			       assignment.keyRange.end.printable().c_str());
+			// re-send revoke to queue to handle range being un-assigned from that worker before the new one
+			RangeAssignment failedRevoke;
+			failedRevoke.keyRange = assignment.keyRange;
+			failedRevoke.isAssign = false;
+			bmData->rangesToAssign.send(failedRevoke);
+			bmData->rangesToAssign.send(assignment);
+			// FIXME: improvement would be to add history of failed workers to assignment so it can try other ones first
+		} else {
+			printf("BM got error revoking range [%s - %s) from worker %s, ignoring\n",
+			       assignment.keyRange.begin.printable().c_str(),
+			       assignment.keyRange.end.printable().c_str());
+		}
 	}
 	return Void();
+}
+
+ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
+	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> collection = actorCollection(addActor.getFuture());
+	loop {
+		RangeAssignment assignment = waitNext(bmData->rangesToAssign.getFuture());
+		int64_t seqNo = bmData->seqNo;
+		bmData->seqNo++;
+
+		// modify the in-memory assignment data structures, and send request off to worker
+		UID workerId;
+		if (assignment.isAssign) {
+			// Ensure range isn't currently assigned anywhere, and there is only 1 intersecting range
+			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
+			int count = 0;
+			for (auto& it : currentAssignments) {
+				ASSERT(it.value() == UID());
+				count++;
+			}
+			ASSERT(count == 1);
+
+			workerId = pickWorkerForAssign(bmData);
+			bmData->workerAssignments.insert(assignment.keyRange, workerId);
+
+			// FIXME: if range is assign, have some sort of semaphore for outstanding assignments so we don't assign
+			// a ton ranges at once and blow up FDB with reading initial snapshots.
+			addActor.send(doRangeAssignment(bmData, assignment, workerId, seqNo));
+		} else {
+			// Revoking a range could be a large range that contains multiple ranges.
+			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
+			for (auto& it : currentAssignments) {
+				// ensure range doesn't truncate existing ranges
+				ASSERT(it.begin() >= assignment.keyRange.begin);
+				ASSERT(it.end() <= assignment.keyRange.begin);
+
+				// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part of
+				// the same logical change
+				addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
+			}
+
+			bmData->workerAssignments.insert(assignment.keyRange, UID());
+		}
+	}
 }
 
 // TODO eventually CC should probably do this and pass it as part of recruitment?
@@ -259,33 +353,9 @@ ACTOR Future<int64_t> acquireManagerLock(BlobManagerData* bmData) {
 	}
 }
 
-// TODO MOVE ELSEWHERE
-// TODO replace locality with full BlobManagerInterface eventually
-ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	state BlobManagerData self(deterministicRandom()->randomUniqueID(),
-	                           openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
-
-	state KeyRangeMap<bool> knownBlobRanges(false, normalKeys.end);
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> collection = actorCollection(addActor.getFuture());
-
-	// TODO remove once we have persistence + failure detection
-	printf("Blob manager nuking previous workers and range assignments on startup\n");
-	wait(nukeBlobWorkerData(&self));
-	printf("Blob manager nuked previous workers and range assignments\n");
-
-	printf("Blob manager taking lock\n");
-	int64_t _epoch = wait(acquireManagerLock(&self));
-	self.epoch = _epoch;
-	printf("Blob manager acquired lock at epoch %lld\n", _epoch);
-
-	state BlobWorkerInterface bwInterf(locality, deterministicRandom()->randomUniqueID());
-	bwInterf.initEndpoints();
-	state Future<Void> bwFuture = blobWorker(bwInterf, dbInfo);
-	state Promise<Void> iAmReplaced; // TODO finish
-
+ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 	loop {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self.db);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
 		printf("Blob manager checking for range updates\n");
 		loop {
@@ -303,19 +373,24 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 				VectorRef<KeyRangeRef> rangesToAdd;
 				VectorRef<KeyRangeRef> rangesToRemove;
 				// TODO hack for simulation
-				updateClientBlobRanges(&knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
+				updateClientBlobRanges(&bmData->knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
 
 				for (KeyRangeRef range : rangesToRemove) {
 					printf("BM Got range to revoke [%s - %s)\n",
 					       range.begin.printable().c_str(),
 					       range.end.printable().c_str());
 
-					addActor.send(doRangeAssignment(&self, bwInterf, range, iAmReplaced, false));
+					RangeAssignment assignment;
+					assignment.keyRange = range;
+					assignment.isAssign = false;
+
+					bmData->rangesToAssign.send(assignment);
 				}
 
 				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
+					// assert that this range contains no currently assigned ranges in this
 					splitFutures.push_back(splitNewRange(tr, range));
 				}
 
@@ -325,28 +400,67 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 					       splits[0].printable().c_str(),
 					       splits[splits.size() - 1].printable().c_str(),
 					       splits.size() - 1);
+
 					for (int i = 0; i < splits.size() - 1; i++) {
 						KeyRange range = KeyRange(KeyRangeRef(splits[i], splits[i + 1]));
 						printf("    [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
-						addActor.send(doRangeAssignment(&self, bwInterf, range, iAmReplaced, true));
+
+						RangeAssignment assignment;
+						assignment.keyRange = range;
+						assignment.isAssign = true;
+
+						bmData->rangesToAssign.send(assignment);
 					}
 				}
 
 				state Future<Void> watchFuture = tr->watch(blobRangeChangeKey);
 				wait(tr->commit());
 				printf("Blob manager done processing client ranges, awaiting update\n");
-				choose {
-					when(wait(watchFuture)) {}
-					when(wait(iAmReplaced.getFuture())) {
-						printf("Blob Manager exiting because it is replaced\n");
-						return Void();
-					}
-				}
+				wait(watchFuture);
 				break;
 			} catch (Error& e) {
 				printf("Blob manager got error looking for range updates %s\n", e.name());
 				wait(tr->onError(e));
 			}
+		}
+	}
+}
+
+// TODO MOVE ELSEWHERE
+// TODO replace locality with full BlobManagerInterface eventually
+ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state BlobManagerData self(deterministicRandom()->randomUniqueID(),
+	                           openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
+
+	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> collection = actorCollection(addActor.getFuture());
+
+	// TODO remove once we have persistence + failure detection
+	printf("Blob manager nuking previous workers and range assignments on startup\n");
+	wait(nukeBlobWorkerData(&self));
+	printf("Blob manager nuked previous workers and range assignments\n");
+
+	printf("Blob manager taking lock\n");
+	int64_t _epoch = wait(acquireManagerLock(&self));
+	self.epoch = _epoch;
+	printf("Blob manager acquired lock at epoch %lld\n", _epoch);
+
+	int numWorkers = 2;
+	for (int i = 0; i < numWorkers; i++) {
+		state BlobWorkerInterface bwInterf(locality, deterministicRandom()->randomUniqueID());
+		bwInterf.initEndpoints();
+		self.workersById.insert({ bwInterf.id(), bwInterf });
+		addActor.send(blobWorker(bwInterf, dbInfo));
+	}
+
+	addActor.send(monitorClientRanges(&self));
+	addActor.send(rangeAssigner(&self));
+
+	// TODO probably other things here eventually
+	loop choose {
+		when(wait(self.iAmReplaced.getFuture())) {
+			printf("Blob Manager exiting because it is replaced\n");
+			return Void();
 		}
 	}
 }

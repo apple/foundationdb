@@ -54,8 +54,8 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	uint64_t currentDeltaBytes = 0;
 	Arena deltaArena;
 
-	int64_t lockEpochNum;
-	int64_t lockSeqNum;
+	int64_t lockEpoch;
+	int64_t lockSeqno;
 
 	KeyRange keyRange;
 	Future<Void> assignFuture;
@@ -82,13 +82,13 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 
 // for a range that may or may not be set
 struct GranuleRangeMetadata {
-	int64_t lastEpochNum;
-	int64_t lastSeqNum;
+	int64_t lastEpoch;
+	int64_t lastSeqno;
 	Reference<GranuleMetadata> activeMetadata;
 
-	GranuleRangeMetadata() : lastEpochNum(0), lastSeqNum(0) {}
-	GranuleRangeMetadata(int64_t epochNum, int64_t seqNum, Reference<GranuleMetadata> activeMetadata)
-	  : lastEpochNum(epochNum), lastSeqNum(seqNum), activeMetadata(activeMetadata) {}
+	GranuleRangeMetadata() : lastEpoch(0), lastSeqno(0) {}
+	GranuleRangeMetadata(int64_t epoch, int64_t seqno, Reference<GranuleMetadata> activeMetadata)
+	  : lastEpoch(epoch), lastSeqno(seqno), activeMetadata(activeMetadata) {}
 };
 
 struct BlobWorkerData {
@@ -111,28 +111,28 @@ struct BlobWorkerData {
 };
 
 // returns true if we can acquire it
-static void acquireGranuleLock(int64_t epochNum, int64_t seqNum, std::pair<int64_t, int64_t> prevOwner) {
+static void acquireGranuleLock(int64_t epoch, int64_t seqno, std::pair<int64_t, int64_t> prevOwner) {
 	// returns true if our lock (E, S) >= (Eprev, Sprev)
-	if (epochNum < prevOwner.first || (epochNum == prevOwner.first && seqNum < prevOwner.second)) {
+	if (epoch < prevOwner.first || (epoch == prevOwner.first && seqno < prevOwner.second)) {
 		printf("Lock acquire check failed. Proposed (%lld, %lld) < previous (%lld, %lld)\n",
-		       epochNum,
-		       seqNum,
+		       epoch,
+		       seqno,
 		       prevOwner.first,
 		       prevOwner.second);
 		throw granule_assignment_conflict();
 	}
 }
 
-static void checkGranuleLock(int64_t epochNum, int64_t seqNum, std::pair<int64_t, int64_t> currentOwner) {
+static void checkGranuleLock(int64_t epoch, int64_t seqno, std::pair<int64_t, int64_t> currentOwner) {
 	// sanity check - lock value should never go backwards because of acquireGranuleLock
-	ASSERT(epochNum <= currentOwner.first);
-	ASSERT(epochNum < currentOwner.first || (epochNum == currentOwner.first && seqNum <= currentOwner.second));
+	ASSERT(epoch <= currentOwner.first);
+	ASSERT(epoch < currentOwner.first || (epoch == currentOwner.first && seqno <= currentOwner.second));
 
 	// returns true if we still own the lock, false if someone else does
-	if (epochNum != currentOwner.first || seqNum != currentOwner.second) {
+	if (epoch != currentOwner.first || seqno != currentOwner.second) {
 		printf("Lock assignment check failed. Expected (%lld, %lld), got (%lld, %lld)\n",
-		       epochNum,
-		       seqNum,
+		       epoch,
+		       seqno,
 		       currentOwner.first,
 		       currentOwner.second);
 		throw granule_assignment_conflict();
@@ -147,14 +147,14 @@ static Key granuleLockKey(KeyRange granuleRange) {
 
 ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> tr,
                                            KeyRange granuleRange,
-                                           int64_t epochNum,
-                                           int64_t seqNum) {
+                                           int64_t epoch,
+                                           int64_t seqno) {
 	state Key lockKey = granuleLockKey(granuleRange);
 	Optional<Value> lockValue = wait(tr->get(lockKey));
 
 	ASSERT(lockValue.present());
 	std::pair<int64_t, int64_t> currentOwner = decodeBlobGranuleLockValue(lockValue.get());
-	checkGranuleLock(epochNum, seqNum, currentOwner);
+	checkGranuleLock(epoch, seqno, currentOwner);
 
 	// if we still own the lock, add a conflict range in case anybody else takes it over while we add this file
 	tr->addReadConflictRange(singleKeyRange(lockKey));
@@ -171,8 +171,8 @@ static Value getFileValue(std::string fname, int64_t offset, int64_t length) {
 // TODO add granule locks
 ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
                                            KeyRange keyRange,
-                                           int64_t epochNum,
-                                           int64_t seqNum,
+                                           int64_t epoch,
+                                           int64_t seqno,
                                            GranuleDeltas const* deltasToWrite,
                                            Version currentDeltaVersion) {
 
@@ -193,7 +193,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				wait(readAndCheckGranuleLock(tr, keyRange, epochNum, seqNum));
+				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				Tuple deltaFileKey;
 				deltaFileKey.append(keyRange.begin).append(keyRange.end);
 				deltaFileKey.append(LiteralStringRef("delta")).append(currentDeltaVersion);
@@ -221,8 +221,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 
 ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
                                           KeyRange keyRange,
-                                          int64_t epochNum,
-                                          int64_t seqNum,
+                                          int64_t epoch,
+                                          int64_t seqno,
                                           Version version,
                                           PromiseStream<RangeResult> rows) {
 	// TODO some sort of directory structure would be useful maybe?
@@ -284,7 +284,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				wait(readAndCheckGranuleLock(tr, keyRange, epochNum, seqNum));
+				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				tr->set(snapshotFileKey.getDataAsStandalone().withPrefix(blobGranuleFileKeys.begin),
 				        getFileValue(fname, 0, serialized.size()));
 				wait(tr->commit());
@@ -321,7 +321,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(BlobWorkerData* bwData, R
 			state Version readVersion = wait(tr->getReadVersion());
 			state PromiseStream<RangeResult> rowsStream;
 			state Future<BlobFileIndex> snapshotWriter = writeSnapshot(
-			    bwData, metadata->keyRange, metadata->lockEpochNum, metadata->lockSeqNum, readVersion, rowsStream);
+			    bwData, metadata->keyRange, metadata->lockEpoch, metadata->lockSeqno, readVersion, rowsStream);
 
 			state Key beginKey = metadata->keyRange.begin;
 			loop {
@@ -390,7 +390,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(BlobWorkerData* bwData, Reference<Gr
 		try {
 			state PromiseStream<RangeResult> rowsStream;
 			state Future<BlobFileIndex> snapshotWriter = writeSnapshot(
-			    bwData, metadata->keyRange, metadata->lockEpochNum, metadata->lockSeqNum, version, rowsStream);
+			    bwData, metadata->keyRange, metadata->lockEpoch, metadata->lockSeqno, version, rowsStream);
 			RangeResult newGranule = wait(readBlobGranule(chunk, metadata->keyRange, version, bwData->bstore));
 			rowsStream.send(std::move(newGranule));
 			rowsStream.sendError(end_of_stream());
@@ -479,8 +479,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					       metadata->currentDeltaBytes);
 					BlobFileIndex newDeltaFile = wait(writeDeltaFile(bwData,
 					                                                 metadata->keyRange,
-					                                                 metadata->lockEpochNum,
-					                                                 metadata->lockSeqNum,
+					                                                 metadata->lockEpoch,
+					                                                 metadata->lockSeqno,
 					                                                 &metadata->currentDeltas,
 					                                                 metadata->currentDeltaVersion));
 
@@ -641,10 +641,7 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* bwData, const BlobGranu
 }
 
 // TODO list of key ranges in the future to batch
-ACTOR Future<Void> persistAssignWorkerRange(BlobWorkerData* bwData,
-                                            KeyRange keyRange,
-                                            int64_t epochNum,
-                                            int64_t seqNum) {
+ACTOR Future<Void> persistAssignWorkerRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t epoch, int64_t seqno) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 	state Key lockKey = granuleLockKey(keyRange);
 
@@ -658,10 +655,10 @@ ACTOR Future<Void> persistAssignWorkerRange(BlobWorkerData* bwData,
 			Optional<Value> prevLockValue = wait(tr->get(lockKey));
 			if (prevLockValue.present()) {
 				std::pair<int64_t, int64_t> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
-				acquireGranuleLock(epochNum, seqNum, prevOwner);
+				acquireGranuleLock(epoch, seqno, prevOwner);
 			} // else we are first, no need to check for owner conflict
 
-			tr->set(lockKey, blobGranuleLockValueFor(epochNum, seqNum));
+			tr->set(lockKey, blobGranuleLockValueFor(epoch, seqno));
 
 			wait(krmSetRangeCoalescing(
 			    tr, blobGranuleMappingKeys.begin, keyRange, KeyRange(allKeys), blobGranuleMappingValueFor(bwData->id)));
@@ -686,30 +683,29 @@ ACTOR Future<Void> persistAssignWorkerRange(BlobWorkerData* bwData,
 
 static GranuleRangeMetadata constructActiveBlobRange(BlobWorkerData* bwData,
                                                      KeyRange keyRange,
-                                                     int64_t epochNum,
-                                                     int64_t seqNum) {
+                                                     int64_t epoch,
+                                                     int64_t seqno) {
 	printf("Creating new worker metadata for range [%s - %s)\n",
 	       keyRange.begin.printable().c_str(),
 	       keyRange.end.printable().c_str());
 
 	Reference<GranuleMetadata> newMetadata = makeReference<GranuleMetadata>();
 	newMetadata->keyRange = keyRange;
-	newMetadata->lockEpochNum = epochNum;
-	newMetadata->lockSeqNum = seqNum;
-	newMetadata->assignFuture = persistAssignWorkerRange(bwData, keyRange, epochNum, seqNum);
+	newMetadata->lockEpoch = epoch;
+	newMetadata->lockSeqno = seqno;
+	newMetadata->assignFuture = persistAssignWorkerRange(bwData, keyRange, epoch, seqno);
 	newMetadata->fileUpdaterFuture = blobGranuleUpdateFiles(bwData, newMetadata);
 
-	return GranuleRangeMetadata(epochNum, seqNum, newMetadata);
+	return GranuleRangeMetadata(epoch, seqno, newMetadata);
 }
 
-static GranuleRangeMetadata constructInactiveBlobRange(int64_t epochNum, int64_t seqNum) {
-	return GranuleRangeMetadata(epochNum, seqNum, Reference<GranuleMetadata>());
+static GranuleRangeMetadata constructInactiveBlobRange(int64_t epoch, int64_t seqno) {
+	return GranuleRangeMetadata(epoch, seqno, Reference<GranuleMetadata>());
 }
 
 // ignore stale assignments and make repeating the same one idempotent
-static bool newerRangeAssignment(GranuleRangeMetadata oldMetadata, int64_t epochNum, int64_t seqNum) {
-	return epochNum > oldMetadata.lastEpochNum ||
-	       (epochNum == oldMetadata.lastEpochNum && seqNum > oldMetadata.lastSeqNum);
+static bool newerRangeAssignment(GranuleRangeMetadata oldMetadata, int64_t epoch, int64_t seqno) {
+	return epoch > oldMetadata.lastEpoch || (epoch == oldMetadata.lastEpoch && seqno > oldMetadata.lastSeqno);
 }
 
 // TODO unit test this assignment, particularly out-of-order insertions!
@@ -725,13 +721,13 @@ static bool newerRangeAssignment(GranuleRangeMetadata oldMetadata, int64_t epoch
 // in, it is a no-op, but updates the sequence number. Similarly, if a worker gets an assign message for any range that
 // already has a higher sequence number, that range was either revoked, or revoked and then re-assigned. Either way,
 // this assignment is no longer valid.
-static void changeBlobRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t epochNum, int64_t seqNum, bool active) {
+static void changeBlobRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t epoch, int64_t seqno, bool active) {
 	printf("Changing range for [%s - %s): %s @ (%lld, %lld)\n",
 	       keyRange.begin.printable().c_str(),
 	       keyRange.end.printable().c_str(),
 	       active ? "T" : "F",
-	       epochNum,
-	       seqNum);
+	       epoch,
+	       seqno);
 
 	// For each range that intersects this update:
 	// If the identical range already exists at the same assignment sequence nunmber, this is a noop
@@ -744,20 +740,20 @@ static void changeBlobRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t e
 
 	auto ranges = bwData->granuleMetadata.intersectingRanges(keyRange);
 	for (auto& r : ranges) {
-		if (r.value().lastEpochNum == epochNum && r.value().lastSeqNum) {
+		if (r.value().lastEpoch == epoch && r.value().lastSeqno) {
 			// applied the same assignment twice, make idempotent
 			ASSERT(r.begin() == keyRange.begin);
 			ASSERT(r.end() == keyRange.end);
 			return;
 		}
-		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epochNum, seqNum);
+		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
 		if (r.value().activeMetadata.isValid() && thisAssignmentNewer) {
 			// cancel actors for old range and clear reference
 			printf("  [%s - %s): @ (%lld, %lld) (cancelling)\n",
 			       r.begin().printable().c_str(),
 			       r.end().printable().c_str(),
-			       r.value().lastEpochNum,
-			       r.value().lastSeqNum);
+			       r.value().lastEpoch,
+			       r.value().lastSeqno);
 			r.value().activeMetadata->cancel();
 			r.value().activeMetadata.clear();
 		} else if (!thisAssignmentNewer) {
@@ -768,33 +764,33 @@ static void changeBlobRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t e
 
 	// if range is active, and isn't surpassed by a newer range already, insert an active range
 	GranuleRangeMetadata newMetadata = (active && newerRanges.empty())
-	                                       ? constructActiveBlobRange(bwData, keyRange, epochNum, seqNum)
-	                                       : constructInactiveBlobRange(epochNum, seqNum);
+	                                       ? constructActiveBlobRange(bwData, keyRange, epoch, seqno)
+	                                       : constructInactiveBlobRange(epoch, seqno);
 	bwData->granuleMetadata.insert(keyRange, newMetadata);
 	printf("Inserting new range [%s - %s): %s @ (%lld, %lld)\n",
 	       keyRange.begin.printable().c_str(),
 	       keyRange.end.printable().c_str(),
 	       newMetadata.activeMetadata.isValid() ? "T" : "F",
-	       newMetadata.lastEpochNum,
-	       newMetadata.lastSeqNum);
+	       newMetadata.lastEpoch,
+	       newMetadata.lastSeqno);
 
 	for (auto& it : newerRanges) {
 		printf("Re-inserting newer range [%s - %s): %s @ (%lld, %lld)\n",
 		       it.first.begin.printable().c_str(),
 		       it.first.end.printable().c_str(),
 		       it.second.activeMetadata.isValid() ? "T" : "F",
-		       it.second.lastEpochNum,
-		       it.second.lastSeqNum);
+		       it.second.lastEpoch,
+		       it.second.lastSeqno);
 		bwData->granuleMetadata.insert(it.first, it.second);
 	}
 }
 
-static void handleAssignedRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t epochNum, int64_t seqNum) {
-	changeBlobRange(bwData, keyRange, epochNum, seqNum, true);
+static void handleAssignedRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t epoch, int64_t seqno) {
+	changeBlobRange(bwData, keyRange, epoch, seqno, true);
 }
 
-static void handleRevokedRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t epochNum, int64_t seqNum) {
-	changeBlobRange(bwData, keyRange, epochNum, seqNum, false);
+static void handleRevokedRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t epoch, int64_t seqno) {
+	changeBlobRange(bwData, keyRange, epoch, seqno, false);
 }
 
 ACTOR Future<Void> registerBlobWorker(BlobWorkerData* bwData, BlobWorkerInterface interf) {
