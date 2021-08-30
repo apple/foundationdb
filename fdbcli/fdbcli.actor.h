@@ -28,6 +28,7 @@
 #elif !defined(FDBCLI_FDBCLI_ACTOR_H)
 #define FDBCLI_FDBCLI_ACTOR_H
 
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IClientApi.h"
 #include "flow/Arena.h"
 
@@ -61,30 +62,85 @@ struct CommandFactory {
 extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
+// datadistribution
+extern const KeyRef ddModeSpecialKey;
+extern const KeyRef ddIgnoreRebalanceSpecialKey;
 // maintenance
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
-
+// setclass
+extern const KeyRangeRef processClassSourceSpecialKeyRange;
+extern const KeyRangeRef processClassTypeSpecialKeyRange;
+// Other special keys
+inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
 // help functions (Copied from fdbcli.actor.cpp)
+// decode worker interfaces
+ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                Reference<FlowLock> connectLock,
+                                KeyValue kv);
 
 // compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
 // print the usage of the specified command
 void printUsage(StringRef command);
+// Pre: tr failed with special_keys_api_failure error
+// Read the error message special key and return the message
+ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
+// Using \xff\xff/worker_interfaces/ special key, get all worker interfaces
+ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
+                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+// Deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> k-v pair and verify by a RPC call
+ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                         Reference<FlowLock> connectLock,
+                                         KeyValue kv);
 
 // All fdbcli commands (alphabetically)
 // advanceversion command
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// cache_range command
+ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
-ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens);
+ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
+                                                std::vector<StringRef> tokens,
+                                                bool intrans);
+// datadistribution command
+ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// expensive_data_check command
+ACTOR Future<bool> expensiveDataCheckCommandActor(
+    Reference<IDatabase> db,
+    Reference<ITransaction> tr,
+    std::vector<StringRef> tokens,
+    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// kill command
+ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
+                                    Reference<ITransaction> tr,
+                                    std::vector<StringRef> tokens,
+                                    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // maintenance command
+ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
+ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
+                                    bool printWarning = false,
+                                    bool clearSSFailureZoneString = false);
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// profile command
+ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans);
+// setclass command
+ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
 ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// suspend command
+ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
+                                       Reference<ITransaction> tr,
+                                       std::vector<StringRef> tokens,
+                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// triggerteaminfolog command
+ACTOR Future<Void> triggerddteaminfologCommandActor(Reference<IDatabase> db);
+// tssq command
+ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 

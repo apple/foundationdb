@@ -2040,7 +2040,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 ServerCoordinators coordinators,
                                 LifetimeToken lifetime,
                                 bool forceRecovery) {

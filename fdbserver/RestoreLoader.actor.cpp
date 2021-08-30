@@ -892,8 +892,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 					MutationRef mutation = mvector[splitMutationIndex];
 					UID applierID = nodeIDs[splitMutationIndex];
 					DEBUG_MUTATION("RestoreLoaderSplittedMutation", commitVersion.version, mutation)
-					    .detail("Version", commitVersion.toString())
-					    .detail("Mutation", mutation);
+					    .detail("Version", commitVersion.toString());
 					// CAREFUL: The splitted mutations' lifetime is shorter than the for-loop
 					// Must use deep copy for splitted mutations
 					applierVersionedMutationsBuffer[applierID].push_back_deep(
@@ -911,8 +910,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 
 				DEBUG_MUTATION("RestoreLoaderSendMutation", commitVersion.version, kvm)
 				    .detail("Applier", applierID)
-				    .detail("Version", commitVersion.toString())
-				    .detail("Mutation", kvm);
+				    .detail("SubVersion", commitVersion.toString());
 				// kvm data is saved in pkvOps in batchData, so shallow copy is ok here.
 				applierVersionedMutationsBuffer[applierID].push_back(applierVersionedMutationsBuffer[applierID].arena(),
 				                                                     VersionedMutation(kvm, commitVersion));
@@ -996,7 +994,7 @@ void splitMutation(const KeyRangeMap<UID>& krMap,
                    VectorRef<MutationRef>& mvector,
                    Arena& nodeIDs_arena,
                    VectorRef<UID>& nodeIDs) {
-	TraceEvent(SevDebug, "FastRestoreSplitMutation").detail("Mutation", m.toString());
+	TraceEvent(SevDebug, "FastRestoreSplitMutation").detail("Mutation", m);
 	ASSERT(mvector.empty());
 	ASSERT(nodeIDs.empty());
 	auto r = krMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
@@ -1527,15 +1525,15 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 		KeyRange krange(KeyRangeRef(result.param1, result.param2));
 		KeyRange krange2(KeyRangeRef(result2.param1, result2.param2));
 		TraceEvent("Result")
-		    .detail("KeyRange1", krange.toString())
-		    .detail("KeyRange2", krange2.toString())
+		    .detail("KeyRange1", krange)
+		    .detail("KeyRange2", krange2)
 		    .detail("ApplierID1", applierID)
 		    .detail("ApplierID2", applierID2);
 		if (krange != krange2 || applierID != applierID2) {
 			TraceEvent(SevError, "IncorrectResult")
-			    .detail("Mutation", mutation.toString())
-			    .detail("KeyRange1", krange.toString())
-			    .detail("KeyRange2", krange2.toString())
+			    .detail("Mutation", mutation)
+			    .detail("KeyRange1", krange)
+			    .detail("KeyRange2", krange2)
 			    .detail("ApplierID1", applierID)
 			    .detail("ApplierID2", applierID2);
 		}

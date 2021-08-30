@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/Notified.h"
+#include "fdbclient/TransactionLineage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -120,8 +121,8 @@ struct GrvProxyStats {
 	                                                    LiteralStringRef("GrvConfirmEpochLive"),
 	                                                    Histogram::Unit::microseconds)),
 	    grvGetCommittedVersionRpcDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                       LiteralStringRef("GrvGetCommittedVersionRpc"),
-	                                       Histogram::Unit::microseconds)) {
+	                                                          LiteralStringRef("GrvGetCommittedVersionRpc"),
+	                                                          Histogram::Unit::microseconds)) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
 		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });
@@ -401,8 +402,12 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
                                                GrvProxyStats* stats,
                                                GrvTransactionRateInfo* batchRateInfo,
                                                TransactionTagMap<uint64_t>* transactionTagCounter) {
+	getCurrentLineage()->modify(&TransactionLineage::operation) =
+	    TransactionLineage::Operation::GetConsistentReadVersion;
 	loop choose {
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
+			// auto lineage = make_scoped_lineage(&TransactionLineage::txID, req.spanContext.first());
+			// getCurrentLineage()->modify(&TransactionLineage::txID) =
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			bool canBeQueued = true;
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
@@ -553,7 +558,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	}
 
 	state double grvConfirmEpochLive = now();
- 	grvProxyData->stats.grvConfirmEpochLiveDist->sampleSeconds(grvConfirmEpochLive - grvStart);
+	grvProxyData->stats.grvConfirmEpochLiveDist->sampleSeconds(grvConfirmEpochLive - grvStart);
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
 		    "TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.confirmEpochLive");
@@ -728,6 +733,8 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state Span span;
 
 	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
+	getCurrentLineage()->modify(&TransactionLineage::operation) =
+	    TransactionLineage::Operation::GetConsistentReadVersion;
 	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
 	addActor.send(getRate(proxy.id(),

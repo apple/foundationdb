@@ -456,6 +456,11 @@ public:
 	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
 	                             Version readVersion,
 	                             VersionVector& latestCommitVersions);
+
+	// used in template functions to create a transaction
+	using TransactionT = ReadYourWritesTransaction;
+	Reference<TransactionT> createTransaction();
+
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 };

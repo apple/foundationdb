@@ -23,7 +23,7 @@
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
 
-#define init(knob, value) initKnob(knob, value, #knob)
+#define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
 ClientKnobs::ClientKnobs(Randomize randomize) {
 	initialize(randomize);
