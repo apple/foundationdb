@@ -791,8 +791,6 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
 	wait(newSeedServers(self, recruits, seedServers));
-	state vector<Standalone<CommitTransactionRef>> confChanges;
-	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits));
 
 	// Recruit TLog groups
 	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
@@ -809,7 +807,10 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(
 			self->tLogGroupCollection->assignStorageTeam(teamId, group);
 		}
 	}
-	wait(newTLogServers(self, recruits, oldLogSystem, &confChanges));
+
+	state vector<Standalone<CommitTransactionRef>> confChanges;
+	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
+	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
 	return confChanges;
 }
