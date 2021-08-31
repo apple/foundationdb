@@ -46,40 +46,39 @@ extern bool g_crashOnError;
 namespace file_converter {
 
 void printDecodeUsage() {
-	std::cout
-	    << "Decoder for FoundationDB backup mutation logs.\n"
-	       "Usage: fdbdecode  [OPTIONS]\n"
-	       "  -r, --container URL\n"
-	       "                 Backup container URL, e.g., file:///some/path/.\n"
-	       "  -i, --input    FILE\n"
-	       "                 Log file filter, only matched files are decoded.\n"
-	       "  --log          Enables trace file logging for the CLI session.\n"
-	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
-	       "                 unspecified, defaults to the current directory. Has\n"
-	       "                 no effect unless --log is specified.\n"
-	       "  --loggroup     LOG_GROUP\n"
-	       "                 Sets the LogGroup field with the specified value for all\n"
-	       "                 events in the trace output (defaults to `default').\n"
-	       "  --trace_format FORMAT\n"
-	       "                 Select the format of the trace files, xml (the default) or json.\n"
-	       "                 Has no effect unless --log is specified.\n"
-	       "  --crash        Crash on serious error.\n"
-	       "  --blob_credentials FILE\n"
-	       "                 File containing blob credentials in JSON format.\n"
-	       "                 The same credential format/file fdbbackup uses.\n"
+	std::cout << "Decoder for FoundationDB backup mutation logs.\n"
+	             "Usage: fdbdecode  [OPTIONS]\n"
+	             "  -r, --container URL\n"
+	             "                 Backup container URL, e.g., file:///some/path/.\n"
+	             "  -i, --input    FILE\n"
+	             "                 Log file filter, only matched files are decoded.\n"
+	             "  --log          Enables trace file logging for the CLI session.\n"
+	             "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	             "                 unspecified, defaults to the current directory. Has\n"
+	             "                 no effect unless --log is specified.\n"
+	             "  --loggroup     LOG_GROUP\n"
+	             "                 Sets the LogGroup field with the specified value for all\n"
+	             "                 events in the trace output (defaults to `default').\n"
+	             "  --trace_format FORMAT\n"
+	             "                 Select the format of the trace files, xml (the default) or json.\n"
+	             "                 Has no effect unless --log is specified.\n"
+	             "  --crash        Crash on serious error.\n"
+	             "  --blob_credentials FILE\n"
+	             "                 File containing blob credentials in JSON format.\n"
+	             "                 The same credential format/file fdbbackup uses.\n"
 #ifndef TLS_DISABLED
 	    TLS_HELP
 #endif
-	       "  --build_flags  Print build information and exit.\n"
-		   "  --list_only    Print file list and exit.\n"
-		   "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
-		   "  --hex_prefix   HEX_PREFIX\n"
-		   "                 The prefix specified in HEX format, e.g., \\x05\\x01.\n"
-		   "  --begin_version_filter BEGIN_VERSION\n"
-		   "                 The version range's begin version (inclusive) for filtering.\n"
-		   "  --end_version_filter END_VERSION\n"
-		   "                 The version range's end version (exclusive) for filtering.\n"
-	       "\n";
+	             "  --build_flags  Print build information and exit.\n"
+	             "  --list_only    Print file list and exit.\n"
+	             "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
+	             "  --hex_prefix   HEX_PREFIX\n"
+	             "                 The prefix specified in HEX format, e.g., \\x05\\x01.\n"
+	             "  --begin_version_filter BEGIN_VERSION\n"
+	             "                 The version range's begin version (inclusive) for filtering.\n"
+	             "  --end_version_filter END_VERSION\n"
+	             "                 The version range's end version (exclusive) for filtering.\n"
+	             "\n";
 	return;
 }
 
@@ -465,9 +464,9 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 			}
 			if (print) {
 				TraceEvent(format("Mutation_%llu_%d", vms.version, sub).c_str(), uid)
-					.detail("Version", vms.version)
-					.setMaxFieldLength(10000)
-					.detail("M", m.toString());
+				    .detail("Version", vms.version)
+				    .setMaxFieldLength(10000)
+				    .detail("M", m.toString());
 				std::cout << vms.version << " " << m.toString() << "\n";
 			}
 		}
@@ -498,7 +497,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	state std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params);
 	printLogFiles("Relevant files are: ", logs);
 
-	if (params.list_only) return Void();
+	if (params.list_only)
+		return Void();
 
 	state int idx = 0;
 	while (idx < logs.size()) {

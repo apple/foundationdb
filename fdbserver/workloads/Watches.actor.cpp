@@ -69,7 +69,7 @@ struct WatchesWorkload : TestWorkload {
 	void getMetrics(vector<PerfMetric>& m) override {
 		if (clientId == 0) {
 			m.push_back(cycles.getMetric());
-			m.push_back(PerfMetric("Mean Latency (ms)", 1000 * cycleLatencies.mean() / nodes, true));
+			m.emplace_back("Mean Latency (ms)", 1000 * cycleLatencies.mean() / nodes, Averaged::True);
 		}
 	}
 

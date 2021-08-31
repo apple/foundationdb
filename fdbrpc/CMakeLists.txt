@@ -20,6 +20,8 @@ set(FDBRPC_SRCS
   Locality.cpp
   Net2FileSystem.cpp
   networksender.actor.h
+  PerfMetric.cpp
+  PerfMetric.h
   QueueModel.cpp
   ReplicationPolicy.cpp
   ReplicationTypes.cpp

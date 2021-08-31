@@ -24,16 +24,19 @@
 
 #include <vector>
 #include <string>
+#include "flow/BooleanParam.h"
 #include "flow/flow.h"
 
 using std::vector;
 
+FDB_DECLARE_BOOLEAN_PARAM(Averaged);
+
 struct PerfMetric {
 	constexpr static FileIdentifier file_identifier = 5980618;
 	PerfMetric() : m_name(""), m_format_code("%.3g"), m_value(0), m_averaged(false) {}
-	PerfMetric(std::string name, double value, bool averaged)
+	PerfMetric(std::string name, double value, Averaged averaged)
 	  : m_name(name), m_format_code("%.3g"), m_value(value), m_averaged(averaged) {}
-	PerfMetric(std::string name, double value, bool averaged, std::string format_code)
+	PerfMetric(std::string name, double value, Averaged averaged, std::string format_code)
 	  : m_name(name), m_format_code(format_code), m_value(value), m_averaged(averaged) {}
 
 	std::string name() const { return m_name; }
@@ -43,7 +46,7 @@ struct PerfMetric {
 	bool averaged() const { return m_averaged; }
 
 	PerfMetric withPrefix(const std::string& pre) {
-		return PerfMetric(pre + name(), value(), averaged(), format_code());
+		return PerfMetric(pre + name(), value(), Averaged{ averaged() }, format_code());
 	}
 
 	template <class Ar>
@@ -62,7 +65,7 @@ struct PerfIntCounter {
 	PerfIntCounter(std::string name, vector<PerfIntCounter*>& v) : name(name), value(0) { v.push_back(this); }
 	void operator+=(int64_t delta) { value += delta; }
 	void operator++() { value += 1; }
-	PerfMetric getMetric() const { return PerfMetric(name, static_cast<double>(value), false, "%.0lf"); }
+	PerfMetric getMetric() const { return PerfMetric(name, static_cast<double>(value), Averaged::False, "%.0lf"); }
 	int64_t getValue() const { return value; }
 	void clear() { value = 0; }
 
@@ -76,7 +79,7 @@ struct PerfDoubleCounter {
 	PerfDoubleCounter(std::string name, vector<PerfDoubleCounter*>& v) : name(name), value(0) { v.push_back(this); }
 	void operator+=(double delta) { value += delta; }
 	void operator++() { value += 1.0; }
-	PerfMetric getMetric() const { return PerfMetric(name, value, false); }
+	PerfMetric getMetric() const { return PerfMetric(name, value, Averaged::False); }
 	double getValue() const { return value; }
 	void clear() { value = 0.0; }
 
