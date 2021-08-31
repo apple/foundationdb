@@ -1995,7 +1995,9 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 		// state is changed Creates a new logSystem representing the (now frozen) epoch No other important side effects.
 		// The writeQuorum in the master info is from the previous configuration
 
-		TraceEvent("epochEnd", dbgid).log();
+		TraceEvent("epochEnd", dbgid)
+		.detail("forceRecovery", *forceRecovery)
+		.detail("prevState.size", prevState.tLogs.size());
 
 		if (!prevState.tLogs.size()) {
 			// This is a brand new database
@@ -2008,6 +2010,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 			wait(Future<Void>(Never()));
 			throw internal_error();
 		}
+
+		TraceEvent("epochEnd after ", dbgid).log();
 
 		if (*forceRecovery) {
 			DBCoreState modifiedState = prevState;

@@ -5088,7 +5088,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			state double recoveryStart = now();
 			state MasterInterface newMaster;
 
-			if (!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
+			if (1) { //!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
 				TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
 				wait(ClusterControllerRecovery::recruitNewMaster(cluster, db, &newMaster));
 			} else {
