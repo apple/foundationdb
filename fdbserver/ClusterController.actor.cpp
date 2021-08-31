@@ -3097,7 +3097,7 @@ public:
 		ac.clear(false);
 		id_worker.clear();
 	}
-};
+}; // class ClusterControllerData
 
 // Assist Cluster Recovery state machine
 namespace ClusterControllerRecovery {
@@ -3965,7 +3965,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<ClusterRecoveryData> self) {
 
 ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 	loop {
-		ChangeCoordinatorsRequest req = waitNext(self->masterInterface.changeCoordinators.getFuture());
+		ChangeCoordinatorsRequest req = waitNext(self->clusterController.changeCoordinators.getFuture());
 		++self->changeCoordinatorsRequests;
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
 
@@ -5059,7 +5059,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	if ( self->resolvers.size() > 1)
 		self->addActor.send(resolutionBalancing(self));
 
-	//self->addActor.send(changeCoordinators(self));
+	self->addActor.send(changeCoordinators(self));
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {
@@ -5080,17 +5080,15 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 	state WorkerFitnessInfo masterWorker;
 	state MasterInterface iMaster;
 
-
 	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
-
 	loop {
 		TraceEvent("CCWDB", cluster->id).log();
 		try {
 			state double recoveryStart = now();
 			state MasterInterface newMaster;
 
-			if (!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
+			if (1) { //!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
 				TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
 				wait(ClusterControllerRecovery::recruitNewMaster(cluster, db, &newMaster));
 			} else {
@@ -5187,9 +5185,9 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					req.reply.send(Void());
 				}
 				when(wait(collection)) {
-					cluster->db.forceMasterFailure.trigger();
 					TraceEvent("CCWDB forceMasterFailure", cluster->id)
 					    .detail("MasterId", cluster->db.serverInfo->get().master.id());
+					cluster->db.forceMasterFailure.trigger();
 				}
 			}
 			wait(spinDelay);

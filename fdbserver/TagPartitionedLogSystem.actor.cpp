@@ -30,6 +30,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<TLogCommitReply>> replies) {
@@ -3048,6 +3049,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 		for (const auto& log : logServers) {
 			logsWaiting.insert(log.first->get().id());
 		}
+
+		TraceEvent("trackJoins", dbgid).log();
 
 		try {
 			loop choose {

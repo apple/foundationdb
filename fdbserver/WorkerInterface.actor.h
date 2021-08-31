@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "flow/network.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKERINTERFACE_ACTOR_G_H)
 #define FDBSERVER_WORKERINTERFACE_ACTOR_G_H
 #include "fdbserver/WorkerInterface.actor.g.h"
@@ -159,6 +160,7 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct TLogRejoinRequest>
 	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new controller
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
+	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -170,7 +172,7 @@ struct ClusterControllerFullInterface {
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
 		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
 		       updateWorkerHealth.getFuture().isReady() || tlogRejoin.getFuture().isReady() ||
-			   notifyBackupWorkerDone.getFuture().isReady();
+			   notifyBackupWorkerDone.getFuture().isReady() || changeCoordinators.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -185,6 +187,7 @@ struct ClusterControllerFullInterface {
 		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
 		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
 		notifyBackupWorkerDone.getEndpoint(TaskPriority::ClusterController);
+		changeCoordinators.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -203,7 +206,8 @@ struct ClusterControllerFullInterface {
 		           getServerDBInfo,
 		           updateWorkerHealth,
 				   tlogRejoin,
-				   notifyBackupWorkerDone);
+				   notifyBackupWorkerDone,
+				   changeCoordinators);
 	}
 };
 

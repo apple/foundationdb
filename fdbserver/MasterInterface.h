@@ -44,10 +44,10 @@ struct MasterInterface {
 	// Report a proxy's committed version.
 	RequestStream<struct ReportRawCommittedVersionRequest> reportLiveCommittedVersion;
 
-	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
-	NetworkAddressList addresses() const { return changeCoordinators.getEndpoint().addresses; }
+	NetworkAddress address() const { return getCommitVersion.getEndpoint().getPrimaryAddress(); }
+	NetworkAddressList addresses() const { return getCommitVersion.getEndpoint().addresses; }
 
-	UID id() const { return changeCoordinators.getEndpoint().token; }
+	UID id() const { return getCommitVersion.getEndpoint().token; }
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
@@ -56,16 +56,16 @@ struct MasterInterface {
 		serializer(ar, locality, waitFailure);
 		if (Archive::isDeserializing) {
 			//tlogRejoin = RequestStream<struct TLogRejoinRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
-			changeCoordinators =
-			    RequestStream<struct ChangeCoordinatorsRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
+			/* changeCoordinators =
+			    RequestStream<struct ChangeCoordinatorsRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1)); */
 			getCommitVersion =
-			    RequestStream<struct GetCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
+			    RequestStream<struct GetCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
 			/* notifyBackupWorkerDone =
 			    RequestStream<struct BackupWorkerDoneRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3)); */
 			getLiveCommittedVersion =
-			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
 			reportLiveCommittedVersion = RequestStream<struct ReportRawCommittedVersionRequest>(
-			    waitFailure.getEndpoint().getAdjustedEndpoint(4));
+			    waitFailure.getEndpoint().getAdjustedEndpoint(3));
 		}
 	}
 
@@ -73,7 +73,7 @@ struct MasterInterface {
 		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
 		streams.push_back(waitFailure.getReceiver());
 		// streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
-		streams.push_back(changeCoordinators.getReceiver());
+		// streams.push_back(changeCoordinators.getReceiver());
 		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
 		// streams.push_back(notifyBackupWorkerDone.getReceiver());
 		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetLiveCommittedVersion));
@@ -234,6 +234,9 @@ struct LifetimeToken {
 
 	bool isStillValid(LifetimeToken const& latestToken, bool isLatestID) const {
 		return ccID == latestToken.ccID && (count >= latestToken.count || isLatestID);
+	}
+	bool isEqual(LifetimeToken const& toCompare) {
+		return ccID.compare(toCompare.ccID) == 0 && count == toCompare.count;
 	}
 	std::string toString() const { return ccID.shortString() + format("#%lld", count); }
 	void operator++() { ++count; }

@@ -19,6 +19,7 @@
  */
 
 #include "flow/Hash3.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -2249,8 +2250,7 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 		}
 
 		if (registerWithCC.isReady()) {
-			if (self->dbInfo->get().masterLifetime.ccID.compare(lastMasterLifetime.ccID) != 0 ||
-				self->dbInfo->get().masterLifetime.count != lastMasterLifetime.count) {
+			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new cluster-contriller, 
 				// which doesn't have our TLogInterface
 				TLogRejoinRequest req(tli);

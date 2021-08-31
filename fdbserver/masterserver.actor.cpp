@@ -2009,10 +2009,6 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	TEST(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())); // Master born doomed
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
 
-	if (SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
-		addActor.send(changeCoordinators(self));
-	}
-
 	try {
 		// state Future<Void> core = SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY ? Never() : masterCore(self);
 
@@ -2038,11 +2034,12 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 				}
 				++self->backupWorkerDoneRequests;
 				req.reply.send(Void());
-			}*/
+			}
 			when(wait(collection)) {
 				ASSERT(false);
 				throw internal_error();
-			}
+			} 
+			*/
 		}
 	} catch (Error& e) {
 		state Error err = e;
