@@ -28,6 +28,8 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
+
+// 
 class FlushNotifier : public rocksdb::EventListener {
 public:
 	FlushNotifier() : persist(nullptr) {}

@@ -43,13 +43,17 @@ public:
 
 class IKeyValueStore : public IClosable {
 public:
+	// A PersistNotification object is sent from the storage engine to a SS to inform the persistence of mutations up
+	// to 'version'.
+	// A construct is used instead of a Version for potential future extension to notifications on other storage events,
+	// e.g., with the following addition, it can represents an event of write without persistence, for more aggressive
+	// pipelining.
+	// enum Type {
+	// 	BufferWrite,
+	// 	Persist,
+	// };
 	struct PersistNotification {
-		enum Type {
-			BufferWrite,
-			Persist,
-		};
-		PersistNotification(Version version) : type(Persist), version(version) {}
-		Type type;
+		PersistNotification(Version version) : version(version) {}
 		Version version;
 	};
 
@@ -59,6 +63,8 @@ public:
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
 
+	// After the Future is ready, the commit is readable from the storage engine, but may not be
+	// persistent.
 	virtual Future<Void> commitAsync(Version version, bool sequential = false) {
 		throw internal_error_msg("Not Implemented Yet.");
 	}
@@ -112,6 +118,7 @@ public:
 protected:
 	virtual ~IKeyValueStore() {}
 
+private:
 	ThreadReturnPromiseStream<PersistNotification> persist;
 };
 
