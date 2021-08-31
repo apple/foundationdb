@@ -2010,7 +2010,7 @@ ACTOR Future<Void> monitorNetworkBusyness() {
 		// It scales linearly from 0 to 1 as the largest burst goes from the start to the saturation threshold.
 		// This allows us to account for saturation that happens in smaller bursts than the measurement interval.
 		//
-		// Burstyness will not be calculated if the saturation threshold is smaller than the start threshold or
+		// Burstiness will not be calculated if the saturation threshold is smaller than the start threshold or
 		// if either value is negative.
 		double burstiness = 0;
 		if (CLIENT_KNOBS->BUSYNESS_SPIKE_START_THRESHOLD >= 0 &&
