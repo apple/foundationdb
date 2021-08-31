@@ -245,7 +245,7 @@ public:
 			    .detail("Filename", filename)
 			    .detail("Refcount", debugGetReferenceCount())
 			    .detail("CanDie", f.isReady());
-			    // .backtrace();
+			// .backtrace();
 			if (f.isReady())
 				delete this;
 			else

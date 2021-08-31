@@ -114,11 +114,11 @@ struct ReadAfterWriteWorkload : KVWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
-		m.emplace_back("Mean Latency (ms)", 1000 * propagationLatency.mean(), true);
-		m.emplace_back("Median Latency (ms, averaged)", 1000 * propagationLatency.median(), true);
-		m.emplace_back("90% Latency (ms, averaged)", 1000 * propagationLatency.percentile(0.90), true);
-		m.emplace_back("99% Latency (ms, averaged)", 1000 * propagationLatency.percentile(0.99), true);
-		m.emplace_back("Max Latency (ms, averaged)", 1000 * propagationLatency.max(), true);
+		m.emplace_back("Mean Latency (ms)", 1000 * propagationLatency.mean(), Averaged::True);
+		m.emplace_back("Median Latency (ms, averaged)", 1000 * propagationLatency.median(), Averaged::True);
+		m.emplace_back("90% Latency (ms, averaged)", 1000 * propagationLatency.percentile(0.90), Averaged::True);
+		m.emplace_back("99% Latency (ms, averaged)", 1000 * propagationLatency.percentile(0.99), Averaged::True);
+		m.emplace_back("Max Latency (ms, averaged)", 1000 * propagationLatency.max(), Averaged::True);
 	}
 };
 
