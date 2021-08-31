@@ -1411,6 +1411,7 @@ static std::set<int> const& normalMasterErrors() {
 	return s;
 }
 
+/*
 ACTOR Future<Void> changeCoordinators(Reference<MasterData> self) {
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->myInterface.changeCoordinators.getFuture());
@@ -1440,7 +1441,6 @@ ACTOR Future<Void> changeCoordinators(Reference<MasterData> self) {
 	}
 }
 
-/*
 ACTOR Future<Void> rejoinRequestHandler(Reference<MasterData> self) {
 	loop {
 		TLogRejoinRequest req = waitNext(self->myInterface.tlogRejoin.getFuture());
@@ -1968,7 +1968,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	if ( self->resolvers.size() > 1)
 		self->addActor.send(resolutionBalancing(self));
 
-	self->addActor.send(changeCoordinators(self));
+	// self->addActor.send(changeCoordinators(self));
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {

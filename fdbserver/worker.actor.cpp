@@ -676,7 +676,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 	// Manually set up a master address.
 	NetworkAddress testAddress(IPAddress(0x13131313), 1);
-	testDbInfo.master.changeCoordinators =
+	testDbInfo.clusterInterface.changeCoordinators =
 	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ testAddress }, UID(1, 2)));
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in primary DC.
@@ -1601,7 +1601,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 
 				DUMPTOKEN(recruited.waitFailure);
 				// DUMPTOKEN(recruited.tlogRejoin);
-				DUMPTOKEN(recruited.changeCoordinators);
+				// DUMPTOKEN(recruited.changeCoordinators);
 				DUMPTOKEN(recruited.getCommitVersion);
 				DUMPTOKEN(recruited.getLiveCommittedVersion);
 				DUMPTOKEN(recruited.reportLiveCommittedVersion);

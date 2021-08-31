@@ -3329,7 +3329,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
 		logger = traceCounters("RecoveryMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "RecoveryMetrics");
-		if (forceRecovery && !masterInterface.locality.dcId().present()) {
+		if (forceRecovery && !controllerData->clusterControllerDcId.present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;
 		}
@@ -3582,6 +3582,16 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 	return Void();
 }
 
+Future<Void> waitMasterFailure(MasterInterface const& master) {
+	std::vector<Future<Void>> failed;
+	failed.push_back(waitFailureClient(master.waitFailure,
+	                                   SERVER_KNOBS->TLOG_TIMEOUT,
+	                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+	                                   /*trace=*/true));
+	ASSERT(failed.size() >= 1);
+	return tagError<Void>(quorum(failed, 1), master_recovery_failed());
+}
+
 Future<Void> waitCommitProxyFailure(vector<CommitProxyInterface> const& commitProxies) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(commitProxies.size());
@@ -3776,6 +3786,11 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		    newState.tLogs.size() ==
 		    configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		state bool finalUpdate = !newState.oldTLogData.size() && allLogs;
+		TraceEvent("trackTlogRecovery")
+		    .detail("finalUpdate", finalUpdate)
+		    .detail("newState.tlogs", newState.tLogs.size())
+		    .detail("expected.tlogs",
+		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()));
 		wait(self->cstate.write(newState, finalUpdate));
 		wait(minRecoveryDuration);
 		self->logSystem->coreStateWritten(newState);
@@ -4224,7 +4239,8 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 		TraceEvent("UpdateRegistration", self->dbgid)
 		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
-		    .detail("Logs", describe(logSystemConfig.tLogs));
+		    .detail("Logs", describe(logSystemConfig.tLogs))
+			.detail("cstateUpdated", self->cstateUpdated.isSet());
 
 		if (!self->cstateUpdated.isSet()) {
 			wait(sendMasterRegistration(self.getPtr(),
@@ -4326,8 +4342,6 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Reference<ClusterRecoveryData> self,
                                                                          vector<StorageServerInterface>* seedServers,
                                                                          Reference<ILogSystem> oldLogSystem) {
-	state MasterInterface newMaster;
-
 	if (!self->configuration.isValid()) {
 		RecoveryStatus::RecoveryStatus status;
 		if (self->configuration.initialized) {
@@ -4439,7 +4453,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	state Reference<AsyncVar<PeekTxsInfo>> myLocality = Reference<AsyncVar<PeekTxsInfo>>(
 	    new AsyncVar<PeekTxsInfo>(PeekTxsInfo(tagLocalityInvalid, tagLocalityInvalid, invalidVersion)));
 	state Future<Void> localityUpdater =
-	    updateLocalityForDcId(self->masterInterface.locality.dcId(), oldLogSystem, myLocality);
+	    updateLocalityForDcId(self->controllerData->clusterControllerDcId.get(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
 
 	// For now, we also obtain the recovery metadata that the log system obtained during the end_epoch process for
@@ -4640,10 +4654,10 @@ void updateConfigForForcedRecovery(Reference<ClusterRecoveryData> self,
                                    vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
 	bool regionsChanged = false;
 	for (auto& it : self->configuration.regions) {
-		if (it.dcId == self->masterInterface.locality.dcId().get() && it.priority < 0) {
+		if (it.dcId == self->controllerData->clusterControllerDcId.get() && it.priority < 0) {
 			it.priority = 1;
 			regionsChanged = true;
-		} else if (it.dcId != self->masterInterface.locality.dcId().get() && it.priority >= 0) {
+		} else if (it.dcId != self->controllerData->clusterControllerDcId.get() && it.priority >= 0) {
 			it.priority = -1;
 			regionsChanged = true;
 		}
@@ -4886,7 +4900,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
 	    .detail("PrimaryLocality", self->primaryLocality)
-	    .detail("DcId", self->masterInterface.locality.dcId())	// master is recruited in same datacenter
+	    .detail("DcId", self->controllerData->clusterControllerDcId.get())	// master is recruited in same datacenter
 	    .trackLatest("ClusterRecoveryState");
 
 	// Recovery transaction
@@ -4955,7 +4969,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena,
 	       primaryDatacenterKey,
-	       self->masterInterface.locality.dcId().present() ? self->masterInterface.locality.dcId().get() : StringRef());
+	       self->dbInfo->get().myLocality.dcId().present() ? self->dbInfo->get().myLocality.dcId().get() : StringRef());
 
 	tr.clear(recoveryCommitRequest.arena, tLogDatacentersKeys);
 	for (auto& dc : self->primaryDcId) {
@@ -4980,6 +4994,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	TraceEvent("ClusterRecoveryCommit", self->dbgid).log();
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
+	self->addActor.send(waitMasterFailure(self->masterInterface));
 	self->addActor.send(waitResolverFailure(self->resolvers));
 	self->addActor.send(waitCommitProxyFailure(self->commitProxies));
 	self->addActor.send(waitGrvProxyFailure(self->grvProxies));
@@ -5088,7 +5103,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			state double recoveryStart = now();
 			state MasterInterface newMaster;
 
-			if (1) { //!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
+			if (!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
 				TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
 				wait(ClusterControllerRecovery::recruitNewMaster(cluster, db, &newMaster));
 			} else {
@@ -5099,7 +5114,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 				DUMPTOKEN_PROCESS(newMaster, newMaster.waitFailure);
 				// DUMPTOKEN_PROCESS(newMaster, newMaster.tlogRejoin);
-				DUMPTOKEN_PROCESS(newMaster, newMaster.changeCoordinators);
+				// DUMPTOKEN_PROCESS(newMaster, newMaster.changeCoordinators);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.getCommitVersion);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.getLiveCommittedVersion);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.reportLiveCommittedVersion);
@@ -5173,6 +5188,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
 				                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
 				          db->forceMasterFailure.onTrigger())) {
+					TraceEvent("waitFailure", cluster->id).log();
 					break;
 				}
 				when(wait(db->serverInfo->onChange())) {}
@@ -5183,6 +5199,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					}
 					++recoveryData->backupWorkerDoneRequests;
 					req.reply.send(Void());
+					TraceEvent("BackupWorkerDoneRequest", cluster->id).log();
 				}
 				when(wait(collection)) {
 					TraceEvent("CCWDB forceMasterFailure", cluster->id)
@@ -7254,7 +7271,7 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 
 	// Create a ServerDBInfo using above addresses.
 	ServerDBInfo testDbInfo;
-	testDbInfo.master.changeCoordinators =
+	testDbInfo.clusterInterface.changeCoordinators =
 	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, UID(1, 2)));
 
 	TLogInterface localTLogInterf;

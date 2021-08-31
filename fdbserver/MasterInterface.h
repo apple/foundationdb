@@ -36,7 +36,7 @@ struct MasterInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	//RequestStream<struct TLogRejoinRequest>
 	//    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
-	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
+	// RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
 	RequestStream<struct GetCommitVersionRequest> getCommitVersion;
 	// RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 	// Get the centralized live committed version reported by commit proxies.
