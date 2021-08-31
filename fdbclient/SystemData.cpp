@@ -1082,10 +1082,10 @@ const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
 
 // key to watch for changes in active blob ranges + KeyRangeMap of active blob ranges
-// TODO go over which of these should be \xff/ and \xff\x02/
+// Blob Manager + Worker stuff is all \xff\x02 to avoid Transaction State Store
 const KeyRef blobRangeChangeKey = LiteralStringRef("\xff\x02/blobRangeChange");
-const KeyRangeRef blobRangeKeys(LiteralStringRef("\xff/blobRange/"), LiteralStringRef("\xff/blobRange0"));
-const KeyRef blobManagerEpochKey = LiteralStringRef("\xff\x02/blobRangeChange");
+const KeyRangeRef blobRangeKeys(LiteralStringRef("\xff\x02/blobRange/"), LiteralStringRef("\xff\x02/blobRange0"));
+const KeyRef blobManagerEpochKey = LiteralStringRef("\xff\x02/blobManagerEpoch");
 
 const Value blobManagerEpochValueFor(int64_t epoch) {
 	BinaryWriter wr(Unversioned());
@@ -1101,9 +1101,9 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
 }
 
 // blob range file data
-const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff/bgf/"), LiteralStringRef("\xff/bgf0"));
-const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff/bgm/"), LiteralStringRef("\xff/bgm0"));
-const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff/bgl/"), LiteralStringRef("\xff/bgl0"));
+const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff\x02/bgf/"), LiteralStringRef("\xff\x02/bgf0"));
+const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), LiteralStringRef("\xff\x02/bgm0"));
+const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 
 const Value blobGranuleMappingValueFor(UID const& workerID) {
 	BinaryWriter wr(Unversioned());
@@ -1133,7 +1133,7 @@ std::pair<int64_t, int64_t> decodeBlobGranuleLockValue(const ValueRef& value) {
 	return std::pair(epoch, seqno);
 }
 
-const KeyRangeRef blobWorkerListKeys(LiteralStringRef("\xff/bwList/"), LiteralStringRef("\xff/bwList0"));
+const KeyRangeRef blobWorkerListKeys(LiteralStringRef("\xff\x02/bwList/"), LiteralStringRef("\xff\x02/bwList0"));
 
 const Key blobWorkerListKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());

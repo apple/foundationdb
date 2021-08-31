@@ -251,6 +251,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				state std::pair<RangeResult, Version> fdb = wait(self->readFromFDB(cx, range));
 				RangeResult blob = wait(self->readFromBlob(cx, self, range, fdb.second));
 				if (self->compareResult(fdb.first, blob, range, fdb.second, true)) {
+					// TODO: bias for immediately re-reading to catch rollback cases
 					double reReadTime = currentTime + deterministicRandom()->random01() * self->timeTravelLimit;
 					int memory = fdb.first.expectedSize();
 					if (reReadTime <= endTime &&

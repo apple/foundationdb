@@ -29,6 +29,8 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+#define BM_DEBUG 1
+
 // TODO add comments + documentation
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena ar,
@@ -37,10 +39,12 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            KeyRef rangeStart,
                            KeyRef rangeEnd,
                            bool rangeActive) {
-	/*printf("db range [%s - %s): %s\n",
-	       rangeStart.printable().c_str(),
-	       rangeEnd.printable().c_str(),
-	       rangeActive ? "T" : "F");*/
+	if (BM_DEBUG) {
+		printf("db range [%s - %s): %s\n",
+		       rangeStart.printable().c_str(),
+		       rangeEnd.printable().c_str(),
+		       rangeActive ? "T" : "F");
+	}
 	KeyRange keyRange(KeyRangeRef(rangeStart, rangeEnd));
 	auto allRanges = knownBlobRanges->intersectingRanges(keyRange);
 	for (auto& r : allRanges) {
@@ -49,21 +53,21 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
 			KeyRef overlapEnd = (keyRange.end < r.end()) ? keyRange.end : r.end();
 			KeyRangeRef overlap(overlapStart, overlapEnd);
 			if (rangeActive) {
-				/*printf("BM Adding client range [%s - %s)\n",
-				       overlapStart.printable().c_str(),
-				       overlapEnd.printable().c_str());*/
+				if (BM_DEBUG) {
+					printf("BM Adding client range [%s - %s)\n",
+					       overlapStart.printable().c_str(),
+					       overlapEnd.printable().c_str());
+				}
 				rangesToAdd->push_back_deep(ar, overlap);
 			} else {
-				/*printf("BM Removing client range [%s - %s)\n",
-				       overlapStart.printable().c_str(),
-				       overlapEnd.printable().c_str());*/
+				if (BM_DEBUG) {
+					printf("BM Removing client range [%s - %s)\n",
+					       overlapStart.printable().c_str(),
+					       overlapEnd.printable().c_str());
+				}
 				rangesToRemove->push_back_deep(ar, overlap);
 			}
 		}
-
-		// results.emplace_back(r.range(), r.value());
-		// printf("  [%s - %s): %s\n", r.begin().printable().c_str(), r.end().printable().c_str(), r.value() ? "T" :
-		// "F");
 	}
 	knownBlobRanges->insert(keyRange, rangeActive);
 }
@@ -73,11 +77,13 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
                             Arena ar,
                             VectorRef<KeyRangeRef>* rangesToAdd,
                             VectorRef<KeyRangeRef>* rangesToRemove) {
-	/*printf("Updating %d client blob ranges", dbBlobRanges.size() / 2);
-	for (int i = 0; i < dbBlobRanges.size() - 1; i += 2) {
-	    printf(" [%s - %s)", dbBlobRanges[i].key.printable().c_str(), dbBlobRanges[i + 1].key.printable().c_str());
+	if (BM_DEBUG) {
+		printf("Updating %d client blob ranges", dbBlobRanges.size() / 2);
+		for (int i = 0; i < dbBlobRanges.size() - 1; i += 2) {
+			printf(" [%s - %s)", dbBlobRanges[i].key.printable().c_str(), dbBlobRanges[i + 1].key.printable().c_str());
+		}
+		printf("\n");
 	}
-	printf("\n");*/
 	// essentially do merge diff of current known blob ranges and new ranges, to assign new ranges to
 	// workers and revoke old ranges from workers
 
@@ -98,21 +104,27 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 		}
 		for (int i = 0; i < dbBlobRanges.size() - 1; i++) {
 			if (dbBlobRanges[i].key >= normalKeys.end) {
-				printf("Found invalid blob range start %s\n", dbBlobRanges[i].key.printable().c_str());
+				if (BM_DEBUG) {
+					printf("Found invalid blob range start %s\n", dbBlobRanges[i].key.printable().c_str());
+				}
 				break;
 			}
 			bool active = dbBlobRanges[i].value == LiteralStringRef("1");
 			if (active) {
 				ASSERT(dbBlobRanges[i + 1].value == StringRef());
-				printf("BM sees client range [%s - %s)\n",
-				       dbBlobRanges[i].key.printable().c_str(),
-				       dbBlobRanges[i + 1].key.printable().c_str());
+				if (BM_DEBUG) {
+					printf("BM sees client range [%s - %s)\n",
+					       dbBlobRanges[i].key.printable().c_str(),
+					       dbBlobRanges[i + 1].key.printable().c_str());
+				}
 			}
 			KeyRef endKey = dbBlobRanges[i + 1].key;
 			if (endKey > normalKeys.end) {
-				printf("Removing system keyspace from blob range [%s - %s)\n",
-				       dbBlobRanges[i].key.printable().c_str(),
-				       endKey.printable().c_str());
+				if (BM_DEBUG) {
+					printf("Removing system keyspace from blob range [%s - %s)\n",
+					       dbBlobRanges[i].key.printable().c_str(),
+					       endKey.printable().c_str());
+				}
 				endKey = normalKeys.end;
 			}
 			handleClientBlobRange(
@@ -132,11 +144,16 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 }
 
 void getRanges(std::vector<std::pair<KeyRangeRef, bool>>& results, KeyRangeMap<bool>& knownBlobRanges) {
-	printf("Getting ranges:\n");
+	if (BM_DEBUG) {
+		printf("Getting ranges:\n");
+	}
 	auto allRanges = knownBlobRanges.ranges();
 	for (auto& r : allRanges) {
 		results.emplace_back(r.range(), r.value());
-		printf("  [%s - %s): %s\n", r.begin().printable().c_str(), r.end().printable().c_str(), r.value() ? "T" : "F");
+		if (BM_DEBUG) {
+			printf(
+			    "  [%s - %s): %s\n", r.begin().printable().c_str(), r.end().printable().c_str(), r.value() ? "T" : "F");
+		}
 	}
 }
 
@@ -186,7 +203,9 @@ ACTOR Future<Void> nukeBlobWorkerData(BlobManagerData* bmData) {
 
 			return Void();
 		} catch (Error& e) {
-			printf("Nuking blob worker data got error %s\n", e.name());
+			if (BM_DEBUG) {
+				printf("Nuking blob worker data got error %s\n", e.name());
+			}
 			wait(tr->onError(e));
 		}
 	}
@@ -196,13 +215,17 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitNewRange(Reference<ReadYourWrit
 	// TODO is it better to just pass empty metrics to estimated?
 	// TODO handle errors here by pulling out into its own transaction instead of the main loop's transaction, and
 	// retrying
-	printf("Splitting new range [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+	if (BM_DEBUG) {
+		printf("Splitting new range [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+	}
 	StorageMetrics estimated = wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
 
-	printf("Estimated bytes for [%s - %s): %lld\n",
-	       range.begin.printable().c_str(),
-	       range.end.printable().c_str(),
-	       estimated.bytes);
+	if (BM_DEBUG) {
+		printf("Estimated bytes for [%s - %s): %lld\n",
+		       range.begin.printable().c_str(),
+		       range.end.printable().c_str(),
+		       estimated.bytes);
+	}
 
 	if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
 		// printf("  Splitting range\n");
@@ -228,14 +251,18 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitNewRange(Reference<ReadYourWrit
 static UID pickWorkerForAssign(BlobManagerData* bmData) {
 	// FIXME: Right now just picks a random worker, this is very suboptimal
 	int idx = deterministicRandom()->randomInt(0, bmData->workersById.size());
-	printf("picked random worker %d: ", idx);
+	if (BM_DEBUG) {
+		printf("picked random worker %d: ", idx);
+	}
 
 	auto it = bmData->workersById.begin();
 	while (idx > 0) {
 		idx--;
 		it++;
 	}
-	printf("%s\n", it->first.toString().c_str());
+	if (BM_DEBUG) {
+		printf("%s\n", it->first.toString().c_str());
+	}
 	return it->first;
 }
 
@@ -247,18 +274,22 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 	req.managerSeqno = seqNo;
 	req.isAssign = assignment.isAssign;
 
-	printf("BM %s %s range [%s - %s) @ (%lld, %lld)\n",
-	       workerID.toString().c_str(),
-	       req.isAssign ? "assigning" : "revoking",
-	       req.keyRange.begin.printable().c_str(),
-	       req.keyRange.end.printable().c_str(),
-	       req.managerEpoch,
-	       req.managerSeqno);
+	if (BM_DEBUG) {
+		printf("BM %s %s range [%s - %s) @ (%lld, %lld)\n",
+		       workerID.toString().c_str(),
+		       req.isAssign ? "assigning" : "revoking",
+		       req.keyRange.begin.printable().c_str(),
+		       req.keyRange.end.printable().c_str(),
+		       req.managerEpoch,
+		       req.managerSeqno);
+	}
 
 	try {
 		AssignBlobRangeReply rep = wait(bmData->workersById[workerID].assignBlobRangeRequest.getReply(req));
 		if (!rep.epochOk) {
-			printf("BM heard from BW that there is a new manager with higher epoch\n");
+			if (BM_DEBUG) {
+				printf("BM heard from BW that there is a new manager with higher epoch\n");
+			}
 			if (bmData->iAmReplaced.canBeSet()) {
 				bmData->iAmReplaced.send(Void());
 			}
@@ -267,14 +298,16 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 		// TODO confirm: using reliable delivery this should only trigger if the worker is marked as failed, right?
 		// So assignment needs to be retried elsewhere, and a revoke is trivially complete
 		if (assignment.isAssign) {
-			printf("BM got error assigning range [%s - %s) to worker %s, requeueing\n",
-			       assignment.keyRange.begin.printable().c_str(),
-			       assignment.keyRange.end.printable().c_str());
+			if (BM_DEBUG) {
+				printf("BM got error assigning range [%s - %s) to worker %s, requeueing\n",
+				       assignment.keyRange.begin.printable().c_str(),
+				       assignment.keyRange.end.printable().c_str());
+			}
 			// re-send revoke to queue to handle range being un-assigned from that worker before the new one
 			bmData->rangesToAssign.send(RangeAssignment(assignment.keyRange, false));
 			bmData->rangesToAssign.send(assignment);
 			// FIXME: improvement would be to add history of failed workers to assignment so it can try other ones first
-		} else {
+		} else if (BM_DEBUG) {
 			printf("BM got error revoking range [%s - %s) from worker %s, ignoring\n",
 			       assignment.keyRange.begin.printable().c_str(),
 			       assignment.keyRange.end.printable().c_str());
@@ -348,7 +381,9 @@ ACTOR Future<int64_t> acquireManagerLock(BlobManagerData* bmData) {
 			wait(tr->commit());
 			return newEpoch;
 		} catch (Error& e) {
-			printf("Acquiring blob manager lock got error %s\n", e.name());
+			if (BM_DEBUG) {
+				printf("Acquiring blob manager lock got error %s\n", e.name());
+			}
 			wait(tr->onError(e));
 		}
 	}
@@ -358,7 +393,9 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
-		printf("Blob manager checking for range updates\n");
+		if (BM_DEBUG) {
+			printf("Blob manager checking for range updates\n");
+		}
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -377,9 +414,11 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 				updateClientBlobRanges(&bmData->knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
 
 				for (KeyRangeRef range : rangesToRemove) {
-					printf("BM Got range to revoke [%s - %s)\n",
-					       range.begin.printable().c_str(),
-					       range.end.printable().c_str());
+					if (BM_DEBUG) {
+						printf("BM Got range to revoke [%s - %s)\n",
+						       range.begin.printable().c_str(),
+						       range.end.printable().c_str());
+					}
 
 					bmData->rangesToAssign.send(RangeAssignment(range, false));
 				}
@@ -393,14 +432,18 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 
 				for (auto f : splitFutures) {
 					Standalone<VectorRef<KeyRef>> splits = wait(f);
-					printf("Split client range [%s - %s) into %d ranges:\n",
-					       splits[0].printable().c_str(),
-					       splits[splits.size() - 1].printable().c_str(),
-					       splits.size() - 1);
+					if (BM_DEBUG) {
+						printf("Split client range [%s - %s) into %d ranges:\n",
+						       splits[0].printable().c_str(),
+						       splits[splits.size() - 1].printable().c_str(),
+						       splits.size() - 1);
+					}
 
 					for (int i = 0; i < splits.size() - 1; i++) {
 						KeyRange range = KeyRange(KeyRangeRef(splits[i], splits[i + 1]));
-						printf("    [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+						if (BM_DEBUG) {
+							printf("    [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+						}
 
 						bmData->rangesToAssign.send(RangeAssignment(range, true));
 					}
@@ -408,11 +451,15 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 
 				state Future<Void> watchFuture = tr->watch(blobRangeChangeKey);
 				wait(tr->commit());
-				printf("Blob manager done processing client ranges, awaiting update\n");
+				if (BM_DEBUG) {
+					printf("Blob manager done processing client ranges, awaiting update\n");
+				}
 				wait(watchFuture);
 				break;
 			} catch (Error& e) {
-				printf("Blob manager got error looking for range updates %s\n", e.name());
+				if (BM_DEBUG) {
+					printf("Blob manager got error looking for range updates %s\n", e.name());
+				}
 				wait(tr->onError(e));
 			}
 		}
@@ -430,20 +477,22 @@ ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
 				tries--;
 				auto randomRange = bmData->workerAssignments.randomRange();
 				if (randomRange.value() != UID()) {
-					printf("Range mover moving range [%s - %s): %s\n",
-					       randomRange.begin().printable().c_str(),
-					       randomRange.end().printable().c_str(),
-					       randomRange.value().toString().c_str());
+					if (BM_DEBUG) {
+						printf("Range mover moving range [%s - %s): %s\n",
+						       randomRange.begin().printable().c_str(),
+						       randomRange.end().printable().c_str(),
+						       randomRange.value().toString().c_str());
+					}
 
 					bmData->rangesToAssign.send(RangeAssignment(randomRange.range(), false));
 					bmData->rangesToAssign.send(RangeAssignment(randomRange.range(), true));
 					break;
 				}
 			}
-			if (tries == 0) {
+			if (tries == 0 && BM_DEBUG) {
 				printf("Range mover couldn't find range to move, skipping\n");
 			}
-		} else {
+		} else if (BM_DEBUG) {
 			printf("Range mover found %d workers, skipping\n", bmData->workerAssignments.size());
 		}
 	}
@@ -459,14 +508,21 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 	state Future<Void> collection = actorCollection(addActor.getFuture());
 
 	// TODO remove once we have persistence + failure detection
-	printf("Blob manager nuking previous workers and range assignments on startup\n");
+	if (BM_DEBUG) {
+		printf("Blob manager nuking previous workers and range assignments on startup\n");
+	}
 	wait(nukeBlobWorkerData(&self));
-	printf("Blob manager nuked previous workers and range assignments\n");
 
-	printf("Blob manager taking lock\n");
+	if (BM_DEBUG) {
+		printf("Blob manager nuked previous workers and range assignments\n");
+		printf("Blob manager taking lock\n");
+	}
+
 	int64_t _epoch = wait(acquireManagerLock(&self));
 	self.epoch = _epoch;
-	printf("Blob manager acquired lock at epoch %lld\n", _epoch);
+	if (BM_DEBUG) {
+		printf("Blob manager acquired lock at epoch %lld\n", _epoch);
+	}
 
 	int numWorkers = 2;
 	for (int i = 0; i < numWorkers; i++) {
@@ -478,12 +534,16 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 
 	addActor.send(monitorClientRanges(&self));
 	addActor.send(rangeAssigner(&self));
-	addActor.send(rangeMover(&self));
+
+	// TODO add back once everything is properly implemented!
+	// addActor.send(rangeMover(&self));
 
 	// TODO probably other things here eventually
 	loop choose {
 		when(wait(self.iAmReplaced.getFuture())) {
-			printf("Blob Manager exiting because it is replaced\n");
+			if (BM_DEBUG) {
+				printf("Blob Manager exiting because it is replaced\n");
+			}
 			return Void();
 		}
 	}
