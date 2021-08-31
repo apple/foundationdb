@@ -223,7 +223,7 @@ struct ApiWorkload : TestWorkload {
 	Database extraDB;
 
 	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1)
-	  : TestWorkload(wcx), success(true), transactionFactory(nullptr), maxClients(maxClients) {
+	  : TestWorkload(wcx), maxClients(maxClients), success(true), transactionFactory(nullptr) {
 		clientPrefixInt = getOption(options, LiteralStringRef("clientId"), clientId);
 		clientPrefix = format("%010d", clientPrefixInt);
 

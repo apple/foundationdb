@@ -20,7 +20,7 @@
 
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/IConfigDatabaseNode.h"
+#include "fdbserver/ConfigNode.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/OnDemandStore.h"
@@ -720,29 +720,25 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 
 ACTOR Future<Void> coordinationServer(std::string dataFolder,
                                       Reference<ClusterConnectionFile> ccf,
-                                      UseConfigDB useConfigDB) {
+                                      ConfigDBType configDBType) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID, "coordination-");
 	state ConfigTransactionInterface configTransactionInterface;
 	state ConfigFollowerInterface configFollowerInterface;
-	state Reference<IConfigDatabaseNode> configDatabaseNode;
+	state Reference<ConfigNode> configNode;
 	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
-	if (useConfigDB != UseConfigDB::DISABLED) {
+	if (configDBType != ConfigDBType::DISABLED) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
-		if (useConfigDB == UseConfigDB::SIMPLE) {
-			configDatabaseNode = IConfigDatabaseNode::createSimple(dataFolder);
-		} else {
-			configDatabaseNode = IConfigDatabaseNode::createPaxos(dataFolder);
-		}
+		configNode = makeReference<ConfigNode>(dataFolder);
 		configDatabaseServer =
-		    configDatabaseNode->serve(configTransactionInterface) || configDatabaseNode->serve(configFollowerInterface);
+		    configNode->serve(configTransactionInterface) || configNode->serve(configFollowerInterface);
 	}
 
 	try {

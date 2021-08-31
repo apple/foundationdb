@@ -51,7 +51,7 @@ public:
 private:
 	DatabaseContext* cx;
 	StorageServerInfo(DatabaseContext* cx, StorageServerInterface const& interf, LocalityData const& locality)
-	  : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
+	  : ReferencedInterface<StorageServerInterface>(interf, locality), cx(cx) {}
 };
 
 struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
@@ -436,6 +436,10 @@ public:
 	// Removes the storage server and its TSS pair from the TSS mapping (if present).
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
+
+	// used in template functions to create a transaction
+	using TransactionT = ReadYourWritesTransaction;
+	Reference<TransactionT> createTransaction();
 
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;

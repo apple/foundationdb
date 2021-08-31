@@ -241,8 +241,8 @@ struct BackupData {
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
-	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false),
-	    lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)) {
+	    pulledVersion(0), paused(false), lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)),
+	    cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
@@ -744,7 +744,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 
 		DEBUG_MUTATION("addMutation", message.version.version, m)
 		    .detail("Version", message.version.toString())
-		    .detail("Mutation", m)
 		    .detail("KCV", self->minKnownCommittedVersion)
 		    .detail("SavedVersion", self->savedVersion);
 

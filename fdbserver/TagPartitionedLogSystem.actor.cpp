@@ -52,7 +52,7 @@ struct OldLogData {
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 
-	OldLogData() : epochBegin(0), epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
+	OldLogData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), epoch(0) {}
 
 	// Constructor for T of OldTLogConf and OldTLogCoreData
 	template <class T>
@@ -124,8 +124,8 @@ TLogSet::TLogSet(const LogSet& rhs)
 }
 
 OldTLogConf::OldTLogConf(const OldLogData& oldLogData)
-  : logRouterTags(oldLogData.logRouterTags), txsTags(oldLogData.txsTags), epochBegin(oldLogData.epochBegin),
-    epochEnd(oldLogData.epochEnd), pseudoLocalities(oldLogData.pseudoLocalities), epoch(oldLogData.epoch) {
+  : epochBegin(oldLogData.epochBegin), epochEnd(oldLogData.epochEnd), logRouterTags(oldLogData.logRouterTags),
+    txsTags(oldLogData.txsTags), pseudoLocalities(oldLogData.pseudoLocalities), epoch(oldLogData.epoch) {
 	for (const Reference<LogSet>& logSet : oldLogData.tLogs) {
 		tLogs.emplace_back(*logSet);
 	}
@@ -202,9 +202,9 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                        LogEpoch e,
 	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
-	    repopulateRegionAntiQuorum(0), epoch(e), oldestBackupEpoch(0), recoveryCompleteWrittenToCoreState(false),
-	    locality(locality), remoteLogsWrittenToCoreState(false), hasRemoteServers(false), stopped(false),
-	    addActor(addActor), popActors(false) {}
+	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
+	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
+	    locality(locality), addActor(addActor), popActors(false) {}
 
 	void stopRejoins() final { rejoins = Future<Void>(); }
 
@@ -527,6 +527,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	}
 
 	ACTOR static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
+	                                                       Reference<Histogram> dist,
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in) {
 		state double startTime = now();
@@ -541,6 +542,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 				self->fastReplies++;
 			}
 		}
+		dist->sampleSeconds(now() - startTime);
 		return t;
 	}
 
@@ -563,12 +565,21 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 						it->connectionResetTrackers.push_back(makeReference<ConnectionResetInfo>());
 					}
 				}
+				if (it->tlogPushDistTrackers.empty()) {
+					for (int i = 0; i < it->logServers.size(); i++) {
+						it->tlogPushDistTrackers.push_back(
+						    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
+						                            it->logServers[i]->get().interf().address().toString(),
+						                            Histogram::Unit::microseconds));
+					}
+				}
 				vector<Future<Void>> tLogCommitResults;
 				for (int loc = 0; loc < it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
 					data.recordEmptyMessage(location, msg);
 					allReplies.push_back(recordPushMetrics(
 					    it->connectionResetTrackers[loc],
+					    it->tlogPushDistTrackers[loc],
 					    it->logServers[loc]->get().interf().address(),
 					    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
 					                                                                          msg.arena(),

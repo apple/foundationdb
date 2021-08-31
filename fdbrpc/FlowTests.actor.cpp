@@ -24,6 +24,7 @@
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
+#include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
@@ -285,6 +286,9 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet& getActorLineageSet() override { throw std::exception(); }
+#endif
 	ProtocolVersion protocolVersion() override { return baseNetwork->protocolVersion(); }
 };
 
@@ -1388,7 +1392,7 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 struct Tracker {
 	int copied;
 	bool moved;
-	Tracker(int copied = 0) : moved(false), copied(copied) {}
+	Tracker(int copied = 0) : copied(copied), moved(false) {}
 	Tracker(Tracker&& other) : Tracker(other.copied) {
 		ASSERT(!other.moved);
 		other.moved = true;

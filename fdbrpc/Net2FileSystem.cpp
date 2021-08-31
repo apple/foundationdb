@@ -101,6 +101,12 @@ Future<std::time_t> Net2FileSystem::lastWriteTime(const std::string& filename) {
 	return Net2AsyncFile::lastWriteTime(filename);
 }
 
+#ifdef ENABLE_SAMPLING
+ActorLineageSet& Net2FileSystem::getActorLineageSet() {
+	return actorLineageSet;
+}
+#endif
+
 void Net2FileSystem::newFileSystem(double ioTimeout, const std::string& fileSystemPath) {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Net2FileSystem(ioTimeout, fileSystemPath));
 }

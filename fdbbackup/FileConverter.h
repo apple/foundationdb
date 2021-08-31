@@ -41,6 +41,11 @@ enum {
 	OPT_TRACE_LOG_GROUP,
 	OPT_INPUT_FILE,
 	OPT_BUILD_FLAGS,
+	OPT_LIST_ONLY,
+	OPT_KEY_PREFIX,
+	OPT_HEX_KEY_PREFIX,
+	OPT_BEGIN_VERSION_FILTER,
+	OPT_END_VERSION_FILTER,
 	OPT_HELP
 };
 
@@ -62,6 +67,11 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        TLS_OPTION_FLAGS
 #endif
 	                                        { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
+	                                        { OPT_LIST_ONLY, "--list_only", SO_NONE },
+	                                        { OPT_KEY_PREFIX, "-k", SO_REQ_SEP },
+	                                        { OPT_HEX_KEY_PREFIX, "--hex_prefix", SO_REQ_SEP },
+	                                        { OPT_BEGIN_VERSION_FILTER, "--begin_version_filter", SO_REQ_SEP },
+	                                        { OPT_END_VERSION_FILTER, "--end_version_filter", SO_REQ_SEP },
 	                                        { OPT_HELP, "-?", SO_NONE },
 	                                        { OPT_HELP, "-h", SO_NONE },
 	                                        { OPT_HELP, "--help", SO_NONE },

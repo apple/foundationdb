@@ -510,7 +510,7 @@ private:
 class StringRef;
 
 struct TraceInterval {
-	TraceInterval(const char* type) : count(-1), type(type), severity(SevInfo) {}
+	TraceInterval(const char* type) : type(type), count(-1), severity(SevInfo) {}
 
 	TraceInterval& begin();
 	TraceInterval& end() { return *this; }
@@ -564,7 +564,8 @@ void openTraceFile(const NetworkAddress& na,
                    std::string directory = ".",
                    std::string baseOfBase = "trace",
                    std::string logGroup = "default",
-                   std::string identifier = "");
+                   std::string identifier = "",
+                   std::string tracePartialFileSuffix = "");
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
@@ -598,4 +599,5 @@ extern TraceBatch g_traceBatch;
 #define DUMPTOKEN(name)                                                                                                \
 	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
+#define DisabledTraceEvent(...) false && TraceEvent()
 #endif

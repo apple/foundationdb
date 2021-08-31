@@ -2920,10 +2920,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["workload"] = workerStatuses[1];
 
 			statusObj["layers"] = workerStatuses[2];
+			/*
 			if (configBroadcaster) {
-				// TODO: Read from coordinators for more up-to-date config database status?
-				statusObj["configuration_database"] = configBroadcaster->getStatus();
+			    // TODO: Read from coordinators for more up-to-date config database status?
+			    statusObj["configuration_database"] = configBroadcaster->getStatus();
 			}
+			*/
 
 			// Add qos section if it was populated
 			if (!qos.empty())

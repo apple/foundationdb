@@ -5,11 +5,17 @@
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice_transform.h>
+#include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
+#include "flow/ThreadHelper.actor.h"
+
+#include <memory>
+#include <tuple>
+#include <vector>
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -48,6 +54,9 @@ rocksdb::Options getOptions() {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
 
+	options.statistics = rocksdb::CreateDBStatistics();
+	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
+
 	rocksdb::BlockBasedTableOptions bbOpts;
 	// TODO: Add a knob for the block cache size. (Default is 8 MB)
 	if (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0) {
@@ -79,6 +88,7 @@ rocksdb::Options getOptions() {
 	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
+	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
 }
 
@@ -87,6 +97,98 @@ rocksdb::ReadOptions getReadOptions() {
 	rocksdb::ReadOptions options;
 	options.background_purge_on_iterator_cleanup = true;
 	return options;
+}
+
+ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> statistics, rocksdb::DB* db) {
+	state std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats = {
+		{ "StallMicros", rocksdb::STALL_MICROS, 0 },
+		{ "BytesRead", rocksdb::BYTES_READ, 0 },
+		{ "IterBytesRead", rocksdb::ITER_BYTES_READ, 0 },
+		{ "BytesWritten", rocksdb::BYTES_WRITTEN, 0 },
+		{ "BlockCacheMisses", rocksdb::BLOCK_CACHE_MISS, 0 },
+		{ "BlockCacheHits", rocksdb::BLOCK_CACHE_HIT, 0 },
+		{ "BloomFilterUseful", rocksdb::BLOOM_FILTER_USEFUL, 0 },
+		{ "BloomFilterFullPositive", rocksdb::BLOOM_FILTER_FULL_POSITIVE, 0 },
+		{ "BloomFilterTruePositive", rocksdb::BLOOM_FILTER_FULL_TRUE_POSITIVE, 0 },
+		{ "BloomFilterMicros", rocksdb::BLOOM_FILTER_MICROS, 0 },
+		{ "MemtableHit", rocksdb::MEMTABLE_HIT, 0 },
+		{ "MemtableMiss", rocksdb::MEMTABLE_MISS, 0 },
+		{ "GetHitL0", rocksdb::GET_HIT_L0, 0 },
+		{ "GetHitL1", rocksdb::GET_HIT_L1, 0 },
+		{ "GetHitL2AndUp", rocksdb::GET_HIT_L2_AND_UP, 0 },
+		{ "CountKeysWritten", rocksdb::NUMBER_KEYS_WRITTEN, 0 },
+		{ "CountKeysRead", rocksdb::NUMBER_KEYS_READ, 0 },
+		{ "CountDBSeek", rocksdb::NUMBER_DB_SEEK, 0 },
+		{ "CountDBNext", rocksdb::NUMBER_DB_NEXT, 0 },
+		{ "CountDBPrev", rocksdb::NUMBER_DB_PREV, 0 },
+		{ "BloomFilterPrefixChecked", rocksdb::BLOOM_FILTER_PREFIX_CHECKED, 0 },
+		{ "BloomFilterPrefixUseful", rocksdb::BLOOM_FILTER_PREFIX_USEFUL, 0 },
+		{ "BlockCacheCompressedMiss", rocksdb::BLOCK_CACHE_COMPRESSED_MISS, 0 },
+		{ "BlockCacheCompressedHit", rocksdb::BLOCK_CACHE_COMPRESSED_HIT, 0 },
+		{ "CountWalFileSyncs", rocksdb::WAL_FILE_SYNCED, 0 },
+		{ "CountWalFileBytes", rocksdb::WAL_FILE_BYTES, 0 },
+		{ "CompactReadBytes", rocksdb::COMPACT_READ_BYTES, 0 },
+		{ "CompactWriteBytes", rocksdb::COMPACT_WRITE_BYTES, 0 },
+		{ "FlushWriteBytes", rocksdb::FLUSH_WRITE_BYTES, 0 },
+		{ "CountBlocksCompressed", rocksdb::NUMBER_BLOCK_COMPRESSED, 0 },
+		{ "CountBlocksDecompressed", rocksdb::NUMBER_BLOCK_DECOMPRESSED, 0 },
+		{ "RowCacheHit", rocksdb::ROW_CACHE_HIT, 0 },
+		{ "RowCacheMiss", rocksdb::ROW_CACHE_MISS, 0 },
+		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
+
+	};
+	state std::vector<std::pair<const char*, std::string>> propertyStats = {
+		{ "NumCompactionsRunning", rocksdb::DB::Properties::kNumRunningCompactions },
+		{ "NumImmutableMemtables", rocksdb::DB::Properties::kNumImmutableMemTable },
+		{ "NumImmutableMemtablesFlushed", rocksdb::DB::Properties::kNumImmutableMemTableFlushed },
+		{ "IsMemtableFlushPending", rocksdb::DB::Properties::kMemTableFlushPending },
+		{ "NumRunningFlushes", rocksdb::DB::Properties::kNumRunningFlushes },
+		{ "IsCompactionPending", rocksdb::DB::Properties::kCompactionPending },
+		{ "NumRunningCompactions", rocksdb::DB::Properties::kNumRunningCompactions },
+		{ "CumulativeBackgroundErrors", rocksdb::DB::Properties::kBackgroundErrors },
+		{ "CurrentSizeActiveMemtable", rocksdb::DB::Properties::kCurSizeActiveMemTable },
+		{ "AllMemtablesBytes", rocksdb::DB::Properties::kCurSizeAllMemTables },
+		{ "ActiveMemtableBytes", rocksdb::DB::Properties::kSizeAllMemTables },
+		{ "CountEntriesActiveMemtable", rocksdb::DB::Properties::kNumEntriesActiveMemTable },
+		{ "CountEntriesImmutMemtables", rocksdb::DB::Properties::kNumEntriesImmMemTables },
+		{ "CountDeletesActiveMemtable", rocksdb::DB::Properties::kNumDeletesActiveMemTable },
+		{ "CountDeletesImmutMemtables", rocksdb::DB::Properties::kNumDeletesImmMemTables },
+		{ "EstimatedCountKeys", rocksdb::DB::Properties::kEstimateNumKeys },
+		{ "EstimateSstReaderBytes", rocksdb::DB::Properties::kEstimateTableReadersMem },
+		{ "CountActiveSnapshots", rocksdb::DB::Properties::kNumSnapshots },
+		{ "OldestSnapshotTime", rocksdb::DB::Properties::kOldestSnapshotTime },
+		{ "CountLiveVersions", rocksdb::DB::Properties::kNumLiveVersions },
+		{ "EstimateLiveDataSize", rocksdb::DB::Properties::kEstimateLiveDataSize },
+		{ "BaseLevel", rocksdb::DB::Properties::kBaseLevel },
+		{ "EstPendCompactBytes", rocksdb::DB::Properties::kEstimatePendingCompactionBytes },
+	};
+	loop {
+		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+		TraceEvent e("RocksDBMetrics");
+		for (auto& t : tickerStats) {
+			auto& [name, ticker, cum] = t;
+			uint64_t val = statistics->getTickerCount(ticker);
+			e.detail(name, val - cum);
+			cum = val;
+		}
+
+		for (auto& p : propertyStats) {
+			auto& [name, property] = p;
+			uint64_t stat = 0;
+			ASSERT(db->GetIntProperty(property, &stat));
+			e.detail(name, stat);
+		}
+	}
+}
+
+Error statusToError(const rocksdb::Status& s) {
+	if (s.IsIOError()) {
+		return io_error();
+	} else if (s.IsTimedOut()) {
+		return transaction_too_old();
+	} else {
+		return unknown_error();
+	}
 }
 
 struct RocksDBKeyValueStore : IKeyValueStore {
@@ -107,40 +209,29 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		void init() override {}
 
-		Error statusToError(const rocksdb::Status& s) {
-			if (s == rocksdb::Status::IOError()) {
-				return io_error();
-			} else {
-				return unknown_error();
-			}
-		}
-
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
 			ThreadReturnPromise<Void> done;
+			Optional<Future<Void>>& metrics;
+			OpenAction(std::string path, Optional<Future<Void>>& metrics) : path(std::move(path)), metrics(metrics) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
-			// If the DB has already been initialized, this should be a no-op.
-			if (db != nullptr) {
-				TraceEvent(SevInfo, "RocksDB")
-				    .detail("Path", a.path)
-				    .detail("Method", "Open")
-				    .detail("Skipping", "Already Open");
-				a.done.send(Void());
-				return;
-			}
-
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
-			auto status = rocksdb::DB::Open(getOptions(), a.path, defaultCF, &handle, &db);
+			auto options = getOptions();
+			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
 				a.done.sendError(statusToError(status));
 			} else {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
+				onMainThread([&] {
+					a.metrics = rocksDBMetricLogger(options.statistics, db);
+					return Future<bool>(true);
+				}).blockUntilReady();
 				a.done.send(Void());
 			}
 		}
@@ -220,16 +311,33 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	struct Reader : IThreadPoolReceiver {
 		DB& db;
+		double readValueTimeout;
+		double readValuePrefixTimeout;
+		double readRangeTimeout;
 
-		explicit Reader(DB& db) : db(db) {}
+		explicit Reader(DB& db) : db(db) {
+			if (g_network->isSimulated()) {
+				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
+				// very high load and single read thread cannot process all the load within the timeouts.
+				readValueTimeout = 5 * 60;
+				readValuePrefixTimeout = 5 * 60;
+				readRangeTimeout = 5 * 60;
+			} else {
+				readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
+				readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
+				readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
+			}
+		}
 
 		void init() override {}
 
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
 			Optional<UID> debugID;
+			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(KeyRef key, Optional<UID> debugID) : key(key), debugID(debugID) {}
+			ReadValueAction(KeyRef key, Optional<UID> debugID)
+			  : key(key), debugID(debugID), startTime(timer_monotonic()) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
@@ -238,19 +346,32 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
+			if (timer_monotonic() - a.startTime > readValueTimeout) {
+				TraceEvent(SevWarn, "RocksDBError")
+				    .detail("Error", "Read value request timedout")
+				    .detail("Method", "ReadValueAction")
+				    .detail("Timeout value", readValueTimeout);
+				a.result.sendError(transaction_too_old());
+				return;
+			}
 			rocksdb::PinnableSlice value;
-			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto options = getReadOptions();
+			uint64_t deadlineMircos =
+			    db->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 				traceBatch.get().dump();
 			}
 			if (s.ok()) {
 				a.result.send(Value(toStringRef(value)));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
@@ -258,13 +379,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Key key;
 			int maxLength;
 			Optional<UID> debugID;
+			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), debugID(debugID){};
+			  : key(key), maxLength(maxLength), debugID(debugID), startTime(timer_monotonic()){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
-			rocksdb::PinnableSlice value;
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
 				traceBatch = { TraceBatch{} };
@@ -272,7 +393,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
+			if (timer_monotonic() - a.startTime > readValuePrefixTimeout) {
+				TraceEvent(SevWarn, "RocksDBError")
+				    .detail("Error", "Read value prefix request timedout")
+				    .detail("Method", "ReadValuePrefixAction")
+				    .detail("Timeout value", readValuePrefixTimeout);
+				a.result.sendError(transaction_too_old());
+				return;
+			}
+			rocksdb::PinnableSlice value;
+			auto options = getReadOptions();
+			uint64_t deadlineMircos =
+			    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValuePrefixDebug",
 				                          a.debugID.get().first(),
@@ -282,25 +417,33 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
 				                              std::min(value.size(), size_t(a.maxLength)))));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError")
-					    .detail("Error", s.ToString())
-					    .detail("Method", "ReadValuePrefix");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
+			double startTime;
 			ThreadReturnPromise<RangeResult> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
+			if (timer_monotonic() - a.startTime > readRangeTimeout) {
+				TraceEvent(SevWarn, "RocksDBError")
+				    .detail("Error", "Read range request timedout")
+				    .detail("Method", "ReadRangeAction")
+				    .detail("Timeout value", readRangeTimeout);
+				a.result.sendError(transaction_too_old());
+				return;
+			}
+
 			RangeResult result;
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				a.result.send(result);
@@ -308,6 +451,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
 			auto options = getReadOptions();
+			uint64_t deadlineMircos =
+			    db->GetEnv()->NowMicros() + (readRangeTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			// When using a prefix extractor, ensure that keys are returned in order even if they cross
 			// a prefix boundary.
 			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
@@ -323,6 +470,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
 					if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
+					}
+					if (timer_monotonic() - a.startTime > readRangeTimeout) {
+						TraceEvent(SevWarn, "RocksDBError")
+						    .detail("Error", "Read range request timedout")
+						    .detail("Method", "ReadRangeAction")
+						    .detail("Timeout value", readRangeTimeout);
+						a.result.sendError(transaction_too_old());
+						return;
 					}
 					cursor->Next();
 				}
@@ -343,6 +498,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					if (result.size() >= -a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
 					}
+					if (timer_monotonic() - a.startTime > readRangeTimeout) {
+						TraceEvent(SevWarn, "RocksDBError")
+						    .detail("Error", "Read range request timedout")
+						    .detail("Method", "ReadRangeAction")
+						    .detail("Timeout value", readRangeTimeout);
+						a.result.sendError(transaction_too_old());
+						return;
+					}
 					cursor->Prev();
 				}
 				s = cursor->status();
@@ -350,6 +513,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
+				a.result.sendError(statusToError(s));
+				return;
 			}
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
@@ -367,7 +532,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Reference<IThreadPool> readThreads;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
+	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	Optional<Future<Void>> metrics;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
@@ -396,6 +563,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> getError() override { return errorPromise.getFuture(); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
+		// The metrics future retains a reference to the DB, so stop it before we delete it.
+		self->metrics.reset();
+
 		wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction(self->path, deleteOnClose);
 		auto f = a->done.getFuture();
@@ -418,11 +588,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
 
 	Future<Void> init() override {
-		std::unique_ptr<Writer::OpenAction> a(new Writer::OpenAction());
-		a->path = path;
-		auto res = a->done.getFuture();
+		if (openFuture.isValid()) {
+			return openFuture;
+		}
+		auto a = std::make_unique<Writer::OpenAction>(path, metrics);
+		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
-		return res;
+		return openFuture;
 	}
 
 	void set(KeyValueRef kv, const Arena*) override {

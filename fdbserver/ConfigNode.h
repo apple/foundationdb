@@ -1,5 +1,5 @@
 /*
- * PaxosConfigDatabaseNode.actor.cpp
+ * ConfigNode.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,25 +18,20 @@
  * limitations under the License.
  */
 
-#include "fdbserver/PaxosConfigDatabaseNode.h"
+#pragma once
 
-class PaxosConfigDatabaseNodeImpl {};
+#include <string>
 
-PaxosConfigDatabaseNode::PaxosConfigDatabaseNode(std::string const& folder) {
-	// TODO: Implement
-	ASSERT(false);
-}
+#include "fdbclient/ConfigTransactionInterface.h"
+#include "fdbclient/PImpl.h"
+#include "fdbserver/ConfigFollowerInterface.h"
 
-PaxosConfigDatabaseNode::~PaxosConfigDatabaseNode() = default;
+class ConfigNode : public ReferenceCounted<ConfigNode> {
+	PImpl<class ConfigNodeImpl> impl;
 
-Future<Void> PaxosConfigDatabaseNode::serve(ConfigTransactionInterface const& cti) {
-	// TODO: Implement
-	ASSERT(false);
-	return Void();
-}
-
-Future<Void> PaxosConfigDatabaseNode::serve(ConfigFollowerInterface const& cfi) {
-	// TODO: Implement
-	ASSERT(false);
-	return Void();
-}
+public:
+	ConfigNode(std::string const& folder);
+	~ConfigNode();
+	Future<Void> serve(ConfigTransactionInterface const&);
+	Future<Void> serve(ConfigFollowerInterface const&);
+};

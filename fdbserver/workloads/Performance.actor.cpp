@@ -69,9 +69,9 @@ struct PerformanceWorkload : TestWorkload {
 		for (int i = 0; i < metrics.size(); i++)
 			m.push_back(metrics[i]);
 		if (!clientId) {
-			m.push_back(PerfMetric("Baseline Latency (average, ms)", latencyBaseline.value(), false));
-			m.push_back(PerfMetric("Saturation Transactions/sec", maxAchievedTPS.value(), false));
-			m.push_back(PerfMetric("Saturation Median Latency (average, ms)", latencySaturation.value(), false));
+			m.emplace_back("Baseline Latency (average, ms)", latencyBaseline.value(), Averaged::False);
+			m.emplace_back("Saturation Transactions/sec", maxAchievedTPS.value(), Averaged::False);
+			m.emplace_back("Saturation Median Latency (average, ms)", latencySaturation.value(), Averaged::False);
 		}
 	}
 

@@ -39,6 +39,7 @@
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "flow/actorcompiler.h"
 
 struct WorkerInterface {
@@ -67,6 +68,7 @@ struct WorkerInterface {
 	RequestStream<struct WorkerSnapRequest> workerSnapReq;
 	RequestStream<struct UpdateServerDBInfoRequest> updateServerDBInfo;
 
+	ConfigBroadcastInterface configBroadcastInterface;
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
@@ -117,7 +119,8 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
-		           updateServerDBInfo);
+		           updateServerDBInfo,
+		           configBroadcastInterface);
 	}
 };
 
@@ -376,6 +379,8 @@ struct RegisterWorkerRequest {
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
+	Version lastSeenKnobVersion;
+	ConfigClassSet knobConfigClassSet;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -386,9 +391,12 @@ struct RegisterWorkerRequest {
 	                      Generation generation,
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
-	                      bool degraded)
+	                      bool degraded,
+	                      Version lastSeenKnobVersion,
+	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
-	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
+	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded),
+	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -403,7 +411,9 @@ struct RegisterWorkerRequest {
 		           issues,
 		           incompatiblePeers,
 		           reply,
-		           degraded);
+		           degraded,
+		           lastSeenKnobVersion,
+		           knobConfigClassSet);
 	}
 };
 
@@ -746,7 +756,7 @@ struct EventLogRequest {
 	ReplyPromise<TraceEventFields> reply;
 
 	EventLogRequest() : getLastError(true) {}
-	explicit EventLogRequest(Standalone<StringRef> eventName) : eventName(eventName), getLastError(false) {}
+	explicit EventLogRequest(Standalone<StringRef> eventName) : getLastError(false), eventName(eventName) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -762,8 +772,8 @@ struct DebugEntryRef {
 	MutationRef mutation;
 	DebugEntryRef() {}
 	DebugEntryRef(const char* c, Version v, MutationRef const& m)
-	  : context((const uint8_t*)c, strlen(c)), version(v), mutation(m), time(now()),
-	    address(g_network->getLocalAddress()) {}
+	  : time(now()), address(g_network->getLocalAddress()), context((const uint8_t*)c, strlen(c)), version(v),
+	    mutation(m) {}
 	DebugEntryRef(Arena& a, DebugEntryRef const& d)
 	  : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
 
@@ -811,6 +821,41 @@ struct Role {
 	std::string abbreviation;
 	bool includeInTraceRoles;
 
+	static const Role& get(ProcessClass::ClusterRole role) {
+		switch (role) {
+		case ProcessClass::Storage:
+			return STORAGE_SERVER;
+		case ProcessClass::TLog:
+			return TRANSACTION_LOG;
+		case ProcessClass::CommitProxy:
+			return COMMIT_PROXY;
+		case ProcessClass::GrvProxy:
+			return GRV_PROXY;
+		case ProcessClass::Master:
+			return MASTER;
+		case ProcessClass::Resolver:
+			return RESOLVER;
+		case ProcessClass::LogRouter:
+			return LOG_ROUTER;
+		case ProcessClass::ClusterController:
+			return CLUSTER_CONTROLLER;
+		case ProcessClass::DataDistributor:
+			return DATA_DISTRIBUTOR;
+		case ProcessClass::Ratekeeper:
+			return RATEKEEPER;
+		case ProcessClass::StorageCache:
+			return STORAGE_CACHE;
+		case ProcessClass::Backup:
+			return BACKUP;
+		case ProcessClass::Worker:
+			return WORKER;
+		case ProcessClass::NoRole:
+		default:
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+
 	bool operator==(const Role& r) const { return roleName == r.roleName; }
 	bool operator!=(const Role& r) const { return !(*this == r); }
 
@@ -835,8 +880,9 @@ class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
                               LockAware = LockAware::False,
                               EnableLocalityLoadBalance = EnableLocalityLoadBalance::True);
-ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
-                                           Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
+ACTOR Future<Void> extractClusterInterface(
+    Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>> const> in,
+    Reference<AsyncVar<Optional<struct ClusterInterface>>> out);
 
 ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         LocalityData localities,
@@ -850,14 +896,14 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         std::string whitelistBinPaths,
                         std::string configPath,
                         std::map<std::string, std::string> manualKnobOverrides,
-                        UseConfigDB useConfigDB);
+                        ConfigDBType configDBType);
 
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     UseConfigDB useConfigDB);
+                                     ConfigDBType configDBType);
 
 // These servers are started by workerServer
 class IKeyValueStore;
@@ -880,7 +926,7 @@ ACTOR Future<Void> storageServer(
         connFile); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 ServerCoordinators serverCoordinators,
                                 LifetimeToken lifetime,
                                 bool forceRecovery);

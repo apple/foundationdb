@@ -205,6 +205,10 @@ public:
 
 	bool checkRunnable() override;
 
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet& getActorLineageSet() override;
+#endif
+
 	bool useThreadPool;
 
 	// private:
@@ -228,10 +232,16 @@ public:
 	uint64_t tasksIssued;
 	TDMetricCollection tdmetrics;
 	ChaosMetrics chaosMetrics;
-	double currentTime;
+	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
+	// not. For portability this should be atomic
+	std::atomic<double> currentTime;
 	// May be accessed off the network thread, e.g. by onMainThread
 	std::atomic<bool> stopped;
 	mutable std::map<IPAddress, bool> addressOnHostCache;
+
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet actorLineageSet;
+#endif
 
 	std::atomic<bool> started;
 
@@ -245,7 +255,7 @@ public:
 	struct DelayedTask : OrderedTask {
 		double at;
 		DelayedTask(double at, int64_t priority, TaskPriority taskID, Task* task)
-		  : at(at), OrderedTask(priority, taskID, task) {}
+		  : OrderedTask(priority, taskID, task), at(at) {}
 		bool operator<(DelayedTask const& rhs) const { return at > rhs.at; } // Ordering is reversed for priority_queue
 	};
 	std::priority_queue<DelayedTask, std::vector<DelayedTask>> timers;
@@ -1171,19 +1181,16 @@ struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 // 5MB for loading files into memory
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
-  : useThreadPool(useThreadPool), network(this), reactor(this), stopped(false), tasksIssued(0),
-    ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE),
-    // Until run() is called, yield() will always yield
-    tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield), numYields(0),
-    lastPriorityStats(nullptr), tlsInitializedState(ETLSInitState::NONE), tlsConfig(tlsConfig), started(false)
+  : useThreadPool(useThreadPool), reactor(this),
 #ifndef TLS_DISABLED
-    ,
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
-    sslPoolHandshakesInProgress(0), sslHandshakerThreadsStarted(0)
+    sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0),
 #endif
-
-{
+    tlsConfig(tlsConfig), tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
+    currentTaskID(TaskPriority::DefaultYield), tasksIssued(0), stopped(false), started(false), numYields(0),
+    lastPriorityStats(nullptr), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE) {
+	// Until run() is called, yield() will always yield
 	TraceEvent("Net2Starting").log();
 
 	// Set the global members
@@ -1387,6 +1394,12 @@ void Net2::initMetrics() {
 bool Net2::checkRunnable() {
 	return !started.exchange(true);
 }
+
+#ifdef ENABLE_SAMPLING
+ActorLineageSet& Net2::getActorLineageSet() {
+	return actorLineageSet;
+}
+#endif
 
 void Net2::run() {
 	TraceEvent::setNetworkThread();
@@ -1918,7 +1931,7 @@ void Net2::getDiskBytes(std::string const& directory, int64_t& free, int64_t& to
 #include <sched.h>
 #endif
 
-ASIOReactor::ASIOReactor(Net2* net) : network(net), firstTimer(ios), do_not_stop(ios) {
+ASIOReactor::ASIOReactor(Net2* net) : do_not_stop(ios), network(net), firstTimer(ios) {
 #ifdef __linux__
 	// Reactor flags are used only for experimentation, and are platform-specific
 	if (FLOW_KNOBS->REACTOR_FLAGS & 1) {

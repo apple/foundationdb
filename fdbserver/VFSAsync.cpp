@@ -61,7 +61,7 @@
 const uint32_t RESERVED_COUNT = 1U << 29;
 
 VFSAsyncFile::VFSAsyncFile(std::string const& filename, int flags)
-  : filename(filename), flags(flags), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0),
+  : flags(flags), filename(filename), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0),
     debug_zcreads(0), debug_reads(0), chunkSize(0) {
 	filename_lockCount_openCount[filename].second++;
 

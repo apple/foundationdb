@@ -1,9 +1,9 @@
-/*
- * IConfigDatabaseNode.actor.cpp
+#/*
+ * PerfMetric.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbserver/IConfigDatabaseNode.h"
-#include "fdbserver/PaxosConfigDatabaseNode.h"
-#include "fdbserver/SimpleConfigDatabaseNode.h"
+#include "fdbrpc/PerfMetric.h"
 
-Reference<IConfigDatabaseNode> IConfigDatabaseNode::createSimple(std::string const& folder) {
-	return makeReference<SimpleConfigDatabaseNode>(folder);
-}
-
-Reference<IConfigDatabaseNode> IConfigDatabaseNode::createPaxos(std::string const& folder) {
-	return makeReference<PaxosConfigDatabaseNode>(folder);
-}
+FDB_DEFINE_BOOLEAN_PARAM(Averaged);

@@ -300,7 +300,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 			Promise<Void> hold = ready;
 			hold.sendError(message.getError());
 		} else {
-			ASSERT(message.get().bytes > bytesAcknowledged);
+			ASSERT(message.get().bytes > bytesAcknowledged || (message.get().bytes < 0 && bytesAcknowledged > 0));
 			bytesAcknowledged = message.get().bytes;
 			if (ready.isValid() && bytesSent - bytesAcknowledged < bytesLimit) {
 				Promise<Void> hold = ready;
@@ -393,7 +393,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			    false);
 		}
 		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
-			// The ReplyPromiseStream was cancelled before sending an error, so the storage server must have died
+			// Notify the client ReplyPromiseStream was cancelled before sending an error, so the storage server must
+			// have died
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(broken_promise()),
 			                                          getEndpoint(TaskPriority::ReadSocket),
 			                                          false);
@@ -413,6 +414,7 @@ public:
 	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
 			if (!queue->acknowledgements.getRawEndpoint().isValid()) {
+				// register acknowledge receiver on sender and tell the receiver where to send acknowledge messages
 				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::ReadSocket).token;
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
@@ -474,6 +476,8 @@ public:
 			errors->delPromiseRef();
 	}
 
+	// The endpoints of a ReplyPromiseStream must be initialized at Task::ReadSocket, because with lower priorities
+	// a delay(0) in FlowTransport deliver can cause out of order delivery.
 	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::ReadSocket); }
 
 	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
@@ -783,6 +787,7 @@ public:
 	}
 
 	bool operator==(const RequestStream<T>& rhs) const { return queue == rhs.queue; }
+	bool operator!=(const RequestStream<T>& rhs) const { return !(*this == rhs); }
 	bool isEmpty() const { return !queue->isReady(); }
 	uint32_t size() const { return queue->size(); }
 
