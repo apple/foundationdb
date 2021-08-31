@@ -89,7 +89,7 @@ LogSet::LogSet(const TLogSet& tLogSet)
 		logServersPtxn.push_back(makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(log));
 	}
 	tLogGroupIDs = tLogSet.tLogGroupIDs;
-	for (int i = 0; tLogGroupIDs.size(); i++) {
+	for (int i = 0; i < tLogGroupIDs.size(); i++) {
 		for (const OptionalInterface<ptxn::TLogInterface_PassivelyPull>& interface : tLogSet.ptxnTLogGroups[i]) {
 			groupIdToInterfaces[tLogSet.tLogGroupIDs[i]].push_back(
 			    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(interface));
