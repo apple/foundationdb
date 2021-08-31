@@ -20,6 +20,7 @@
 
 #ifndef FDBSERVER_LOGSYSTEMCONFIG_H
 #define FDBSERVER_LOGSYSTEMCONFIG_H
+#include "fdbserver/Knobs.h"
 #pragma once
 
 #include "fdbserver/BackupInterface.h"
@@ -113,12 +114,12 @@ struct TLogSet {
 
 	std::string toString() const {
 		return format(
-		    "anti: %d replication: %d local: %d routers: %d tLogs %d tLogGroups: %s backupWorkers: %s locality: %d",
+		    "anti: %d replication: %d local: %d routers: %d tLogs %d tLogGroups: %d backupWorkers: %s locality: %d",
 		    tLogWriteAntiQuorum,
 		    tLogReplicationFactor,
 		    isLocal,
 		    logRouters.size(),
-		    describe(tLogs).c_str(),
+		    SERVER_KNOBS->TLOG_NEW_INTERFACE ? tLogsPtxn.size() : tLogs.size(),
 		    tLogGroupIDs.size(),
 		    describe(backupWorkers).c_str(),
 		    locality);
