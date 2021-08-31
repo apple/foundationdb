@@ -26,14 +26,21 @@ MessageTransferModel TLogInterfaceBase::getMessageTransferModel() const {
 	return messageTransferModel;
 }
 
-void TLogInterfaceBase::initEndpointsImpl(std::vector<ReceiverPriorityPair>&& receivers) {
+void TLogInterfaceBase::initEndpointsImpl(std::vector<ReceiverPriorityPair>&& more) {
+	std::vector<ReceiverPriorityPair> receivers;
+
+	// The order here should be the same as declared in the TLogInterfaceBase
 	receivers.push_back(commit.getReceiver(TaskPriority::TLogCommit));
+	receivers.push_back(peek.getReceiver(TaskPriority::TLogCommit));
+	receivers.push_back(pop.getReceiver(TaskPriority::TLogCommit));
 	receivers.push_back(lock.getReceiver());
 	receivers.push_back(getQueuingMetrics.getReceiver(TaskPriority::TLogQueuingMetrics));
 	receivers.push_back(confirmRunning.getReceiver(TaskPriority::TLogConfirmRunning));
 	receivers.push_back(waitFailure.getReceiver());
 	receivers.push_back(recoveryFinished.getReceiver());
 	receivers.push_back(snapRequest.getReceiver());
+
+	receivers.insert(receivers.end(), more.begin(), more.end());
 	FlowTransport::transport().addEndpoints(receivers);
 }
 
@@ -42,6 +49,7 @@ void TLogInterface_ActivelyPush::initEndpoints() {
 }
 
 void TLogInterface_PassivelyPull::initEndpoints() {
+	// RequestSteam order must be the same as declared in TLogInterface_PassivelyPull
 	TLogInterfaceBase::initEndpointsImpl({ peekMessages.getReceiver(TaskPriority::TLogPeek),
 	                                       popMessages.getReceiver(TaskPriority::TLogPop),
 	                                       disablePopRequest.getReceiver(),
