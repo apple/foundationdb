@@ -627,8 +627,12 @@ public:
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
-			nextPageReader = queue->pager->readPage(
-			    PagerEventReasons::MetaData, nonBtreeLevel, nextPageID, ioMaxPriority, true, false);
+			nextPageReader = queue->pager->readPage(PagerEventReasons::MetaData,
+			                                        nonBtreeLevel,
+			                                        VectorRef<LogicalPageID>(&nextPageID, 1),
+			                                        ioMaxPriority,
+			                                        true,
+			                                        false);
 		}
 
 		Future<Void> loadExtent() {
@@ -646,7 +650,8 @@ public:
 			debug_printf("FIFOQueue::Cursor(%s) writePage\n", toString().c_str());
 			VALGRIND_MAKE_MEM_DEFINED(raw()->begin(), offset);
 			VALGRIND_MAKE_MEM_DEFINED(raw()->begin() + offset, queue->dataBytesPerPage - raw()->endOffset);
-			queue->pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, pageID, page);
+			queue->pager->updatePage(
+			    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&pageID, 1), page);
 			if (firstPageIDWritten == invalidLogicalPageID) {
 				firstPageIDWritten = pageID;
 			}
@@ -880,8 +885,7 @@ public:
 				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext waiting for page load\n",
 				             self->toString().c_str());
 				wait(success(self->nextPageReader));
-				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext page loaded\n",
-				             self->toString().c_str());
+				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext page loaded\n", self->toString().c_str());
 			}
 
 			state Optional<T> result = wait(self->readNext(upperBound, &localLock));
@@ -2458,22 +2462,6 @@ public:
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
 
-	Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs(size_t size) override {
-		return newPageIDs_impl(this, size);
-	}
-	ACTOR static Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs_impl(DWALPager* self, size_t size) {
-		state Standalone<VectorRef<LogicalPageID>> newPages;
-		state size_t i = 0;
-		for (i = 0; i < size; ++i) {
-			LogicalPageID id = wait(self->newPageID());
-			newPages.push_back(newPages.arena(), id);
-		}
-		debug_printf("DWALPager(%s) newPageIDs_impl(%d) returning %s at end of file\n",
-		             self->filename.c_str(),
-		             size,
-		             toString(newPages).c_str());
-		return newPages;
-	}
 	// Get a new, previously available extent and it's first page ID.  The page will be considered in-use after the next
 	// commit regardless of whether or not it was written to, until it is returned to the pager via freePage()
 	ACTOR static Future<LogicalPageID> newExtentPageID_impl(DWALPager* self, QueueID queueID) {
@@ -2589,10 +2577,6 @@ public:
 		    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page, true);
 	}
 
-	void updatePage(PagerEventReasons reason, unsigned int level, LogicalPageID pageID, Reference<ArenaPage> data) {
-		updatePage(reason, level, VectorRef<LogicalPageID>(&pageID, 1), data);
-	}
-
 	void updatePage(PagerEventReasons reason,
 	                unsigned int level,
 	                VectorRef<LogicalPageID> pageIDs,
@@ -2647,7 +2631,7 @@ public:
 	                                       Version v) override {
 		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageID).c_str(), v);
 		Future<LogicalPageID> f = map(newPageID(), [=](LogicalPageID newPageID) {
-			updatePage(reason, level, newPageID, data);
+			updatePage(reason, level, VectorRef<LogicalPageID>(&newPageID, 1), data);
 			// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
 			RemappedPage r{ v, pageID, newPageID };
 			remapQueue.pushBack(r);
@@ -2873,7 +2857,7 @@ public:
 	// in the current commit
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                      unsigned int level,
-	                                      VectorRef<PhysicalPageID> pageIDs,
+	                                      Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                                      int priority,
 	                                      bool cacheable,
 	                                      bool noHit) override {
@@ -2946,23 +2930,33 @@ public:
 		return (PhysicalPageID)pageID;
 	}
 
-	Standalone<VectorRef<PhysicalPageID>> getPhysicalPageIDs(VectorRef<LogicalPageID> logicalIDs, Version v) {
-		Standalone<VectorRef<PhysicalPageID>> physicalIDs;
-		for (const auto id : logicalIDs) {
-			physicalIDs.push_back(physicalIDs.arena(), getPhysicalPageID(id, v));
-		}
-		return physicalIDs;
-	}
-
-	Future<Reference<ArenaPage>> readPageAtVersion(PagerEventReasons reason,
+	Future<Reference<ArenaPage>> readPageAtVersion(DWALPager* self,
+	                                               PagerEventReasons reason,
 	                                               unsigned int level,
 	                                               VectorRef<LogicalPageID> logicalIDs,
 	                                               int priority,
 	                                               Version v,
 	                                               bool cacheable,
 	                                               bool noHit) {
-		Standalone<VectorRef<PhysicalPageID>> physicalIDs = getPhysicalPageIDs(logicalIDs, v);
-		return readPage(reason, level, physicalIDs, priority, cacheable, noHit);
+		PhysicalPageID id;
+		// VectorRef<PhysicalPageID> physicalIDs;
+		Standalone<VectorRef<PhysicalPageID>> ids;
+		if (logicalIDs.size() == 1) {
+			id = self->getPhysicalPageID(logicalIDs.front(), v);
+			// physicalIDs =  VectorRef<PhysicalPageID>(&id, 1);
+			ids.push_back(ids.arena(), id);
+		} else {
+			ids.resize(ids.arena(), logicalIDs.size());
+			for (int i = 0; i < logicalIDs.size(); ++i) {
+				ids[i] = self->getPhysicalPageID(logicalIDs[i], v);
+			}
+		}
+		// physicalIDs = ids;
+		debug_printf("DWALPager(%s) op=readPageAtVersion, from logicalIDs %s to phsyicalIDs %s\n",
+		             filename.c_str(),
+		             toString(logicalIDs).c_str(),
+		             toString(ids).c_str());
+		return self->readPage(reason, level, ids, priority, cacheable, noHit);
 	}
 
 	void releaseExtentReadLock() override { concurrentExtentReads->release(); }
@@ -3212,7 +3206,8 @@ public:
 			                                                true));
 
 			// Write the data to the original page so it can be read using its original pageID
-			self->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, p.originalPageID, data);
+			self->updatePage(
+			    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&p.originalPageID, 1), data);
 			++g_redwoodMetrics.metric.pagerRemapCopy;
 		} else if (firstType == RemappedPage::REMAP) {
 			++g_redwoodMetrics.metric.pagerRemapSkip;
@@ -3695,7 +3690,7 @@ public:
 		if (expired.isError()) {
 			throw expired.getError();
 		}
-		return map(pager->readPageAtVersion(reason, level, pageIDs, priority, version, cacheable, noHit),
+		return map(pager->readPageAtVersion(pager, reason, level, pageIDs, priority, version, cacheable, noHit),
 		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
 
@@ -4743,7 +4738,7 @@ public:
 			++latest;
 			Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 			makeEmptyRoot(page);
-			self->m_pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, id, page);
+			self->m_pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, newRoot, page);
 			self->m_pager->setCommitVersion(latest);
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
@@ -5409,8 +5404,15 @@ private:
 				if (records.empty()) {
 					self->freeBTreePage(previousID, v);
 				}
-				Standalone<VectorRef<LogicalPageID>> emptyPages = wait(self->m_pager->newPageIDs(p.blockCount));
-				self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages, pages);
+				state Standalone<VectorRef<LogicalPageID>> emptyPages;
+				emptyPages.resize(emptyPages.arena(), p.blockCount);
+				state int i = 0;
+				for (i = 0; i < emptyPages.size(); ++i) {
+					LogicalPageID id = wait(self->m_pager->newPageID());
+					emptyPages[i] = id;
+				}
+				debug_printf("writePages: newPages %s", toString(emptyPages).c_str());
+				self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages.contents(), pages);
 				for (const LogicalPageID id : emptyPages) {
 					childPageID.push_back(records.arena(), id);
 				}
@@ -5580,17 +5582,23 @@ private:
 			LogicalPageID id = wait(
 			    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, oldID.front(), page, writeVersion));
 			newID.front() = id;
-		} else {
-			Standalone<VectorRef<LogicalPageID>> emptyPages = wait(self->m_pager->newPageIDs(oldID.size()));
-			self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages, page);
-			state int i = 0;
-			for (const LogicalPageID id : emptyPages) {
-				newID[i] = id;
-				++i;
-			}
-			self->freeBTreePage(oldID, writeVersion);
+			return newID;
 		}
-
+		state Standalone<VectorRef<LogicalPageID>> emptyPages;
+		state int i = 0;
+		emptyPages.resize(emptyPages.arena(), oldID.size());
+		for (i = 0; i < oldID.size(); ++i) {
+			LogicalPageID id = wait(self->m_pager->newPageID());
+			emptyPages[i] = id;
+		}
+		debug_printf("updateBTreePage: newPages %s", toString(emptyPages).c_str());
+		self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages.contents(), page);
+		i = 0;
+		for (const LogicalPageID id : emptyPages) {
+			newID[i] = id;
+			++i;
+		}
+		self->freeBTreePage(oldID, writeVersion);
 		return newID;
 	}
 
@@ -6669,7 +6677,8 @@ private:
 				Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 				makeEmptyRoot(page);
 				self->m_pHeader->height = 1;
-				self->m_pager->updatePage(PagerEventReasons::Commit, self->m_pHeader->height, newRootID, page);
+				VectorRef<LogicalPageID> rootID((LogicalPageID*)&newRootID, 1);
+				self->m_pager->updatePage(PagerEventReasons::Commit, self->m_pHeader->height, rootID, page);
 				rootPageID = BTreePageIDRef((LogicalPageID*)&newRootID, 1);
 			} else {
 				Standalone<VectorRef<RedwoodRecordRef>> newRootRecords(all.newLinks, all.newLinks.arena());
@@ -9324,13 +9333,14 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 
 	wait(success(pager->init()));
 	state LogicalPageID id = wait(pager->newPageID());
+	state VectorRef<LogicalPageID> pageID(&id, 1);
 	Reference<ArenaPage> p = pager->newPageBuffer();
 	memset(p->mutate(), (char)id, p->size());
-	pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, id, p);
+	pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, pageID, p);
 	pager->setMetaKey(LiteralStringRef("asdfasdf"));
 	wait(pager->commit());
 	Reference<ArenaPage> p2 =
-	    wait(pager->readPage(PagerEventReasons::PointRead, nonBtreeLevel, id, ioMinPriority, true, false));
+	    wait(pager->readPage(PagerEventReasons::PointRead, nonBtreeLevel, pageID, ioMinPriority, true, false));
 	printf("%s\n", StringRef(p2->begin(), p2->size()).toHexString().c_str());
 
 	// TODO: Verify reads, do more writes and reads to make this a real pager validator

@@ -198,7 +198,6 @@ public:
 	// Allocate a new page ID for a subsequent write.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to.
 	virtual Future<LogicalPageID> newPageID() = 0;
-	virtual Future<Standalone<VectorRef<LogicalPageID>>> newPageIDs(size_t size) = 0;
 
 	virtual Future<LogicalPageID> newExtentPageID(QueueID queueID) = 0;
 	virtual QueueID newLastQueueID() = 0;
@@ -210,10 +209,6 @@ public:
 	                        unsigned int level,
 	                        VectorRef<LogicalPageID> pageIDs,
 	                        Reference<ArenaPage> data) = 0;
-	void updatePage(PagerEventReasons reason, unsigned int level, LogicalPageID pageID, Reference<ArenaPage> data) {
-		updatePage(reason, level, VectorRef<LogicalPageID>(&pageID, 1), data);
-	}
-
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
 	// instead and return the new page ID to the caller.  Otherwise the original pageID argument will be returned.
@@ -242,18 +237,10 @@ public:
 	// considered likely to be needed soon.
 	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                              unsigned int level,
-	                                              VectorRef<PhysicalPageID> pageIDs,
+	                                              Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                                              int priority,
 	                                              bool cacheable,
 	                                              bool noHit) = 0;
-	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
-	                                      unsigned int level,
-	                                      LogicalPageID pageID,
-	                                      int priority,
-	                                      bool cacheable,
-	                                      bool noHit) {
-		return readPage(reason, level, VectorRef<PhysicalPageID>(&pageID, 1), priority, cacheable, noHit);
-	}
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 
