@@ -910,6 +910,8 @@ public:
 
 	StorageBytes getStorageBytes() const override { return StorageBytes(); }
 
+	DiskQueueVersion getDiskQueueVersion() const { return diskQueueVersion; }
+
 private:
 	UID dbgid;
 	DiskQueueVersion diskQueueVersion;
