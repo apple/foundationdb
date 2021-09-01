@@ -2135,7 +2135,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 								    decodeStorageServerToTeamIdValue(kv.value);
 								// For demo purpose, each storage server can only belong to single storage team.
 								ASSERT(storageTeamIDs.size() == 1);
-								storageServerToStorageTeam.emplace(UID::fromString(k.toString()),
+								storageServerToStorageTeam.emplace(BinaryReader::fromStringRef<UID>(k, Unversioned()),
 								                                   *storageTeamIDs.begin());
 							} else {
 								mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
