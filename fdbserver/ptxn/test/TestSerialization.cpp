@@ -721,9 +721,6 @@ namespace {
 
 namespace testSubsequencedMessageSerializer {
 
-const int KeyLength = 10;
-const int ValueLength = 100;
-
 void generateMutations(std::vector<ptxn::VersionSubsequenceMessage>& mutations, Arena& arena, const int numMutations) {
 	Version version = 1;
 	Subsequence subsequence = 0;
@@ -784,15 +781,6 @@ TEST_CASE("/fdbserver/ptxn/test/SubsequencedMessageSerializer/timing") {
 namespace {
 
 namespace testTLogSubsequencedMessageSerializer {
-	struct A {
-		uint8_t x = 0xff;
-		uint32_t y = 0xabcd;
-
-		template <typename Ar>
-		void serialize(Ar& ar) {
-			serializer(ar, x, y);
-		}
-	} a;
 
 bool testWriteSerialized() {
 	using namespace ptxn;

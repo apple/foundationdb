@@ -92,13 +92,6 @@ void prepareProxySerializedMessages(
 	}
 }
 
-void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
-                            const Version& version,
-                            const StorageTeamID& storageTeamID,
-                            CommitRecord& commitRecord) {
-	distributeMutationRefs(mutationRefs, version, { storageTeamID }, commitRecord);
-}
-
 bool isAllRecordsValidated(const CommitRecord& commitRecord) {
 	for (const auto& [_1, storageTeamTagMap] : commitRecord.tags) {
 		for (const auto& [_2, commitRecordTag] : storageTeamTagMap) {
