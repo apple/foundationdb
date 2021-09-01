@@ -100,11 +100,11 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 	}
 
 	void getMetrics(vector<PerfMetric>& m) override {
-		m.push_back(PerfMetric("peakMovingData", peakMovingData, false));
-		m.push_back(PerfMetric("peakInQueue", peakInQueue, false));
-		m.push_back(PerfMetric("peakInFlight", peakInFlight, false));
-		m.push_back(PerfMetric("DDDuration", ddDone, false));
-		m.push_back(PerfMetric("movingDataPerSec", movingDataPerSec, false));
+		m.emplace_back("peakMovingData", peakMovingData, Averaged::False);
+		m.emplace_back("peakInQueue", peakInQueue, Averaged::False);
+		m.emplace_back("peakInFlight", peakInFlight, Averaged::False);
+		m.emplace_back("DDDuration", ddDone, Averaged::False);
+		m.emplace_back("movingDataPerSec", movingDataPerSec, Averaged::False);
 	}
 };
 

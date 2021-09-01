@@ -2934,12 +2934,6 @@ public:
 			return false;
 		}
 
-		if (db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority &&
-		    db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated &&
-		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
-			checkRegions(db.config.regions);
-		}
-
 		for (const auto& excludedServer : degradedServers) {
 			if (dbi.master.addresses().contains(excludedServer)) {
 				return true;

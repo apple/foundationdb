@@ -178,6 +178,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectnessStatus.toml)
   add_fdb_test(TEST_FILES rare/RYWDisable.toml)
   add_fdb_test(TEST_FILES rare/RandomReadWriteTest.toml)
+  add_fdb_test(TEST_FILES rare/SpecificUnitTests.toml)
   add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.toml)
   add_fdb_test(TEST_FILES rare/Throttling.toml)
@@ -218,8 +219,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_6.3.10/CycleTestRestart-1.txt
-               restarting/to_6.3.10/CycleTestRestart-2.txt)
+    TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
+               restarting/to_7.0.0/CycleTestRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)

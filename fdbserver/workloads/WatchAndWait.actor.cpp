@@ -82,7 +82,7 @@ struct WatchAndWaitWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
-		m.push_back(PerfMetric("Triggers/sec", triggers.getValue() / duration, false));
+		m.emplace_back("Triggers/sec", triggers.getValue() / duration, Averaged::False);
 		m.push_back(triggers.getMetric());
 		m.push_back(retries.getMetric());
 	}
