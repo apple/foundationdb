@@ -419,6 +419,9 @@ protected:
 			ASSERT(ar.isDeserializing || uniqueID != UID());
 		}
 		serializer(ar, uniqueID, sharedTLogID, filteredLocality, messageTransferModel, commit);
+		// We only serialize the first RequestStream, all the rest have tokens + offset
+		// as described in the deserializing, i.e., getAdjustedEndpoint(offset). This is
+		// to save space for network message size.
 		if (Ar::isDeserializing) {
 			peek = RequestStream<TLogPeekRequest>(commit.getEndpoint().getAdjustedEndpoint(1));
 			pop = RequestStream<TLogPopRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
@@ -456,11 +459,11 @@ struct TLogInterface_PassivelyPull : public TLogInterfaceBase {
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		TLogInterfaceBase::serializeImpl(ar);
-		serializer(ar, peekMessages);
 		if (Ar::isDeserializing) {
-			popMessages = RequestStream<TLogPopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(1));
-			disablePopRequest = RequestStream<TLogDisablePopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(2));
-			enablePopRequest = RequestStream<TLogEnablePopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(3));
+			popMessages = RequestStream<TLogPopRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
+			popMessages = RequestStream<TLogPopRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
+			disablePopRequest = RequestStream<TLogDisablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
+			enablePopRequest = RequestStream<TLogEnablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(12));
 		}
 	}
 

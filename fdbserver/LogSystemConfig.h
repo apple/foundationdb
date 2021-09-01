@@ -22,10 +22,11 @@
 #define FDBSERVER_LOGSYSTEMCONFIG_H
 #pragma once
 
-#include "fdbserver/BackupInterface.h"
-#include "fdbserver/TLogInterface.h"
-#include "fdbrpc/ReplicationPolicy.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbrpc/ReplicationPolicy.h"
+#include "fdbserver/BackupInterface.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/TLogInterface.h"
 
 template <class Interface>
 struct OptionalInterface {
@@ -113,12 +114,12 @@ struct TLogSet {
 
 	std::string toString() const {
 		return format(
-		    "anti: %d replication: %d local: %d routers: %d tLogs %d tLogGroups: %s backupWorkers: %s locality: %d",
+		    "anti: %d replication: %d local: %d routers: %d tLogs %d tLogGroups: %d backupWorkers: %s locality: %d",
 		    tLogWriteAntiQuorum,
 		    tLogReplicationFactor,
 		    isLocal,
 		    logRouters.size(),
-		    describe(tLogs).c_str(),
+		    SERVER_KNOBS->TLOG_NEW_INTERFACE ? tLogsPtxn.size() : tLogs.size(),
 		    tLogGroupIDs.size(),
 		    describe(backupWorkers).c_str(),
 		    locality);
