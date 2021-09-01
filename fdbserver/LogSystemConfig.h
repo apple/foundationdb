@@ -20,13 +20,13 @@
 
 #ifndef FDBSERVER_LOGSYSTEMCONFIG_H
 #define FDBSERVER_LOGSYSTEMCONFIG_H
-#include "fdbserver/Knobs.h"
 #pragma once
 
-#include "fdbserver/BackupInterface.h"
-#include "fdbserver/TLogInterface.h"
-#include "fdbrpc/ReplicationPolicy.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbrpc/ReplicationPolicy.h"
+#include "fdbserver/BackupInterface.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/TLogInterface.h"
 
 template <class Interface>
 struct OptionalInterface {
