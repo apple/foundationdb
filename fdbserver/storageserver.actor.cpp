@@ -1538,6 +1538,7 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 
 ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChangeFeedsRequest req) {
 	wait(delay(0));
+	wait(data->version.whenAtLeast(req.minVersion));
 	auto ranges = data->keyChangeFeed.intersectingRanges(req.range);
 	std::map<Key, KeyRange> rangeIds;
 	for (auto r : ranges) {
@@ -1671,14 +1672,17 @@ ACTOR Future<Void> changeFeedQ(StorageServer* data, ChangeFeedRequest req) {
 }
 
 ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req)
-// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
-// selector offset prevents all data from being read in one range read
 {
 	state Span span("SS:getChangeFeedStream"_loc, { req.spanContext });
 	state Version begin = req.begin;
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 
 	wait(delay(0, TaskPriority::DefaultEndpoint));
+
+	state uint64_t changeCounter = data->shardChangeCounter;
+	if (!data->isReadable(req.range)) {
+		throw wrong_shard_server();
+	}
 
 	try {
 		loop {
@@ -1688,6 +1692,9 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			feedRequest.begin = begin;
 			feedRequest.end = req.end;
 			ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
+
+			data->checkChangeCounter(changeCounter, req.range);
+
 			begin = feedReply.mutations.back().version + 1;
 			req.reply.send(ChangeFeedStreamReply(feedReply));
 			if (feedReply.mutations.back().version == req.end - 1) {

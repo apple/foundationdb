@@ -6579,6 +6579,115 @@ Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getChange
 	return getChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, begin, end, range);
 }
 
+ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
+                                          PromiseStream<Standalone<MutationsAndVersionRef>> results,
+                                          Key rangeID,
+                                          Version begin,
+                                          Version end,
+                                          KeyRange range) {
+	loop {
+		try {
+			state ChangeFeedStreamRequest req;
+			req.rangeID = rangeID;
+			req.begin = begin;
+			req.end = end;
+			req.range = range;
+
+			state ReplyPromiseStream<ChangeFeedStreamReply> replyStream = interf.changeFeedStream.getReplyStream(req);
+
+			loop {
+				state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture());
+				begin = rep.mutations.back().version + 1;
+				state int resultLoc = 0;
+				while (resultLoc < rep.mutations.size()) {
+					if (rep.mutations[resultLoc].mutations.size() || rep.mutations[resultLoc].version + 1 == end) {
+						wait(results.onEmpty());
+						results.send(rep.mutations[resultLoc]);
+					}
+					resultLoc++;
+				}
+				if (begin == end) {
+					return Void();
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+			    e.code() == error_code_connection_failed) {
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+			} else {
+				results.sendError(e);
+				return Void();
+			}
+		}
+	}
+}
+
+struct MutationAndVersionStream {
+	Standalone<MutationsAndVersionRef> next;
+	PromiseStream<Standalone<MutationsAndVersionRef>> results;
+
+	bool operator<(MutationAndVersionStream const& rhs) const { return next.version < rhs.next.version; }
+};
+
+ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
+                                         PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
+                                         Key rangeID,
+                                         Version* begin,
+                                         Version end) {
+	state std::priority_queue<MutationAndVersionStream, std::vector<MutationAndVersionStream>> mutations;
+	state std::vector<Future<Void>> fetchers(interfs.size());
+	state std::vector<MutationAndVersionStream> streams(interfs.size());
+	for (int i = 0; i < interfs.size(); i++) {
+		fetchers[i] =
+		    singleChangeFeedStream(interfs[i].first, streams[i].results, rangeID, *begin, end, interfs[i].second);
+	}
+	state int interfNum = 0;
+	while (interfNum < interfs.size()) {
+		try {
+			Standalone<MutationsAndVersionRef> res = waitNext(streams[interfNum].results.getFuture());
+			streams[interfNum].next = res;
+			mutations.push(streams[interfNum]);
+		} catch (Error& e) {
+			if (e.code() != error_code_end_of_stream) {
+				throw e;
+			}
+		}
+		interfNum++;
+	}
+	state Version checkVersion = invalidVersion;
+	state Standalone<VectorRef<MutationsAndVersionRef>> nextOut;
+	while (mutations.size()) {
+		state MutationAndVersionStream nextStream = mutations.top();
+		mutations.pop();
+		ASSERT(nextStream.next.version >= checkVersion);
+		if (nextStream.next.version != checkVersion) {
+			if (nextOut.size()) {
+				*begin = checkVersion + 1;
+				results.send(nextOut);
+				nextOut = Standalone<VectorRef<MutationsAndVersionRef>>();
+			}
+			checkVersion = nextStream.next.version;
+		}
+		nextOut.push_back_deep(nextOut.arena(), nextStream.next);
+		try {
+			Standalone<MutationsAndVersionRef> res = waitNext(nextStream.results.getFuture());
+			nextStream.next = res;
+			mutations.push(nextStream);
+		} catch (Error& e) {
+			if (e.code() != error_code_end_of_stream) {
+				throw e;
+			}
+		}
+	}
+	if (nextOut.size()) {
+		results.send(nextOut);
+	}
+	throw end_of_stream();
+}
+
 ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
                                             StringRef rangeID,
@@ -6609,26 +6718,27 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 			    wait(getKeyRangeLocations(cx,
 			                              keys,
-			                              100,
+			                              1000,
 			                              Reverse::False,
 			                              &StorageServerInterface::changeFeed,
 			                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
-			if (locations.size() > 1) {
+			if (locations.size() >= 1000) {
 				results.sendError(unsupported_operation());
 				return Void();
 			}
 
-			state int useIdx = -1;
-
-			loop {
+			state std::vector<int> chosenLocations(locations.size());
+			state int loc = 0;
+			while (loc < locations.size()) {
 				// FIXME: create a load balance function for this code so future users of reply streams do not have
 				// to duplicate this code
 				int count = 0;
-				for (int i = 0; i < locations[0].second->size(); i++) {
+				int useIdx = -1;
+				for (int i = 0; i < locations[loc].second->size(); i++) {
 					if (!IFailureMonitor::failureMonitor()
 					         .getState(
-					             locations[0].second->get(i, &StorageServerInterface::changeFeedStream).getEndpoint())
+					             locations[loc].second->get(i, &StorageServerInterface::changeFeedStream).getEndpoint())
 					         .failed) {
 						if (deterministicRandom()->random01() <= 1.0 / ++count) {
 							useIdx = i;
@@ -6637,13 +6747,15 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				}
 
 				if (useIdx >= 0) {
-					break;
+					chosenLocations[loc] = useIdx;
+					loc++;
+					continue;
 				}
 
-				vector<Future<Void>> ok(locations[0].second->size());
+				vector<Future<Void>> ok(locations[loc].second->size());
 				for (int i = 0; i < ok.size(); i++) {
 					ok[i] = IFailureMonitor::failureMonitor().onStateEqual(
-					    locations[0].second->get(i, &StorageServerInterface::changeFeedStream).getEndpoint(),
+					    locations[loc].second->get(i, &StorageServerInterface::changeFeedStream).getEndpoint(),
 					    FailureStatus(false));
 				}
 
@@ -6654,23 +6766,36 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				}
 
 				wait(allAlternativesFailedDelay(quorum(ok, 1)));
+				loc = 0;
 			}
 
-			state ChangeFeedStreamRequest req;
-			req.rangeID = rangeID;
-			req.begin = begin;
-			req.end = end;
+			if (locations.size() > 1) {
+				std::vector<std::pair<StorageServerInterface, KeyRange>> interfs;
+				for (int i = 0; i < locations.size(); i++) {
+					interfs.push_back(
+					    std::make_pair(locations[i].second->getInterface(chosenLocations[i]), locations[i].first));
+				}
+				wait(mergeChangeFeedStream(interfs, results, rangeID, &begin, end) || cx->connectionFileChanged());
+			} else {
+				state ChangeFeedStreamRequest req;
+				req.rangeID = rangeID;
+				req.begin = begin;
+				req.end = end;
+				req.range = range;
 
-			state ReplyPromiseStream<ChangeFeedStreamReply> replyStream =
-			    locations[0].second->get(useIdx, &StorageServerInterface::changeFeedStream).getReplyStream(req);
+				state ReplyPromiseStream<ChangeFeedStreamReply> replyStream =
+				    locations[0]
+				        .second->get(chosenLocations[0], &StorageServerInterface::changeFeedStream)
+				        .getReplyStream(req);
 
-			loop {
-				wait(results.onEmpty());
-				choose {
-					when(wait(cx->connectionFileChanged())) { break; }
-					when(ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
-						begin = rep.mutations.back().version + 1;
-						results.send(Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
+				loop {
+					wait(results.onEmpty());
+					choose {
+						when(wait(cx->connectionFileChanged())) { break; }
+						when(ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
+							begin = rep.mutations.back().version + 1;
+							results.send(Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
+						}
 					}
 				}
 			}
@@ -6699,6 +6824,29 @@ Future<Void> DatabaseContext::getChangeFeedStream(
 	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range);
 }
 
+ACTOR Future<std::vector<std::pair<Key, KeyRange>>> singleLocationOverlappingChangeFeeds(
+    Database cx,
+    Reference<LocationInfo> location,
+    KeyRangeRef range,
+    Version minVersion) {
+	state OverlappingChangeFeedsRequest req;
+	req.range = range;
+	req.minVersion = minVersion;
+
+	OverlappingChangeFeedsReply rep = wait(loadBalance(cx.getPtr(),
+	                                                   location,
+	                                                   &StorageServerInterface::overlappingChangeFeeds,
+	                                                   req,
+	                                                   TaskPriority::DefaultPromiseEndpoint,
+	                                                   AtMostOnce::False,
+	                                                   cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
+	return rep.rangeIds;
+}
+
+bool compareChangeFeedResult(const std::pair<Key, KeyRange>& i, const std::pair<Key, KeyRange>& j) {
+	return i.first < j.first;
+}
+
 ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsActor(Reference<DatabaseContext> db,
                                                                                    KeyRangeRef range,
                                                                                    Version minVersion) {
@@ -6708,26 +6856,28 @@ ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsAct
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              range,
-	                              100,
+	                              1000,
 	                              Reverse::False,
 	                              &StorageServerInterface::changeFeed,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
-	if (locations.size() > 1) {
+	if (locations.size() >= 1000) {
 		throw unsupported_operation();
 	}
 
-	state OverlappingChangeFeedsRequest req;
-	req.range = range;
+	state std::vector<Future<std::vector<std::pair<Key, KeyRange>>>> allOverlappingRequests;
+	for (auto& it : locations) {
+		allOverlappingRequests.push_back(singleLocationOverlappingChangeFeeds(cx, it.second, range, minVersion));
+	}
+	wait(waitForAll(allOverlappingRequests));
 
-	OverlappingChangeFeedsReply rep = wait(loadBalance(cx.getPtr(),
-	                                                   locations[0].second,
-	                                                   &StorageServerInterface::overlappingChangeFeeds,
-	                                                   req,
-	                                                   TaskPriority::DefaultPromiseEndpoint,
-	                                                   AtMostOnce::False,
-	                                                   cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
-	return rep.rangeIds;
+	std::vector<std::pair<Key, KeyRange>> result;
+	for (auto& it : allOverlappingRequests) {
+		result.insert(result.end(), it.get().begin(), it.get().end());
+	}
+	std::sort(result.begin(), result.end(), compareChangeFeedResult);
+	result.resize(std::unique(result.begin(), result.end()) - result.begin());
+	return result;
 }
 
 Future<std::vector<std::pair<Key, KeyRange>>> DatabaseContext::getOverlappingChangeFeeds(KeyRangeRef range,
@@ -6748,20 +6898,27 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, St
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
-	                              100,
+	                              1000,
 	                              Reverse::False,
 	                              &StorageServerInterface::changeFeed,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
-	if (locations.size() > 1) {
+	if (locations.size() >= 1000) {
 		throw unsupported_operation();
 	}
 
+	state std::vector<StorageServerInterface> allInterfs;
+	for (auto& it : locations) {
+		for (int i = 0; i < it.second->size(); i++) {
+			allInterfs.push_back(it.second->getInterface(i));
+		}
+	}
+	uniquify(allInterfs);
+
 	// FIXME: lookup both the src and dest shards as of the pop version to ensure all locations are popped
 	state std::vector<Future<Void>> popRequests;
-	for (int i = 0; i < locations[0].second->size(); i++) {
-		popRequests.push_back(
-		    locations[0].second->getInterface(i).changeFeedPop.getReply(ChangeFeedPopRequest(rangeID, version)));
+	for (int i = 0; i < allInterfs.size(); i++) {
+		popRequests.push_back(allInterfs[i].changeFeedPop.getReply(ChangeFeedPopRequest(rangeID, version)));
 	}
 	wait(waitForAll(popRequests));
 	return Void();
