@@ -237,7 +237,7 @@ public:
 	// considered likely to be needed soon.
 	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                              unsigned int level,
-	                                              Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                              VectorRef<PhysicalPageID> pageIDs,
 	                                              int priority,
 	                                              bool cacheable,
 	                                              bool noHit) = 0;

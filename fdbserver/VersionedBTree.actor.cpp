@@ -1913,7 +1913,9 @@ public:
 					break;
 				}
 
-				debug_printf("Trying to evict %s to make room for %s\n",
+				debug_printf("currentSize is %u and input size is %u. Trying to evict %s to make room for %s\n",
+							 currentSize,
+							 size,
 				             toString(toEvict.index).c_str(),
 				             toString(index).c_str());
 
@@ -2761,7 +2763,7 @@ public:
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
-	                                                           Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                                           VectorRef<PhysicalPageID> pageIDs,
 	                                                           int priority,
 	                                                           bool header) {
 		ASSERT(!self->memoryOnly);
@@ -2857,7 +2859,7 @@ public:
 	// in the current commit
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                      unsigned int level,
-	                                      Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                      VectorRef<PhysicalPageID> pageIDs,
 	                                      int priority,
 	                                      bool cacheable,
 	                                      bool noHit) override {
@@ -2930,7 +2932,7 @@ public:
 		return (PhysicalPageID)pageID;
 	}
 
-	Future<Reference<ArenaPage>> readPageAtVersion(DWALPager* self,
+	ACTOR Future<Reference<ArenaPage>> readPageAtVersion(DWALPager* self,
 	                                               PagerEventReasons reason,
 	                                               unsigned int level,
 	                                               VectorRef<LogicalPageID> logicalIDs,
@@ -2938,25 +2940,27 @@ public:
 	                                               Version v,
 	                                               bool cacheable,
 	                                               bool noHit) {
-		PhysicalPageID id;
-		// VectorRef<PhysicalPageID> physicalIDs;
-		Standalone<VectorRef<PhysicalPageID>> ids;
+		state PhysicalPageID id;
 		if (logicalIDs.size() == 1) {
 			id = self->getPhysicalPageID(logicalIDs.front(), v);
-			// physicalIDs =  VectorRef<PhysicalPageID>(&id, 1);
-			ids.push_back(ids.arena(), id);
-		} else {
-			ids.resize(ids.arena(), logicalIDs.size());
-			for (int i = 0; i < logicalIDs.size(); ++i) {
-				ids[i] = self->getPhysicalPageID(logicalIDs[i], v);
-			}
+			VectorRef<PhysicalPageID> physicalIDs(&id, 1);
+			debug_printf("op=readPageAtVersion, from logicalID %u to phsyicalID %u\n",
+		             logicalIDs.front(),
+		             id);
+			Reference<ArenaPage> data = wait(self->readPage(reason, level, physicalIDs, priority, cacheable, noHit));
+			return data;
 		}
-		// physicalIDs = ids;
-		debug_printf("DWALPager(%s) op=readPageAtVersion, from logicalIDs %s to phsyicalIDs %s\n",
-		             filename.c_str(),
+		state Standalone<VectorRef<PhysicalPageID>> ids;
+		ids.resize(ids.arena(), logicalIDs.size());
+		for (int i = 0; i < logicalIDs.size(); ++i) {
+			ids[i] = self->getPhysicalPageID(logicalIDs[i], v);
+		}
+		VectorRef<PhysicalPageID> physicalIDs = ids;
+		debug_printf("op=readPageAtVersion, from logicalIDs %s to phsyicalIDs %s\n",
 		             toString(logicalIDs).c_str(),
 		             toString(ids).c_str());
-		return self->readPage(reason, level, ids, priority, cacheable, noHit);
+		Reference<ArenaPage> data = wait(self->readPage(reason, level, physicalIDs, priority, cacheable, noHit));
+		return data;
 	}
 
 	void releaseExtentReadLock() override { concurrentExtentReads->release(); }
@@ -3198,9 +3202,10 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
+			VectorRef<LogicalPageID> pageID(&p.newPageID, 1);
 			Reference<ArenaPage> data = wait(self->readPage(PagerEventReasons::MetaData,
 			                                                nonBtreeLevel,
-			                                                VectorRef<LogicalPageID>(&p.newPageID, 1),
+			                                               	pageID,
 			                                                ioLeafPriority,
 			                                                false,
 			                                                true));
@@ -3431,6 +3436,8 @@ public:
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
 		self->remapCleanupFuture.cancel();
 
+		wait(self->pageCache.clear());
+
 		if (self->errorPromise.canBeSet()) {
 			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
 			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
@@ -3441,9 +3448,9 @@ public:
 		debug_printf("DWALPager(%s) shutdown wait for operations\n", self->filename.c_str());
 		wait(self->operations.signal());
 
-		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
+		/*debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->pageCache.clear());
-		wait(delay(0));
+		wait(delay(0));*/
 
 		debug_printf("DWALPager(%s) shutdown remappedPagesMap: %s\n",
 		             self->filename.c_str(),
