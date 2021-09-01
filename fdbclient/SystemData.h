@@ -501,6 +501,10 @@ extern const KeyRange globalConfigKnobKeys;
 extern const KeyRangeRef configKnobKeys;
 extern const KeyRangeRef configClassKeys;
 
+extern const KeyRangeRef tenantMapKeys;
+extern const KeyRef tenantMapPrefix;
+extern const KeyRef tenantMapPrivatePrefix;
+
 #pragma clang diagnostic pop
 
 #endif

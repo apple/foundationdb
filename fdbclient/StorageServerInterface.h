@@ -47,6 +47,8 @@ struct VersionReply {
 	}
 };
 
+typedef std::string TenantName;
+
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
 	enum { BUSY_ALLOWED = 0, BUSY_FORCE = 1, BUSY_LOCAL = 2 };
@@ -207,6 +209,7 @@ struct GetValueReply : public LoadBalancedReply {
 struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
 	SpanID spanContext;
+	TenantName tenant;
 	Key key;
 	Version version;
 	Optional<TagSet> tags;
@@ -214,12 +217,21 @@ struct GetValueRequest : TimedRequest {
 	ReplyPromise<GetValueReply> reply;
 
 	GetValueRequest() {}
+
 	GetValueRequest(SpanID spanContext, const Key& key, Version ver, Optional<TagSet> tags, Optional<UID> debugID)
 	  : spanContext(spanContext), key(key), version(ver), tags(tags), debugID(debugID) {}
 
+	GetValueRequest(SpanID spanContext,
+	                const TenantName& tenant,
+	                const Key& key,
+	                Version ver,
+	                Optional<TagSet> tags,
+	                Optional<UID> debugID)
+	  : spanContext(spanContext), tenant(tenant), key(key), version(ver), tags(tags), debugID(debugID) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, tags, debugID, reply, spanContext);
+		serializer(ar, tenant, key, version, tags, debugID, reply, spanContext);
 	}
 };
 
@@ -240,6 +252,7 @@ struct WatchValueReply {
 struct WatchValueRequest {
 	constexpr static FileIdentifier file_identifier = 14747733;
 	SpanID spanContext;
+	TenantName tenant;
 	Key key;
 	Optional<Value> value;
 	Version version;
@@ -248,6 +261,7 @@ struct WatchValueRequest {
 	ReplyPromise<WatchValueReply> reply;
 
 	WatchValueRequest() {}
+
 	WatchValueRequest(SpanID spanContext,
 	                  const Key& key,
 	                  Optional<Value> value,
@@ -256,9 +270,18 @@ struct WatchValueRequest {
 	                  Optional<UID> debugID)
 	  : spanContext(spanContext), key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
 
+	WatchValueRequest(SpanID spanContext,
+	                  const TenantName& tenant,
+	                  const Key& key,
+	                  Optional<Value> value,
+	                  Version ver,
+	                  Optional<TagSet> tags,
+	                  Optional<UID> debugID)
+	  : spanContext(spanContext), tenant(tenant), key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, value, version, tags, debugID, reply, spanContext);
+		serializer(ar, tenant, key, value, version, tags, debugID, reply, spanContext);
 	}
 };
 
@@ -282,6 +305,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
+	TenantName tenant;
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
@@ -293,7 +317,8 @@ struct GetKeyValuesRequest : TimedRequest {
 	GetKeyValuesRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		serializer(
+		    ar, tenant, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
 	}
 };
 
@@ -328,6 +353,7 @@ struct GetKeyValuesStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
+	TenantName tenant;
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
@@ -339,7 +365,8 @@ struct GetKeyValuesStreamRequest {
 	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		serializer(
+		    ar, tenant, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
 	}
 };
 
@@ -361,6 +388,7 @@ struct GetKeyRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 10457870;
 	SpanID spanContext;
 	Arena arena;
+	TenantName tenant;
 	KeySelectorRef sel;
 	Version version; // or latestVersion
 	Optional<TagSet> tags;
@@ -368,6 +396,7 @@ struct GetKeyRequest : TimedRequest {
 	ReplyPromise<GetKeyReply> reply;
 
 	GetKeyRequest() {}
+
 	GetKeyRequest(SpanID spanContext,
 	              KeySelectorRef const& sel,
 	              Version version,
@@ -375,9 +404,17 @@ struct GetKeyRequest : TimedRequest {
 	              Optional<UID> debugID)
 	  : spanContext(spanContext), sel(sel), version(version), debugID(debugID) {}
 
+	GetKeyRequest(SpanID spanContext,
+	              TenantName const& tenant,
+	              KeySelectorRef const& sel,
+	              Version version,
+	              Optional<TagSet> tags,
+	              Optional<UID> debugID)
+	  : spanContext(spanContext), tenant(tenant), sel(sel), version(version), debugID(debugID) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, debugID, reply, spanContext, arena);
+		serializer(ar, tenant, sel, version, tags, debugID, reply, spanContext, arena);
 	}
 };
 

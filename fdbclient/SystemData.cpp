@@ -1035,6 +1035,11 @@ const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
 
+// TODO: before we commit to this, make sure it works with broader MTC plans or can be migrated
+const KeyRangeRef tenantMapKeys("\xff\x02/tenantMap/"_sr, "\xff\x02/tenantMap0"_sr);
+const KeyRef tenantMapPrefix = tenantMapKeys.begin;
+const KeyRef tenantMapPrivatePrefix = "\xff\xff\x02/tenantMap/"_sr;
+
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",

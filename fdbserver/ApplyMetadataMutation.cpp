@@ -545,6 +545,25 @@ private:
 		TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
 	}
 
+	void checkSetTenantMapPrefix(MutationRef m) {
+		if (m.param1.startsWith(tenantMapPrefix)) {
+			// For now, this goes to all storage servers.
+			// Eventually, we can have each SS store tenants that apply only to the data stored on it.
+			std::set<Tag> allTags;
+			auto allServers = txnStateStore->readRange(serverTagKeys).get();
+			for (auto& kv : allServers) {
+				allTags.insert(decodeServerTagValue(kv.value));
+			}
+
+			toCommit->addTags(allTags);
+
+			MutationRef privatized = m;
+			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+			toCommit->writeTypedMessage(privatized);
+			TEST(true); // Tenant added to map
+		}
+	}
+
 	void checkClearKeyServerKeys(KeyRangeRef range) {
 		if (!keyServersKeys.intersects(range)) {
 			return;
@@ -865,6 +884,27 @@ private:
 		}
 	}
 
+	void checkClearTenantMapPrefix(KeyRangeRef range) {
+		if (tenantMapKeys.intersects(range)) {
+			// For now, this goes to all storage servers.
+			// Eventually, we can have each SS store tenants that apply only to the data stored on it.
+			std::set<Tag> allTags;
+			auto allServers = txnStateStore->readRange(serverTagKeys).get();
+			for (auto& kv : allServers) {
+				allTags.insert(decodeServerTagValue(kv.value));
+			}
+
+			toCommit->addTags(allTags);
+
+			MutationRef privatized;
+			privatized.type = MutationRef::ClearRange;
+			privatized.param1 = range.begin.withPrefix(systemKeys.begin, arena);
+			privatized.param2 = range.end.withPrefix(systemKeys.begin, arena);
+			toCommit->writeTypedMessage(privatized);
+			TEST(true); // Tenant cleared from map
+		}
+	}
+
 	void checkClearMiscRangeKeys(KeyRangeRef range) {
 		if (initialCommit) {
 			return;
@@ -980,6 +1020,7 @@ public:
 				checkSetGlobalKeys(m);
 				checkSetWriteRecoverKey(m);
 				checkSetMinRequiredCommitVersionKey(m);
+				checkSetTenantMapPrefix(m);
 				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 				KeyRangeRef range(m.param1, m.param2);
@@ -995,6 +1036,7 @@ public:
 				checkClearLogRangesRange(range);
 				checkClearTssMappingKeys(m, range);
 				checkClearTssQuarantineKeys(m, range);
+				checkClearTenantMapPrefix(range);
 				checkClearMiscRangeKeys(range);
 			}
 		}

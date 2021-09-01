@@ -175,6 +175,11 @@ ERROR( special_keys_no_write_module_found, 2115, "Special key space key or keyra
 ERROR( special_keys_cross_module_clear, 2116, "Special key space clear crosses modules" )
 ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message." )
 
+ERROR( tenant_name_required, 2120, "Tenant name must be specified to access data in the cluster" )
+ERROR( tenant_not_found, 2121, "Tenant not found on the cluster" )
+ERROR( key_not_in_tenant, 2122, "The specified key is not in the key-range represented by the tenant" )
+ERROR( key_range_locked, 2123, "The key-range is locked" )
+
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
 ERROR( api_version_already_set, 2201, "API version may be set only once" )
