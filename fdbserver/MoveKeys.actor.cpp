@@ -1372,7 +1372,6 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						TraceEvent(SevWarn, "FailedServerRemoveRange", serverID)
 						    .detail("Key", it.key)
 						    .detail("ValueDest", describe(dest));
-						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, src, dest));
 						serversToRemoveRange.insert(serversToRemoveRange.end(), dest.begin(), dest.end());
 						tr.clear(keyServersKey(it.key));
 					} else {
