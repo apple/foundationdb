@@ -3150,6 +3150,7 @@ public:
 	Future<Void> read() { return _read(this); }
 
 	Future<Void> write(DBCoreState newState, bool finalWrite = false) {
+		TraceEvent("write db").detail("prvTLogs", prevDBState.tLogs.size()).detail("newTLog", newState.tLogs.size());
 		previousWrite = _write(this, newState, finalWrite);
 		return previousWrite;
 	}
@@ -4714,6 +4715,10 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 	if (self->forceRecovery) {
 		updateConfigForForcedRecovery(self, initialConfChanges);
 	}
+
+	// Update recoveryTransactionVersion to the master interface
+	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryVersion.getReply(
+	    UpdateRecoveryTransactionVersionRequest(self->recoveryTransactionVersion))));
 
 	debug_checkMaxRestoredVersion(UID(), self->lastEpochEnd, "DBRecovery");
 

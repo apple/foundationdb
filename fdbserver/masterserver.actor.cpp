@@ -1217,6 +1217,23 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
+ACTOR Future<Void> updateRecoveryTransactionVersion(Reference<MasterData> self) {
+	loop {
+		choose {
+			when(UpdateRecoveryTransactionVersionRequest req =
+			         waitNext(self->myInterface.updateRecoveryVersion.getFuture())) {
+				TraceEvent("UpdateRecoveryVersion", self->dbgid).detail("version", req.recoveryTransactionVersion);
+
+				if (req.recoveryTransactionVersion != invalidVersion) {
+					self->recoveryTransactionVersion = req.recoveryTransactionVersion;
+				}
+				req.reply.send(Void());
+			}
+		}
+	}
+}
+
+
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
@@ -2008,6 +2025,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	addActor.send(traceRole(Role::MASTER, mi.id()));
 	addActor.send(provideVersions(self));
 	addActor.send(serveLiveCommittedVersion(self));
+	addActor.send(updateRecoveryTransactionVersion(self));
 
 	TEST(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())); // Master born doomed
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
@@ -2042,7 +2060,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 			when(wait(collection)) {
 				ASSERT(false);
 				throw internal_error();
-			} 
+			}
 		}
 	} catch (Error& e) {
 		state Error err = e;

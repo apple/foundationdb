@@ -43,6 +43,7 @@ struct MasterInterface {
 	RequestStream<struct GetRawCommittedVersionRequest> getLiveCommittedVersion;
 	// Report a proxy's committed version.
 	RequestStream<struct ReportRawCommittedVersionRequest> reportLiveCommittedVersion;
+	RequestStream<struct UpdateRecoveryTransactionVersionRequest> updateRecoveryVersion;
 
 	NetworkAddress address() const { return getCommitVersion.getEndpoint().getPrimaryAddress(); }
 	NetworkAddressList addresses() const { return getCommitVersion.getEndpoint().addresses; }
@@ -66,6 +67,8 @@ struct MasterInterface {
 			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
 			reportLiveCommittedVersion = RequestStream<struct ReportRawCommittedVersionRequest>(
 			    waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			updateRecoveryVersion = RequestStream<struct UpdateRecoveryTransactionVersionRequest>(
+			    waitFailure.getEndpoint().getAdjustedEndpoint(4));
 		}
 	}
 
@@ -78,6 +81,7 @@ struct MasterInterface {
 		// streams.push_back(notifyBackupWorkerDone.getReceiver());
 		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetLiveCommittedVersion));
 		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ReportLiveCommittedVersion));
+		streams.push_back(updateRecoveryVersion.getReceiver(TaskPriority::UpdateRecoveryTransactionVersion));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -123,6 +127,21 @@ struct ChangeCoordinatorsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, newConnectionString, reply);
+	}
+};
+
+struct UpdateRecoveryTransactionVersionRequest {
+	constexpr static FileIdentifier file_identifier = 13605417;
+	Version recoveryTransactionVersion;
+	ReplyPromise<Void> reply;
+
+	UpdateRecoveryTransactionVersionRequest() {}
+	UpdateRecoveryTransactionVersionRequest(Version recoveryTransactionVersion)
+	  : recoveryTransactionVersion(recoveryTransactionVersion) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, recoveryTransactionVersion, reply);
 	}
 };
 
