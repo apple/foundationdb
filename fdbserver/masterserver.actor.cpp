@@ -1204,7 +1204,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
-	for (auto& p : self->commitProxies)
+	for (auto& p : self->dbInfo->get().client.commitProxies)
 		self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 
 	loop {
@@ -2004,7 +2004,10 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	state Reference<MasterData> self(new MasterData(
 	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));
 	state Future<Void> collection = actorCollection(addActor.getFuture());
-	self->addActor.send(traceRole(Role::MASTER, mi.id()));
+
+	addActor.send(traceRole(Role::MASTER, mi.id()));
+	addActor.send(provideVersions(self));
+	addActor.send(serveLiveCommittedVersion(self));
 
 	TEST(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())); // Master born doomed
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
@@ -2035,11 +2038,11 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 				++self->backupWorkerDoneRequests;
 				req.reply.send(Void());
 			}
+			*/
 			when(wait(collection)) {
 				ASSERT(false);
 				throw internal_error();
 			} 
-			*/
 		}
 	} catch (Error& e) {
 		state Error err = e;

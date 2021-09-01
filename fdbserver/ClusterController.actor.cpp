@@ -4900,7 +4900,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
 	    .detail("PrimaryLocality", self->primaryLocality)
-	    .detail("DcId", self->controllerData->clusterControllerDcId.get())	// master is recruited in same datacenter
+	    .detail("DcId", self->controllerData->clusterControllerDcId.get())
 	    .trackLatest("ClusterRecoveryState");
 
 	// Recovery transaction
@@ -4998,8 +4998,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(waitResolverFailure(self->resolvers));
 	self->addActor.send(waitCommitProxyFailure(self->commitProxies));
 	self->addActor.send(waitGrvProxyFailure(self->grvProxies));
-	self->addActor.send(provideVersions(self));
-	self->addActor.send(serveLiveCommittedVersion(self));
+	// self->addActor.send(provideVersions(self));
+	// self->addActor.send(serveLiveCommittedVersion(self));
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 
@@ -5103,7 +5103,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			state double recoveryStart = now();
 			state MasterInterface newMaster;
 
-			if (!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
+			if (1) { //!SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
 				TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
 				wait(ClusterControllerRecovery::recruitNewMaster(cluster, db, &newMaster));
 			} else {
