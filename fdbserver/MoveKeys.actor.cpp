@@ -236,6 +236,44 @@ ACTOR Future<vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 	return result;
 }
 
+ACTOR Future<std::vector<UID>> pickReadWriteServers(std::vector<UID> candidates, KeyRangeRef range, Transaction* tr) {
+	vector<Future<Optional<Value>>> serverListEntries;
+
+	for (const UID id : candidates) {
+		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
+	}
+
+	vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+
+	std::vector<StorageServerInterface> ssis;
+	for (auto& v : serverListValues) {
+		ssis.push_back(decodeServerListValue(v.get()));
+	}
+
+	state std::vector<Future<Optional<UID>>> checks;
+	checks.reserve(ssis.size());
+	for (auto& ssi : ssis) {
+		checks.push_back(checkReadWrite(
+		    ssi.getShardState.getReplyUnlessFailedFor(GetShardStateRequest(range, GetShardStateRequest::NO_WAIT),
+		                                              SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL,
+		                                              0,
+		                                              TaskPriority::MoveKeys),
+		    ssi.id(),
+		    0));
+	}
+
+	wait(waitForAll(checks));
+
+	vector<UID> result;
+	for (const auto& it : checks) {
+		if (it.get().present()) {
+			result.push_back(it.get().get());
+		}
+	}
+
+	return result;
+}
+
 ACTOR Future<vector<vector<UID>>> additionalSources(RangeResult shards,
                                                     Reference<ReadYourWritesTransaction> tr,
                                                     int desiredHealthy,
@@ -1290,10 +1328,16 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
-				for (int i = 0; i < keyServers.size() - 1; ++i) {
-					auto it = keyServers[i];
-					vector<UID> src;
-					vector<UID> dest;
+				state std::vector<UID> serversToRemoveRange;
+				state vector<UID> src;
+				state vector<UID> dest;
+				state int i = 0;
+				for (i = 0; i < keyServers.size() - 1; ++i) {
+					src.clear();
+					dest.clear();
+					serversToRemoveRange.clear();
+					serversToRemoveRange.push_back(serverID);
+					state KeyValueRef it = keyServers[i];
 					decodeKeyServersValue(UIDtoTagMap, it.value, src, dest);
 
 					// The failed server is not present
@@ -1306,11 +1350,31 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 					// Dest is usually empty, but keep this in case there is parallel data movement
 					src.erase(std::remove(src.begin(), src.end(), serverID), src.end());
 					dest.erase(std::remove(dest.begin(), dest.end(), serverID), dest.end());
-					TraceEvent(SevDebug, "FailedServerSetKey", serverID)
-					    .detail("Key", it.key)
-					    .detail("ValueSrc", describe(src))
-					    .detail("ValueDest", describe(dest));
-					tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, src, dest));
+					if (src.empty() && !dest.empty()) {
+						std::vector<UID> newSources =
+						    wait(pickReadWriteServers(dest, KeyRangeRef(it.key, keyServers[i + 1].key), &tr));
+						for (const UID& id : newSources) {
+							TraceEvent(SevWarn, "FailedServerAdditionalSourceServer", serverID)
+							    .detail("Key", it.key)
+							    .detail("NewSourceServerFromDest", id);
+							dest.erase(std::remove(dest.begin(), dest.end(), id), dest.end());
+							src.push_back(id);
+						}
+					}
+					if (src.empty()) {
+						TraceEvent(SevWarn, "FailedServerRemoveRange", serverID)
+						    .detail("Key", it.key)
+						    .detail("ValueDest", describe(dest));
+						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, src, dest));
+						serversToRemoveRange.insert(serversToRemoveRange.end(), dest.begin(), dest.end());
+						tr.clear(keyServersKey(it.key));
+					} else {
+						TraceEvent(SevDebug, "FailedServerSetKey", serverID)
+						    .detail("Key", it.key)
+						    .detail("ValueSrc", describe(src))
+						    .detail("ValueDest", describe(dest));
+						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, src, dest));
+					}
 				}
 
 				// Set entire range for our serverID in serverKeys keyspace to false to signal erasure
