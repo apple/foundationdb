@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include <vector>
+#include <unordered_map>
+
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -180,7 +183,7 @@ struct BlobManagerData {
 	UID id;
 	Database db;
 
-	std::map<UID, BlobWorkerInterface> workersById;
+	std::unordered_map<UID, BlobWorkerInterface> workersById;
 	std::unordered_map<UID, BlobWorkerStats> workerStats; // mapping between workerID -> workerStats
 	KeyRangeMap<UID> workerAssignments;
 	KeyRangeMap<bool> knownBlobRanges;
@@ -373,6 +376,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 				// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part of
 				// the same logical change
+				bmData->workerStats[it.value()].numGranulesAssigned -= 1;
 				addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
 			}
 
