@@ -3416,6 +3416,10 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->commitProxies[0] is the firstCommitProxy.
 	self->commitProxies = newRecruits;
 
+	// Update recoveryTransactionVersion to the master interface
+	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryData.getReply(
+	    UpdateRecoveryDataRequest(self->recoveryTransactionVersion, self->commitProxies)))); 
+
 	return Void();
 }
 
@@ -4426,6 +4430,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	state vector<Standalone<CommitTransactionRef>> confChanges;
 	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
+
 	return confChanges;
 }
 
@@ -4716,9 +4721,6 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 		updateConfigForForcedRecovery(self, initialConfChanges);
 	}
 
-	// Update recoveryTransactionVersion to the master interface
-	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryVersion.getReply(
-	    UpdateRecoveryTransactionVersionRequest(self->recoveryTransactionVersion))));
 
 	debug_checkMaxRestoredVersion(UID(), self->lastEpochEnd, "DBRecovery");
 

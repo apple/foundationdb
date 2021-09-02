@@ -1605,7 +1605,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				DUMPTOKEN(recruited.getCommitVersion);
 				DUMPTOKEN(recruited.getLiveCommittedVersion);
 				DUMPTOKEN(recruited.reportLiveCommittedVersion);
-				DUMPTOKEN(recruited.updateRecoveryVersion);
+				DUMPTOKEN(recruited.updateRecoveryData);
 				// DUMPTOKEN(recruited.notifyBackupWorkerDone);
 
 				// printf("Recruited as masterServer\n");

@@ -1204,7 +1204,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
-	for (auto& p : self->dbInfo->get().client.commitProxies)
+	for (auto& p : self->commitProxies)
 		self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 
 	loop {
@@ -1217,15 +1217,20 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
-ACTOR Future<Void> updateRecoveryTransactionVersion(Reference<MasterData> self) {
+ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	loop {
 		choose {
-			when(UpdateRecoveryTransactionVersionRequest req =
-			         waitNext(self->myInterface.updateRecoveryVersion.getFuture())) {
-				TraceEvent("UpdateRecoveryVersion", self->dbgid).detail("version", req.recoveryTransactionVersion);
+			when(UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture())) {
+				TraceEvent("UpdateRecoveryData", self->dbgid)
+				    .detail("version", req.recoveryTransactionVersion)
+				    .detail("proxies", req.commitProxies.size());
 
-				if (req.recoveryTransactionVersion != invalidVersion) {
+				if (self->recoveryTransactionVersion == invalidVersion ||
+					req.recoveryTransactionVersion > self->recoveryTransactionVersion) {
 					self->recoveryTransactionVersion = req.recoveryTransactionVersion;
+				}
+				if (req.commitProxies.size() > 0) {
+					self->commitProxies = req.commitProxies;
 				}
 				req.reply.send(Void());
 			}
@@ -2025,7 +2030,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	addActor.send(traceRole(Role::MASTER, mi.id()));
 	addActor.send(provideVersions(self));
 	addActor.send(serveLiveCommittedVersion(self));
-	addActor.send(updateRecoveryTransactionVersion(self));
+	addActor.send(updateRecoveryData(self));
 
 	TEST(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())); // Master born doomed
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
