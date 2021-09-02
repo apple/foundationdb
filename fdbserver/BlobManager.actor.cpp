@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include <vector>
+#include <unordered_map>
+
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -169,11 +172,19 @@ struct RangeAssignment {
 	explicit RangeAssignment(KeyRange keyRange, bool isAssign) : keyRange(keyRange), isAssign(isAssign) {}
 };
 
+// TODO: track worker's reads/writes eventually
+struct BlobWorkerStats {
+	int numGranulesAssigned;
+
+	BlobWorkerStats(int numGranulesAssigned=0): numGranulesAssigned(numGranulesAssigned) {}
+};
+
 struct BlobManagerData {
 	UID id;
 	Database db;
 
-	std::map<UID, BlobWorkerInterface> workersById;
+	std::unordered_map<UID, BlobWorkerInterface> workersById;
+	std::unordered_map<UID, BlobWorkerStats> workerStats; // mapping between workerID -> workerStats
 	KeyRangeMap<UID> workerAssignments;
 	KeyRangeMap<bool> knownBlobRanges;
 
@@ -248,22 +259,34 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitNewRange(Reference<ReadYourWrit
 	}
 }
 
+// Picks a worker with the fewest number of already assigned ranges.
+// If there is a tie, picks one such worker at random.
 static UID pickWorkerForAssign(BlobManagerData* bmData) {
-	// FIXME: Right now just picks a random worker, this is very suboptimal
-	int idx = deterministicRandom()->randomInt(0, bmData->workersById.size());
-	if (BM_DEBUG) {
-		printf("picked random worker %d: ", idx);
+	int minGranulesAssigned = INT_MAX;
+	std::vector<UID> eligibleWorkers;
+	
+	for (auto const &worker : bmData->workerStats) {
+		UID currId = worker.first;
+		int granulesAssigned = worker.second.numGranulesAssigned;
+
+		if (granulesAssigned < minGranulesAssigned) {
+			eligibleWorkers.resize(0);
+			minGranulesAssigned = granulesAssigned;
+			eligibleWorkers.emplace_back(currId);
+		} else if (granulesAssigned == minGranulesAssigned) {
+			eligibleWorkers.emplace_back(currId);
+		}
 	}
 
-	auto it = bmData->workersById.begin();
-	while (idx > 0) {
-		idx--;
-		it++;
-	}
+	// pick a random worker out of the eligible workers
+	ASSERT(eligibleWorkers.size() > 0);
+	int idx = deterministicRandom()->randomInt(0, eligibleWorkers.size());
 	if (BM_DEBUG) {
-		printf("%s\n", it->first.toString().c_str());
+		printf("picked worker %s, which has a minimal number (%d) of granules assigned\n", 
+			   eligibleWorkers[idx].toString().c_str(), minGranulesAssigned);
 	}
-	return it->first;
+
+	return eligibleWorkers[idx];
 }
 
 ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment assignment, UID workerID, int64_t seqNo) {
@@ -338,6 +361,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 			workerId = pickWorkerForAssign(bmData);
 			bmData->workerAssignments.insert(assignment.keyRange, workerId);
+			bmData->workerStats[workerId].numGranulesAssigned += 1;
 
 			// FIXME: if range is assign, have some sort of semaphore for outstanding assignments so we don't assign
 			// a ton ranges at once and blow up FDB with reading initial snapshots.
@@ -352,6 +376,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 				// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part of
 				// the same logical change
+				bmData->workerStats[it.value()].numGranulesAssigned -= 1;
 				addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
 			}
 
@@ -529,6 +554,7 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 		state BlobWorkerInterface bwInterf(locality, deterministicRandom()->randomUniqueID());
 		bwInterf.initEndpoints();
 		self.workersById.insert({ bwInterf.id(), bwInterf });
+		self.workerStats.insert({ bwInterf.id(), BlobWorkerStats() });
 		addActor.send(blobWorker(bwInterf, dbInfo));
 	}
 
