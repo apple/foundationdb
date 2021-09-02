@@ -166,6 +166,12 @@ class IPagerSnapshot {
 public:
 	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
 	                                                           unsigned int level,
+	                                                           LogicalPageID pageID,
+	                                                           int priority,
+	                                                           bool cacheable,
+	                                                           bool nohit) = 0;
+	virtual Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
+	                                                           unsigned int level,
 	                                                           VectorRef<LogicalPageID> pageIDs,
 	                                                           int priority,
 	                                                           bool cacheable,

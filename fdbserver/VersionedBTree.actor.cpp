@@ -3003,31 +3003,33 @@ public:
 		return (PhysicalPageID)pageID;
 	}
 
-	Future<Reference<ArenaPage>> readPageAtVersion(DWALPager* self,
-	                                               PagerEventReasons reason,
+	Future<Reference<ArenaPage>> readPageAtVersion(PagerEventReasons reason,
+	                                               unsigned int level,
+	                                               LogicalPageID logicalID,
+	                                               int priority,
+	                                               Version v,
+	                                               bool cacheable,
+	                                               bool noHit) {
+		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
+		return readPage(reason, level, physicalID, priority, cacheable, noHit);
+	}
+
+	Future<Reference<ArenaPage>> readMultiPageAtVersion(PagerEventReasons reason,
 	                                               unsigned int level,
 	                                               VectorRef<LogicalPageID> logicalIDs,
 	                                               int priority,
 	                                               Version v,
 	                                               bool cacheable,
 	                                               bool noHit) {
-		PhysicalPageID physicalID;
-		if (logicalIDs.size() == 1) {
-			physicalID = self->getPhysicalPageID(logicalIDs.front(), v);
-			debug_printf("op=readPageAtVersion, from logicalID %u to phsyicalID %u\n",
-		             logicalIDs.front(),
-		             physicalID );
-			return self->readPage(reason, level, physicalID, priority, cacheable, noHit);
-		}
 		Standalone<VectorRef<PhysicalPageID>> ids;
 		ids.resize(ids.arena(), logicalIDs.size());
 		for (int i = 0; i < logicalIDs.size(); ++i) {
-			ids[i] = self->getPhysicalPageID(logicalIDs[i], v);
+			ids[i] = getPhysicalPageID(logicalIDs[i], v);
 		}
-		debug_printf("op=readPageAtVersion, from logicalIDs %s to phsyicalIDs %s\n",
+		debug_printf("op=readMultiPageAtVersion, from logicalIDs %s to phsyicalIDs %s\n",
 		             toString(logicalIDs).c_str(),
 		             toString(ids).c_str());
-		return self->readMultiPage(reason, level, ids, priority, cacheable, noHit);
+		return readMultiPage(reason, level, ids, priority, cacheable, noHit);
 	}
 
 	void releaseExtentReadLock() override { concurrentExtentReads->release(); }
@@ -3754,6 +3756,19 @@ public:
 
 	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
 	                                                   unsigned int level,
+	                                                   LogicalPageID pageID,
+	                                                   int priority,
+	                                                   bool cacheable,
+	                                                   bool noHit) override {
+		if (expired.isError()) {
+			throw expired.getError();
+		}
+		return map(pager->readPageAtVersion(reason, level, pageID, priority, version, cacheable, noHit),
+		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
+	}
+
+	Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
+	                                                   unsigned int level,
 	                                                   VectorRef<LogicalPageID> pageIDs,
 	                                                   int priority,
 	                                                   bool cacheable,
@@ -3761,7 +3776,7 @@ public:
 		if (expired.isError()) {
 			throw expired.getError();
 		}
-		return map(pager->readPageAtVersion(pager, reason, level, pageIDs, priority, version, cacheable, noHit),
+		return map(pager->readMultiPageAtVersion(reason, level, pageIDs, priority, version, cacheable, noHit),
 		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
 
@@ -5569,9 +5584,16 @@ private:
 		             snapshot->getVersion());
 
 		state Reference<const ArenaPage> page;
-		Reference<const ArenaPage> p = wait(snapshot->getPhysicalPage(reason, level, id, priority, cacheable, false));
-		page = std::move(p);
-
+		if (id.size() == 1) {
+			Reference<const ArenaPage> p =
+			    wait(snapshot->getPhysicalPage(reason, level, id.front(), priority, cacheable, false));
+			page = std::move(p);
+		} else {
+			ASSERT(!id.empty());
+			Reference<const ArenaPage> p =
+			    wait(snapshot->getMultiPhysicalPage(reason, level, id, priority, cacheable, false));
+			page = std::move(p);
+		}
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
 		const BTreePage* btPage = (const BTreePage*)page->begin();
 		auto& metrics = g_redwoodMetrics.level(btPage->height).metrics;
@@ -5614,8 +5636,11 @@ private:
 	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef pageIDs, int priority) {
 		g_redwoodMetrics.metric.btreeLeafPreload += 1;
 		g_redwoodMetrics.metric.btreeLeafPreloadExt += (pageIDs.size() - 1);
-
-		snapshot->getPhysicalPage(PagerEventReasons::RangePrefetch, nonBtreeLevel, pageIDs, priority, true, true);
+		if (pageIDs.size() == 1){
+			snapshot->getPhysicalPage(PagerEventReasons::RangePrefetch, nonBtreeLevel, pageIDs.front(), priority, true, true);
+		} else {
+			snapshot->getMultiPhysicalPage(PagerEventReasons::RangePrefetch, nonBtreeLevel, pageIDs, priority, true, true);
+		}
 	}
 
 	void freeBTreePage(BTreePageIDRef btPageID, Version v) {
