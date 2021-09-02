@@ -963,10 +963,23 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 
 // Reads txnStateStore and broadcasts the data to all Commit Proxies. After
 // that, initializes Resolvers to allow recovery transaction goes through.
-ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
+ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self, std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>* servers) {
 	state KeyRange txnKeys = allKeys;
 	state Sequence txnSequence = 0;
 	ASSERT(self->recoveryTransactionVersion);
+
+	if (SERVER_KNOBS->TLOG_NEW_INTERFACE && self->lastEpochEnd == 0) {
+		for (const auto& pair : *servers) {
+			std::vector<UID> serverSrcUID(1, pair.first.id());
+			std::cout << "SS/Team :: " << pair.first.id().toString() << " " << pair.second.toString() << std::endl;
+			auto teamId = pair.second;
+			for (const auto& ss : serverSrcUID) {
+				Key teamIdKey = storageServerToTeamIdKey(ss);
+				Value val = encodeStorageServerToTeamIdValue({ teamId });
+				self->txnStateStore->set(KeyValueRef(teamIdKey, val));
+			}
+		}
+	}
 
 	state RangeResult data =
 	    self->txnStateStore
@@ -1924,6 +1937,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers, self->configuration.splits);
+		// self->tLogGroupCollection->seedTLogGroupAssignment(recoveryCommitRequest.arena, tr, seedServers);
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely
@@ -1983,7 +1997,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	// Wait for the recovery transaction to complete.
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them
 	// unless we want to change TLogs
-	wait((success(recoveryCommit) && sendInitialCommitToResolvers(self)));
+	wait(success(recoveryCommit) && sendInitialCommitToResolvers(self, &seedServers));
 	if (recoveryCommit.isReady() && recoveryCommit.get().isError()) {
 		TEST(true); // Master recovery failed because of the initial commit failed
 		throw master_recovery_failed();

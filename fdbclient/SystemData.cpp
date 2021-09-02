@@ -327,6 +327,10 @@ const Key storageServerToTeamIdKey(UID serverId) {
 	return wr.toValue();
 }
 
+UID decodeStorageServerToTeamIdKey(Key k) {
+	return BinaryReader::fromStringRef<UID>(k.removePrefix(storageServerToTeamIdKeyPrefix), Unversioned());
+}
+
 const Value encodeStorageServerToTeamIdValue(const std::set<UID>& teamIds) {
 	return BinaryWriter::toValue(teamIds, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 }

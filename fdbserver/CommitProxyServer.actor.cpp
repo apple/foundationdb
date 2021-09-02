@@ -2130,13 +2130,12 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 							if (kv.key.startsWith(keyServersPrefix)) {
 								keyServers.emplace_back(kv.key.removePrefix(keyServersPrefix), kv.value);
 							} else if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
-								KeyRef k = kv.key.removePrefix(storageServerToTeamIdKeyPrefix);
+								UID k = decodeStorageServerToTeamIdKey(kv.key);
 								std::set<ptxn::StorageTeamID> storageTeamIDs =
 								    decodeStorageServerToTeamIdValue(kv.value);
 								// For demo purpose, each storage server can only belong to single storage team.
 								ASSERT(storageTeamIDs.size() == 1);
-								storageServerToStorageTeam.emplace(UID::fromString(k.toString()),
-								                                   *storageTeamIDs.begin());
+								storageServerToStorageTeam.emplace(k, *storageTeamIDs.begin());
 							} else {
 								mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 							}
@@ -2157,6 +2156,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 						info.tags.clear();
 						info.src_info.clear();
 						info.dest_info.clear();
+						info.storageTeams.clear();
 						for (const auto& id : src) {
 							auto storageInfo =
 								getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
