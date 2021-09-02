@@ -1,0 +1,20 @@
+extraDB=3
+
+testTitle=DrUpgrade
+clearAfterTest=false
+simBackupAgents=BackupToDB
+
+    testName=Cycle
+    nodeCount=30000
+    transactionsPerSecond=2500.0
+    testDuration=30.0
+    expectedRate=0
+
+    testName=BackupToDBUpgrade
+    backupAfter=10.0
+    stopDifferentialAfter=50.0
+    backupRangesCount=-1
+    
+    testName=SaveAndKill
+    restartInfoLocation=simfdb/restartInfo.ini
+    testDuration=40.0
