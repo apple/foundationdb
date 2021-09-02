@@ -308,9 +308,16 @@ namespace SummarizeTest
                     string lastFolderName = Path.GetFileName(Path.GetDirectoryName(testFile));
                     if (lastFolderName.Contains("from_") || lastFolderName.Contains("to_")) // Only perform upgrade/downgrade tests from certain versions
                     {
-                        oldBinaryVersionLowerBound = lastFolderName.Split('_').Last();
+                        oldBinaryVersionLowerBound = lastFolderName.Split('_').ElementAt(1); // Assuming "from_*.*.*" appears first in the folder name
                     }
                     string oldBinaryVersionUpperBound = getFdbserverVersion(fdbserverName);
+                    if (lastFolderName.Contains("until_")) // Specify upper bound for old binary; "until_*.*.*" is assumed at the end if present
+                    {
+                        string givenUpperBound = lastFolderName.Split('_').Last();
+                        if (versionLessThan(givenUpperBound, oldBinaryVersionUpperBound)) {
+                            oldBinaryVersionUpperBound = givenUpperBound;
+                        }
+                    }
                     if (versionGreaterThanOrEqual("4.0.0", oldBinaryVersionUpperBound)) {
                         // If the binary under test is from 3.x, then allow upgrade tests from 3.x binaries.
                         oldBinaryVersionLowerBound = "0.0.0";
