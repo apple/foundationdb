@@ -2156,6 +2156,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 						info.tags.clear();
 						info.src_info.clear();
 						info.dest_info.clear();
+						info.storageTeams.clear();
 						for (const auto& id : src) {
 							auto storageInfo =
 								getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
