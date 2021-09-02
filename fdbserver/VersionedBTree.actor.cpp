@@ -629,7 +629,7 @@ public:
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
 			nextPageReader = queue->pager->readPage(PagerEventReasons::MetaData,
 			                                        nonBtreeLevel,
-			                                        VectorRef<LogicalPageID>(&nextPageID, 1),
+			                                        nextPageID,
 			                                        ioMaxPriority,
 			                                        true,
 			                                        false);
@@ -2763,7 +2763,58 @@ public:
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
-	                                                           VectorRef<PhysicalPageID> pageIDs,
+	                                                           PhysicalPageID pageID,
+	                                                           int priority,
+	                                                           bool header) {
+		ASSERT(!self->memoryOnly);
+
+		// if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
+		// 	wait(delay(0, TaskPriority::DiskRead));
+		// }
+
+		state Reference<ArenaPage> page =
+		    header ? Reference<ArenaPage>(new ArenaPage(smallestPhysicalBlock, smallestPhysicalBlock))
+		           : self->newPageBuffer();
+		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p\n",
+		             self->filename.c_str(),
+		             toString(pageID).c_str(),
+		             page->begin());
+
+		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
+		++g_redwoodMetrics.metric.pagerDiskRead;
+
+		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
+		int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
+		int readBytes = wait(self->pageFile->read(page->mutate(), blockSize, (int64_t)pageID * blockSize));
+		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
+		             self->filename.c_str(),
+		             toString(pageID).c_str(),
+		             page->begin(),
+		             readBytes);
+
+		// Header reads are checked explicitly during recovery
+		if (!header) {
+			if (!page->verifyChecksum(pageID)) {
+				debug_printf(
+				    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageID).c_str());
+				Error e = checksum_failed();
+				TraceEvent(SevError, "RedwoodChecksumFailed")
+				    .detail("Filename", self->filename.c_str())
+				    .detail("PageID", pageID)
+				    .detail("PageSize", self->physicalPageSize)
+				    .detail("Offset", pageID * self->physicalPageSize)
+				    .detail("CalculatedChecksum", page->calculateChecksum(pageID))
+				    .detail("ChecksumInPage", page->getChecksum())
+				    .error(e);
+				ASSERT(false);
+				throw e;
+			}
+		}
+		return page;
+	}
+
+	ACTOR static Future<Reference<ArenaPage>> readPhysicalMultiPage(DWALPager* self,
+	                                                           Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                                                           int priority,
 	                                                           bool header) {
 		ASSERT(!self->memoryOnly);
@@ -2785,32 +2836,6 @@ public:
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
 		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
 		state uint8_t* data = page->mutate();
-		if (pageIDs.size() == 1) {
-			int readBytes = wait(self->pageFile->read(data, blockSize, (int64_t)pageIDs.front() * blockSize));
-			debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
-			             self->filename.c_str(),
-			             toString(pageIDs).c_str(),
-			             page->begin(),
-			             readBytes);
-			if (!header) {
-				if (!page->verifyChecksum(pageIDs.front())) {
-					debug_printf(
-					    "DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageIDs).c_str());
-					Error e = checksum_failed();
-					TraceEvent(SevError, "RedwoodChecksumFailed")
-					    .detail("Filename", self->filename.c_str())
-					    .detail("PageID", pageIDs)
-					    .detail("PageSize", self->physicalPageSize)
-					    .detail("Offset", pageIDs.front() * self->physicalPageSize)
-					    .detail("CalculatedChecksum", page->calculateChecksum(pageIDs.front()))
-					    .detail("ChecksumInPage", page->getChecksum())
-					    .error(e);
-					ASSERT(false);
-					throw e;
-				}
-			}
-			return page;
-		}
 		std::vector<Future<int>> reads;
 		for (int i = 0; i < pageIDs.size(); ++i) {
 			reads.push_back(readPhysicalPage_impl(self, data, blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
@@ -2847,7 +2872,7 @@ public:
 
 	static Future<Reference<ArenaPage>> readHeaderPage(DWALPager* self, PhysicalPageID pageID) {
 		debug_printf("DWALPager(%s) readHeaderPage %s\n", self->filename.c_str(), toString(pageID).c_str());
-		return readPhysicalPage(self, VectorRef<LogicalPageID>(&pageID, 1), ioMaxPriority, true);
+		return readPhysicalPage(self, pageID, ioMaxPriority, true);
 	}
 
 	bool tryEvictPage(LogicalPageID logicalID, Version v) {
@@ -2859,7 +2884,53 @@ public:
 	// in the current commit
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                      unsigned int level,
-	                                      VectorRef<PhysicalPageID> pageIDs,
+	                                      PhysicalPageID pageID,
+	                                      int priority,
+	                                      bool cacheable,
+	                                      bool noHit) override {
+		// Use cached page if present, without triggering a cache hit.
+		// Otherwise, read the page and return it but don't add it to the cache
+		debug_printf("DWALPager(%s) op=read %s noHit=%d\n", filename.c_str(), toString(pageID).c_str(), noHit);
+		auto& eventReasons = g_redwoodMetrics.level(level).metrics.events;
+		eventReasons.addEventReason(PagerEvents::CacheLookup, reason);
+		if (!cacheable) {
+			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
+			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageID);
+			if (pCacheEntry != nullptr) {
+				++g_redwoodMetrics.metric.pagerProbeHit;
+				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageID).c_str());
+				return pCacheEntry->readFuture;
+			}
+			++g_redwoodMetrics.metric.pagerProbeMiss;
+			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
+			return forwardError(readPhysicalPage(this, pageID, priority, false), errorPromise);
+		}
+
+		PageCacheEntry& cacheEntry = pageCache.get(pageID, 1, noHit);
+		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
+		             filename.c_str(),
+		             toString(pageID).c_str(),
+		             cacheEntry.initialized(),
+		             cacheEntry.initialized() && cacheEntry.reading(),
+		             cacheEntry.initialized() && cacheEntry.writing(),
+		             noHit);
+		if (!cacheEntry.initialized()) {
+			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageID).c_str());
+			cacheEntry.readFuture = forwardError(readPhysicalPage(this, pageID, priority, false), errorPromise);
+			cacheEntry.writeFuture = Void();
+
+			++g_redwoodMetrics.metric.pagerCacheMiss;
+			eventReasons.addEventReason(PagerEvents::CacheMiss, reason);
+		} else {
+			++g_redwoodMetrics.metric.pagerCacheHit;
+			eventReasons.addEventReason(PagerEvents::CacheHit, reason);
+		}
+		return cacheEntry.readFuture;
+	}
+
+	Future<Reference<ArenaPage>> readMultiPage(PagerEventReasons reason,
+	                                      unsigned int level,
+	                                      Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                                      int priority,
 	                                      bool cacheable,
 	                                      bool noHit) override {
@@ -2878,7 +2949,7 @@ public:
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageIDs).c_str());
-			return forwardError(readPhysicalPage(this, pageIDs, priority, false), errorPromise);
+			return forwardError(readPhysicalMultiPage(this, pageIDs, priority, false), errorPromise);
 		}
 
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), noHit);
@@ -2891,7 +2962,7 @@ public:
 		             noHit);
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageIDs).c_str());
-			cacheEntry.readFuture = forwardError(readPhysicalPage(this, pageIDs, priority, false), errorPromise);
+			cacheEntry.readFuture = forwardError(readPhysicalMultiPage(this, pageIDs, priority, false), errorPromise);
 			cacheEntry.writeFuture = Void();
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
@@ -2932,7 +3003,7 @@ public:
 		return (PhysicalPageID)pageID;
 	}
 
-	ACTOR Future<Reference<ArenaPage>> readPageAtVersion(DWALPager* self,
+	Future<Reference<ArenaPage>> readPageAtVersion(DWALPager* self,
 	                                               PagerEventReasons reason,
 	                                               unsigned int level,
 	                                               VectorRef<LogicalPageID> logicalIDs,
@@ -2940,27 +3011,23 @@ public:
 	                                               Version v,
 	                                               bool cacheable,
 	                                               bool noHit) {
-		state PhysicalPageID id;
+		PhysicalPageID physicalID;
 		if (logicalIDs.size() == 1) {
-			id = self->getPhysicalPageID(logicalIDs.front(), v);
-			VectorRef<PhysicalPageID> physicalIDs(&id, 1);
+			physicalID = self->getPhysicalPageID(logicalIDs.front(), v);
 			debug_printf("op=readPageAtVersion, from logicalID %u to phsyicalID %u\n",
 		             logicalIDs.front(),
-		             id);
-			Reference<ArenaPage> data = wait(self->readPage(reason, level, physicalIDs, priority, cacheable, noHit));
-			return data;
+		             physicalID );
+			return self->readPage(reason, level, physicalID, priority, cacheable, noHit);
 		}
-		state Standalone<VectorRef<PhysicalPageID>> ids;
+		Standalone<VectorRef<PhysicalPageID>> ids;
 		ids.resize(ids.arena(), logicalIDs.size());
 		for (int i = 0; i < logicalIDs.size(); ++i) {
 			ids[i] = self->getPhysicalPageID(logicalIDs[i], v);
 		}
-		VectorRef<PhysicalPageID> physicalIDs = ids;
 		debug_printf("op=readPageAtVersion, from logicalIDs %s to phsyicalIDs %s\n",
 		             toString(logicalIDs).c_str(),
 		             toString(ids).c_str());
-		Reference<ArenaPage> data = wait(self->readPage(reason, level, physicalIDs, priority, cacheable, noHit));
-		return data;
+		return self->readMultiPage(reason, level, ids, priority, cacheable, noHit);
 	}
 
 	void releaseExtentReadLock() override { concurrentExtentReads->release(); }
@@ -3202,10 +3269,9 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			VectorRef<LogicalPageID> pageID(&p.newPageID, 1);
 			Reference<ArenaPage> data = wait(self->readPage(PagerEventReasons::MetaData,
 			                                                nonBtreeLevel,
-			                                               	pageID,
+			                                               	p.newPageID,
 			                                                ioLeafPriority,
 			                                                false,
 			                                                true));
@@ -3436,8 +3502,6 @@ public:
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
 		self->remapCleanupFuture.cancel();
 
-		wait(self->pageCache.clear());
-
 		if (self->errorPromise.canBeSet()) {
 			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
 			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
@@ -3448,9 +3512,9 @@ public:
 		debug_printf("DWALPager(%s) shutdown wait for operations\n", self->filename.c_str());
 		wait(self->operations.signal());
 
-		/*debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
+		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->pageCache.clear());
-		wait(delay(0));*/
+		wait(delay(0));
 
 		debug_printf("DWALPager(%s) shutdown remappedPagesMap: %s\n",
 		             self->filename.c_str(),
@@ -9347,7 +9411,7 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 	pager->setMetaKey(LiteralStringRef("asdfasdf"));
 	wait(pager->commit());
 	Reference<ArenaPage> p2 =
-	    wait(pager->readPage(PagerEventReasons::PointRead, nonBtreeLevel, pageID, ioMinPriority, true, false));
+	    wait(pager->readPage(PagerEventReasons::PointRead, nonBtreeLevel, id, ioMinPriority, true, false));
 	printf("%s\n", StringRef(p2->begin(), p2->size()).toHexString().c_str());
 
 	// TODO: Verify reads, do more writes and reads to make this a real pager validator

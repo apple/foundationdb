@@ -237,10 +237,17 @@ public:
 	// considered likely to be needed soon.
 	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                              unsigned int level,
-	                                              VectorRef<PhysicalPageID> pageIDs,
+	                                              PhysicalPageID pageIDs,
 	                                              int priority,
 	                                              bool cacheable,
 	                                              bool noHit) = 0;
+	virtual Future<Reference<ArenaPage>> readMultiPage(PagerEventReasons reason,
+	                                              unsigned int level,
+	                                              Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                              int priority,
+	                                              bool cacheable,
+	                                              bool noHit) = 0;
+
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 
