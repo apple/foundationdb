@@ -424,6 +424,10 @@ public:
 	void deleteWatchMetadata(KeyRef key);
 	void clearWatchMetadata();
 
+	// tenant map operations
+	void insertTenant(KeyRef key, KeyRef value, Version version);
+	void clearTenants(KeyRef startKey, KeyRef endKey, Version version);
+
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
 		std::unordered_map<UID, KeyRange> keyRangeMap;
@@ -3630,31 +3634,10 @@ private:
 			data->addMutationToMutationLog(mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2));
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
 		           m.param1.startsWith(tenantMapPrivatePrefix)) {
-			data->tenantMap.createNewVersion(currentVersion);
-			data->tenantIndex.createNewVersion(currentVersion);
 			if (m.type == MutationRef::SetValue) {
-				TenantProperties props;
-				props.begin = "a"_sr;
-				props.lockState = TenantProperties::LockState::LOCKED;
-				data->tenantMap.insert("LockedTenant", props);
-				data->tenantIndex.insert(props.begin, "LockedTenant");
-
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-				data->addMutationToMutationLog(mLV,
-				                               MutationRef(MutationRef::SetValue,
-				                                           persistTenantMapKeys.begin.toString() + "LockedTenant",
-				                                           m.param2));
-				TraceEvent("DebugTenant_SetKey").detail("Key", persistTenantMapKeys.begin.toString() + "LockedTenant");
+				data->insertTenant(m.param1, m.param2, currentVersion);
 			} else if (m.type == MutationRef::ClearRange) {
-				data->tenantMap.erase("LockedTenant");
-				data->tenantIndex.erase("a"_sr);
-
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-				data->addMutationToMutationLog(
-				    mLV, MutationRef(MutationRef::ClearRange, persistTenantMapKeys.begin, persistTenantMapKeys.end));
-				TraceEvent("DebugTenant_ClearedKeys")
-				    .detail("Begin", persistTenantMapKeys.begin)
-				    .detail("End", persistTenantMapKeys.end);
+				data->clearTenants(m.param1, m.param2, currentVersion);
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
@@ -3720,6 +3703,37 @@ private:
 		}
 	}
 };
+
+void StorageServer::insertTenant(KeyRef key, KeyRef value, Version version) {
+	tenantMap.createNewVersion(version);
+	tenantIndex.createNewVersion(version);
+
+	TenantProperties props;
+	props.begin = "a"_sr;
+	props.lockState = TenantProperties::LockState::LOCKED;
+	tenantMap.insert("LockedTenant", props);
+	tenantIndex.insert(props.begin, "LockedTenant");
+
+	auto& mLV = addVersionToMutationLog(version);
+	addMutationToMutationLog(
+	    mLV, MutationRef(MutationRef::SetValue, persistTenantMapKeys.begin.toString() + "LockedTenant", value));
+	TraceEvent("DebugTenant_SetKey").detail("Key", persistTenantMapKeys.begin.toString() + "LockedTenant");
+}
+
+void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version) {
+	tenantMap.createNewVersion(version);
+	tenantIndex.createNewVersion(version);
+
+	tenantMap.erase("LockedTenant");
+	tenantIndex.erase("a"_sr);
+
+	auto& mLV = addVersionToMutationLog(version);
+	addMutationToMutationLog(
+	    mLV, MutationRef(MutationRef::ClearRange, persistTenantMapKeys.begin, persistTenantMapKeys.end));
+	TraceEvent("DebugTenant_ClearedKeys")
+	    .detail("Begin", persistTenantMapKeys.begin)
+	    .detail("End", persistTenantMapKeys.end);
+}
 
 ACTOR Future<Void> tssDelayForever() {
 	loop {
@@ -5288,6 +5302,29 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 	}
 }
 
+ACTOR Future<Void> initTenantMap(StorageServer* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state Version version = wait(tr->getReadVersion());
+			RangeResult tenantMapKeys = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
+
+			for (auto kv : tenantMapKeys) {
+				// TODO: we need to make sure whatever version we use for reading the tenant map is the minimum we can
+				// use for reads, and that we will get all updates after that point
+				self->insertTenant(kv.key, kv.value, version);
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	return Void();
+}
+
 // for creating a new storage server
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
@@ -5335,6 +5372,11 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		rep.addedVersion = self.version.get();
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
+
+		if (seedTag == invalidTag) {
+			// TODO: we need to make sure that if we fail before the result here is made durable, then we can recover and read it again
+			wait(initTenantMap(&self));
+		}
 
 		wait(storageServerCore(&self, ssi));
 
