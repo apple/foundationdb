@@ -664,12 +664,14 @@ ACTOR Future<Void> timeWarning(double when, const char* msg) {
 ACTOR Future<Void> checkStatus(Future<Void> f, Reference<IDatabase> db, bool displayDatabaseAvailable = true) {
 	wait(f);
 	state Reference<ITransaction> tr = db->createTransaction();
-	Optional<Value> statusValue = wait(safeThreadFutureToFuture(tr->get(LiteralStringRef("\xff\xff/status/json"))));
-	if (!statusValue.present()) {
+	state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+	Optional<Optional<Value>> statusValue = wait(timeout(safeThreadFutureToFuture(statusValueF), 5.0));
+	if (!statusValue.present() || !statusValue.get().present()) {
 		fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
+		return Void();
 	}
 	json_spirit::mValue mv;
-	json_spirit::read_string(statusValue.get().toString(), mv);
+	json_spirit::read_string(statusValue.get().get().toString(), mv);
 	StatusObject s = StatusObject(mv.get_obj());
 	printf("\n");
 	printStatus(s, StatusClient::MINIMAL, displayDatabaseAvailable);
@@ -1984,6 +1986,18 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		    .trackLatest("ProgramStart");
 	}
 
+	// used to catch the first cluster_version_changed error when using external clients
+	loop {
+		try {
+			getTransaction(db2, tr, options, intrans);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			wait(delay(3.0) || success(safeThreadFutureToFuture(tr->getReadVersion())));
+			break;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+
 	if (!opt.exec.present()) {
 		if (opt.initialStatusCheck) {
 			Future<Void> checkStatusF = checkStatus(Void(), db2);
@@ -2385,8 +2399,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						Optional<Standalone<StringRef>> v = wait(makeInterruptable(
-						    safeThreadFutureToFuture(getTransaction(db2, tr, options, intrans)->get(tokens[1]))));
+						state ThreadFuture<Optional<Value>> valueF =
+						    getTransaction(db2, tr, options, intrans)->get(tokens[1]);
+						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
 
 						if (v.present())
 							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
@@ -2522,9 +2537,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							endKey = strinc(tokens[1]);
 						}
 
-						RangeResult kvs = wait(makeInterruptable(
-						    safeThreadFutureToFuture(getTransaction(db2, tr, options, intrans)
-						                                 ->getRange(KeyRangeRef(tokens[1], endKey), limit))));
+						state ThreadFuture<RangeResult> kvsF =
+						    getTransaction(db2, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit);
+						RangeResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(kvsF)));
 
 						printf("\nRange limited to %d keys\n", limit);
 						for (auto iter = kvs.begin(); iter < kvs.end(); iter++) {

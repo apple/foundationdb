@@ -1196,7 +1196,8 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db, std::vector<Strin
 	}
 
 	state Reference<ITransaction> tr = db->createTransaction();
-	Optional<Value> statusValue = wait(safeThreadFutureToFuture(tr->get(LiteralStringRef("\xff\xff/status/json"))));
+	state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+	Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 	if (!statusValue.present()) {
 		fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
 	}

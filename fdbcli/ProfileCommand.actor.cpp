@@ -53,14 +53,16 @@ ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<S
 			}
 			state std::string sampleRateStr = "default";
 			state std::string sizeLimitStr = "default";
-			Optional<Value> sampleRateValue =
-			    wait(safeThreadFutureToFuture(tr->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate))));
+			state ThreadFuture<Optional<Value>> sampleRateValueF =
+			    tr->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate));
+			Optional<Value> sampleRateValue = wait(safeThreadFutureToFuture(sampleRateValueF));
 			if (sampleRateValue.present() &&
 			    !std::isinf(boost::lexical_cast<double>(sampleRateValue.get().toString()))) {
 				sampleRateStr = sampleRateValue.get().toString();
 			}
-			Optional<Value> sizeLimitValue =
-			    wait(safeThreadFutureToFuture(tr->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit))));
+			state ThreadFuture<Optional<Value>> sizeLimitValueF =
+			    tr->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit));
+			Optional<Value> sizeLimitValue = wait(safeThreadFutureToFuture(sizeLimitValueF));
 			if (sizeLimitValue.present() && boost::lexical_cast<int64_t>(sizeLimitValue.get().toString()) != -1) {
 				sizeLimitStr = sizeLimitValue.get().toString();
 			}

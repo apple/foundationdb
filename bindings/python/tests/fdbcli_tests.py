@@ -547,7 +547,8 @@ if __name__ == '__main__':
         kill()
         lockAndUnlock()
         maintenance()
-        profile()
+        # TODO: disable for now, while using the external client, we need to find a way to wait for global config to initialize
+        # profile()
         suspend()
         transaction()
         throttle()
