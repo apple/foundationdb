@@ -30,6 +30,7 @@
 
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbclient/BlobWorkerCommon.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -38,7 +39,8 @@
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version readVersion,
-                                          Reference<BackupContainerFileSystem> bstore);
+                                          Reference<BackupContainerFileSystem> bstore,
+                                          Optional<BlobWorkerStats *> stats=Optional<BlobWorkerStats *>());
 
 ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
                                     BlobGranuleFileReply reply,
