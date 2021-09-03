@@ -1,7 +1,9 @@
 [[test]]
+testTitle = 'ChangeFeed'
+
     [[test.workload]]
     testName = 'Cycle'
-    transactionsPerSecond = 2500.0
+    transactionsPerSecond = 250.0
     testDuration = 60.0
     expectedRate = 0
 
