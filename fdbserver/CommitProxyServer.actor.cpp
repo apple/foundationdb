@@ -1994,6 +1994,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	//TraceEvent("ProxyInit3", proxy.id());
 
 	// Add TLog groups to collection
+	// TODO: also add list of workers for groups
 	const auto& logset = commitData.db->get().logSystemConfig.tLogs[0];
 	for (const auto& gid : logset.tLogGroupIDs) {
 		TLogGroupRef group = makeReference<TLogGroup>(gid);
