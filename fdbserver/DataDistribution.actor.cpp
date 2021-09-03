@@ -3581,7 +3581,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			bool healthy = !badTeam && !anyUndesired && serversLeft == self->configuration.storageTeamSize;
 			team->setHealthy(healthy); // Unhealthy teams won't be chosen by bestTeam
 			bool optimal = team->isOptimal() && healthy;
-			bool containsFailed = teamContainsFailedServer(self, team);  // True if the team has already excluded by TC
+			bool containsFailed = teamContainsFailedServer(self, team);
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 			                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
