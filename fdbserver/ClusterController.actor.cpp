@@ -3103,6 +3103,30 @@ public:
 // Assist Cluster Recovery state machine
 namespace ClusterControllerRecovery {
 
+static std::set<int> const& normalClusterRecoveryErrors() {
+	static std::set<int> s;
+	if (s.empty()) {
+		s.insert(error_code_operation_failed);
+		s.insert(error_code_tlog_stopped);
+		s.insert(error_code_master_tlog_failed);
+		s.insert(error_code_commit_proxy_failed);
+		s.insert(error_code_grv_proxy_failed);
+		s.insert(error_code_master_resolver_failed);
+		s.insert(error_code_master_backup_worker_failed);
+		s.insert(error_code_recruitment_failed);
+		s.insert(error_code_no_more_servers);
+		s.insert(error_code_master_recovery_failed);
+		s.insert(error_code_coordinated_state_conflict);
+		s.insert(error_code_master_max_versions_in_flight);
+		s.insert(error_code_worker_removed);
+		s.insert(error_code_new_coordinators_timed_out);
+		s.insert(error_code_broken_promise);
+		s.insert(error_code_coordinators_changed);
+	}
+	return s;
+}
+
+
 struct CommitProxyVersionReplies {
 	std::map<uint64_t, GetCommitVersionReply> replies;
 	NotifiedVersion latestRequestNum;
@@ -5227,14 +5251,30 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			TEST(true); // clusterWatchDatabase() master failed
 			TraceEvent(SevWarn, "DetectedFailedMaster", cluster->id).detail("OldMaster", iMaster.id());
 		} catch (Error& e) {
+			state Error err = e;
 			TraceEvent("CCWDB", cluster->id).error(e, true).detail("Master", iMaster.id());
-			if (e.code() == error_code_actor_cancelled)
+			if (err.code() == error_code_actor_cancelled) {
 				throw;
+			} else {
+				wait(delay(0.0));
+			}
 
-			bool ok = e.code() == error_code_no_more_servers;
-			TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(e);
-			if (!ok) {
-				throw e;
+			TEST(err.code() == error_code_master_tlog_failed);          // Terminated due to tLog failure
+			TEST(err.code() == error_code_commit_proxy_failed);         // Terminated due to commit proxy failure
+			TEST(err.code() == error_code_grv_proxy_failed);            // Terminated due to GRV proxy failure
+			TEST(err.code() == error_code_master_resolver_failed);      // Terminated due to resolver failure
+			TEST(err.code() == error_code_master_backup_worker_failed); // Terminated due to backup worker failure
+			TEST(err.code() == error_code_operation_failed); 			// Terminated due to failed operation
+			TEST(err.code() == error_code_coordinators_changed);		// Terminated due to change in coordinator
+
+			if (ClusterControllerRecovery::normalClusterRecoveryErrors().count(err.code())) {
+				TraceEvent(SevWarn, "ClusterRecoveryRetrying", cluster->id).error(err);
+			} else {
+				bool ok = err.code() == error_code_no_more_servers;
+				TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
+				if (!ok) {
+					throw err;
+				}
 			}
 			wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
 		}
