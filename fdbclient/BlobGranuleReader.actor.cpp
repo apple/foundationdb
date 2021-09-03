@@ -253,6 +253,8 @@ static void applyDeltas(std::map<KeyRef, ValueRef>* dataMap,
 	}
 }
 
+// TODO: improve the interface of this function so that it doesn't need 
+//       to be passed the entire BlobWorkerStats object
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version readVersion,

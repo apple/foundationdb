@@ -220,14 +220,17 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			throw e;
+		}
+
 		// FIXME: only delete if key doesn't exist
-		// if transaction throws non-retryable error, delete s3 file before exiting
 		if (BW_DEBUG) {
 			printf("deleting s3 delta file %s after error %s\n", fname.c_str(), e.name());
 		}
 		state Error eState = e;
-		wait(bwData->bstore->deleteFile(fname));
 		++bwData->stats.s3DeleteReqs;
+		wait(bwData->bstore->deleteFile(fname));
 		throw eState;
 	}
 }
@@ -287,7 +290,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.snapshotFilesWritten;
-	bwData->stats.snapshotBytesWritten += serialized.size(); // vs. snapshot.size()?
+	bwData->stats.snapshotBytesWritten += serialized.size();
 
 	wait(objectFile->append(serialized.begin(), serialized.size()));
 	wait(objectFile->finish());
@@ -314,14 +317,17 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			throw e;
+		}
+
 		// FIXME: only delete if key doesn't exist
-		// if transaction throws non-retryable error, delete s3 file before exiting
 		if (BW_DEBUG) {
 			printf("deleting s3 snapshot file %s after error %s\n", fname.c_str(), e.name());
 		}
 		state Error eState = e;
-		wait(bwData->bstore->deleteFile(fname));
 		++bwData->stats.s3DeleteReqs;
+		wait(bwData->bstore->deleteFile(fname));
 		throw eState;
 	}
 
@@ -496,7 +502,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 		metadata->currentDeltaVersion = metadata->lastWriteVersion;
 		rangeFeedFuture = bwData->db->getRangeFeedStream(
 		    rangeFeedStream, rangeFeedData.first, newSnapshotFile.version + 1, maxVersion, metadata->keyRange);
-		bwData->stats.rangeFeedInputBytes += metadata->keyRange.expectedSize();
 
 		loop {
 			// TODO: Buggify delay in change feed stream
@@ -507,9 +512,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					for (auto& delta : deltas.mutations) {
 						// FIXME: add mutation tracking here
 						// 8 for version, 1 for type, 4 for each param length then actual param size
-						metadata->currentDeltaBytes += 17 + delta.param1.size() + delta.param2.size();
-						bwData->stats.rangeFeedOutputBytes += delta.expectedSize();
-						bwData->stats.mutationBytesBuffered = metadata->currentDeltaBytes;
+						metadata->currentDeltaBytes += delta.totalSize();
+						bwData->stats.changeFeedInputBytes += delta.totalSize();
+						bwData->stats.mutationBytesBuffered += delta.totalSize();
 					}
 				}
 
@@ -537,12 +542,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					metadata->lastWriteVersion = metadata->currentDeltaVersion;
 					metadata->bytesInNewDeltaFiles += metadata->currentDeltaBytes;
 
+					bwData->stats.mutationBytesBuffered -= metadata->currentDeltaBytes;
+
 					// reset current deltas
 					metadata->deltaArena = Arena();
 					metadata->currentDeltas = GranuleDeltas();
 					metadata->currentDeltaBytes = 0;
-
-					bwData->stats.mutationBytesBuffered = 0;
 
 					if (BW_DEBUG) {
 						printf("Popping range feed %s at %lld\n\n",
@@ -598,7 +603,7 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* bwData, const BlobGranu
 		if (lastRangeEnd < r.begin() || !isValid) {
 			if (BW_REQUEST_DEBUG) {
 				printf("No %s blob data for [%s - %s) in request range [%s - %s), skipping request\n",
-					   isValid ? "" : "valid",
+				       isValid ? "" : "valid",
 				       lastRangeEnd.printable().c_str(),
 				       r.begin().printable().c_str(),
 				       req.keyRange.begin.printable().c_str(),
@@ -697,7 +702,6 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* bwData, const BlobGranu
 		rep.chunks.push_back(rep.arena, chunk);
 
 		bwData->stats.readReqTotalFilesReturned += chunk.deltaFiles.size() + int(chunk.snapshotFile.present());
-		bwData->stats.readReqDeltaFilesReturned += chunk.deltaFiles.size();
 
 		// TODO yield?
 	}

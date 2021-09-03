@@ -30,11 +30,10 @@ struct BlobWorkerStats {
 	Counter deltaBytesWritten, snapshotBytesWritten;
 	Counter bytesReadFromFDBForInitialSnapshot;
 	Counter bytesReadFromS3ForCompaction;
-	Counter rangeAssignmentRequests;
-	Counter readRequests;
+	Counter rangeAssignmentRequests, readRequests;
 	Counter wrongShardServer;
-	Counter rangeFeedInputBytes, rangeFeedOutputBytes;
-	Counter readReqTotalFilesReturned, readReqDeltaFilesReturned;
+	Counter changeFeedInputBytes;
+	Counter readReqTotalFilesReturned;
 	Counter readReqDeltaBytesReturned;
 
 	int numRangesAssigned;
@@ -53,8 +52,8 @@ struct BlobWorkerStats {
 		bytesReadFromS3ForCompaction("BytesReadFromS3ForCompaction", cc),
 		rangeAssignmentRequests("RangeAssignmentRequests", cc), readRequests("ReadRequests", cc),
 		wrongShardServer("WrongShardServer", cc),
-		rangeFeedInputBytes("RangeFeedInputBytes", cc), rangeFeedOutputBytes("RangeFeedOutputBytes", cc),
-		readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc), readReqDeltaFilesReturned("ReadReqDeltaFilesReturned", cc),
+		changeFeedInputBytes("RangeFeedInputBytes", cc),
+		readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
 		readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc),
 		numRangesAssigned(0), mutationBytesBuffered(0)
 	{
