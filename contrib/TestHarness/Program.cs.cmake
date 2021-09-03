@@ -327,7 +327,10 @@ namespace SummarizeTest
                                                          Directory.GetFiles(oldBinaryFolder),
                                                          x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
                                                            && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
-                    oldBinaries = oldBinaries.Concat(currentBinary);
+                    if (versionGreaterThanOrEqual(oldBinaryVersionUpperBound, getFdbserverVersion(fdbserverName))) {
+                        // only add current binary if it's allowed
+                        oldBinaries = oldBinaries.Concat(currentBinary);
+                    }
                     oldServerName = random.Choice(oldBinaries.ToList<string>());
                 }
                 else
