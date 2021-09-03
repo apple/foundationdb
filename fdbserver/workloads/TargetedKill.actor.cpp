@@ -33,10 +33,14 @@ struct TargetedKillWorkload : TestWorkload {
 	std::string machineToKill;
 	bool enabled, killAllMachineProcesses;
 	double killAt;
+	bool reboot;
+	double suspendDuration;
 
 	TargetedKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		killAt = getOption(options, LiteralStringRef("killAt"), 5.0);
+		reboot = getOption(options, LiteralStringRef("reboot"), false);
+		suspendDuration = getOption(options, LiteralStringRef("suspendDuration"), 1.0);
 		machineToKill = getOption(options, LiteralStringRef("machineToKill"), LiteralStringRef("master")).toString();
 		killAllMachineProcesses = getOption(options, LiteralStringRef("killWholeMachine"), false);
 	}
@@ -61,13 +65,19 @@ struct TargetedKillWorkload : TestWorkload {
 		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
 		int killed = 0;
+		state RebootRequest rbReq;
+		if (self->reboot) {
+			rbReq.waitForDuration = self->suspendDuration;
+		} else {
+			rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
+		}
 		for (int i = 0; i < workers.size(); i++) {
 			if (workers[i].interf.master.getEndpoint().getPrimaryAddress() == address ||
 			    (self->killAllMachineProcesses &&
 			     workers[i].interf.master.getEndpoint().getPrimaryAddress().ip == address.ip &&
 			     workers[i].processClass != ProcessClass::TesterClass)) {
 				TraceEvent("WorkerKill").detail("TargetedMachine", address).detail("Worker", workers[i].interf.id());
-				workers[i].interf.clientInterface.reboot.send(RebootRequest());
+				workers[i].interf.clientInterface.reboot.send(rbReq);
 			}
 		}
 

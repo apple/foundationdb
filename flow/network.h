@@ -706,6 +706,7 @@ struct DiskFailureInjector {
 		throttlePeriod = throttleFor;
 		throttleUntil = std::max(throttleUntil, g_network->now() + throttleFor);
 		TraceEvent("SetDiskFailure")
+			.detail("Now", g_network->now())
 		    .detail("StallInterval", interval)
 		    .detail("StallPeriod", stallFor)
 		    .detail("StallUntil", stallUntil)

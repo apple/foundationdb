@@ -34,8 +34,11 @@ private:
 
 public:
 	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {
-		// We onlyl allow chaod events on storage files
-		enabled = StringRef(file->getFilename()).startsWith(LiteralStringRef("storage-"));
+		// We only allow chaos events on storage files
+		enabled = (file->getFilename().find("storage-") != std::string::npos);
+		//enabled = StringRef(file->getFilename()).startsWith(LiteralStringRef("storage-"));
+
+		TraceEvent("AsyncFileChaos").detail("Enabled", enabled).detail("FileName", file->getFilename());
 	}
 
 	void addref() override { ReferenceCounted<AsyncFileChaos>::addref(); }
