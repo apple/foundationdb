@@ -31,6 +31,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -109,6 +110,14 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 	state NetworkAddress proxyAddress =
 	    req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
 	state ProxyRequestsInfo& proxyInfo = self->proxyInfoMap[proxyAddress];
+
+	/* for (auto e : self->proxyInfoMap) {
+		TraceEvent("resolveBatch proxyMap").detail("first", e.first.toString()).detail("second", e.second.lastVersion);
+	}
+	TraceEvent("resolveBatch proxyMap")
+	    .detail("proxyAdress", proxyAddress.toString())
+	    .detail("isFound", self->proxyInfoMap.find(proxyAddress) != self->proxyInfoMap.end());
+    */
 
 	++self->resolveBatchIn;
 

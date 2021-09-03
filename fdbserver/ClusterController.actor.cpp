@@ -3151,7 +3151,7 @@ public:
 	Future<Void> read() { return _read(this); }
 
 	Future<Void> write(DBCoreState newState, bool finalWrite = false) {
-		TraceEvent("write db").detail("prvTLogs", prevDBState.tLogs.size()).detail("newTLog", newState.tLogs.size());
+		// TraceEvent("write db").detail("prvTLogs", prevDBState.tLogs.size()).detail("newTLog", newState.tLogs.size());
 		previousWrite = _write(this, newState, finalWrite);
 		return previousWrite;
 	}
@@ -3788,11 +3788,13 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		    newState.tLogs.size() ==
 		    configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		state bool finalUpdate = !newState.oldTLogData.size() && allLogs;
+		/* 
 		TraceEvent("trackTlogRecovery")
 		    .detail("finalUpdate", finalUpdate)
 		    .detail("newState.tlogs", newState.tLogs.size())
 		    .detail("expected.tlogs",
 		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()));
+		*/
 		wait(self->cstate.write(newState, finalUpdate));
 		wait(minRecoveryDuration);
 		self->logSystem->coreStateWritten(newState);
@@ -4238,11 +4240,13 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 		trigger = self->registrationTrigger.onTrigger();
 
 		auto logSystemConfig = logSystem->getLogSystemConfig();
+		/* 
 		TraceEvent("UpdateRegistration", self->dbgid)
 		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
 		    .detail("Logs", describe(logSystemConfig.tLogs))
 			.detail("cstateUpdated", self->cstateUpdated.isSet());
+		*/
 
 		if (!self->cstateUpdated.isSet()) {
 			wait(sendMasterRegistration(self.getPtr(),
@@ -5229,8 +5233,9 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 			bool ok = e.code() == error_code_no_more_servers;
 			TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(e);
-			if (!ok)
+			if (!ok) {
 				throw e;
+			}
 			wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
 		}
 	}

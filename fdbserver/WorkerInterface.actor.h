@@ -166,6 +166,8 @@ struct ClusterControllerFullInterface {
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterControllerFullInterface const& r) const { return id() != r.id(); }
 
+	NetworkAddress address() const { return clientInterface.address(); }
+
 	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||

@@ -282,7 +282,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                       FutureStream<TLogRejoinRequest> const& rejoins,
 	                                       LocalityData const& locality,
 	                                       bool* forceRecovery) {
-		TraceEvent("recoverAndEndEpoch", dbgid).log();
+		// TraceEvent("recoverAndEndEpoch", dbgid).log();
 		return epochEnd(outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery);
 	}
 
@@ -1995,9 +1995,11 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 		// state is changed Creates a new logSystem representing the (now frozen) epoch No other important side effects.
 		// The writeQuorum in the master info is from the previous configuration
 
+		/* 
 		TraceEvent("epochEnd", dbgid)
 		.detail("forceRecovery", *forceRecovery)
 		.detail("prevState.size", prevState.tLogs.size());
+		*/
 
 		if (!prevState.tLogs.size()) {
 			// This is a brand new database
@@ -2011,7 +2013,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 			throw internal_error();
 		}
 
-		TraceEvent("epochEnd after ", dbgid).log();
+		// TraceEvent("epochEnd after ", dbgid).log();
 
 		if (*forceRecovery) {
 			DBCoreState modifiedState = prevState;
@@ -3057,8 +3059,6 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 			logsWaiting.insert(log.first->get().id());
 		}
 
-		TraceEvent("trackJoins", dbgid).log();
-
 		try {
 			loop choose {
 				when(TLogRejoinRequest req = waitNext(rejoinRequests)) {
@@ -3314,7 +3314,7 @@ Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSys
                                             FutureStream<TLogRejoinRequest> const& rejoins,
                                             LocalityData const& locality,
                                             bool* forceRecovery) {
-	TraceEvent("recoverAndEndEpoch", dbgid).log();
+	// TraceEvent("recoverAndEndEpoch", dbgid).log();
 	return TagPartitionedLogSystem::recoverAndEndEpoch(outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery);
 }
 

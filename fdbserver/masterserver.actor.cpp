@@ -1134,14 +1134,15 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 
 	++self->getCommitVersionRequests;
 
-	TraceEvent("updateRecoveryData", req.requestingProxy)
+	/* TraceEvent("updateRecoveryData", req.requestingProxy)
 		.detail("reqNum", req.requestNum)
-	    .detail("isFound", proxyItr != self->lastCommitProxyVersionReplies.end());
+	    .detail("isFound", proxyItr != self->lastCommitProxyVersionReplies.end()); */
 
 	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
 		// Request from invalid proxy (e.g. from duplicate recruitment request)
-		TraceEvent("updateRecoveryData invalid proxy", req.requestingProxy)
+		/* TraceEvent("updateRecoveryData invalid proxy", req.requestingProxy)
 		    .detail("reqNum", req.requestNum);
+		*/
 		req.reply.send(Never());
 		return Void();
 	}
@@ -1152,13 +1153,13 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 	auto itr = proxyItr->second.replies.find(req.requestNum);
 	if (itr != proxyItr->second.replies.end()) {
 		TEST(true); // Duplicate request for sequence
-		TraceEvent("updateRecoveryData duplicate request", req.requestingProxy).detail("reqNum", req.requestNum);
+		//TraceEvent("updateRecoveryData duplicate request", req.requestingProxy).detail("reqNum", req.requestNum);
 		req.reply.send(itr->second);
 	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
 		TEST(true); // Old request for previously acknowledged sequence - may be impossible with current FlowTransport
-		TraceEvent("updateRecoveryData", req.requestingProxy)
+		/* TraceEvent("updateRecoveryData", req.requestingProxy)
 		    .detail("reqNum", req.requestNum)
-		    .detail("latestReqNum", proxyItr->second.latestRequestNum.get());
+		    .detail("latestReqNum", proxyItr->second.latestRequestNum.get()); */
 		ASSERT(req.requestNum <
 		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
 		req.reply.send(Never());
@@ -1202,10 +1203,10 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		proxyItr->second.replies.erase(proxyItr->second.replies.begin(),
 		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
 		proxyItr->second.replies[req.requestNum] = rep;
-		TraceEvent("updateRecoveryData", req.requestingProxy)
+		/* TraceEvent("updateRecoveryData", req.requestingProxy)
 			.detail("reqNum", req.requestNum)
 		    .detail("repVersion", self->version)
-		    .detail("recoveryTxnVersion", self->recoveryTransactionVersion);
+		    .detail("recoveryTxnVersion", self->recoveryTransactionVersion); */
 		ASSERT(rep.prevVersion >= 0);
 		req.reply.send(rep);
 
@@ -1233,9 +1234,11 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	loop {
 		choose {
 			when(UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture())) {
+				/* 
 				TraceEvent("UpdateRecoveryData", self->dbgid)
 				    .detail("version", req.recoveryTransactionVersion)
 				    .detail("proxies", req.commitProxies.size());
+				*/
 
 				if (self->recoveryTransactionVersion == invalidVersion ||
 					req.recoveryTransactionVersion > self->recoveryTransactionVersion) {
@@ -1249,7 +1252,7 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 					self->lastCommitProxyVersionReplies.clear();
 
 					for (auto& p : self->commitProxies) {
-						TraceEvent("updateRecoveryData").detail("proxyId", p.id());
+						// TraceEvent("updateRecoveryData").detail("proxyId", p.id());
 						self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 					}
 				}
