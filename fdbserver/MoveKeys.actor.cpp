@@ -1346,6 +1346,11 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						continue;
 					}
 
+					TraceEvent("FailedServerRemoveBegin", serverID)
+					    .detail("Key", it.key)
+					    .detail("ValueSrc", describe(src))
+					    .detail("ValueDest", describe(dest));
+
 					// Update the vectors to remove failed server then set the value again
 					// Dest is usually empty, but keep this in case there is parallel data movement
 					src.erase(std::remove(src.begin(), src.end(), serverID), src.end());
@@ -1366,7 +1371,11 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						    .detail("Key", it.key)
 						    .detail("ValueDest", describe(dest));
 						serversToRemoveRange.insert(serversToRemoveRange.end(), dest.begin(), dest.end());
-						tr.clear(keyServersKey(it.key));
+						wait(krmSetRangeCoalescing(&tr,
+						                           keyServersPrefix,
+						                           KeyRangeRef(it.key, keyServers[i + 1].key),
+						                           allKeys,
+						                           keyServers[i + 1].value));
 					} else {
 						TraceEvent(SevDebug, "FailedServerSetKey", serverID)
 						    .detail("Key", it.key)
