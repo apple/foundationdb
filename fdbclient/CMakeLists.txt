@@ -21,6 +21,7 @@ set(FDBCLIENT_SRCS
   BlobGranuleReader.actor.cpp
   BlobGranuleReader.actor.h
   BlobGranuleCommon.h
+  BlobWorkerCommon.h
   ClientKnobCollection.cpp
   ClientKnobCollection.h
   ClientKnobs.cpp
