@@ -334,7 +334,13 @@ namespace SummarizeTest
                         // thus, by definition, if "until_" appears, we do not want to run with the current binary version
                         oldBinaries = oldBinaries.Concat(currentBinary);
                     }
-                    oldServerName = random.Choice(oldBinaries.ToList<string>());
+                    List<string> oldBinariesList = oldBinaries.ToList<string>();
+                    if (oldBinariesList.Count == 0) {
+                        Console.WriteLine("No available binary version from {0} to {1}", oldBinaryVersionLowerBound, oldBinaryVersionUpperBound);
+                        return 0;
+                    } else {
+                        oldServerName = random.Choice(oldBinariesList);
+                    }
                 }
                 else
                 {
