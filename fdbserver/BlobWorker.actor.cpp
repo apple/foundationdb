@@ -22,6 +22,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
+#include "fdbclient/BlobWorkerCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -89,6 +90,8 @@ struct BlobWorkerData {
 	UID id;
 	Database db;
 
+	BlobWorkerStats stats;
+
 	LocalityData locality;
 	int64_t currentManagerEpoch = -1;
 
@@ -100,7 +103,7 @@ struct BlobWorkerData {
 
 	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
 
-	BlobWorkerData(UID id, Database db) : id(id), db(db) {}
+	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 	~BlobWorkerData() { printf("Destroying blob worker data for %s\n", id.toString().c_str()); }
 };
 
@@ -182,6 +185,11 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 	state Value serialized = ObjectWriter::toValue(*deltasToWrite, Unversioned());
 
 	state Reference<IBackupFile> objectFile = wait(bwData->bstore->writeFile(fname));
+
+	++bwData->stats.s3PutReqs;
+	++bwData->stats.deltaFilesWritten;
+	bwData->stats.deltaBytesWritten += serialized.size();
+
 	wait(objectFile->append(serialized.begin(), serialized.size()));
 	wait(objectFile->finish());
 
@@ -212,13 +220,18 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			throw e;
+		}
+
 		// FIXME: only delete if key doesn't exist
-		// if transaction throws non-retryable error, delete s3 file before exiting
 		if (BW_DEBUG) {
 			printf("deleting s3 delta file %s after error %s\n", fname.c_str(), e.name());
 		}
-		bwData->bstore->deleteFile(fname);
-		throw e;
+		state Error eState = e;
+		++bwData->stats.s3DeleteReqs;
+		wait(bwData->bstore->deleteFile(fname));
+		throw eState;
 	}
 }
 
@@ -274,6 +287,11 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 
 	// write to s3 using multi part upload
 	state Reference<IBackupFile> objectFile = wait(bwData->bstore->writeFile(fname));
+
+	++bwData->stats.s3PutReqs;
+	++bwData->stats.snapshotFilesWritten;
+	bwData->stats.snapshotBytesWritten += serialized.size();
+
 	wait(objectFile->append(serialized.begin(), serialized.size()));
 	wait(objectFile->finish());
 
@@ -299,13 +317,18 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			throw e;
+		}
+
 		// FIXME: only delete if key doesn't exist
-		// if transaction throws non-retryable error, delete s3 file before exiting
 		if (BW_DEBUG) {
 			printf("deleting s3 snapshot file %s after error %s\n", fname.c_str(), e.name());
 		}
-		bwData->bstore->deleteFile(fname);
-		throw e;
+		state Error eState = e;
+		++bwData->stats.s3DeleteReqs;
+		wait(bwData->bstore->deleteFile(fname));
+		throw eState;
 	}
 
 	if (BW_DEBUG) {
@@ -340,6 +363,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(BlobWorkerData* bwData, R
 				// TODO: use streaming range read
 				// TODO knob for limit?
 				RangeResult res = wait(tr->getRange(KeyRangeRef(beginKey, metadata->keyRange.end), 1000));
+				bwData->stats.bytesReadFromFDBForInitialSnapshot += res.size();
 				rowsStream.send(res);
 				if (res.more) {
 					beginKey = keyAfter(res.back().key);
@@ -410,7 +434,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(BlobWorkerData* bwData, Reference<Gr
 			state PromiseStream<RangeResult> rowsStream;
 			state Future<BlobFileIndex> snapshotWriter = writeSnapshot(
 			    bwData, metadata->keyRange, metadata->lockEpoch, metadata->lockSeqno, version, rowsStream);
-			RangeResult newGranule = wait(readBlobGranule(chunk, metadata->keyRange, version, bwData->bstore));
+			RangeResult newGranule = wait(readBlobGranule(chunk, metadata->keyRange, version, bwData->bstore, &bwData->stats));
+			bwData->stats.bytesReadFromS3ForCompaction += newGranule.expectedSize();
 			rowsStream.send(std::move(newGranule));
 			rowsStream.sendError(end_of_stream());
 
@@ -487,7 +512,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					for (auto& delta : deltas.mutations) {
 						// FIXME: add mutation tracking here
 						// 8 for version, 1 for type, 4 for each param length then actual param size
-						metadata->currentDeltaBytes += 17 + delta.param1.size() + delta.param2.size();
+						metadata->currentDeltaBytes += delta.totalSize();
+						bwData->stats.changeFeedInputBytes += delta.totalSize();
+						bwData->stats.mutationBytesBuffered += delta.totalSize();
 					}
 				}
 
@@ -514,6 +541,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					metadata->deltaFiles.push_back(newDeltaFile);
 					metadata->lastWriteVersion = metadata->currentDeltaVersion;
 					metadata->bytesInNewDeltaFiles += metadata->currentDeltaBytes;
+
+					bwData->stats.mutationBytesBuffered -= metadata->currentDeltaBytes;
 
 					// reset current deltas
 					metadata->deltaArena = Arena();
@@ -570,25 +599,17 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* bwData, const BlobGranu
 	// check for gaps as errors before doing actual data copying
 	KeyRef lastRangeEnd = req.keyRange.begin;
 	for (auto& r : checkRanges) {
-		if (lastRangeEnd < r.begin()) {
+		bool isValid = r.value().activeMetadata.isValid();
+		if (lastRangeEnd < r.begin() || !isValid) {
 			if (BW_REQUEST_DEBUG) {
-				printf("No blob data for [%s - %s) in request range [%s - %s), skipping request\n",
+				printf("No %s blob data for [%s - %s) in request range [%s - %s), skipping request\n",
+				       isValid ? "" : "valid",
 				       lastRangeEnd.printable().c_str(),
 				       r.begin().printable().c_str(),
 				       req.keyRange.begin.printable().c_str(),
 				       req.keyRange.end.printable().c_str());
 			}
-			req.reply.sendError(wrong_shard_server());
-			return;
-		}
-		if (!r.value().activeMetadata.isValid()) {
-			if (BW_REQUEST_DEBUG) {
-				printf("No valid blob data for [%s - %s) in request range [%s - %s), skipping request\n",
-				       lastRangeEnd.printable().c_str(),
-				       r.begin().printable().c_str(),
-				       req.keyRange.begin.printable().c_str(),
-				       req.keyRange.end.printable().c_str());
-			}
+			++bwData->stats.wrongShardServer;
 			req.reply.sendError(wrong_shard_server());
 			return;
 		}
@@ -602,6 +623,7 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* bwData, const BlobGranu
 			       req.keyRange.begin.printable().c_str(),
 			       req.keyRange.end.printable().c_str());
 		}
+		++bwData->stats.wrongShardServer;
 		req.reply.sendError(wrong_shard_server());
 		return;
 	}
@@ -662,6 +684,7 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* bwData, const BlobGranu
 		while (j <= i) {
 			BlobFileIndex deltaF = metadata->deltaFiles[j];
 			chunk.deltaFiles.emplace_back_deep(rep.arena, deltaF.filename, deltaF.offset, deltaF.length);
+			bwData->stats.readReqDeltaBytesReturned += deltaF.length;
 			j++;
 		}
 
@@ -677,6 +700,8 @@ static void handleBlobGranuleFileRequest(BlobWorkerData* bwData, const BlobGranu
 		}
 
 		rep.chunks.push_back(rep.arena, chunk);
+
+		bwData->stats.readReqTotalFilesReturned += chunk.deltaFiles.size() + int(chunk.snapshotFile.present());
 
 		// TODO yield?
 	}
@@ -921,9 +946,11 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 				/*printf("Got blob granule request [%s - %s)\n",
 				       req.keyRange.begin.printable().c_str(),
 				       req.keyRange.end.printable().c_str());*/
+				++self.stats.readRequests;
 				handleBlobGranuleFileRequest(&self, req);
 			}
 			when(AssignBlobRangeRequest _req = waitNext(bwInterf.assignBlobRangeRequest.getFuture())) {
+				++self.stats.rangeAssignmentRequests;
 				state AssignBlobRangeRequest req = _req;
 				if (BW_DEBUG) {
 					printf("Worker %s %s range [%s - %s) @ (%lld, %lld)\n",
@@ -954,6 +981,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 
 					// TODO with range versioning, need to persist only after it's confirmed
 					changeBlobRange(&self, req.keyRange, req.managerEpoch, req.managerSeqno, req.isAssign);
+					req.isAssign ? ++self.stats.numRangesAssigned : --self.stats.numRangesAssigned;
 					req.reply.send(AssignBlobRangeReply(true));
 				}
 			}

@@ -253,10 +253,14 @@ static void applyDeltas(std::map<KeyRef, ValueRef>* dataMap,
 	}
 }
 
+// TODO: improve the interface of this function so that it doesn't need 
+//       to be passed the entire BlobWorkerStats object
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version readVersion,
-                                          Reference<BackupContainerFileSystem> bstore) {
+                                          Reference<BackupContainerFileSystem> bstore,
+                                          Optional<BlobWorkerStats *> stats) {
+
 	// TODO REMOVE with V2 of protocol
 	ASSERT(readVersion == chunk.includedVersion);
 	// Arena to hold all allocations for applying deltas. Most of it, and the arenas produced by reading the files,
@@ -269,13 +273,23 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 	try {
 		state std::map<KeyRef, ValueRef> dataMap;
 
-		Future<Arena> readSnapshotFuture = chunk.snapshotFile.present()
-		                                       ? readSnapshotFile(bstore, chunk.snapshotFile.get(), keyRange, &dataMap)
-		                                       : Future<Arena>(Arena());
+		Future<Arena> readSnapshotFuture;
+		if (chunk.snapshotFile.present()) {
+			readSnapshotFuture = readSnapshotFile(bstore, chunk.snapshotFile.get(), keyRange, &dataMap);
+			if (stats.present()) {
+				++stats.get()->s3GetReqs;
+			}
+		} else {
+			readSnapshotFuture = Future<Arena>(Arena());
+		}
+
 		state std::vector<Future<Standalone<GranuleDeltas>>> readDeltaFutures;
 		readDeltaFutures.reserve(chunk.deltaFiles.size());
 		for (BlobFilenameRef deltaFile : chunk.deltaFiles) {
 			readDeltaFutures.push_back(readDeltaFile(bstore, deltaFile, keyRange, readVersion));
+			if (stats.present()) {
+				++stats.get()->s3GetReqs;
+			}
 		}
 
 		Arena snapshotArena = wait(readSnapshotFuture);
