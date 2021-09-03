@@ -327,8 +327,11 @@ namespace SummarizeTest
                                                          Directory.GetFiles(oldBinaryFolder),
                                                          x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
                                                            && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
-                    if (versionGreaterThanOrEqual(oldBinaryVersionUpperBound, getFdbserverVersion(fdbserverName))) {
-                        // only add current binary to list of old binaries if its version is less than or equal to the upperbound version
+                    if (!lastFolderName.Contains("until_")) {
+                        // only add current binary to the list of old binaries if "until_" is not specified in the folder name
+                        // <version> in until_<version> should be less or equal to the current binary version
+                        // otherwise, using "until_" makes no sense
+                        // thus, by definition, if "until_" appears, we do not want to run with the current binary version
                         oldBinaries = oldBinaries.Concat(currentBinary);
                     }
                     oldServerName = random.Choice(oldBinaries.ToList<string>());
