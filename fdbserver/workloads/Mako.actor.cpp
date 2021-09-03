@@ -178,23 +178,23 @@ struct MakoWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		// metrics of population process
 		if (populateData) {
-			m.push_back(PerfMetric("Mean load time (seconds)", loadTime, true));
+			m.emplace_back("Mean load time (seconds)", loadTime, Averaged::True);
 			// The importing rate of keys, controlled by parameter "insertionCountsToMeasure"
 			auto ratesItr = ratesAtKeyCounts.begin();
 			for (; ratesItr != ratesAtKeyCounts.end(); ratesItr++) {
-				m.push_back(
-				    PerfMetric(format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, false));
+				m.emplace_back(
+				    format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
 			}
 		}
 		// benchmark
 		if (runBenchmark) {
-			m.push_back(PerfMetric("Measured Duration", testDuration, true));
+			m.emplace_back("Measured Duration", testDuration, Averaged::True);
 			m.push_back(xacts.getMetric());
-			m.push_back(PerfMetric("Transactions/sec", xacts.getValue() / testDuration, true));
+			m.emplace_back("Transactions/sec", xacts.getValue() / testDuration, Averaged::True);
 			m.push_back(totalOps.getMetric());
-			m.push_back(PerfMetric("Operations/sec", totalOps.getValue() / testDuration, true));
+			m.emplace_back("Operations/sec", totalOps.getValue() / testDuration, Averaged::True);
 			m.push_back(conflicts.getMetric());
-			m.push_back(PerfMetric("Conflicts/sec", conflicts.getValue() / testDuration, true));
+			m.emplace_back("Conflicts/sec", conflicts.getValue() / testDuration, Averaged::True);
 			m.push_back(retries.getMetric());
 
 			// count of each operation
@@ -205,11 +205,11 @@ struct MakoWorkload : TestWorkload {
 			// Meaningful Latency metrics
 			const int opExecutedAtOnce[] = { OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_COMMIT };
 			for (const int& op : opExecutedAtOnce) {
-				m.push_back(PerfMetric("Mean " + opNames[op] + " Latency (us)", 1e6 * opLatencies[op].mean(), true));
-				m.push_back(
-				    PerfMetric("Max " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].max(), true));
-				m.push_back(
-				    PerfMetric("Min " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].min(), true));
+				m.emplace_back("Mean " + opNames[op] + " Latency (us)", 1e6 * opLatencies[op].mean(), Averaged::True);
+				m.emplace_back(
+				    "Max " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].max(), Averaged::True);
+				m.emplace_back(
+				    "Min " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].min(), Averaged::True);
 			}
 			// Latency for local operations if needed
 			if (latencyForLocalOperation) {
@@ -218,12 +218,12 @@ struct MakoWorkload : TestWorkload {
 					TraceEvent(SevDebug, "LocalLatency")
 					    .detail("Name", opNames[op])
 					    .detail("Size", opLatencies[op].getPopulationSize());
-					m.push_back(
-					    PerfMetric("Mean " + opNames[op] + " Latency (us)", 1e6 * opLatencies[op].mean(), true));
-					m.push_back(PerfMetric(
-					    "Max " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].max(), true));
-					m.push_back(PerfMetric(
-					    "Min " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].min(), true));
+					m.emplace_back(
+					    "Mean " + opNames[op] + " Latency (us)", 1e6 * opLatencies[op].mean(), Averaged::True);
+					m.emplace_back(
+					    "Max " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].max(), Averaged::True);
+					m.emplace_back(
+					    "Min " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].min(), Averaged::True);
 				}
 			}
 
@@ -347,10 +347,12 @@ struct MakoWorkload : TestWorkload {
 			    .detail("Count", self->opCounters[OP_GETREADVERSION].getValue());
 
 			std::string ts = format("T=%04.0fs: ", elapsed);
-			self->periodicMetrics.push_back(PerfMetric(
-			    ts + "Transactions/sec", (self->xacts.getValue() - last_xacts) / self->periodicLoggingInterval, false));
-			self->periodicMetrics.push_back(PerfMetric(
-			    ts + "Operations/sec", (self->totalOps.getValue() - last_ops) / self->periodicLoggingInterval, false));
+			self->periodicMetrics.emplace_back(ts + "Transactions/sec",
+			                                   (self->xacts.getValue() - last_xacts) / self->periodicLoggingInterval,
+			                                   Averaged::False);
+			self->periodicMetrics.emplace_back(ts + "Operations/sec",
+			                                   (self->totalOps.getValue() - last_ops) / self->periodicLoggingInterval,
+			                                   Averaged::False);
 
 			last_xacts = self->xacts.getValue();
 			last_ops = self->totalOps.getValue();

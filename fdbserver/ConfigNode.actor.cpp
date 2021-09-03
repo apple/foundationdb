@@ -316,9 +316,13 @@ class ConfigNodeImpl {
 
 	ACTOR static Future<Void> commit(ConfigNodeImpl* self, ConfigTransactionCommitRequest req) {
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
-		if (req.generation != currentGeneration) {
+		if (req.generation.committedVersion != currentGeneration.committedVersion) {
 			++self->failedCommits;
-			req.reply.sendError(transaction_too_old());
+			req.reply.sendError(commit_unknown_result());
+			return Void();
+		} else if (req.generation.liveVersion != currentGeneration.liveVersion) {
+			++self->failedCommits;
+			req.reply.sendError(not_committed());
 			return Void();
 		}
 		int index = 0;

@@ -71,13 +71,13 @@ int digits(int num) {
 /* prefix is "mako" by default, prefixpadding = 1 means 'x' will be in front rather than trailing the keyname */
 /* len is the buffer size, key length + null */
 void genkey(char* str, char* prefix, int prefixlen, int prefixpadding, int num, int rows, int len) {
-        const int rowdigit = digits(rows);
-        const int prefixoffset = prefixpadding ? len - (prefixlen + rowdigit) - 1 : 0;
-        char* prefixstr = (char*)alloca(sizeof(char) * (prefixlen + rowdigit + 1));
-        snprintf(prefixstr, prefixlen + rowdigit + 1, "%s%0.*d", prefix, rowdigit, num);
-        memset(str, 'x', len);
-        memcpy(str + prefixoffset, prefixstr, prefixlen + rowdigit);
-        str[len - 1] = '\0';
+	const int rowdigit = digits(rows);
+	const int prefixoffset = prefixpadding ? len - (prefixlen + rowdigit) - 1 : 0;
+	char* prefixstr = (char*)alloca(sizeof(char) * (prefixlen + rowdigit + 1));
+	snprintf(prefixstr, prefixlen + rowdigit + 1, "%s%0.*d", prefix, rowdigit, num);
+	memset(str, 'x', len);
+	memcpy(str + prefixoffset, prefixstr, prefixlen + rowdigit);
+	str[len - 1] = '\0';
 }
 
 /* This is another sorting algorithm used to calculate latency parameters */

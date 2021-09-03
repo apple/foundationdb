@@ -424,7 +424,8 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		if (usePeekStream && (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
+		if (usePeekStream &&
+		    (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
 			more = serverPeekStreamGetMore(this, taskID);
 		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
 			more = serverPeekParallelGetMore(this, taskID);

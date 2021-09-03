@@ -66,4 +66,6 @@ public:
 	static void setGlobalKnobCollection(Type, Randomize, IsSimulated);
 	static IKnobCollection const& getGlobalKnobCollection();
 	static IKnobCollection& getMutableGlobalKnobCollection();
+	static ConfigMutationRef createSetMutation(Arena, KeyRef, ValueRef);
+	static ConfigMutationRef createClearMutation(Arena, KeyRef);
 };

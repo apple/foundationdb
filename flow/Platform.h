@@ -594,9 +594,9 @@ inline static int64_t flowInterlockedAnd64(int64_t* p, int64_t a) {
 #error Missing byte swap methods
 #endif
 
-#define littleEndian16(value) value
-#define littleEndian32(value) value
-#define littleEndian64(value) value
+#define littleEndian16(value) uint16_t(value)
+#define littleEndian32(value) uint32_t(value)
+#define littleEndian64(value) uint64_t(value)
 
 #if defined(_WIN32)
 inline static void flushOutputStreams() {
@@ -797,17 +797,17 @@ inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) 
 #include <inttypes.h>
 static inline uint32_t hwCrc32cU8(unsigned int crc, unsigned char v) {
 	uint32_t ret;
-	asm volatile("crc32cb %w[r], %w[c], %w[v]" : [ r ] "=r"(ret) : [ c ] "r"(crc), [ v ] "r"(v));
+	asm volatile("crc32cb %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
 	return ret;
 }
 static inline uint32_t hwCrc32cU32(unsigned int crc, unsigned int v) {
 	uint32_t ret;
-	asm volatile("crc32cw %w[r], %w[c], %w[v]" : [ r ] "=r"(ret) : [ c ] "r"(crc), [ v ] "r"(v));
+	asm volatile("crc32cw %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
 	return ret;
 }
 static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
 	uint64_t ret;
-	asm volatile("crc32cx %w[r], %w[c], %x[v]" : [ r ] "=r"(ret) : [ c ] "r"(crc), [ v ] "r"(v));
+	asm volatile("crc32cx %w[r], %w[c], %x[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
 	return ret;
 }
 #else

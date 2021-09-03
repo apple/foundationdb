@@ -373,8 +373,8 @@ void traceTSSErrors(const char* name, UID tssId, const std::unordered_map<int, u
 ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 	state double lastLogged = 0;
 	loop {
-		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));		
-			
+		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
+
 		TraceEvent ev("TransactionMetrics", cx->dbId);
 
 		ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
