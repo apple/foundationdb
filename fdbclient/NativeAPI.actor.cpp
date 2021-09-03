@@ -6544,7 +6544,7 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutatio
 	if (!val.present()) {
 		throw unsupported_operation();
 	}
-	KeyRange keys = std::get<0>(decodeChangeFeedValue(val.get()));
+	state KeyRange keys = std::get<0>(decodeChangeFeedValue(val.get())) & range;
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
@@ -6707,7 +6707,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results.sendError(unsupported_operation());
 				return Void();
 			}
-			keys = std::get<0>(decodeChangeFeedValue(val.get()));
+			keys = std::get<0>(decodeChangeFeedValue(val.get())) & range;
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -6773,8 +6773,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			if (locations.size() > 1) {
 				std::vector<std::pair<StorageServerInterface, KeyRange>> interfs;
 				for (int i = 0; i < locations.size(); i++) {
-					interfs.push_back(
-					    std::make_pair(locations[i].second->getInterface(chosenLocations[i]), locations[i].first));
+					interfs.push_back(std::make_pair(locations[i].second->getInterface(chosenLocations[i]),
+					                                 locations[i].first & range));
 				}
 				wait(mergeChangeFeedStream(interfs, results, rangeID, &begin, end) || cx->connectionFileChanged());
 			} else {
