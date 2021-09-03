@@ -62,6 +62,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -4913,9 +4914,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	// Recovery transaction
 	state bool debugResult = debug_checkMinRestoredVersion(UID(), self->lastEpochEnd, "DBRecovery", SevWarn);
 
+	state UID debugId = deterministicRandom()->randomUniqueID();
 	CommitTransactionRequest recoveryCommitRequest;
 	recoveryCommitRequest.flags = recoveryCommitRequest.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 	CommitTransactionRef& tr = recoveryCommitRequest.transaction;
+	recoveryCommitRequest.debugID = debugId;
+	TraceEvent("ClusterRecoveryCommitReq", debugId).log();
 	int mmApplied = 0; // The number of mutations in tr.mutations that have been applied to the txnStateStore so far
 	if (self->lastEpochEnd != 0) {
 		Optional<Value> snapRecoveryFlag = self->txnStateStore->readValue(writeRecoveryKey).get();
