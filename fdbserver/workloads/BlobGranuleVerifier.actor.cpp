@@ -59,10 +59,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		doSetup = !clientId; // only do this on the "first" client
+		// FIXME: don't do the delay in setup, as that delays the start of all workloads
 		minDelay = getOption(options, LiteralStringRef("minDelay"), 0.0);
-		maxDelay = getOption(options, LiteralStringRef("minDelay"), 60.0);
+		maxDelay = getOption(options, LiteralStringRef("maxDelay"), 0.0);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
-		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), 60.0);
+		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
 		ASSERT(threads >= 1);
@@ -96,6 +97,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(normalKeys), LiteralStringRef("1")));
 				wait(tr->commit());
 				printf("Successfully set up blob granule range for normalKeys\n");
+				TraceEvent("BlobGranuleVerifierSetup");
 				return Void();
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -106,7 +108,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	std::string description() const override { return "BlobGranuleVerifier"; }
 	Future<Void> setup(Database const& cx) override {
 		if (doSetup) {
-			/// TODO make only one client do this!!! others wait
 			double initialDelay = deterministicRandom()->random01() * (maxDelay - minDelay) + minDelay;
 			printf("BGW setup initial delay of %.3f\n", initialDelay);
 			return setUpBlobRange(cx, delay(initialDelay));
@@ -223,6 +224,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state std::map<double, OldRead> timeTravelChecks;
 		state int64_t timeTravelChecksMemory = 0;
 
+		TraceEvent("BlobGranuleVerifierStart");
 		printf("BGV thread starting\n");
 
 		// wait for first set of ranges to be loaded
@@ -264,16 +266,18 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				self->bytesRead += fdb.first.expectedSize();
 				self->initialReads++;
 
-				// TODO increase frequency a lot!! just for initial testing
-				wait(poisson(&last, 5.0));
-				// wait(poisson(&last, 0.1));
 			} catch (Error& e) {
-				printf("BGVerifier got error %s\n", e.name());
 				if (e.code() == error_code_operation_cancelled) {
-					return Void();
+					throw;
+				}
+				if (e.code() != error_code_transaction_too_old && e.code() != error_code_wrong_shard_server) {
+					printf("BGVerifier got unexpected error %s\n", e.name());
 				}
 				self->errors++;
 			}
+			// TODO increase frequency a lot!! just for initial testing
+			wait(poisson(&last, 5.0));
+			// wait(poisson(&last, 0.1));
 		}
 	}
 
@@ -329,6 +333,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		printf("  %lld rows\n", self->rowsRead);
 		printf("  %lld bytes\n", self->bytesRead);
 		printf("  %d final granule checks\n", checks);
+		TraceEvent("BlobGranuleVerifierChecked");
 		return self->mismatches == 0 && checks > 0;
 	}
 

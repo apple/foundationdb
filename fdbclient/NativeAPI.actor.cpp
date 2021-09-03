@@ -6581,7 +6581,7 @@ Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getRangeF
 
 ACTOR Future<Void> getRangeFeedStreamActor(Reference<DatabaseContext> db,
                                            PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
-                                           StringRef rangeID,
+                                           Key rangeID,
                                            Version begin,
                                            Version end,
                                            KeyRange range) {

@@ -179,6 +179,7 @@ static void applyDelta(std::map<KeyRef, ValueRef>* dataMap, Arena& ar, KeyRangeR
 		if (m.param1 < keyRange.begin || m.param1 >= keyRange.end) {
 			return;
 		}
+		// TODO: we don't need atomics here since eager reads handles it
 		std::map<KeyRef, ValueRef>::iterator it = dataMap->find(m.param1);
 		if (m.type != MutationRef::SetValue) {
 			Optional<StringRef> oldVal;
@@ -242,14 +243,23 @@ static void applyDeltas(std::map<KeyRef, ValueRef>* dataMap,
                         Arena& arena,
                         GranuleDeltas deltas,
                         KeyRangeRef keyRange,
-                        Version readVersion) {
+                        Version readVersion,
+                        Version* lastFileEndVersion) {
+	if (!deltas.empty()) {
+		// check that consecutive delta file versions are disjoint
+		ASSERT(*lastFileEndVersion < deltas.front().version);
+	}
 	for (MutationsAndVersionRef& delta : deltas) {
 		if (delta.version > readVersion) {
-			break;
+			*lastFileEndVersion = readVersion;
+			return;
 		}
 		for (auto& m : delta.mutations) {
 			applyDelta(dataMap, arena, keyRange, m);
 		}
+	}
+	if (!deltas.empty()) {
+		*lastFileEndVersion = deltas.back().version;
 	}
 }
 
@@ -272,6 +282,7 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 
 	try {
 		state std::map<KeyRef, ValueRef> dataMap;
+		state Version lastFileEndVersion = invalidVersion;
 
 		Future<Arena> readSnapshotFuture;
 		if (chunk.snapshotFile.present()) {
@@ -301,13 +312,13 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 		for (Future<Standalone<GranuleDeltas>> deltaFuture : readDeltaFutures) {
 			Standalone<GranuleDeltas> result = wait(deltaFuture);
 			arena.dependsOn(result.arena());
-			applyDeltas(&dataMap, arena, result, keyRange, readVersion);
+			applyDeltas(&dataMap, arena, result, keyRange, readVersion, &lastFileEndVersion);
 			wait(yield());
 		}
 		if (BG_READ_DEBUG) {
 			printf("Applying %d memory deltas\n", chunk.newDeltas.size());
 		}
-		applyDeltas(&dataMap, arena, chunk.newDeltas, keyRange, readVersion);
+		applyDeltas(&dataMap, arena, chunk.newDeltas, keyRange, readVersion, &lastFileEndVersion);
 		wait(yield());
 
 		RangeResult ret;

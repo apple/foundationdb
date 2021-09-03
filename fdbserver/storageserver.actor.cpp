@@ -1561,6 +1561,16 @@ ACTOR Future<RangeFeedReply> getRangeFeedMutations(StorageServer* data, RangeFee
 	if (data->version.get() < req.begin) {
 		wait(data->version.whenAtLeast(req.begin));
 	}
+	// TODO REMOVE this super hacky fix once evan finishes change feeds, the above wait doesn't work apparently
+	state int waitCnt = 0;
+	while (data->uidRangeFeed.count(req.rangeID) == 0) {
+		wait(delay(0.05));
+		waitCnt++;
+		if ((waitCnt & (waitCnt - 1)) == 0) {
+			printf("Waiting for change feed %s %d times\n", req.rangeID.printable().c_str(), waitCnt);
+		}
+	}
+	ASSERT(data->uidRangeFeed.count(req.rangeID) > 0);
 	auto& feedInfo = data->uidRangeFeed[req.rangeID];
 	/*printf("SS processing range feed req %s for version [%lld - %lld)\n",
 	       req.rangeID.printable().c_str(),
@@ -3878,6 +3888,12 @@ private:
 				rangeFeedInfo->range = rangeFeedRange;
 				rangeFeedInfo->id = rangeFeedId;
 				rangeFeedInfo->emptyVersion = currentVersion - 1;
+				printf("SS %s creating change feed %s for [%s - %s) at version %lld\n",
+				       data->thisServerID.toString().c_str(),
+				       rangeFeedId.toString().c_str(),
+				       rangeFeedRange.begin.printable().c_str(),
+				       rangeFeedRange.end.printable().c_str(),
+				       currentVersion);
 				data->uidRangeFeed[rangeFeedId] = rangeFeedInfo;
 				auto rs = data->keyRangeFeed.modify(rangeFeedRange);
 				for (auto r = rs.begin(); r != rs.end(); ++r) {

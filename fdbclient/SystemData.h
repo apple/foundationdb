@@ -25,7 +25,7 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h
+#include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
 
 // Don't warn on constants being defined in this file.
@@ -535,16 +535,23 @@ extern const KeyRangeRef blobGranuleFileKeys;
 // \xff/bgm/[[begin]] = [[BlobWorkerUID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
 
-// \xff/bgl/(begin,end) = (epoch, seqno)
+// \xff/bgl/(begin,end) = (epoch, seqno, changefeed id)
 extern const KeyRangeRef blobGranuleLockKeys;
 
-const Value blobGranuleLockValueFor(int64_t epochNum, int64_t sequenceNum);
-std::pair<int64_t, int64_t> decodeBlobGranuleLockValue(ValueRef const& value);
+// \xff/bgs/(oldbegin,oldend,newbegin) = state
+extern const KeyRangeRef blobGranuleSplitKeys;
 
 const Value blobGranuleMappingValueFor(UID const& workerID);
 UID decodeBlobGranuleMappingValue(ValueRef const& value);
 
-// \xff/blobWorkerList/[[BlobWorkerID]] = [[BlobWorkerInterface]]
+const Value blobGranuleLockValueFor(int64_t epochNum, int64_t sequenceNum, UID changeFeedId);
+// FIXME: maybe just define a struct?
+std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(ValueRef const& value);
+
+const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
+BlobGranuleSplitState decodeBlobGranuleSplitValue(ValueRef const& value);
+
+// \xff/bwl/[[BlobWorkerID]] = [[BlobWorkerInterface]]
 extern const KeyRangeRef blobWorkerListKeys;
 
 const Key blobWorkerListKeyFor(UID workerID);

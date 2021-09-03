@@ -1104,6 +1104,7 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
 const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff\x02/bgf/"), LiteralStringRef("\xff\x02/bgf0"));
 const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), LiteralStringRef("\xff\x02/bgm0"));
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
+const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
 
 const Value blobGranuleMappingValueFor(UID const& workerID) {
 	BinaryWriter wr(Unversioned());
@@ -1118,19 +1119,35 @@ UID decodeBlobGranuleMappingValue(ValueRef const& value) {
 	return workerID;
 }
 
-const Value blobGranuleLockValueFor(int64_t epoch, int64_t seqno) {
+const Value blobGranuleLockValueFor(int64_t epoch, int64_t seqno, UID changeFeedId) {
 	BinaryWriter wr(Unversioned());
 	wr << epoch;
 	wr << seqno;
+	wr << changeFeedId;
 	return wr.toValue();
 }
 
-std::pair<int64_t, int64_t> decodeBlobGranuleLockValue(const ValueRef& value) {
+std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(const ValueRef& value) {
 	int64_t epoch, seqno;
+	UID changeFeedId;
 	BinaryReader reader(value, Unversioned());
 	reader >> epoch;
 	reader >> seqno;
-	return std::pair(epoch, seqno);
+	reader >> changeFeedId;
+	return std::make_tuple(epoch, seqno, changeFeedId);
+}
+
+const Value blobGranuleSplitValueFor(BlobGranuleSplitState st) {
+	BinaryWriter wr(Unversioned());
+	wr << st;
+	return wr.toValue();
+}
+
+BlobGranuleSplitState decodeBlobGranuleSplitValue(const ValueRef& value) {
+	BlobGranuleSplitState st;
+	BinaryReader reader(value, Unversioned());
+	reader >> st;
+	return st;
 }
 
 const KeyRangeRef blobWorkerListKeys(LiteralStringRef("\xff\x02/bwList/"), LiteralStringRef("\xff\x02/bwList0"));

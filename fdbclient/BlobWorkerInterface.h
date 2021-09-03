@@ -33,6 +33,8 @@ struct BlobWorkerInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
 	RequestStream<struct AssignBlobRangeRequest> assignBlobRangeRequest;
+	RequestStream<struct RevokeBlobRangeRequest> revokeBlobRangeRequest;
+	RequestStream<struct GranuleStatusStreamRequest> granuleStatusStreamRequest;
 	struct LocalityData locality;
 	UID myId;
 
@@ -95,23 +97,88 @@ struct AssignBlobRangeReply {
 	}
 };
 
-struct AssignBlobRangeRequest {
+struct RevokeBlobRangeRequest {
 	constexpr static FileIdentifier file_identifier = 4844288;
 	Arena arena;
 	KeyRangeRef keyRange;
 	int64_t managerEpoch;
 	int64_t managerSeqno;
-	bool isAssign; // true if assignment, false if revoke
+	bool dispose;
+	ReplyPromise<AssignBlobRangeReply> reply;
+
+	RevokeBlobRangeRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keyRange, managerEpoch, managerSeqno, dispose, reply, arena);
+	}
+};
+
+struct AssignBlobRangeRequest {
+	constexpr static FileIdentifier file_identifier = 905381;
+	Arena arena;
+	KeyRangeRef keyRange;
+	int64_t managerEpoch;
+	int64_t managerSeqno;
+	// If continueAssignment is true, this is just to instruct the worker that it still owns the range, so it should
+	// re-snapshot it and continue. If continueAssignment is false and previousGranules is empty, this is either the
+	// initial assignment to construct a previously non-existent granule, or a reassignment. Depending on what state
+	// exists for the granule currently, the worker will either start a new granule, or just pick up from where the
+	// previous worker left off.
+
+	// For a split or merge, continueAssignment==false.
+	// For a split, previousGranules will contain one granule that contains keyRange. For a merge, previousGranules will
+	// contain two or more granules, the union of which will be keyRange.
+	bool continueAssignment;
+	VectorRef<KeyRangeRef> previousGranules; // only set if there is a granule boundary change
+
 	ReplyPromise<AssignBlobRangeReply> reply;
 
 	AssignBlobRangeRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, managerEpoch, managerSeqno, isAssign, reply, arena);
+		serializer(ar, keyRange, managerEpoch, managerSeqno, continueAssignment, previousGranules, reply, arena);
 	}
 };
 
-// TODO once this
+// reply per granule
+// TODO: could eventually add other types of metrics to report back to the manager here
+struct GranuleStatusReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 7563104;
+
+	KeyRange granuleRange;
+	bool doSplit;
+	int64_t epoch;
+	int64_t seqno;
+
+	GranuleStatusReply() {}
+	explicit GranuleStatusReply(KeyRange range, bool doSplit, int64_t epoch, int64_t seqno)
+	  : granuleRange(range), doSplit(doSplit), epoch(epoch), seqno(seqno) {}
+
+	int expectedSize() const { return sizeof(GranuleStatusReply) + granuleRange.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, granuleRange, doSplit, epoch, seqno);
+	}
+};
+
+// manager makes one request per worker, it sends all range updates through this stream
+struct GranuleStatusStreamRequest {
+	constexpr static FileIdentifier file_identifier = 2289677;
+
+	int64_t managerEpoch;
+
+	ReplyPromiseStream<GranuleStatusReply> reply;
+
+	GranuleStatusStreamRequest() {}
+	explicit GranuleStatusStreamRequest(int64_t managerEpoch) : managerEpoch(managerEpoch) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, managerEpoch, reply);
+	}
+};
 
 #endif
