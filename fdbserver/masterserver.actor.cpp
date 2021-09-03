@@ -1204,9 +1204,6 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
-	for (auto& p : self->commitProxies)
-		self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
-
 	loop {
 		choose {
 			when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
@@ -1231,6 +1228,10 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 				}
 				if (req.commitProxies.size() > 0) {
 					self->commitProxies = req.commitProxies;
+					self->lastCommitProxyVersionReplies.clear();
+
+					for (auto& p : self->commitProxies)
+						self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 				}
 				req.reply.send(Void());
 			}
