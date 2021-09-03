@@ -236,7 +236,8 @@ ACTOR Future<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 	return result;
 }
 
-ACTOR Future<std::vector<UID>> pickReadWriteServers(std::vector<UID> candidates, KeyRangeRef range, Transaction* tr) {
+// Returns storage servers selected from 'candidates', who is serving a read-write copy of 'range'.
+ACTOR Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> candidates, KeyRangeRef range) {
 	vector<Future<Optional<Value>>> serverListEntries;
 
 	for (const UID id : candidates) {
@@ -1328,23 +1329,10 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
-<<<<<<< HEAD
 				for (int i = 0; i < keyServers.size() - 1; ++i) {
 					auto it = keyServers[i];
 					std::vector<UID> src;
 					std::vector<UID> dest;
-=======
-				state std::vector<UID> serversToRemoveRange;
-				state vector<UID> src;
-				state vector<UID> dest;
-				state int i = 0;
-				for (i = 0; i < keyServers.size() - 1; ++i) {
-					src.clear();
-					dest.clear();
-					serversToRemoveRange.clear();
-					serversToRemoveRange.push_back(serverID);
-					state KeyValueRef it = keyServers[i];
->>>>>>> Check if the src server list will be empty before removing a failed server."
 					decodeKeyServersValue(UIDtoTagMap, it.value, src, dest);
 
 					// The failed server is not present
@@ -1362,9 +1350,11 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 					// Dest is usually empty, but keep this in case there is parallel data movement
 					src.erase(std::remove(src.begin(), src.end(), serverID), src.end());
 					dest.erase(std::remove(dest.begin(), dest.end(), serverID), dest.end());
+					// If the last src server is to be removed, first check if there are dest servers who is
+					// hosting a read-write copy of the data, and move such dest servers to the src list.
 					if (src.empty() && !dest.empty()) {
 						std::vector<UID> newSources =
-						    wait(pickReadWriteServers(dest, KeyRangeRef(it.key, keyServers[i + 1].key), &tr));
+						    wait(pickReadWriteServers(&tr, dest, KeyRangeRef(it.key, keyServers[i + 1].key)));
 						for (const UID& id : newSources) {
 							TraceEvent(SevWarn, "FailedServerAdditionalSourceServer", serverID)
 							    .detail("Key", it.key)
@@ -1373,6 +1363,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							src.push_back(id);
 						}
 					}
+					// Remove the shard from keyServers/ if the src list is empty, and also remove the shard from all
+					// dest servers.
 					if (src.empty()) {
 						TraceEvent(SevWarn, "FailedServerRemoveRange", serverID)
 						    .detail("Key", it.key)
