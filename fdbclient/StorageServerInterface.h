@@ -675,6 +675,7 @@ struct ChangeFeedRequest {
 	Key rangeID;
 	Version begin = 0;
 	Version end = 0;
+	KeyRange range;
 	ReplyPromise<ChangeFeedReply> reply;
 
 	ChangeFeedRequest() {}
@@ -682,7 +683,7 @@ struct ChangeFeedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, reply);
+		serializer(ar, rangeID, begin, end, range, reply);
 	}
 };
 

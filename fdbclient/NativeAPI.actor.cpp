@@ -6561,6 +6561,7 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutatio
 	req.rangeID = rangeID;
 	req.begin = begin;
 	req.end = end;
+	req.range = keys;
 
 	ChangeFeedReply rep = wait(loadBalance(cx.getPtr(),
 	                                       locations[0].second,
