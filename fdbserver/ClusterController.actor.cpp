@@ -4430,7 +4430,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 
 	// Update recoveryTransactionVersion to the master interface
 	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryData.getReply(
-	    UpdateRecoveryDataRequest(self->recoveryTransactionVersion, self->commitProxies)))); 
+	    UpdateRecoveryDataRequest(self->recoveryTransactionVersion, self->lastEpochEnd, self->commitProxies)))); 
 
 	return confChanges;
 }

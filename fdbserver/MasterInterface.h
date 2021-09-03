@@ -134,16 +134,20 @@ struct ChangeCoordinatorsRequest {
 struct UpdateRecoveryDataRequest {
 	constexpr static FileIdentifier file_identifier = 13605417;
 	Version recoveryTransactionVersion;
+	Version lastEpochEnd;
 	std::vector<CommitProxyInterface> commitProxies;
 	ReplyPromise<Void> reply;
 
 	UpdateRecoveryDataRequest() {}
-	UpdateRecoveryDataRequest(Version recoveryTransactionVersion, std::vector<CommitProxyInterface> commitProxies)
-	  : recoveryTransactionVersion(recoveryTransactionVersion), commitProxies(commitProxies) {}
+	UpdateRecoveryDataRequest(Version recoveryTransactionVersion,
+	                          Version lastEpochEnd,
+	                          std::vector<CommitProxyInterface> commitProxies)
+	  : recoveryTransactionVersion(recoveryTransactionVersion), lastEpochEnd(lastEpochEnd),
+	    commitProxies(commitProxies) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryTransactionVersion, commitProxies, reply);
+		serializer(ar, recoveryTransactionVersion, lastEpochEnd, commitProxies, reply);
 	}
 };
 
