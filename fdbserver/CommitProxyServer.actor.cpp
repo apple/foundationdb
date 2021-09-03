@@ -49,6 +49,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
@@ -1319,10 +1320,9 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                                                          self->toCommit,
 		                                                          span.context,
 		                                                          self->debugID);
+		float ratio = self->toCommit.getEmptyMessageRatio();
+		pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
 	}
-
-	float ratio = self->toCommit.getEmptyMessageRatio();
-	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
 
 	if (!self->forceRecovery) {
 		ASSERT(pProxyCommitData->latestLocalCommitBatchLogging.get() == self->localBatchNumber - 1);
@@ -1992,6 +1992,13 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	}
 	state Future<Void> dbInfoChange = commitData.db->onChange();
 	//TraceEvent("ProxyInit3", proxy.id());
+
+	// Add TLog groups to collection
+	const auto& logset = commitData.db->get().logSystemConfig.tLogs[0];
+	for (const auto& gid : logset.tLogGroupIDs) {
+		TLogGroupRef group = makeReference<TLogGroup>(gid);
+		commitData.tLogGroupCollection->addTLogGroup(group);
+	}
 
 	commitData.resolvers = commitData.db->get().resolvers;
 	ASSERT(commitData.resolvers.size() != 0);

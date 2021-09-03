@@ -53,9 +53,9 @@ struct TLogWorkerData;
 class TLogGroup;
 class TLogGroupCollection;
 
-typedef Reference<TLogWorkerData> TLogWorkerDataRef;
-typedef Reference<TLogGroup> TLogGroupRef;
-typedef Reference<TLogGroupCollection> TLogGroupCollectionRef;
+using TLogWorkerDataRef = Reference<TLogWorkerData>;
+using TLogGroupRef = Reference<TLogGroup>;
+using TLogGroupCollectionRef = Reference<TLogGroupCollection>;
 
 // `TLogGroupCollection` manages, recruits and tracks all the TLogGroups in the system.
 // TODO: TLogGroupCollection for HA (satellite and remote), either same class or separate.
