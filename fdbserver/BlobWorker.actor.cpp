@@ -217,8 +217,9 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 		if (BW_DEBUG) {
 			printf("deleting s3 delta file %s after error %s\n", fname.c_str(), e.name());
 		}
-		bwData->bstore->deleteFile(fname);
-		throw e;
+		state Error eState = e;
+		wait(bwData->bstore->deleteFile(fname));
+		throw eState;
 	}
 }
 
@@ -304,8 +305,9 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 		if (BW_DEBUG) {
 			printf("deleting s3 snapshot file %s after error %s\n", fname.c_str(), e.name());
 		}
-		bwData->bstore->deleteFile(fname);
-		throw e;
+		state Error eState = e;
+		wait(bwData->bstore->deleteFile(fname));
+		throw eState;
 	}
 
 	if (BW_DEBUG) {
