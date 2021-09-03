@@ -30,6 +30,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
 #include <fdbserver/ptxn/TLogPeekCursor.actor.h>
+#include "flow/Error.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <class T>
@@ -157,7 +158,11 @@ CoreTLogSet::CoreTLogSet(const LogSet& logset)
     tLogLocalities(logset.tLogLocalities), tLogPolicy(logset.tLogPolicy), isLocal(logset.isLocal),
     locality(logset.locality), startVersion(logset.startVersion), satelliteTagLocations(logset.satelliteTagLocations),
     tLogVersion(logset.tLogVersion) {
+	ASSERT_WE_THINK(logset.logServers.empty() || logset.logServersPtxn.empty());
 	for (const auto& log : logset.logServers) {
+		tLogs.push_back(log->get().id());
+	}
+	for (const auto& log : logset.logServersPtxn) {
 		tLogs.push_back(log->get().id());
 	}
 	// Do NOT store logset.backupWorkers, because master will recruit new ones.
@@ -384,12 +389,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		newState.logRouterTags = logRouterTags;
 		newState.txsTags = txsTags;
 		newState.pseudoLocalities = pseudoLocalities;
-		for (const auto& t : tLogs) {
-			if (t->logServers.size()) {
-				newState.tLogs.emplace_back(*t);
+		for (const auto& logset : tLogs) {
+			ASSERT(logset->logServers.empty() || logset->logServersPtxn.empty());
+			if (logset->logServers.size() || logset->logServersPtxn.size()) {
+				newState.tLogs.emplace_back(*logset);
 				newState.tLogs.back().tLogLocalities.clear();
-				for (const auto& log : t->logServers) {
+				for (const auto& log : logset->logServers) {
 					newState.tLogs.back().tLogLocalities.push_back(log->get().interf().filteredLocality);
+				}
+				for (const auto& log : logset->logServersPtxn) {
+					newState.tLogs.back().tLogLocalities.push_back(log->get().interf().getLocality());
 				}
 			}
 		}
@@ -2909,7 +2918,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			lockNum++;
 		}
 
-		vector<LocalityData> localities;
+		std::vector<LocalityData> localities;
 		localities.resize(recr.tLogs.size());
 		for (int i = 0; i < recr.tLogs.size(); i++) {
 			localities[i] = recr.tLogs[i].locality;
@@ -3170,6 +3179,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->tLogs[0]->logServersPtxn[i] =
 				    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
 				        OptionalInterface<ptxn::TLogInterface_PassivelyPull>(serverNew));
+				logSystem->tLogs[0]->tLogLocalities[i] = recr.tLogs[i].locality;
 				id2Interface[recr.tLogs[i].id()] = serverNew;
 			}
 
@@ -3200,7 +3210,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator.speedUpSimulation)
 			throw master_recovery_failed();
 
-		for (int i = 0; i < logSystem->tLogs[0]->logServers.size(); i++)
+		for (int i = 0; i < logSystem->tLogs[0]->logServers.size(); i++) {
 			recoveryComplete.push_back(transformErrors(
 			    throwErrorOr(
 			        // TODO: make recoveryFinished work with new tlog interfaces.
@@ -3209,6 +3219,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			            SERVER_KNOBS->TLOG_TIMEOUT,
 			            SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 			    master_recovery_failed()));
+		}
+		for (int i = 0; i < logSystem->tLogs[0]->logServersPtxn.size(); i++) {
+			recoveryComplete.push_back(transformErrors(
+			    throwErrorOr(
+			        // TODO: make recoveryFinished work with new tlog interfaces.
+			        logSystem->tLogs[0]->logServersPtxn[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor(
+			            ptxn::TLogRecoveryFinishedRequest(),
+			            SERVER_KNOBS->TLOG_TIMEOUT,
+			            SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+			    master_recovery_failed()));
+		}
+
 		logSystem->recoveryComplete = waitForAll(recoveryComplete);
 
 		if (configuration.usableRegions > 1) {

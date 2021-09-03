@@ -482,10 +482,16 @@ struct LogSystemConfig {
 			if (std::count(log.tLogs.begin(), log.tLogs.end(), tid) > 0) {
 				return true;
 			}
+			if (std::count(log.tLogsPtxn.begin(), log.tLogsPtxn.end(), tid) > 0) {
+				return true;
+			}
 		}
 		for (const auto& old : oldTLogs) {
 			for (const auto& log : old.tLogs) {
 				if (std::count(log.tLogs.begin(), log.tLogs.end(), tid) > 0) {
+					return true;
+				}
+				if (std::count(log.tLogsPtxn.begin(), log.tLogsPtxn.end(), tid) > 0) {
 					return true;
 				}
 			}
