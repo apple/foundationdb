@@ -105,6 +105,8 @@ public:
 
 	// Usable size, without checksum
 	int size() const { return logicalSize - sizeof(Checksum); }
+	int totalSize() const { return logicalSize; }
+
 
 	Standalone<StringRef> asStringRef() const { return Standalone<StringRef>(StringRef(begin(), size()), arena); }
 
