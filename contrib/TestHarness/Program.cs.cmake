@@ -328,7 +328,7 @@ namespace SummarizeTest
                                                          x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
                                                            && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
                     if (versionGreaterThanOrEqual(oldBinaryVersionUpperBound, getFdbserverVersion(fdbserverName))) {
-                        // only add current binary if it's allowed
+                        // only add current binary to list of old binaries if its version is less than or equal to the upperbound version
                         oldBinaries = oldBinaries.Concat(currentBinary);
                     }
                     oldServerName = random.Choice(oldBinaries.ToList<string>());
