@@ -1983,7 +1983,7 @@ ACTOR Future<Void> changeFeedList(Database db) {
 			ASSERT(!result.more);
 			printf("Found %d range feeds%s\n", result.size(), result.size() == 0 ? "." : ":");
 			for (auto& it : result) {
-				auto range = decodeChangeFeedValue(it.value);
+				auto range = std::get<0>(decodeChangeFeedValue(it.value));
 				printf("  %s: %s - %s\n",
 				       it.key.removePrefix(changeFeedPrefix).toString().c_str(),
 				       range.begin.toString().c_str(),

@@ -1513,11 +1513,16 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 }
 
 ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
+	if (!self->isReadable(req.range)) {
+		req.reply.sendError(wrong_shard_server());
+		return Void();
+	}
+
 	auto& feed = self->uidChangeFeed[req.rangeID];
 	if (req.version - 1 > feed->emptyVersion) {
 		feed->emptyVersion = req.version - 1;
 		while (!feed->mutations.empty() && feed->mutations.front().version < req.version) {
-			self->uidChangeFeed[req.rangeID]->mutations.pop_front();
+			feed->mutations.pop_front();
 		}
 		if (feed->storageVersion != invalidVersion) {
 			self->storage.clearRange(
@@ -1539,6 +1544,12 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChangeFeedsRequest req) {
 	wait(delay(0));
 	wait(data->version.whenAtLeast(req.minVersion));
+
+	if (!data->isReadable(req.range)) {
+		req.reply.sendError(wrong_shard_server());
+		return Void();
+	}
+
 	auto ranges = data->keyChangeFeed.intersectingRanges(req.range);
 	std::map<Key, KeyRange> rangeIds;
 	for (auto r : ranges) {
@@ -1680,11 +1691,12 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
 	state uint64_t changeCounter = data->shardChangeCounter;
-	if (!data->isReadable(req.range)) {
-		throw wrong_shard_server();
-	}
 
 	try {
+		if (!data->isReadable(req.range)) {
+			throw wrong_shard_server();
+		}
+
 		loop {
 			wait(req.reply.onReady());
 			state ChangeFeedRequest feedRequest;
@@ -3120,7 +3132,7 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 		data->addMutationToMutationLog(mLV,
 		                               MutationRef(MutationRef::SetValue,
 		                                           persistChangeFeedKeys.begin.toString() + rangeId.toString(),
-		                                           changeFeedValue(range)));
+		                                           changeFeedValue(range, invalidVersion, false)));
 	} else {
 		changeFeedInfo = data->uidChangeFeed[rangeId];
 	}
@@ -3946,26 +3958,49 @@ private:
 		           m.param1.startsWith(changeFeedPrivatePrefix)) {
 			if (m.type == MutationRef::SetValue) {
 				Key changeFeedId = m.param1.removePrefix(changeFeedPrivatePrefix);
-				KeyRange changeFeedRange = decodeChangeFeedValue(m.param2);
-				TraceEvent("AddingChangeFeed", data->thisServerID)
-				    .detail("RangeID", changeFeedId.printable())
-				    .detail("Range", changeFeedRange.toString());
-				Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
-				changeFeedInfo->range = changeFeedRange;
-				changeFeedInfo->id = changeFeedId;
-				changeFeedInfo->emptyVersion = currentVersion - 1;
-				data->uidChangeFeed[changeFeedId] = changeFeedInfo;
-				auto rs = data->keyChangeFeed.modify(changeFeedRange);
-				for (auto r = rs.begin(); r != rs.end(); ++r) {
-					r->value().push_back(changeFeedInfo);
+				KeyRange changeFeedRange;
+				Version popVersion;
+				bool stopped;
+				std::tie(changeFeedRange, popVersion, stopped) = decodeChangeFeedValue(m.param2);
+				auto feed = data->uidChangeFeed.find(changeFeedId);
+				if (feed == data->uidChangeFeed.end()) {
+					TraceEvent("AddingChangeFeed", data->thisServerID)
+					    .detail("RangeID", changeFeedId.printable())
+					    .detail("Range", changeFeedRange.toString());
+					Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
+					changeFeedInfo->range = changeFeedRange;
+					changeFeedInfo->id = changeFeedId;
+					changeFeedInfo->emptyVersion = currentVersion - 1;
+					data->uidChangeFeed[changeFeedId] = changeFeedInfo;
+
+					auto rs = data->keyChangeFeed.modify(changeFeedRange);
+					for (auto r = rs.begin(); r != rs.end(); ++r) {
+						r->value().push_back(changeFeedInfo);
+					}
+					data->keyChangeFeed.coalesce(changeFeedRange.contents());
+					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+					data->addMutationToMutationLog(
+					    mLV,
+					    MutationRef(MutationRef::SetValue,
+					                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
+					                m.param2));
+				} else {
+					if (popVersion != invalidVersion && popVersion - 1 > feed->second->emptyVersion) {
+						feed->second->emptyVersion = popVersion - 1;
+						while (!feed->second->mutations.empty() &&
+						       feed->second->mutations.front().version < popVersion) {
+							feed->second->mutations.pop_front();
+						}
+						if (feed->second->storageVersion != invalidVersion) {
+							data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(feed->second->id, 0),
+							                                     changeFeedDurableKey(feed->second->id, popVersion)));
+							if (popVersion > feed->second->storageVersion) {
+								feed->second->storageVersion = invalidVersion;
+								feed->second->durableVersion = invalidVersion;
+							}
+						}
+					}
 				}
-				data->keyChangeFeed.coalesce(changeFeedRange.contents());
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-				data->addMutationToMutationLog(
-				    mLV,
-				    MutationRef(MutationRef::SetValue,
-				                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
-				                m.param2));
 			} else {
 				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 				auto beginFeed = m.param1.removePrefix(changeFeedPrivatePrefix);
@@ -4916,7 +4951,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state int feedLoc;
 	for (feedLoc = 0; feedLoc < changeFeeds.size(); feedLoc++) {
 		Key changeFeedId = changeFeeds[feedLoc].key.removePrefix(persistChangeFeedKeys.begin);
-		KeyRange changeFeedRange = decodeChangeFeedValue(changeFeeds[feedLoc].value);
+		KeyRange changeFeedRange = std::get<0>(decodeChangeFeedValue(changeFeeds[feedLoc].value));
 		TraceEvent("RestoringChangeFeed", data->thisServerID)
 		    .detail("RangeID", changeFeedId.printable())
 		    .detail("Range", changeFeedRange.toString());

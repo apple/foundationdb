@@ -4319,8 +4319,8 @@ ACTOR Future<Void> registerChangeFeedActor(Transaction* tr, Key rangeID, KeyRang
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	Optional<Value> val = wait(tr->get(rangeIDKey));
 	if (!val.present()) {
-		tr->set(rangeIDKey, changeFeedValue(range));
-	} else if (decodeChangeFeedValue(val.get()) != range) {
+		tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, false));
+	} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
 		throw unsupported_operation();
 	}
 	return Void();
@@ -6544,7 +6544,7 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutatio
 	if (!val.present()) {
 		throw unsupported_operation();
 	}
-	KeyRange keys = decodeChangeFeedValue(val.get());
+	KeyRange keys = std::get<0>(decodeChangeFeedValue(val.get()));
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
@@ -6706,7 +6706,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results.sendError(unsupported_operation());
 				return Void();
 			}
-			keys = decodeChangeFeedValue(val.get());
+			keys = std::get<0>(decodeChangeFeedValue(val.get()));
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -6853,36 +6853,74 @@ ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsAct
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Span span("NAPI:GetOverlappingChangeFeeds"_loc);
-	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
-	    wait(getKeyRangeLocations(cx,
-	                              range,
-	                              1000,
-	                              Reverse::False,
-	                              &StorageServerInterface::changeFeed,
-	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
-	if (locations.size() >= 1000) {
-		throw unsupported_operation();
-	}
+	loop {
+		try {
+			state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+			    wait(getKeyRangeLocations(cx,
+			                              range,
+			                              1000,
+			                              Reverse::False,
+			                              &StorageServerInterface::overlappingChangeFeeds,
+			                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
-	state std::vector<Future<std::vector<std::pair<Key, KeyRange>>>> allOverlappingRequests;
-	for (auto& it : locations) {
-		allOverlappingRequests.push_back(singleLocationOverlappingChangeFeeds(cx, it.second, range, minVersion));
-	}
-	wait(waitForAll(allOverlappingRequests));
+			if (locations.size() >= 1000) {
+				throw unsupported_operation();
+			}
 
-	std::vector<std::pair<Key, KeyRange>> result;
-	for (auto& it : allOverlappingRequests) {
-		result.insert(result.end(), it.get().begin(), it.get().end());
+			state std::vector<Future<std::vector<std::pair<Key, KeyRange>>>> allOverlappingRequests;
+			for (auto& it : locations) {
+				allOverlappingRequests.push_back(
+				    singleLocationOverlappingChangeFeeds(cx, it.second, it.first & range, minVersion));
+			}
+			wait(waitForAll(allOverlappingRequests));
+
+			std::vector<std::pair<Key, KeyRange>> result;
+			for (auto& it : allOverlappingRequests) {
+				result.insert(result.end(), it.get().begin(), it.get().end());
+			}
+			std::sort(result.begin(), result.end(), compareChangeFeedResult);
+			result.resize(std::unique(result.begin(), result.end()) - result.begin());
+			return result;
+		} catch (Error& e) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+				cx->invalidateCache(range);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+			} else {
+				throw e;
+			}
+		}
 	}
-	std::sort(result.begin(), result.end(), compareChangeFeedResult);
-	result.resize(std::unique(result.begin(), result.end()) - result.begin());
-	return result;
 }
 
 Future<std::vector<std::pair<Key, KeyRange>>> DatabaseContext::getOverlappingChangeFeeds(KeyRangeRef range,
                                                                                          Version minVersion) {
 	return getOverlappingChangeFeedsActor(Reference<DatabaseContext>::addRef(this), range, minVersion);
+}
+
+ACTOR static Future<Void> popChangeFeedBackup(Database cx, StringRef rangeID, Version version) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+			Optional<Value> val = wait(tr.get(rangeIDKey));
+			if (val.present()) {
+				KeyRange range;
+				Version popVersion;
+				bool stopped;
+				std::tie(range, popVersion, stopped) = decodeChangeFeedValue(val.get());
+				if (version > popVersion) {
+					tr.set(rangeIDKey, changeFeedValue(range, invalidVersion, stopped));
+				}
+			} else {
+				throw unsupported_operation();
+			}
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }
 
 ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, StringRef rangeID, Version version) {
@@ -6894,33 +6932,33 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, St
 	if (!val.present()) {
 		throw unsupported_operation();
 	}
-	KeyRange keys = decodeChangeFeedValue(val.get());
+	KeyRange keys = std::get<0>(decodeChangeFeedValue(val.get()));
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
-	                              1000,
+	                              3,
 	                              Reverse::False,
 	                              &StorageServerInterface::changeFeed,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
-	if (locations.size() >= 1000) {
-		throw unsupported_operation();
+	if (locations.size() > 2) {
+		wait(popChangeFeedBackup(cx, rangeID, version));
+		return Void();
 	}
-
-	state std::vector<StorageServerInterface> allInterfs;
-	for (auto& it : locations) {
-		for (int i = 0; i < it.second->size(); i++) {
-			allInterfs.push_back(it.second->getInterface(i));
-		}
-	}
-	uniquify(allInterfs);
 
 	// FIXME: lookup both the src and dest shards as of the pop version to ensure all locations are popped
 	state std::vector<Future<Void>> popRequests;
-	for (int i = 0; i < allInterfs.size(); i++) {
-		popRequests.push_back(allInterfs[i].changeFeedPop.getReply(ChangeFeedPopRequest(rangeID, version)));
+	for (int i = 0; i < locations.size(); i++) {
+		for (int j = 0; j < locations[i].second->size(); j++) {
+			popRequests.push_back(locations[i].second->getInterface(j).changeFeedPop.getReply(
+			    ChangeFeedPopRequest(rangeID, version, locations[i].first)));
+		}
 	}
-	wait(waitForAll(popRequests));
+
+	choose {
+		when(wait(waitForAll(popRequests))) {}
+		when(wait(delay(5.0))) { wait(popChangeFeedBackup(cx, rangeID, version)); }
+	}
 	return Void();
 }
 

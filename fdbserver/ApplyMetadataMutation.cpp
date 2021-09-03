@@ -410,7 +410,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 				TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
 			} else if (m.param1.startsWith(changeFeedPrefix)) {
 				if (toCommit && keyInfo) {
-					KeyRange r = decodeChangeFeedValue(m.param2);
+					KeyRange r = std::get<0>(decodeChangeFeedValue(m.param2));
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					auto ranges = keyInfo->intersectingRanges(r);

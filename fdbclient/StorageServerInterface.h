@@ -723,14 +723,16 @@ struct ChangeFeedPopRequest {
 	constexpr static FileIdentifier file_identifier = 10726174;
 	Key rangeID;
 	Version version;
+	KeyRange range;
 	ReplyPromise<Void> reply;
 
 	ChangeFeedPopRequest() {}
-	ChangeFeedPopRequest(Key const& rangeID, Version version) : rangeID(rangeID), version(version) {}
+	ChangeFeedPopRequest(Key const& rangeID, Version version, KeyRange const& range)
+	  : rangeID(rangeID), version(version), range(range) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, version, reply);
+		serializer(ar, rangeID, version, range, reply);
 	}
 };
 

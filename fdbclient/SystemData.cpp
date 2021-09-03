@@ -1034,19 +1034,26 @@ const KeyRangeRef changeFeedKeys(LiteralStringRef("\xff\x02/feed/"), LiteralStri
 const KeyRef changeFeedPrefix = changeFeedKeys.begin;
 const KeyRef changeFeedPrivatePrefix = LiteralStringRef("\xff\xff\x02/feed/");
 
-const Value changeFeedValue(KeyRangeRef const& range) {
+const Value changeFeedValue(KeyRangeRef const& range, Version popVersion, bool stopped) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
 	wr << range;
+	wr << popVersion;
+	wr << stopped;
 	return wr.toValue();
 }
-KeyRange decodeChangeFeedValue(ValueRef const& value) {
+
+std::tuple<KeyRange, Version, bool> decodeChangeFeedValue(ValueRef const& value) {
 	KeyRange range;
+	Version version;
+	bool stopped;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> range;
-	return range;
+	reader >> version;
+	reader >> stopped;
+	return std::make_tuple(range, version, stopped);
 }
 
-const KeyRangeRef changeFeedDurableKeys(LiteralStringRef("\xff\xff/rf/"), LiteralStringRef("\xff\xff/rf0"));
+const KeyRangeRef changeFeedDurableKeys(LiteralStringRef("\xff\xff/cf/"), LiteralStringRef("\xff\xff/cf0"));
 const KeyRef changeFeedDurablePrefix = changeFeedDurableKeys.begin;
 
 const Value changeFeedDurableKey(Key const& feed, Version const& version) {
