@@ -6536,6 +6536,7 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutatio
                                                                                         Version begin,
                                                                                         Version end,
                                                                                         KeyRange range) {
+	// FIXME: this function is out of date!
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
@@ -6612,16 +6613,13 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
+			    e.code() == error_code_actor_cancelled) {
 				throw;
 			}
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-			    e.code() == error_code_connection_failed) {
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
-			} else {
-				results.sendError(e);
-				return Void();
-			}
+			results.sendError(e);
+			return Void();
 		}
 	}
 }
@@ -6700,21 +6698,22 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
 	state KeyRange keys;
-	loop {
-		try {
-			Optional<Value> val = wait(tr.get(rangeIDKey));
-			if (!val.present()) {
-				results.sendError(unsupported_operation());
-				return Void();
-			}
-			keys = std::get<0>(decodeChangeFeedValue(val.get())) & range;
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
 
 	loop {
+		loop {
+			try {
+				Optional<Value> val = wait(tr.get(rangeIDKey));
+				if (!val.present()) {
+					results.sendError(unsupported_operation());
+					return Void();
+				}
+				keys = std::get<0>(decodeChangeFeedValue(val.get())) & range;
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
 		try {
 			state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 			    wait(getKeyRangeLocations(cx,
@@ -6805,7 +6804,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				throw;
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-			    e.code() == error_code_connection_failed) {
+			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed) {
 				cx->invalidateCache(keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
@@ -6933,7 +6932,7 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, St
 	if (!val.present()) {
 		throw unsupported_operation();
 	}
-	KeyRange keys = std::get<0>(decodeChangeFeedValue(val.get()));
+	state KeyRange keys = std::get<0>(decodeChangeFeedValue(val.get()));
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
@@ -6956,9 +6955,18 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, St
 		}
 	}
 
-	choose {
-		when(wait(waitForAll(popRequests))) {}
-		when(wait(delay(5.0))) { wait(popChangeFeedBackup(cx, rangeID, version)); }
+	try {
+		choose {
+			when(wait(waitForAll(popRequests))) {}
+			when(wait(delay(5.0))) { wait(popChangeFeedBackup(cx, rangeID, version)); }
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_unknown_change_feed && e.code() != error_code_wrong_shard_server &&
+		    e.code() != error_code_all_alternatives_failed) {
+			throw;
+		}
+		cx->invalidateCache(keys);
+		wait(popChangeFeedBackup(cx, rangeID, version));
 	}
 	return Void();
 }

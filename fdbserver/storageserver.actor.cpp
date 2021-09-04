@@ -81,6 +81,7 @@ bool canReplyWith(Error e) {
 	case error_code_wrong_shard_server:
 	case error_code_process_behind:
 	case error_code_watch_cancelled:
+	case error_code_unknown_change_feed:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -1513,30 +1514,37 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 }
 
 ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
+	wait(delay(0));
+
+	TraceEvent("ChangeFeedPopQuery", self->thisServerID)
+	    .detail("RangeID", req.rangeID.printable())
+	    .detail("Version", req.version)
+	    .detail("Range", req.range.toString());
+
 	if (!self->isReadable(req.range)) {
 		req.reply.sendError(wrong_shard_server());
 		return Void();
 	}
-
-	auto& feed = self->uidChangeFeed[req.rangeID];
-	if (req.version - 1 > feed->emptyVersion) {
-		feed->emptyVersion = req.version - 1;
-		while (!feed->mutations.empty() && feed->mutations.front().version < req.version) {
-			feed->mutations.pop_front();
+	auto feed = self->uidChangeFeed.find(req.rangeID);
+	if (feed == self->uidChangeFeed.end()) {
+		req.reply.sendError(unknown_change_feed());
+		return Void();
+	}
+	if (req.version - 1 > feed->second->emptyVersion) {
+		feed->second->emptyVersion = req.version - 1;
+		while (!feed->second->mutations.empty() && feed->second->mutations.front().version < req.version) {
+			feed->second->mutations.pop_front();
 		}
-		if (feed->storageVersion != invalidVersion) {
-			self->storage.clearRange(
-			    KeyRangeRef(changeFeedDurableKey(feed->id, 0), changeFeedDurableKey(feed->id, req.version)));
-			if (req.version > feed->storageVersion) {
-				feed->storageVersion = invalidVersion;
-				feed->durableVersion = invalidVersion;
+		if (feed->second->storageVersion != invalidVersion) {
+			self->storage.clearRange(KeyRangeRef(changeFeedDurableKey(feed->second->id, 0),
+			                                     changeFeedDurableKey(feed->second->id, req.version)));
+			if (req.version > feed->second->storageVersion) {
+				feed->second->storageVersion = invalidVersion;
+				feed->second->durableVersion = invalidVersion;
 			}
 			wait(self->durableVersion.whenAtLeast(self->storageVersion() + 1));
 		}
 	}
-	TraceEvent("ChangeFeedPopQuery", self->thisServerID)
-	    .detail("RangeID", req.rangeID.printable())
-	    .detail("Version", req.version);
 	req.reply.send(Void());
 	return Void();
 }
@@ -1612,10 +1620,14 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 	if (!data->isReadable(req.range)) {
 		throw wrong_shard_server();
 	}
-	auto& feedInfo = data->uidChangeFeed[req.rangeID];
-	if (req.end <= feedInfo->emptyVersion + 1) {
-	} else if (feedInfo->durableVersion == invalidVersion || req.begin > feedInfo->durableVersion) {
-		for (auto it : data->uidChangeFeed[req.rangeID]->mutations) {
+
+	auto feed = data->uidChangeFeed.find(req.rangeID);
+	if (feed == data->uidChangeFeed.end()) {
+		throw unknown_change_feed();
+	}
+	if (req.end <= feed->second->emptyVersion + 1) {
+	} else if (feed->second->durableVersion == invalidVersion || req.begin > feed->second->durableVersion) {
+		for (auto it : feed->second->mutations) {
 			if (it.version >= req.end || remainingLimitBytes <= 0) {
 				break;
 			}
@@ -1627,9 +1639,8 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 			}
 		}
 	} else {
-		state std::deque<Standalone<MutationsAndVersionRef>> mutationsDeque =
-		    data->uidChangeFeed[req.rangeID]->mutations;
-		state Version startingDurableVersion = feedInfo->durableVersion;
+		state std::deque<Standalone<MutationsAndVersionRef>> mutationsDeque = feed->second->mutations;
+		state Version startingDurableVersion = feed->second->durableVersion;
 		RangeResult res = wait(data->storage.readRange(
 		    KeyRangeRef(changeFeedDurableKey(req.rangeID, req.begin), changeFeedDurableKey(req.rangeID, req.end)),
 		    1 << 30,
@@ -1668,24 +1679,25 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 			}
 		}
 		if (isEmpty) {
-			auto& feedInfo = data->uidChangeFeed[req.rangeID];
-			if (startingDurableVersion == feedInfo->storageVersion && req.end > startingDurableVersion) {
+			auto feed = data->uidChangeFeed.find(req.rangeID);
+			if (feed != data->uidChangeFeed.end() && startingDurableVersion == feed->second->storageVersion &&
+			    req.end > startingDurableVersion) {
 				if (req.begin == 0) {
-					feedInfo->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
+					feed->second->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
 				} else {
 					RangeResult emp = wait(data->storage.readRange(
 					    KeyRangeRef(changeFeedDurableKey(req.rangeID, 0), changeFeedDurableKey(req.rangeID, req.end)),
 					    -1));
 					data->checkChangeCounter(changeCounter, req.range);
-					auto& feedInfo = data->uidChangeFeed[req.rangeID];
-					if (startingDurableVersion == feedInfo->storageVersion) {
+					auto feed = data->uidChangeFeed.find(req.rangeID);
+					if (feed != data->uidChangeFeed.end() && startingDurableVersion == feed->second->storageVersion) {
 						if (emp.empty()) {
-							feedInfo->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
+							feed->second->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
 						} else {
 							Key id;
 							Version version;
 							std::tie(id, version) = decodeChangeFeedDurableKey(emp[0].key);
-							feedInfo->durableVersion = version;
+							feed->second->durableVersion = version;
 						}
 					}
 				}
@@ -1705,32 +1717,43 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
                                          Version begin,
                                          Version end,
                                          KeyRange range) {
-	loop {
-		state ChangeFeedRequest feedRequest;
-		feedRequest.rangeID = rangeID;
-		feedRequest.begin = begin;
-		feedRequest.end = end;
-		feedRequest.range = range;
-		state ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
-		begin = feedReply.mutations.back().version + 1;
-		state int resultLoc = 0;
-		while (resultLoc < feedReply.mutations.size()) {
-			if (feedReply.mutations[resultLoc].mutations.size() || feedReply.mutations[resultLoc].version == end) {
-				wait(results.onEmpty());
-				results.send(feedReply.mutations[resultLoc]);
+	try {
+		loop {
+			state ChangeFeedRequest feedRequest;
+			feedRequest.rangeID = rangeID;
+			feedRequest.begin = begin;
+			feedRequest.end = end;
+			feedRequest.range = range;
+			state ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
+			begin = feedReply.mutations.back().version + 1;
+			state int resultLoc = 0;
+			while (resultLoc < feedReply.mutations.size()) {
+				if (feedReply.mutations[resultLoc].mutations.size() || feedReply.mutations[resultLoc].version == end) {
+					wait(results.onEmpty());
+					results.send(feedReply.mutations[resultLoc]);
+				}
+				resultLoc++;
 			}
-			resultLoc++;
-		}
 
-		if (begin == end) {
-			return Void();
+			if (begin == end) {
+				return Void();
+			}
 		}
+	} catch (Error& e) {
+		TraceEvent(SevError, "LocalChangeFeedError", data->thisServerID).error(e);
+		throw;
 	}
 }
 
 ACTOR Future<Void> changeFeedQ(StorageServer* data, ChangeFeedRequest req) {
-	ChangeFeedReply rep = wait(getChangeFeedMutations(data, req));
-	req.reply.send(rep);
+	try {
+		ChangeFeedReply rep = wait(getChangeFeedMutations(data, req));
+		req.reply.send(rep);
+	} catch (Error& e) {
+		if (!canReplyWith(e))
+			throw;
+		req.reply.sendError(e);
+	}
 	return Void();
 }
 
@@ -1759,9 +1782,13 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				return Void();
 			}
 			if (feedReply.mutations.back().mutations.empty()) {
+				auto feed = data->uidChangeFeed.find(req.rangeID);
+				if (feed == data->uidChangeFeed.end()) {
+					throw unknown_change_feed();
+				}
 				choose {
 					when(wait(delay(5.0, TaskPriority::DefaultEndpoint))) {}
-					when(wait(data->uidChangeFeed[req.rangeID]->newMutations.onTrigger())) {}
+					when(wait(feed->second->newMutations.onTrigger())) {}
 				}
 			}
 		}
@@ -3154,9 +3181,9 @@ static const KeyRangeRef persistChangeFeedKeys =
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
 ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange range, Version fetchVersion) {
-	state bool existing = data->uidChangeFeed.count(rangeId);
 	state Reference<ChangeFeedInfo> changeFeedInfo;
 	wait(delay(0)); // allow this actor to be cancelled by removals
+	bool existing = data->uidChangeFeed.count(rangeId);
 
 	TraceEvent("FetchChangeFeed", data->thisServerID)
 	    .detail("RangeID", rangeId.printable())
@@ -4485,7 +4512,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->changeFeedVersions.push_back(std::make_pair(
 				    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
 				for (auto& it : data->currentChangeFeeds) {
-					data->uidChangeFeed[it]->newMutations.trigger();
+					auto feed = data->uidChangeFeed.find(it);
+					if (feed != data->uidChangeFeed.end()) {
+						feed->second->newMutations.trigger();
+					}
 				}
 				data->currentChangeFeeds.clear();
 			}
@@ -4562,16 +4592,18 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state std::vector<Key> updatedChangeFeeds(modifiedChangeFeeds.begin(), modifiedChangeFeeds.end());
 		state int curFeed = 0;
 		while (curFeed < updatedChangeFeeds.size()) {
-			auto info = data->uidChangeFeed[updatedChangeFeeds[curFeed]];
-			for (auto& it : info->mutations) {
-				if (it.version >= newOldestVersion) {
-					break;
+			auto info = data->uidChangeFeed.find(updatedChangeFeeds[curFeed]);
+			if (info != data->uidChangeFeed.end()) {
+				for (auto& it : info->second->mutations) {
+					if (it.version >= newOldestVersion) {
+						break;
+					}
+					data->storage.writeKeyValue(KeyValueRef(changeFeedDurableKey(info->second->id, it.version),
+					                                        changeFeedDurableValue(it.mutations)));
+					info->second->storageVersion = it.version;
 				}
-				data->storage.writeKeyValue(
-				    KeyValueRef(changeFeedDurableKey(info->id, it.version), changeFeedDurableValue(it.mutations)));
-				info->storageVersion = it.version;
+				wait(yield(TaskPriority::UpdateStorage));
 			}
-			wait(yield(TaskPriority::UpdateStorage));
 			curFeed++;
 		}
 
@@ -4610,12 +4642,14 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		curFeed = 0;
 		while (curFeed < updatedChangeFeeds.size()) {
-			auto info = data->uidChangeFeed[updatedChangeFeeds[curFeed]];
-			while (!info->mutations.empty() && info->mutations.front().version < newOldestVersion) {
-				info->mutations.pop_front();
+			auto info = data->uidChangeFeed.find(updatedChangeFeeds[curFeed]);
+			if (info != data->uidChangeFeed.end()) {
+				while (!info->second->mutations.empty() && info->second->mutations.front().version < newOldestVersion) {
+					info->second->mutations.pop_front();
+				}
+				info->second->durableVersion = info->second->storageVersion;
+				wait(yield(TaskPriority::UpdateStorage));
 			}
-			info->durableVersion = info->storageVersion;
-			wait(yield(TaskPriority::UpdateStorage));
 			curFeed++;
 		}
 

@@ -77,6 +77,7 @@ ERROR( dd_not_found, 1053, "Data distributor not found")
 ERROR( wrong_connection_file, 1054, "Connection file mismatch")
 ERROR( version_already_compacted, 1055, "The requested changes have been compacted away")
 ERROR( local_config_changed, 1056, "Local configuration file has changed. Restart and apply these changes" )
+ERROR( unknown_change_feed, 1057, "Change feed not found" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
