@@ -17,11 +17,13 @@
 # limitations under the License.
 #
 
-version: '3'
+version: "3"
 services:
   # Specify three fdbserver processes.
   fdb-coordinator:
     image: foundationdb/foundationdb:${FDB_VERSION}
+    volumes:
+      - ./fdb.bash:/var/fdb/scripts/fdb.bash
     environment:
       FDB_COORDINATOR: ${FDB_COORDINATOR}
       FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
@@ -32,6 +34,8 @@ services:
     depends_on:
       - fdb-coordinator
     image: foundationdb/foundationdb:${FDB_VERSION}
+    volumes:
+      - ./fdb.bash:/var/fdb/scripts/fdb.bash
     environment:
       FDB_COORDINATOR: ${FDB_COORDINATOR}
       FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
@@ -40,6 +44,8 @@ services:
     depends_on:
       - fdb-coordinator
     image: foundationdb/foundationdb:${FDB_VERSION}
+    volumes:
+      - ./fdb.bash:/var/fdb/scripts/fdb.bash
     environment:
       FDB_COORDINATOR: ${FDB_COORDINATOR}
       FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
@@ -56,6 +62,8 @@ services:
       args:
         FDB_VERSION: ${FDB_VERSION}
         FDB_ADDITIONAL_VERSIONS: ${FDB_ADDITIONAL_VERSIONS}
+    volumes:
+      - ./app:/app
     ports:
       - 5000:5000/tcp
     environment:

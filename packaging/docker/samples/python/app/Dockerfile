@@ -19,34 +19,27 @@
 
 ARG FDB_VERSION
 
-FROM foundationdb/foundationdb:${FDB_VERSION} as fdb
-FROM python:3.8-slim
+FROM --platform=linux/amd64 foundationdb/foundationdb:${FDB_VERSION} as fdb
+FROM --platform=linux/amd64 python:3.8-slim 
 
 RUN apt-get update; apt-get install -y dnsutils curl && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /app
-WORKDIR /app
-
 COPY --from=fdb /usr/lib/libfdb_c.so /usr/lib
 COPY --from=fdb /usr/bin/fdbcli /usr/bin/
-COPY --from=fdb /var/fdb/scripts/create_cluster_file.bash /app
+COPY --from=fdb /var/fdb/scripts/create_cluster_file.bash /
 
 ARG FDB_WEBSITE=https://www.foundationdb.org
 ARG FDB_ADDITIONAL_VERSIONS
 ENV FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY=/usr/lib/fdb-multiversion
 RUN mkdir /usr/lib/fdb-multiversion; \
 	for version in ${FDB_ADDITIONAL_VERSIONS}; do \
-		curl ${FDB_WEBSITE}/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb-multiversion/libfdb_c_$version.so; \
+	curl ${FDB_WEBSITE}/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb-multiversion/libfdb_c_$version.so; \
 	done
 
-COPY requirements.txt /app
+WORKDIR /app
+
+COPY /app /app
 RUN pip install -r requirements.txt
-
-COPY start.bash /app
-COPY server.py /app
-RUN chmod u+x /app/start.bash
-
-CMD /app/start.bash
 
 ENV FLASK_APP=server.py
 ENV FLASK_ENV=development

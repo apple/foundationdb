@@ -1,6 +1,7 @@
 #! /bin/bash
 
-# start.bash
+#
+# fdb.bash
 #
 # This source file is part of the FoundationDB open source project
 #
@@ -19,20 +20,12 @@
 # limitations under the License.
 #
 
-set -xe;
-
-if [[ -z "${FDB_CLUSTER_FILE:-}" || ! -s "${FDB_CLUSTER_FILE}" ]]; then
-    /create_cluster_file.bash
-    FDB_CLUSTER_FILE="${FDB_CLUSTER_FILE:-/etc/foundationdb/fdb.cluster}"
-
-    # Attempt to connect. Configure the database if necessary.
-    if ! /usr/bin/fdbcli -C "${FDB_CLUSTER_FILE}" --exec status --timeout 3 --knob_disable_posix_kernel_aio=1 ; then
-        echo "creating the database"
-        if ! fdbcli -C "${FDB_CLUSTER_FILE}" --exec "configure new single memory ; status" --timeout 10 --knob_disable_posix_kernel_aio=1 ; then
-            echo "Unable to configure new FDB cluster."
-            exit 1
-        fi
-    fi
-fi
-
-FLASK_APP=server.py flask run --host=0.0.0.0
+source /var/fdb/scripts/create_server_environment.bash
+create_server_environment
+source /var/fdb/.fdbenv
+echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT"
+mkdir -p /var/fdb/logs
+fdbserver --listen_address 0.0.0.0:$FDB_PORT --public_address $PUBLIC_IP:$FDB_PORT \
+	--datadir /var/fdb/data --logdir /var/fdb/logs \
+	--locality_zoneid="$(hostname)" --locality_machineid="$(hostname)" --class $FDB_PROCESS_CLASS \
+	--knob_disable_posix_kernel_aio=1
