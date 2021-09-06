@@ -1575,6 +1575,10 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 }
 
 void filterMutations(Arena& arena, VectorRef<MutationRef>& mutations, KeyRange const& range) {
+	if (mutations.size() == 1 && mutations.back().param1 == lastEpochEndPrivateKey) {
+		return;
+	}
+
 	Optional<VectorRef<MutationRef>> modifiedMutations;
 	for (int i = 0; i < mutations.size(); i++) {
 		if (mutations[i].type == MutationRef::SetValue) {
@@ -1705,7 +1709,7 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 		}
 	}
 	Version finalVersion = std::min(req.end - 1, data->version.get());
-	if ((reply.mutations.empty() || reply.mutations.back().version) < finalVersion && remainingLimitBytes > 0) {
+	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0) {
 		reply.mutations.push_back(reply.arena, MutationsAndVersionRef(finalVersion));
 	}
 	return reply;
@@ -3999,6 +4003,11 @@ private:
 				ASSERT(rollbackVersion >= data->storageVersion());
 				rollback(data, rollbackVersion, currentVersion);
 			}
+			for (auto& it : data->uidChangeFeed) {
+				it.second->mutations.push_back(MutationsAndVersionRef(currentVersion));
+				it.second->mutations.back().mutations.push_back_deep(it.second->mutations.back().arena(), m);
+				data->currentChangeFeeds.insert(it.first);
+			}
 
 			data->recoveryVersionSkips.emplace_back(rollbackVersion, currentVersion - rollbackVersion);
 		} else if (m.type == MutationRef::SetValue && m.param1 == killStoragePrivateKey) {
@@ -4357,6 +4366,17 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
 				++data->counters.updateVersions;
+				if (data->currentChangeFeeds.size()) {
+					data->changeFeedVersions.push_back(std::make_pair(
+					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
+					for (auto& it : data->currentChangeFeeds) {
+						auto feed = data->uidChangeFeed.find(it);
+						if (feed != data->uidChangeFeed.end()) {
+							feed->second->newMutations.trigger();
+						}
+					}
+					data->currentChangeFeeds.clear();
+				}
 				ver = cloneCursor2->version().version;
 			}
 
@@ -4435,6 +4455,17 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
+		if (data->currentChangeFeeds.size()) {
+			data->changeFeedVersions.push_back(std::make_pair(
+			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
+			for (auto& it : data->currentChangeFeeds) {
+				auto feed = data->uidChangeFeed.find(it);
+				if (feed != data->uidChangeFeed.end()) {
+					feed->second->newMutations.trigger();
+				}
+			}
+			data->currentChangeFeeds.clear();
+		}
 
 		if (ver != invalidVersion) {
 			data->lastVersionWithData = ver;
@@ -4507,18 +4538,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->recoveryVersionSkips.pop_front();
 			}
 			data->desiredOldestVersion.set(proposedOldestVersion);
-
-			if (data->currentChangeFeeds.size()) {
-				data->changeFeedVersions.push_back(std::make_pair(
-				    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
-				for (auto& it : data->currentChangeFeeds) {
-					auto feed = data->uidChangeFeed.find(it);
-					if (feed != data->uidChangeFeed.end()) {
-						feed->second->newMutations.trigger();
-					}
-				}
-				data->currentChangeFeeds.clear();
-			}
 		}
 
 		validate(data);
@@ -4595,7 +4614,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			auto info = data->uidChangeFeed.find(updatedChangeFeeds[curFeed]);
 			if (info != data->uidChangeFeed.end()) {
 				for (auto& it : info->second->mutations) {
-					if (it.version >= newOldestVersion) {
+					if (it.version > newOldestVersion) {
 						break;
 					}
 					data->storage.writeKeyValue(KeyValueRef(changeFeedDurableKey(info->second->id, it.version),

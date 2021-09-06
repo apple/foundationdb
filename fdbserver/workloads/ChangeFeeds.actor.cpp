@@ -20,6 +20,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -68,7 +69,22 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> readMutations(Databa
 			loop {
 				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(results.getFuture());
 				output.arena().dependsOn(res.arena());
-				output.append(output.arena(), res.begin(), res.size());
+				for (auto& it : res) {
+					if (it.mutations.size() == 1 && it.mutations.back().param1 == lastEpochEndPrivateKey) {
+						Version rollbackVersion;
+						BinaryReader br(it.mutations.back().param2, Unversioned());
+						br >> rollbackVersion;
+						TraceEvent("ChangeFeedRollback")
+						    .detail("Ver", it.version)
+						    .detail("RollbackVer", rollbackVersion);
+						while (output.size() && output.back().version > rollbackVersion) {
+							TraceEvent("ChangeFeedRollbackVer").detail("Ver", output.back().version);
+							output.pop_back();
+						}
+					} else {
+						output.push_back(output.arena(), it);
+					}
+				}
 				begin = res.back().version + 1;
 			}
 		} catch (Error& e) {
@@ -147,8 +163,11 @@ struct ChangeFeedsWorkload : TestWorkload {
 	std::string description() const override { return "ChangeFeedsWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
-		client = changeFeedClient(cx->clone(), this);
-		return delay(testDuration);
+		if (clientId == 0) {
+			client = changeFeedClient(cx->clone(), this);
+			return delay(testDuration);
+		}
+		return Void();
 	}
 	Future<bool> check(Database const& cx) override {
 		client = Future<Void>();
@@ -174,10 +193,12 @@ struct ChangeFeedsWorkload : TestWorkload {
 			wait(delay(deterministicRandom()->random01()));
 
 			state std::pair<Standalone<VectorRef<KeyValueRef>>, Version> firstResults = wait(readDatabase(cx));
+			TraceEvent("ChangeFeedReadDB").detail("Ver1", firstResults.second);
 
 			wait(delay(10 * deterministicRandom()->random01()));
 
 			state std::pair<Standalone<VectorRef<KeyValueRef>>, Version> secondResults = wait(readDatabase(cx));
+			TraceEvent("ChangeFeedReadDB").detail("Ver2", secondResults.second);
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations =
 			    wait(readMutations(cx, rangeID, firstResults.second, secondResults.second + 1));
 
