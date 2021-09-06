@@ -181,6 +181,24 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 	}
 }
 
+void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
+	TraceEvent e(SevError, "RocksDBError");
+	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
+	if (status.IsIOError()) {
+		e.detail("SubCode", status.subcode());
+	}
+}
+
+Error statusToError(const rocksdb::Status& s) {
+	if (s.IsIOError()) {
+		return io_error();
+	} else if (s.IsTimedOut()) {
+		return transaction_too_old();
+	} else {
+		return unknown_error();
+	}
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -199,14 +217,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		void init() override {}
 
-		Error statusToError(const rocksdb::Status& s) {
-			if (s == rocksdb::Status::IOError()) {
-				return io_error();
-			} else {
-				return unknown_error();
-			}
-		}
-
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
 			ThreadReturnPromise<Void> done;
@@ -222,7 +232,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			auto options = getOptions();
 			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
+				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
 			} else {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
@@ -264,7 +274,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
+				logRocksDBError(s, "Commit");
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
@@ -290,14 +300,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			auto s = db->Close();
 			if (!s.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
+				logRocksDBError(s, "Close");
 			}
 			if (a.deleteOnClose) {
 				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 					"default", getCFOptions() } };
 				s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
 				if (!s.ok()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Destroy");
+					logRocksDBError(s, "Destroy");
 				} else {
 					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Destroy");
 				}
@@ -365,11 +375,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (s.ok()) {
 				a.result.send(Value(toStringRef(value)));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
@@ -415,13 +425,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
 				                              std::min(value.size(), size_t(a.maxLength)))));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError")
-					    .detail("Error", s.ToString())
-					    .detail("Method", "ReadValuePrefix");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				logRocksDBError(s, "ReadValuePrefix");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
@@ -512,7 +520,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			if (!s.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
+				logRocksDBError(s, "ReadRange");
+				a.result.sendError(statusToError(s));
+				return;
 			}
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);

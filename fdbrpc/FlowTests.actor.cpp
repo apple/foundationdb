@@ -287,9 +287,7 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		return emptyConfig;
 	}
 #ifdef ENABLE_SAMPLING
-	ActorLineageSet& getActorLineageSet() override {
-		throw std::exception();
-	}
+	ActorLineageSet& getActorLineageSet() override { throw std::exception(); }
 #endif
 	ProtocolVersion protocolVersion() override { return baseNetwork->protocolVersion(); }
 };

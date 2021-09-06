@@ -986,9 +986,7 @@ public:
 	bool checkRunnable() override { return net2->checkRunnable(); }
 
 #ifdef ENABLE_SAMPLING
-	ActorLineageSet& getActorLineageSet() override {
-		return actorLineageSet;
-	}
+	ActorLineageSet& getActorLineageSet() override { return actorLineageSet; }
 #endif
 
 	void stop() override { isStopped = true; }

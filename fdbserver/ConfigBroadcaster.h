@@ -67,4 +67,5 @@ public:
 
 public: // Testing
 	explicit ConfigBroadcaster(ConfigFollowerInterface const&);
+	Future<Void> getClientFailure(UID clientUID) const;
 };

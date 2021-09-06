@@ -61,8 +61,11 @@ public:
 	// Result indicates whether or not knob was successfully set:
 	virtual bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) = 0;
 	void setKnob(std::string const& knobName, KnobValueRef const& knobValue);
+	virtual bool isAtomic(std::string const& knobName) const = 0;
 
 	static void setGlobalKnobCollection(Type, Randomize, IsSimulated);
 	static IKnobCollection const& getGlobalKnobCollection();
 	static IKnobCollection& getMutableGlobalKnobCollection();
+	static ConfigMutationRef createSetMutation(Arena, KeyRef, ValueRef);
+	static ConfigMutationRef createClearMutation(Arena, KeyRef);
 };

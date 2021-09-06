@@ -73,7 +73,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
-		m.push_back(PerfMetric("Operations/sec", operations.getValue() / duration, false));
+		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());
 		m.push_back(checks.getMetric());
 		m.push_back(retries.getMetric());

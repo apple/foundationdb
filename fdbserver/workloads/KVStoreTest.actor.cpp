@@ -232,15 +232,15 @@ struct KVStoreTestWorkload : TestWorkload {
 	}
 	Future<bool> check(Database const& cx) override { return true; }
 	void metricsFromHistogram(vector<PerfMetric>& m, std::string name, TestHistogram<float>& h) const {
-		m.push_back(PerfMetric("Min " + name, 1000.0 * h.min(), true));
-		m.push_back(PerfMetric("Average " + name, 1000.0 * h.mean(), true));
-		m.push_back(PerfMetric("Median " + name, 1000.0 * h.medianEstimate(), true));
-		m.push_back(PerfMetric("95%% " + name, 1000.0 * h.percentileEstimate(0.95), true));
-		m.push_back(PerfMetric("Max " + name, 1000.0 * h.max(), true));
+		m.emplace_back("Min " + name, 1000.0 * h.min(), Averaged::True);
+		m.emplace_back("Average " + name, 1000.0 * h.mean(), Averaged::True);
+		m.emplace_back("Median " + name, 1000.0 * h.medianEstimate(), Averaged::True);
+		m.emplace_back("95%% " + name, 1000.0 * h.percentileEstimate(0.95), Averaged::True);
+		m.emplace_back("Max " + name, 1000.0 * h.max(), Averaged::True);
 	}
 	void getMetrics(vector<PerfMetric>& m) override {
 		if (setupTook)
-			m.push_back(PerfMetric("SetupTook", setupTook, false));
+			m.emplace_back("SetupTook", setupTook, Averaged::False);
 
 		m.push_back(reads.getMetric());
 		m.push_back(sets.getMetric());

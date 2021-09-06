@@ -242,7 +242,7 @@ class TestConfig {
 				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
 			if (attrib == "disableTss") {
-				sscanf(value.c_str(), "%d", &disableTss);
+				disableTss = strcmp(value.c_str(), "true") == 0;
 			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
@@ -1297,7 +1297,9 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 
 // Sets storage engine based on testConfig details
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
-	int storage_engine_type = deterministicRandom()->randomInt(0, 5);
+	// Using [0, 4) to disable the RocksDB storage engine.
+	// TODO: Figure out what is broken with the RocksDB engine in simulation.
+	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {

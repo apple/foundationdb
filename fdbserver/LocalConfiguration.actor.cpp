@@ -246,15 +246,20 @@ class LocalConfigurationImpl {
 		}
 		++self->snapshots;
 		self->kvStore->clear(knobOverrideKeys);
+		state bool restartRequired = false;
 		for (const auto& [configKey, knobValue] : snapshot) {
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, knobValue);
 			self->kvStore->set(
 			    KeyValueRef(BinaryWriter::toValue(configKey, IncludeVersion()).withPrefix(knobOverrideKeys.begin),
 			                ObjectWriter::toValue(knobValue, IncludeVersion())));
+			restartRequired |= self->getKnobs().isAtomic(configKey.knobName.toString());
 		}
 		ASSERT_GE(snapshotVersion, self->lastSeenVersion);
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(snapshotVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
+		if (restartRequired) {
+			throw local_config_changed();
+		}
 		self->updateInMemoryState(snapshotVersion);
 		return Void();
 	}
@@ -264,6 +269,7 @@ class LocalConfigurationImpl {
 	                                     Version mostRecentVersion) {
 		// TODO: Concurrency control?
 		++self->changeRequestsFetched;
+		state bool restartRequired = false;
 		for (const auto& versionedMutation : changes) {
 			if (versionedMutation.version <= self->lastSeenVersion) {
 				TraceEvent(SevWarnAlways, "LocalConfigGotRepeatedChange")
@@ -291,9 +297,13 @@ class LocalConfigurationImpl {
 				self->kvStore->clear(singleKeyRange(serializedKey.withPrefix(knobOverrideKeys.begin)));
 				self->configKnobOverrides.remove(mutation.getConfigClass(), mutation.getKnobName());
 			}
+			restartRequired |= self->getKnobs().isAtomic(mutation.getKnobName().toString());
 		}
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(mostRecentVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
+		if (restartRequired) {
+			throw local_config_changed();
+		}
 		self->updateInMemoryState(mostRecentVersion);
 		return Void();
 	}
@@ -345,21 +355,13 @@ public:
 		return addChanges(this, changes, mostRecentVersion);
 	}
 
-	FlowKnobs const& getFlowKnobs() const {
-		return getKnobs().getFlowKnobs();
-	}
+	FlowKnobs const& getFlowKnobs() const { return getKnobs().getFlowKnobs(); }
 
-	ClientKnobs const& getClientKnobs() const {
-		return getKnobs().getClientKnobs();
-	}
+	ClientKnobs const& getClientKnobs() const { return getKnobs().getClientKnobs(); }
 
-	ServerKnobs const& getServerKnobs() const {
-		return getKnobs().getServerKnobs();
-	}
+	ServerKnobs const& getServerKnobs() const { return getKnobs().getServerKnobs(); }
 
-	TestKnobs const& getTestKnobs() const {
-		return getKnobs().getTestKnobs();
-	}
+	TestKnobs const& getTestKnobs() const { return getKnobs().getTestKnobs(); }
 
 	Future<Void> consume(ConfigBroadcastInterface const& broadcastInterface) {
 		return consume(this, broadcastInterface);

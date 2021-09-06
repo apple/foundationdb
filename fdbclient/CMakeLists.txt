@@ -192,6 +192,9 @@ add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} AD
 add_dependencies(fdbclient_sampling fdboptions fdb_c_options)
 target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
+if(WIN32)
+  add_dependencies(fdbclient_sampling_actors fdbclient_actors)
+endif()
 
 if(BUILD_AZURE_BACKUP)
   target_link_libraries(fdbclient PRIVATE curl uuid azure-storage-lite)
