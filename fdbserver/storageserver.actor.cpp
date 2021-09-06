@@ -1621,7 +1621,7 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 		wait(data->version.whenAtLeast(req.begin));
 	}
 	state uint64_t changeCounter = data->shardChangeCounter;
-	if (!data->isReadable(req.range)) {
+	if (!req.range.empty() && !data->isReadable(req.range)) {
 		throw wrong_shard_server();
 	}
 
@@ -1650,7 +1650,9 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 		    1 << 30,
 		    remainingLimitBytes));
 
-		data->checkChangeCounter(changeCounter, req.range);
+		if (!req.range.empty()) {
+			data->checkChangeCounter(changeCounter, req.range);
+		}
 
 		bool isEmpty = res.size() == 0;
 		Version lastVersion = req.begin - 1;
@@ -1692,7 +1694,9 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 					RangeResult emp = wait(data->storage.readRange(
 					    KeyRangeRef(changeFeedDurableKey(req.rangeID, 0), changeFeedDurableKey(req.rangeID, req.end)),
 					    -1));
-					data->checkChangeCounter(changeCounter, req.range);
+					if (!req.range.empty()) {
+						data->checkChangeCounter(changeCounter, req.range);
+					}
 					auto feed = data->uidChangeFeed.find(req.rangeID);
 					if (feed != data->uidChangeFeed.end() && startingDurableVersion == feed->second->storageVersion) {
 						if (emp.empty()) {
@@ -1719,20 +1723,19 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
                                          PromiseStream<Standalone<MutationsAndVersionRef>> results,
                                          Key rangeID,
                                          Version begin,
-                                         Version end,
-                                         KeyRange range) {
+                                         Version end) {
 	try {
 		loop {
 			state ChangeFeedRequest feedRequest;
 			feedRequest.rangeID = rangeID;
 			feedRequest.begin = begin;
 			feedRequest.end = end;
-			feedRequest.range = range;
 			state ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
 			begin = feedReply.mutations.back().version + 1;
 			state int resultLoc = 0;
 			while (resultLoc < feedReply.mutations.size()) {
-				if (feedReply.mutations[resultLoc].mutations.size() || feedReply.mutations[resultLoc].version == end) {
+				if (feedReply.mutations[resultLoc].mutations.size() ||
+				    feedReply.mutations[resultLoc].version == end - 1) {
 					wait(results.onEmpty());
 					results.send(feedReply.mutations[resultLoc]);
 				}
@@ -3222,8 +3225,10 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 			loop {
 				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults.getFuture());
 				for (auto& it : res) {
-					data->storage.writeKeyValue(
-					    KeyValueRef(changeFeedDurableKey(rangeId, it.version), changeFeedDurableValue(it.mutations)));
+					if (it.mutations.size()) {
+						data->storage.writeKeyValue(KeyValueRef(changeFeedDurableKey(rangeId, it.version),
+						                                        changeFeedDurableValue(it.mutations)));
+					}
 				}
 				wait(yield());
 			}
@@ -3231,11 +3236,12 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 			if (e.code() != error_code_end_of_stream) {
 				throw;
 			}
+			return Void();
 		}
 	}
 
 	state PromiseStream<Standalone<MutationsAndVersionRef>> localResults;
-	state Future<Void> localStream = localChangeFeedStream(data, localResults, rangeId, 0, fetchVersion + 2, range);
+	state Future<Void> localStream = localChangeFeedStream(data, localResults, rangeId, 0, fetchVersion + 2);
 	state Standalone<MutationsAndVersionRef> localResult;
 
 	Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
@@ -3301,6 +3307,7 @@ ACTOR Future<Void> dispatchChangeFeeds(StorageServer* data, UID fetchKeysID, Key
 					} else {
 						nextFeed = feedFetches.begin()->second;
 						done = false;
+						break;
 					}
 				}
 				if (done) {
