@@ -6702,13 +6702,18 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 	loop {
 		loop {
 			try {
-				Optional<Value> val = wait(tr.get(rangeIDKey));
-				if (!val.present()) {
-					results.sendError(unsupported_operation());
-					return Void();
+				Version readVer = wait(tr.getReadVersion());
+				if (readVer < begin) {
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				} else {
+					Optional<Value> val = wait(tr.get(rangeIDKey));
+					if (!val.present()) {
+						results.sendError(unsupported_operation());
+						return Void();
+					}
+					keys = std::get<0>(decodeChangeFeedValue(val.get())) & range;
+					break;
 				}
-				keys = std::get<0>(decodeChangeFeedValue(val.get())) & range;
-				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
@@ -6724,6 +6729,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
 			if (locations.size() >= 1000) {
+				ASSERT(false);
 				results.sendError(unsupported_operation());
 				return Void();
 			}
