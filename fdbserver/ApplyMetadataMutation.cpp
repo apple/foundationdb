@@ -159,11 +159,11 @@ private:
 
 		KeyRef end = keyInfo->rangeContaining(k).end();
 		KeyRangeRef insertRange(k, end);
-		vector<UID> src, dest;
+		std::vector<UID> src, dest;
 		// txnStateStore is always an in-memory KVS, and must always be recovered before
 		// applyMetadataMutations is called, so a wait here should never be needed.
 		Future<RangeResult> fResult = txnStateStore->readRange(serverTagKeys);
-		decodeKeyServersValue(fResult.get(), m.param2, src, dest);
+		std::vector<ptxn::StorageTeamID> srcDstTeams = decodeKeyServersValue(fResult.get(), m.param2, src, dest);
 
 		ASSERT(storageCache);
 		ServerCacheInfo info;
@@ -177,6 +177,11 @@ private:
 			ASSERT(storageInfo->tag != invalidTag);
 			info.tags.push_back(storageInfo->tag);
 			info.src_info.push_back(storageInfo);
+
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				// Add storage teams of storage servers
+				info.storageTeams.insert(srcDstTeams[0]);
+			}
 		}
 		for (const auto& id : dest) {
 			auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
@@ -184,8 +189,14 @@ private:
 			ASSERT(storageInfo->tag != invalidTag);
 			info.tags.push_back(storageInfo->tag);
 			info.dest_info.push_back(storageInfo);
+
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				// Add storage teams of storage servers
+				info.storageTeams.insert(srcDstTeams[1]);
+			}
 		}
 		uniquify(info.tags);
+		//TraceEvent("ProxyApply", dbgid).detail("Range", insertRange.toString()).detail("CacheInfo", info.toString());
 		keyInfo->insert(insertRange, info);
 	}
 
@@ -636,10 +647,7 @@ private:
 	}
 
 	void checkClearServerListKeys(KeyRangeRef range) {
-		if (!serverListKeys.intersects(range)) {
-			return;
-		}
-		if (initialCommit) {
+		if (!serverListKeys.intersects(range) || initialCommit) {
 			return;
 		}
 		KeyRangeRef rangeToClear = range & serverListKeys;
@@ -657,10 +665,7 @@ private:
 	}
 
 	void checkClearTagLocalityListKeys(KeyRangeRef range) {
-		if (!tagLocalityListKeys.intersects(range)) {
-			return;
-		}
-		if (initialCommit) {
+		if (!tagLocalityListKeys.intersects(range) || initialCommit) {
 			return;
 		}
 		txnStateStore->clear(range & tagLocalityListKeys);

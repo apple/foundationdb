@@ -22,7 +22,9 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
@@ -39,9 +41,6 @@ const KeyRangeRef specialKeys = KeyRangeRef(LiteralStringRef("\xff\xff"), Litera
 const KeyRangeRef keyServersKeys(LiteralStringRef("\xff/keyServers/"), LiteralStringRef("\xff/keyServers0"));
 const KeyRef keyServersPrefix = keyServersKeys.begin;
 const KeyRef keyServersEnd = keyServersKeys.end;
-const KeyRangeRef keyServersKeyServersKeys(LiteralStringRef("\xff/keyServers/\xff/keyServers/"),
-                                           LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
-const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
 const Key keyServersKey(const KeyRef& k) {
 	return k.withPrefix(keyServersPrefix);
@@ -87,6 +86,53 @@ const Value keyServersValue(RangeResult result, const std::vector<UID>& src, con
 
 	return keyServersValue(srcTag, destTag);
 }
+
+const Value keyServersValue(RangeResult result,
+                            const std::vector<UID>& src,
+                            const ptxn::StorageTeamID srcTeam,
+                            const std::vector<UID>& dest,
+                            const ptxn::StorageTeamID dstTeam) {
+	// Only called for ptxn tlogs
+	ASSERT_WE_THINK(SERVER_KNOBS->TLOG_NEW_INTERFACE);
+
+	if (!CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS) {
+		BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+		wr << src << srcTeam << dest << dstTeam;
+		return wr.toValue();
+	}
+
+	std::vector<Tag> srcTag;
+	std::vector<Tag> destTag;
+
+	bool foundOldLocality = false;
+	for (const KeyValueRef& kv : result) {
+		UID uid = decodeServerTagKey(kv.key);
+		if (std::find(src.begin(), src.end(), uid) != src.end()) {
+			srcTag.push_back(decodeServerTagValue(kv.value));
+			if (srcTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
+		}
+		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
+			destTag.push_back(decodeServerTagValue(kv.value));
+			if (destTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
+		}
+	}
+
+	if (foundOldLocality || src.size() != srcTag.size() || dest.size() != destTag.size()) {
+		ASSERT_WE_THINK(foundOldLocality);
+	}
+
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+	wr << src << srcTeam << dest << dstTeam;
+	return wr.toValue();
+	//return keyServersValue(srcTag, srcTeam, destTag, dstTeam);
+}
+
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag) {
 	// src and dest are expected to be sorted
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValueV2()));
@@ -94,24 +140,34 @@ const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Ta
 	return wr.toValue();
 }
 
-void decodeKeyServersValue(RangeResult result,
-                           const ValueRef& value,
-                           std::vector<UID>& src,
-                           std::vector<UID>& dest,
-                           bool missingIsError) {
+std::vector<ptxn::StorageTeamID> decodeKeyServersValue(RangeResult result,
+                                                       const ValueRef& value,
+                                                       std::vector<UID>& src,
+                                                       std::vector<UID>& dest,
+                                                       bool missingIsError) {
+	std::vector<ptxn::StorageTeamID> srcDstTeams;
 	if (value.size() == 0) {
 		src.clear();
 		dest.clear();
-		return;
+		return srcDstTeams;
 	}
 
 	BinaryReader rd(value, IncludeVersion());
 	if (!rd.protocolVersion().hasKeyServerValueV2()) {
 		rd >> src >> dest;
-		return;
+		return srcDstTeams;
 	}
 
+	ptxn::StorageTeamID srcTeam, dstTeam;
 	std::vector<Tag> srcTag, destTag;
+
+	if (rd.protocolVersion().hasPartitionTransaction() && SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		rd >> src >> srcTeam >> dest >> dstTeam;
+		srcDstTeams.push_back(srcTeam);
+		srcDstTeams.push_back(dstTeam);
+		return srcDstTeams;
+	}
+
 	rd >> srcTag >> destTag;
 
 	src.clear();
@@ -143,20 +199,30 @@ void decodeKeyServersValue(RangeResult result,
 		}
 		ASSERT(false);
 	}
+	return srcDstTeams;
 }
 
-void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
-                           const ValueRef& value,
-                           std::vector<UID>& src,
-                           std::vector<UID>& dest) {
+std::vector<ptxn::StorageTeamID> decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
+                                                       const ValueRef& value,
+                                                       std::vector<UID>& src,
+                                                       std::vector<UID>& dest) {
+	std::vector<ptxn::StorageTeamID> srcDstTeams;
 	static std::vector<Tag> srcTag, destTag;
 	src.clear();
 	dest.clear();
 	if (value.size() == 0) {
-		return;
+		return srcDstTeams;
 	}
 
 	BinaryReader rd(value, IncludeVersion());
+	if (rd.protocolVersion().hasPartitionTransaction() && SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		ptxn::StorageTeamID srcTeam, destTeam;
+		rd >> src >> srcTeam >> dest >> destTeam;
+		srcDstTeams.push_back(srcTeam);
+		srcDstTeams.push_back(destTeam);
+		return srcDstTeams;
+	}
+
 	rd.checkpoint();
 	int srcLen, destLen;
 	rd >> srcLen;
@@ -168,7 +234,7 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 	    sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
 		rd >> src >> dest;
 		rd.assertEnd();
-		return;
+		return srcDstTeams;
 	}
 
 	srcTag.clear();
@@ -197,6 +263,7 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
+	return srcDstTeams;
 }
 
 const KeyRangeRef conflictingKeysRange =
