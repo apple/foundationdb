@@ -5227,7 +5227,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
 				                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
 				          db->forceMasterFailure.onTrigger())) {
-					TraceEvent("waitFailure", cluster->id).log();
+					TraceEvent("WaitFailure", cluster->id).log();
 					break;
 				}
 				when(wait(db->serverInfo->onChange())) {}
