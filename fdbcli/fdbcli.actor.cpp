@@ -507,7 +507,8 @@ void initHelp() {
 	    "configure [new|tss]"
 	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
 	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
-	    "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>",
+	    "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|storage_migration_type={disabled|gradual|"
+	    "aggressive}",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -2045,6 +2046,27 @@ ACTOR Future<bool> configure(Database db,
 		break;
 	case ConfigurationResult::LOCKED_NOT_NEW:
 		fprintf(stderr, "ERROR: `only new databases can be configured as locked`\n");
+		ret = false;
+		break;
+	case ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL:
+		printf("Configuration changed, with warnings\n");
+		fprintf(stderr,
+		        "WARN: To make progress toward the desired storage type with storage_migration_type=gradual, the "
+		        "Perpetual Wiggle must be enabled.\n");
+		fprintf(stderr,
+		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
+		        "storage_migration_type=gradual' to set the gradual migration type.\n");
+		ret = true;
+		break;
+	case ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE:
+		printf("Configuration changed, with warnings\n");
+		fprintf(stderr,
+		        "WARN: Storage engine type changed, but nothing will be migrated because "
+		        "storage_migration_mode=disabled.\n");
+		fprintf(stderr,
+		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
+		        "migration with the perpetual wiggle, or `configure "
+		        "storage_migration_type=aggressive' for aggressive migration.\n");
 		ret = true;
 		break;
 	default:
@@ -2747,6 +2769,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "logs=",
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
+		                   "storage_migration_type=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
