@@ -44,7 +44,7 @@
 #include <cinttypes>
 #include <boost/intrusive/list.hpp>
 
-#define REDWOOD_DEBUG 0
+#define REDWOOD_DEBUG  0
 
 // Only print redwood debug statements for a certain address. Useful in simulation with many redwood processes to reduce
 // log size.
