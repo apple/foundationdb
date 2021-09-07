@@ -4609,7 +4609,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		std::set<Key> modifiedChangeFeeds;
-		while (!data->changeFeedVersions.empty() && data->changeFeedVersions.front().second < newOldestVersion) {
+		while (!data->changeFeedVersions.empty() && data->changeFeedVersions.front().second <= newOldestVersion) {
 			modifiedChangeFeeds.insert(data->changeFeedVersions.front().first.begin(),
 			                           data->changeFeedVersions.front().first.end());
 			data->changeFeedVersions.pop_front();
