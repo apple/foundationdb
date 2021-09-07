@@ -1818,11 +1818,11 @@ template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 
 	struct Entry : public boost::intrusive::list_base_hook<> {
-		Entry() : hits(0) /*size(0)*/ {}
+		Entry() : hits(0), size(0) {}
 		IndexType index;
 		ObjectType item;
 		int hits;
-		/*int size*/;
+		int size;
 	};
 
 	typedef std::unordered_map<IndexType, Entry> CacheT;
@@ -1831,10 +1831,10 @@ class ObjectCache : NonCopyable {
 public:
 	ObjectCache(int sizeLimit = 1) : sizeLimit(sizeLimit), currentSize(0) {}
 
-	void setSizeLimit(int64_t n, int buckets) {
+	void setSizeLimit(int n) {
 		ASSERT(n > 0);
 		sizeLimit = n;
-		cache.reserve(buckets);
+		cache.reserve(n);
 	}
 
 	// Get the object for i if it exists, else return nullptr.
@@ -1869,7 +1869,7 @@ public:
 		if (toEvict.hits == 0) {
 			++g_redwoodMetrics.metric.pagerEvictUnhit;
 		}
-		currentSize -= toEvict.item.byteSize();
+		currentSize -= toEvict.size;
 		evictionOrder.erase(evictionOrder.iterator_to(toEvict));
 		cache.erase(i);
 		return true;
@@ -1895,7 +1895,7 @@ public:
 			// Finish initializing entry
 			entry.index = index;
 			entry.hits = 0;
-			/*entry.size = size;*/
+			entry.size = size;
 			currentSize += size;
 			// Insert the newly created Entry at the back of the eviction order
 			evictionOrder.push_back(entry);
@@ -1928,7 +1928,7 @@ public:
 					if (toEvict.hits == 0) {
 						++g_redwoodMetrics.metric.pagerEvictUnhit;
 					}
-					currentSize -= toEvict.item.byteSize();
+					currentSize -= toEvict.size;
 					debug_printf(
 					    "Evicting %s to make room for %s\n", toString(toEvict.index).c_str(), toString(index).c_str());
 					evictionOrder.pop_front();
@@ -1960,15 +1960,14 @@ public:
 			if (!i->item.evictable()) {
 				wait(i->item.onEvictable());
 			}
-			//currentSize -= i->item.byteSize();
-			//self->currentSize -= i->item.byteSize();
+			currentSize -= i->size;
+			self->currentSize -= i->size;
 			++i;
 		}
 
 		evictionOrder.clear();
 		cache.clear();
-		//ASSERT(currentSize == 0);
-		self->currentSize -= currentSize;
+		ASSERT(currentSize == 0);
 		return Void();
 	}
 
@@ -1977,7 +1976,7 @@ public:
 		return clear_impl(this);
 	}
 
-	int count() const { return evictionOrder.size(); }
+	int count() const { return currentSize; }
 
 private:
 	int64_t sizeLimit;
@@ -2115,8 +2114,7 @@ public:
 		if (pHeader != nullptr) {
 			pHeader->pageSize = logicalPageSize;
 		}
-		//pageCache.setSizeLimit(1 + ((pageCacheBytes - 1) / physicalPageSize));
-		pageCache.setSizeLimit(pageCacheBytes, 1 + ((pageCacheBytes - 1) / physicalPageSize));
+		pageCache.setSizeLimit(1 + ((pageCacheBytes - 1) / physicalPageSize));
 	}
 
 	void setExtentSize(int size) {
@@ -2134,7 +2132,7 @@ public:
 		}
 
 		// TODO: How should this cache be sized - not really a cache. it should hold all extentIDs?
-		extentCache.setSizeLimit(100000 * physicalPageSize, 100000);
+		extentCache.setSizeLimit(100000);
 	}
 
 	void updateCommittedHeader() {
@@ -2589,7 +2587,7 @@ public:
 		// or as a cache miss because there is no benefit to the page already being in cache
 		// Similarly, this does not count as a point lookup for reason.
 		ASSERT(pageIDs.front() != invalidLogicalPageID);
-		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size() * logicalPageSize, true);
+		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), true);
 		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n",
 		             filename.c_str(),
 		             toString(pageIDs).c_str(),
@@ -2830,7 +2828,6 @@ public:
 		             toString(pageIDs).c_str(),
 		             page->begin());
 
-		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
 		++g_redwoodMetrics.metric.pagerDiskRead;
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
 		state int blockSize = self->physicalPageSize;
@@ -2902,7 +2899,7 @@ public:
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
 			return forwardError(readPhysicalPage(this, pageID, priority, false), errorPromise);
 		}
-		PageCacheEntry& cacheEntry = pageCache.get(pageID, logicalPageSize, noHit);
+		PageCacheEntry& cacheEntry = pageCache.get(pageID, 1, noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
 		             filename.c_str(),
 		             toString(pageID).c_str(),
@@ -2948,7 +2945,7 @@ public:
 			return forwardError(readPhysicalMultiPage(this, pageIDs, priority), errorPromise);
 		}
 
-		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size() * logicalPageSize, noHit);
+		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
 		             filename.c_str(),
 		             toString(pageIDs).c_str(),
@@ -3139,7 +3136,7 @@ public:
 			readSize = (tailPageID - pageID + 1) * physicalPageSize;
 		}
 
-		PageCacheEntry& cacheEntry = extentCache.get(pageID, logicalPageSize);
+		PageCacheEntry& cacheEntry = extentCache.get(pageID, 1);
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = Void();
 			cacheEntry.readFuture =
@@ -3664,8 +3661,6 @@ private:
 			// Don't evict if a page is still being read or written
 			return !reading() && !writing();
 		}
-
-		int byteSize() const { return readFuture.get()->totalSize(); }
 
 		Future<Void> onEvictable() const { return ready(readFuture) && writeFuture; }
 	};
