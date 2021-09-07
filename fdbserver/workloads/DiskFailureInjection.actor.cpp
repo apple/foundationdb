@@ -78,20 +78,23 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	// 2. Starting the actor that injects failures on chosen storage servers
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
-			clients.push_back(diskFailureInjectionClient<WorkerInterface>(cx, this));
-			clients.push_back(periodicEventBroadcast(this));
-			// In verification mode, we want to wait until the first actor returns which indicates that
-			// a non-zero chaosMetric was found
+			clients.push_back(timeout(diskFailureInjectionClient<WorkerInterface>(cx, this), testDuration, Void()));
+			// In verification mode, we want to wait until periodicEventBroadcast actor returns which indicates that
+			// a non-zero chaosMetric was found.
 			if (verificationMode) {
-				return waitForAny(clients);
-			}
-			// Else we honor testDuration
-			return timeout(waitForAll(clients), testDuration, Void());
+				clients.push_back(periodicEventBroadcast(this));
+			} else
+				//Else we honor the testDuration
+				clients.push_back(timeout(periodicEventBroadcast(this), testDuration, Void()));
+			return waitForAll(clients);
 		} else
 			return Void();
 	}
 
-	Future<bool> check(Database const& cx) override { return true; }
+	Future<bool> check(Database const& cx) override {
+		clients.clear();
+		return true;
+	}
 
 	void getMetrics(vector<PerfMetric>& m) override {}
 
@@ -242,6 +245,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 				}
 			}
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "ChaosGetStatus").error(e);
 			// it's possible to get an empty event, it's okay to ignore
 			if (e.code() != error_code_attribute_not_found) {
 				throw e;
