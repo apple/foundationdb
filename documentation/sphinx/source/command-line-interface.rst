@@ -64,7 +64,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [storage_migration_type={disabled|aggressive|gradual}]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -113,6 +113,20 @@ perpetual storage wiggle
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
 Set the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle. For more details, see :ref:`perpetual-storage-wiggle`.
+
+storage migration type
+^^^^^^^^^^^^^^^^^^^^^^
+
+Set the storage migration type, or how FDB should migrate to a new storage engine if the value is changed.
+The default is ``disabled``.
+
+* ``disabled``
+* ``gradual``
+* ``aggressive``
+
+``gradual`` replaces a single storage at a time when the ``perpetual storage wiggle`` is active. This requires the perpetual storage wiggle to be set to a non-zero value to actually migrate storage servers. It is somewhat slow but very safe.
+``aggressive`` tries to replace as many storages as it can at once, and will recruit a new storage server on the same process as the old one. The main benefit over ``gradual`` is that this doesn't need to take one storage out of rotation, so it works for small or development clusters that have the same number of storage processes as the replication factor.
+
 
 consistencycheck
 ----------------
