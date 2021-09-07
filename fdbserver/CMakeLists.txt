@@ -117,6 +117,7 @@ set(FDBSERVER_SRCS
   StorageMetrics.h
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
+  TagPartitionedLogSystem.actor.h
   template_fdb.h
   tester.actor.cpp
   TesterInterface.actor.h
