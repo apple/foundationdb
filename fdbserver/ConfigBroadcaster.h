@@ -22,28 +22,31 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/PImpl.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/ConfigFollowerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/flow.h"
 #include <memory>
 
 /*
  * The configuration broadcaster runs on the cluster controller. The broadcaster listens uses
- * an IConfigConsumer instantitation to consume updates from the configuration database, and broadcasts
+ * an IConfigConsumer instantiation to consume updates from the configuration database, and broadcasts
  * these updates to all workers' local configurations
  */
 class ConfigBroadcaster {
-	std::unique_ptr<class ConfigBroadcasterImpl> _impl;
-	ConfigBroadcasterImpl& impl() { return *_impl; }
-	ConfigBroadcasterImpl const& impl() const { return *_impl; }
+	PImpl<class ConfigBroadcasterImpl> impl;
 
 public:
-	explicit ConfigBroadcaster(ServerCoordinators const&, UseConfigDB);
+	explicit ConfigBroadcaster(ServerCoordinators const&, ConfigDBType);
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
-	Future<Void> serve(ConfigBroadcastFollowerInterface const&);
+	Future<Void> registerWorker(Version lastSeenVersion,
+	                            ConfigClassSet const& configClassSet,
+	                            Future<Void> watcher,
+	                            ConfigBroadcastInterface worker);
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                  Version mostRecentVersion,
 	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
@@ -57,10 +60,12 @@ public:
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion,
 	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
+	Future<Void> getError() const;
 	UID getID() const;
 	JsonBuilderObject getStatus() const;
 	void compact(Version compactionVersion);
 
 public: // Testing
 	explicit ConfigBroadcaster(ConfigFollowerInterface const&);
+	Future<Void> getClientFailure(UID clientUID) const;
 };

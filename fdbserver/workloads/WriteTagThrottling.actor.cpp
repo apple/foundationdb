@@ -23,7 +23,7 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 constexpr int SAMPLE_SIZE = 10000;
@@ -100,7 +100,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 			wait(bulkSetup(cx, self, self->keyCount, Promise<double>()));
 		}
 		if (self->clientId == 0) {
-			wait(ThrottleApi::enableAuto(cx, true));
+			wait(ThrottleApi::enableAuto(cx.getReference(), true));
 		}
 		return Void();
 	}
@@ -306,9 +306,10 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	}
 	ACTOR static Future<Void> throttledTagUpdater(Database cx, WriteTagThrottlingWorkload* self) {
 		state std::vector<TagThrottleInfo> tags;
+		state Reference<DatabaseContext> db = cx.getReference();
 		loop {
 			wait(delay(1.0));
-			wait(store(tags, ThrottleApi::getThrottledTags(cx, CLIENT_KNOBS->TOO_MANY, true)));
+			wait(store(tags, ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY, true)));
 			self->recordThrottledTags(tags);
 		};
 	}

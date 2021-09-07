@@ -3426,7 +3426,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		state Key mutationLogPrefix = restore.mutationLogPrefix();
 		state Reference<IAsyncFile> inFile = wait(bc->readFile(logFile.fileName));
-		state Standalone<VectorRef<KeyValueRef>> dataOriginal = wait(decodeMutationLogFileBlock(inFile, readOffset, readLen));
+		state Standalone<VectorRef<KeyValueRef>> dataOriginal =
+		    wait(decodeMutationLogFileBlock(inFile, readOffset, readLen));
 
 		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for this
 		// restore based on the restore range set.

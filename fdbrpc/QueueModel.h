@@ -109,13 +109,13 @@ public:
 	int laggingRequestCount;
 	int laggingTSSCompareCount;
 
-        // Updates this endpoint data to duplicate requests to the specified TSS endpoint
+	// Updates this endpoint data to duplicate requests to the specified TSS endpoint
 	void updateTssEndpoint(uint64_t endpointId, const TSSEndpointData& endpointData);
 
-        // Removes the TSS mapping from this endpoint to stop duplicating requests to a TSS endpoint
+	// Removes the TSS mapping from this endpoint to stop duplicating requests to a TSS endpoint
 	void removeTssEndpoint(uint64_t endpointId);
 
-        // Retrieves the data for this endpoint's pair TSS endpoint, if present
+	// Retrieves the data for this endpoint's pair TSS endpoint, if present
 	Optional<TSSEndpointData> getTssData(uint64_t endpointId);
 
 	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0) {

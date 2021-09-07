@@ -1580,9 +1580,7 @@ void CacheRangeInfo::addMutation(Version version, MutationRef const& mutation) {
 		readWrite->addMutation(this->keys, version, mutation);
 	else if (mutation.type != MutationRef::ClearRange) { // TODO NEELAM: ClearRange mutations are ignored (why do we
 		                                                 // even allow them on un-assigned range?)
-		TraceEvent(SevError, "DeliveredToNotAssigned")
-		    .detail("Version", version)
-		    .detail("Mutation", mutation.toString());
+		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
 		ASSERT(false); // Mutation delivered to notAssigned cacheRange!
 	}
 }
@@ -1719,7 +1717,7 @@ public:
 
 		DEBUG_MUTATION("SCUpdateMutation", ver, m);
 		if (m.param1.startsWith(systemKeys.end)) {
-			//TraceEvent("SCPrivateData", data->thisServerID).detail("Mutation", m.toString()).detail("Version", ver);
+			//TraceEvent("SCPrivateData", data->thisServerID).detail("Mutation", m).detail("Version", ver);
 			applyPrivateCacheData(data, m);
 		} else {
 			splitMutation(data, data->cachedRangeMap, m, ver);
@@ -2011,7 +2009,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 						}
 					} else {
 						TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)
-						    .detail("Mutation", msg.toString())
+						    .detail("Mutation", msg)
 						    .detail("CursorVersion", cloneCursor2->version().version)
 						    .detail("DataVersion", data->version.get());
 					}

@@ -30,9 +30,7 @@
  * stores all data, so there is no fault tolerance.
  */
 class SimpleConfigConsumer : public IConfigConsumer {
-	std::unique_ptr<class SimpleConfigConsumerImpl> _impl;
-	SimpleConfigConsumerImpl const& impl() const { return *_impl; }
-	SimpleConfigConsumerImpl& impl() { return *_impl; }
+	PImpl<class SimpleConfigConsumerImpl> impl;
 
 public:
 	SimpleConfigConsumer(ServerCoordinators const& coordinators,

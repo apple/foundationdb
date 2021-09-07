@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/SimpleConfigConsumer.h"
+#include "flow/actorcompiler.h" // must be last include
 
 class SimpleConfigConsumerImpl {
 	ConfigFollowerInterface cfi;
@@ -141,19 +142,19 @@ public:
 SimpleConfigConsumer::SimpleConfigConsumer(ConfigFollowerInterface const& cfi,
                                            double pollingInterval,
                                            Optional<double> compactionInterval)
-  : _impl(std::make_unique<SimpleConfigConsumerImpl>(cfi, pollingInterval, compactionInterval)) {}
+  : impl(PImpl<SimpleConfigConsumerImpl>::create(cfi, pollingInterval, compactionInterval)) {}
 
 SimpleConfigConsumer::SimpleConfigConsumer(ServerCoordinators const& coordinators,
                                            double pollingInterval,
                                            Optional<double> compactionInterval)
-  : _impl(std::make_unique<SimpleConfigConsumerImpl>(coordinators, pollingInterval, compactionInterval)) {}
+  : impl(PImpl<SimpleConfigConsumerImpl>::create(coordinators, pollingInterval, compactionInterval)) {}
 
 Future<Void> SimpleConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
-	return impl().consume(broadcaster);
+	return impl->consume(broadcaster);
 }
 
 SimpleConfigConsumer::~SimpleConfigConsumer() = default;
 
 UID SimpleConfigConsumer::getID() const {
-	return impl().getID();
+	return impl->getID();
 }
