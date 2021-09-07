@@ -20,7 +20,7 @@
 
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
-#pragma  once
+#pragma once
 
 #include "fdbserver/IKeyValueStore.h"
 
