@@ -47,24 +47,37 @@ extern const KeyRef afterAllKeys;
 //	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
 //	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
 //	as data movement occurs.
-extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
-extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
+// In partitioned transactions, the format is:
+//    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, <srcTeamID>, vector<serverID>, <dstTeamID>]"
+// If destination vector<serverID> is empty, then dstTeamID is not used.
+extern const KeyRangeRef keyServersKeys;
+extern const KeyRef keyServersPrefix, keyServersEnd;
 const Key keyServersKey(const KeyRef& k);
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena);
 const Value keyServersValue(RangeResult result,
                             const std::vector<UID>& src,
                             const std::vector<UID>& dest = std::vector<UID>());
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag = std::vector<Tag>());
+
+// Returns the value for a keyServers/[[begin]] key.
+const Value keyServersValue(RangeResult result,
+                            const std::vector<UID>& src,
+                            const ptxn::StorageTeamID srcTeam,
+                            const std::vector<UID>& dest = std::vector<UID>(),
+                            const ptxn::StorageTeamID dstTeam = ptxn::StorageTeamID());
+
 // `result` must be the full result of getting serverTagKeys
-void decodeKeyServersValue(RangeResult result,
-                           const ValueRef& value,
-                           std::vector<UID>& src,
-                           std::vector<UID>& dest,
-                           bool missingIsError = true);
-void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
-                           const ValueRef& value,
-                           std::vector<UID>& src,
-                           std::vector<UID>& dest);
+// Returns source and destination team for partitioned transactions, otherwise,
+// returns empty vector for non-partitioned transactions (to be compatible).
+std::vector<ptxn::StorageTeamID> decodeKeyServersValue(RangeResult result,
+                                                       const ValueRef& value,
+                                                       std::vector<UID>& src,
+                                                       std::vector<UID>& dest,
+                                                       bool missingIsError = true);
+std::vector<ptxn::StorageTeamID> decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
+                                                       const ValueRef& value,
+                                                       std::vector<UID>& src,
+                                                       std::vector<UID>& dest);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD

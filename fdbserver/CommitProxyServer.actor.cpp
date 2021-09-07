@@ -1311,6 +1311,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    [](const std::vector<Version>& versions) -> Version {
 			return *std::min_element(versions.begin(), versions.end());
 		};
+		// TODO: empty commits can happen
+		ASSERT(!pushResults.empty());
 		self->loggingComplete = getAll(pushResults, reduce);
 	} else {
 		self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
@@ -2160,7 +2162,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 						if (k == allKeys.end) {
 							continue;
 						}
-						decodeKeyServersValue(tag_uid, it.second, src, dest);
+						std::vector<ptxn::StorageTeamID> srcDstTeams =
+						    decodeKeyServersValue(tag_uid, it.second, src, dest);
 						info.tags.clear();
 						info.src_info.clear();
 						info.dest_info.clear();
@@ -2175,13 +2178,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 							if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 								// Add storage teams of storage servers
 								ASSERT(storageServerToStorageTeam.count(id));
-								info.storageTeams.insert(storageServerToStorageTeam[id]);
+								ASSERT(storageServerToStorageTeam[id] == srcDstTeams[0]);
+								info.storageTeams.insert(srcDstTeams[0]);
 							}
-						}
-
-						if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-							// A shard can only correspond to single storage team in the primary DC for now
-							ASSERT(info.storageTeams.size() == 1);
 						}
 
 						for (const auto& id : dest) {
@@ -2193,10 +2192,16 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 							if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 								// Add storage teams of storage servers
 								ASSERT(storageServerToStorageTeam.count(id));
-								info.storageTeams.insert(storageServerToStorageTeam[id]);
+								ASSERT(storageServerToStorageTeam[id] == srcDstTeams[1]);
+								info.storageTeams.insert(srcDstTeams[1]);
 							}
 						}
 						uniquify(info.tags);
+						if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+							// A shard can only correspond to single storage team in the primary DC for now
+							ASSERT(info.storageTeams.size() == 1);
+						}
+						//std::cout << commitData.dbgid.shortString() << " add key info: " << k.toString() << " " << info.toString() << "\n";
 						keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 					}
 
@@ -2231,6 +2236,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					storageServerToStorageTeam.clear();
 					keyServers.clear();
 					txnStateResults.clear();
+					TraceEvent("ProxyCommitDataDone", commitData.dbgid);
 				}
 			}
 			addActor.send(broadcastTxnRequest(req, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));

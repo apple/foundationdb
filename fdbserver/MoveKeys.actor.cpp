@@ -1512,34 +1512,50 @@ void seedShardServers(Arena& arena,
 
 	std::vector<Tag> serverTags;
 	std::vector<UID> serverSrcUID;
+	std::vector<ptxn::StorageTeamID> serverTeamIDs;
 	serverTags.reserve(servers.size());
-	for (const auto& [s, _] : servers) {
+	for (const auto& [s, team] : servers) {
 		serverTags.push_back(server_tag[s.id()]);
 		serverSrcUID.push_back(s.id());
+		serverTeamIDs.push_back(team);
 	}
 
-	auto getServerID = [&](int serverIndex) -> Value {
+	if (!SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
+		                                                    : keyServersValue(RangeResult(), serverSrcUID);
+		// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a
+		// change to a specific
+		//   key (keyServersKeyServersKey)
+		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
+
+		for (const auto& [s, _] : servers) {
+			krmSetPreviouslyEmptyRange(
+			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+		}
+		return;
+	}
+
+	auto getServersValue = [&](int serverIndex) -> Value {
+		// TODO: encode team into keyServersValue with tags
 		return CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
 		           ? keyServersValue({ serverTags[serverIndex] })
-		           : keyServersValue(RangeResult(), { servers[serverIndex].first.id() });
+		           : keyServersValue(RangeResult(), { serverSrcUID[serverIndex] }, serverTeamIDs[serverIndex]);
 	};
 
 	const int numServers = servers.size();
 	const int numKeyRanges = keySplits.size() + 1;
 
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-		ASSERT(numKeyRanges > 1);
-		ASSERT(numKeyRanges >= numServers);
-	}
+	ASSERT(numKeyRanges > 1);
+	ASSERT(numKeyRanges <= numServers);
 
 	int serverIndex = 0;
 	StringRef keyRangeStart = allKeys.begin;
 	for (int index = 0; index < keySplits.size(); ++index) {
 		auto keyRange = KeyRangeRef(keyRangeStart, keySplits[index]);
-		std::cout << " loop: Assigning range " << keyRange.toString() << " to " << servers[serverIndex].first.id().toString() << std::endl;
+		std::cout << " Assigning range " << keyRange.toString() << " to " << serverSrcUID[serverIndex].toString() << std::endl;
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, serverKeysPrefixFor(servers[serverIndex].first.id()), keyRange, serverKeysTrue, serverKeysFalse);
-		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, keyRange, getServerID(serverIndex), serverKeysFalse);
+		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, keyRange, getServersValue(serverIndex), serverKeysFalse);
 		++serverIndex;
 		serverIndex %= numServers;
 		keyRangeStart = keySplits[index];
@@ -1547,9 +1563,10 @@ void seedShardServers(Arena& arena,
 	if (keySplits.size() != 0) {
 		keyRangeStart = keySplits.back();
 	}
+	std::cout << " Assigning range " << KeyRangeRef(keyRangeStart, allKeys.end).toString() << " to " << servers[serverIndex].first.id().toString() << std::endl;
 	krmSetPreviouslyEmptyRange(tr,
 	                           arena,
-	                           serverKeysPrefixFor(servers[serverIndex].first.id()),
+	                           serverKeysPrefixFor(serverSrcUID[serverIndex]),
 	                           KeyRangeRef(keyRangeStart, allKeys.end),
 	                           serverKeysTrue,
 	                           serverKeysFalse);
@@ -1557,6 +1574,6 @@ void seedShardServers(Arena& arena,
 	                           arena,
 	                           keyServersPrefix,
 	                           KeyRangeRef(keyRangeStart, allKeys.end),
-	                           getServerID(serverIndex),
+	                           getServersValue(serverIndex),
 	                           serverKeysFalse);
 }
