@@ -78,9 +78,10 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	GranuleFiles files;
 	GranuleDeltas currentDeltas;
 	uint64_t bytesInNewDeltaFiles = 0;
-	Version lastWriteVersion = 0;
-	Version currentDeltaVersion = 0;
-	uint64_t currentDeltaBytes = 0;
+	Version bufferedDeltaVersion = 0;
+	Version pendingDeltaVersion = 0;
+	Version durableDeltaVersion = 0;
+	uint64_t bufferedDeltaBytes = 0;
 	Arena deltaArena;
 
 	int64_t originalEpoch;
@@ -148,6 +149,9 @@ struct BlobWorkerData {
 	// logic
 	Reference<BackupContainerFileSystem> bstore;
 	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
+
+	AsyncVar<int> pendingDeltaFileCommitChecks;
+	AsyncVar<Version> knownCommittedVersion;
 
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 	~BlobWorkerData() { printf("Destroying blob worker data for %s\n", id.toString().c_str()); }
@@ -322,7 +326,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 
 	state KeyRange currentRange = KeyRangeRef(splitStateStartKey, splitStateEndKey);
 
-	RangeResult totalState = wait(tr->getRange(currentRange, 10));
+	RangeResult totalState = wait(tr->getRange(currentRange, 100));
 	// TODO is this explicit conflit range necessary with the above read?
 	tr->addWriteConflictRange(currentRange);
 	ASSERT(!totalState.more);
@@ -420,22 +424,33 @@ static Value getFileValue(std::string fname, int64_t offset, int64_t length) {
 	return fileValue.getDataAsStandalone();
 }
 
-// TODO add granule locks
+// writeDelta file writes speculatively in the common case to optimize throughput. It creates the s3 object even though
+// the data in it may not yet be committed, and even though previous delta fiels with lower versioned data may still be
+// in flight. The synchronization happens after the s3 file is written, but before we update the FDB index of what files
+// exist. Before updating FDB, we ensure the version is committed and all previous delta files have updated FDB.
 ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
                                            KeyRange keyRange,
                                            int64_t epoch,
                                            int64_t seqno,
-                                           GranuleDeltas const* deltasToWrite,
+                                           Arena deltaArena,
+                                           GranuleDeltas deltasToWrite,
                                            Version currentDeltaVersion,
+                                           Future<BlobFileIndex> previousDeltaFileFuture,
                                            Optional<KeyRange> oldChangeFeedDataComplete,
                                            Optional<UID> oldChangeFeedId) {
+	// potentially kick off delta file commit check, if our version isn't already known to be committed
+	if (bwData->knownCommittedVersion.get() < currentDeltaVersion) {
+		bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() + 1);
+	}
 
 	// TODO some sort of directory structure would be useful?
 	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
 	                          std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(currentDeltaVersion) +
 	                          ".delta";
 
-	state Value serialized = ObjectWriter::toValue(*deltasToWrite, Unversioned());
+	state Value serialized = ObjectWriter::toValue(deltasToWrite, Unversioned());
+
+	// FIXME: technically we can free up deltaArena here to reduce memory
 
 	state Reference<IBackupFile> objectFile = wait(bwData->bstore->writeFile(fname));
 
@@ -446,8 +461,15 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 	wait(objectFile->append(serialized.begin(), serialized.size()));
 	wait(objectFile->finish());
 
-	// update FDB with new file
 	try {
+		// before updating FDB, wait for the delta file version to be committed and previous delta files to finish
+		while (bwData->knownCommittedVersion.get() < currentDeltaVersion) {
+			wait(bwData->knownCommittedVersion.onChange());
+		}
+		BlobFileIndex prev = wait(previousDeltaFileFuture);
+		wait(yield()); // prevent stack overflow of many chained futures
+
+		// update FDB with new file
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -767,6 +789,24 @@ static bool filterOldMutations(const KeyRange& range,
 	return false;
 }
 
+static Future<Void> handleCompletedDeltaFile(BlobWorkerData* bwData,
+                                             Reference<GranuleMetadata> metadata,
+                                             BlobFileIndex completedDeltaFile,
+                                             Key cfKey,
+                                             Version cfStartVersion) {
+	metadata->files.deltaFiles.push_back(completedDeltaFile);
+	ASSERT(metadata->durableDeltaVersion < completedDeltaFile.version);
+	metadata->durableDeltaVersion = completedDeltaFile.version;
+
+	if (metadata->durableDeltaVersion > cfStartVersion) {
+		if (BW_DEBUG) {
+			printf("Popping range feed %s at %lld\n", cfKey.printable().c_str(), metadata->durableDeltaVersion);
+		}
+		return bwData->db->popRangeFeedMutations(cfKey, metadata->durableDeltaVersion);
+	}
+	return Future<Void>(Void());
+}
+
 // TODO a hack, eventually just have open end interval in range feed request?
 // Or maybe we want to cycle and start a new range feed stream every X million versions?
 
@@ -774,9 +814,9 @@ static bool filterOldMutations(const KeyRange& range,
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 // FIXME: handle errors here (forward errors)
 ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<GranuleMetadata> metadata) {
-
 	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> oldChangeFeedStream;
 	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> changeFeedStream;
+	state std::deque<Future<BlobFileIndex>> inFlightDeltaFiles;
 	state Future<Void> oldChangeFeedFuture;
 	state Future<Void> changeFeedFuture;
 	state GranuleChangeFeedInfo changeFeedInfo;
@@ -834,9 +874,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 
 			startVersion = newSnapshotFile.version;
 			metadata->files.snapshotFiles.push_back(newSnapshotFile);
-			metadata->lastWriteVersion = newSnapshotFile.version;
-			metadata->currentDeltaVersion = metadata->lastWriteVersion;
 		}
+
+		metadata->durableDeltaVersion = startVersion;
+		metadata->pendingDeltaVersion = startVersion;
+		metadata->bufferedDeltaVersion = startVersion;
 
 		if (changeFeedInfo.prevChangeFeedId.present()) {
 			// FIXME: once we have empty versions, only include up to changeFeedInfo.changeFeedStartVersion in the read
@@ -853,6 +895,19 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 		}
 
 		loop {
+
+			// check outstanding delta files for completion
+			while (inFlightDeltaFiles.size() > 0) {
+				if (inFlightDeltaFiles.front().isReady()) {
+					BlobFileIndex completedDeltaFile = wait(inFlightDeltaFiles.front());
+					wait(handleCompletedDeltaFile(
+					    bwData, metadata, completedDeltaFile, cfKey, changeFeedInfo.changeFeedStartVersion));
+					inFlightDeltaFiles.pop_front();
+				} else {
+					break;
+				}
+			}
+
 			// TODO: handle empty versions here
 			// TODO: Buggify delay in change feed stream
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations;
@@ -884,52 +939,47 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 			// process mutations
 			for (MutationsAndVersionRef d : mutations) {
 				state MutationsAndVersionRef deltas = d;
-				ASSERT(deltas.version >= metadata->currentDeltaVersion);
+				ASSERT(deltas.version >= metadata->bufferedDeltaVersion);
 				// Write a new delta file IF we have enough bytes, and we have all of the previous version's stuff
 				// there to ensure no versions span multiple delta files. Check this by ensuring the version of this new
 				// delta is larger than the previous largest seen version
-				if (metadata->currentDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
-				    deltas.version > metadata->currentDeltaVersion) {
+				if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
+				    deltas.version > metadata->bufferedDeltaVersion) {
 					if (BW_DEBUG) {
 						printf("Granule [%s - %s) flushing delta file after %d bytes\n",
 						       metadata->keyRange.begin.printable().c_str(),
 						       metadata->keyRange.end.printable().c_str(),
-						       metadata->currentDeltaBytes);
+						       metadata->bufferedDeltaBytes);
 					}
 					TraceEvent("BlobGranuleDeltaFile", bwData->id)
 					    .detail("GranuleStart", metadata->keyRange.begin)
 					    .detail("GranuleEnd", metadata->keyRange.end)
-					    .detail("Version", metadata->currentDeltaVersion);
-					BlobFileIndex newDeltaFile = wait(writeDeltaFile(bwData,
-					                                                 metadata->keyRange,
-					                                                 metadata->originalEpoch,
-					                                                 metadata->originalSeqno,
-					                                                 &metadata->currentDeltas,
-					                                                 metadata->currentDeltaVersion,
-					                                                 oldChangeFeedDataComplete,
-					                                                 changeFeedInfo.prevChangeFeedId));
+					    .detail("Version", metadata->bufferedDeltaVersion);
+					// TODO launch in parallel
+					Future<BlobFileIndex> previousDeltaFileFuture =
+					    inFlightDeltaFiles.empty() ? Future<BlobFileIndex>(BlobFileIndex()) : inFlightDeltaFiles.back();
+					inFlightDeltaFiles.push_back(writeDeltaFile(bwData,
+					                                            metadata->keyRange,
+					                                            metadata->originalEpoch,
+					                                            metadata->originalSeqno,
+					                                            metadata->deltaArena,
+					                                            metadata->currentDeltas,
+					                                            metadata->bufferedDeltaVersion,
+					                                            previousDeltaFileFuture,
+					                                            oldChangeFeedDataComplete,
+					                                            changeFeedInfo.prevChangeFeedId));
 
 					// add new delta file
-					metadata->files.deltaFiles.push_back(newDeltaFile);
-					metadata->lastWriteVersion = metadata->currentDeltaVersion;
-					metadata->bytesInNewDeltaFiles += metadata->currentDeltaBytes;
+					ASSERT(metadata->pendingDeltaVersion < metadata->bufferedDeltaVersion);
+					metadata->pendingDeltaVersion = metadata->bufferedDeltaVersion;
+					metadata->bytesInNewDeltaFiles += metadata->bufferedDeltaBytes;
 
-					bwData->stats.mutationBytesBuffered -= metadata->currentDeltaBytes;
+					bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
 
 					// reset current deltas
 					metadata->deltaArena = Arena();
 					metadata->currentDeltas = GranuleDeltas();
-					metadata->currentDeltaBytes = 0;
-
-					if (!readOldChangeFeed && !lastFromOldChangeFeed) {
-						if (BW_DEBUG) {
-							printf("Popping range feed %s at %lld\n\n",
-							       changeFeedInfo.changeFeedId.toString().c_str(),
-							       metadata->lastWriteVersion);
-						}
-						wait(bwData->db->popRangeFeedMutations(cfKey, metadata->lastWriteVersion));
-					}
-					oldChangeFeedDataComplete.reset();
+					metadata->bufferedDeltaBytes = 0;
 
 					// if we just wrote a delta file, check if we need to compact here.
 					// exhaust old change feed before compacting - otherwise we could end up with an endlessly growing
@@ -937,6 +987,15 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					// of previous change feeds in the worst case.
 					if (metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
 					    !readOldChangeFeed && !lastFromOldChangeFeed) {
+
+						// wait for all in flight delta files
+						for (auto& it : inFlightDeltaFiles) {
+							BlobFileIndex completedDeltaFile = wait(it);
+							wait(handleCompletedDeltaFile(
+							    bwData, metadata, completedDeltaFile, cfKey, changeFeedInfo.changeFeedStartVersion));
+						}
+						inFlightDeltaFiles.clear();
+
 						if (BW_DEBUG) {
 							printf("Granule [%s - %s) checking with BM for re-snapshot after %d bytes\n",
 							       metadata->keyRange.begin.printable().c_str(),
@@ -947,7 +1006,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						TraceEvent("BlobGranuleSnapshotCheck", bwData->id)
 						    .detail("GranuleStart", metadata->keyRange.begin)
 						    .detail("GranuleEnd", metadata->keyRange.end)
-						    .detail("Version", metadata->currentDeltaVersion);
+						    .detail("Version", metadata->durableDeltaVersion);
 
 						// Save these from the start so repeated requests are idempotent
 						// Need to retry in case response is dropped or manager changes. Eventually, a manager will
@@ -980,14 +1039,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						TraceEvent("BlobGranuleSnapshotFile", bwData->id)
 						    .detail("GranuleStart", metadata->keyRange.begin)
 						    .detail("GranuleEnd", metadata->keyRange.end)
-						    .detail("Version", metadata->currentDeltaVersion);
+						    .detail("Version", metadata->durableDeltaVersion);
 						// TODO: this could read from FDB instead if it knew there was a large range clear at the end or
 						// it knew the granule was small, or something
 						BlobFileIndex newSnapshotFile = wait(compactFromBlob(bwData, metadata, metadata->files));
 
 						// add new snapshot file
 						metadata->files.snapshotFiles.push_back(newSnapshotFile);
-						metadata->lastWriteVersion = newSnapshotFile.version;
 
 						// reset metadata
 						metadata->bytesInNewDeltaFiles = 0;
@@ -1000,14 +1058,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					for (auto& delta : deltas.mutations) {
 						// FIXME: add mutation tracking here
 						// 8 for version, 1 for type, 4 for each param length then actual param size
-						metadata->currentDeltaBytes += delta.totalSize();
+						metadata->bufferedDeltaBytes += delta.totalSize();
 						bwData->stats.changeFeedInputBytes += delta.totalSize();
 						bwData->stats.mutationBytesBuffered += delta.totalSize();
 					}
 				}
 
-				ASSERT(metadata->currentDeltaVersion <= deltas.version);
-				metadata->currentDeltaVersion = deltas.version;
+				ASSERT(metadata->bufferedDeltaVersion <= deltas.version);
+				metadata->bufferedDeltaVersion = deltas.version;
 			}
 			if (lastFromOldChangeFeed) {
 				lastFromOldChangeFeed = false;
@@ -1498,6 +1556,40 @@ ACTOR Future<Void> handleRangeRevoke(BlobWorkerData* bwData, RevokeBlobRangeRequ
 	}
 }
 
+// FIXME: handle errors
+// Because change feeds send uncommitted data and explicit rollback messages, we speculatively buffer/write uncommitted
+// data. This means we must ensure the data is actually committed before "committing" those writes in the blob granule.
+// The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed to be an earlier
+// committed version.
+ACTOR Future<Void> runGrvChecks(BlobWorkerData* bwData) {
+	loop {
+		// only do grvs to get committed version if we need it to persist delta files
+		while (bwData->pendingDeltaFileCommitChecks.get() == 0) {
+			wait(bwData->pendingDeltaFileCommitChecks.onChange());
+		}
+
+		// batch potentially multiple delta files into one GRV, and also rate limit GRVs for this worker
+		wait(delay(0.1)); // TODO KNOB?
+
+		state int checksToResolve = bwData->pendingDeltaFileCommitChecks.get();
+
+		Transaction tr(bwData->db);
+		Version readVersion = wait(tr.getReadVersion());
+
+		ASSERT(readVersion >= bwData->knownCommittedVersion.get());
+		if (readVersion > bwData->knownCommittedVersion.get()) {
+			// TODO REMOVE
+			printf("BW %s GRV updated committed version to %lld for %d delta files\n",
+			       bwData->id.toString().c_str(),
+			       readVersion,
+			       checksToResolve);
+			bwData->knownCommittedVersion.set(readVersion);
+		}
+
+		bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() - checksToResolve);
+	}
+}
+
 // TODO need to version assigned ranges with read version of txn the range was read and use that in
 // handleAssigned/Revoked from to prevent out-of-order assignments/revokes from the blob manager from getting ranges in
 // an incorrect state
@@ -1539,6 +1631,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 	state Future<Void> collection = actorCollection(addActor.getFuture());
 
 	addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
+	addActor.send(runGrvChecks(&self));
 
 	try {
 		loop choose {
