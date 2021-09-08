@@ -1296,15 +1296,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		self->toCommit.pGroupMessageBuilders = &self->pGroupMessageBuilders;
 		std::vector<Future<Version>> pushResults;
 		pushResults.reserve(self->pGroupMessageBuilders.size());
-		for (auto& groupMessageBuilder : self->pGroupMessageBuilders) {
-			pushResults.push_back(
-			    pProxyCommitData->logSystem->push(self->previousCommitVersionByGroup[groupMessageBuilder.first],
-			                                      self->commitVersion,
-			                                      pProxyCommitData->committedVersion.get(),
-			                                      pProxyCommitData->minKnownCommittedVersion,
-			                                      self->toCommit,
-			                                      span.context,
-			                                      self->debugID));
+		for (auto& [groupId, _] : self->pGroupMessageBuilders) {
+			pushResults.push_back(pProxyCommitData->logSystem->push(self->previousCommitVersionByGroup[groupId],
+			                                                        self->commitVersion,
+			                                                        pProxyCommitData->committedVersion.get(),
+			                                                        pProxyCommitData->minKnownCommittedVersion,
+			                                                        self->toCommit,
+			                                                        span.context,
+			                                                        self->debugID,
+			                                                        groupId));
 		}
 
 		std::function<Version(const std::vector<Version>&)> reduce =
