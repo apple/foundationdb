@@ -1176,7 +1176,6 @@ void printStatus(StatusObjectReader statusObj,
 			printf("Could not retrieve status, type 'status json' for more information.\n");
 		}
 	}
-	return;
 }
 
 // "db" is the handler to the multiversion databse
