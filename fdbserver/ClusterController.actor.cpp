@@ -3590,6 +3590,9 @@ ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, 
 				TraceEvent("RecruitFromConfigurationRetry", self->id)
 				    .error(e)
 				    .detail("GoodRecruitmentTimeReady", self->goodRecruitmentTime.isReady());
+				while (!self->goodRecruitmentTime.isReady()) {
+					wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+				}
 			} else {
 				TraceEvent(SevError, "RecruitFromConfigurationError", self->id).error(e);
 				throw; // goodbye, cluster controller
@@ -3618,6 +3621,9 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration(ClusterControllerData* 
 				TraceEvent("RecruitRemoteFromConfigurationRetry", self->id)
 				    .error(e)
 				    .detail("GoodRecruitmentTimeReady", self->goodRemoteRecruitmentTime.isReady());
+				while (!self->goodRemoteRecruitmentTime.isReady()) {
+					wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+				}
 			} else {
 				TraceEvent(SevError, "RecruitRemoteFromConfigurationError", self->id).error(e);
 				throw; // goodbye, cluster controller
