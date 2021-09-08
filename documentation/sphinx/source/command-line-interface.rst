@@ -118,7 +118,7 @@ storage migration type
 ^^^^^^^^^^^^^^^^^^^^^^
 
 Set the storage migration type, or how FDB should migrate to a new storage engine if the value is changed.
-The default is ``disabled``.
+The default is ``disabled``, which means changing the storage engine will not be possible. 
 
 * ``disabled``
 * ``gradual``
