@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP public
+#define PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 #include "flow/TLSConfig.actor.h"
 #undef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 
