@@ -807,7 +807,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			try {
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// lock the database
-				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), LiteralStringRef(""));
+				UID uid = deterministicRandom()->randomUniqueID();
+				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), uid.toString());
 				// commit
 				wait(tx->commit());
 				break;
