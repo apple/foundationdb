@@ -605,6 +605,15 @@ void CommitBatchContext::findOverlappingTLogGroups() {
 			}
 		}
 	}
+	if (pGroupMessageBuilders.empty()) {
+		TraceEvent("EmptyCommits", pProxyCommitData->dbgid);
+		// This is an empty commit controlled by MAX_COMMIT_BATCH_INTERVAL.
+		// We force writing to all groups.
+		for (const auto& groupRef : pProxyCommitData->tLogGroupCollection->groups()) {
+			pGroupMessageBuilders.emplace(groupRef->id(),
+			                              std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
+		}
+	}
 }
 
 void CommitBatchContext::writeToStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams, MutationRef m) {
@@ -1296,15 +1305,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		self->toCommit.pGroupMessageBuilders = &self->pGroupMessageBuilders;
 		std::vector<Future<Version>> pushResults;
 		pushResults.reserve(self->pGroupMessageBuilders.size());
-		for (auto& groupMessageBuilder : self->pGroupMessageBuilders) {
-			pushResults.push_back(
-			    pProxyCommitData->logSystem->push(self->previousCommitVersionByGroup[groupMessageBuilder.first],
-			                                      self->commitVersion,
-			                                      pProxyCommitData->committedVersion.get(),
-			                                      pProxyCommitData->minKnownCommittedVersion,
-			                                      self->toCommit,
-			                                      span.context,
-			                                      self->debugID));
+		for (auto& [groupId, _] : self->pGroupMessageBuilders) {
+			pushResults.push_back(pProxyCommitData->logSystem->push(self->previousCommitVersionByGroup[groupId],
+			                                                        self->commitVersion,
+			                                                        pProxyCommitData->committedVersion.get(),
+			                                                        pProxyCommitData->minKnownCommittedVersion,
+			                                                        self->toCommit,
+			                                                        span.context,
+			                                                        self->debugID,
+			                                                        groupId));
 		}
 
 		std::function<Version(const std::vector<Version>&)> reduce =

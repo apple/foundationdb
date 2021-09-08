@@ -22,9 +22,6 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of
 // this file. In intellisense use the source version.
-#include "fdbserver/TesterInterface.actor.h"
-#include "fdbserver/ptxn/TLogInterface.h"
-#include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TLOGROUP_ACTOR_G_H)
 #define FDBSERVER_TLOGROUP_ACTOR_G_H
 #include "fdbserver/TLogGroup.actor.g.h"
@@ -37,11 +34,14 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/ptxn/TLogInterface.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/network.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
