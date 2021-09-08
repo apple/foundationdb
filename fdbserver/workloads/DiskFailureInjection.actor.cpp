@@ -116,10 +116,8 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	ACTOR void injectDiskDelays(WorkerInterface worker,
 	                            double stallInterval,
 	                            double stallPeriod,
-	                            double throttlePeriod,
-	                            double startDelay) {
+	                            double throttlePeriod) {
 		state Future<Void> res;
-		wait(::delay(startDelay));
 		SetFailureInjection::DiskFailureCommand diskFailure;
 		diskFailure.stallInterval = stallInterval;
 		diskFailure.stallPeriod = stallPeriod;
@@ -132,9 +130,8 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	}
 
 	// Sets the disk corruption request
-	ACTOR void injectBitFlips(WorkerInterface worker, double percentage, double startDelay = 0.0) {
+	ACTOR void injectBitFlips(WorkerInterface worker, double percentage) {
 		state Future<Void> res;
-		wait(::delay(startDelay));
 		SetFailureInjection::FlipBitsCommand flipBits;
 		flipBits.percentBitFlips = percentage;
 		SetFailureInjection req;
@@ -149,6 +146,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	// other worker types in future
 	ACTOR template <class W>
 	Future<Void> diskFailureInjectionClient(Database cx, DiskFailureInjectionWorkload* self) {
+		wait(::delay(self->startDelay));
 		state double lastTime = now();
 		state std::vector<W> machines;
 		state int throttledWorkers = 0;
@@ -174,7 +172,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			self->chosenWorkers.emplace_back(machine.address());
 			if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
 				self->injectDiskDelays(
-				    machine, self->stallInterval, self->stallPeriod, self->throttlePeriod, self->startDelay);
+				    machine, self->stallInterval, self->stallPeriod, self->throttlePeriod);
 			if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
 				if (&g_simulator == g_network)
 					g_simulator.corruptWorkerMap[machine.address()] = true;
@@ -188,9 +186,8 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	ACTOR static Future<Void> reSendChaos(DiskFailureInjectionWorkload* self) {
 		state int throttledWorkers = 0;
 		state int corruptedWorkers = 0;
-		std::vector<WorkerDetails> workers =
-		    wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest{}));
-		std::map<NetworkAddress, WorkerInterface> workersMap;
+		state std::map<NetworkAddress, WorkerInterface> workersMap;
+		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		for (auto worker : workers) {
 			workersMap[worker.interf.address()] = worker.interf;
 		}
@@ -199,7 +196,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			if (itr != workersMap.end()) {
 				if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
 					self->injectDiskDelays(
-					    itr->second, self->stallInterval, self->stallPeriod, self->throttlePeriod, self->startDelay);
+					    itr->second, self->stallInterval, self->stallPeriod, self->throttlePeriod);
 				if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
 					if (&g_simulator == g_network)
 						g_simulator.corruptWorkerMap[workerAddress] = true;
@@ -213,8 +210,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	// Fetches chaosMetrics and verifies that chaos events are happening for enabled workers
 	ACTOR static Future<int> chaosGetStatus(DiskFailureInjectionWorkload* self) {
 		state int foundChaosMetrics = 0;
-		std::vector<WorkerDetails> workers =
-		    wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest{}));
+		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
 		Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventsFuture;
 		latestEventsFuture = latestEventOnWorkers(workers, "ChaosMetrics");
@@ -245,9 +241,9 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "ChaosGetStatus").error(e);
 			// it's possible to get an empty event, it's okay to ignore
 			if (e.code() != error_code_attribute_not_found) {
+				TraceEvent(SevError, "ChaosGetStatus").error(e);
 				throw e;
 			}
 		}
@@ -257,16 +253,18 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 
 	// Periodically re-send the chaos event in case of a process restart
 	ACTOR static Future<Void> periodicEventBroadcast(DiskFailureInjectionWorkload* self) {
+		wait(::delay(self->startDelay));
 		state double start = now();
 		state double elapsed = 0.0;
 
 		loop {
+			wait(delayUntil(start + elapsed));
 			wait(reSendChaos(self));
 			elapsed += self->periodicBroadcastInterval;
 			wait(delayUntil(start + elapsed));
 			int foundChaosMetrics = wait(chaosGetStatus(self));
 			if (foundChaosMetrics > 0) {
-				TraceEvent("FoundChaos").detail("ChaosMetricCount", foundChaosMetrics);
+				TraceEvent("FoundChaos").detail("ChaosMetricCount", foundChaosMetrics).detail("ClientID", self->clientId);
 				return Void();
 			}
 		}

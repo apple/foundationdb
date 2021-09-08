@@ -87,6 +87,7 @@ public:
 		auto res = g_network->global(INetwork::enBitFlipper);
 		if (enabled && res) {
 			auto bitFlipPercentage = static_cast<BitFlipper*>(res)->getBitFlipPercentage();
+			//TraceEvent("AsyncFileChaosCorrupt").detail("Percentage", bitFlipPercentage);
 			if (bitFlipPercentage > 0.0) {
 				if (deterministicRandom()->random01() < bitFlipPercentage) {
 					pdata = (char*)arena.allocate4kAlignedBuffer(length);

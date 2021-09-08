@@ -10,23 +10,23 @@ testTitle = 'DiskFailureCycle'
     [[test.workload]]
     testName = 'Cycle'
     transactionsPerSecond = 2500.0
-    testDuration = 600.0
+    testDuration = 300.0
     expectedRate = 0
 
     [[test.workload]]
     testName = 'DiskFailureInjection'
-    testDuration = 20.0
+    testDuration = 120.0
     verificationMode = true
-    startDelay = 20.0
+    startDelay = 30.0
     throttleDisk = true
     stallInterval = 10.0
-    stallPeriod = 20.0
-    throttlePeriod = 20.0
+    stallPeriod = 60.0
+    throttlePeriod = 60.0
 
     [[test.workload]]
     testName = 'DiskFailureInjection'
-    testDuration = 20.0
+    testDuration = 240.0
     verificationMode = true
-    startDelay = 40.0
+    startDelay = 120.0
     corruptFile = true
     percentBitFlips = 10
