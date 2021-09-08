@@ -595,17 +595,19 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                              SpanID const& spanContext,
 	                              Optional<UID> debugID,
 	                              ptxn::TLogGroupID tLogGroup) {
-		vector<Future<Void>> quorumResults;
-		vector<Future<ptxn::TLogCommitReply>> allReplies;
+		std::vector<Future<Void>> quorumResults;
+		std::vector<Future<ptxn::TLogCommitReply>> allReplies;
 		int location = 0;
 		Span span("TPLS:push"_loc, spanContext);
+		auto serialized = data.pGroupMessageBuilders->find(tLogGroup)->second->getAllSerialized();
+
 		for (auto& it : tLogs) {
-			if (it->isLocal && it->groupIdToInterfaces.size()) {
+			if (it->isLocal && !it->groupIdToInterfaces.empty()) {
 				ASSERT(it->groupIdToInterfaces.count(tLogGroup));
 				const auto& logServers = it->groupIdToInterfaces[tLogGroup];
-				vector<Future<Void>> tLogCommitResults;
+				std::vector<Future<Void>> tLogCommitResults;
 				for (int loc = 0; loc < logServers.size(); loc++) {
-					auto serialized = data.pGroupMessageBuilders->find(tLogGroup)->second->getAllSerialized();
+					// TODO: pass serializer from caller
 					allReplies.push_back(logServers[loc]->get().interf().commit.getReply(
 					    ptxn::TLogCommitRequest(spanContext,
 					                            tLogGroup,
@@ -625,6 +627,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size()));
 			}
 		}
+		ASSERT_WE_THINK(!allReplies.empty());
 		return minVersionWhenReady(waitForAll(quorumResults), allReplies);
 	}
 
