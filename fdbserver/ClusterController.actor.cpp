@@ -5131,9 +5131,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators) {
-	state WorkerFitnessInfo masterWorker;
 	state MasterInterface iMaster;
-	state Future<Void> recoveryCore;
 	state Reference<ClusterControllerRecovery::ClusterRecoveryData> recoveryData;
 
 	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
@@ -5196,6 +5194,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 			state Future<Void> collection;
 			state PromiseStream<Future<Void>> addActor;
+			state Future<Void> recoveryCore;
 
 			if (SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
 				recoveryData = makeReference<ClusterControllerRecovery::ClusterRecoveryData>(
@@ -5227,7 +5226,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
 				                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
 				          db->forceMasterFailure.onTrigger())) {
-					TraceEvent("WaitFailure", cluster->id).log();
+					TraceEvent(SevWarn, "DetectedFailedMaster", cluster->id).detail("OldMaster", iMaster.id());
 					break;
 				}
 				when(wait(db->serverInfo->onChange())) {}
@@ -5241,22 +5240,23 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					TraceEvent("BackupWorkerDoneRequest", cluster->id).log();
 				}
 				when(wait(collection)) {
-					TraceEvent("CCWDB forceMasterFailure", cluster->id)
-					    .detail("MasterId", cluster->db.serverInfo->get().master.id());
-					cluster->db.forceMasterFailure.trigger();
+					throw internal_error();
 				}
 			}
 			wait(spinDelay);
 
-			TEST(true); // clusterWatchDatabase() master failed
-			TraceEvent(SevWarn, "DetectedFailedMaster", cluster->id).detail("OldMaster", iMaster.id());
+			TEST(true); // clusterWatchDatabase() recovery failed
+
+			while (recoveryData.isValid() && !recoveryData->addActor.isEmpty()) {
+				recoveryData->addActor.getFuture().pop();
+			}
 		} catch (Error& e) {
 			state Error err = e;
 			TraceEvent("CCWDB", cluster->id).error(e, true).detail("Master", iMaster.id());
-			if (err.code() == error_code_actor_cancelled) {
-				throw;
-			} else {
+			if (e.code() != error_code_actor_cancelled) {
 				wait(delay(0.0));
+			} else {
+				throw err;
 			}
 
 			while (recoveryData.isValid() && !recoveryData->addActor.isEmpty()) {
