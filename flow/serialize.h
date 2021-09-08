@@ -278,7 +278,7 @@ static inline bool valgrindCheck(const void* data, int bytes, const char* contex
 struct _IncludeVersion {
 	ProtocolVersion v;
 	ProtocolVersion futureDowngradev;
-	explicit _IncludeVersion( ProtocolVersion defaultVersion ) : v(defaultVersion), futureDowngradev(defaultVersion) {
+	explicit _IncludeVersion(ProtocolVersion defaultVersion) : v(defaultVersion), futureDowngradev(defaultVersion) {
 		ASSERT(defaultVersion.isValid());
 	}
 	template <class Ar>

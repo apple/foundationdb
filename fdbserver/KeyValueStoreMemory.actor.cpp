@@ -304,8 +304,8 @@ private:
 		OpSnapshotItem,
 		OpSnapshotEnd,
 		OpSnapshotAbort, // terminate an in progress snapshot in order to start a full snapshot
-		OpCommit,        // only in log, not in queue
-		OpRollback,       // only in log, not in queue
+		OpCommit, // only in log, not in queue
+		OpRollback, // only in log, not in queue
 		OpSnapshotItemDelta
 	};
 
@@ -532,15 +532,15 @@ private:
 							        .detail("Nextlocation", self->log->getNextReadLocation());
 							}
 							ASSERT( p1 >= uncommittedNextKey );*/
-							if(h.op == OpSnapshotItemDelta) {
+							if (h.op == OpSnapshotItemDelta) {
 								ASSERT(p1.size() > 1);
 								// Get number of bytes borrowed from previous item key
-								int borrowed = *(uint8_t *)p1.begin();
+								int borrowed = *(uint8_t*)p1.begin();
 								ASSERT(borrowed <= lastSnapshotKey.size());
 								// Trim p1 to just the suffix
 								StringRef suffix = p1.substr(1);
 								// Allocate a new string in data arena to hold prefix + suffix
-								Arena &dataArena = *(Arena *)&data.arena();
+								Arena& dataArena = *(Arena*)&data.arena();
 								p1 = makeString(borrowed + suffix.size(), dataArena);
 								// Copy the prefix into the new reconstituted key
 								memcpy(mutateString(p1), lastSnapshotKey.begin(), borrowed);

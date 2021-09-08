@@ -261,7 +261,7 @@ struct KeyRangeRef {
 			const_cast<KeyRef&>(begin) = end.substr(0, end.size() - 1);
 		}
 
-		if( begin > end ) {
+		if (begin > end) {
 			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		};
