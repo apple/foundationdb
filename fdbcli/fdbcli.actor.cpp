@@ -1931,9 +1931,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state LineNoise& linenoise = *plinenoise;
 	state bool intrans = false;
 
-	state Database db;
-	// TODO: refactoring work, will replace db when we have all commands through the general fdb interface
-	state Reference<IDatabase> db2;
+	state Database localDb;
+	state Reference<IDatabase> db;
 	state Reference<ITransaction> tr;
 
 	state bool writeMode = false;
@@ -1962,19 +1961,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		db = Database::createDatabase(ccf, -1, IsInternal::False);
+		localDb = Database::createDatabase(ccf, -1, IsInternal::False);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
-	} catch (Error& e) {
-		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
-		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
-		return 1;
-	}
-
-	// Note: refactoring work, will remove the above code finally
-	try {
-		db2 = API->createDatabase(opt.clusterFile.c_str());
+		db = API->createDatabase(opt.clusterFile.c_str());
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
 		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
@@ -2001,7 +1992,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	// The 3.0 timeout is a guard to avoid waiting forever when the cli cannot talk to any coordinators
 	loop {
 		try {
-			getTransaction(db2, tr, options, intrans);
+			getTransaction(db, tr, options, intrans);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(delay(3.0) || success(safeThreadFutureToFuture(tr->getReadVersion())));
 			break;
@@ -2019,7 +2010,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	if (!opt.exec.present()) {
 		if (opt.initialStatusCheck) {
-			Future<Void> checkStatusF = checkStatus(Void(), db2, db);
+			Future<Void> checkStatusF = checkStatus(Void(), db, localDb);
 			wait(makeInterruptable(success(checkStatusF)));
 		} else {
 			printf("\n");
@@ -2057,7 +2048,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				linenoise.historyAdd(line);
 		}
 
-		warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db2, db);
+		warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 
 		try {
 			state UID randomID = deterministicRandom()->randomUniqueID();
@@ -2157,13 +2148,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "waitconnected")) {
-					wait(makeInterruptable(db->onConnected()));
+					wait(makeInterruptable(localDb->onConnected()));
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "waitopen")) {
 					wait(
-					    success(safeThreadFutureToFuture(getTransaction(db2, tr, options, intrans)->getReadVersion())));
+					    success(safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
 					continue;
 				}
 
@@ -2188,49 +2179,27 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					// Warn at 7 seconds since status will spend as long as 5 seconds trying to read/write from the
 					// database
 					warn = timeWarning(7.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n");
-
-					// state StatusClient::StatusLevel level;
-					// if (tokens.size() == 1)
-					// 	level = StatusClient::NORMAL;
-					// else if (tokens.size() == 2 && tokencmp(tokens[1], "details"))
-					// 	level = StatusClient::DETAILED;
-					// else if (tokens.size() == 2 && tokencmp(tokens[1], "minimal"))
-					// 	level = StatusClient::MINIMAL;
-					// else if (tokens.size() == 2 && tokencmp(tokens[1], "json"))
-					// 	level = StatusClient::JSON;
-					// else {
-					// 	printUsage(tokens[0]);
-					// 	is_error = true;
-					// 	continue;
-					// }
-
-					// StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(db)));
-
-					// if (!opt.exec.present())
-					// 	printf("\n");
-					// printStatus(s, level);
-					// if (!opt.exec.present())
-					// 	printf("\n");
-					bool _result = wait(makeInterruptable(statusCommandActor(db2, db, tokens, opt.exec.present())));
+					bool _result =
+					    wait(makeInterruptable(statusCommandActor(db, localDb, tokens, opt.exec.present())));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
-					wait(triggerddteaminfologCommandActor(db2));
+					wait(triggerddteaminfologCommandActor(db));
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "tssq")) {
-					bool _result = wait(makeInterruptable(tssqCommandActor(db2, tokens)));
+					bool _result = wait(makeInterruptable(tssqCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "configure")) {
-					bool err = wait(configure(db, tokens, db->getConnectionFile(), &linenoise, warn));
+					bool err = wait(configure(localDb, tokens, localDb->getConnectionFile(), &linenoise, warn));
 					if (err)
 						is_error = true;
 					continue;
@@ -2239,7 +2208,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "fileconfigure")) {
 					if (tokens.size() == 2 || (tokens.size() == 3 && (tokens[1] == LiteralStringRef("new") ||
 					                                                  tokens[1] == LiteralStringRef("FORCE")))) {
-						bool err = wait(fileConfigure(db,
+						bool err = wait(fileConfigure(localDb,
 						                              tokens.back().toString(),
 						                              tokens[1] == LiteralStringRef("new"),
 						                              tokens[1] == LiteralStringRef("FORCE")));
@@ -2253,7 +2222,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "coordinators")) {
-					auto cs = ClusterConnectionFile(db->getConnectionFile()->getFilename()).getConnectionString();
+					auto cs = ClusterConnectionFile(localDb->getConnectionFile()->getFilename()).getConnectionString();
 					if (tokens.size() < 2) {
 						printf("Cluster description: %s\n", cs.clusterKeyName().toString().c_str());
 						printf("Cluster coordinators (%zu): %s\n",
@@ -2261,7 +2230,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						       describe(cs.coordinators()).c_str());
 						printf("Type `help coordinators' to learn how to change this information.\n");
 					} else {
-						bool err = wait(coordinators(db, tokens, cs.coordinators()[0].isTLS()));
+						bool err = wait(coordinators(localDb, tokens, cs.coordinators()[0].isTLS()));
 						if (err)
 							is_error = true;
 					}
@@ -2269,7 +2238,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "exclude")) {
-					bool err = wait(exclude(db, tokens, db->getConnectionFile(), warn));
+					bool err = wait(exclude(localDb, tokens, localDb->getConnectionFile(), warn));
 					if (err)
 						is_error = true;
 					continue;
@@ -2280,7 +2249,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						bool err = wait(include(db, tokens));
+						bool err = wait(include(localDb, tokens));
 						if (err)
 							is_error = true;
 					}
@@ -2288,7 +2257,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "snapshot")) {
-					bool _result = wait(snapshotCommandActor(db2, tokens));
+					bool _result = wait(snapshotCommandActor(db, tokens));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2301,7 +2270,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						state UID lockUID = deterministicRandom()->randomUniqueID();
 						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
-						wait(makeInterruptable(lockDatabase(db, lockUID)));
+						wait(makeInterruptable(lockDatabase(localDb, lockUID)));
 						printf("Database locked.\n");
 					}
 					continue;
@@ -2320,11 +2289,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						fflush(stdout);
 						Optional<std::string> input =
 						    wait(linenoise.read(format("Repeat the above passphrase if you would like to proceed:")));
-						warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db2, db);
+						warn = checkStatus(
+						    timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
 							try {
-								wait(makeInterruptable(unlockDatabase(db, unlockUID)));
+								wait(makeInterruptable(unlockDatabase(localDb, unlockUID)));
 								printf("Database unlocked.\n");
 							} catch (Error& e) {
 								if (e.code() == error_code_database_locked) {
@@ -2342,7 +2312,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "setclass")) {
-					bool _result = wait(makeInterruptable(setClassCommandActor(db2, tokens)));
+					bool _result = wait(makeInterruptable(setClassCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2358,7 +2328,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
-						getTransaction(db2, tr, options, false);
+						getTransaction(db, tr, options, false);
 						intrans = true;
 						printf("Transaction started\n");
 					}
@@ -2419,7 +2389,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						state ThreadFuture<Optional<Value>> valueF =
-						    getTransaction(db2, tr, options, intrans)->get(tokens[1]);
+						    getTransaction(db, tr, options, intrans)->get(tokens[1]);
 						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
 
 						if (v.present())
@@ -2436,51 +2406,51 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						Version v = wait(makeInterruptable(
-						    safeThreadFutureToFuture(getTransaction(db2, tr, options, intrans)->getReadVersion())));
+						    safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
 						printf("%ld\n", v);
 					}
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "advanceversion")) {
-					bool _result = wait(makeInterruptable(advanceVersionCommandActor(db2, tokens)));
+					bool _result = wait(makeInterruptable(advanceVersionCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "kill")) {
-					getTransaction(db2, tr, options, intrans);
-					bool _result = wait(makeInterruptable(killCommandActor(db2, tr, tokens, &address_interface)));
+					getTransaction(db, tr, options, intrans);
+					bool _result = wait(makeInterruptable(killCommandActor(db, tr, tokens, &address_interface)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "suspend")) {
-					getTransaction(db2, tr, options, intrans);
-					bool _result = wait(makeInterruptable(suspendCommandActor(db2, tr, tokens, &address_interface)));
+					getTransaction(db, tr, options, intrans);
+					bool _result = wait(makeInterruptable(suspendCommandActor(db, tr, tokens, &address_interface)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
-					bool _result = wait(makeInterruptable(forceRecoveryWithDataLossCommandActor(db2, tokens)));
+					bool _result = wait(makeInterruptable(forceRecoveryWithDataLossCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "maintenance")) {
-					bool _result = wait(makeInterruptable(maintenanceCommandActor(db2, tokens)));
+					bool _result = wait(makeInterruptable(maintenanceCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
-					getTransaction(db2, tr, options, intrans);
+					getTransaction(db, tr, options, intrans);
 					bool _result = wait(makeInterruptable(consistencyCheckCommandActor(tr, tokens, intrans)));
 					if (!_result)
 						is_error = true;
@@ -2488,7 +2458,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "profile")) {
-					getTransaction(db2, tr, options, intrans);
+					getTransaction(db, tr, options, intrans);
 					bool _result = wait(makeInterruptable(profileCommandActor(tr, tokens, intrans)));
 					if (!_result)
 						is_error = true;
@@ -2496,9 +2466,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "expensive_data_check")) {
-					getTransaction(db2, tr, options, intrans);
+					getTransaction(db, tr, options, intrans);
 					bool _result =
-					    wait(makeInterruptable(expensiveDataCheckCommandActor(db2, tr, tokens, &address_interface)));
+					    wait(makeInterruptable(expensiveDataCheckCommandActor(db, tr, tokens, &address_interface)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2557,7 +2527,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 
 						state ThreadFuture<RangeResult> kvsF =
-						    getTransaction(db2, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit);
+						    getTransaction(db, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit);
 						RangeResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(kvsF)));
 
 						printf("\nRange limited to %d keys\n", limit);
@@ -2601,7 +2571,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db2, tr, options, intrans);
+						getTransaction(db, tr, options, intrans);
 						tr->set(tokens[1], tokens[2]);
 
 						if (!intrans) {
@@ -2622,7 +2592,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db2, tr, options, intrans);
+						getTransaction(db, tr, options, intrans);
 						tr->clear(tokens[1]);
 
 						if (!intrans) {
@@ -2643,7 +2613,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db2, tr, options, intrans);
+						getTransaction(db, tr, options, intrans);
 						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
 
 						if (!intrans) {
@@ -2654,7 +2624,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "datadistribution")) {
-					bool _result = wait(makeInterruptable(dataDistributionCommandActor(db2, tokens)));
+					bool _result = wait(makeInterruptable(dataDistributionCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2719,14 +2689,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "throttle")) {
-					bool _result = wait(throttleCommandActor(db2, tokens));
+					bool _result = wait(throttleCommandActor(db, tokens));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "cache_range")) {
-					bool _result = wait(makeInterruptable(cacheRangeCommandActor(db2, tokens)));
+					bool _result = wait(makeInterruptable(cacheRangeCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
