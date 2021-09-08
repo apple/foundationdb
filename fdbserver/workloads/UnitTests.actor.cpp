@@ -92,7 +92,15 @@ struct UnitTestWorkload : TestWorkload {
 				tests.push_back(test);
 			}
 		}
+
 		fprintf(stdout, "Found %zu tests\n", tests.size());
+
+		if (tests.size() == 0) {
+			TraceEvent(SevError, "NoMatchingUnitTests").detail("TestPattern", self->testPattern);
+			++self->testsFailed;
+			return Void();
+		}
+
 		deterministicRandom()->randomShuffle(tests);
 		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit)
 			tests.resize(self->testRunLimit);

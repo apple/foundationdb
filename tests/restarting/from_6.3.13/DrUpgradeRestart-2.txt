@@ -1,0 +1,18 @@
+extraDB=3
+
+testTitle=DrUpgrade
+runSetup=false
+clearAfterTest=false
+simBackupAgents=BackupToDB
+waitForQuiescenceBegin=false
+
+    testName=Cycle
+    nodeCount=30000
+    transactionsPerSecond=2500.0
+    testDuration=30.0
+    expectedRate=0
+
+    testName=BackupToDBUpgrade
+    backupAfter=10.0
+    backupRangesCount=-1
+    stopDifferentialAfter=70.0
