@@ -84,7 +84,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			if (verificationMode) {
 				clients.push_back(periodicEventBroadcast(this));
 			} else
-				//Else we honor the testDuration
+				// Else we honor the testDuration
 				clients.push_back(timeout(periodicEventBroadcast(this), testDuration, Void()));
 			return waitForAll(clients);
 		} else
@@ -171,8 +171,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			// Keep track of chosen workers for verification purpose
 			self->chosenWorkers.emplace_back(machine.address());
 			if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
-				self->injectDiskDelays(
-				    machine, self->stallInterval, self->stallPeriod, self->throttlePeriod);
+				self->injectDiskDelays(machine, self->stallInterval, self->stallPeriod, self->throttlePeriod);
 			if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
 				if (&g_simulator == g_network)
 					g_simulator.corruptWorkerMap[machine.address()] = true;
@@ -195,8 +194,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			auto itr = workersMap.find(workerAddress);
 			if (itr != workersMap.end()) {
 				if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
-					self->injectDiskDelays(
-					    itr->second, self->stallInterval, self->stallPeriod, self->throttlePeriod);
+					self->injectDiskDelays(itr->second, self->stallInterval, self->stallPeriod, self->throttlePeriod);
 				if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
 					if (&g_simulator == g_network)
 						g_simulator.corruptWorkerMap[workerAddress] = true;
@@ -264,7 +262,9 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			wait(delayUntil(start + elapsed));
 			int foundChaosMetrics = wait(chaosGetStatus(self));
 			if (foundChaosMetrics > 0) {
-				TraceEvent("FoundChaos").detail("ChaosMetricCount", foundChaosMetrics).detail("ClientID", self->clientId);
+				TraceEvent("FoundChaos")
+				    .detail("ChaosMetricCount", foundChaosMetrics)
+				    .detail("ClientID", self->clientId);
 				return Void();
 			}
 		}
