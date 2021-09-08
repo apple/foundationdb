@@ -605,6 +605,15 @@ void CommitBatchContext::findOverlappingTLogGroups() {
 			}
 		}
 	}
+	if (pGroupMessageBuilders.empty()) {
+		TraceEvent("EmptyCommits", pProxyCommitData->dbgid);
+		// This is an empty commit controlled by MAX_COMMIT_BATCH_INTERVAL.
+		// We force writing to all groups.
+		for (const auto& groupRef : pProxyCommitData->tLogGroupCollection->groups()) {
+			pGroupMessageBuilders.emplace(groupRef->id(),
+			                              std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
+		}
+	}
 }
 
 void CommitBatchContext::writeToStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams, MutationRef m) {
