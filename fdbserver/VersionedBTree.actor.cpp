@@ -627,12 +627,8 @@ public:
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
-			nextPageReader = queue->pager->readPage(PagerEventReasons::MetaData,
-			                                        nonBtreeLevel,
-			                                        nextPageID,
-			                                        ioMaxPriority,
-			                                        true,
-			                                        false);
+			nextPageReader = queue->pager->readPage(
+			    PagerEventReasons::MetaData, nonBtreeLevel, nextPageID, ioMaxPriority, true, false);
 		}
 
 		Future<Void> loadExtent() {
@@ -1914,8 +1910,8 @@ public:
 				}
 
 				debug_printf("currentSize is %u and input size is %u. Trying to evict %s to make room for %s\n",
-							 currentSize,
-							 size,
+				             currentSize,
+				             size,
 				             toString(toEvict.index).c_str(),
 				             toString(index).c_str());
 
@@ -2814,8 +2810,8 @@ public:
 	}
 
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalMultiPage(DWALPager* self,
-	                                                           Standalone<VectorRef<PhysicalPageID>> pageIDs,
-	                                                           int priority) {
+	                                                                Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                                                int priority) {
 		ASSERT(!self->memoryOnly);
 
 		// if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
@@ -2847,17 +2843,16 @@ public:
 		             pageIDs.size() * blockSize);
 		// Header reads are checked explicitly during recovery
 		if (!page->verifyChecksum(pageIDs.front())) {
-			debug_printf(
-				"DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageIDs).c_str());
+			debug_printf("DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageIDs).c_str());
 			Error e = checksum_failed();
 			TraceEvent(SevError, "RedwoodChecksumFailed")
-				.detail("Filename", self->filename.c_str())
-				.detail("PageID", pageIDs)
-				.detail("PageSize", self->physicalPageSize)
-				.detail("Offset", pageIDs.front() * self->physicalPageSize)
-				.detail("CalculatedChecksum", page->calculateChecksum(pageIDs.front()))
-				.detail("ChecksumInPage", page->getChecksum())
-				.error(e);
+			    .detail("Filename", self->filename.c_str())
+			    .detail("PageID", pageIDs)
+			    .detail("PageSize", self->physicalPageSize)
+			    .detail("Offset", pageIDs.front() * self->physicalPageSize)
+			    .detail("CalculatedChecksum", page->calculateChecksum(pageIDs.front()))
+			    .detail("ChecksumInPage", page->getChecksum())
+			    .error(e);
 			ASSERT(false);
 			throw e;
 		}
@@ -2922,11 +2917,11 @@ public:
 	}
 
 	Future<Reference<ArenaPage>> readMultiPage(PagerEventReasons reason,
-	                                      unsigned int level,
-	                                      Standalone<VectorRef<PhysicalPageID>> pageIDs,
-	                                      int priority,
-	                                      bool cacheable,
-	                                      bool noHit) override {
+	                                           unsigned int level,
+	                                           Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                           int priority,
+	                                           bool cacheable,
+	                                           bool noHit) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		debug_printf("DWALPager(%s) op=read %s noHit=%d\n", filename.c_str(), toString(pageIDs).c_str(), noHit);
@@ -3008,12 +3003,12 @@ public:
 	}
 
 	Future<Reference<ArenaPage>> readMultiPageAtVersion(PagerEventReasons reason,
-	                                               unsigned int level,
-	                                               VectorRef<LogicalPageID> logicalIDs,
-	                                               int priority,
-	                                               Version v,
-	                                               bool cacheable,
-	                                               bool noHit) {
+	                                                    unsigned int level,
+	                                                    VectorRef<LogicalPageID> logicalIDs,
+	                                                    int priority,
+	                                                    Version v,
+	                                                    bool cacheable,
+	                                                    bool noHit) {
 		Standalone<VectorRef<PhysicalPageID>> ids;
 		ids.resize(ids.arena(), logicalIDs.size());
 		for (int i = 0; i < logicalIDs.size(); ++i) {
@@ -3264,12 +3259,8 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data = wait(self->readPage(PagerEventReasons::MetaData,
-			                                                nonBtreeLevel,
-			                                               	p.newPageID,
-			                                                ioLeafPriority,
-			                                                false,
-			                                                true));
+			Reference<ArenaPage> data = wait(
+			    self->readPage(PagerEventReasons::MetaData, nonBtreeLevel, p.newPageID, ioLeafPriority, false, true));
 
 			// Write the data to the original page so it can be read using its original pageID
 			self->updatePage(
@@ -3542,8 +3533,7 @@ public:
 		int64_t total;
 		if (memoryOnly) {
 			total = pageCacheBytes;
-			//free = pageCacheBytes - ((int64_t)pageCache.count() * physicalPageSize);
-			free = pageCacheBytes - ((int64_t)pageCache.count());
+			free = pageCacheBytes - ((int64_t)pageCache.count() * physicalPageSize);
 		} else {
 			g_network->getDiskBytes(parentDirectory(filename), free, total);
 		}
@@ -3762,11 +3752,11 @@ public:
 	}
 
 	Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
-	                                                   unsigned int level,
-	                                                   VectorRef<LogicalPageID> pageIDs,
-	                                                   int priority,
-	                                                   bool cacheable,
-	                                                   bool noHit) override {
+	                                                        unsigned int level,
+	                                                        VectorRef<LogicalPageID> pageIDs,
+	                                                        int priority,
+	                                                        bool cacheable,
+	                                                        bool noHit) override {
 		if (expired.isError()) {
 			throw expired.getError();
 		}
@@ -5630,10 +5620,12 @@ private:
 	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef pageIDs, int priority) {
 		g_redwoodMetrics.metric.btreeLeafPreload += 1;
 		g_redwoodMetrics.metric.btreeLeafPreloadExt += (pageIDs.size() - 1);
-		if (pageIDs.size() == 1){
-			snapshot->getPhysicalPage(PagerEventReasons::RangePrefetch, nonBtreeLevel, pageIDs.front(), priority, true, true);
+		if (pageIDs.size() == 1) {
+			snapshot->getPhysicalPage(
+			    PagerEventReasons::RangePrefetch, nonBtreeLevel, pageIDs.front(), priority, true, true);
 		} else {
-			snapshot->getMultiPhysicalPage(PagerEventReasons::RangePrefetch, nonBtreeLevel, pageIDs, priority, true, true);
+			snapshot->getMultiPhysicalPage(
+			    PagerEventReasons::RangePrefetch, nonBtreeLevel, pageIDs, priority, true, true);
 		}
 	}
 
@@ -7028,7 +7020,8 @@ public:
 				// Prefetch the sibling if the link is not null
 				if (c.get().value.present()) {
 					BTreePageIDRef childPage = c.get().getChildPage();
-					preLoadPage(pager.getPtr(), childPage, ioLeafPriority);
+					if (childPage.size() > 0)
+						preLoadPage(pager.getPtr(), childPage, ioLeafPriority);
 					recordsRead += estRecordsPerPage;
 					// Use sibling node capacity as an estimate of bytes read.
 					bytesRead += childPage.size() * this->btree->m_blockSize;
