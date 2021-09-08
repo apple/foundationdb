@@ -107,7 +107,7 @@ struct OldTLogCoreData {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if( ar.protocolVersion() == supportDowngradeProtocolVersion && ar.isDeserializing ) {
+		if (ar.protocolVersion() == supportDowngradeProtocolVersion && ar.isDeserializing) {
 			serializer(ar, tLogs, logRouterTags, epochEnd, pseudoLocalities, txsTags);
 			// 6.3 specific fields
 			Version epochBegin;

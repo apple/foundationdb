@@ -123,8 +123,7 @@ public:
 
 	void print(FILE* fp);
 
-PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
-	std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;
+	PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP : std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;
 	std::string tlsPassword;
 	std::vector<std::string> tlsVerifyPeers;
 	TLSEndpointType endpointType = TLSEndpointType::UNSET;
@@ -206,8 +205,7 @@ public:
 	std::string getKeyPathSync() const;
 	std::string getCAPathSync() const;
 
-PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
-	ACTOR static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self);
+	PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP : ACTOR static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self);
 	template <typename T>
 	friend class LoadAsyncActorState;
 

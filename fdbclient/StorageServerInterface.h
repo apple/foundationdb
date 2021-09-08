@@ -77,9 +77,9 @@ struct StorageServerInterface {
 	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
-	template <class Ar> 
-	void serialize( Ar& ar ) {
-		if ( ar.protocolVersion() == supportDowngradeProtocolVersion && ar.isDeserializing ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if (ar.protocolVersion() == supportDowngradeProtocolVersion && ar.isDeserializing) {
 			serializer(ar, uniqueID, locality, getValue);
 			getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint());
 			getKeyValues = RequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint());

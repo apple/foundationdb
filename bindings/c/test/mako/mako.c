@@ -830,7 +830,8 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm) {
 
 	/* Set client Log group */
 	if (strlen(args->log_group) != 0) {
-		err = fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP, (uint8_t*)args->log_group, strlen(args->log_group));
+		err =
+		    fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP, (uint8_t*)args->log_group, strlen(args->log_group));
 		if (err) {
 			fprintf(stderr, "ERROR: fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP): %s\n", fdb_get_error(err));
 		}
