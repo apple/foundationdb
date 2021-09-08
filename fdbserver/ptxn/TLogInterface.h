@@ -98,6 +98,7 @@ struct TLogCommitRequest {
 	void serialize(Ar& ar) {
 		serializer(ar,
 		           spanID,
+		           tLogGroupID,
 		           arena,
 		           messages,
 		           prevVersion,
