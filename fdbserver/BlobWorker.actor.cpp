@@ -150,6 +150,9 @@ struct BlobWorkerData {
 	Reference<BackupContainerFileSystem> bstore;
 	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
 
+	AsyncVar<int> pendingDeltaFileCommitChecks;
+	AsyncVar<Version> knownCommittedVersion;
+
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 	~BlobWorkerData() { printf("Destroying blob worker data for %s\n", id.toString().c_str()); }
 
@@ -421,7 +424,10 @@ static Value getFileValue(std::string fname, int64_t offset, int64_t length) {
 	return fileValue.getDataAsStandalone();
 }
 
-// TODO add granule locks
+// writeDelta file writes speculatively in the common case to optimize throughput. It creates the s3 object even though
+// the data in it may not yet be committed, and even though previous delta fiels with lower versioned data may still be
+// in flight. The synchronization happens after the s3 file is written, but before we update the FDB index of what files
+// exist. Before updating FDB, we ensure the version is committed and all previous delta files have updated FDB.
 ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
                                            KeyRange keyRange,
                                            int64_t epoch,
@@ -432,6 +438,10 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
                                            Future<BlobFileIndex> previousDeltaFileFuture,
                                            Optional<KeyRange> oldChangeFeedDataComplete,
                                            Optional<UID> oldChangeFeedId) {
+	// potentially kick off delta file commit check, if our version isn't already known to be committed
+	if (bwData->knownCommittedVersion.get() < currentDeltaVersion) {
+		bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() + 1);
+	}
 
 	// TODO some sort of directory structure would be useful?
 	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
@@ -452,7 +462,10 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 	wait(objectFile->finish());
 
 	try {
-		// before updating FDB, wait for previous delta files to finish and update FDB
+		// before updating FDB, wait for the delta file version to be committed and previous delta files to finish
+		while (bwData->knownCommittedVersion.get() < currentDeltaVersion) {
+			wait(bwData->knownCommittedVersion.onChange());
+		}
 		BlobFileIndex prev = wait(previousDeltaFileFuture);
 		wait(yield()); // prevent stack overflow of many chained futures
 
@@ -1543,6 +1556,40 @@ ACTOR Future<Void> handleRangeRevoke(BlobWorkerData* bwData, RevokeBlobRangeRequ
 	}
 }
 
+// FIXME: handle errors
+// Because change feeds send uncommitted data and explicit rollback messages, we speculatively buffer/write uncommitted
+// data. This means we must ensure the data is actually committed before "committing" those writes in the blob granule.
+// The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed to be an earlier
+// committed version.
+ACTOR Future<Void> runGrvChecks(BlobWorkerData* bwData) {
+	loop {
+		// only do grvs to get committed version if we need it to persist delta files
+		while (bwData->pendingDeltaFileCommitChecks.get() == 0) {
+			wait(bwData->pendingDeltaFileCommitChecks.onChange());
+		}
+
+		// batch potentially multiple delta files into one GRV, and also rate limit GRVs for this worker
+		wait(delay(0.1)); // TODO KNOB?
+
+		state int checksToResolve = bwData->pendingDeltaFileCommitChecks.get();
+
+		Transaction tr(bwData->db);
+		Version readVersion = wait(tr.getReadVersion());
+
+		ASSERT(readVersion >= bwData->knownCommittedVersion.get());
+		if (readVersion > bwData->knownCommittedVersion.get()) {
+			// TODO REMOVE
+			printf("BW %s GRV updated committed version to %lld for %d delta files\n",
+			       bwData->id.toString().c_str(),
+			       readVersion,
+			       checksToResolve);
+			bwData->knownCommittedVersion.set(readVersion);
+		}
+
+		bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() - checksToResolve);
+	}
+}
+
 // TODO need to version assigned ranges with read version of txn the range was read and use that in
 // handleAssigned/Revoked from to prevent out-of-order assignments/revokes from the blob manager from getting ranges in
 // an incorrect state
@@ -1584,6 +1631,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 	state Future<Void> collection = actorCollection(addActor.getFuture());
 
 	addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
+	addActor.send(runGrvChecks(&self));
 
 	try {
 		loop choose {
