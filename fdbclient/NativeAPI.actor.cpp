@@ -6609,6 +6609,7 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 					resultLoc++;
 				}
 				if (begin == end) {
+					results.sendError(end_of_stream());
 					return Void();
 				}
 			}
@@ -6628,7 +6629,7 @@ struct MutationAndVersionStream {
 	Standalone<MutationsAndVersionRef> next;
 	PromiseStream<Standalone<MutationsAndVersionRef>> results;
 
-	bool operator<(MutationAndVersionStream const& rhs) const { return next.version < rhs.next.version; }
+	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
 };
 
 ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
