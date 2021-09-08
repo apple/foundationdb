@@ -5133,6 +5133,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ServerCoordinators coordinators) {
 	state WorkerFitnessInfo masterWorker;
 	state MasterInterface iMaster;
+	state Future<Void> recoveryCore;
+	state Reference<ClusterControllerRecovery::ClusterRecoveryData> recoveryData;
 
 	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
@@ -5192,10 +5194,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
 
-			state Future<Void> recoveryCore;
-			state Reference<ClusterControllerRecovery::ClusterRecoveryData> recoveryData;
-			state PromiseStream<Future<Void>> addActor;
 			state Future<Void> collection;
+			state PromiseStream<Future<Void>> addActor;
 
 			if (SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
 				recoveryData = makeReference<ClusterControllerRecovery::ClusterRecoveryData>(
@@ -5257,6 +5257,10 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				throw;
 			} else {
 				wait(delay(0.0));
+			}
+
+			while (recoveryData.isValid() && !recoveryData->addActor.isEmpty()) {
+				recoveryData->addActor.getFuture().pop();
 			}
 
 			TEST(err.code() == error_code_master_tlog_failed);          // Terminated due to tLog failure
