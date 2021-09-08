@@ -2153,8 +2153,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "waitopen")) {
-					wait(
-					    success(safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
+					wait(success(safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
 					continue;
 				}
 
@@ -2179,8 +2178,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					// Warn at 7 seconds since status will spend as long as 5 seconds trying to read/write from the
 					// database
 					warn = timeWarning(7.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n");
-					bool _result =
-					    wait(makeInterruptable(statusCommandActor(db, localDb, tokens, opt.exec.present())));
+					bool _result = wait(makeInterruptable(statusCommandActor(db, localDb, tokens, opt.exec.present())));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2289,8 +2287,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						fflush(stdout);
 						Optional<std::string> input =
 						    wait(linenoise.read(format("Repeat the above passphrase if you would like to proceed:")));
-						warn = checkStatus(
-						    timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
+						warn =
+						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
 							try {
