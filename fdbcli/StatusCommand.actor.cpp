@@ -1179,7 +1179,14 @@ void printStatus(StatusObjectReader statusObj,
 	return;
 }
 
-ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, bool isExecMode) {
+// "db" is the handler to the multiversion databse
+// localDb is the native Database object
+// localDb is rarely needed except the "db" has not establised a connection to the cluster where the operation will
+// return Never as we expect status command to always return, we use "localDb" to return the default result
+ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
+                                      Database localDb,
+                                      std::vector<StringRef> tokens,
+                                      bool isExecMode) {
 
 	state StatusClient::StatusLevel level;
 	if (tokens.size() == 1)
@@ -1195,15 +1202,21 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db, std::vector<Strin
 		return false;
 	}
 
+	state StatusObject s;
 	state Reference<ITransaction> tr = db->createTransaction();
-	state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
-	Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
-	if (!statusValue.present()) {
-		fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
+	if (!tr->isValid()) {
+		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
+		s = _s;
+	} else {
+		state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
+		if (!statusValue.present()) {
+			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
+		}
+		json_spirit::mValue mv;
+		json_spirit::read_string(statusValue.get().toString(), mv);
+		s = StatusObject(mv.get_obj());
 	}
-	json_spirit::mValue mv;
-	json_spirit::read_string(statusValue.get().toString(), mv);
-	StatusObject s = StatusObject(mv.get_obj());
 
 	if (!isExecMode)
 		printf("\n");

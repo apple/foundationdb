@@ -877,6 +877,11 @@ void MultiVersionTransaction::reset() {
 	updateTransaction();
 }
 
+bool MultiVersionTransaction::isValid() {
+	auto tr = getTransaction();
+	return tr.transaction ? true : false;
+}
+
 // MultiVersionDatabase
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            int threadIdx,

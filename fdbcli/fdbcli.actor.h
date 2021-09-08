@@ -137,7 +137,10 @@ ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<Str
 // snapshot command
 ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // status command
-ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, bool isExecMode = false);
+ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
+                                      Database localDb,
+                                      std::vector<StringRef> tokens,
+                                      bool isExecMode = false);
 // suspend command
 ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        Reference<ITransaction> tr,
