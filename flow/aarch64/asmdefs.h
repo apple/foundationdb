@@ -28,7 +28,7 @@
 
 /* Add a NT_GNU_PROPERTY_TYPE_0 note.  */
 #define GNU_PROPERTY(type, value)                                                                                      \
-	.section.note.gnu.property, "a";                                                                                   \
+	.section .note.gnu.property, "a";                                                                                   \
 	.p2align 3;                                                                                                        \
 	.word 4;                                                                                                           \
 	.word 16;                                                                                                          \
