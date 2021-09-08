@@ -2097,8 +2097,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 			wait(delay(0.0));
 		}
 
-		while (!self->addActor.isEmpty()) {
-			self->addActor.getFuture().pop();
+		while (!addActor.isEmpty()) {
+			addActor.getFuture().pop();
 		}
 
 		TEST(err.code() == error_code_master_tlog_failed); // Master: terminated due to tLog failure

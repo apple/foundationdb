@@ -3799,6 +3799,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	state DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
+	// printf("trackTLogRecovery %p\n", self.getPtr());
 	loop {
 		state DBCoreState newState;
 		self->logSystem->toCoreState(newState);
@@ -4007,6 +4008,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<ClusterRecoveryData> self) {
 }
 
 ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
+	// printf("registering changeCoordinators %p\n", self.getPtr());
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->clusterController.changeCoordinators.getFuture());
 		++self->changeCoordinatorsRequests;
@@ -5126,6 +5128,19 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	throw internal_error();
 }
 
+ACTOR Future<Void> cleanupActorCollection(Reference<ClusterRecoveryData> self, bool exThrown) {
+	if (self.isValid()) {
+		wait(delay(0.0));
+
+		// printf("freeing up actors %p exThrown %d\n", self.getPtr(), exThrown);
+		while (!self->addActor.isEmpty()) {
+			self->addActor.getFuture().pop();
+		}
+	}
+
+	return Void();
+}
+
 } // namespace ClusterControllerRecovery
 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
@@ -5133,6 +5148,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ServerCoordinators coordinators) {
 	state MasterInterface iMaster;
 	state Reference<ClusterControllerRecovery::ClusterRecoveryData> recoveryData;
+	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> recoveryCore;
 
 	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
@@ -5193,8 +5210,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
 
 			state Future<Void> collection;
-			state PromiseStream<Future<Void>> addActor;
-			state Future<Void> recoveryCore;
 
 			if (SERVER_KNOBS->CLUSTERRECOVERY_CONTROLLER_DRIVEN_RECOVERY) {
 				recoveryData = makeReference<ClusterControllerRecovery::ClusterRecoveryData>(
@@ -5206,6 +5221,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				    LiteralStringRef(""),
 				    addActor,
 				    db->forceRecovery);
+				// printf("allocated new recoveryData %p\n", recoveryData.getPtr());
 
 				collection = actorCollection(recoveryData->addActor.getFuture());
 				recoveryCore = ClusterControllerRecovery::clusterRecoveryCore(recoveryData);
@@ -5239,29 +5255,25 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					req.reply.send(Void());
 					TraceEvent("BackupWorkerDoneRequest", cluster->id).log();
 				}
-				when(wait(collection)) {
-					throw internal_error();
-				}
+				when(wait(collection)) { throw internal_error(); }
 			}
 			wait(spinDelay);
 
 			TEST(true); // clusterWatchDatabase() recovery failed
 
-			while (recoveryData.isValid() && !recoveryData->addActor.isEmpty()) {
-				recoveryData->addActor.getFuture().pop();
-			}
+			recoveryCore.cancel();
+			wait(ClusterControllerRecovery::cleanupActorCollection(recoveryData, false /* exThrown */));
+			ASSERT(addActor.isEmpty());
 		} catch (Error& e) {
 			state Error err = e;
 			TraceEvent("CCWDB", cluster->id).error(e, true).detail("Master", iMaster.id());
 			if (e.code() != error_code_actor_cancelled) {
 				wait(delay(0.0));
-			} else {
-				throw err;
 			}
 
-			while (recoveryData.isValid() && !recoveryData->addActor.isEmpty()) {
-				recoveryData->addActor.getFuture().pop();
-			}
+			recoveryCore.cancel();
+			wait(ClusterControllerRecovery::cleanupActorCollection(recoveryData, true /* exThrown */));
+			ASSERT(addActor.isEmpty());
 
 			TEST(err.code() == error_code_master_tlog_failed);          // Terminated due to tLog failure
 			TEST(err.code() == error_code_commit_proxy_failed);         // Terminated due to commit proxy failure
