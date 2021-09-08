@@ -108,4 +108,5 @@ struct BlobGranuleChunkRef {
 	}
 };
 
+enum BlobGranuleSplitState { Unknown = 0, Started = 1, Assigned = 2, Done = 3 };
 #endif

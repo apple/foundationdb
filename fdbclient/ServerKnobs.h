@@ -704,6 +704,8 @@ public:
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 
+	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
+
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };
