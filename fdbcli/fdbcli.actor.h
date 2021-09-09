@@ -128,7 +128,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // lock/unlock command
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
-ACTOR Future<Void> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
+ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,

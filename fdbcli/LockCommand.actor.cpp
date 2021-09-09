@@ -32,22 +32,23 @@
 
 namespace {
 
-ACTOR Future<Void> lockDatabase(Reference<IDatabase> db, UID id) {
+ACTOR Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
 			tr->set(fdb_cli::lockSpecialKey, id.toString());
 			wait(safeThreadFutureToFuture(tr->commit()));
-			return Void();
+			printf("Database locked.\n");
+			return true;
 		} catch (Error& e) {
+			state Error err(e);
 			if (e.code() == error_code_database_locked)
 				throw e;
-			state Error err(e);
-			if (e.code() == error_code_special_keys_api_failure) {
+			else if (e.code() == error_code_special_keys_api_failure) {
 				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
-				if (errorMsgStr == "Database has already been locked")
-					throw database_locked();
+				fprintf(stderr, "%s\n", errorMsgStr.c_str());
+				return false;
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
@@ -67,13 +68,12 @@ ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringR
 	} else {
 		state UID lockUID = deterministicRandom()->randomUniqueID();
 		printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
-		wait((lockDatabase(db, lockUID)));
-		printf("Database locked.\n");
-		return true;
+		bool result = wait((lockDatabase(db, lockUID)));
+		return result;
 	}
 }
 
-ACTOR Future<Void> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
+ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -82,23 +82,23 @@ ACTOR Future<Void> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
 			Optional<Value> val = wait(safeThreadFutureToFuture(valF));
 
 			if (!val.present())
-				return Void();
+				return true;
 
 			if (val.present() && UID::fromString(val.get().toString()) != uid) {
-				throw database_locked();
+				printf("Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
+				return false;
 			}
 
 			tr->clear(fdb_cli::lockSpecialKey);
 			wait(safeThreadFutureToFuture(tr->commit()));
-			return Void();
+			printf("Database unlocked.\n");
+			return true;
 		} catch (Error& e) {
-			if (e.code() == error_code_database_locked)
-				throw e;
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
 				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
-				if (errorMsgStr == "Database has already been locked")
-					throw database_locked();
+				fprintf(stderr, "%s\n", errorMsgStr.c_str());
+				return false;
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
