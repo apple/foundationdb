@@ -955,8 +955,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ClusterConnectionString ccStr(ccStrValue.get().toString());
 					// choose a new description if configuration allows transactions across differently named clusters
 					new_cluster_description = SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT
-			                                                ? deterministicRandom()->randomAlphaNumeric(8)
-			                                                : ccStr.clusterKeyName().toString();
+					                              ? deterministicRandom()->randomAlphaNumeric(8)
+					                              : ccStr.clusterKeyName().toString();
 					// get current coordinators
 					Optional<Value> processes_key =
 					    wait(tx->get(LiteralStringRef("processes")
