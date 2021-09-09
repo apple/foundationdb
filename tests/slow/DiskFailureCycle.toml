@@ -22,11 +22,5 @@ testTitle = 'DiskFailureCycle'
     stallInterval = 10.0
     stallPeriod = 60.0
     throttlePeriod = 60.0
-
-    [[test.workload]]
-    testName = 'DiskFailureInjection'
-    testDuration = 240.0
-    verificationMode = true
-    startDelay = 120.0
     corruptFile = true
     percentBitFlips = 10
