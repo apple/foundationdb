@@ -552,6 +552,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Counter bytesDurable;
 	Counter blockingPeeks;
 	Counter blockingPeekTimeouts;
+	std::map<Tag, LatencySample> blockingPeekLatencies;
 
 	UID logId;
 	ProtocolVersion protocolVersion;
@@ -1758,7 +1759,19 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled &&
 	    reqTag.locality >= 0 && !reqReturnIfBlocked) {
-           wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
+		state double startTime = now();
+		// TODO (version vector) check if this should be included in "status details" json
+		// TODO (version vector) all tags may be too many, instead,  standard deviation?
+		wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
+		double latency = now() - startTime;
+		if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
+			UID ssID = nondeterministicRandom()->randomUniqueID();
+			std::string s = "BlockingPeekLatencies " + reqTag.toString();
+			logData->blockingPeekLatencies.try_emplace(
+			    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
+		}
+		LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
+		sample.addMeasurement(latency);
 	}
 	state Version endVersion = logData->version.get() + 1;
 	state bool onlySpilled = false;
