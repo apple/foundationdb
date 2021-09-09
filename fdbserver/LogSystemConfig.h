@@ -183,8 +183,8 @@ struct LogSystemConfig {
 	LogEpoch oldestBackupEpoch;
 
 	LogSystemConfig(LogEpoch e = 0)
-	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false),
-	    epoch(e), oldestBackupEpoch(e) {}
+	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),
+	    oldestBackupEpoch(e) {}
 
 	std::string toString() const;
 

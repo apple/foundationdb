@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -1916,9 +1915,8 @@ Optional<std::pair<Version, Version>> TagPartitionedLogSystem::getDurableVersion
 	return Optional<std::pair<Version, Version>>();
 }
 
-ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(
-    LogLockInfo lockInfo,
-    std::vector<Reference<AsyncVar<bool>>> failed) {
+ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo lockInfo,
+                                                                     std::vector<Reference<AsyncVar<bool>>> failed) {
 	// Wait for anything relevant to change
 	std::vector<Future<Void>> changes;
 	for (int j = 0; j < lockInfo.logSet->logServers.size(); j++) {
