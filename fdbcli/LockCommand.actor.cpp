@@ -45,12 +45,8 @@ ACTOR Future<Void> lockDatabase(Reference<IDatabase> db, UID id) {
 				throw e;
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				Optional<Value> errorMsg = wait(safeThreadFutureToFuture(tr->get(fdb_cli::errorMsgSpecialKey)));
-				ASSERT(errorMsg.present());
-				std::string errorMsgStr;
-				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-				if (valueObj["message"].get_str() == "Database has already been locked")
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				if (errorMsgStr == "Database has already been locked")
 					throw database_locked();
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));
@@ -100,12 +96,8 @@ ACTOR Future<Void> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
 				throw e;
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				Optional<Value> errorMsg = wait(safeThreadFutureToFuture(tr->get(fdb_cli::errorMsgSpecialKey)));
-				ASSERT(errorMsg.present());
-				std::string errorMsgStr;
-				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-				if (valueObj["message"].get_str() == "Database has already been locked")
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				if (errorMsgStr == "Database has already been locked")
 					throw database_locked();
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));
