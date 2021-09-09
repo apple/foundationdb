@@ -51,6 +51,7 @@ set(FDBSERVER_SRCS
   LogRouter.actor.cpp
   LogSystem.cpp
   LogSystem.h
+  LogSystemConfig.cpp
   LogSystemConfig.h
   LogSystemDiskQueueAdapter.actor.cpp
   LogSystemDiskQueueAdapter.h
