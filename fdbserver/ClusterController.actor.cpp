@@ -63,6 +63,7 @@
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -2985,6 +2986,7 @@ public:
 			}
 		}
 
+		TraceEvent("none of the above").log();
 		return false;
 	}
 
@@ -7340,11 +7342,16 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	NetworkAddress backup(IPAddress(0x06060606), 1);
 	NetworkAddress proxy(IPAddress(0x07070707), 1);
 	NetworkAddress resolver(IPAddress(0x08080808), 1);
+	NetworkAddress clusterController(IPAddress(0x09090909), 1);
 
 	// Create a ServerDBInfo using above addresses.
 	ServerDBInfo testDbInfo;
 	testDbInfo.clusterInterface.changeCoordinators =
-	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, UID(1, 2)));
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ clusterController }, UID(1, 2)));
+
+	MasterInterface mInterface;
+	mInterface.getCommitVersion = RequestStream<struct GetCommitVersionRequest>(Endpoint({ master }, UID(1, 2)));
+	testDbInfo.master = mInterface;
 
 	TLogInterface localTLogInterf;
 	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, UID(1, 2)));
