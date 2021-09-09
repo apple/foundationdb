@@ -38,6 +38,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/IRandom.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -45,6 +46,7 @@
 #include "fdbrpc/Replication.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "fdbclient/Schemas.h"
+#include "flow/network.h"
 #include "flow/serialize.h"
 
 bool isInteger(const std::string& s) {
@@ -460,6 +462,11 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
+			if (g_network->isSimulated()) {
+				UID debugID = deterministicRandom()->randomUniqueID();
+				TraceEvent(SevDebug, "ChangeConfigRandom", debugID);
+				tr.debugTransaction(debugID);
+			}
 			if (!creating && !force) {
 				state Future<RangeResult> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<vector<ProcessData>> fWorkers = getWorkers(&tr);
@@ -653,6 +660,7 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 			tr.set(moveKeysLockOwnerKey, versionKey);
 
 			wait(tr.commit());
+			TraceEvent(SevDebug, "ChangeConfigSuccess");
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
@@ -662,6 +670,12 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 				tr.reset();
 				loop {
 					try {
+						if (g_network->isSimulated()) {
+							UID debugID = deterministicRandom()->randomUniqueID();
+							TraceEvent(SevDebug, "ChangeConfigRandom2", debugID);
+							tr.debugTransaction(debugID);
+						}
+
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
@@ -672,10 +686,12 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 						else
 							return ConfigurationResult::DATABASE_CREATED;
 					} catch (Error& e2) {
+						TraceEvent(SevDebug, "ChangeConfigError2").error(e2);
 						wait(tr.onError(e2));
 					}
 				}
 			}
+			TraceEvent(SevDebug, "ChangeConfigError").error(e1);
 			wait(tr.onError(e1));
 		}
 	}
