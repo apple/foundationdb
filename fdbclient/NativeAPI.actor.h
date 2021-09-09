@@ -359,7 +359,9 @@ public:
 	              const ValueRef& value,
 	              MutationRef::Type operationType,
 	              AddConflictRange = AddConflictRange::True);
-	void clear(const KeyRangeRef& range, AddConflictRange = AddConflictRange::True);
+	void clear(const KeyRangeRef& range,
+	           AddConflictRange = AddConflictRange::True,
+	           MutationRef::Type = MutationRef::Type::ClearRange);
 	void clear(const KeyRef& key, AddConflictRange = AddConflictRange::True);
 	[[nodiscard]] Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
 

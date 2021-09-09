@@ -4597,7 +4597,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	TEST(true); // NativeAPI atomic operation
 }
 
-void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRange) {
+void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRange, MutationRef::Type type) {
 	++cx->transactionClearMutations;
 	auto& req = tr;
 	auto& t = req.transaction;
@@ -4624,7 +4624,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	if (r.empty())
 		return;
 
-	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, r.begin, r.end);
+	t.mutations.emplace_back(req.arena, type, r.begin, r.end);
 
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);

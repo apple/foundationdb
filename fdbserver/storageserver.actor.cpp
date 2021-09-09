@@ -2727,7 +2727,7 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		if (!SHORT_CIRCUT_ACTUAL_STORAGE || !normalKeys.contains(m.param1))
 			addMutation(map.rangeContaining(m.param1)->value(), ver, m);
-	} else if (m.type == MutationRef::ClearRange) {
+	} else if (isRangeOrBackupRestoreMutation((MutationRef::Type)m.type)) {
 		KeyRangeRef mKeys(m.param1, m.param2);
 		if (!SHORT_CIRCUT_ACTUAL_STORAGE || !normalKeys.contains(mKeys)) {
 			auto r = map.intersectingRanges(mKeys);
@@ -3374,6 +3374,10 @@ void StorageServer::addMutation(Version version,
                                 MutationRef const& mutation,
                                 KeyRangeRef const& shard,
                                 UpdateEagerReadInfo* eagerReads) {
+	if (mutation.type == MutationRef::Type::RestoreRange) {
+		std::cout << "storage server received (and skipped) " << mutation.toString() << std::endl;
+		return;
+	}
 	MutationRef expanded = mutation;
 	auto& mLog = addVersionToMutationLog(version);
 

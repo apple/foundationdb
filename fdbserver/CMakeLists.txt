@@ -199,6 +199,7 @@ set(FDBSERVER_SRCS
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
   workloads/MutationLogReaderCorrectness.actor.cpp
+  workloads/BackupRestoreDemo.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp

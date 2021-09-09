@@ -50,6 +50,8 @@ static const char* typeString[] = { "SetValue",
 	                                "AndV2",
 	                                "CompareAndClear",
 	                                "Reserved_For_SpanContextMessage",
+	                                "BackupRange",
+	                                "RestoreRange",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
@@ -77,7 +79,9 @@ struct MutationRef {
 		AndV2,
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
-		MAX_ATOMIC_OP
+		BackupRange,
+		RestoreRange, // TODO: This may need the third param representing a desired version.
+		MAX_ATOMIC_OP // TODO: This may need to be renamed to something like MAX_MUTATION_TYPE
 	};
 	// This is stored this way for serialization purposes.
 	uint8_t type;
@@ -134,7 +138,8 @@ struct MutationRef {
 		SINGLE_KEY_MASK = ATOMIC_MASK | (1 << SetValue),
 		NON_ASSOCIATIVE_MASK = (1 << AddValue) | (1 << Or) | (1 << Xor) | (1 << Max) | (1 << Min) |
 		                       (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << MinV2) |
-		                       (1 << CompareAndClear)
+		                       (1 << CompareAndClear),
+		RANGE_MASK = (1 << ClearRange) | (1 << BackupRange) | (1 << RestoreRange)
 	};
 };
 
@@ -154,6 +159,10 @@ static inline std::string getTypeString(uint8_t type) {
 // A 'single key mutation' is one which affects exactly the value of the key specified by its param1
 static inline bool isSingleKeyMutation(MutationRef::Type type) {
 	return (MutationRef::SINGLE_KEY_MASK & (1 << type)) != 0;
+}
+
+static inline bool isRangeOrBackupRestoreMutation(MutationRef::Type type) {
+	return (MutationRef::RANGE_MASK & (1 << type)) != 0;
 }
 
 // Returns true if the given type can be safely cast to MutationRef::Type and used as a parameter to

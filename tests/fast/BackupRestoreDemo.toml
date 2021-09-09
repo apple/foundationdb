@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'BackupRestoreDemo'
+useDB = true
+
+    [[test.workload]]
+    testName = 'BackupRestoreDemo'
