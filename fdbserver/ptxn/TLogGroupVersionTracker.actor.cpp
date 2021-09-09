@@ -22,6 +22,7 @@
 #include "fdbserver/ptxn/TLogGroupVersionTracker.h"
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 
 namespace ptxn {
@@ -60,11 +61,10 @@ std::map<TLogGroupID, Version> TLogGroupVersionTracker::updateGroups(const std::
 	}
 
 	if (SERVER_KNOBS->INSERT_EMPTY_TRANSACTION) {
-		for (auto& it : versions) {
-			if (results.count(it.first) == 0 &&
-			    commitVersion - it.second >= SERVER_KNOBS->LAGGING_TLOG_GROUP_VERSION_LIMIT) {
-				it.second = commitVersion;
-				results.emplace(it.first, it.second);
+		for (auto& [gid, version] : versions) {
+			if (results.count(gid) == 0 && commitVersion - version >= SERVER_KNOBS->LAGGING_TLOG_GROUP_VERSION_LIMIT) {
+				results.emplace(gid, version);
+				version = commitVersion;
 			}
 		}
 	}
