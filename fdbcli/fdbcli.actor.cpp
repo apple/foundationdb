@@ -1815,16 +1815,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
-							try {
-								wait(makeInterruptable(unlockDatabaseActor(db, unlockUID)));
-								printf("Database unlocked.\n");
-							} catch (Error& e) {
-								if (e.code() == error_code_database_locked) {
-									printf(
-									    "Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
-								}
-								throw e;
-							}
+							bool _result = wait(makeInterruptable(unlockDatabaseActor(db, unlockUID)));
+							if (!_result)
+								is_error = true;
 						} else {
 							fprintf(stderr, "ERROR: Incorrect passphrase entered.\n");
 							is_error = true;
