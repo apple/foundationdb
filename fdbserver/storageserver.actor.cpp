@@ -3527,6 +3527,7 @@ private:
 
 	KeyRef startKey;
 	bool nowAssigned;
+	bool emptyRange;
 	bool processedStartKey;
 
 	KeyRef cacheStartKey;
@@ -3549,7 +3550,8 @@ private:
 
 				// The changes for version have already been received (and are being processed now).  We need to fetch
 				// the data for change.version-1 (changes from versions < change.version)
-				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, CSK_UPDATE);
+				const Version shardVersion = (emptyRange && nowAssigned) ? 1 : currentVersion - 1;
+				changeServerKeys(data, keys, nowAssigned, shardVersion, CSK_UPDATE);
 			}
 
 			processedStartKey = false;
@@ -3559,6 +3561,7 @@ private:
 			// keys
 			startKey = m.param1;
 			nowAssigned = m.param2 != serverKeysFalse;
+			emptyRange = m.param2 == serverKeysTrueEmptyRange;
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)

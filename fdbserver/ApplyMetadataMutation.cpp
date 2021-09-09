@@ -35,7 +35,11 @@ Reference<StorageInfo> getStorageInfo(UID id,
 	auto cacheItr = storageCache->find(id);
 	if (cacheItr == storageCache->end()) {
 		storageInfo = makeReference<StorageInfo>();
-		storageInfo->tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(id)).get().get());
+		Optional<Value> tag = txnStateStore->readValue(serverTagKeyFor(id)).get();
+		TraceEvent(SevWarn, "HeLiuDebuggetStorageInfo")
+		    .detail("SSID", id)
+		    .detail("Tag", tag.present() ? tag.get().toString() : "");
+		storageInfo->tag = decodeServerTagValue(tag.get());
 		storageInfo->interf = decodeServerListValue(txnStateStore->readValue(serverListKeyFor(id)).get().get());
 		(*storageCache)[id] = storageInfo;
 	} else {

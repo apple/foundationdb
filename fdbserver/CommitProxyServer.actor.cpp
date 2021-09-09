@@ -2066,6 +2066,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			updateTagInfo(src, info.tags, info.src_info);
 
 			info.dest_info.clear();
+			TraceEvent(SevWarn, "HeLiuDebugUpdateDest").detail("Dest", describe(dest));
 			updateTagInfo(dest, info.tags, info.dest_info);
 
 			uniquify(info.tags);

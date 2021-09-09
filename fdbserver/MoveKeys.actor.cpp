@@ -1259,6 +1259,7 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 					allLocalities.insert(dcId_locality[decodeTLogDatacentersKey(it.key)]);
 				}
 
+				// If the storage server is in an invalid DC, remove the DC?
 				if (locality >= 0 && !allLocalities.count(locality)) {
 					for (auto& it : fTagLocalities.get()) {
 						if (locality == decodeTagLocalityListValue(it.value)) {
@@ -1305,7 +1306,11 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               UID serverID,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState) {
+	state std::vector<UID> targetTeam;
 	state Key begin = allKeys.begin;
+
+	state vector<UID> src;
+	state vector<UID> dest;
 	// Multi-transactional removal in case of large number of shards, concern in violating 5s transaction limit
 	while (begin < allKeys.end) {
 		state Transaction tr(cx);
@@ -1328,6 +1333,20 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				                                                 KeyRangeRef(begin, allKeys.end),
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+
+				for (int i = 0; i < keyServers.size() && targetTeam.empty(); ++i) {
+					decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+					if (std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
+						targetTeam.insert(targetTeam.end(), dest.begin(), dest.end());
+					}
+					if (!targetTeam.empty()) {
+						break;
+					}
+					if (std::find(src.begin(), src.end(), serverID) == src.end()) {
+						targetTeam.insert(targetTeam.end(), src.begin(), src.end());
+					}
+				}
+
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
 				for (int i = 0; i < keyServers.size() - 1; ++i) {
 					auto it = keyServers[i];
@@ -1366,15 +1385,29 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 					// Remove the shard from keyServers/ if the src list is empty, and also remove the shard from all
 					// dest servers.
 					if (src.empty()) {
+						ASSERT(!targetTeam.empty());
+						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, targetTeam, {}));
+						vector<Future<Void>> actors;
+						for (const UID& id : dest) {
+							actors.push_back(krmSetRangeCoalescing(&tr,
+							                                       serverKeysPrefixFor(id),
+							                                       KeyRangeRef(it.key, keyServers[i + 1].key),
+							                                       allKeys,
+							                                       serverKeysFalse));
+						}
+						// Update serverKeys to include keys.
+						for (const UID& id : targetTeam) {
+							actors.push_back(krmSetRangeCoalescing(&tr,
+							                                       serverKeysPrefixFor(id),
+							                                       KeyRangeRef(it.key, keyServers[i + 1].key),
+							                                       allKeys,
+							                                       serverKeysTrueEmptyRange));
+						}
 						TraceEvent(SevWarn, "FailedServerRemoveRange", serverID)
 						    .detail("Key", it.key)
-						    .detail("ValueDest", describe(dest));
-						serversToRemoveRange.insert(serversToRemoveRange.end(), dest.begin(), dest.end());
-						wait(krmSetRangeCoalescing(&tr,
-						                           keyServersPrefix,
-						                           KeyRangeRef(it.key, keyServers[i + 1].key),
-						                           allKeys,
-						                           keyServers[i + 1].value));
+						    .detail("OldDest", describe(dest))
+						    .detail("NewTeam", describe(targetTeam));
+						waitForAll(actors);
 					} else {
 						TraceEvent(SevDebug, "FailedServerSetKey", serverID)
 						    .detail("Key", it.key)

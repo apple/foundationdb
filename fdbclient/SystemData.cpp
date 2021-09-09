@@ -275,7 +275,7 @@ std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID
 
 const KeyRef serverKeysPrefix = LiteralStringRef("\xff/serverKeys/");
 const ValueRef serverKeysTrue = LiteralStringRef("1"), // compatible with what was serverKeysTrue
-    serverKeysFalse;
+    serverKeysTrueEmptyRange = LiteralStringRef("3"), serverKeysFalse;
 
 const Key serverKeysKey(UID serverID, const KeyRef& key) {
 	BinaryWriter wr(Unversioned());
@@ -299,7 +299,7 @@ UID serverKeysDecodeServer(const KeyRef& key) {
 	return server_id;
 }
 bool serverHasKey(ValueRef storedValue) {
-	return storedValue == serverKeysTrue;
+	return storedValue == serverKeysTrue || storedValue == serverKeysTrueEmptyRange;
 }
 
 const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
