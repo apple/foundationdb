@@ -1,6 +1,11 @@
 #include <atomic>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/executor_work_guard.hpp>
 #include <boost/interprocess/creation_tags.hpp>
 #include <boost/interprocess/interprocess_fwd.hpp>
+#include <boost/interprocess/sync/named_condition.hpp>
+#include <boost/interprocess/sync/named_mutex.hpp>
+#include <boost/interprocess/sync/scoped_lock.hpp>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -17,48 +22,33 @@ using namespace boost::interprocess;
 
 volatile sig_atomic_t stopped = 0;
 
-void trace(int trace_period_milliseconds, std::atomic_int* counter, std::atomic_ullong* latency) {
-	shm::bench_t prev_time = shm::now();
-    // shm::bench_t prev_latency = latency->load();
-	int prev_counter = counter->load();
-	while (!stopped) {
-        printf("Rate: %.3e messages/second\n", (counter->load() - prev_counter) * 1e9 / (shm::now() - prev_time));
-        printf("Roundtrip latency(Avg): %.3f us\n", latency->load() / 1e3 / counter->load());
-		// clear samples, recalculate metrics in the next time window
-        counter->store(0);
-        latency->store(0);
-		prev_counter = counter->load();
-		prev_time = shm::now();
-		// sleep
-		std::this_thread::sleep_for(std::chrono::milliseconds(trace_period_milliseconds));
-	}
-}
-
-shm::bench_t shm::now() {
-	struct timespec ts;
-	timespec_get(&ts, TIME_UTC);
-	return ts.tv_sec * 1e9 + ts.tv_nsec;
-};
-
-void my_handler(int s){
-    stopped = 1;
+void my_handler(int s) {
+	// printf("Producer: catch ctrl-C\n");
+	stopped = 1;
 }
 
 // Main function. For producer
 int main(int argc, char* argv[]) {
-	
+
 	signal(SIGINT, my_handler);
 
-    int size = std::stoi(argv[1]);
-    int waiting_interval = 0;
-	if (argc == 3) waiting_interval = std::stoi(argv[2]);
+	int size = std::stoi(argv[1]);
+	int waiting_interval = 0;
+	if (argc == 3)
+		waiting_interval = std::stoi(argv[2]);
 
 	// Remove shared memory on construction and destruction
 	struct shm_remove {
-		shm_remove() { 
+		shm_remove() {
 			shared_memory_object::remove("MySharedMemory");
+			named_mutex::remove("consumer_mutex");
+			named_condition::remove("consumer_cond");
 		}
-		~shm_remove() { shared_memory_object::remove("MySharedMemory"); }
+		~shm_remove() {
+			shared_memory_object::remove("MySharedMemory");
+			named_mutex::remove("consumer_mutex");
+			named_condition::remove("consumer_cond");
+		}
 	} remover;
 
 	// Create a new segment with given name and size
@@ -67,40 +57,53 @@ int main(int argc, char* argv[]) {
 	// size is given as 10
 	// here we are doing a ping-pong test so the size if okay
 	shm::message_queue* request_queue = segment.construct<shm::message_queue>("request_queue")();
-	shm::message_queue* reply_queue = segment.construct<shm::message_queue>("reply_queue")();
-	
-	std::atomic_int count = 0;
-	std::atomic_ullong latency = 0;
-	std::thread traceT{ trace, 1000, &count, &latency };
-    // shm::message* msg = static_cast<shm::message*>(segment.allocate(sizeof(shm::message)));
-    char* msg = static_cast<char*>(segment.allocate(size*sizeof(char)));
-    void* buffer = malloc(size*sizeof(char));
+	// shm::message_queue* latency_queue = segment.construct<shm::message_queue>("latency_queue")();
+
+	// create a flag to indicate whether the consumer is sleeping
+	std::atomic_bool* sleepingFlag = segment.construct<std::atomic_bool>("sleeping_flag")();
+	sleepingFlag->store(false);
+	named_mutex mutex(open_or_create, "consumer_mutex");
+	named_condition cond(open_or_create, "consumer_cond");
+	printf("Created cond and mutex\n");
+
+	shm::message* msg = static_cast<shm::message*>(segment.allocate(sizeof(shm::message)));
+	// char* msg = static_cast<char*>(segment.allocate(size*sizeof(char)));
+	void* buffer = malloc(size * sizeof(char));
 	while (!stopped) {
-        if (waiting_interval)
-            std::this_thread::sleep_for(std::chrono::milliseconds(waiting_interval));
+		if (waiting_interval)
+			std::this_thread::sleep_for(std::chrono::milliseconds(waiting_interval));
+		else {
+			// somehow the busy loop will die quickly
+			// add a very short sleep can avoid it
+			// 10 nano seconds is small enough to be ignored considering the latency is ~10us
+			std::this_thread::sleep_for(std::chrono::nanoseconds(10));
+		}
 		// shm::message* msg = static_cast<shm::message*>(segment.allocate(sizeof(shm::message)));
 		// write the message
-        memset(msg, '-', size);
-
-		shm::bench_t start_time = shm::now();
-		// shm::bench_t push_start = shm::now();
+		memset(msg->data, '-', 100);
+		msg->start_time = shm::now();
 		while (!request_queue->push(msg) && !stopped) {
 			// fails to push, just retry
+			// printf("Retry once\n");
 		};
-		offset_ptr<char> ptr;
-		while (!reply_queue->pop(ptr) && !stopped) {
-			// fails to pop, just retry
+		// printf("Producer pushed once\n");
+		if (sleepingFlag->load()) {
+			// printf("Notify once\n");
+			cond.notify_all();
 		}
+		// while (!reply_queue->pop(ptr) && !stopped) {
+		// 	// fails to pop, just retry
+		// }
+		// printf("Producer sleep\n");
+		// reply_queue->pop(ptr);
 		// read the reply
-		memcpy(buffer, ptr.get(), size);
-		latency.fetch_add(shm::now() - start_time);
-        count.fetch_add(1);
+		// memcpy(buffer, ptr.get(), size);
 	}
-    segment.deallocate(msg);
-    free(buffer);
+	segment.deallocate(msg);
+	free(buffer);
 	// When done, destroy the queues from the segment
 	segment.destroy<shm::message>("request_queue");
-	segment.destroy<shm::message>("reply_queue");
-	traceT.join();
+	// segment.destroy<shm::message>("reply_queue");
+	segment.destroy<std::atomic_bool>("sleeping_flag");
 	printf("Producer destroyed.\n");
 }

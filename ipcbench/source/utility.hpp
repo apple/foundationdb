@@ -16,9 +16,11 @@ typedef unsigned long long bench_t;
 
 struct message {
 	char data[100];
+	bench_t start_time;
 	message() {
 		// default message
 		memset(data, '*', 100);
+		start_time = 0;
 	}
 };
 
@@ -27,9 +29,13 @@ using alloc = bip::allocator<T, bip::managed_shared_memory::segment_manager>;
 
 using message_alloc = alloc<message>;
 
-using message_queue = boost::lockfree::spsc_queue<bip::offset_ptr<char>, boost::lockfree::capacity<10>>;
+using message_queue = boost::lockfree::spsc_queue<bip::offset_ptr<message>, boost::lockfree::capacity<1000>>;
 // using message_queue = std::queue<bip::offset_ptr<char>>;
 
-bench_t now();
+bench_t now() {
+	struct timespec ts;
+	timespec_get(&ts, TIME_UTC);
+	return ts.tv_sec * 1e9 + ts.tv_nsec;
+};
 
 } // namespace shm
