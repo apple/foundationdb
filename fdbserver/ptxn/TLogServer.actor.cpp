@@ -1180,6 +1180,7 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			auto tlogGroup = activeGeneration->find(req.tLogGroupID);
 			TEST(tlogGroup == activeGeneration->end()); // TLog group not found
 			if (tlogGroup == activeGeneration->end()) {
+				TraceEvent(SevWarn, "TLogCommitUnknownGroup", self->dbgid).detail("Group", req.tLogGroupID);
 				req.reply.sendError(tlog_group_not_found());
 				continue;
 			}
