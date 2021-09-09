@@ -1735,7 +1735,7 @@ void checkTestConf(const char* testFile, TestConfig* testConfig) {
 			testConfig->isFirstTestInRestart = true;
 		}
 		if (attrib == "disableTss") {
-			sscanf(value.c_str(), "%d", &testConfig->disableTss);
+			testConfig->disableTss = strcmp(value.c_str(), "true") == 0;
 		}
 	}
 

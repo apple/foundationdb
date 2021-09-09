@@ -63,7 +63,7 @@ Source IP:port     0         string   The IP and port of the machine where the s
 Trace ID           1         uint64   The 64-bit identifier of the trace. All spans in a trace share the same trace ID.
 Span ID            2         uint64   The 64-bit identifier of the span. All spans have a unique identifier.
 Start timestamp    3         double   The timestamp when the operation represented by the span began.
-End timestamp      4         double   The timestamp when the operation represented by the span ended.
+Duration           4         double   The duration in seconds of the operation represented by the span.
 Operation name     5         string   The name of the operation the span represents.
 Tags               6         map      User defined tags, added manually to specify additional information.
 Parent span IDs    7         vector   (Optional) A list of span IDs representing parents of this span.
