@@ -879,7 +879,7 @@ void MultiVersionTransaction::reset() {
 
 bool MultiVersionTransaction::isValid() {
 	auto tr = getTransaction();
-	return tr.transaction ? true : false;
+	return tr.transaction.isValid();
 }
 
 // MultiVersionDatabase
