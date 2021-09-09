@@ -1296,6 +1296,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                  std::vector<std::pair<Version, Tag>> history) final {
 		if (storageTeam.present()) {
 			Optional<ptxn::TLogGroupID> tLogGroup;
+			Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>> tlogIf;
 			for (auto& tLogSet : tLogs) {
 				if (tLogSet->isLocal && !tLogSet->groupIdToInterfaces.empty()) {
 					std::vector<ptxn::TLogGroupID> tLogGroups;
@@ -1303,19 +1304,21 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						tLogGroups.push_back(tLogGroup);
 					}
 					// TODO: remove this once tlog group collection is inside ILogSystem
+					// find the group for the given team
 					tLogGroup = ptxn::tLogGroupByStorageTeamID(tLogGroups, storageTeam.get());
+					ASSERT(tLogGroup.present());
+					auto& tlogInterfaces = tLogSet->groupIdToInterfaces[tLogGroup.get()];
+					ASSERT(!tlogInterfaces.empty());
+					tlogIf = tlogInterfaces[0];
 				}
 			}
+			TraceEvent(SevDebug, "SSPeekSingle", dbgid)
+			    .detail("Team", storageTeam.get())
+			    .detail("Group", tLogGroup.get())
+			    .detail("TLog", tlogIf->get().id());
 			ASSERT(tLogGroup.present());
 			return makeReference<ptxn::ServerPeekCursor>(
-			    Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(),
-			    tag,
-			    storageTeam.get(),
-			    tLogGroup.get(),
-			    begin,
-			    invalidVersion,
-			    false,
-			    false);
+			    tlogIf, tag, storageTeam.get(), tLogGroup.get(), begin, getPeekEnd(), false, false);
 		}
 
 		while (history.size() && begin >= history.back().first) {
