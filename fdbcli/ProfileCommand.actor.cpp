@@ -51,18 +51,16 @@ ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<S
 				fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
 				return false;
 			}
-			state std::string sampleRateStr = "default";
-			state std::string sizeLimitStr = "default";
-			Optional<Value> sampleRateValue =
-			    wait(safeThreadFutureToFuture(tr->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate))));
-			if (sampleRateValue.present() &&
-			    !std::isinf(boost::lexical_cast<double>(sampleRateValue.get().toString()))) {
-				sampleRateStr = sampleRateValue.get().toString();
+			std::string sampleRateStr = "default";
+			std::string sizeLimitStr = "default";
+			const double sampleRateDbl = GlobalConfig::globalConfig().get<double>(
+			    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+			if (!std::isinf(sampleRateDbl)) {
+				sampleRateStr = std::to_string(sampleRateDbl);
 			}
-			Optional<Value> sizeLimitValue =
-			    wait(safeThreadFutureToFuture(tr->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit))));
-			if (sizeLimitValue.present() && boost::lexical_cast<int64_t>(sizeLimitValue.get().toString()) != -1) {
-				sizeLimitStr = sizeLimitValue.get().toString();
+			const int64_t sizeLimit = GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			if (sizeLimit != -1) {
+				sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 			}
 			printf("Client profiling rate is set to %s and size limit is set to %s.\n",
 			       sampleRateStr.c_str(),
