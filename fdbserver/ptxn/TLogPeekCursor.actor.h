@@ -183,20 +183,20 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	TagsAndMessage messageAndTags; // TODO: do we still have tag concept in a message
 	bool hasMsg;
 	Future<Void> more;
-	UID randomID; // TODO: figure out what's this
+	UID dbgid; // i.e., unique debugID of this cursor.
 	bool returnIfBlocked;
 
-	bool onlySpilled;
+	bool onlySpilled = false;
 	bool parallelGetMore;
-	int sequence;
+	int sequence = 0;
 	Deque<Future<TLogPeekReply>> futureResults;
 	Future<Void> interfaceChanged;
 
-	double lastReset;
-	Future<Void> resetCheck;
-	int slowReplies;
-	int fastReplies;
-	int unknownReplies;
+	double lastReset = 0;
+	Future<Void> resetCheck = Void();
+	int slowReplies = 0;
+	int fastReplies = 0;
+	int unknownReplies = 0;
 
 	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> const& interf,
 	                 Tag tag,

@@ -27,6 +27,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "flow/Error.h"
+#include "flow/Trace.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include
 
@@ -236,13 +237,16 @@ ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInte
                                    bool returnIfBlocked,
                                    bool parallelGetMore)
   : interf(interf), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID), messageVersion(begin), end(end),
-    hasMsg(false), rd(results.arena, results.data, Unversioned()), randomID(deterministicRandom()->randomUniqueID()),
-    poppedVersion(0), returnIfBlocked(returnIfBlocked), sequence(0), onlySpilled(false),
-    parallelGetMore(parallelGetMore), lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0),
-    resetCheck(Void()) {
+    hasMsg(false), rd(results.arena, results.data, Unversioned()), dbgid(deterministicRandom()->randomUniqueID()),
+    poppedVersion(0), returnIfBlocked(returnIfBlocked), parallelGetMore(parallelGetMore) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
-	//TraceEvent("SPC_Starting", randomID).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).backtrace();
+	TraceEvent(SevDebug, "SPC_Starting", dbgid)
+	    .detail("Team", storageTeamId)
+	    .detail("Group", tLogGroupID)
+	    .detail("Tag", tag.toString())
+	    .detail("Begin", begin)
+	    .detail("End", end);
 }
 
 ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
@@ -256,10 +260,9 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
                                    TLogGroupID tLogGroupID)
   : results(results), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID),
     rd(results.arena, results.data, Unversioned()), messageVersion(messageVersion), end(end), messageAndTags(message),
-    hasMsg(hasMsg), randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion),
-    returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false), lastReset(0), slowReplies(0),
-    fastReplies(0), unknownReplies(0), resetCheck(Void()) {
-	//TraceEvent("SPC_Clone", randomID);
+    hasMsg(hasMsg), dbgid(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion),
+    returnIfBlocked(false), parallelGetMore(false) {
+	TraceEvent(SevDebug, "SPC_Clone", dbgid);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	if (hasMsg)
@@ -286,12 +289,12 @@ ArenaReader* ServerPeekCursor::reader() {
 }
 
 bool ServerPeekCursor::hasMessage() const {
-	//TraceEvent("SPC_HasMessage", randomID).detail("HasMsg", hasMsg);
+	TraceEvent(SevDebug, "SPC_HasMessage", dbgid).detail("HasMsg", hasMsg);
 	return hasMsg;
 }
 
 void ServerPeekCursor::nextMessage() {
-	//TraceEvent("SPC_NextMessage", randomID).detail("MessageVersion", messageVersion.toString());
+	TraceEvent(SevDebug, "SPC_NextMessage", dbgid).detail("MessageVersion", messageVersion.toString());
 	ASSERT(hasMsg);
 	if (rd.empty()) {
 		messageVersion.reset(std::min(results.endVersion, end.version));
@@ -304,7 +307,7 @@ void ServerPeekCursor::nextMessage() {
 		Version ver;
 		rd >> dummy >> ver;
 
-		//TraceEvent("SPC_ProcessSeq", randomID).detail("MessageVersion", messageVersion.toString()).detail("Ver", ver).detail("Tag", tag.toString());
+		TraceEvent(SevDebug, "SPC_ProcessSeq", dbgid).detail("MessageVersion", messageVersion.toString()).detail("Ver", ver).detail("Tag", tag.toString());
 		// ASSERT( ver >= messageVersion.version );
 
 		messageVersion.reset(ver);
@@ -319,16 +322,16 @@ void ServerPeekCursor::nextMessage() {
 
 	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
 	DEBUG_TAGS_AND_MESSAGE("ServerPeekCursor", messageVersion.version, messageAndTags.getRawMessage())
-	    .detail("CursorID", this->randomID);
+	    .detail("CursorID", this->dbgid);
 	// Rewind and consume the header so that reader() starts from the message.
 	rd.rewind();
 	rd.readBytes(messageAndTags.getHeaderSize());
 	hasMsg = true;
-	//TraceEvent("SPC_NextMessageB", randomID).detail("MessageVersion", messageVersion.toString());
+	TraceEvent(SevDebug, "SPC_NextMessageB", dbgid).detail("MessageVersion", messageVersion.toString());
 }
 
 StringRef ServerPeekCursor::getMessage() {
-	//TraceEvent("SPC_GetMessage", randomID);
+	TraceEvent(SevDebug, "SPC_GetMessage", dbgid);
 	StringRef message = messageAndTags.getMessageWithoutTags();
 	rd.readBytes(message.size()); // Consumes the message.
 	return message;
@@ -345,7 +348,7 @@ VectorRef<Tag> ServerPeekCursor::getTags() const {
 }
 
 void ServerPeekCursor::advanceTo(LogMessageVersion n) {
-	//TraceEvent("SPC_AdvanceTo", randomID).detail("N", n.toString());
+	TraceEvent(SevDebug, "SPC_AdvanceTo", dbgid).detail("N", n.toString());
 	while (messageVersion < n && hasMessage()) {
 		getMessage();
 		nextMessage();
@@ -366,7 +369,7 @@ ACTOR Future<Void> resetChecker(ServerPeekCursor* self, NetworkAddress addr) {
 	self->unknownReplies = 0;
 	self->fastReplies = 0;
 	wait(delay(SERVER_KNOBS->PEEK_STATS_INTERVAL));
-	TraceEvent("SlowPeekStats", self->randomID)
+	TraceEvent("SlowPeekStats", self->dbgid)
 	    .detail("PeerAddress", addr)
 	    .detail("SlowReplies", self->slowReplies)
 	    .detail("FastReplies", self->fastReplies)
@@ -375,7 +378,7 @@ ACTOR Future<Void> resetChecker(ServerPeekCursor* self, NetworkAddress addr) {
 	if (self->slowReplies >= SERVER_KNOBS->PEEK_STATS_SLOW_AMOUNT &&
 	    self->slowReplies / double(self->slowReplies + self->fastReplies) >= SERVER_KNOBS->PEEK_STATS_SLOW_RATIO) {
 
-		TraceEvent("ConnectionResetSlowPeek", self->randomID)
+		TraceEvent("ConnectionResetSlowPeek", self->dbgid)
 		    .detail("PeerAddress", addr)
 		    .detail("SlowReplies", self->slowReplies)
 		    .detail("FastReplies", self->fastReplies)
@@ -436,7 +439,7 @@ ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriorit
 					self->futureResults.push_back(recordRequestMetrics(
 					    self,
 					    self->interf->get().interf().peekMessages.getEndpoint().getPrimaryAddress(),
-					    self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->randomID,
+					    self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->dbgid,
 					                                                                       self->messageVersion.version,
 					                                                                       Optional<Version>(),
 					                                                                       self->returnIfBlocked,
@@ -472,12 +475,12 @@ ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriorit
 					self->hasMsg = true;
 					self->nextMessage();
 					self->advanceTo(skipSeq);
-					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
+					TraceEvent(SevDebug, "SPC_GetMoreB", self->dbgid).detail("Has", self->hasMessage()).detail("End", res.endVersion).detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
 				when(wait(self->interfaceChanged)) {
 					self->interfaceChanged = self->interf->onChange();
-					self->randomID = deterministicRandom()->randomUniqueID();
+					self->dbgid = deterministicRandom()->randomUniqueID();
 					self->sequence = 0;
 					self->onlySpilled = false;
 					self->futureResults.clear();
@@ -488,14 +491,14 @@ ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriorit
 				self->end.reset(self->messageVersion.version);
 				return Void();
 			} else if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
-				TraceEvent("PeekCursorTimedOut", self->randomID).error(e);
+				TraceEvent("PeekCursorTimedOut", self->dbgid).error(e);
 				// We *should* never get timed_out(), as it means the TLog got stuck while handling a parallel peek,
 				// and thus we've likely just wasted 10min.
 				// timed_out() is sent by cleanupPeekTrackers as value PEEK_TRACKER_EXPIRATION_TIME
 				ASSERT_WE_THINK(e.code() == error_code_operation_obsolete ||
 				                SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
 				self->interfaceChanged = self->interf->onChange();
-				self->randomID = deterministicRandom()->randomUniqueID();
+				self->dbgid = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;
 				self->futureResults.clear();
 			} else {
@@ -511,35 +514,34 @@ ACTOR Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID
 		throw internal_error();
 	}
 	try {
-		loop {
-			choose {
-				when(TLogPeekReply res =
-				         wait(self->interf->get().present()
-				                  ? brokenPromiseToNever(self->interf->get().interf().peekMessages.getReply(
-				                        TLogPeekRequest(self->randomID,
-				                                        self->messageVersion.version,
-				                                        Optional<Version>(),
-				                                        self->returnIfBlocked,
-				                                        self->onlySpilled,
-				                                        self->storageTeamId,
-				                                        self->tLogGroupID),
-				                        taskID))
-				                  : Never())) {
-					self->results = res;
-					self->onlySpilled = res.onlySpilled;
-					if (res.popped.present())
-						self->poppedVersion =
-						    std::min(std::max(self->poppedVersion, res.popped.get()), self->end.version);
-					self->rd = ArenaReader(self->results.arena, self->results.data, Unversioned());
-					LogMessageVersion skipSeq = self->messageVersion;
-					self->hasMsg = true;
-					self->nextMessage();
-					self->advanceTo(skipSeq);
-					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
-					return Void();
-				}
-				when(wait(self->interf->onChange())) { self->onlySpilled = false; }
+		loop choose {
+			when(TLogPeekReply res = wait(self->interf->get().present()
+			                                  ? brokenPromiseToNever(self->interf->get().interf().peekMessages.getReply(
+			                                        TLogPeekRequest(self->dbgid,
+			                                                        self->messageVersion.version,
+			                                                        Optional<Version>(),
+			                                                        self->returnIfBlocked,
+			                                                        self->onlySpilled,
+			                                                        self->storageTeamId,
+			                                                        self->tLogGroupID),
+			                                        taskID))
+			                                  : Never())) {
+				self->results = res;
+				self->onlySpilled = res.onlySpilled;
+				if (res.popped.present())
+					self->poppedVersion = std::min(std::max(self->poppedVersion, res.popped.get()), self->end.version);
+				self->rd = ArenaReader(self->results.arena, self->results.data, Unversioned());
+				LogMessageVersion skipSeq = self->messageVersion;
+				self->hasMsg = true;
+				self->nextMessage();
+				self->advanceTo(skipSeq);
+				TraceEvent(SevDebug, "SPC_GetMoreB", self->dbgid)
+				    .detail("Has", self->hasMessage())
+				    .detail("End", res.endVersion)
+				    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
+				return Void();
 			}
+			when(wait(self->interf->onChange())) { self->onlySpilled = false; }
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_end_of_stream) {
@@ -551,11 +553,16 @@ ACTOR Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID
 }
 
 Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
-	//TraceEvent("SPC_GetMore", randomID).detail("HasMessage", hasMessage()).detail("More", !more.isValid() || more.isReady()).detail("MessageVersion", messageVersion.toString()).detail("End", end.toString());
+	TraceEvent(SevDebug, "SPC_GetMore", dbgid)
+	    .detail("HasMessage", hasMessage())
+	    .detail("More", !more.isValid() || more.isReady())
+	    .detail("MessageVersion", messageVersion.toString())
+	    .detail("End", end.toString());
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
 		if (parallelGetMore || onlySpilled || futureResults.size()) {
+			ASSERT(false); // not used
 			more = serverPeekParallelGetMore(this, taskID);
 		} else {
 			more = serverPeekGetMore(this, taskID);
