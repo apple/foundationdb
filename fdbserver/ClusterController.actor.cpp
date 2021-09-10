@@ -2811,22 +2811,8 @@ public:
 
 		const ServerDBInfo dbi = db.serverInfo->get();
 		for (const auto& excludedServer : degradedServers) {
-			for (auto& logSet : dbi.logSystemConfig.tLogs) {
-				if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
-					continue;
-				}
-
-				for (const auto& tlog : logSet.tLogs) {
-					if (tlog.present() && tlog.interf().addresses().contains(excludedServer)) {
-						return true;
-					}
-				}
-
-				for (const auto& logRouter : logSet.logRouters) {
-					if (logRouter.present() && logRouter.interf().addresses().contains(excludedServer)) {
-						return true;
-					}
-				}
+			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+				return true;
 			}
 		}
 
@@ -4696,6 +4682,9 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
 						                      ? self->db.config.regions[1].dcId
 						                      : self->db.config.regions[0].dcId;
+
+						// Switch the current primary DC and remote DC in desiredDcIds, so that the remote DC becomes
+						// the new primary, and the primary DC becomes the new remote.
 						dcPriority.push_back(remoteDcId);
 						dcPriority.push_back(self->clusterControllerDcId);
 						self->desiredDcIds.set(dcPriority);
@@ -5130,18 +5119,19 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	NetworkAddress backup(IPAddress(0x06060606), 1);
 	NetworkAddress proxy(IPAddress(0x07070707), 1);
 	NetworkAddress resolver(IPAddress(0x08080808), 1);
+	UID testUID(1, 2);
 
 	// Create a ServerDBInfo using above addresses.
 	ServerDBInfo testDbInfo;
 	testDbInfo.master.changeCoordinators =
-	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, UID(1, 2)));
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, testUID));
 
 	TLogInterface localTLogInterf;
-	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, UID(1, 2)));
+	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, testUID));
 	TLogInterface localLogRouterInterf;
-	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, UID(1, 2)));
+	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, testUID));
 	BackupInterface backupInterf;
-	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, UID(1, 2)));
+	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, testUID));
 	TLogSet localTLogSet;
 	localTLogSet.isLocal = true;
 	localTLogSet.tLogs.push_back(OptionalInterface(localTLogInterf));
@@ -5150,7 +5140,7 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(localTLogSet);
 
 	TLogInterface sateTLogInterf;
-	sateTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTlog }, UID(1, 2)));
+	sateTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTlog }, testUID));
 	TLogSet sateTLogSet;
 	sateTLogSet.isLocal = true;
 	sateTLogSet.locality = tagLocalitySatellite;
@@ -5158,18 +5148,18 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(sateTLogSet);
 
 	TLogInterface remoteTLogInterf;
-	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, UID(1, 2)));
+	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, testUID));
 	TLogSet remoteTLogSet;
 	remoteTLogSet.isLocal = false;
 	remoteTLogSet.tLogs.push_back(OptionalInterface(remoteTLogInterf));
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface proxyInterf;
-	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, UID(1, 2)));
+	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
 	testDbInfo.client.grvProxies.push_back(proxyInterf);
 
 	ResolverInterface resolverInterf;
-	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, UID(1, 2)));
+	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, testUID));
 	testDbInfo.resolvers.push_back(resolverInterf);
 
 	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
@@ -5234,20 +5224,21 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	NetworkAddress proxy(IPAddress(0x07070707), 1);
 	NetworkAddress proxy2(IPAddress(0x08080808), 1);
 	NetworkAddress resolver(IPAddress(0x09090909), 1);
+	UID testUID(1, 2);
 
 	data.db.config.usableRegions = 2;
 
 	// Create a ServerDBInfo using above addresses.
 	ServerDBInfo testDbInfo;
 	testDbInfo.master.changeCoordinators =
-	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, UID(1, 2)));
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, testUID));
 
 	TLogInterface localTLogInterf;
-	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, UID(1, 2)));
+	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, testUID));
 	TLogInterface localLogRouterInterf;
-	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, UID(1, 2)));
+	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, testUID));
 	BackupInterface backupInterf;
-	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, UID(1, 2)));
+	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, testUID));
 	TLogSet localTLogSet;
 	localTLogSet.isLocal = true;
 	localTLogSet.tLogs.push_back(OptionalInterface(localTLogInterf));
@@ -5256,7 +5247,7 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(localTLogSet);
 
 	TLogInterface sateTLogInterf;
-	sateTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTlog }, UID(1, 2)));
+	sateTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTlog }, testUID));
 	TLogSet sateTLogSet;
 	sateTLogSet.isLocal = true;
 	sateTLogSet.locality = tagLocalitySatellite;
@@ -5264,23 +5255,22 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(sateTLogSet);
 
 	TLogInterface remoteTLogInterf;
-	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, UID(1, 2)));
+	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, testUID));
 	TLogSet remoteTLogSet;
 	remoteTLogSet.isLocal = false;
 	remoteTLogSet.tLogs.push_back(OptionalInterface(remoteTLogInterf));
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface grvProxyInterf;
-	grvProxyInterf.getConsistentReadVersion =
-	    RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, UID(1, 2)));
+	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 
 	CommitProxyInterface commitProxyInterf;
-	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ proxy2 }, UID(1, 2)));
+	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ proxy2 }, testUID));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 
 	ResolverInterface resolverInterf;
-	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, UID(1, 2)));
+	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, testUID));
 	testDbInfo.resolvers.push_back(resolverInterf);
 
 	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
@@ -5294,7 +5284,7 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
 	data.degradedServers.clear();
 
-	// Trigger failover when enough  is degraded.
+	// Trigger failover when enough servers in the txn system are degraded.
 	data.degradedServers.insert(master);
 	data.degradedServers.insert(tlog);
 	data.degradedServers.insert(proxy);

@@ -711,7 +711,6 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 } // namespace
 
-// Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's remote DC.
 bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	const auto& dbi = dbInfo->get();
 
