@@ -275,7 +275,8 @@ std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID
 
 const KeyRef serverKeysPrefix = LiteralStringRef("\xff/serverKeys/");
 const ValueRef serverKeysTrue = LiteralStringRef("1"), // compatible with what was serverKeysTrue
-    serverKeysTrueEmptyRange = LiteralStringRef("3"), serverKeysFalse;
+    serverKeysTrueEmptyRange = LiteralStringRef("3"), // the server treats the range as empty.
+    serverKeysFalse;
 
 const Key serverKeysKey(UID serverID, const KeyRef& key) {
 	BinaryWriter wr(Unversioned());
