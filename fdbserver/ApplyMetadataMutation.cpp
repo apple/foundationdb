@@ -196,7 +196,7 @@ private:
 			    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get());
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			TraceEvent(SevDebug, "SendingPrivateMutation", dbgid)
+			TraceEvent("SendingPrivateMutation", dbgid)
 			    .detail("Original", m)
 			    .detail("Privatized", privatized)
 			    .detail("Server", serverKeysDecodeServer(m.param1))

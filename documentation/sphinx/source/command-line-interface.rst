@@ -203,6 +203,11 @@ The ``getrangekeys`` command fetches keys in a range. Its syntax is ``getrangeke
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
+printkeymetadata
+------------
+
+The ``printkeymetadata`` command.
+
 getversion
 ----------
 

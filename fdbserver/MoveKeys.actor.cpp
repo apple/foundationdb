@@ -1407,9 +1407,13 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						    .detail("Key", it.key)
 						    .detail("OldDest", describe(dest))
 						    .detail("NewTeam", describe(targetTeam));
-						waitForAll(actors);
+						wait(waitForAll(actors));
+						TraceEvent(SevWarn, "FailedServerRemoveRangeEnd", serverID)
+						    .detail("Key", it.key)
+						    .detail("OldDest", describe(dest))
+						    .detail("NewTeam", describe(targetTeam));
 					} else {
-						TraceEvent(SevDebug, "FailedServerSetKey", serverID)
+						TraceEvent("FailedServerSetKey", serverID)
 						    .detail("Key", it.key)
 						    .detail("ValueSrc", describe(src))
 						    .detail("ValueDest", describe(dest));
@@ -1418,12 +1422,12 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				}
 
 				// Set entire range for our serverID in serverKeys keyspace to false to signal erasure
-				TraceEvent(SevDebug, "FailedServerSetRange", serverID)
+				TraceEvent("FailedServerSetRange", serverID)
 				    .detail("Begin", currentKeys.begin)
 				    .detail("End", currentKeys.end);
 				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverID), currentKeys, allKeys, serverKeysFalse));
 				wait(tr.commit());
-				TraceEvent(SevDebug, "FailedServerCommitSuccess", serverID)
+				TraceEvent("FailedServerCommitSuccess", serverID)
 				    .detail("Begin", currentKeys.begin)
 				    .detail("End", currentKeys.end)
 				    .detail("CommitVersion", tr.getCommittedVersion());
