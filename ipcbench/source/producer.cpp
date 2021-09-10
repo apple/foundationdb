@@ -7,6 +7,7 @@
 #include <boost/interprocess/sync/named_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -23,7 +24,6 @@ using namespace boost::interprocess;
 volatile sig_atomic_t stopped = 0;
 
 void my_handler(int s) {
-	// printf("Producer: catch ctrl-C\n");
 	stopped = 1;
 }
 
@@ -32,7 +32,7 @@ int main(int argc, char* argv[]) {
 
 	signal(SIGINT, my_handler);
 
-	int size = std::stoi(argv[1]);
+	int pid = std::stoi(argv[1]);
 	int waiting_interval = 0;
 	if (argc == 3)
 		waiting_interval = std::stoi(argv[2]);
@@ -41,13 +41,9 @@ int main(int argc, char* argv[]) {
 	struct shm_remove {
 		shm_remove() {
 			shared_memory_object::remove("MySharedMemory");
-			named_mutex::remove("consumer_mutex");
-			named_condition::remove("consumer_cond");
 		}
 		~shm_remove() {
 			shared_memory_object::remove("MySharedMemory");
-			named_mutex::remove("consumer_mutex");
-			named_condition::remove("consumer_cond");
 		}
 	} remover;
 
@@ -62,13 +58,11 @@ int main(int argc, char* argv[]) {
 	// create a flag to indicate whether the consumer is sleeping
 	std::atomic_bool* sleepingFlag = segment.construct<std::atomic_bool>("sleeping_flag")();
 	sleepingFlag->store(false);
-	named_mutex mutex(open_or_create, "consumer_mutex");
-	named_condition cond(open_or_create, "consumer_cond");
-	printf("Created cond and mutex\n");
+
+	printf("Signal consumer to start\n");
+	kill(pid, SIGUSR1);
 
 	shm::message* msg = static_cast<shm::message*>(segment.allocate(sizeof(shm::message)));
-	// char* msg = static_cast<char*>(segment.allocate(size*sizeof(char)));
-	void* buffer = malloc(size * sizeof(char));
 	while (!stopped) {
 		if (waiting_interval)
 			std::this_thread::sleep_for(std::chrono::milliseconds(waiting_interval));
@@ -84,26 +78,14 @@ int main(int argc, char* argv[]) {
 		msg->start_time = shm::now();
 		while (!request_queue->push(msg) && !stopped) {
 			// fails to push, just retry
-			// printf("Retry once\n");
 		};
-		// printf("Producer pushed once\n");
 		if (sleepingFlag->load()) {
-			// printf("Notify once\n");
-			cond.notify_all();
+			kill(pid, SIGUSR2);
 		}
-		// while (!reply_queue->pop(ptr) && !stopped) {
-		// 	// fails to pop, just retry
-		// }
-		// printf("Producer sleep\n");
-		// reply_queue->pop(ptr);
-		// read the reply
-		// memcpy(buffer, ptr.get(), size);
 	}
 	segment.deallocate(msg);
-	free(buffer);
 	// When done, destroy the queues from the segment
 	segment.destroy<shm::message>("request_queue");
-	// segment.destroy<shm::message>("reply_queue");
 	segment.destroy<std::atomic_bool>("sleeping_flag");
 	printf("Producer destroyed.\n");
 }
