@@ -35,11 +35,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
 	auto cacheItr = storageCache->find(id);
 	if (cacheItr == storageCache->end()) {
 		storageInfo = makeReference<StorageInfo>();
-		Optional<Value> tag = txnStateStore->readValue(serverTagKeyFor(id)).get();
-		TraceEvent(SevWarn, "HeLiuDebuggetStorageInfo")
-		    .detail("SSID", id)
-		    .detail("Tag", tag.present() ? tag.get().toString() : "");
-		storageInfo->tag = decodeServerTagValue(tag.get());
+		storageInfo->tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(id)).get().get());
 		storageInfo->interf = decodeServerListValue(txnStateStore->readValue(serverListKeyFor(id)).get().get());
 		(*storageCache)[id] = storageInfo;
 	} else {
@@ -197,7 +193,7 @@ private:
 			    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get());
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			TraceEvent("SendingPrivateMutation", dbgid)
+			TraceEvent(SevDebug, "SendingPrivateMutation", dbgid)
 			    .detail("Original", m)
 			    .detail("Privatized", privatized)
 			    .detail("Server", serverKeysDecodeServer(m.param1))
