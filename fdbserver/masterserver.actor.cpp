@@ -512,7 +512,7 @@ Future<Void> waitResolverFailure(vector<ResolverInterface> const& resolvers) {
 		                                   /*trace=*/true));
 	}
 	ASSERT(failed.size() >= 1);
-	return tagError<Void>(quorum(failed, 1), master_resolver_failed());
+	return tagError<Void>(quorum(failed, 1), resolver_failed());
 }
 
 ACTOR Future<Void> updateLogsValue(Reference<MasterData> self, Database cx) {
@@ -1440,10 +1440,10 @@ static std::set<int> const& normalMasterErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
 		s.insert(error_code_tlog_stopped);
-		s.insert(error_code_master_tlog_failed);
+		s.insert(error_code_tlog_failed);
 		s.insert(error_code_commit_proxy_failed);
 		s.insert(error_code_grv_proxy_failed);
-		s.insert(error_code_master_resolver_failed);
+		s.insert(error_code_resolver_failed);
 		s.insert(error_code_master_backup_worker_failed);
 		s.insert(error_code_recruitment_failed);
 		s.insert(error_code_no_more_servers);
@@ -2101,10 +2101,10 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 			addActor.getFuture().pop();
 		}
 
-		TEST(err.code() == error_code_master_tlog_failed); // Master: terminated due to tLog failure
+		TEST(err.code() == error_code_tlog_failed); // Master: terminated due to tLog failure
 		TEST(err.code() == error_code_commit_proxy_failed); // Master: terminated due to commit proxy failure
 		TEST(err.code() == error_code_grv_proxy_failed); // Master: terminated due to GRV proxy failure
-		TEST(err.code() == error_code_master_resolver_failed); // Master: terminated due to resolver failure
+		TEST(err.code() == error_code_resolver_failed); // Master: terminated due to resolver failure
 		TEST(err.code() == error_code_master_backup_worker_failed); // Master: terminated due to backup worker failure
 
 		if (normalMasterErrors().count(err.code())) {

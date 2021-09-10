@@ -1241,7 +1241,7 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_broken_promise) {
-			throw master_tlog_failed();
+			throw tlog_failed();
 		}
 		throw;
 	}
@@ -2014,7 +2014,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError =
-	    transformError(actorCollection(addActor.getFuture()), broken_promise(), master_tlog_failed());
+	    transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed());
 	state double lastCommit = 0;
 
 	state GetHealthMetricsReply healthMetricsReply;
@@ -2164,7 +2164,7 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		TraceEvent("CommitProxyTerminated", proxy.id()).error(e, true);
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
-		    e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
+		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&
 		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out &&
 		    e.code() != error_code_failed_to_progress) {
 			throw;

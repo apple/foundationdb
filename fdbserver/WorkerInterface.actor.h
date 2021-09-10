@@ -189,7 +189,7 @@ struct ClusterControllerFullInterface {
 		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
 		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
 		notifyBackupWorkerDone.getEndpoint(TaskPriority::ClusterController);
-		changeCoordinators.getEndpoint(TaskPriority::ClusterController);
+		changeCoordinators.getEndpoint(TaskPriority::DefaultEndpoint);
 	}
 
 	template <class Ar>

@@ -507,7 +507,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 			changes.push_back(self->backupWorkerChanged.onTrigger());
 
 			ASSERT(failed.size() >= 1);
-			wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), master_tlog_failed()) ||
+			wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), tlog_failed()) ||
 			     tagError<Void>(quorum(backupFailed, 1), master_backup_worker_failed()));
 		}
 	}
@@ -2468,7 +2468,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 		if (!forRemote) {
 			self->logSystemConfigChanged.trigger();
-			wait(failed.size() ? tagError<Void>(quorum(failed, 1), master_tlog_failed()) : Future<Void>(Never()));
+			wait(failed.size() ? tagError<Void>(quorum(failed, 1), tlog_failed()) : Future<Void>(Never()));
 			throw internal_error();
 		}
 		return Void();

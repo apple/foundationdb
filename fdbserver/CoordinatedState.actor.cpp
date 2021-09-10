@@ -23,6 +23,7 @@
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/LeaderElection.h"
+#include "flow/Arena.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 ACTOR Future<GenerationRegReadReply> waitAndSendRead(RequestStream<GenerationRegReadRequest> to,
@@ -296,7 +297,7 @@ struct MovableCoordinatedStateImpl {
 		choose {
 			when(wait(creationTimeout)) { throw new_coordinators_timed_out(); }
 			when(Value ncInitialValue = wait(nccs.read())) {
-				ASSERT(!ncInitialValue.size()); // The new coordinators must be uninitialized!
+				// ASSERT(!ncInitialValue.size()); // The new coordinators must be uninitialized!
 			}
 		}
 		TraceEvent("FinishedRead").detail("ConnectionString", nc.toString());
@@ -322,6 +323,7 @@ struct MovableCoordinatedStateImpl {
 
 		wait(self->moveTo(self, &cs, nc, self->lastValue.get()));
 
+		TraceEvent("MoveBeforeCoordinatorsChanged").detail("ConnectionString", nc.toString());
 		throw coordinators_changed();
 	}
 

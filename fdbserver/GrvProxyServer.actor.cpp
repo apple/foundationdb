@@ -925,7 +925,7 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError =
-	    transformError(actorCollection(addActor.getFuture()), broken_promise(), master_tlog_failed());
+	    transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed());
 
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
@@ -989,7 +989,7 @@ ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
 		TraceEvent("GrvProxyTerminated", proxy.id()).error(e, true);
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
-		    e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
+		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&
 		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out) {
 			throw;
 		}

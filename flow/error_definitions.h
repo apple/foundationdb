@@ -89,16 +89,16 @@ ERROR( move_to_removed_server, 1201, "Attempt to move keys to a storage server t
 ERROR( worker_removed, 1202, "Normal worker shut down" )   // Be careful, catching this will delete the data of a storage server or tlog permanently
 ERROR( master_recovery_failed, 1203, "Master recovery failed")
 ERROR( master_max_versions_in_flight, 1204, "Master hit maximum number of versions in flight" )
-ERROR( master_tlog_failed, 1205, "Master terminating because a TLog failed" )   // similar to tlog_stopped, but the tlog has actually died
+ERROR( tlog_failed, 1205, "Recovery terminating because a TLog failed" )   // similar to tlog_stopped, but the tlog has actually died
 ERROR( worker_recovery_failed, 1206, "Recovery of a worker process failed" )
 ERROR( please_reboot, 1207, "Reboot of server process requested" )
 ERROR( please_reboot_delete, 1208, "Reboot of server process requested, with deletion of state" )
-ERROR( commit_proxy_failed, 1209, "Master terminating because a Commit CommitProxy failed" )
-ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver failed" )
+ERROR( commit_proxy_failed, 1209, "Recovery terminating because a Commit CommitProxy failed" )
+ERROR( resolver_failed, 1210, "Recovery terminating because a Resolver failed" )
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
 ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
 ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
-ERROR( grv_proxy_failed, 1214, "Master terminating because a GRV CommitProxy failed" )
+ERROR( grv_proxy_failed, 1214, "Recovery terminating because a GRV CommitProxy failed" )
 ERROR( dd_tracker_cancelled, 1215, "The data distribution tracker has been cancelled" )
 ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress" )
 

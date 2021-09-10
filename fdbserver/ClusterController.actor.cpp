@@ -3110,10 +3110,10 @@ static std::set<int> const& normalClusterRecoveryErrors() {
 	if (s.empty()) {
 		s.insert(error_code_operation_failed);
 		s.insert(error_code_tlog_stopped);
-		s.insert(error_code_master_tlog_failed);
+		s.insert(error_code_tlog_failed);
 		s.insert(error_code_commit_proxy_failed);
 		s.insert(error_code_grv_proxy_failed);
-		s.insert(error_code_master_resolver_failed);
+		s.insert(error_code_resolver_failed);
 		s.insert(error_code_master_backup_worker_failed);
 		s.insert(error_code_recruitment_failed);
 		s.insert(error_code_no_more_servers);
@@ -3123,7 +3123,6 @@ static std::set<int> const& normalClusterRecoveryErrors() {
 		s.insert(error_code_worker_removed);
 		s.insert(error_code_new_coordinators_timed_out);
 		s.insert(error_code_broken_promise);
-		s.insert(error_code_coordinators_changed);
 	}
 	return s;
 }
@@ -3436,7 +3435,7 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    master_recovery_failed()));
+		                    commit_proxy_failed()));
 	}
 
 	vector<CommitProxyInterface> newRecruits = wait(getAll(initializationReplies));
@@ -3456,7 +3455,7 @@ ACTOR Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFro
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.grvProxies[i].grvProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    master_recovery_failed()));
+		                    grv_proxy_failed()));
 	}
 
 	vector<GrvProxyInterface> newRecruits = wait(getAll(initializationReplies));
@@ -3475,7 +3474,7 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.resolvers[i].resolver.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    master_recovery_failed()));
+		                    resolver_failed()));
 	}
 
 	vector<ResolverInterface> newRecruits = wait(getAll(initializationReplies));
@@ -3655,7 +3654,7 @@ Future<Void> waitResolverFailure(vector<ResolverInterface> const& resolvers) {
 		                                   /*trace=*/true));
 	}
 	ASSERT(failed.size() >= 1);
-	return tagError<Void>(quorum(failed, 1), master_resolver_failed());
+	return tagError<Void>(quorum(failed, 1), resolver_failed());
 }
 
 ACTOR Future<Void> getVersion(Reference<ClusterRecoveryData> self, GetCommitVersionRequest req) {
@@ -4010,7 +4009,6 @@ ACTOR Future<Void> resolutionBalancing(Reference<ClusterRecoveryData> self) {
 }
 
 ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
-	// printf("registering changeCoordinators %p\n", self.getPtr());
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->clusterController.changeCoordinators.getFuture());
 		++self->changeCoordinatorsRequests;
@@ -4819,8 +4817,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	state TraceInterval recoveryInterval("ClusterRecovery");
 	state double recoverStartTime = now();
 
-	//state Future<Void> collection = actorCollection(self->addActor.getFuture());
-
 	self->addActor.send(waitFailureServer(self->masterInterface.waitFailure.getFuture()));
 
 	TraceEvent(recoveryInterval.begin(), self->dbgid).log();
@@ -5277,21 +5273,25 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			wait(ClusterControllerRecovery::cleanupActorCollection(recoveryData, true /* exThrown */));
 			ASSERT(addActor.isEmpty());
 
-			TEST(err.code() == error_code_master_tlog_failed);          // Terminated due to tLog failure
+			TEST(err.code() == error_code_tlog_failed);                 // Terminated due to tLog failure
 			TEST(err.code() == error_code_commit_proxy_failed);         // Terminated due to commit proxy failure
 			TEST(err.code() == error_code_grv_proxy_failed);            // Terminated due to GRV proxy failure
-			TEST(err.code() == error_code_master_resolver_failed);      // Terminated due to resolver failure
+			TEST(err.code() == error_code_resolver_failed);             // Terminated due to resolver failure
 			TEST(err.code() == error_code_master_backup_worker_failed); // Terminated due to backup worker failure
 			TEST(err.code() == error_code_operation_failed); 			// Terminated due to failed operation
-			TEST(err.code() == error_code_coordinators_changed);		// Terminated due to change in coordinator
 
 			if (ClusterControllerRecovery::normalClusterRecoveryErrors().count(err.code())) {
 				TraceEvent(SevWarn, "ClusterRecoveryRetrying", cluster->id).error(err);
 			} else {
-				bool ok = err.code() == error_code_no_more_servers;
-				TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
-				if (!ok) {
+				if (err.code() != error_code_coordinators_changed) {
+					TraceEvent(SevWarn, "CCWDB coordinators change detected", cluster->id).error(err);
 					throw err;
+				} else {
+					bool ok = err.code() == error_code_no_more_servers;
+					TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
+					if (!ok) {
+						throw err;
+					}
 				}
 			}
 			wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
