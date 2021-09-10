@@ -107,7 +107,7 @@ private:
 	std::vector<TraceEventFields> eventBuffer;
 	int loggedLength;
 	int bufferLength;
-	bool opened;
+	std::atomic<bool> opened;
 	int64_t preopenOverflowCount;
 	std::string basename;
 	std::string logGroup;
@@ -659,15 +659,15 @@ bool traceClockSource(std::string& source) {
 
 std::string toString(ErrorKind errorKind) {
 	switch (errorKind) {
-		case ErrorKind::Unset:
-			return "Unset";
-		case ErrorKind::DiskIssue:
-			return "DiskIssue";
-		case ErrorKind::BugDetected:
-			return "BugDetected";
-		default:
-			UNSTOPPABLE_ASSERT(false);
-			return "";
+	case ErrorKind::Unset:
+		return "Unset";
+	case ErrorKind::DiskIssue:
+		return "DiskIssue";
+	case ErrorKind::BugDetected:
+		return "BugDetected";
+	default:
+		UNSTOPPABLE_ASSERT(false);
+		return "";
 	}
 }
 
@@ -921,7 +921,7 @@ bool TraceEvent::init() {
 		detail("Severity", int(severity));
 		if (severity >= SevError) {
 			detail("ErrorKind", errorKind);
-			errorKindIndex = fields.size()-1;
+			errorKindIndex = fields.size() - 1;
 		}
 		detail("Time", "0.000000");
 		timeIndex = fields.size() - 1;
@@ -1110,7 +1110,7 @@ TraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCoun
 	return *this;
 }
 
-TraceEvent &TraceEvent::setErrorKind(ErrorKind errorKind) {
+TraceEvent& TraceEvent::setErrorKind(ErrorKind errorKind) {
 	this->errorKind = errorKind;
 	return *this;
 }

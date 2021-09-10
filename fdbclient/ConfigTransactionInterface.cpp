@@ -55,21 +55,18 @@ bool ConfigGeneration::operator!=(ConfigGeneration const& rhs) const {
 	return !(*this == rhs);
 }
 
-void ConfigTransactionCommitRequest::set(KeyRef key, ValueRef value) {
-	if (key == configTransactionDescriptionKey) {
-		annotation.description = KeyRef(arena, value);
+bool ConfigGeneration::operator<(ConfigGeneration const& rhs) const {
+	if (committedVersion != rhs.committedVersion) {
+		return committedVersion < rhs.committedVersion;
 	} else {
-		ConfigKey configKey = ConfigKeyRef::decodeKey(key);
-		auto knobValue = IKnobCollection::parseKnobValue(
-		    configKey.knobName.toString(), value.toString(), IKnobCollection::Type::TEST);
-		mutations.emplace_back_deep(arena, configKey, knobValue.contents());
+		return liveVersion < rhs.liveVersion;
 	}
 }
 
-void ConfigTransactionCommitRequest::clear(KeyRef key) {
-	if (key == configTransactionDescriptionKey) {
-		annotation.description = ""_sr;
+bool ConfigGeneration::operator>(ConfigGeneration const& rhs) const {
+	if (committedVersion != rhs.committedVersion) {
+		return committedVersion > rhs.committedVersion;
 	} else {
-		mutations.emplace_back_deep(arena, ConfigKeyRef::decodeKey(key), Optional<KnobValueRef>{});
+		return liveVersion > rhs.liveVersion;
 	}
 }

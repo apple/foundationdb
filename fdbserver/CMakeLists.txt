@@ -103,8 +103,11 @@ set(FDBSERVER_SRCS
   RestoreWorkerInterface.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
+  RoleLineage.actor.h
+  RoleLineage.actor.cpp
   ServerDBInfo.actor.h
   ServerDBInfo.h
+  SigStack.cpp
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
   SimulatedCluster.actor.cpp
@@ -148,6 +151,7 @@ set(FDBSERVER_SRCS
   workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
   workloads/ClogSingleConnection.actor.cpp
+  workloads/ConfigIncrement.actor.cpp
   workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
@@ -167,6 +171,7 @@ set(FDBSERVER_SRCS
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
+  workloads/ChangeFeeds.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
@@ -199,6 +204,7 @@ set(FDBSERVER_SRCS
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
+  workloads/MutationLogReaderCorrectness.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
@@ -309,6 +315,7 @@ else()
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
+# target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)

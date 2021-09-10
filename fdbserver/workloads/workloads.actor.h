@@ -49,7 +49,7 @@ struct WorkloadContext {
 	Standalone<VectorRef<KeyValueRef>> options;
 	int clientId, clientCount;
 	int64_t sharedRandomNumber;
-	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
@@ -192,10 +192,10 @@ public:
 	bool waitForQuiescenceBegin;
 	bool waitForQuiescenceEnd;
 	bool restorePerpetualWiggleSetting; // whether set perpetual_storage_wiggle as the value after run
-	                                      // QuietDatabase. QuietDatabase always disables perpetual storage wiggle on
-	                                      // purpose. If waitForQuiescenceBegin == true and we want to keep perpetual
-	                                      // storage wiggle the same setting as before during testing, this value should
-	                                      // be set true.
+	                                    // QuietDatabase. QuietDatabase always disables perpetual storage wiggle on
+	                                    // purpose. If waitForQuiescenceBegin == true and we want to keep perpetual
+	                                    // storage wiggle the same setting as before during testing, this value should
+	                                    // be set true.
 
 	bool simCheckRelocationDuration; // If set to true, then long duration relocations generate SevWarnAlways messages.
 	                                 // Once any workload sets this to true, it will be true for the duration of the

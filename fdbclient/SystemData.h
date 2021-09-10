@@ -496,19 +496,19 @@ extern const ValueRef writeRecoveryKeyTrue;
 //	Allows incremental restore to read and set starting version for consistency.
 extern const KeyRef snapshotEndVersionKey;
 
-extern const KeyRangeRef rangeFeedKeys;
-const Value rangeFeedValue(KeyRangeRef const& range);
-KeyRange decodeRangeFeedValue(ValueRef const& value);
-extern const KeyRef rangeFeedPrefix;
-extern const KeyRef rangeFeedPrivatePrefix;
+extern const KeyRangeRef changeFeedKeys;
+const Value changeFeedValue(KeyRangeRef const& range, Version popVersion, bool stopped);
+std::tuple<KeyRange, Version, bool> decodeChangeFeedValue(ValueRef const& value);
+extern const KeyRef changeFeedPrefix;
+extern const KeyRef changeFeedPrivatePrefix;
 
-extern const KeyRangeRef rangeFeedDurableKeys;
-extern const KeyRef rangeFeedDurablePrefix;
+extern const KeyRangeRef changeFeedDurableKeys;
+extern const KeyRef changeFeedDurablePrefix;
 
-const Value rangeFeedDurableKey(Key const& feed, Version const& version);
-std::pair<Key, Version> decodeRangeFeedDurableKey(ValueRef const& key);
-const Value rangeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations);
-Standalone<VectorRef<MutationRef>> decodeRangeFeedDurableValue(ValueRef const& value);
+const Value changeFeedDurableKey(Key const& feed, Version const& version);
+std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key);
+const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations);
+Standalone<VectorRef<MutationRef>> decodeChangeFeedDurableValue(ValueRef const& value);
 
 // Configuration database special keys
 extern const KeyRef configTransactionDescriptionKey;

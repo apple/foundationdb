@@ -55,7 +55,8 @@ void doOnMainThreadVoid(Future<Void> signal, F f, Error* err) {
 // There is no way to wait for the functor run to finish. For cases where you need a result back or simply need
 // to know when the functor has finished running, use `onMainThread`.
 //
-// WARNING: Successive invocations of `onMainThreadVoid` with different task priorities may not run in the order they were called.
+// WARNING: Successive invocations of `onMainThreadVoid` with different task priorities may not run in the order they
+// were called.
 //
 // WARNING: The error returned in `err` can only be read on the FDB network thread because there is no way to
 // order the write to `err` with actions on other threads.
@@ -627,6 +628,13 @@ Future<T> safeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 	return threadFuture.get();
 }
 
+// do nothing, just for template functions' calls
+template <class T>
+Future<T> safeThreadFutureToFuture(Future<T> future) {
+	// do nothing
+	return future;
+}
+
 // Helper actor. Do not use directly!
 namespace internal_thread_helper {
 
@@ -648,7 +656,7 @@ Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<
 	return Void();
 }
 
-}  // namespace internal_thread_helper
+} // namespace internal_thread_helper
 
 // `onMainThread` runs a functor returning a `Future` on the main thread, waits for the future, and sends either the
 // value returned from the waited `Future` or an error through the `ThreadFuture` returned from the function call.

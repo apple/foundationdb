@@ -40,6 +40,12 @@ struct MutationsAndVersionRef {
 	  : mutations(to, from.mutations), version(from.version) {}
 	int expectedSize() const { return mutations.expectedSize(); }
 
+	struct OrderByVersion {
+		bool operator()(MutationsAndVersionRef const& a, MutationsAndVersionRef const& b) const {
+			return a.version < b.version;
+		}
+	};
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, mutations, version);

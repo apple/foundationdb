@@ -1,4 +1,7 @@
 set(FDBCLIENT_SRCS
+  ActorLineageProfiler.h
+  ActorLineageProfiler.cpp
+  AnnotateActor.cpp
   AsyncFileS3BlobStore.actor.cpp
   AsyncFileS3BlobStore.actor.h
   AsyncTaskThread.actor.cpp
@@ -44,6 +47,7 @@ set(FDBCLIENT_SRCS
   FDBOptions.h
   FDBTypes.cpp
   FDBTypes.h
+  FluentDSampleIngestor.cpp
   FileBackupAgent.actor.cpp
   GlobalConfig.h
   GlobalConfig.actor.h
@@ -71,6 +75,10 @@ set(FDBCLIENT_SRCS
   MultiVersionTransaction.actor.cpp
   MultiVersionTransaction.h
   MutationList.h
+  MutationLogReader.actor.cpp
+  MutationLogReader.actor.h
+  NameLineage.h
+  NameLineage.cpp
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
@@ -78,6 +86,7 @@ set(FDBCLIENT_SRCS
   ParallelStream.actor.h
   PaxosConfigTransaction.actor.cpp
   PaxosConfigTransaction.h
+  PImpl.h
   SimpleConfigTransaction.actor.cpp
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h
@@ -106,10 +115,12 @@ set(FDBCLIENT_SRCS
   StorageServerInterface.h
   Subspace.cpp
   Subspace.h
+  StackLineage.h
+  StackLineage.cpp
   SystemData.cpp
   SystemData.h
   TagThrottle.actor.cpp
-  TagThrottle.h
+  TagThrottle.actor.h
   TaskBucket.actor.cpp
   TaskBucket.h
   TestKnobCollection.cpp
@@ -177,8 +188,20 @@ endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions fdb_c_options)
+target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
+
+# Create a separate fdbclient library with sampling enabled. This lets
+# fdbserver retain sampling functionality in client code while disabling
+# sampling for pure clients.
+add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
+add_dependencies(fdbclient_sampling fdboptions fdb_c_options)
+target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack)
+target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
+if(WIN32)
+  add_dependencies(fdbclient_sampling_actors fdbclient_actors)
+endif()
+
 if(BUILD_AZURE_BACKUP)
-  target_link_libraries(fdbclient PUBLIC fdbrpc PRIVATE curl uuid azure-storage-lite)
-else()
-  target_link_libraries(fdbclient PUBLIC fdbrpc)
+  target_link_libraries(fdbclient PRIVATE curl uuid azure-storage-lite)
+  target_link_libraries(fdbclient_sampling PRIVATE curl uuid azure-storage-lite)
 endif()

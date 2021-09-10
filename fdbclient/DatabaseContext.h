@@ -252,20 +252,20 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	Future<Standalone<VectorRef<MutationsAndVersionRef>>> getRangeFeedMutations(
+	Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutations(
 	    StringRef rangeID,
 	    Version begin = 0,
 	    Version end = std::numeric_limits<Version>::max(),
 	    KeyRange range = allKeys);
 
-	Future<Void> getRangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
-	                                StringRef rangeID,
-	                                Version begin = 0,
-	                                Version end = std::numeric_limits<Version>::max(),
-	                                KeyRange range = allKeys);
+	Future<Void> getChangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
+	                                 StringRef rangeID,
+	                                 Version begin = 0,
+	                                 Version end = std::numeric_limits<Version>::max(),
+	                                 KeyRange range = allKeys);
 
-	Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingRangeFeeds(KeyRangeRef ranges, Version minVersion);
-	Future<Void> popRangeFeedMutations(StringRef rangeID, Version version);
+	Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<Void> popChangeFeedMutations(StringRef rangeID, Version version);
 
 	Future<Void> getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range);
 	// TODO add optional for end version so it can do a GRV in the transaction it already has to do
@@ -459,6 +459,10 @@ public:
 	// Removes the storage server and its TSS pair from the TSS mapping (if present).
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
+
+	// used in template functions to create a transaction
+	using TransactionT = ReadYourWritesTransaction;
+	Reference<TransactionT> createTransaction();
 
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;

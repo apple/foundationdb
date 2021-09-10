@@ -75,10 +75,10 @@ Performance issues:
 - When waiting for a number of things, wait a little extra time to get
 	the stragglers. (See the SmartQuorum() generic actor)
 
-- If asking another asynch server to do units of work, don't queue up more
+- If asking another asynchronous server to do units of work, don't queue up more
 	work than is necessary to keep the server busy. Likewise, if you are
-	busy, let your own work queue fill up to signal your requestor
+	busy, let your own work queue fill up to signal your requester
 	that you are blocked. Also do this personally with managers assigning
 	you stuff.
 
-- Pass all variables as "const &" if thier size is greater than 8 bytes.
+- Pass all variables as "const &" if their size is greater than 8 bytes.

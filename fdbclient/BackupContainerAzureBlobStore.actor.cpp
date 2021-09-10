@@ -283,7 +283,6 @@ public:
 		}
 		return Void();
 	}
-
 };
 
 Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileName) {

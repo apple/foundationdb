@@ -212,6 +212,107 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
+template <>
+bool TSS_doCompare(const SplitMetricsReply& src, const SplitMetricsReply& tss) {
+	// We duplicate split metrics just for load, no need to validate replies.
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const SplitMetricsRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const SplitMetricsRequest& req,
+                       const SplitMetricsReply& src,
+                       const SplitMetricsReply& tss) {
+	ASSERT(false);
+}
+
+template <>
+bool TSS_doCompare(const ReadHotSubRangeReply& src, const ReadHotSubRangeReply& tss) {
+	// We duplicate read hot sub range metrics just for load, no need to validate replies.
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const ReadHotSubRangeRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const ReadHotSubRangeRequest& req,
+                       const ReadHotSubRangeReply& src,
+                       const ReadHotSubRangeReply& tss) {
+	ASSERT(false);
+}
+
+template <>
+bool TSS_doCompare(const SplitRangeReply& src, const SplitRangeReply& tss) {
+	// We duplicate read hot sub range metrics just for load, no need to validate replies.
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const SplitRangeRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const SplitRangeRequest& req,
+                       const SplitRangeReply& src,
+                       const SplitRangeReply& tss) {
+	ASSERT(false);
+}
+
+// change feed
+template <>
+bool TSS_doCompare(const ChangeFeedReply& src, const ChangeFeedReply& tss) {
+	ASSERT(false);
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const ChangeFeedRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const ChangeFeedRequest& req,
+                       const ChangeFeedReply& src,
+                       const ChangeFeedReply& tss) {
+	ASSERT(false);
+}
+
+template <>
+bool TSS_doCompare(const OverlappingChangeFeedsReply& src, const OverlappingChangeFeedsReply& tss) {
+	ASSERT(false);
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const OverlappingChangeFeedsRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const OverlappingChangeFeedsRequest& req,
+                       const OverlappingChangeFeedsReply& src,
+                       const OverlappingChangeFeedsReply& tss) {
+	ASSERT(false);
+}
+
 // template specializations for metrics replies that should never be called because these requests aren't duplicated
 
 // storage metrics
@@ -232,110 +333,6 @@ void TSS_traceMismatch(TraceEvent& event,
                        const WaitMetricsRequest& req,
                        const StorageMetrics& src,
                        const StorageMetrics& tss) {
-	ASSERT(false);
-}
-
-// split metrics
-template <>
-bool TSS_doCompare(const SplitMetricsReply& src, const SplitMetricsReply& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const SplitMetricsRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const SplitMetricsRequest& req,
-                       const SplitMetricsReply& src,
-                       const SplitMetricsReply& tss) {
-	ASSERT(false);
-}
-
-// read hot sub range
-template <>
-bool TSS_doCompare(const ReadHotSubRangeReply& src, const ReadHotSubRangeReply& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const ReadHotSubRangeRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const ReadHotSubRangeRequest& req,
-                       const ReadHotSubRangeReply& src,
-                       const ReadHotSubRangeReply& tss) {
-	ASSERT(false);
-}
-
-// split range
-template <>
-bool TSS_doCompare(const SplitRangeReply& src, const SplitRangeReply& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const SplitRangeRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const SplitRangeRequest& req,
-                       const SplitRangeReply& src,
-                       const SplitRangeReply& tss) {
-	ASSERT(false);
-}
-
-// range feed
-template <>
-bool TSS_doCompare(const RangeFeedReply& src, const RangeFeedReply& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const RangeFeedRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const RangeFeedRequest& req,
-                       const RangeFeedReply& src,
-                       const RangeFeedReply& tss) {
-	ASSERT(false);
-}
-
-template <>
-bool TSS_doCompare(const OverlappingRangeFeedsReply& src, const OverlappingRangeFeedsReply& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const OverlappingRangeFeedsRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const OverlappingRangeFeedsRequest& req,
-                       const OverlappingRangeFeedsReply& src,
-                       const OverlappingRangeFeedsReply& tss) {
 	ASSERT(false);
 }
 
@@ -398,10 +395,10 @@ template <>
 void TSSMetrics::recordLatency(const GetKeyValuesStreamRequest& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const RangeFeedRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(const ChangeFeedRequest& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const OverlappingRangeFeedsRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(const OverlappingChangeFeedsRequest& req, double ssLatency, double tssLatency) {}
 
 // this isn't even to storage servers
 template <>

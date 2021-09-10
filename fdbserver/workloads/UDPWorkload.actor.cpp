@@ -252,10 +252,10 @@ struct UDPWorkload : TestWorkload {
 		for (const auto& p : successes) {
 			totalSuccess += p.second;
 		}
-		m.emplace_back("Sent", totalSent, false);
-		m.emplace_back("Received", totalReceived, false);
-		m.emplace_back("Acknknowledged", totalAcked, false);
-		m.emplace_back("Successes", totalSuccess, false);
+		m.emplace_back("Sent", totalSent, Averaged::False);
+		m.emplace_back("Received", totalReceived, Averaged::False);
+		m.emplace_back("Acknknowledged", totalAcked, Averaged::False);
+		m.emplace_back("Successes", totalSuccess, Averaged::False);
 	}
 };
 

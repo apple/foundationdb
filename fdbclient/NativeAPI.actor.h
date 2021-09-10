@@ -107,6 +107,7 @@ public:
 	inline DatabaseContext* getPtr() const { return db.getPtr(); }
 	inline DatabaseContext* extractPtr() { return db.extractPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
+	Reference<DatabaseContext> getReference() const { return db; }
 
 	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
@@ -180,6 +181,9 @@ struct TransactionInfo {
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
+
+	// Only available so that Transaction can have a default constructor, for use in state variables
+	TransactionInfo() : taskID(), spanID(), useProvisionalProxies() {}
 
 	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
 	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
@@ -327,8 +331,8 @@ public:
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
 
-	Future<Void> registerRangeFeed(const Key& rangeID, const KeyRange& range);
-	void destroyRangeFeed(const Key& rangeID);
+	Future<Void> registerChangeFeed(const Key& rangeID, const KeyRange& range);
+	void destroyChangeFeed(const Key& rangeID);
 
 	void enableCheckWrites();
 	void addReadConflictRange(KeyRangeRef const& keys);
