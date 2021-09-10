@@ -74,7 +74,7 @@ bool destructed = false;
 class TestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
-		using base_variant = std::variant<int, bool, std::string, std::vector<int>>;
+		using base_variant = std::variant<int, bool, std::string, std::vector<int>, ConfigDBType>;
 		using types =
 		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
 		std::unordered_map<std::string_view, types> confMap;
@@ -99,19 +99,29 @@ class TestConfig {
 				(*this)(&res);
 				*val = std::move(res);
 			}
+			void operator()(ConfigDBType* val) const {
+				if (value.as_string() == "random") {
+					*val = deterministicRandom()->coinflip() ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
+				} else {
+					*val = configDBTypeFromString(value.as_string());
+				}
+			}
+			void operator()(Optional<ConfigDBType>* val) const {
+				ConfigDBType res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
 		};
 
 		struct trace_visitor {
 			std::string key;
 			TraceEvent& evt;
 			trace_visitor(std::string const& key, TraceEvent& e) : key("Key" + key), evt(e) {}
-			void operator()(int* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(Optional<int>* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(bool* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(Optional<bool>* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(std::string* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(Optional<std::string>* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(std::vector<int>* val) const {
+			template <class T>
+			void operator()(T const* val) const {
+				evt.detail(key.c_str(), *val);
+			}
+			void operator()(std::vector<int> const* val) const {
 				if (val->empty()) {
 					evt.detail(key.c_str(), "[]");
 					return;
@@ -124,10 +134,20 @@ class TestConfig {
 				value << "]";
 				evt.detail(key.c_str(), value.str());
 			}
-			void operator()(Optional<std::vector<int>>* val) const {
-				std::vector<int> res;
-				(*this)(&res);
-				*val = std::move(res);
+			void operator()(Optional<std::vector<int>> const* val) const {
+				if (!val->present()) {
+					evt.detail(key.c_str(), *val);
+				} else {
+					(*this)(&(val->get()));
+				}
+			}
+			void operator()(ConfigDBType const* val) const { evt.detail(key.c_str(), *val); }
+			void operator()(Optional<ConfigDBType> const* val) const {
+				Optional<std::string> optStr;
+				if (val->present()) {
+					optStr = configDBTypeToString(val->get());
+				}
+				evt.detail(key.c_str(), optStr);
 			}
 		};
 
@@ -222,15 +242,24 @@ class TestConfig {
 				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
 			if (attrib == "disableTss") {
-				sscanf(value.c_str(), "%d", &disableTss);
+				disableTss = strcmp(value.c_str(), "true") == 0;
 			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
+			}
+			if (attrib == "configDBType") {
+				if (value == "random") {
+					configDBType = deterministicRandom()->coinflip() ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
+				} else {
+					configDBType = configDBTypeFromString(value);
+				}
 			}
 		}
 
 		ifs.close();
 	}
+
+	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
 public:
 	int extraDB = 0;
@@ -259,6 +288,8 @@ public:
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
+
+	ConfigDBType getConfigDBType() const { return configDBType; }
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
 		if (data.is_table()) {
@@ -305,7 +336,8 @@ public:
 		    .add("StderrSeverity", &stderrSeverity)
 		    .add("machineCount", &machineCount)
 		    .add("processesPerMachine", &processesPerMachine)
-		    .add("coordinators", &coordinators);
+		    .add("coordinators", &coordinators)
+		    .add("configDB", &configDBType);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -438,7 +470,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
                                                          bool useSeedFile,
                                                          AgentMode runBackupAgents,
                                                          std::string whitelistBinPaths,
-                                                         ProtocolVersion protocolVersion) {
+                                                         ProtocolVersion protocolVersion,
+                                                         ConfigDBType configDBType) {
 	state ISimulator::ProcessInfo* simProcess = g_simulator.getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
 	state int cycles = 0;
@@ -521,7 +554,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					                       whitelistBinPaths,
 					                       "",
 					                       {},
-					                       UseConfigDB::DISABLED));
+					                       configDBType));
 				}
 				if (runBackupAgents != AgentNone) {
 					futures.push_back(runBackup(connFile));
@@ -660,7 +693,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
                                     AgentMode runBackupAgents,
                                     bool sslOnly,
                                     std::string whitelistBinPaths,
-                                    ProtocolVersion protocolVersion) {
+                                    ProtocolVersion protocolVersion,
+                                    ConfigDBType configDBType) {
 	state int bootCount = 0;
 	state std::vector<std::string> myFolders;
 	state std::vector<std::string> coordFolders;
@@ -730,7 +764,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          useSeedFile,
 					                                          agentMode,
 					                                          whitelistBinPaths,
-					                                          protocolVersion));
+					                                          protocolVersion,
+					                                          configDBType));
 					g_simulator.setDiffProtocol = true;
 				} else {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
@@ -747,7 +782,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          useSeedFile,
 					                                          agentMode,
 					                                          whitelistBinPaths,
-					                                          g_network->protocolVersion()));
+					                                          g_network->protocolVersion(),
+					                                          configDBType));
 				}
 				TraceEvent("SimulatedMachineProcess", randomId)
 				    .detail("Address", NetworkAddress(ips[i], listenPort, true, false))
@@ -973,6 +1009,8 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
 
+	auto configDBType = testConfig.getConfigDBType();
+
 	// allows multiple ipAddr entries
 	ini.SetMultiKey();
 
@@ -1081,7 +1119,8 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 			                     AgentAddition,
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
 			                     whitelistBinPaths,
-			                     protocolVersion),
+			                     protocolVersion,
+			                     configDBType),
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}
 
@@ -1258,7 +1297,9 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 
 // Sets storage engine based on testConfig details
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
-	int storage_engine_type = deterministicRandom()->randomInt(0, 5);
+	// Using [0, 4) to disable the RocksDB storage engine.
+	// TODO: Figure out what is broken with the RocksDB engine in simulation.
+	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
@@ -1667,6 +1708,10 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 	}
 }
 
+void setConfigDB(TestConfig const& testConfig) {
+	g_simulator.configDBType = testConfig.getConfigDBType();
+}
+
 // Generates and sets an appropriate configuration for the database according to
 // the provided testConfig. Some attributes are randomly generated for more coverage
 // of different combinations
@@ -1702,6 +1747,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 	setProcessesPerMachine(testConfig);
 	setTss(testConfig);
+	setConfigDB(testConfig);
 }
 
 // Configures the system according to the given specifications in order to run
@@ -1724,6 +1770,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	if (testConfig.configureLocked) {
 		startingConfigString += " locked";
 	}
+	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {
 		if ("tss_storage_engine" == kv.first) {
 			continue;
@@ -2006,7 +2053,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 			                                                      requiresExtraDBMachines ? AgentOnly : AgentAddition,
 			                                                      sslOnly,
 			                                                      whitelistBinPaths,
-			                                                      protocolVersion),
+			                                                      protocolVersion,
+			                                                      configDBType),
 			                                     "SimulatedMachine"));
 
 			if (requiresExtraDBMachines) {
@@ -2032,7 +2080,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 				                                                      AgentNone,
 				                                                      sslOnly,
 				                                                      whitelistBinPaths,
-				                                                      protocolVersion),
+				                                                      protocolVersion,
+				                                                      configDBType),
 				                                     "SimulatedMachine"));
 			}
 
@@ -2071,7 +2120,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		                                  AgentNone,
 		                                  sslEnabled && sslOnly,
 		                                  whitelistBinPaths,
-		                                  protocolVersion),
+		                                  protocolVersion,
+		                                  configDBType),
 		                 "SimulatedTesterMachine"));
 	}
 

@@ -88,6 +88,14 @@ public:
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+
+	// used in template functions as returned Future type
+	template <class Type>
+	using FutureT = ThreadFuture<Type>;
+	// internal use only, return true by default
+	// Only if it's a MultiVersionTransaction and the underlying transaction handler is null,
+	// it will return false
+	virtual bool isValid() { return true; }
 };
 
 // An interface that represents a connection to a cluster made by a client
@@ -115,6 +123,9 @@ public:
 	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
+
+	// used in template functions as the Transaction type that can be created through createTransaction()
+	using TransactionT = ITransaction;
 };
 
 // An interface that presents the top-level FDB client API as exposed through the C bindings

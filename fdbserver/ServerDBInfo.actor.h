@@ -26,7 +26,6 @@
 #define FDBSERVER_SERVERDBINFO_H
 #pragma once
 
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/LogSystemConfig.h"
@@ -63,7 +62,6 @@ struct ServerDBInfo {
 	                                           // which need to stay alive in case this recovery fails
 	Optional<LatencyBandConfig> latencyBandConfig;
 	int64_t infoGeneration;
-	ConfigBroadcastFollowerInterface configBroadcaster;
 
 	ServerDBInfo()
 	  : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
@@ -87,8 +85,7 @@ struct ServerDBInfo {
 		           logSystemConfig,
 		           priorCommittedLogServers,
 		           latencyBandConfig,
-		           infoGeneration,
-		           configBroadcaster);
+		           infoGeneration);
 	}
 };
 

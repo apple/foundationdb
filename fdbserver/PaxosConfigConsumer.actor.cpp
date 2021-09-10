@@ -132,19 +132,19 @@ public:
 PaxosConfigConsumer::PaxosConfigConsumer(std::vector<ConfigFollowerInterface> const& cfis,
                                          double pollingInterval,
                                          Optional<double> compactionInterval)
-  : _impl(std::make_unique<PaxosConfigConsumerImpl>(cfis, pollingInterval, compactionInterval)) {}
+  : impl(PImpl<PaxosConfigConsumerImpl>::create(cfis, pollingInterval, compactionInterval)) {}
 
 PaxosConfigConsumer::PaxosConfigConsumer(ServerCoordinators const& coordinators,
                                          double pollingInterval,
                                          Optional<double> compactionInterval)
-  : _impl(std::make_unique<PaxosConfigConsumerImpl>(coordinators.configServers, pollingInterval, compactionInterval)) {}
+  : impl(PImpl<PaxosConfigConsumerImpl>::create(coordinators.configServers, pollingInterval, compactionInterval)) {}
 
 PaxosConfigConsumer::~PaxosConfigConsumer() = default;
 
 Future<Void> PaxosConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
-	return impl().consume(broadcaster);
+	return impl->consume(broadcaster);
 }
 
 UID PaxosConfigConsumer::getID() const {
-	return impl().getID();
+	return impl->getID();
 }

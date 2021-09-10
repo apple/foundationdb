@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CoordinationInterface.h"
 #include "fdbrpc/FlowTransport.h"
 #include "flow/network.h"
 
@@ -51,7 +50,7 @@ constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
-static constexpr int WLTOKEN_COUNTS = 21; // number of wellKnownEndpoints
+static constexpr int WLTOKEN_COUNTS = 22; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:
@@ -158,7 +157,10 @@ const Endpoint& EndpointMap::insert(NetworkAddressList localAddresses,
 NetworkMessageReceiver* EndpointMap::get(Endpoint::Token const& token) {
 	uint32_t index = token.second();
 	if (index < wellKnownEndpointCount && data[index].receiver == nullptr) {
-		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded").detail("Token", token).detail("Index", index).backtrace();
+		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded")
+		    .detail("Token", token)
+		    .detail("Index", index)
+		    .backtrace();
 	}
 	if (index < data.size() && data[index].token().first() == token.first() &&
 	    ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second())
@@ -923,6 +925,7 @@ ACTOR static void deliver(TransportData* self,
 	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
 	// with a higher priority. ReplyPromiseStream needs to guarentee that messages are recieved in the order they were
 	// sent, so we are using orderedDelay.
+	// NOTE: don't skip delay(0) when it's local deliver since it could cause out of order object deconstruction.
 	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
 		wait(orderedDelay(0, priority));
 	} else {

@@ -210,33 +210,9 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
-// template specializations for metrics replies that should never be called because these requests aren't duplicated
-
-// storage metrics
-template <>
-bool TSS_doCompare(const StorageMetrics& src, const StorageMetrics& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const WaitMetricsRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const WaitMetricsRequest& req,
-                       const StorageMetrics& src,
-                       const StorageMetrics& tss) {
-	ASSERT(false);
-}
-
-// split metrics
 template <>
 bool TSS_doCompare(const SplitMetricsReply& src, const SplitMetricsReply& tss) {
-	ASSERT(false);
+	// We duplicate split metrics just for load, no need to validate replies.
 	return true;
 }
 
@@ -254,10 +230,9 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
-// read hot sub range
 template <>
 bool TSS_doCompare(const ReadHotSubRangeReply& src, const ReadHotSubRangeReply& tss) {
-	ASSERT(false);
+	// We duplicate read hot sub range metrics just for load, no need to validate replies.
 	return true;
 }
 
@@ -275,10 +250,9 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
-// split range
 template <>
 bool TSS_doCompare(const SplitRangeReply& src, const SplitRangeReply& tss) {
-	ASSERT(false);
+	// We duplicate read hot sub range metrics just for load, no need to validate replies.
 	return true;
 }
 
@@ -296,7 +270,7 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
-// range feed
+// change feed
 template <>
 bool TSS_doCompare(const ChangeFeedReply& src, const ChangeFeedReply& tss) {
 	ASSERT(false);
@@ -334,6 +308,29 @@ void TSS_traceMismatch(TraceEvent& event,
                        const OverlappingChangeFeedsRequest& req,
                        const OverlappingChangeFeedsReply& src,
                        const OverlappingChangeFeedsReply& tss) {
+	ASSERT(false);
+}
+
+// template specializations for metrics replies that should never be called because these requests aren't duplicated
+
+// storage metrics
+template <>
+bool TSS_doCompare(const StorageMetrics& src, const StorageMetrics& tss) {
+	ASSERT(false);
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const WaitMetricsRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const WaitMetricsRequest& req,
+                       const StorageMetrics& src,
+                       const StorageMetrics& tss) {
 	ASSERT(false);
 }
 

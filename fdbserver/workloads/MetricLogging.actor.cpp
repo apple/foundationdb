@@ -80,7 +80,7 @@ struct MetricLoggingWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(changes.getMetric());
-		m.push_back(PerfMetric("Changes/sec", changes.getValue() / testDuration, false));
+		m.emplace_back("Changes/sec", changes.getValue() / testDuration, Averaged::False);
 	}
 
 	ACTOR Future<Void> MetricLoggingClient(Database cx, MetricLoggingWorkload* self, int clientId, int actorId) {

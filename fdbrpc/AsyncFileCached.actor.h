@@ -244,8 +244,8 @@ public:
 			TraceEvent("AsyncFileCachedDel")
 			    .detail("Filename", filename)
 			    .detail("Refcount", debugGetReferenceCount())
-			    .detail("CanDie", f.isReady())
-			    .backtrace();
+			    .detail("CanDie", f.isReady());
+			// .backtrace();
 			if (f.isReady())
 				delete this;
 			else

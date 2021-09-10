@@ -22,35 +22,176 @@
 #include "fdbclient/PaxosConfigTransaction.h"
 #include "flow/actorcompiler.h" // must be last include
 
-class PaxosConfigTransactionImpl {
-	ConfigTransactionCommitRequest toCommit;
-	Future<ConfigGeneration> getGenerationFuture;
+class CommitQuorum {
+	ActorCollection actors{ false };
 	std::vector<ConfigTransactionInterface> ctis;
+	size_t failed{ 0 };
+	size_t successful{ 0 };
+	size_t maybeCommitted{ 0 };
+	Promise<Void> result;
+	Standalone<VectorRef<ConfigMutationRef>> mutations;
+	ConfigCommitAnnotation annotation;
+
+	ConfigTransactionCommitRequest getCommitRequest(ConfigGeneration generation) const {
+		return ConfigTransactionCommitRequest(generation, mutations, annotation);
+	}
+
+	void updateResult() {
+		if (successful >= ctis.size() / 2 + 1 && result.canBeSet()) {
+			result.send(Void());
+		} else if (failed >= ctis.size() / 2 + 1 && result.canBeSet()) {
+			result.sendError(not_committed());
+		} else {
+			// Check if it is possible to ever receive quorum agreement
+			auto totalRequestsOutstanding = ctis.size() - (failed + successful + maybeCommitted);
+			if ((failed + totalRequestsOutstanding < ctis.size() / 2 + 1) &&
+			    (successful + totalRequestsOutstanding < ctis.size() / 2 + 1) && result.canBeSet()) {
+				result.sendError(commit_unknown_result());
+			}
+		}
+	}
+
+	ACTOR static Future<Void> addRequestActor(CommitQuorum* self,
+	                                          ConfigGeneration generation,
+	                                          ConfigTransactionInterface cti) {
+		try {
+			wait(retryBrokenPromise(cti.commit, self->getCommitRequest(generation)));
+			++self->successful;
+		} catch (Error& e) {
+			if (e.code() == error_code_not_committed) {
+				++self->failed;
+			} else {
+				++self->maybeCommitted;
+			}
+		}
+		self->updateResult();
+		return Void();
+	}
+
+public:
+	CommitQuorum() = default;
+	explicit CommitQuorum(std::vector<ConfigTransactionInterface> const& ctis) : ctis(ctis) {}
+	void set(KeyRef key, ValueRef value) {
+		if (key == configTransactionDescriptionKey) {
+			annotation.description = ValueRef(annotation.arena(), value);
+		} else {
+			mutations.push_back_deep(mutations.arena(),
+			                         IKnobCollection::createSetMutation(mutations.arena(), key, value));
+		}
+	}
+	void clear(KeyRef key) {
+		if (key == configTransactionDescriptionKey) {
+			annotation.description = ""_sr;
+		} else {
+			mutations.push_back_deep(mutations.arena(), IKnobCollection::createClearMutation(mutations.arena(), key));
+		}
+	}
+	void setTimestamp() { annotation.timestamp = now(); }
+	size_t expectedSize() const { return annotation.expectedSize() + mutations.expectedSize(); }
+	Future<Void> commit(ConfigGeneration generation) {
+		// Send commit message to all replicas, even those that did not return the used replica.
+		// This way, slow replicas are kept up date.
+		for (const auto& cti : ctis) {
+			actors.add(addRequestActor(this, generation, cti));
+		}
+		return result.getFuture();
+	}
+	bool committed() const { return result.isSet(); }
+};
+
+class GetGenerationQuorum {
+	ActorCollection actors{ false };
+	std::vector<ConfigTransactionInterface> ctis;
+	std::map<ConfigGeneration, std::vector<ConfigTransactionInterface>> seenGenerations;
+	Promise<ConfigGeneration> result;
+	size_t totalRepliesReceived{ 0 };
+	size_t maxAgreement{ 0 };
+	Optional<Version> lastSeenLiveVersion;
+	Future<ConfigGeneration> getGenerationFuture;
+
+	ACTOR static Future<Void> addRequestActor(GetGenerationQuorum* self, ConfigTransactionInterface cti) {
+		ConfigTransactionGetGenerationReply reply = wait(
+		    retryBrokenPromise(cti.getGeneration, ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }));
+
+		++self->totalRepliesReceived;
+		auto gen = reply.generation;
+		self->lastSeenLiveVersion = std::max(gen.liveVersion, self->lastSeenLiveVersion.orDefault(::invalidVersion));
+		auto& replicas = self->seenGenerations[gen];
+		replicas.push_back(cti);
+		self->maxAgreement = std::max(replicas.size(), self->maxAgreement);
+		if (replicas.size() >= self->ctis.size() / 2 + 1 && !self->result.isSet()) {
+			self->result.send(gen);
+		} else if (self->maxAgreement + (self->ctis.size() - self->totalRepliesReceived) <
+		           (self->ctis.size() / 2 + 1)) {
+			if (!self->result.isError()) {
+				self->result.sendError(failed_to_reach_quorum());
+			}
+		}
+		return Void();
+	}
+
+	ACTOR static Future<ConfigGeneration> getGenerationActor(GetGenerationQuorum* self) {
+		state int retries = 0;
+		loop {
+			for (const auto& cti : self->ctis) {
+				self->actors.add(addRequestActor(self, cti));
+			}
+			try {
+				choose {
+					when(ConfigGeneration generation = wait(self->result.getFuture())) { return generation; }
+					when(wait(self->actors.getResult())) { ASSERT(false); }
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_failed_to_reach_quorum) {
+					TEST(true); // Failed to reach quorum getting generation
+					wait(delayJittered(0.01 * (1 << retries)));
+					++retries;
+					self->actors.clear(false);
+				} else {
+					throw e;
+				}
+			}
+		}
+	}
+
+public:
+	GetGenerationQuorum() = default;
+	explicit GetGenerationQuorum(std::vector<ConfigTransactionInterface> const& ctis,
+	                             Optional<Version> const& lastSeenLiveVersion = {})
+	  : ctis(ctis), lastSeenLiveVersion(lastSeenLiveVersion) {}
+	Future<ConfigGeneration> getGeneration() {
+		if (!getGenerationFuture.isValid()) {
+			getGenerationFuture = getGenerationActor(this);
+		}
+		return getGenerationFuture;
+	}
+	bool isReady() const {
+		return getGenerationFuture.isValid() && getGenerationFuture.isReady() && !getGenerationFuture.isError();
+	}
+	Optional<ConfigGeneration> getCachedGeneration() const {
+		return isReady() ? getGenerationFuture.get() : Optional<ConfigGeneration>{};
+	}
+	std::vector<ConfigTransactionInterface> getReadReplicas() const {
+		ASSERT(isReady());
+		return seenGenerations.at(getGenerationFuture.get());
+	}
+	Optional<Version> getLastSeenLiveVersion() const { return lastSeenLiveVersion; }
+};
+
+class PaxosConfigTransactionImpl {
+	std::vector<ConfigTransactionInterface> ctis;
+	GetGenerationQuorum getGenerationQuorum;
+	CommitQuorum commitQuorum;
 	int numRetries{ 0 };
-	bool committed{ false };
 	Optional<UID> dID;
 	Database cx;
 
-	ACTOR static Future<ConfigGeneration> getGeneration(PaxosConfigTransactionImpl* self) {
-		state std::vector<Future<ConfigTransactionGetGenerationReply>> getGenerationFutures;
-		getGenerationFutures.reserve(self->ctis.size());
-		for (auto const& cti : self->ctis) {
-			getGenerationFutures.push_back(cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{}));
-		}
-		// FIXME: Must tolerate failures and disagreement
-		wait(waitForAll(getGenerationFutures));
-		return getGenerationFutures[0].get().generation;
-	}
-
 	ACTOR static Future<Optional<Value>> get(PaxosConfigTransactionImpl* self, Key key) {
-		if (!self->getGenerationFuture.isValid()) {
-			self->getGenerationFuture = getGeneration(self);
-		}
 		state ConfigKey configKey = ConfigKey::decodeKey(key);
-		ConfigGeneration generation = wait(self->getGenerationFuture);
+		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 		// TODO: Load balance
-		ConfigTransactionGetReply reply =
-		    wait(self->ctis[0].get.getReply(ConfigTransactionGetRequest{ generation, configKey }));
+		ConfigTransactionGetReply reply = wait(retryBrokenPromise(
+		    self->getGenerationQuorum.getReadReplicas()[0].get, ConfigTransactionGetRequest{ generation, configKey }));
 		if (reply.value.present()) {
 			return reply.value.get().toValue();
 		} else {
@@ -59,13 +200,11 @@ class PaxosConfigTransactionImpl {
 	}
 
 	ACTOR static Future<RangeResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
-		if (!self->getGenerationFuture.isValid()) {
-			self->getGenerationFuture = getGeneration(self);
-		}
-		ConfigGeneration generation = wait(self->getGenerationFuture);
+		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 		// TODO: Load balance
 		ConfigTransactionGetConfigClassesReply reply =
-		    wait(self->ctis[0].getClasses.getReply(ConfigTransactionGetConfigClassesRequest{ generation }));
+		    wait(retryBrokenPromise(self->getGenerationQuorum.getReadReplicas()[0].getClasses,
+		                            ConfigTransactionGetConfigClassesRequest{ generation }));
 		RangeResult result;
 		result.reserve(result.arena(), reply.configClasses.size());
 		for (const auto& configClass : reply.configClasses) {
@@ -75,13 +214,11 @@ class PaxosConfigTransactionImpl {
 	}
 
 	ACTOR static Future<RangeResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
-		if (!self->getGenerationFuture.isValid()) {
-			self->getGenerationFuture = getGeneration(self);
-		}
-		ConfigGeneration generation = wait(self->getGenerationFuture);
+		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 		// TODO: Load balance
 		ConfigTransactionGetKnobsReply reply =
-		    wait(self->ctis[0].getKnobs.getReply(ConfigTransactionGetKnobsRequest{ generation, configClass }));
+		    wait(retryBrokenPromise(self->getGenerationQuorum.getReadReplicas()[0].getKnobs,
+		                            ConfigTransactionGetKnobsRequest{ generation, configClass }));
 		RangeResult result;
 		result.reserve(result.arena(), reply.knobNames.size());
 		for (const auto& knobName : reply.knobNames) {
@@ -91,45 +228,47 @@ class PaxosConfigTransactionImpl {
 	}
 
 	ACTOR static Future<Void> commit(PaxosConfigTransactionImpl* self) {
-		if (!self->getGenerationFuture.isValid()) {
-			self->getGenerationFuture = getGeneration(self);
-		}
-		wait(store(self->toCommit.generation, self->getGenerationFuture));
-		self->toCommit.annotation.timestamp = now();
-		std::vector<Future<Void>> commitFutures;
-		commitFutures.reserve(self->ctis.size());
-		for (const auto& cti : self->ctis) {
-			commitFutures.push_back(cti.commit.getReply(self->toCommit));
-		}
-		// FIXME: Must tolerate failures and disagreement
-		wait(quorum(commitFutures, commitFutures.size() / 2 + 1));
-		self->committed = true;
+		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
+		self->commitQuorum.setTimestamp();
+		wait(self->commitQuorum.commit(generation));
 		return Void();
+	}
+
+	ACTOR static Future<Void> onError(PaxosConfigTransactionImpl* self, Error e) {
+		// TODO: Improve this:
+		TraceEvent("ConfigIncrementOnError").error(e).detail("NumRetries", self->numRetries);
+		if (e.code() == error_code_transaction_too_old || e.code() == error_code_not_committed) {
+			wait(delay((1 << self->numRetries++) * 0.01 * deterministicRandom()->random01()));
+			self->reset();
+			return Void();
+		}
+		throw e;
 	}
 
 public:
 	Future<Version> getReadVersion() {
-		if (!getGenerationFuture.isValid()) {
-			getGenerationFuture = getGeneration(this);
-		}
-		return map(getGenerationFuture, [](auto const& gen) { return gen.committedVersion; });
+		return map(getGenerationQuorum.getGeneration(), [](auto const& gen) { return gen.committedVersion; });
 	}
 
 	Optional<Version> getCachedReadVersion() const {
-		if (getGenerationFuture.isValid() && getGenerationFuture.isReady() && !getGenerationFuture.isError()) {
-			return getGenerationFuture.get().committedVersion;
+		auto gen = getGenerationQuorum.getCachedGeneration();
+		if (gen.present()) {
+			return gen.get().committedVersion;
 		} else {
 			return {};
 		}
 	}
 
-	Version getCommittedVersion() const { return committed ? getGenerationFuture.get().liveVersion : ::invalidVersion; }
+	Version getCommittedVersion() const {
+		return commitQuorum.committed() ? getGenerationQuorum.getCachedGeneration().get().liveVersion
+		                                : ::invalidVersion;
+	}
 
-	int64_t getApproximateSize() const { return toCommit.expectedSize(); }
+	int64_t getApproximateSize() const { return commitQuorum.expectedSize(); }
 
-	void set(KeyRef key, ValueRef value) { toCommit.set(key, value); }
+	void set(KeyRef key, ValueRef value) { commitQuorum.set(key, value); }
 
-	void clear(KeyRef key) { toCommit.clear(key); }
+	void clear(KeyRef key) { commitQuorum.clear(key); }
 
 	Future<Optional<Value>> get(Key const& key) { return get(this, key); }
 
@@ -146,21 +285,13 @@ public:
 		}
 	}
 
-	Future<Void> onError(Error const& e) {
-		// TODO: Improve this:
-		if (e.code() == error_code_transaction_too_old) {
-			reset();
-			return delay((1 << numRetries++) * 0.01 * deterministicRandom()->random01());
-		}
-		throw e;
-	}
+	Future<Void> onError(Error const& e) { return onError(this, e); }
 
 	void debugTransaction(UID dID) { this->dID = dID; }
 
 	void reset() {
-		getGenerationFuture = Future<ConfigGeneration>{};
-		toCommit = {};
-		committed = false;
+		getGenerationQuorum = GetGenerationQuorum{ ctis };
+		commitQuorum = CommitQuorum{ ctis };
 	}
 
 	void fullReset() {
@@ -186,21 +317,24 @@ public:
 		for (const auto& coordinator : coordinators) {
 			ctis.emplace_back(coordinator);
 		}
+		getGenerationQuorum = GetGenerationQuorum{ ctis };
+		commitQuorum = CommitQuorum{ ctis };
 	}
 
-	PaxosConfigTransactionImpl(std::vector<ConfigTransactionInterface> const& ctis) : ctis(ctis) {}
+	PaxosConfigTransactionImpl(std::vector<ConfigTransactionInterface> const& ctis)
+	  : ctis(ctis), getGenerationQuorum(ctis), commitQuorum(ctis) {}
 };
 
 Future<Version> PaxosConfigTransaction::getReadVersion() {
-	return impl().getReadVersion();
+	return impl->getReadVersion();
 }
 
 Optional<Version> PaxosConfigTransaction::getCachedReadVersion() const {
-	return impl().getCachedReadVersion();
+	return impl->getCachedReadVersion();
 }
 
 Future<Optional<Value>> PaxosConfigTransaction::get(Key const& key, Snapshot) {
-	return impl().get(key);
+	return impl->get(key);
 }
 
 Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
@@ -211,7 +345,7 @@ Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
 	if (reverse) {
 		throw client_invalid_operation();
 	}
-	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
+	return impl->getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
 Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector begin,
@@ -222,27 +356,27 @@ Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector begin,
 	if (reverse) {
 		throw client_invalid_operation();
 	}
-	return impl().getRange(KeyRangeRef(begin.getKey(), end.getKey()));
+	return impl->getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
 void PaxosConfigTransaction::set(KeyRef const& key, ValueRef const& value) {
-	return impl().set(key, value);
+	return impl->set(key, value);
 }
 
 void PaxosConfigTransaction::clear(KeyRef const& key) {
-	return impl().clear(key);
+	return impl->clear(key);
 }
 
 Future<Void> PaxosConfigTransaction::commit() {
-	return impl().commit();
+	return impl->commit();
 }
 
 Version PaxosConfigTransaction::getCommittedVersion() const {
-	return impl().getCommittedVersion();
+	return impl->getCommittedVersion();
 }
 
 int64_t PaxosConfigTransaction::getApproximateSize() const {
-	return impl().getApproximateSize();
+	return impl->getApproximateSize();
 }
 
 void PaxosConfigTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
@@ -250,7 +384,7 @@ void PaxosConfigTransaction::setOption(FDBTransactionOptions::Option option, Opt
 }
 
 Future<Void> PaxosConfigTransaction::onError(Error const& e) {
-	return impl().onError(e);
+	return impl->onError(e);
 }
 
 void PaxosConfigTransaction::cancel() {
@@ -259,28 +393,28 @@ void PaxosConfigTransaction::cancel() {
 }
 
 void PaxosConfigTransaction::reset() {
-	impl().reset();
+	impl->reset();
 }
 
 void PaxosConfigTransaction::fullReset() {
-	impl().fullReset();
+	impl->fullReset();
 }
 
 void PaxosConfigTransaction::debugTransaction(UID dID) {
-	impl().debugTransaction(dID);
+	impl->debugTransaction(dID);
 }
 
 void PaxosConfigTransaction::checkDeferredError() const {
-	impl().checkDeferredError(deferredError);
+	impl->checkDeferredError(deferredError);
 }
 
 PaxosConfigTransaction::PaxosConfigTransaction(std::vector<ConfigTransactionInterface> const& ctis)
-  : _impl(std::make_unique<PaxosConfigTransactionImpl>(ctis)) {}
+  : impl(PImpl<PaxosConfigTransactionImpl>::create(ctis)) {}
 
 PaxosConfigTransaction::PaxosConfigTransaction() = default;
 
 PaxosConfigTransaction::~PaxosConfigTransaction() = default;
 
 void PaxosConfigTransaction::setDatabase(Database const& cx) {
-	_impl = std::make_unique<PaxosConfigTransactionImpl>(cx);
+	impl = PImpl<PaxosConfigTransactionImpl>::create(cx);
 }
