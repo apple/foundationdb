@@ -171,11 +171,11 @@ public:
 	                                                           bool cacheable,
 	                                                           bool nohit) = 0;
 	virtual Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
-	                                                           unsigned int level,
-	                                                           VectorRef<LogicalPageID> pageIDs,
-	                                                           int priority,
-	                                                           bool cacheable,
-	                                                           bool nohit) = 0;
+	                                                                unsigned int level,
+	                                                                VectorRef<LogicalPageID> pageIDs,
+	                                                                int priority,
+	                                                                bool cacheable,
+	                                                                bool nohit) = 0;
 	virtual bool tryEvictPage(LogicalPageID id) = 0;
 	virtual Version getVersion() const = 0;
 
@@ -248,11 +248,11 @@ public:
 	                                              bool cacheable,
 	                                              bool noHit) = 0;
 	virtual Future<Reference<ArenaPage>> readMultiPage(PagerEventReasons reason,
-	                                              unsigned int level,
-	                                              Standalone<VectorRef<PhysicalPageID>> pageIDs,
-	                                              int priority,
-	                                              bool cacheable,
-	                                              bool noHit) = 0;
+	                                                   unsigned int level,
+	                                                   Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                                   int priority,
+	                                                   bool cacheable,
+	                                                   bool noHit) = 0;
 
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
