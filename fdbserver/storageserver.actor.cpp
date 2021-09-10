@@ -3320,6 +3320,7 @@ void changeServerKeys(StorageServer* data,
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
+				TraceEvent("ChangeServerKeysEmptyRange", data->thisServerID);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);
@@ -3477,7 +3478,7 @@ private:
 	bool processedCacheStartKey;
 
 	void applyPrivateData(StorageServer* data, MutationRef const& m) {
-		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m);
+		TraceEvent("SSPrivateMutation", data->thisServerID).detail("Mutation", m);
 
 		if (processedStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -3493,7 +3494,7 @@ private:
 
 				// The changes for version have already been received (and are being processed now).  We need to fetch
 				// the data for change.version-1 (changes from versions < change.version)
-				const Version shardVersion = (emptyRange && nowAssigned) ? 1 : currentVersion - 1;
+				const Version shardVersion = (emptyRange && nowAssigned) ? 0 : currentVersion - 1;
 				changeServerKeys(data, keys, nowAssigned, shardVersion, CSK_UPDATE);
 			}
 
