@@ -1781,7 +1781,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {
-		if ("tss_storage_engine" == kv.first) {
+		if ("tss_storage_engine" == kv.first || "perpetual_storage_wiggle_locality" == kv.first) {
 			continue;
 		}
 		startingConfigString += " ";

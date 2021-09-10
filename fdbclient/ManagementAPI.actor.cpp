@@ -150,6 +150,14 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = value;
 		}
+		if (key == "perpetual_storage_wiggle_locality") {
+			if (value.find(':') == std::string::npos && value.compare("0")) {
+				printf("Error: perpetual_storage_wiggle_locality should be in <locality_key>:<locality_value> "
+				       "format or enter 0 to disable the locality match for wiggling.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
 		if (key == "storage_migration_type") {
 			StorageMigrationType type;
 			if (value == "disabled") {

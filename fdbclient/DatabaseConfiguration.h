@@ -245,6 +245,7 @@ struct DatabaseConfiguration {
 
 	// Perpetual Storage Setting
 	int32_t perpetualStorageWiggleSpeed;
+	std::string perpetualStorageWiggleLocality;
 
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;

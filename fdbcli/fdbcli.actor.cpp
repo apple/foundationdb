@@ -1171,6 +1171,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "logs=",
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
+		                   "perpetual_storage_wiggle_locality=",
 		                   "storage_migration_type=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
