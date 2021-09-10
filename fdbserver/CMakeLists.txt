@@ -117,6 +117,7 @@ set(FDBSERVER_SRCS
   StorageMetrics.h
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
+  TagPartitionedLogSystem.actor.h
   MockLogSystem.h
   MockLogSystem.cpp
   MockPeekCursor.h
