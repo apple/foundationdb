@@ -49,6 +49,7 @@ set(FDBSERVER_SRCS
   LocalConfiguration.h
   LogProtocolMessage.h
   LogRouter.actor.cpp
+  LogSystem.cpp
   LogSystem.h
   LogSystemConfig.h
   LogSystemDiskQueueAdapter.actor.cpp
