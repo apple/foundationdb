@@ -35,6 +35,7 @@ set(FDBSERVER_SRCS
   IDiskQueue.h
   IKeyValueContainer.h
   IKeyValueStore.h
+  IKeyValueStore.cpp
   IPager.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp

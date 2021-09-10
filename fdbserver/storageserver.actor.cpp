@@ -849,6 +849,7 @@ public:
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this) {
+
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -3411,7 +3412,6 @@ static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairI
 static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
 
 // (Potentially) change with the durable version or when fetchKeys completes
-static const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
 static const KeyRangeRef persistShardAssignedKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAssigned/"), LiteralStringRef(PERSIST_PREFIX "ShardAssigned0"));
 static const KeyRangeRef persistShardAvailableKeys =
@@ -4115,7 +4115,7 @@ void StorageServerDisk::makeNewStorageServerDurable() {
 	if (data->tssPairID.present()) {
 		storage->set(KeyValueRef(persistTssPairID, BinaryWriter::toValue(data->tssPairID.get(), Unversioned())));
 	}
-	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
+	storage->setCommitVersion(data->version.get());
 	storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), LiteralStringRef("0")));
 	storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), LiteralStringRef("0")));
 }
@@ -4220,7 +4220,7 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 
 // Update data->storage to persist the changes from (data->storageVersion(),version]
 void StorageServerDisk::makeVersionDurable(Version version) {
-	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(version, Unversioned())));
+	storage->setCommitVersion(version);
 
 	// TraceEvent("MakeDurable", data->thisServerID)
 	//     .detail("FromVersion", prevStorageVersion)
@@ -4349,7 +4349,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<Optional<Value>> fID = storage->readValue(persistID);
 	state Future<Optional<Value>> ftssPairID = storage->readValue(persistTssPairID);
 	state Future<Optional<Value>> fTssQuarantine = storage->readValue(persistTssQuarantine);
-	state Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
+	state Future<Version> fVersion = storage->getCommittedVersion();
 	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
 	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
 	state Future<RangeResult> fShardAssigned = storage->readRange(persistShardAssignedKeys);
@@ -4361,7 +4361,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	    restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
 	TraceEvent("ReadingDurableState", data->thisServerID).log();
-	wait(waitForAll(std::vector{ fFormat, fID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
+	wait(waitForAll(std::vector{ fFormat, fID, ftssPairID, fTssQuarantine, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
@@ -4402,7 +4402,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	if (fPrimaryLocality.get().present())
 		data->primaryLocality = BinaryReader::fromStringRef<int8_t>(fPrimaryLocality.get().get(), Unversioned());
 
-	state Version version = BinaryReader::fromStringRef<Version>(fVersion.get().get(), Unversioned());
+	state Version version = wait(fVersion);
 	debug_checkRestoredVersion(data->thisServerID, version, "StorageServer");
 	data->setInitialVersion(version);
 
