@@ -36,9 +36,6 @@ public:
 	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {
 		// We only allow chaos events on storage files
 		enabled = (file->getFilename().find("storage-") != std::string::npos);
-		//enabled = StringRef(file->getFilename()).startsWith(LiteralStringRef("storage-"));
-
-		TraceEvent("AsyncFileChaos").detail("Enabled", enabled).detail("FileName", file->getFilename());
 	}
 
 	void addref() override { ReferenceCounted<AsyncFileChaos>::addref(); }
@@ -48,7 +45,7 @@ public:
 		double delayFor = 0.0;
 		if (!enabled)
 			return delayFor;
-	
+
 		auto res = g_network->global(INetwork::enDiskFailureInjector);
 		if (res) {
 			DiskFailureInjector* delayInjector = static_cast<DiskFailureInjector*>(res);
@@ -87,7 +84,6 @@ public:
 		auto res = g_network->global(INetwork::enBitFlipper);
 		if (enabled && res) {
 			auto bitFlipPercentage = static_cast<BitFlipper*>(res)->getBitFlipPercentage();
-			//TraceEvent("AsyncFileChaosCorrupt").detail("Percentage", bitFlipPercentage);
 			if (bitFlipPercentage > 0.0) {
 				if (deterministicRandom()->random01() < bitFlipPercentage) {
 					pdata = (char*)arena.allocate4kAlignedBuffer(length);
