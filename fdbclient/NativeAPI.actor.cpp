@@ -169,9 +169,11 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	}
 }
 
-void DatabaseContext::updateCachedRV(Future<Version> v) {
-	lastGrvUpdateTime = now();
-	cachedReadVersion = v;
+void DatabaseContext::updateCachedRV(double t, Version v) {
+	if (t >= lastTimedGrv.get()) {
+		lastTimedGrv = t;
+		cachedRv = v;
+	}
 }
 
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
@@ -886,23 +888,27 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 }
 
 ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
-	cx->lastGrvUpdateTime = 0.0;
 	state Transaction tr;
+	state double grvDelay = 0.001;
+	cx->lastTimedGrv = 0.0;
+	cx->cachedRv = Version(0);
 	loop {
 		wait(refreshTransaction(cx, &tr));
-		auto curTime = now();
-		if (curTime - cx->lastGrvUpdateTime > CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
+		state double curTime = now();
+		state double lastTime = cx->lastTimedGrv.get();
+		if (curTime - lastTime > (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay)) {
 			try {
-				// Is this what the method should be? Maybe skip transaction
-				// and go straight to proxy like getRawVersion()
 				Version v = wait(tr.getReadVersion());
-				cx->updateCachedRV(v);
+				// Take the average of what we expect and what we got as the delay
+				grvDelay = (grvDelay + (now() - curTime)) / 2.0;
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) {
 					throw;
 				}
 				wait(tr.onError(e));
 			}
+		} else {
+			wait(delay((CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) - (curTime - lastTime)));
 		}
 	}
 }
@@ -3614,7 +3620,6 @@ void Transaction::setVersion(Version v) {
 	if (v <= 0)
 		throw version_invalid();
 	readVersion = v;
-	cx->updateCachedRV(v);
 }
 
 Future<Optional<Value>> Transaction::get(const Key& key, bool snapshot) {
@@ -4429,7 +4434,7 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			                         TaskPriority::DefaultPromiseEndpoint,
 			                         true);
 		}
-
+		state double grvTime = now();
 		choose {
 			when(wait(cx->onProxiesChanged())) {
 				reply.cancel();
@@ -4437,6 +4442,7 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			}
 			when(CommitID ci = wait(reply)) {
 				Version v = ci.version;
+				cx->updateCachedRV(grvTime, v);
 				if (v != invalidVersion) {
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
@@ -4628,8 +4634,6 @@ Future<Void> Transaction::commitMutations() {
 		Future<Void> commitResult =
 		    tryCommit(cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options);
 
-		// Record committed version if successful (failed commit would go to catch block instead(?))
-		cx->updateCachedRV(this->committedVersion);
 		if (isCheckingWrites) {
 			Promise<Void> committed;
 			checkWrites(cx, commitResult, committed, tr, this);
@@ -5012,6 +5016,7 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	state Span span(spanContext, location, { parent });
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
+	cx->updateCachedRV(startTime, rep.version);
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
 		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(
@@ -5069,11 +5074,18 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	return rep.version;
 }
 
+ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx) {
+	double t = cx->lastTimedGrv.get();
+	if (now() - t > CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
+		wait(cx->lastTimedGrv.whenAtLeast(now() - CLIENT_KNOBS->MAX_VERSION_CACHE_LAG));
+	}
+	return cx->cachedRv;
+}
+
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
-		if (options.useGrvCache && cx->cachedReadVersion.isValid() && cx->cachedReadVersion.isReady() &&
-		    !cx->cachedReadVersion.isError()) {
-			return cx->cachedReadVersion;
+		if (options.useGrvCache && cx->cachedRv > Version(0)) {
+			return getDBCachedReadVersion(getDatabase().getPtr());
 		}
 		++cx->transactionReadVersions;
 		flags |= options.getReadVersionFlags;
@@ -5149,7 +5161,6 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		                                 startTime,
 		                                 metadataVersion,
 		                                 options.tags);
-		cx->updateCachedRV(readVersion);
 	}
 	return readVersion;
 }

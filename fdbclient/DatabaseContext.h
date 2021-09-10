@@ -32,6 +32,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/Notified.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -329,10 +330,10 @@ public:
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 
-	// Database-level read version cache storing the most recent successful GRV
-	Future<Version> cachedReadVersion;
-	double lastGrvUpdateTime;
-	void updateCachedRV(Future<Version> v);
+	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
+	NotifiedDouble lastTimedGrv;
+	Version cachedRv;
+	void updateCachedRV(double t, Version v);
 
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal

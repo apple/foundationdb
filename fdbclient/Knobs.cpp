@@ -114,7 +114,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
 	init( LOG_RANGE_BLOCK_SIZE,                    1e6 ); //Dependent on CORE_VERSIONSPERSECOND
 	init( MUTATION_BLOCK_SIZE,	            	  10000 );
-	init( MAX_VERSION_CACHE_LAG,                   10.0 ); // If subtracting time from now(), what unit is being measured?
+	init( MAX_VERSION_CACHE_LAG,                    0.1 );
 
 
 	// TaskBucket
