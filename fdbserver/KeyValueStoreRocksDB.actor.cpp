@@ -236,10 +236,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(status));
 			} else {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
-				onMainThread([&] {
-					a.metrics = rocksDBMetricLogger(options.statistics, db);
-					return Future<bool>(true);
-				}).blockUntilReady();
+				// The current thread and main thread are same when the code runs in simulation.
+				// blockUntilReady() is getting the thread into deadlock state, so avoiding the
+				// metric logger in simulation.
+				if (!g_network->isSimulated()) {
+					onMainThread([&] {
+						a.metrics = rocksDBMetricLogger(options.statistics, db);
+						return Future<bool>(true);
+					}).blockUntilReady();
+				}
 				a.done.send(Void());
 			}
 		}
@@ -459,10 +464,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
 			auto options = getReadOptions();
-			uint64_t deadlineMircos =
+			// TODO: Deadline option is not supported with current rocksdb verion. Re-enable the code
+			// below when deadline option is supported.
+			/* uint64_t deadlineMircos =
 			    db->GetEnv()->NowMicros() + (readRangeTimeout - (timer_monotonic() - a.startTime)) * 1000000;
 			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
-			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds); */
 			// When using a prefix extractor, ensure that keys are returned in order even if they cross
 			// a prefix boundary.
 			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
