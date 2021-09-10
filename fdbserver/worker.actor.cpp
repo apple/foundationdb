@@ -551,6 +551,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		}
 
 		state bool ccInterfacePresent = ccInterface->get().present();
+		TraceEvent("SendRegisterWorkerRequest").detail("DegradedPeersSize", request.degradedPeers.size());
 		state Future<RegisterWorkerReply> registrationReply =
 		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
 		                       : Never();
@@ -729,6 +730,34 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 } // namespace
 
+bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	const auto& dbi = dbInfo->get();
+
+	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+		if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+			continue;
+		}
+		for (const auto& tlog : logSet.tLogs) {
+			if (tlog.present() && tlog.interf().addresses().contains(address)) {
+				return true;
+			}
+		}
+
+		for (const auto& logRouter : logSet.logRouters) {
+			if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+bool addressesInDbAndRemoteDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return addressInDbAndRemoteDc(addresses.address, dbInfo) ||
+	       (addresses.secondaryAddress.present() && addressInDbAndRemoteDc(addresses.secondaryAddress.get(), dbInfo));
+}
+
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
 ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                  WorkerInterface interf,
@@ -737,54 +766,67 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
                                  Reference<AsyncVar<std::vector<NetworkAddress>>> degradedPeers) {
 	loop {
 		state Future<Void> nextHealthCheckDelay = Never();
-		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-		    addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
+		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
 			std::vector<NetworkAddress> currentDegradedPeers;
-			for (const auto& [address, peer] : allPeers) {
-				if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
-					// Ignore peers that don't have enough samples.
-					// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a regular
-					//              basis, which may affect the measurement count. Currently,
-					//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval, so
-					//              it may be ok. If this ends to be a problem, we need to consider keep track of last
-					//              ping latencies logged.
-					continue;
-				}
+			bool workerInDb = false;
+			bool workerInPrimary = false;
+			if (addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
+				workerInDb = true;
+				workerInPrimary = true;
+			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
+				workerInDb = true;
+				workerInPrimary = false;
+			}
 
-				if (!addressInDbAndPrimaryDc(address, dbInfo)) {
-					// Ignore the servers that are not in the database's transaction system and not in the primary DC.
-					// Note that currently we are not monitor storage servers, since lagging in storage servers today
-					// already can trigger server exclusion by data distributor.
-					continue;
-				}
+			if (workerInDb) {
+				for (const auto& [address, peer] : allPeers) {
+					if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
+						// Ignore peers that don't have enough samples.
+						// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
+						// regular
+						//              basis, which may affect the measurement count. Currently,
+						//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval,
+						//              so it may be ok. If this ends to be a problem, we need to consider keep track of
+						//              last ping latencies logged.
+						continue;
+					}
 
-				if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
-				        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
-				    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
-				        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
-					// This is a degraded peer.
-					TraceEvent("HealthMonitorDetectDegradedPeer")
-					    .suppressFor(30)
-					    .detail("Peer", address)
-					    .detail("Elapsed", now() - peer->lastLoggedTime)
-					    .detail("MinLatency", peer->pingLatencies.min())
-					    .detail("MaxLatency", peer->pingLatencies.max())
-					    .detail("MeanLatency", peer->pingLatencies.mean())
-					    .detail("MedianLatency", peer->pingLatencies.median())
-					    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-					    .detail("CheckedPercentileLatency",
-					            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-					    .detail("Count", peer->pingLatencies.getPopulationSize())
-					    .detail("TimeoutCount", peer->timeoutCount);
+					if ((workerInPrimary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+					    (!workerInPrimary && addressInDbAndRemoteDc(address, dbInfo))) {
+						// Ignore the servers that are not in the database's transaction system and not in the primary
+						// DC. Note that currently we are not monitor storage servers, since lagging in storage servers
+						// today already can trigger server exclusion by data distributor.
 
-					currentDegradedPeers.push_back(address);
+						if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
+						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
+						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+							// This is a degraded peer.
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .suppressFor(30)
+							    .detail("Peer", address)
+							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+							    .detail(
+							        "CheckedPercentileLatency",
+							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+							    .detail("Count", peer->pingLatencies.getPopulationSize())
+							    .detail("TimeoutCount", peer->timeoutCount);
+
+							currentDegradedPeers.push_back(address);
+						}
+					}
 				}
 			}
 
 			if (!currentDegradedPeers.empty()) {
-				degradedPeers->set(currentDegradedPeers);
+				degradedPeers->setUnconditional(currentDegradedPeers);
 			}
 		}
 		choose {

@@ -1297,6 +1297,10 @@ public:
 			getWorkerForRoleInDatacenter(
 			    regions[0].dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true);
 
+			TraceEvent("CheckRegionsFailBackToOriginal")
+			    .detail("Primary", regions[0].dcId)
+			    .detail("Remote", regions[1].dcId);
+
 			vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(regions[0].dcId);
 			dcPriority.push_back(regions[1].dcId);
@@ -1338,9 +1342,18 @@ public:
 			return false;
 		}
 
+		TraceEvent("betterMasterExistCheckRegionConditions")
+		    .detail("IsHaEnabled",
+		            db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority)
+		    .detail("IsRemote", db.config.regions[0].dcId != clusterControllerDcId.get())
+		    .detail("VersionDifferenceUpdated", versionDifferenceUpdated)
+		    .detail("VersionDifferenceSmallEnough", datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE)
+		    .detail("RemoteTransactionSystemContainsDegradedServers", remoteTransactionSystemContainsDegradedServers());
+
 		if (db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority &&
 		    db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated &&
-		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
+		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE &&
+		    !remoteTransactionSystemContainsDegradedServers()) {
 			checkRegions(db.config.regions);
 		}
 
@@ -1707,11 +1720,12 @@ public:
 	void updateWorkerHealth(const NetworkAddress& workerAddress, const std::vector<NetworkAddress>& degradedPeers) {
 		std::string degradedPeersString;
 		for (int i = 0; i < degradedPeers.size(); ++i) {
-			degradedPeersString += i == 0 ? "" : " " + degradedPeers[i].toString();
+			degradedPeersString += (i == 0 ? "" : " ") + degradedPeers[i].toString();
 		}
 		TraceEvent("ClusterControllerUpdateWorkerHealth")
 		    .detail("WorkerAddress", workerAddress)
-		    .detail("DegradedPeers", degradedPeersString);
+		    .detail("DegradedPeers", degradedPeersString)
+			.detail("DegradedPeersSize", degradedPeers.size());
 
 		// `req.degradedPeers` contains the latest peer performance view from the worker. Clear the worker if the
 		// requested worker doesn't see any degraded peers.
@@ -1841,24 +1855,8 @@ public:
 		return currentDegradedServersWithinLimit;
 	}
 
-	// Returns true when the cluster controller should trigger a recovery due to degraded servers are used in the
-	// transaction system in the primary data center.
-	bool shouldTriggerRecoveryDueToDegradedServers() {
-		if (degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
-			return false;
-		}
-
+	bool transactionSystemContainsDegradedServers() {
 		const ServerDBInfo dbi = db.serverInfo->get();
-		if (dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-			return false;
-		}
-
-		// Do not trigger recovery if the cluster controller is excluded, since the master will change
-		// anyways once the cluster controller is moved
-		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
-			return false;
-		}
-
 		for (const auto& excludedServer : degradedServers) {
 			if (dbi.master.addresses().contains(excludedServer)) {
 				return true;
@@ -1889,6 +1887,75 @@ public:
 		}
 
 		return false;
+	}
+
+	bool remoteTransactionSystemContainsDegradedServers() {
+		const ServerDBInfo dbi = db.serverInfo->get();
+		for (const auto& excludedServer : degradedServers) {
+			for (auto& logSet : dbi.logSystemConfig.tLogs) {
+				if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+					continue;
+				}
+
+				for (const auto& tlog : logSet.tLogs) {
+					if (tlog.present() && tlog.interf().addresses().contains(excludedServer)) {
+						return true;
+					}
+				}
+
+				for (const auto& logRouter : logSet.logRouters) {
+					if (logRouter.present() && logRouter.interf().addresses().contains(excludedServer)) {
+						return true;
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+
+	// Returns true when the cluster controller should trigger a recovery due to degraded servers are used in the
+	// transaction system in the primary data center.
+	bool shouldTriggerRecoveryDueToDegradedServers() {
+		if (degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+			return false;
+		}
+
+		if (db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			return false;
+		}
+
+		// Do not trigger recovery if the cluster controller is excluded, since the master will change
+		// anyways once the cluster controller is moved
+		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			return false;
+		}
+
+		return transactionSystemContainsDegradedServers();
+	}
+
+	bool shouldTriggerFailoverDueToDegradedServers() {
+		TraceEvent("ShouldTriggerFailoverDueToDegradedServers")
+		    .detail("UsableRegions", db.config.usableRegions)
+		    .detail("DegradedServerSize", degradedServers.size())
+		    .detail("TransactionSystemContainsDegradedServers", transactionSystemContainsDegradedServers())
+		    .detail("RemoteTransactionSystemContainsDegradedServers", remoteTransactionSystemContainsDegradedServers());
+		if (db.config.usableRegions <= 1) {
+			return false;
+		}
+
+		if (degradedServers.size() < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
+		    degradedServers.size() > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
+			return false;
+		}
+
+		// Do not trigger recovery if the cluster controller is excluded, since the master will change
+		// anyways once the cluster controller is moved
+		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			return false;
+		}
+
+		return transactionSystemContainsDegradedServers() && !remoteTransactionSystemContainsDegradedServers();
 	}
 
 	int recentRecoveryCountDueToHealth() {
@@ -1941,6 +2008,7 @@ public:
 	Version datacenterVersionDifference;
 	PromiseStream<Future<Void>> addActor;
 	bool versionDifferenceUpdated;
+	bool remoteTransactionSystemDegraded;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
@@ -1977,7 +2045,7 @@ public:
 	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
 	    gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
-	    recruitingDistributor(false), recruitRatekeeper(false),
+	    remoteTransactionSystemDegraded(false), recruitingDistributor(false), recruitRatekeeper(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
@@ -2690,7 +2758,8 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		    .detail("ZoneId", w.locality.zoneId())
 		    .detail("DataHall", w.locality.dataHallId())
 		    .detail("PClass", req.processClass.toString())
-		    .detail("Workers", self->id_worker.size());
+		    .detail("Workers", self->id_worker.size())
+			.detail("DegradedPeers", req.degradedPeers.size());
 		self->goodRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
 		self->goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
 	} else {
@@ -2701,7 +2770,8 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		    .detail("ZoneId", w.locality.zoneId())
 		    .detail("DataHall", w.locality.dataHallId())
 		    .detail("PClass", req.processClass.toString())
-		    .detail("Workers", self->id_worker.size());
+		    .detail("Workers", self->id_worker.size())
+			.detail("DegradedPeers", req.degradedPeers.size());
 	}
 	if (w.address() == g_network->getLocalAddress()) {
 		if (self->changingDcIds.get().first) {
@@ -3405,6 +3475,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
 
 ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self) {
 	state double lastLogTime = 0;
+	wait(delay(SERVER_KNOBS->INITIAL_UPDATE_DC_VERSION_DIFF_DELAY));
 	loop {
 		self->versionDifferenceUpdated = false;
 		if (self->db.serverInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
@@ -3468,7 +3539,12 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 				self->versionDifferenceUpdated = true;
 				self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
 
-				if (oldDifferenceTooLarge && self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
+				bool oldRemoteTransactionSystemDegraded = self->remoteTransactionSystemDegraded;
+				self->remoteTransactionSystemDegraded = self->remoteTransactionSystemContainsDegradedServers();
+
+				if ((oldDifferenceTooLarge || oldRemoteTransactionSystemDegraded) &&
+				    (self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE &&
+				     !self->remoteTransactionSystemDegraded)) {
 					checkOutstandingRequests(self);
 				}
 
@@ -3770,6 +3846,19 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 					} else {
 						self->excludedDegradedServers.clear();
 						TraceEvent("DegradedServerDetectedAndSuggestRecovery");
+					}
+				} else if (self->shouldTriggerFailoverDueToDegradedServers()) {
+					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER) {
+						TraceEvent("DegradedServerDetectedAndTriggerFailover");
+						vector<Optional<Key>> dcPriority;
+						auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
+						                      ? self->db.config.regions[1].dcId
+						                      : self->db.config.regions[0].dcId;
+						dcPriority.push_back(remoteDcId);
+						dcPriority.push_back(self->clusterControllerDcId);
+						self->desiredDcIds.set(dcPriority);
+					} else {
+						TraceEvent("DegradedServerDetectedAndSuggestFailover").log();
 					}
 				}
 			}

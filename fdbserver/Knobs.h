@@ -381,6 +381,7 @@ public:
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	double VERSION_LAG_METRIC_INTERVAL;
 	int64_t MAX_VERSION_DIFFERENCE;
+	double INITIAL_UPDATE_DC_VERSION_DIFF_DELAY;
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
@@ -404,6 +405,9 @@ public:
 	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
 	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
 	int CC_MAX_HEALTH_RECOVERY_COUNT;
+	int CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION;
+	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION;
+	bool CC_HEALTH_TRIGGER_FAILOVER;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
