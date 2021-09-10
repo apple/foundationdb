@@ -1297,9 +1297,7 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 
 // Sets storage engine based on testConfig details
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
-	// Using [0, 4) to disable the RocksDB storage engine.
-	// TODO: Figure out what is broken with the RocksDB engine in simulation.
-	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	int storage_engine_type = deterministicRandom()->randomInt(0, 5);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
@@ -1337,7 +1335,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		set_config("ssd-rocksdb-experimental");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
-		TraceEvent(SevWarn, "RocksDBNonDeterminism")
+		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
 		    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
 		noUnseed = true;
 		break;
@@ -2180,6 +2178,13 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// snapshot of the storage engine without a snapshotting file system.
 	// https://github.com/apple/foundationdb/issues/5155
 	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.push_back(4);
+	}
+
+	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
+	// possibly due to running the rocksdb in single thread in simulation.
+	// Re-enable the backup and restore related simulation tests when the tests are passing again.
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
 	}
 
