@@ -4009,16 +4009,69 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
 // to a sorted PID set maintained by the data distributor. If now no storage server exists, the new Process ID is 0.
 ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection) {
 	state ReadYourWritesTransaction tr(teamCollection->cx);
-	state Value writeValue;
+	state Value writeValue = LiteralStringRef("");
 	state const Key writeKey =
 	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> value = wait(tr.get(writeKey));
+			Optional<Value> locality = wait(tr.get(perpetualStorageWiggleLocalityKey));
+
 			if (teamCollection->pid2server_info.empty()) {
 				writeValue = LiteralStringRef("");
+			} else if (locality.present() && locality.get().toString().compare("0")) {
+				// if perpetual_storage_wiggle_locality has value and not 0(disabled).
+				state std::string localityKeyValue = locality.get().toString();
+				int split = localityKeyValue.find(':');
+				ASSERT(split != std::string::npos);
+
+				// get key and value from perpetual_storage_wiggle_locality.
+				state std::string localityKey = localityKeyValue.substr(0, split);
+				state std::string localityValue = localityKeyValue.substr(split + 1);
+				state Value prevValue;
+				state int serverInfoSize = teamCollection->pid2server_info.size();
+
+				Optional<Value> value = wait(tr.get(writeKey));
+				if (value.present()) {
+					prevValue = value.get();
+				} else {
+					// if value not present, check for locality match of the first entry in pid2server_info.
+					auto& info_vec = teamCollection->pid2server_info.begin()->second;
+					if (info_vec.size() && info_vec[0]->lastKnownInterface.locality.get(localityKey) == localityValue) {
+						writeValue = teamCollection->pid2server_info.begin()->first; // first entry locality matched.
+					} else {
+						prevValue = teamCollection->pid2server_info.begin()->first;
+						serverInfoSize--;
+					}
+				}
+
+				// If first entry of pid2server_info, did not match the locality.
+				if (!(writeValue.compare(LiteralStringRef("")))) {
+					while (true) {
+						auto nextIt = teamCollection->pid2server_info.upper_bound(prevValue);
+						if (nextIt == teamCollection->pid2server_info.end()) {
+							nextIt = teamCollection->pid2server_info.begin();
+						}
+
+						if (nextIt->second.size() &&
+						    nextIt->second[0]->lastKnownInterface.locality.get(localityKey) == localityValue) {
+							writeValue = nextIt->first; // locality matched
+							break;
+						}
+						serverInfoSize--;
+						if (!serverInfoSize) {
+							// None of the entries in pid2server_info matched the given locality.
+							writeValue = LiteralStringRef("");
+							TraceEvent("PerpetualNextWigglingStoragePIDNotFound", teamCollection->distributorId)
+							    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
+							    .detail("PerpetualStorageWiggleLocality", localityKeyValue);
+							break;
+						}
+						prevValue = nextIt->first;
+					}
+				}
 			} else {
+				Optional<Value> value = wait(tr.get(writeKey));
 				Value pid = teamCollection->pid2server_info.begin()->first;
 				if (value.present()) {
 					auto nextIt = teamCollection->pid2server_info.upper_bound(value.get());
@@ -4031,6 +4084,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 					writeValue = pid;
 				}
 			}
+
 			tr.set(writeKey, writeValue);
 			wait(tr.commit());
 			break;
