@@ -227,7 +227,7 @@ ACTOR Future<Void> nukeBlobWorkerData(BlobManagerData* bmData) {
 		try {
 			tr->clear(blobWorkerListKeys);
 			tr->clear(blobGranuleMappingKeys);
-			tr->clear(rangeFeedKeys);
+			tr->clear(changeFeedKeys);
 
 			return Void();
 		} catch (Error& e) {

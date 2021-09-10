@@ -388,7 +388,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 			       previousGranule.begin.printable().c_str(),
 			       previousGranule.end.printable().c_str());
 			Key oldGranuleLockKey = granuleLockKey(previousGranule);
-			tr->destroyRangeFeed(KeyRef(prevChangeFeedId.toString()));
+			tr->destroyChangeFeed(KeyRef(prevChangeFeedId.toString()));
 			tr->clear(singleKeyRange(oldGranuleLockKey));
 			tr->clear(currentRange);
 		} else {
@@ -800,15 +800,12 @@ static Future<Void> handleCompletedDeltaFile(BlobWorkerData* bwData,
 
 	if (metadata->durableDeltaVersion > cfStartVersion) {
 		if (BW_DEBUG) {
-			printf("Popping range feed %s at %lld\n", cfKey.printable().c_str(), metadata->durableDeltaVersion);
+			printf("Popping change feed %s at %lld\n", cfKey.printable().c_str(), metadata->durableDeltaVersion);
 		}
-		return bwData->db->popRangeFeedMutations(cfKey, metadata->durableDeltaVersion);
+		return bwData->db->popChangeFeedMutations(cfKey, metadata->durableDeltaVersion);
 	}
 	return Future<Void>(Void());
 }
-
-// TODO a hack, eventually just have open end interval in range feed request?
-// Or maybe we want to cycle and start a new range feed stream every X million versions?
 
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
@@ -889,11 +886,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 			// mutation version truncation stuff
 			ASSERT(changeFeedInfo.granuleSplitFrom.present());
 			readOldChangeFeed = true;
-			oldChangeFeedFuture = bwData->db->getRangeFeedStream(
+			oldChangeFeedFuture = bwData->db->getChangeFeedStream(
 			    oldChangeFeedStream, oldCFKey.get(), startVersion + 1, MAX_VERSION, metadata->keyRange);
 		} else {
 			readOldChangeFeed = false;
-			changeFeedFuture = bwData->db->getRangeFeedStream(
+			changeFeedFuture = bwData->db->getChangeFeedStream(
 			    changeFeedStream, cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange);
 		}
 
@@ -931,11 +928,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					// one
 					readOldChangeFeed = false;
 					Key cfKey = StringRef(changeFeedInfo.changeFeedId.toString());
-					changeFeedFuture = bwData->db->getRangeFeedStream(changeFeedStream,
-					                                                  cfKey,
-					                                                  changeFeedInfo.changeFeedStartVersion,
-					                                                  MAX_VERSION,
-					                                                  metadata->keyRange);
+					changeFeedFuture = bwData->db->getChangeFeedStream(changeFeedStream,
+					                                                   cfKey,
+					                                                   changeFeedInfo.changeFeedStartVersion,
+					                                                   MAX_VERSION,
+					                                                   metadata->keyRange);
 					oldChangeFeedFuture.cancel();
 					lastFromOldChangeFeed = true;
 
@@ -1006,7 +1003,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					if (metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
 					    !readOldChangeFeed && !lastFromOldChangeFeed) {
 
-						if (BW_DEBUG && (inFlightBlobSnapshot.isValid() || !inFlightDeltaFiles.isEmpty())) {
+						if (BW_DEBUG && (inFlightBlobSnapshot.isValid() || !inFlightDeltaFiles.empty())) {
 							printf("Granule [%s - %s) ready to re-snapshot, waiting for outstanding snapshot+deltas to "
 							       "finish\n",
 							       metadata->keyRange.begin.printable().c_str(),
@@ -1285,7 +1282,7 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 
 			} else {
 				// else we are first, no need to check for owner conflict
-				wait(tr.registerRangeFeed(StringRef(info.changeFeedId.toString()), req.keyRange));
+				wait(tr.registerChangeFeed(StringRef(info.changeFeedId.toString()), req.keyRange));
 				info.doSnapshot = true;
 				info.previousDurableVersion = invalidVersion;
 			}
