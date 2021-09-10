@@ -101,6 +101,21 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<As
 	}
 }
 
+// Gets whether there still has SS with wrong storage type the data distributor.
+ACTOR Future<bool> getWrongStoreTypeCheck(Database cx, WorkerInterface distributorWorker) {
+	try {
+		TraceEvent("GetWrongStoreTypeCheck").detail("Stage", "ContactingDataDistributor");
+		TraceEventFields md =
+		    wait(timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("WrongStoreType"_sr)), 1.0));
+		return boost::lexical_cast<bool>(md.getValue("Found"));
+	} catch (Error& e) {
+		TraceEvent("QuietDatabaseFailure", distributorWorker.id())
+		    .error(e)
+		    .detail("Reason", "Failed to extract WrongStoreTypeCheck");
+		throw;
+	}
+}
+
 // Gets the number of bytes in flight from the data distributor.
 ACTOR Future<int64_t> getDataInFlight(Database cx, WorkerInterface distributorWorker) {
 	try {
@@ -631,18 +646,14 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<int64_t> storageQueueSize;
 	state Future<bool> dataDistributionActive;
 	state Future<bool> storageServersRecruiting;
-
+	state Future<bool> wrongStoreTypeCheck;
+	state bool ppwClosed = false;
 	auto traceMessage = "QuietDatabase" + phase + "Begin";
 	TraceEvent(traceMessage.c_str());
 
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if (g_network->isSimulated())
 		wait(delay(5.0));
-	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
-	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
-	printf("Set perpetual_storage_wiggle=0 ...\n");
-	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
-	printf("Set perpetual_storage_wiggle=0 Done.\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
@@ -650,10 +661,23 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	loop {
 		try {
 			TraceEvent("QuietDatabaseWaitingOnDataDistributor").log();
-			WorkerInterface distributorWorker = wait(getDataDistributorWorker(cx, dbInfo));
-			UID distributorUID = dbInfo->get().distributor.get().id();
+			state WorkerInterface distributorWorker = wait(getDataDistributorWorker(cx, dbInfo));
+			state UID distributorUID = dbInfo->get().distributor.get().id();
 			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID)
 			    .detail("Locality", distributorWorker.locality.toString());
+
+			wrongStoreTypeCheck = getWrongStoreTypeCheck(cx, distributorWorker);
+			wait(success(wrongStoreTypeCheck));
+			// make sure we don't stop perpetual wiggle while we're migrating store type
+			if (!wrongStoreTypeCheck.get() && !ppwClosed) {
+				// The quiet database check (which runs at the end of every test) will always time out due to active
+				// data movement. To get around this, quiet Database will disable the perpetual wiggle in the setup
+				// phase.
+				printf("Set perpetual_storage_wiggle=0 ...\n");
+				wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
+				printf("Set perpetual_storage_wiggle=0 Done.\n");
+				ppwClosed = true;
+			}
 
 			dataInFlight = getDataInFlight(cx, distributorWorker);
 			tLogQueueInfo = getTLogQueueInfo(cx, dbInfo);
@@ -668,6 +692,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			     success(storageServersRecruiting));
 
 			TraceEvent(("QuietDatabase" + phase).c_str())
+			    .detail("FoundWrongStoreType", wrongStoreTypeCheck.get())
 			    .detail("DataInFlight", dataInFlight.get())
 			    .detail("DataInFlightGate", dataInFlightGate)
 			    .detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
@@ -683,18 +708,18 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			    .detail("StorageServersRecruiting", storageServersRecruiting.get())
 			    .detail("NumSuccesses", numSuccesses);
 
-			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate ||
-			    tLogQueueInfo.get().second > maxPoppedVersionLag ||
+			if (wrongStoreTypeCheck.get() || dataInFlight.get() > dataInFlightGate ||
+			    tLogQueueInfo.get().first > maxTLogQueueGate || tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
-			    storageQueueSize.get() > maxStorageServerQueueGate || dataDistributionActive.get() == false ||
-			    storageServersRecruiting.get() == true || teamCollectionValid.get() == false) {
+			    storageQueueSize.get() > maxStorageServerQueueGate || !dataDistributionActive.get() ||
+			    storageServersRecruiting.get() || !teamCollectionValid.get()) {
 
 				wait(delay(1.0));
 				numSuccesses = 0;
 			} else {
 				if (++numSuccesses == 3) {
 					auto msg = "QuietDatabase" + phase + "Done";
-					TraceEvent(msg.c_str());
+					TraceEvent(msg.c_str()).log();
 					break;
 				} else {
 					wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
@@ -715,31 +740,38 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			TraceEvent evt(evtType.c_str());
 			evt.error(e);
 			int notReadyCount = 0;
-			if (dataInFlight.isReady() && dataInFlight.isError()) {
+			if (wrongStoreTypeCheck.isValid() && wrongStoreTypeCheck.isReady() && wrongStoreTypeCheck.isError()) {
+				auto key = "NotReady" + std::to_string(notReadyCount++);
+				evt.detail(key.c_str(), "wrongStoreTypeCheck");
+			}
+			if (dataInFlight.isValid() && dataInFlight.isReady() && dataInFlight.isError()) {
 				auto key = "NotReady" + std::to_string(notReadyCount++);
 				evt.detail(key.c_str(), "dataInFlight");
 			}
-			if (tLogQueueInfo.isReady() && tLogQueueInfo.isError()) {
+			if (tLogQueueInfo.isValid() && tLogQueueInfo.isReady() && tLogQueueInfo.isError()) {
 				auto key = "NotReady" + std::to_string(notReadyCount++);
 				evt.detail(key.c_str(), "tLogQueueInfo");
 			}
-			if (dataDistributionQueueSize.isReady() && dataDistributionQueueSize.isError()) {
+			if (dataDistributionQueueSize.isValid() && dataDistributionQueueSize.isReady() &&
+			    dataDistributionQueueSize.isError()) {
 				auto key = "NotReady" + std::to_string(notReadyCount++);
 				evt.detail(key.c_str(), "dataDistributionQueueSize");
 			}
-			if (teamCollectionValid.isReady() && teamCollectionValid.isError()) {
+			if (teamCollectionValid.isValid() && teamCollectionValid.isReady() && teamCollectionValid.isError()) {
 				auto key = "NotReady" + std::to_string(notReadyCount++);
 				evt.detail(key.c_str(), "teamCollectionValid");
 			}
-			if (storageQueueSize.isReady() && storageQueueSize.isError()) {
+			if (storageQueueSize.isValid() && storageQueueSize.isReady() && storageQueueSize.isError()) {
 				auto key = "NotReady" + std::to_string(notReadyCount++);
 				evt.detail(key.c_str(), "storageQueueSize");
 			}
-			if (dataDistributionActive.isReady() && dataDistributionActive.isError()) {
+			if (dataDistributionActive.isValid() && dataDistributionActive.isReady() &&
+			    dataDistributionActive.isError()) {
 				auto key = "NotReady" + std::to_string(notReadyCount++);
 				evt.detail(key.c_str(), "dataDistributionActive");
 			}
-			if (storageServersRecruiting.isReady() && storageServersRecruiting.isError()) {
+			if (storageServersRecruiting.isValid() && storageServersRecruiting.isReady() &&
+			    storageServersRecruiting.isError()) {
 				auto key = "NotReady" + std::to_string(notReadyCount++);
 				evt.detail(key.c_str(), "storageServersRecruiting");
 			}

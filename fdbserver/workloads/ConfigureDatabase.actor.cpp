@@ -31,6 +31,10 @@
 static const char* storeTypes[] = {
 	"ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta"
 };
+static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",
+	                                           "perpetual_storage_wiggle=1",
+	                                           "perpetual_storage_wiggle=1 storage_migration_type=gradual",
+	                                           "storage_migration_type=aggressive" };
 static const char* logTypes[] = { "log_engine:=1",  "log_engine:=2",  "log_spill:=1",
 	                              "log_spill:=2",   "log_version:=2", "log_version:=3",
 	                              "log_version:=4", "log_version:=5", "log_version:=6" };
@@ -250,7 +254,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
-		wait(success(changeConfig(cx, "single", true)));
+		wait(success(changeConfig(cx, "single storage_migration_type=aggressive", true)));
 		return Void();
 	}
 
@@ -345,6 +349,12 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				    cx,
 				    backupTypes[deterministicRandom()->randomInt(0, sizeof(backupTypes) / sizeof(backupTypes[0]))],
 				    false)));
+			} else if (randomChoice == 8) {
+				wait(success(
+				    IssueConfigurationChange(cx,
+				                             storageMigrationTypes[deterministicRandom()->randomInt(
+				                                 0, sizeof(storageMigrationTypes) / sizeof(storageMigrationTypes[0]))],
+				                             false)));
 			} else {
 				ASSERT(false);
 			}
