@@ -27,6 +27,7 @@
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TLogInterface.h"
+#include "fdbserver/ptxn/TLogInterface.h"
 
 template <class Interface>
 struct OptionalInterface {
