@@ -489,10 +489,6 @@ void initHelp() {
 	    "fetch keys in a range of keys",
 	    "Displays up to LIMIT keys for keys between BEGINKEY (inclusive) and ENDKEY (exclusive). If ENDKEY is omitted, "
 	    "then the range will include all keys starting with BEGINKEY. LIMIT defaults to 25 if omitted." ESCAPINGK);
-	helpMap["printkeymetadata"] = CommandHelp(
-	    "getrangekeys <KEY> ",
-	    "fetch location metadata for KEY",
-	    "Displays location metadata for KEY" ESCAPINGK);
 	helpMap["getversion"] =
 	    CommandHelp("getversion",
 	                "Fetch the current read version",
@@ -2117,18 +2113,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					}
 					continue;
 				}
-				if (tokencmp(tokens[0], "printkeymetadata")) { // FIXME: support byte limits, and reverse range reads
-					RangeResult kvs = wait(makeInterruptable(
-					    safeThreadFutureToFuture(getTransaction(db, tr, tr2, options, intrans)
-					                                 ->getRange(keyServersKeys, 2000))));
 
-					printf("\nRange limited to %d keys\n", limit);
-					for (auto iter = kvs.begin(); iter < kvs.end(); iter++) {
-						printf("`%s'\n", printable((*iter).key).c_str());
-					}
-					printf("\n");
-					continue;
-				}
 				if (tokencmp(tokens[0], "writemode")) {
 					if (tokens.size() != 2) {
 						printUsage(tokens[0]);
