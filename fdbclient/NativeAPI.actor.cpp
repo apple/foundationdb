@@ -6583,7 +6583,7 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 }
 
 ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutationsActor(Reference<DatabaseContext> db,
-                                                                                        StringRef rangeID,
+                                                                                        Key rangeID,
                                                                                         Version begin,
                                                                                         Version end,
                                                                                         KeyRange range) {
@@ -6625,7 +6625,7 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutatio
 	return Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena);
 }
 
-Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getChangeFeedMutations(StringRef rangeID,
+Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getChangeFeedMutations(Key rangeID,
                                                                                               Version begin,
                                                                                               Version end,
                                                                                               KeyRange range) {
@@ -6741,7 +6741,7 @@ ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInte
 
 ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
-                                            StringRef rangeID,
+                                            Key rangeID,
                                             Version begin,
                                             Version end,
                                             KeyRange range) {
@@ -6875,7 +6875,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 
 Future<Void> DatabaseContext::getChangeFeedStream(
     const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
-    StringRef rangeID,
+    Key rangeID,
     Version begin,
     Version end,
     KeyRange range) {
@@ -6956,7 +6956,7 @@ Future<std::vector<std::pair<Key, KeyRange>>> DatabaseContext::getOverlappingCha
 	return getOverlappingChangeFeedsActor(Reference<DatabaseContext>::addRef(this), range, minVersion);
 }
 
-ACTOR static Future<Void> popChangeFeedBackup(Database cx, StringRef rangeID, Version version) {
+ACTOR static Future<Void> popChangeFeedBackup(Database cx, Key rangeID, Version version) {
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -6981,7 +6981,7 @@ ACTOR static Future<Void> popChangeFeedBackup(Database cx, StringRef rangeID, Ve
 	}
 }
 
-ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, StringRef rangeID, Version version) {
+ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Key rangeID, Version version) {
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
@@ -7029,7 +7029,7 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, St
 	return Void();
 }
 
-Future<Void> DatabaseContext::popChangeFeedMutations(StringRef rangeID, Version version) {
+Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version version) {
 	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
 }
 

@@ -985,7 +985,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					                                            oldChangeFeedDataComplete,
 					                                            changeFeedInfo.prevChangeFeedId));
 
-					// add new delta file
+					oldChangeFeedDataComplete.reset();
+					// add new pending delta file
 					ASSERT(metadata->pendingDeltaVersion < metadata->bufferedDeltaVersion);
 					metadata->pendingDeltaVersion = metadata->bufferedDeltaVersion;
 					metadata->bytesInNewDeltaFiles += metadata->bufferedDeltaBytes;
@@ -1100,6 +1101,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 				// set this so next delta file write updates granule split metadata to done
 				ASSERT(changeFeedInfo.granuleSplitFrom.present());
 				oldChangeFeedDataComplete = changeFeedInfo.granuleSplitFrom;
+				if (BW_DEBUG) {
+					printf("Granule [%s - %s) switching to new change feed %s, exiting\n",
+					       metadata->keyRange.begin.printable().c_str(),
+					       metadata->keyRange.end.printable().c_str(),
+					       changeFeedInfo.changeFeedId.toString().c_str());
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -1282,6 +1289,8 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 
 			} else {
 				// else we are first, no need to check for owner conflict
+				// FIXME: use actual 16 bytes of UID instead of converting it to 32 character string and then that to
+				// bytes
 				wait(tr.registerChangeFeed(StringRef(info.changeFeedId.toString()), req.keyRange));
 				info.doSnapshot = true;
 				info.previousDurableVersion = invalidVersion;

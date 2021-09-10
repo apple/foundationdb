@@ -253,19 +253,19 @@ public:
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
 	Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutations(
-	    StringRef rangeID,
+	    Key rangeID,
 	    Version begin = 0,
 	    Version end = std::numeric_limits<Version>::max(),
 	    KeyRange range = allKeys);
 
 	Future<Void> getChangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
-	                                 StringRef rangeID,
+	                                 Key rangeID,
 	                                 Version begin = 0,
 	                                 Version end = std::numeric_limits<Version>::max(),
 	                                 KeyRange range = allKeys);
 
 	Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
-	Future<Void> popChangeFeedMutations(StringRef rangeID, Version version);
+	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
 	Future<Void> getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range);
 	// TODO add optional for end version so it can do a GRV in the transaction it already has to do

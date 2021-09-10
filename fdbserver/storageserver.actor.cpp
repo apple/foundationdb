@@ -1644,6 +1644,7 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 
 	auto feed = data->uidChangeFeed.find(req.rangeID);
 	if (feed == data->uidChangeFeed.end()) {
+		printf("Unknown change feed %s\n", req.rangeID.printable().c_str());
 		throw unknown_change_feed();
 	}
 	if (req.end <= feed->second->emptyVersion + 1) {
