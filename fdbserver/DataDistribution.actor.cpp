@@ -3216,7 +3216,11 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 				// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the
 				// storageServerTracker. This race may cause the server to be removed before react to
 				// wrongStoreTypeToRemove
-				server.second->wrongStoreTypeToRemove.set(true);
+				if (self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE) {
+					// if the Storage Migration type is aggressive, let DD remove SS with wrong storage type
+					server.second->wrongStoreTypeToRemove.set(true);
+				}
+				// Otherwise, wait Perpetual Wiggler to wiggle the SS with wrong storage type
 				foundSSToRemove = true;
 				TraceEvent("WrongStoreTypeRemover", self->distributorId)
 				    .detail("Server", server.first)
@@ -5614,6 +5618,12 @@ ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> te
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 				    .detail("HighestPriority", highestPriority)
 				    .trackLatest(self->primary ? "TotalDataInFlight" : "TotalDataInFlightRemote");
+
+				TraceEvent("WrongStoreType", self->distributorId)
+				    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType)
+				    .detail("StorageMigrationMode", self->configuration.storageMigrationType.toString())
+				    .detail("Found", !self->wrongStoreTypeRemover.isValid() && !self->wrongStoreTypeRemover.isReady())
+				    .trackLatest("WrongStoreType");
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
 			when(wait(self->serverTrackerErrorOut.getFuture())) {} // Propagate errors from storageServerTracker
