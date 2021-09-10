@@ -3321,6 +3321,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	bool neverCreated;
 	int8_t safeLocality;
 	int8_t primaryLocality;
+	bool ccShouldCommitSuicide;
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
@@ -3349,7 +3350,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	    memoryLimit(2e9), dbId(dbId), masterInterface(masterInterface), clusterController(clusterController),
 	    cstate(coordinators, addActor, dbgid), dbInfo(dbInfo), registrationCount(0), addActor(addActor),
 	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), ccShouldCommitSuicide(false),
 	    cc("ClusterController", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
@@ -4012,6 +4013,11 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->clusterController.changeCoordinators.getFuture());
 		++self->changeCoordinatorsRequests;
+
+		// Kill cluster controller to facilitate coordinator registration update
+		ASSERT(!self->ccShouldCommitSuicide);
+		self->ccShouldCommitSuicide = true;
+
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
 
 		while (!self->cstate.previousWrite.isReady()) {
@@ -5280,18 +5286,21 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			TEST(err.code() == error_code_master_backup_worker_failed); // Terminated due to backup worker failure
 			TEST(err.code() == error_code_operation_failed); 			// Terminated due to failed operation
 
+			if (recoveryData.isValid() && recoveryData->ccShouldCommitSuicide) {
+				TraceEvent("CCWDB", cluster->id)
+				    .error(err, true)
+				    .detail("ClusterControlled", recoveryData->clusterController.id());
+
+				return Void();
+			}
+
 			if (ClusterControllerRecovery::normalClusterRecoveryErrors().count(err.code())) {
 				TraceEvent(SevWarn, "ClusterRecoveryRetrying", cluster->id).error(err);
 			} else {
-				if (err.code() != error_code_coordinators_changed) {
-					TraceEvent(SevWarn, "CCWDB coordinators change detected", cluster->id).error(err);
+				bool ok = err.code() == error_code_no_more_servers;
+				TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
+				if (!ok) {
 					throw err;
-				} else {
-					bool ok = err.code() == error_code_no_more_servers;
-					TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
-					if (!ok) {
-						throw err;
-					}
 				}
 			}
 			wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));

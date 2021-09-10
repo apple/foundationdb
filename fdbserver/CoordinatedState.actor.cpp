@@ -297,7 +297,7 @@ struct MovableCoordinatedStateImpl {
 		choose {
 			when(wait(creationTimeout)) { throw new_coordinators_timed_out(); }
 			when(Value ncInitialValue = wait(nccs.read())) {
-				// ASSERT(!ncInitialValue.size()); // The new coordinators must be uninitialized!
+				ASSERT(!ncInitialValue.size()); // The new coordinators must be uninitialized!
 			}
 		}
 		TraceEvent("FinishedRead").detail("ConnectionString", nc.toString());
