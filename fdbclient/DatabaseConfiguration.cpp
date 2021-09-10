@@ -45,6 +45,7 @@ void DatabaseConfiguration::resetInternal() {
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 	backupWorkerEnabled = false;
 	perpetualStorageWiggleSpeed = 0;
+	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
 }
 
@@ -200,6 +201,8 @@ bool DatabaseConfiguration::isValid() const {
 	      (regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") &&
 	      // We cannot specify regions with three_datacenter replication
 	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
+	      (perpetualStorageWiggleLocality.find(':') != std::string::npos ||
+	       !perpetualStorageWiggleLocality.compare("0")) &&
 	      storageMigrationType != StorageMigrationType::UNSET)) {
 		return false;
 	}
@@ -391,6 +394,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
+	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
 	result["storage_migration_type"] = storageMigrationType.toString();
 	return result;
 }
@@ -545,6 +549,11 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse(&regions, value);
 	} else if (ck == LiteralStringRef("perpetual_storage_wiggle")) {
 		parse(&perpetualStorageWiggleSpeed, value);
+	} else if (ck == LiteralStringRef("perpetual_storage_wiggle_locality")) {
+		if (value.toString().find(':') == std::string::npos && value.toString().compare("0")) {
+			return false;
+		}
+		perpetualStorageWiggleLocality = value.toString();
 	} else if (ck == LiteralStringRef("storage_migration_type")) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
