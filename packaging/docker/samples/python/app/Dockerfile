@@ -43,3 +43,5 @@ RUN pip install -r requirements.txt
 
 ENV FLASK_APP=server.py
 ENV FLASK_ENV=development
+
+CMD /app/start.bash
