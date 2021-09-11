@@ -124,7 +124,6 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 		diskFailure.throttlePeriod = throttlePeriod;
 		SetFailureInjection req;
 		req.diskFailure = diskFailure;
-		TraceEvent("DiskFailureInjectDiskDelays");
 		res = worker.clientInterface.setFailureInjection.getReply(req);
 		wait(ready(res));
 		checkDiskFailureInjectionResult(res, worker);
@@ -137,7 +136,6 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 		flipBits.percentBitFlips = percentage;
 		SetFailureInjection req;
 		req.flipBits = flipBits;
-		TraceEvent("DiskFailureInjectBitFlips");
 		res = worker.clientInterface.setFailureInjection.getReply(req);
 		wait(ready(res));
 		checkDiskFailureInjectionResult(res, worker);
@@ -160,16 +158,13 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			} catch (Error& e) {
 				// If we failed to get a list of storage servers, we can't inject failure events
 				// But don't throw the error in that case
-				TraceEvent("DiskFailureInjectionFailed");
 				continue;
-				// return Void();
 			}
 			auto machine = deterministicRandom()->randomChoice(machines);
 
 			// If we have already chosen this worker, then just continue
 			if (find(self->chosenWorkers.begin(), self->chosenWorkers.end(), machine.address()) !=
 			    self->chosenWorkers.end()) {
-				TraceEvent("DiskFailureInjectionSkipped");
 				continue;
 			}
 
