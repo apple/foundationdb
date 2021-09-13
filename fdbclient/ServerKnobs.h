@@ -224,7 +224,6 @@ public:
 	// Remove wrong storage engines
 	double DD_REMOVE_STORE_ENGINE_DELAY; // wait for the specified time before remove the next batch
 
-	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 
 	// KeyValueStore SQLITE
@@ -390,6 +389,7 @@ public:
 	double VERSION_LAG_METRIC_INTERVAL;
 	int64_t MAX_VERSION_DIFFERENCE;
 	double FORCE_RECOVERY_CHECK_DELAY;
+	double DATA_DISTRIBUTOR_FAILURE_TIME;
 	double RATEKEEPER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
 	double REPLACE_INTERFACE_CHECK_DELAY;
