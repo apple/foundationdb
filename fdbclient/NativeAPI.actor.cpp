@@ -5548,7 +5548,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::USE_GRV_CACHE:
 		// Needs to be a no-op if ratekeeper is throttling
-		validateOptionValue(value, false);
+		validateOptionValueNotPresent(value);
 		options.useGrvCache = true;
 		break;
 
