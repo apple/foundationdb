@@ -41,8 +41,6 @@
 #include "fdbrpc/TSSComparison.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-
-
 ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
 
 struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {

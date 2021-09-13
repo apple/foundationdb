@@ -22,8 +22,6 @@
 #include <vector>
 #include "flow/actorcompiler.h"
 
-
-
 inline void throw_operation_failed() {
 	throw operation_failed();
 }
