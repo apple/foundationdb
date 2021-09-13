@@ -7052,7 +7052,8 @@ public:
 		wait(
 		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
 
-		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
+		state PriorityMultiLock::Lock lock;
+		state bool inLock = false;
 		++g_redwoodMetrics.metric.opGetRange;
 
 		state RangeResult result;
@@ -7064,8 +7065,12 @@ public:
 		}
 
 		if (rowLimit > 0) {
-			wait(cur.seekGTE(keys.begin));
-
+			Future<Void> f = cur.seekGTE(keys.begin);
+			if (!inLock && !f.isReady()) {
+				inLock = true;
+				wait(store(lock, self->m_concurrentReads.lock()));
+			}
+			
 			if (self->prefetch) {
 				cur.prefetch(keys.end, true, rowLimit, byteLimit);
 			}
@@ -7111,7 +7116,11 @@ public:
 				wait(cur.moveNext());
 			}
 		} else {
-			wait(cur.seekLT(keys.end));
+			Future<Void> f = cur.seekLT(keys.end);
+			if (!inLock && !f.isReady()) {
+				inLock = true;
+				wait(store(lock, self->m_concurrentReads.lock()));
+			}
 
 			if (self->prefetch) {
 				cur.prefetch(keys.begin, false, -rowLimit, byteLimit);
@@ -7175,10 +7184,14 @@ public:
 		wait(
 		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead));
 
-		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
+		state PriorityMultiLock::Lock lock;
+
 		++g_redwoodMetrics.metric.opGet;
 
-		wait(cur.seekGTE(key));
+		Future<Void> f = cur.seekGTE(key);
+		if (!f.isReady()) {
+			wait(store(lock, self->m_concurrentReads.lock()));
+		}
 		if (cur.isValid() && cur.get().key == key) {
 			// Return a Value whose arena depends on the source page arena
 			Value v;
