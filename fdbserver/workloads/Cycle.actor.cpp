@@ -40,8 +40,8 @@ struct CycleWorkload : TestWorkload {
 	PerfDoubleCounter totalLatency;
 
 	CycleWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
-	    tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed") {
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), tooOldRetries("Retries.too_old"),
+	    commitFailedRetries("Retries.commit_failed"), totalLatency("Latency") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
@@ -73,9 +73,9 @@ struct CycleWorkload : TestWorkload {
 		m.push_back(retries.getMetric());
 		m.push_back(tooOldRetries.getMetric());
 		m.push_back(commitFailedRetries.getMetric());
-		m.push_back(PerfMetric("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true));
-		m.push_back(PerfMetric("Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, false));
-		m.push_back(PerfMetric("Write rows/simsec (approx)", transactions.getValue() * 4 / testDuration, false));
+		m.emplace_back("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), Averaged::True);
+		m.emplace_back("Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, Averaged::False);
+		m.emplace_back("Write rows/simsec (approx)", transactions.getValue() * 4 / testDuration, Averaged::False);
 	}
 
 	Key keyForIndex(int n) { return key(n); }
@@ -104,7 +104,7 @@ struct CycleWorkload : TestWorkload {
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() >= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
-					TraceEvent("CycleTracingTransaction", span.context);
+					TraceEvent("CycleTracingTransaction", span.context).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
 					             BinaryWriter::toValue(span.context, Unversioned()));
 				}
@@ -154,7 +154,7 @@ struct CycleWorkload : TestWorkload {
 	}
 
 	void logTestData(const VectorRef<KeyValueRef>& data) {
-		TraceEvent("TestFailureDetail");
+		TraceEvent("TestFailureDetail").log();
 		int index = 0;
 		for (auto& entry : data) {
 			TraceEvent("CurrentDataEntry")

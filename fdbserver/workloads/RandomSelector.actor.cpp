@@ -103,7 +103,7 @@ struct RandomSelectorWorkload : TestWorkload {
 		state int offsetB;
 		state int randomLimit;
 		state int randomByteLimit;
-		state bool reverse;
+		state Reverse reverse = Reverse::False;
 		state Error error;
 
 		clientID = format("%08d", self->clientId);
@@ -125,6 +125,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						//TraceEvent("RYOWInit").detail("Key",myKeyA).detail("Value",myValue);
 					}
 					wait(tr.commit());
+					tr.reset();
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
@@ -149,6 +150,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.set(StringRef(clientID + "d/" + myKeyA), myValue);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								wait(tr.onError(e));
@@ -163,6 +165,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.clear(StringRef(clientID + "d/" + myKeyA));
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								wait(tr.onError(e));
@@ -184,6 +187,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.clear(KeyRangeRef(StringRef(clientID + "d/" + myKeyA),
 								                     StringRef(clientID + "d/" + myKeyB)));
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								wait(tr.onError(e));
@@ -231,6 +235,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AddValue);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								error = e;
@@ -254,6 +259,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AppendIfFits);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								error = e;
@@ -277,6 +283,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::And);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								error = e;
@@ -300,6 +307,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Or);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								error = e;
@@ -323,6 +331,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Xor);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								error = e;
@@ -346,6 +355,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Max);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								error = e;
@@ -369,6 +379,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Min);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								error = e;
@@ -392,6 +403,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMin);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								error = e;
@@ -415,6 +427,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMax);
 								wait(tr.commit());
+								tr.reset();
 								break;
 							} catch (Error& e) {
 								error = e;
@@ -438,7 +451,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						randomLimit = deterministicRandom()->randomInt(0, 2 * self->maxOffset + self->maxKeySpace);
 						randomByteLimit =
 						    deterministicRandom()->randomInt(0, (self->maxOffset + self->maxKeySpace) * 512);
-						reverse = deterministicRandom()->random01() > 0.5 ? false : true;
+						reverse.set(deterministicRandom()->coinflip());
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("RandomLimit",randomLimit).detail("RandomByteLimit", randomByteLimit).detail("Reverse", reverse);
 
@@ -447,7 +460,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						    wait(trRYOW.getRange(KeySelectorRef(StringRef(clientID + "b/" + myKeyA), onEqualA, offsetA),
 						                         KeySelectorRef(StringRef(clientID + "b/" + myKeyB), onEqualB, offsetB),
 						                         randomLimit,
-						                         false,
+						                         Snapshot::False,
 						                         reverse));
 						getRangeTest1 = getRangeTest;
 
@@ -457,7 +470,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								    tr.getRange(KeySelectorRef(StringRef(clientID + "d/" + myKeyA), onEqualA, offsetA),
 								                KeySelectorRef(StringRef(clientID + "d/" + myKeyB), onEqualB, offsetB),
 								                randomLimit,
-								                false,
+								                Snapshot::False,
 								                reverse));
 
 								bool fail = false;

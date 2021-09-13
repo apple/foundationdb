@@ -64,7 +64,7 @@ public:
 
 	NetworkAddress getStableAddress() const { return addresses.getTLSAddress(); }
 
-	Endpoint getAdjustedEndpoint(uint32_t index) {
+	Endpoint getAdjustedEndpoint(uint32_t index) const {
 		uint32_t newIndex = token.second();
 		newIndex += index;
 		return Endpoint(
@@ -152,6 +152,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastLoggedTime;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
+	int timeoutCount;
 
 	Reference<AsyncVar<Optional<ProtocolVersion>>> protocolVersion;
 
@@ -195,6 +196,9 @@ public:
 
 	// Returns all local NetworkAddress.
 	NetworkAddressList getLocalAddresses() const;
+
+	// Returns all peers that the FlowTransport is monitoring.
+	const std::unordered_map<NetworkAddress, Reference<Peer>>& getAllPeers() const;
 
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
@@ -248,7 +252,7 @@ public:
 	//
 	// Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
 	// version, some other mechanism should be used to connect to that peer.
-	Reference<AsyncVar<Optional<ProtocolVersion>>> getPeerProtocolAsyncVar(NetworkAddress addr);
+	Reference<AsyncVar<Optional<ProtocolVersion>> const> getPeerProtocolAsyncVar(NetworkAddress addr);
 
 	static FlowTransport& transport() {
 		return *static_cast<FlowTransport*>((void*)g_network->global(INetwork::enFlowTransport));

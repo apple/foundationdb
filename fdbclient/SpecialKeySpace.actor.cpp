@@ -21,6 +21,14 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
+#include <time.h>
+#include <msgpack.hpp>
+
+#include <exception>
+
+#include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/ProcessInterface.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "flow/Arena.h"
@@ -67,7 +75,12 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::GLOBALCONFIG,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/global_config/"), LiteralStringRef("\xff\xff/global_config0")) },
 	{ SpecialKeySpace::MODULE::TRACING,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) }
+	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) },
+	{ SpecialKeySpace::MODULE::ACTORLINEAGE,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) },
+	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
+	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -76,6 +89,12 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "failed",
 	  KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "excludedlocality",
+	  KeyRangeRef(LiteralStringRef("excluded_locality/"), LiteralStringRef("excluded_locality0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "failedlocality",
+	  KeyRangeRef(LiteralStringRef("failed_locality/"), LiteralStringRef("failed_locality0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "consistencycheck",
@@ -98,7 +117,19 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
-std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
+std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiCommandToRange = {
+	{ "state",
+	  KeyRangeRef(LiteralStringRef("state/"), LiteralStringRef("state0"))
+	      .withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) },
+	{ "time",
+	  KeyRangeRef(LiteralStringRef("time/"), LiteralStringRef("time0"))
+	      .withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) }
+};
+
+std::set<std::string> SpecialKeySpace::options = { "excluded/force",
+	                                               "failed/force",
+	                                               "excluded_locality/force",
+	                                               "failed_locality/force" };
 
 std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
 
@@ -239,8 +270,9 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks,
 }
 
 SpecialKeySpace::SpecialKeySpace(KeyRef spaceStartKey, KeyRef spaceEndKey, bool testOnly)
-  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), readImpls(nullptr, spaceEndKey), writeImpls(nullptr, spaceEndKey),
-    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
+  : readImpls(nullptr, spaceEndKey),
+    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey),
+    writeImpls(nullptr, spaceEndKey), range(KeyRangeRef(spaceStartKey, spaceEndKey)) {
 	// Default begin of KeyRangeMap is Key(), insert the range to update start key
 	readImpls.insert(range, nullptr);
 	writeImpls.insert(range, nullptr);
@@ -268,7 +300,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
                                                          KeySelector begin,
                                                          KeySelector end,
                                                          GetRangeLimits limits,
-                                                         bool reverse) {
+                                                         Reverse reverse) {
 	ASSERT(ryw);
 	choose {
 		when(RangeResult result =
@@ -284,7 +316,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
                                                                     KeySelector begin,
                                                                     KeySelector end,
                                                                     GetRangeLimits limits,
-                                                                    bool reverse) {
+                                                                    Reverse reverse) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state RangeResult result;
@@ -404,7 +436,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
                                               KeySelector begin,
                                               KeySelector end,
                                               GetRangeLimits limits,
-                                              bool reverse) {
+                                              Reverse reverse) {
 	// validate limits here
 	if (!limits.isValid())
 		return range_limits_invalid();
@@ -432,7 +464,7 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks,
 	                                        KeySelector(firstGreaterOrEqual(key)),
 	                                        KeySelector(firstGreaterOrEqual(keyAfter(key))),
 	                                        GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                        false));
+	                                        Reverse::False));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
 		return Optional<Value>(result[0].value);
@@ -466,10 +498,10 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 	auto begin = writeImpls[range.begin];
 	auto end = writeImpls.rangeContainingKeyBefore(range.end)->value();
 	if (begin != end) {
-		TraceEvent(SevDebug, "SpecialKeySpaceCrossModuleClear").detail("Range", range.toString());
+		TraceEvent(SevDebug, "SpecialKeySpaceCrossModuleClear").detail("Range", range);
 		throw special_keys_cross_module_clear(); // ban cross module clear
 	} else if (begin == nullptr) {
-		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range.toString());
+		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range);
 		throw special_keys_no_write_module_found();
 	}
 	return begin->clear(ryw, range);
@@ -1258,7 +1290,8 @@ ACTOR Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyR
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
 	RangeResult result;
 	if (val.present()) {
-		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, val.get()));
+		UID uid = UID::fromString(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString());
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, Value(uid.toString())));
 	}
 	return result;
 }
@@ -1281,11 +1314,10 @@ Future<RangeResult> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw, K
 	}
 }
 
-ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
+ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw, UID uid) {
 	state Optional<std::string> msg;
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
-	UID uid = deterministicRandom()->randomUniqueID();
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
 		// check database not locked
@@ -1316,7 +1348,15 @@ ACTOR Future<Optional<std::string>> unlockDatabaseCommitActor(ReadYourWritesTran
 Future<Optional<std::string>> LockDatabaseImpl::commit(ReadYourWritesTransaction* ryw) {
 	auto lockId = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("lock")].second;
 	if (lockId.present()) {
-		return lockDatabaseCommitActor(ryw);
+		std::string uidStr = lockId.get().toString();
+		UID uid;
+		try {
+			uid = UID::fromString(uidStr);
+		} catch (Error& e) {
+			return Optional<std::string>(
+			    ManagementAPIError::toJsonString(false, "lock", "Invalid UID hex string: " + uidStr));
+		}
+		return lockDatabaseCommitActor(ryw, uid);
 	} else {
 		return unlockDatabaseCommitActor(ryw);
 	}
@@ -1908,6 +1948,303 @@ void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& ke
 	    "Clear operation is forbidden for profile client. You can set it to default to disable profiling.");
 }
 
+ActorLineageImpl::ActorLineageImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+void parse(StringRef& val, int& i) {
+	i = std::stoi(val.toString());
+}
+
+void parse(StringRef& val, double& d) {
+	d = std::stod(val.toString());
+}
+
+void parse(StringRef& val, WaitState& w) {
+	if (val == LiteralStringRef("disk") || val == LiteralStringRef("Disk")) {
+		w = WaitState::Disk;
+	} else if (val == LiteralStringRef("network") || val == LiteralStringRef("Network")) {
+		w = WaitState::Network;
+	} else if (val == LiteralStringRef("running") || val == LiteralStringRef("Running")) {
+		w = WaitState::Running;
+	} else {
+		throw std::range_error("failed to parse run state");
+	}
+}
+
+void parse(StringRef& val, time_t& t) {
+	struct tm tm = { 0 };
+#ifdef _WIN32
+	std::istringstream s(val.toString());
+	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
+	s >> std::get_time(&tm, "%FT%T%z");
+	if (s.fail()) {
+		throw std::invalid_argument("failed to parse ISO 8601 datetime");
+	}
+	long timezone;
+	if (_get_timezone(&timezone) != 0) {
+		throw std::runtime_error("failed to convert ISO 8601 datetime");
+	}
+	timezone = -timezone;
+#else
+	if (strptime(val.toString().c_str(), "%FT%T%z", &tm) == nullptr) {
+		throw std::invalid_argument("failed to parse ISO 8601 datetime");
+	}
+	long timezone = tm.tm_gmtoff;
+	t = timegm(&tm);
+	if (t == -1) {
+		throw std::runtime_error("failed to convert ISO 8601 datetime");
+	}
+	t -= timezone;
+#endif
+}
+
+void parse(StringRef& val, NetworkAddress& a) {
+	auto address = NetworkAddress::parse(val.toString());
+	if (!address.isValid()) {
+		throw std::invalid_argument("invalid host");
+	}
+	a = address;
+}
+
+// Base case function for parsing function below.
+template <typename T>
+void parse(std::vector<StringRef>::iterator it, std::vector<StringRef>::iterator end, T& t1) {
+	if (it == end) {
+		return;
+	}
+	parse(*it, t1);
+}
+
+// Given an iterator into a vector of string tokens, an iterator to the end of
+// the search space in the vector (exclusive), and a list of references to
+// types, parses each token in the vector into the associated type according to
+// the order of the arguments.
+//
+// For example, given the vector ["1", "1.5", "127.0.0.1:4000"] and the
+// argument list int a, double b, NetworkAddress c, after this function returns
+// each parameter passed in will hold the parsed value from the token list.
+//
+// The appropriate parsing function must be implemented for the type you wish
+// to parse. See the existing parsing functions above, and add your own if
+// necessary.
+template <typename T, typename... Types>
+void parse(std::vector<StringRef>::iterator it, std::vector<StringRef>::iterator end, T& t1, Types&... remaining) {
+	// Return as soon as all tokens have been parsed. This allows parameters
+	// passed at the end to act as optional parameters -- they will only be set
+	// if the value exists.
+	if (it == end) {
+		return;
+	}
+
+	try {
+		parse(*it, t1);
+		parse(++it, end, remaining...);
+	} catch (Error& e) {
+		throw e;
+	} catch (std::exception& e) {
+		throw e;
+	}
+}
+
+ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                           KeyRef prefix,
+                                                           KeyRangeRef kr) {
+	state RangeResult result;
+
+	// Set default values for all fields. The default will be used if the field
+	// is missing in the key.
+	state NetworkAddress host;
+	state WaitState waitStateStart = WaitState{ 0 };
+	state WaitState waitStateEnd = WaitState{ 2 };
+	state time_t timeStart = 0;
+	state time_t timeEnd = std::numeric_limits<time_t>::max();
+	state int seqStart = 0;
+	state int seqEnd = std::numeric_limits<int>::max();
+
+	state std::vector<StringRef> beginValues = kr.begin.removePrefix(prefix).splitAny("/"_sr);
+	state std::vector<StringRef> endValues = kr.end.removePrefix(prefix).splitAny("/"_sr);
+	// Require index (either "state" or "time") and address:port.
+	if (beginValues.size() < 2 || endValues.size() < 2) {
+		ryw->setSpecialKeySpaceErrorMsg("missing required parameters (index, host)");
+		throw special_keys_api_failure();
+	}
+
+	state NetworkAddress endRangeHost;
+	try {
+		if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
+			// For the range \xff\xff/actor_lineage/state/ip:port/wait-state/time/seq
+			parse(beginValues.begin() + 1, beginValues.end(), host, waitStateStart, timeStart, seqStart);
+			if (kr.begin != kr.end) {
+				parse(endValues.begin() + 1, endValues.end(), endRangeHost, waitStateEnd, timeEnd, seqEnd);
+			}
+		} else if (SpecialKeySpace::getActorLineageApiCommandRange("time").contains(kr)) {
+			// For the range \xff\xff/actor_lineage/time/ip:port/time/wait-state/seq
+			parse(beginValues.begin() + 1, beginValues.end(), host, timeStart, waitStateStart, seqStart);
+			if (kr.begin != kr.end) {
+				parse(endValues.begin() + 1, endValues.end(), endRangeHost, timeEnd, waitStateEnd, seqEnd);
+			}
+		} else {
+			ryw->setSpecialKeySpaceErrorMsg("invalid index in actor_lineage");
+			throw special_keys_api_failure();
+		}
+	} catch (Error& e) {
+		if (e.code() != special_keys_api_failure().code()) {
+			ryw->setSpecialKeySpaceErrorMsg("failed to parse key");
+			throw special_keys_api_failure();
+		} else {
+			throw e;
+		}
+	}
+
+	if (kr.begin != kr.end && host != endRangeHost) {
+		// The client doesn't know about all the hosts, so a get range covering
+		// multiple hosts has no way of knowing which IP:port combos to use.
+		ryw->setSpecialKeySpaceErrorMsg("the host must remain the same on both ends of the range");
+		throw special_keys_api_failure();
+	}
+
+	// Open endpoint to target process on each call. This can be optimized at
+	// some point...
+	state ProcessInterface process;
+	process.getInterface = RequestStream<GetProcessInterfaceRequest>(Endpoint({ host }, WLTOKEN_PROCESS));
+	ProcessInterface p = wait(retryBrokenPromise(process.getInterface, GetProcessInterfaceRequest{}));
+	process = p;
+
+	ActorLineageRequest actorLineageRequest;
+	actorLineageRequest.waitStateStart = waitStateStart;
+	actorLineageRequest.waitStateEnd = waitStateEnd;
+	actorLineageRequest.timeStart = timeStart;
+	actorLineageRequest.timeEnd = timeEnd;
+	ActorLineageReply reply = wait(process.actorLineage.getReply(actorLineageRequest));
+
+	time_t dt = 0;
+	int seq = -1;
+	for (const auto& sample : reply.samples) {
+		time_t datetime = (time_t)sample.time;
+		char buf[50];
+		struct tm* tm;
+		tm = localtime(&datetime);
+		size_t size = strftime(buf, 50, "%FT%T%z", tm);
+		std::string date(buf, size);
+
+		seq = dt == datetime ? seq + 1 : 0;
+		dt = datetime;
+
+		for (const auto& [waitState, data] : sample.data) {
+			if (seq < seqStart) {
+				continue;
+			} else if (seq >= seqEnd) {
+				break;
+			}
+
+			std::ostringstream streamKey;
+			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("state").toString() << host.toString()
+				          << "/" << to_string(waitState) << "/" << date;
+			} else if (SpecialKeySpace::getActorLineageApiCommandRange("time").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("time").toString() << host.toString()
+				          << "/" << date << "/" << to_string(waitState);
+			} else {
+				ASSERT(false);
+			}
+			streamKey << "/" << seq;
+
+			msgpack::object_handle oh = msgpack::unpack(data.data(), data.size());
+			msgpack::object deserialized = oh.get();
+
+			std::ostringstream stream;
+			stream << deserialized;
+
+			result.push_back_deep(result.arena(), KeyValueRef(streamKey.str(), stream.str()));
+		}
+
+		if (sample.data.size() == 0) {
+			std::ostringstream streamKey;
+			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("state").toString() << host.toString()
+				          << "/Running/" << date;
+			} else if (SpecialKeySpace::getActorLineageApiCommandRange("time").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("time").toString() << host.toString()
+				          << "/" << date << "/Running";
+			} else {
+				ASSERT(false);
+			}
+			streamKey << "/" << seq;
+			result.push_back_deep(result.arena(), KeyValueRef(streamKey.str(), "{}"_sr));
+		}
+	}
+
+	return result;
+}
+
+Future<RangeResult> ActorLineageImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	return actorLineageGetRangeActor(ryw, getKeyRange().begin, kr);
+}
+
+namespace {
+std::string_view to_string_view(StringRef sr) {
+	return std::string_view(reinterpret_cast<const char*>(sr.begin()), sr.size());
+}
+} // namespace
+
+ActorProfilerConf::ActorProfilerConf(KeyRangeRef kr)
+  : SpecialKeyRangeRWImpl(kr), config(ProfilerConfig::instance().getConfig()) {}
+
+Future<RangeResult> ActorProfilerConf::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	RangeResult res;
+	std::string_view begin(to_string_view(kr.begin.removePrefix(range.begin))),
+	    end(to_string_view(kr.end.removePrefix(range.begin)));
+	for (auto& p : config) {
+		if (p.first > end) {
+			break;
+		} else if (p.first > begin) {
+			KeyValueRef kv;
+			kv.key = StringRef(res.arena(), p.first).withPrefix(kr.begin, res.arena());
+			kv.value = StringRef(res.arena(), p.second);
+			res.push_back(res.arena(), kv);
+		}
+	}
+	return res;
+}
+
+void ActorProfilerConf::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	config[key.removePrefix(range.begin).toString()] = value.toString();
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
+	didWrite = true;
+}
+
+void ActorProfilerConf::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr) {
+	std::string begin(kr.begin.removePrefix(range.begin).toString()), end(kr.end.removePrefix(range.begin).toString());
+	auto first = config.lower_bound(begin);
+	if (first == config.end()) {
+		// nothing to clear
+		return;
+	}
+	didWrite = true;
+	auto last = config.upper_bound(end);
+	config.erase(first, last);
+}
+
+void ActorProfilerConf::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	std::string k = key.removePrefix(range.begin).toString();
+	auto iter = config.find(k);
+	if (iter != config.end()) {
+		config.erase(iter);
+	}
+	didWrite = true;
+}
+
+Future<Optional<std::string>> ActorProfilerConf::commit(ReadYourWritesTransaction* ryw) {
+	Optional<std::string> res{};
+	try {
+		if (didWrite) {
+			ProfilerConfig::instance().reset(config);
+		}
+		return res;
+	} catch (ConfigError& err) {
+		return Optional<std::string>{ err.description };
+	}
+}
+
 MaintenanceImpl::MaintenanceImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 // Used to read the healthZoneKey
@@ -2109,4 +2446,159 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 		}
 	}
 	return msg;
+}
+
+// Clears the special management api keys excludeLocality and failedLocality.
+void includeLocalities(ReadYourWritesTransaction* ryw) {
+	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
+	// includeLocalities might be used in an emergency transaction, so make sure it is retry-self-conflicting and
+	// CAUSAL_WRITE_RISKY
+	ryw->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
+	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
+	// for excluded localities
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
+	    SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
+	Transaction& tr = ryw->getTransaction();
+	for (auto& iter : ranges) {
+		auto entry = iter.value();
+		if (entry.first && !entry.second.present()) {
+			tr.addReadConflictRange(singleKeyRange(excludedLocalityVersionKey));
+			tr.set(excludedLocalityVersionKey, versionKey);
+			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter.range()));
+		}
+	}
+	// for failed localities
+	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
+	    SpecialKeySpace::getManamentApiCommandRange("failedlocality"));
+	for (auto& iter : ranges) {
+		auto entry = iter.value();
+		if (entry.first && !entry.second.present()) {
+			tr.addReadConflictRange(singleKeyRange(failedLocalityVersionKey));
+			tr.set(failedLocalityVersionKey, versionKey);
+			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter.range()));
+		}
+	}
+}
+
+// Reads the excludedlocality and failed locality keys using managment api,
+// parses them and returns the list.
+bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
+                             bool failed,
+                             std::unordered_set<std::string>& localities,
+                             std::vector<AddressExclusion>& addresses,
+                             std::set<AddressExclusion>& exclusions,
+                             std::vector<ProcessData>& workers,
+                             Optional<std::string>& msg) {
+	KeyRangeRef range = failed ? SpecialKeySpace::getManamentApiCommandRange("failedlocality")
+	                           : SpecialKeySpace::getManamentApiCommandRange("excludedlocality");
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
+	auto iter = ranges.begin();
+	while (iter != ranges.end()) {
+		auto entry = iter->value();
+		// only check for exclude(set) operation, include(clear) are not checked
+		TraceEvent(SevDebug, "ParseLocalities")
+		    .detail("Valid", entry.first)
+		    .detail("Set", entry.second.present())
+		    .detail("Key", iter->begin().toString());
+		if (entry.first && entry.second.present()) {
+			Key locality = iter->begin().removePrefix(range.begin);
+			if (locality.startsWith(LocalityData::ExcludeLocalityPrefix) &&
+			    locality.toString().find(':') != std::string::npos) {
+				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality.toString());
+				if (!localityAddresses.empty()) {
+					std::copy(localityAddresses.begin(), localityAddresses.end(), back_inserter(addresses));
+					exclusions.insert(localityAddresses.begin(), localityAddresses.end());
+				}
+
+				localities.insert(locality.toString());
+			} else {
+				std::string error = "ERROR: \'" + locality.toString() + "\' is not a valid locality\n";
+				msg = ManagementAPIError::toJsonString(
+				    false, entry.second.present() ? (failed ? "exclude failed" : "exclude") : "include", error);
+				return false;
+			}
+		}
+		++iter;
+	}
+	return true;
+}
+
+// On commit, parses the special exclusion keys and get the localities to be excluded, check for exclusions
+// and add them to the exclusion list. Also, clears the special management api keys with includeLocalities.
+ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTransaction* ryw, bool failed) {
+	state Optional<std::string> result;
+	state std::unordered_set<std::string> localities;
+	state std::vector<AddressExclusion> addresses;
+	state std::set<AddressExclusion> exclusions;
+	state std::vector<ProcessData> workers = wait(getWorkers(&ryw->getTransaction()));
+	if (!parseLocalitiesFromKeys(ryw, failed, localities, addresses, exclusions, workers, result))
+		return result;
+	// If force option is not set, we need to do safety check
+	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
+	    failed ? "failed_locality" : "excluded_locality", "force")];
+	// only do safety check when we have localities to be excluded and the force option key is not set
+	if (localities.size() && !(force.first && force.second.present())) {
+		bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, failed, &result));
+		if (!safe)
+			return result;
+	}
+
+	excludeLocalities(ryw->getTransaction(), localities, failed);
+	includeLocalities(ryw);
+
+	return result;
+}
+
+ExcludedLocalitiesRangeImpl::ExcludedLocalitiesRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> ExcludedLocalitiesRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
+}
+
+void ExcludedLocalitiesRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	// ignore value
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(ValueRef())));
+}
+
+Key ExcludedLocalitiesRangeImpl::decode(const KeyRef& key) const {
+	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
+	    .withPrefix(LiteralStringRef("\xff/conf/"));
+}
+
+Key ExcludedLocalitiesRangeImpl::encode(const KeyRef& key) const {
+	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+}
+
+Future<Optional<std::string>> ExcludedLocalitiesRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	// exclude locality with failed option as false.
+	return excludeLocalityCommitActor(ryw, false);
+}
+
+FailedLocalitiesRangeImpl::FailedLocalitiesRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> FailedLocalitiesRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
+}
+
+void FailedLocalitiesRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	// ignore value
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(ValueRef())));
+}
+
+Key FailedLocalitiesRangeImpl::decode(const KeyRef& key) const {
+	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
+	    .withPrefix(LiteralStringRef("\xff/conf/"));
+}
+
+Key FailedLocalitiesRangeImpl::encode(const KeyRef& key) const {
+	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+}
+
+Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	// exclude locality with failed option as true.
+	return excludeLocalityCommitActor(ryw, true);
 }

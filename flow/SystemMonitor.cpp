@@ -61,7 +61,7 @@ SystemStatistics getSystemStatistics() {
 	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
 	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
 
-SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics) {
+SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsState* statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	SystemStatistics currentStats = getSystemStatistics(
 	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState->systemState, true);

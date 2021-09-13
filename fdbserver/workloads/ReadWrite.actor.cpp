@@ -121,12 +121,12 @@ struct ReadWriteWorkload : KVWorkload {
 	bool doSetup;
 
 	ReadWriteWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), latencies(sampleSize), readLatencies(sampleSize), fullReadLatencies(sampleSize),
-	    commitLatencies(sampleSize), GRVLatencies(sampleSize), readLatencyTotal(0), readLatencyCount(0), loadTime(0.0),
-	    dependentReads(false), adjacentReads(false), adjacentWrites(false), clientBegin(0),
-	    aTransactions("A Transactions"), bTransactions("B Transactions"), retries("Retries"),
-	    totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
-	    totalRetriesMetric(LiteralStringRef("RWWorkload.TotalRetries")) {
+	  : KVWorkload(wcx), loadTime(0.0), clientBegin(0), dependentReads(false), adjacentReads(false),
+	    adjacentWrites(false), totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
+	    totalRetriesMetric(LiteralStringRef("RWWorkload.TotalRetries")), aTransactions("A Transactions"),
+	    bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize), readLatencies(sampleSize),
+	    commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize), readLatencyTotal(0),
+	    readLatencyCount(0) {
 		transactionSuccessMetric.init(LiteralStringRef("RWWorkload.SuccessfulTransaction"));
 		transactionFailureMetric.init(LiteralStringRef("RWWorkload.FailedTransaction"));
 		readMetric.init(LiteralStringRef("RWWorkload.Read"));
@@ -224,7 +224,7 @@ struct ReadWriteWorkload : KVWorkload {
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	ACTOR static Future<bool> traceDumpWorkers(Reference<AsyncVar<ServerDBInfo>> db) {
+	ACTOR static Future<bool> traceDumpWorkers(Reference<AsyncVar<ServerDBInfo> const> db) {
 		try {
 			loop {
 				choose {
@@ -270,51 +270,54 @@ struct ReadWriteWorkload : KVWorkload {
 		    (aTransactions.getValue() * readsPerTransactionA) + (bTransactions.getValue() * readsPerTransactionB);
 		int writes =
 		    (aTransactions.getValue() * writesPerTransactionA) + (bTransactions.getValue() * writesPerTransactionB);
-		m.emplace_back("Measured Duration", duration, true);
-		m.emplace_back("Transactions/sec", (aTransactions.getValue() + bTransactions.getValue()) / duration, false);
-		m.emplace_back("Operations/sec", ((reads + writes) / duration), false);
+		m.emplace_back("Measured Duration", duration, Averaged::True);
+		m.emplace_back(
+		    "Transactions/sec", (aTransactions.getValue() + bTransactions.getValue()) / duration, Averaged::False);
+		m.emplace_back("Operations/sec", ((reads + writes) / duration), Averaged::False);
 		m.push_back(aTransactions.getMetric());
 		m.push_back(bTransactions.getMetric());
 		m.push_back(retries.getMetric());
-		m.emplace_back("Mean load time (seconds)", loadTime, true);
-		m.emplace_back("Read rows", reads, false);
-		m.emplace_back("Write rows", writes, false);
+		m.emplace_back("Mean load time (seconds)", loadTime, Averaged::True);
+		m.emplace_back("Read rows", reads, Averaged::False);
+		m.emplace_back("Write rows", writes, Averaged::False);
 
 		if (!rampUpLoad) {
-			m.emplace_back("Mean Latency (ms)", 1000 * latencies.mean(), true);
-			m.emplace_back("Median Latency (ms, averaged)", 1000 * latencies.median(), true);
-			m.emplace_back("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), true);
-			m.emplace_back("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), true);
-			m.emplace_back("Max Latency (ms, averaged)", 1000 * latencies.max(), true);
+			m.emplace_back("Mean Latency (ms)", 1000 * latencies.mean(), Averaged::True);
+			m.emplace_back("Median Latency (ms, averaged)", 1000 * latencies.median(), Averaged::True);
+			m.emplace_back("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), Averaged::True);
+			m.emplace_back("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), Averaged::True);
+			m.emplace_back("Max Latency (ms, averaged)", 1000 * latencies.max(), Averaged::True);
 
-			m.emplace_back("Mean Row Read Latency (ms)", 1000 * readLatencies.mean(), true);
-			m.emplace_back("Median Row Read Latency (ms, averaged)", 1000 * readLatencies.median(), true);
-			m.emplace_back("Max Row Read Latency (ms, averaged)", 1000 * readLatencies.max(), true);
+			m.emplace_back("Mean Row Read Latency (ms)", 1000 * readLatencies.mean(), Averaged::True);
+			m.emplace_back("Median Row Read Latency (ms, averaged)", 1000 * readLatencies.median(), Averaged::True);
+			m.emplace_back("Max Row Read Latency (ms, averaged)", 1000 * readLatencies.max(), Averaged::True);
 
-			m.emplace_back("Mean Total Read Latency (ms)", 1000 * fullReadLatencies.mean(), true);
-			m.emplace_back("Median Total Read Latency (ms, averaged)", 1000 * fullReadLatencies.median(), true);
-			m.emplace_back("Max Total Latency (ms, averaged)", 1000 * fullReadLatencies.max(), true);
+			m.emplace_back("Mean Total Read Latency (ms)", 1000 * fullReadLatencies.mean(), Averaged::True);
+			m.emplace_back(
+			    "Median Total Read Latency (ms, averaged)", 1000 * fullReadLatencies.median(), Averaged::True);
+			m.emplace_back("Max Total Latency (ms, averaged)", 1000 * fullReadLatencies.max(), Averaged::True);
 
-			m.emplace_back("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true);
-			m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true);
-			m.emplace_back("Max GRV Latency (ms, averaged)", 1000 * GRVLatencies.max(), true);
+			m.emplace_back("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), Averaged::True);
+			m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), Averaged::True);
+			m.emplace_back("Max GRV Latency (ms, averaged)", 1000 * GRVLatencies.max(), Averaged::True);
 
-			m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true);
-			m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true);
-			m.emplace_back("Max Commit Latency (ms, averaged)", 1000 * commitLatencies.max(), true);
+			m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), Averaged::True);
+			m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), Averaged::True);
+			m.emplace_back("Max Commit Latency (ms, averaged)", 1000 * commitLatencies.max(), Averaged::True);
 		}
 
-		m.emplace_back("Read rows/sec", reads / duration, false);
-		m.emplace_back("Write rows/sec", writes / duration, false);
+		m.emplace_back("Read rows/sec", reads / duration, Averaged::False);
+		m.emplace_back("Write rows/sec", writes / duration, Averaged::False);
 		m.emplace_back(
-		    "Bytes read/sec", (reads * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration, false);
-		m.emplace_back(
-		    "Bytes written/sec", (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration, false);
+		    "Bytes read/sec", (reads * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration, Averaged::False);
+		m.emplace_back("Bytes written/sec",
+		               (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration,
+		               Averaged::False);
 		m.insert(m.end(), periodicMetrics.begin(), periodicMetrics.end());
 
 		std::vector<std::pair<uint64_t, double>>::iterator ratesItr = ratesAtKeyCounts.begin();
 		for (; ratesItr != ratesAtKeyCounts.end(); ratesItr++)
-			m.emplace_back(format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, false);
+			m.emplace_back(format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
 	}
 
 	Value randomValue() {
@@ -386,64 +389,72 @@ struct ReadWriteWorkload : KVWorkload {
 			if (recordBegin && recordEnd) {
 				std::string ts = format("T=%04.0fs:", elapsed);
 				self->periodicMetrics.emplace_back(
-				    ts + "Operations/sec", (ops - last_ops) / self->periodicLoggingInterval, false);
+				    ts + "Operations/sec", (ops - last_ops) / self->periodicLoggingInterval, Averaged::False);
 
 				// if(self->rampUpLoad) {
-				self->periodicMetrics.emplace_back(ts + "Mean Latency (ms)", 1000 * self->latencies.mean(), true);
 				self->periodicMetrics.emplace_back(
-				    ts + "Median Latency (ms, averaged)", 1000 * self->latencies.median(), true);
+				    ts + "Mean Latency (ms)", 1000 * self->latencies.mean(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "5% Latency (ms, averaged)", 1000 * self->latencies.percentile(.05), true);
+				    ts + "Median Latency (ms, averaged)", 1000 * self->latencies.median(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "95% Latency (ms, averaged)", 1000 * self->latencies.percentile(.95), true);
+				    ts + "5% Latency (ms, averaged)", 1000 * self->latencies.percentile(.05), Averaged::True);
+				self->periodicMetrics.emplace_back(
+				    ts + "95% Latency (ms, averaged)", 1000 * self->latencies.percentile(.95), Averaged::True);
 
 				self->periodicMetrics.emplace_back(
-				    ts + "Mean Row Read Latency (ms)", 1000 * self->readLatencies.mean(), true);
+				    ts + "Mean Row Read Latency (ms)", 1000 * self->readLatencies.mean(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "Median Row Read Latency (ms, averaged)", 1000 * self->readLatencies.median(), true);
-				self->periodicMetrics.emplace_back(
-				    ts + "5% Row Read Latency (ms, averaged)", 1000 * self->readLatencies.percentile(.05), true);
-				self->periodicMetrics.emplace_back(
-				    ts + "95% Row Read Latency (ms, averaged)", 1000 * self->readLatencies.percentile(.95), true);
+				    ts + "Median Row Read Latency (ms, averaged)", 1000 * self->readLatencies.median(), Averaged::True);
+				self->periodicMetrics.emplace_back(ts + "5% Row Read Latency (ms, averaged)",
+				                                   1000 * self->readLatencies.percentile(.05),
+				                                   Averaged::True);
+				self->periodicMetrics.emplace_back(ts + "95% Row Read Latency (ms, averaged)",
+				                                   1000 * self->readLatencies.percentile(.95),
+				                                   Averaged::True);
 
 				self->periodicMetrics.emplace_back(
-				    ts + "Mean Total Read Latency (ms)", 1000 * self->fullReadLatencies.mean(), true);
-				self->periodicMetrics.emplace_back(
-				    ts + "Median Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.median(), true);
-				self->periodicMetrics.emplace_back(
-				    ts + "5% Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.percentile(.05), true);
-				self->periodicMetrics.emplace_back(
-				    ts + "95% Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.percentile(.95), true);
+				    ts + "Mean Total Read Latency (ms)", 1000 * self->fullReadLatencies.mean(), Averaged::True);
+				self->periodicMetrics.emplace_back(ts + "Median Total Read Latency (ms, averaged)",
+				                                   1000 * self->fullReadLatencies.median(),
+				                                   Averaged::True);
+				self->periodicMetrics.emplace_back(ts + "5% Total Read Latency (ms, averaged)",
+				                                   1000 * self->fullReadLatencies.percentile(.05),
+				                                   Averaged::True);
+				self->periodicMetrics.emplace_back(ts + "95% Total Read Latency (ms, averaged)",
+				                                   1000 * self->fullReadLatencies.percentile(.95),
+				                                   Averaged::True);
 
 				self->periodicMetrics.emplace_back(
-				    ts + "Mean GRV Latency (ms)", 1000 * self->GRVLatencies.mean(), true);
+				    ts + "Mean GRV Latency (ms)", 1000 * self->GRVLatencies.mean(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "Median GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.median(), true);
+				    ts + "Median GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.median(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "5% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.05), true);
+				    ts + "5% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.05), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "95% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.95), true);
+				    ts + "95% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.95), Averaged::True);
 
 				self->periodicMetrics.emplace_back(
-				    ts + "Mean Commit Latency (ms)", 1000 * self->commitLatencies.mean(), true);
+				    ts + "Mean Commit Latency (ms)", 1000 * self->commitLatencies.mean(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "Median Commit Latency (ms, averaged)", 1000 * self->commitLatencies.median(), true);
-				self->periodicMetrics.emplace_back(
-				    ts + "5% Commit Latency (ms, averaged)", 1000 * self->commitLatencies.percentile(.05), true);
-				self->periodicMetrics.emplace_back(
-				    ts + "95% Commit Latency (ms, averaged)", 1000 * self->commitLatencies.percentile(.95), true);
+				    ts + "Median Commit Latency (ms, averaged)", 1000 * self->commitLatencies.median(), Averaged::True);
+				self->periodicMetrics.emplace_back(ts + "5% Commit Latency (ms, averaged)",
+				                                   1000 * self->commitLatencies.percentile(.05),
+				                                   Averaged::True);
+				self->periodicMetrics.emplace_back(ts + "95% Commit Latency (ms, averaged)",
+				                                   1000 * self->commitLatencies.percentile(.95),
+				                                   Averaged::True);
 				//}
 
 				self->periodicMetrics.emplace_back(
-				    ts + "Max Latency (ms, averaged)", 1000 * self->latencies.max(), true);
+				    ts + "Max Latency (ms, averaged)", 1000 * self->latencies.max(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "Max Row Read Latency (ms, averaged)", 1000 * self->readLatencies.max(), true);
+				    ts + "Max Row Read Latency (ms, averaged)", 1000 * self->readLatencies.max(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "Max Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.max(), true);
+				    ts + "Max Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.max(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "Max GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.max(), true);
+				    ts + "Max GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.max(), Averaged::True);
 				self->periodicMetrics.emplace_back(
-				    ts + "Max Commit Latency (ms, averaged)", 1000 * self->commitLatencies.max(), true);
+				    ts + "Max Commit Latency (ms, averaged)", 1000 * self->commitLatencies.max(), Averaged::True);
 			}
 			last_ops = ops;
 

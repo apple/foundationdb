@@ -25,10 +25,10 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 #include "flow/Arena.h"
 #include "flow/flow.h"
-#include "fdbclient/Knobs.h"
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
@@ -41,8 +41,8 @@ typedef UID SpanID;
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,
-	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
-	tagLocalityUpgraded = -4,
+	tagLocalityRemoteLog = -3, // tag created by log router for remote (aka. not in Primary DC) tLogs
+	tagLocalityUpgraded = -4, // tlogs with old log format
 	tagLocalitySatellite = -5,
 	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
@@ -242,6 +242,11 @@ std::string describeList(T const& items, int max_items) {
 
 template <class T>
 std::string describe(std::vector<T> const& items, int max_items = -1) {
+	return describeList(items, max_items);
+}
+
+template <class T>
+std::string describe(std::unordered_set<T> const& items, int max_items = -1) {
 	return describeList(items, max_items);
 }
 
@@ -514,28 +519,12 @@ inline KeyRange prefixRange(KeyRef prefix) {
 	range.contents() = KeyRangeRef(start, end);
 	return range;
 }
-inline KeyRef keyBetween(const KeyRangeRef& keys) {
-	// Returns (one of) the shortest key(s) either contained in keys or equal to keys.end,
-	// assuming its length is no more than CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT. If the length of
-	// the shortest key exceeds that limit, then the end key is returned.
-	// The returned reference is valid as long as keys is valid.
 
-	int pos = 0; // will be the position of the first difference between keys.begin and keys.end
-	int minSize = std::min(keys.begin.size(), keys.end.size());
-	for (; pos < minSize && pos < CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT; pos++) {
-		if (keys.begin[pos] != keys.end[pos]) {
-			return keys.end.substr(0, pos + 1);
-		}
-	}
-
-	// If one more character keeps us in the limit, and the latter key is simply
-	// longer, then we only need one more byte of the end string.
-	if (pos < CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT && keys.begin.size() < keys.end.size()) {
-		return keys.end.substr(0, pos + 1);
-	}
-
-	return keys.end;
-}
+// Returns (one of) the shortest key(s) either contained in keys or equal to keys.end,
+// assuming its length is no more than CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT. If the length of
+// the shortest key exceeds that limit, then the end key is returned.
+// The returned reference is valid as long as keys is valid.
+KeyRef keyBetween(const KeyRangeRef& keys);
 
 struct KeySelectorRef {
 private:
@@ -560,32 +549,9 @@ public:
 
 	KeyRef getKey() const { return key; }
 
-	void setKey(KeyRef const& key) {
-		// There are no keys in the database with size greater than KEY_SIZE_LIMIT, so if this key selector has a key
-		// which is large, then we can translate it to an equivalent key selector with a smaller key
-		if (key.size() > (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-		                                                           : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-			this->key = key.substr(0,
-			                       (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-			                                                                 : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-			                           1);
-		else
-			this->key = key;
-	}
+	void setKey(KeyRef const& key);
 
-	std::string toString() const {
-		if (offset > 0) {
-			if (orEqual)
-				return format("%d+firstGreaterThan(%s)", offset - 1, printable(key).c_str());
-			else
-				return format("%d+firstGreaterOrEqual(%s)", offset - 1, printable(key).c_str());
-		} else {
-			if (orEqual)
-				return format("%d+lastLessOrEqual(%s)", offset, printable(key).c_str());
-			else
-				return format("%d+lastLessThan(%s)", offset, printable(key).c_str());
-		}
-	}
+	std::string toString() const;
 
 	bool isBackward() const {
 		return !orEqual && offset <= 0;
@@ -689,9 +655,9 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 	RangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
 	RangeResultRef(Arena& p, const RangeResultRef& toCopy)
-	  : more(toCopy.more), readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd),
+	  : VectorRef<KeyValueRef>(p, toCopy), more(toCopy.more),
 	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
-	    VectorRef<KeyValueRef>(p, toCopy) {}
+	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
 	RangeResultRef(const VectorRef<KeyValueRef>& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
 	  : VectorRef<KeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false), readThroughEnd(false) {
 	}
@@ -709,7 +675,6 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
 	}
 };
-using RangeResult = Standalone<RangeResultRef>;
 
 template <>
 struct Traceable<RangeResultRef> : std::true_type {

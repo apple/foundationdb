@@ -548,11 +548,11 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	return true; // All of the above options currently require recovery to take effect
 }
 
-inline static KeyValueRef* lower_bound(VectorRef<KeyValueRef>& config, KeyRef const& key) {
+static KeyValueRef* lower_bound(VectorRef<KeyValueRef>& config, KeyRef const& key) {
 	return std::lower_bound(config.begin(), config.end(), KeyValueRef(key, ValueRef()), KeyValueRef::OrderByKey());
 }
-inline static KeyValueRef const* lower_bound(VectorRef<KeyValueRef> const& config, KeyRef const& key) {
-	return lower_bound(const_cast<VectorRef<KeyValueRef>&>(config), key);
+static KeyValueRef const* lower_bound(VectorRef<KeyValueRef> const& config, KeyRef const& key) {
+	return std::lower_bound(config.begin(), config.end(), KeyValueRef(key, ValueRef()), KeyValueRef::OrderByKey());
 }
 
 void DatabaseConfiguration::applyMutation(MutationRef m) {
@@ -632,6 +632,57 @@ std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 	return addrs;
 }
 
+// checks if the locality is excluded or not by checking if the key is present.
+bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) const {
+	std::map<std::string, std::string> localityData = locality.getAllData();
+	for (const auto& l : localityData) {
+		if (get(StringRef(encodeExcludedLocalityKey(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
+		                                            l.second)))
+		        .present() ||
+		    get(StringRef(
+		            encodeFailedLocalityKey(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second)))
+		        .present()) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// checks if this machineid of given locality is excluded.
+bool DatabaseConfiguration::isMachineExcluded(const LocalityData& locality) const {
+	if (locality.machineId().present()) {
+		return get(encodeExcludedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
+		                                     locality.machineId().get().toString()))
+		           .present() ||
+		       get(encodeFailedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
+		                                   locality.machineId().get().toString()))
+		           .present();
+	}
+
+	return false;
+}
+
+// Gets the list of already excluded localities (with failed option)
+std::set<std::string> DatabaseConfiguration::getExcludedLocalities() const {
+	// TODO: revisit all const_cast usages
+	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
+	std::set<std::string> localities;
+	for (auto i = lower_bound(rawConfiguration, excludedLocalityKeys.begin);
+	     i != rawConfiguration.end() && i->key < excludedLocalityKeys.end;
+	     ++i) {
+		std::string l = decodeExcludedLocalityKey(i->key);
+		localities.insert(l);
+	}
+	for (auto i = lower_bound(rawConfiguration, failedLocalityKeys.begin);
+	     i != rawConfiguration.end() && i->key < failedLocalityKeys.end;
+	     ++i) {
+		std::string l = decodeFailedLocalityKey(i->key);
+		localities.insert(l);
+	}
+	return localities;
+}
+
 void DatabaseConfiguration::makeConfigurationMutable() {
 	if (mutableConfiguration.present())
 		return;
@@ -664,7 +715,7 @@ void DatabaseConfiguration::fromKeyValues(Standalone<VectorRef<KeyValueRef>> raw
 }
 
 bool DatabaseConfiguration::isOverridden(std::string key) const {
-	key = configKeysPrefix.toString() + key;
+	key = configKeysPrefix.toString() + std::move(key);
 
 	if (mutableConfiguration.present()) {
 		return mutableConfiguration.get().find(key) != mutableConfiguration.get().end();

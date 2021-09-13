@@ -21,6 +21,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iterator>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -33,8 +34,6 @@
 #include <vector>
 #include <cstring>
 #include <array>
-#include <typeinfo>
-#include <typeindex>
 #include <unordered_map>
 #include <deque>
 #include "flow/FileIdentifier.h"
@@ -482,8 +481,8 @@ struct WriteToBuffer : Context {
 	              int vtable_start,
 	              uint8_t* buffer,
 	              std::vector<int>::iterator writeToOffsetsIter)
-	  : Context(context), buffer_length(buffer_length), vtable_start(vtable_start), buffer(buffer),
-	    writeToOffsetsIter(writeToOffsetsIter) {}
+	  : Context(context), buffer_length(buffer_length), vtable_start(vtable_start),
+	    writeToOffsetsIter(writeToOffsetsIter), buffer(buffer) {}
 
 	struct MessageWriter {
 		template <class T>

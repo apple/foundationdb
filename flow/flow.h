@@ -20,23 +20,29 @@
 
 #ifndef FLOW_FLOW_H
 #define FLOW_FLOW_H
+#include "flow/Arena.h"
+#include "flow/FastRef.h"
 #pragma once
 
 #pragma warning(disable : 4244 4267) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int
-                                     // conversions like this suppresses)
+// conversions like this suppresses)
 #pragma warning(disable : 4345)
 #pragma warning(error : 4239)
 
 #include <vector>
 #include <queue>
+#include <stack>
 #include <map>
 #include <unordered_map>
 #include <set>
 #include <functional>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <algorithm>
+#include <memory>
+#include <mutex>
 
 #include "flow/Platform.h"
 #include "flow/FastAlloc.h"
@@ -46,6 +52,7 @@
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
+#include "flow/WriteOnlySet.h"
 
 #include <boost/version.hpp>
 
@@ -72,7 +79,7 @@ extern double P_EXPENSIVE_VALIDATION;
 enum class BuggifyType : uint8_t { General = 0, Client };
 bool isBuggifyEnabled(BuggifyType type);
 void clearBuggifySections(BuggifyType type);
-int getSBVar(std::string file, int line, BuggifyType);
+int getSBVar(std::string const& file, int line, BuggifyType);
 void enableBuggify(bool enabled,
                    BuggifyType type); // Currently controls buggification and (randomized) expensive validation
 bool validationIsEnabled(BuggifyType type);
@@ -83,8 +90,8 @@ bool validationIsEnabled(BuggifyType type);
 #define EXPENSIVE_VALIDATION                                                                                           \
 	(validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
-extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
-extern Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit = "");
+extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
+extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");
 extern std::string format(const char* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.
@@ -133,22 +140,21 @@ class Never {};
 
 template <class T>
 class ErrorOr : public ComposedIdentifier<T, 2> {
+	std::variant<Error, T> value;
+
 public:
 	ErrorOr() : ErrorOr(default_error_or()) {}
-	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }
-	ErrorOr(const ErrorOr<T>& o) : error(o.error) {
-		if (present())
-			new (&value) T(o.get());
-	}
+	ErrorOr(Error const& error) : value(std::in_place_type<Error>, error) {}
 
 	template <class U>
-	ErrorOr(const U& t) : error() {
-		new (&value) T(t);
-	}
+	ErrorOr(U const& t) : value(std::in_place_type<T>, t) {}
 
-	ErrorOr(Arena& a, const ErrorOr<T>& o) : error(o.error) {
-		if (present())
-			new (&value) T(a, o.get());
+	ErrorOr(Arena& a, ErrorOr<T> const& o) {
+		if (o.present()) {
+			value = std::variant<Error, T>(std::in_place_type<T>, a, o.get());
+		} else {
+			value = std::variant<Error, T>(std::in_place_type<Error>, o.getError());
+		}
 	}
 	int expectedSize() const { return present() ? get().expectedSize() : 0; }
 
@@ -158,68 +164,66 @@ public:
 	}
 
 	template <class R>
-	ErrorOr<R> map(std::function<R(T)> f) const {
-		if (present()) {
-			return ErrorOr<R>(f(get()));
-		} else {
-			return ErrorOr<R>(error);
-		}
+	ErrorOr<R> map(std::function<R(T)> f) const& {
+		return present() ? ErrorOr<R>(f(get())) : ErrorOr<R>(getError());
+	}
+	template <class R>
+	ErrorOr<R> map(std::function<R(T)> f) && {
+		return present() ? ErrorOr<R>(f(std::move(*this).get())) : ErrorOr<R>(getError());
 	}
 
-	~ErrorOr() {
-		if (present())
-			((T*)&value)->~T();
-	}
-
-	ErrorOr& operator=(ErrorOr const& o) {
-		if (present()) {
-			((T*)&value)->~T();
-		}
-		if (o.present()) {
-			new (&value) T(o.get());
-		}
-		error = o.error;
-		return *this;
-	}
-
-	bool present() const { return error.code() == invalid_error_code; }
-	T& get() {
+	bool present() const { return std::holds_alternative<T>(value); }
+	T& get() & {
 		UNSTOPPABLE_ASSERT(present());
-		return *(T*)&value;
+		return std::get<T>(value);
 	}
-	T const& get() const {
+	T const& get() const& {
 		UNSTOPPABLE_ASSERT(present());
-		return *(T const*)&value;
+		return std::get<T>(value);
 	}
-	T orDefault(T const& default_value) const {
-		if (present())
-			return get();
-		else
-			return default_value;
+	T&& get() && {
+		UNSTOPPABLE_ASSERT(present());
+		return std::get<T>(std::move(value));
 	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		// SOMEDAY: specialize for space efficiency?
-		serializer(ar, error);
-		if (present()) {
-			if (Ar::isDeserializing)
-				new (&value) T();
-			serializer(ar, *(T*)&value);
-		}
+	template <class U>
+	T orDefault(U&& defaultValue) const& {
+		return present() ? get() : std::forward<U>(defaultValue);
+	}
+	template <class U>
+	T orDefault(U&& defaultValue) && {
+		return present() ? std::move(*this).get() : std::forward<U>(defaultValue);
 	}
 
-	bool isError() const { return error.code() != invalid_error_code; }
-	bool isError(int code) const { return error.code() == code; }
-	const Error& getError() const {
+	bool isError() const { return std::holds_alternative<Error>(value); }
+	bool isError(int code) const { return isError() && getError().code() == code; }
+	Error const& getError() const {
 		ASSERT(isError());
-		return error;
+		return std::get<Error>(value);
 	}
-
-private:
-	typename std::aligned_storage<sizeof(T), __alignof(T)>::type value;
-	Error error;
 };
+
+template <class Archive, class T>
+void load(Archive& ar, ErrorOr<T>& value) {
+	Error error;
+	ar >> error;
+	if (error.code() != invalid_error_code) {
+		T t;
+		ar >> t;
+		value = ErrorOr<T>(t);
+	} else {
+		value = ErrorOr<T>(error);
+	}
+}
+
+template <class Archive, class T>
+void save(Archive& ar, ErrorOr<T> const& value) {
+	if (value.present()) {
+		ar << Error{}; // invalid error code
+		ar << value.get();
+	} else {
+		ar << value.getError();
+	}
+}
 
 template <class T>
 struct union_like_traits<ErrorOr<T>> : std::true_type {
@@ -420,6 +424,188 @@ struct SingleCallback {
 	}
 };
 
+struct LineagePropertiesBase {
+	virtual ~LineagePropertiesBase();
+};
+
+// helper class to make implementation of LineageProperties easier
+template <class Derived>
+struct LineageProperties : LineagePropertiesBase {
+	// Contract:
+	//
+	// StringRef name = "SomeUniqueName"_str;
+
+	// this has to be implemented by subclasses
+	// but can't be made virtual.
+	// A user should implement this for any type
+	// within the properies class.
+	template <class Value>
+	bool isSet(Value Derived::*member) const {
+		return true;
+	}
+};
+
+struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage> {
+	friend class LineageReference;
+
+	struct Property {
+		std::string_view name;
+		LineagePropertiesBase* properties;
+	};
+
+private:
+	std::vector<Property> properties;
+	Reference<ActorLineage> parent;
+	mutable std::mutex mutex;
+	using Lock = std::unique_lock<std::mutex>;
+	using Iterator = std::vector<Property>::const_iterator;
+
+	ActorLineage();
+	Iterator find(const std::string_view& name) const {
+		for (auto it = properties.cbegin(); it != properties.cend(); ++it) {
+			if (it->name == name) {
+				return it;
+			}
+		}
+		return properties.end();
+	}
+	Property& findOrInsert(const std::string_view& name) {
+		for (auto& property : properties) {
+			if (property.name == name) {
+				return property;
+			}
+		}
+		properties.emplace_back(Property{ name, nullptr });
+		return properties.back();
+	}
+
+public:
+	~ActorLineage();
+	bool isRoot() const {
+		Lock _{ mutex };
+		return parent.getPtr() == nullptr;
+	}
+	void makeRoot() {
+		Lock _{ mutex };
+		parent.clear();
+	}
+	template <class T, class V>
+	V& modify(V T::*member) {
+		Lock _{ mutex };
+		auto& res = findOrInsert(T::name).properties;
+		if (!res) {
+			res = new T{};
+		}
+		T* map = static_cast<T*>(res);
+		return map->*member;
+	}
+	template <class T, class V>
+	std::optional<V> get(V T::*member) const {
+		Lock _{ mutex };
+		auto current = this;
+		while (current != nullptr) {
+			auto iter = current->find(T::name);
+			if (iter != current->properties.end()) {
+				T const& map = static_cast<T const&>(*iter->properties);
+				if (map.isSet(member)) {
+					return map.*member;
+				}
+			}
+			current = current->parent.getPtr();
+		}
+		return std::optional<V>{};
+	}
+	template <class T, class V>
+	std::vector<V> stack(V T::*member) const {
+		Lock _{ mutex };
+		auto current = this;
+		std::vector<V> res;
+		while (current != nullptr) {
+			auto iter = current->find(T::name);
+			if (iter != current->properties.end()) {
+				T const& map = static_cast<T const&>(*iter->properties);
+				if (map.isSet(member)) {
+					res.push_back(map.*member);
+				}
+			}
+			current = current->parent.getPtr();
+		}
+		return res;
+	}
+	Reference<ActorLineage> getParent() { return parent; }
+};
+
+// A Reference subclass with knowledge on the true owner of the contained
+// ActorLineage object. This class enables lazy allocation of ActorLineages.
+// LineageReference copies are generally made by child actors, which should
+// create their own ActorLineage when attempting to add lineage properties (see
+// getCurrentLineage()).
+class LineageReference : public Reference<ActorLineage> {
+public:
+	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
+	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
+	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+
+	void setActorName(const char* name) { actorName_ = name; }
+	const char* actorName() { return actorName_; }
+	void allocate() {
+		Reference<ActorLineage>::setPtrUnsafe(new ActorLineage());
+		allocated_ = true;
+	}
+	bool isAllocated() { return allocated_; }
+
+private:
+	// The actor name has to be a property of the LineageReference because all
+	// actors store their own LineageReference copy, but not all actors point
+	// to their own ActorLineage.
+	const char* actorName_;
+	bool allocated_;
+};
+
+extern std::atomic<bool> startSampling;
+extern thread_local LineageReference* currentLineage;
+
+#ifdef ENABLE_SAMPLING
+LineageReference getCurrentLineage();
+#else
+#define getCurrentLineage()                                                                                            \
+	if (false)                                                                                                         \
+	(*currentLineage)
+#endif
+void replaceLineage(LineageReference* lineage);
+
+struct StackLineage : LineageProperties<StackLineage> {
+	static const std::string_view name;
+	StringRef actorName;
+};
+
+#ifdef ENABLE_SAMPLING
+struct LineageScope {
+	LineageReference* oldLineage;
+	LineageScope(LineageReference* with) : oldLineage(currentLineage) { replaceLineage(with); }
+	~LineageScope() { replaceLineage(oldLineage); }
+};
+#endif
+
+// This class can be used in order to modify all lineage properties
+// of actors created within a (non-actor) scope
+struct LocalLineage {
+	LineageReference lineage;
+	LineageReference* oldLineage;
+	LocalLineage() {
+#ifdef ENABLE_SAMPLING
+		lineage.allocate();
+		oldLineage = currentLineage;
+		replaceLineage(&lineage);
+#endif
+	}
+	~LocalLineage() {
+#ifdef ENABLE_SAMPLING
+		replaceLineage(oldLineage);
+#endif
+	}
+};
+
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
@@ -437,7 +623,7 @@ public:
 	T& value() { return *(T*)&value_storage; }
 
 	SAV(int futures, int promises)
-	  : futures(futures), promises(promises), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
+	  : promises(promises), futures(futures), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
 		Callback<T>::prev = Callback<T>::next = this;
 	}
 	~SAV() {
@@ -461,8 +647,9 @@ public:
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
-		while (Callback<T>::next != this)
+		while (Callback<T>::next != this) {
 			Callback<T>::next->fire(this->value());
+		}
 	}
 
 	void send(Never) {
@@ -473,8 +660,9 @@ public:
 	void sendError(Error err) {
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
 		this->error_state = err;
-		while (Callback<T>::next != this)
+		while (Callback<T>::next != this) {
 			Callback<T>::next->error(err);
+		}
 	}
 
 	template <class U>
@@ -578,88 +766,6 @@ public:
 
 	void unwait() override { delFutureRef(); }
 	void fire(T const&) override { ASSERT(false); }
-};
-
-template <class T>
-struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
-	int promises; // one for each promise (and one for an active actor if this is an actor)
-	int futures; // one for each future and one more if there are any callbacks
-
-	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
-	std::queue<T, Deque<T>> queue;
-	Error error;
-
-	NotifiedQueue(int futures, int promises) : futures(futures), promises(promises) { SingleCallback<T>::next = this; }
-
-	bool isReady() const { return !queue.empty() || error.isValid(); }
-	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
-	uint32_t size() const { return queue.size(); }
-
-	T pop() {
-		if (queue.empty()) {
-			if (error.isValid())
-				throw error;
-			throw internal_error();
-		}
-		auto copy = std::move(queue.front());
-		queue.pop();
-		return copy;
-	}
-
-	template <class U>
-	void send(U&& value) {
-		if (error.isValid())
-			return;
-
-		if (SingleCallback<T>::next != this) {
-			SingleCallback<T>::next->fire(std::forward<U>(value));
-		} else {
-			queue.emplace(std::forward<U>(value));
-		}
-	}
-
-	void sendError(Error err) {
-		if (error.isValid())
-			return;
-
-		this->error = err;
-		if (SingleCallback<T>::next != this)
-			SingleCallback<T>::next->error(err);
-	}
-
-	void addPromiseRef() { promises++; }
-	void addFutureRef() { futures++; }
-
-	void delPromiseRef() {
-		if (!--promises) {
-			if (futures) {
-				sendError(broken_promise());
-			} else
-				destroy();
-		}
-	}
-	void delFutureRef() {
-		if (!--futures) {
-			if (promises)
-				cancel();
-			else
-				destroy();
-		}
-	}
-
-	int getFutureReferenceCount() const { return futures; }
-	int getPromiseReferenceCount() const { return promises; }
-
-	virtual void destroy() { delete this; }
-	virtual void cancel() {}
-
-	void addCallbackAndDelFutureRef(SingleCallback<T>* cb) {
-		ASSERT(SingleCallback<T>::next == this);
-		cb->insert(this);
-	}
-	void unwait() override { delFutureRef(); }
-	void fire(T const&) override { ASSERT(false); }
-	void fire(T&&) override { ASSERT(false); }
 };
 
 template <class T>
@@ -794,6 +900,7 @@ public:
 	}
 	bool isSet() const { return sav->isSet(); }
 	bool canBeSet() const { return sav->canBeSet(); }
+	bool isError() const { return sav->isError(); }
 
 	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
@@ -836,6 +943,113 @@ public:
 
 private:
 	SAV<T>* sav;
+};
+
+template <class T>
+struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
+	int promises; // one for each promise (and one for an active actor if this is an actor)
+	int futures; // one for each future and one more if there are any callbacks
+
+	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
+	std::queue<T, Deque<T>> queue;
+	Promise<Void> onEmpty;
+	Error error;
+
+	NotifiedQueue(int futures, int promises) : promises(promises), futures(futures), onEmpty(nullptr) {
+		SingleCallback<T>::next = this;
+	}
+
+	bool isReady() const { return !queue.empty() || error.isValid(); }
+	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
+	uint32_t size() const { return queue.size(); }
+
+	virtual T pop() {
+		if (queue.empty()) {
+			if (error.isValid())
+				throw error;
+			throw internal_error();
+		}
+		auto copy = std::move(queue.front());
+		queue.pop();
+		if (onEmpty.isValid() && queue.empty()) {
+			Promise<Void> hold = onEmpty;
+			onEmpty = Promise<Void>(nullptr);
+			hold.send(Void());
+		}
+		return copy;
+	}
+
+	template <class U>
+	void send(U&& value) {
+		if (error.isValid())
+			return;
+
+		if (SingleCallback<T>::next != this) {
+			SingleCallback<T>::next->fire(std::forward<U>(value));
+		} else {
+			queue.emplace(std::forward<U>(value));
+		}
+	}
+
+	void sendError(Error err) {
+		if (error.isValid())
+			return;
+
+		this->error = err;
+		if (shouldFireImmediately()) {
+			SingleCallback<T>::next->error(err);
+		}
+	}
+
+	void addPromiseRef() { promises++; }
+	void addFutureRef() { futures++; }
+
+	void delPromiseRef() {
+		if (!--promises) {
+			if (futures) {
+				sendError(broken_promise());
+			} else
+				destroy();
+		}
+	}
+	void delFutureRef() {
+		if (!--futures) {
+			if (promises)
+				cancel();
+			else
+				destroy();
+		}
+	}
+
+	int getFutureReferenceCount() const { return futures; }
+	int getPromiseReferenceCount() const { return promises; }
+
+	virtual void destroy() { delete this; }
+	virtual void cancel() {}
+
+	void addCallbackAndDelFutureRef(SingleCallback<T>* cb) {
+		ASSERT(SingleCallback<T>::next == this);
+		cb->insert(this);
+	}
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
+	virtual void fire(T&&) override { ASSERT(false); }
+
+protected:
+	T popImpl() {
+		if (queue.empty()) {
+			if (error.isValid())
+				throw error;
+			throw internal_error();
+		}
+		auto copy = std::move(queue.front());
+		queue.pop();
+		return copy;
+	}
+
+	bool hasError() { return error.isValid(); }
+
+	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
 };
 
 template <class T>
@@ -890,6 +1104,11 @@ private:
 
 template <class Request>
 decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r) {
+	return r.reply;
+}
+
+template <class Request>
+auto const& getReplyPromiseStream(Request const& r) {
 	return r.reply;
 }
 
@@ -981,9 +1200,38 @@ public:
 	bool operator==(const PromiseStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
 
+	Future<Void> onEmpty() {
+		if (isEmpty()) {
+			return Void();
+		}
+		if (!queue->onEmpty.isValid()) {
+			queue->onEmpty = Promise<Void>();
+		}
+		return queue->onEmpty.getFuture();
+	}
+
 private:
 	NotifiedQueue<T>* queue;
 };
+
+// Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
+#ifdef __GNUG__
+#define REPLYSTREAM_TYPE(RequestType) decltype(getReplyPromiseStream(std::declval<RequestType>()).getFuture().pop())
+#else
+template <class T>
+struct ReplyStreamType {
+	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
+	//   breaks IntelliSense in VS2010; this is a workaround.
+	typedef decltype(std::declval<T>().reply.getFuture().pop()) Type;
+};
+template <class T>
+class ReplyPromiseStream;
+template <class T>
+struct ReplyStreamType<ReplyPromiseStream<T>> {
+	typedef T Type;
+};
+#define REPLYSTREAM_TYPE(RequestType) typename ReplyStreamType<RequestType>::Type
+#endif
 
 // extern int actorCount;
 
@@ -994,42 +1242,84 @@ static inline void destruct(T& t) {
 
 template <class ReturnValue>
 struct Actor : SAV<ReturnValue> {
+#ifdef ENABLE_SAMPLING
+	LineageReference lineage = *currentLineage;
+#endif
 	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
 	                         // group #
 
 	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/
 	}
-	//~Actor() { --actorCount; }
+	// ~Actor() { --actorCount; }
+
+#ifdef ENABLE_SAMPLING
+	LineageReference* lineageAddr() { return std::addressof(lineage); }
+#endif
 };
 
 template <>
 struct Actor<void> {
 	// This specialization is for a void actor (one not returning a future, hence also uncancellable)
 
+#ifdef ENABLE_SAMPLING
+	LineageReference lineage = *currentLineage;
+#endif
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
 	Actor() : actor_wait_state(0) { /*++actorCount;*/
 	}
-	//~Actor() { --actorCount; }
+	// ~Actor() { --actorCount; }
+
+#ifdef ENABLE_SAMPLING
+	LineageReference* lineageAddr() { return std::addressof(lineage); }
+#endif
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
-	void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
+	virtual void fire(ValueType const& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_fire(this, value);
+	}
+	virtual void error(Error e) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_error(this, e);
+	}
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
-	void fire(ValueType&& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value)); }
-	void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
+	void fire(ValueType const& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_fire(this, value);
+	}
+	void fire(ValueType&& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
+	}
+	void error(Error e) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
+#endif
+		static_cast<ActorType*>(this)->a_callback_error(this, e);
+	}
 };
 inline double now() {
 	return g_network->now();
 }
 inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(seconds, taskID);
+}
+inline Future<Void> orderedDelay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	return g_network->orderedDelay(seconds, taskID);
 }
 inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(std::max(0.0, time - g_network->now()), taskID);

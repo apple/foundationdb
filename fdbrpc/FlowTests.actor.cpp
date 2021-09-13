@@ -24,6 +24,7 @@
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
+#include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
@@ -234,6 +235,8 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 
 	Future<class Void> delay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
 
+	Future<class Void> orderedDelay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
+
 	Future<class Void> yield(TaskPriority taskID) override {
 		if (check_yield(taskID))
 			return delay(0, taskID);
@@ -262,8 +265,8 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		return baseNetwork->onMainThread(std::move(signal), taskID);
 	}
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
-		return baseNetwork->startThread(func, arg);
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
+		return baseNetwork->startThread(func, arg, stackSize, name);
 	}
 	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
 		return IAsyncFileSystem::filesystem()->open(filename, flags, mode);
@@ -283,6 +286,9 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet& getActorLineageSet() override { throw std::exception(); }
+#endif
 	ProtocolVersion protocolVersion() override { return baseNetwork->protocolVersion(); }
 };
 
@@ -1386,7 +1392,7 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 struct Tracker {
 	int copied;
 	bool moved;
-	Tracker(int copied = 0) : moved(false), copied(copied) {}
+	Tracker(int copied = 0) : copied(copied), moved(false) {}
 	Tracker(Tracker&& other) : Tracker(other.copied) {
 		ASSERT(!other.moved);
 		other.moved = true;
@@ -1581,26 +1587,18 @@ TEST_CASE("/flow/flow/FlowMutex") {
 				}
 				error = e;
 
-				// Wait for all actors still running to finish their waits and try to take the mutex
+				// Some actors can still be running, waiting while locked or unlocked,
+				// but all should become ready, some with errors.
+				state int i;
 				if (verbose) {
-					printf("Waiting for completions\n");
+					printf("Waiting for completions.  Future end states:\n");
 				}
-				wait(delay(2 * mutexTestDelay));
-
-				if (verbose) {
-					printf("Future end states:\n");
-				}
-				// All futures should be ready, some with errors.
-				bool allReady = true;
-				for (int i = 0; i < tests.size(); ++i) {
-					auto f = tests[i];
+				for (i = 0; i < tests.size(); ++i) {
+					ErrorOr<Void> f = wait(errorOr(tests[i]));
 					if (verbose) {
-						printf(
-						    "  %d: %s\n", i, f.isReady() ? (f.isError() ? f.getError().what() : "done") : "not ready");
+						printf("  %d: %s\n", i, f.isError() ? f.getError().what() : "done");
 					}
-					allReady = allReady && f.isReady();
 				}
-				ASSERT(allReady);
 			}
 
 			// If an error was caused, one should have been detected.

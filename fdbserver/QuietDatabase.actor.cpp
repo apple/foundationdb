@@ -35,7 +35,7 @@
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0) {
+ACTOR Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
 		choose {
 			when(vector<WorkerDetails> w = wait(brokenPromiseToNever(
@@ -48,7 +48,7 @@ ACTOR Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo>>
 }
 
 // Gets the WorkerInterface representing the Master server.
-ACTOR Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("GetMasterWorker").detail("Stage", "GettingWorkers");
 
 	loop {
@@ -75,7 +75,7 @@ ACTOR Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<Se
 }
 
 // Gets the WorkerInterface representing the data distributor.
-ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("GetDataDistributorWorker").detail("Stage", "GettingWorkers");
 
 	loop {
@@ -118,7 +118,7 @@ ACTOR Future<int64_t> getDataInFlight(Database cx, WorkerInterface distributorWo
 }
 
 // Gets the number of bytes in flight from the data distributor.
-ACTOR Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	WorkerInterface distributorInterf = wait(getDataDistributorWorker(cx, dbInfo));
 	int64_t dataInFlight = wait(getDataInFlight(cx, distributorInterf));
 	return dataInFlight;
@@ -144,7 +144,7 @@ int64_t getPoppedVersionLag(const TraceEventFields& md) {
 	return persistentDataDurableVersion - queuePoppedVersion;
 }
 
-ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
 	Optional<Value> coordinators =
@@ -177,7 +177,8 @@ ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<Asy
 }
 
 // This is not robust in the face of a TLog failure
-ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
+                                                           Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ContactingLogs");
 
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
@@ -245,7 +246,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool
 }
 
 ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx,
-                                                        Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                                         bool localOnly) {
 	state std::vector<StorageServerInterface> servers = wait(getStorageServers(cx));
 	state std::map<NetworkAddress, WorkerInterface> workersMap;
@@ -285,8 +286,57 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx,
 	return result;
 }
 
+// Helper function to extract he maximum SQ size of all provided messages. All futures in the
+// messages vector have to be ready.
+int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& messages,
+                            const std::vector<StorageServerInterface>& servers) {
+
+	int64_t maxQueueSize = 0;
+	UID maxQueueServer;
+
+	for (int i = 0; i < messages.size(); i++) {
+		try {
+			auto queueSize = getQueueSize(messages[i].get());
+			if (queueSize > maxQueueSize) {
+				maxQueueSize = queueSize;
+				maxQueueServer = servers[i].id();
+			}
+		} catch (Error& e) {
+			TraceEvent("QuietDatabaseFailure")
+			    .detail("Reason", "Failed to extract MaxStorageServerQueue")
+			    .detail("SS", servers[i].id());
+			for (auto& m : messages) {
+				TraceEvent("Messages").detail("Info", m.get().toString());
+			}
+			throw;
+		}
+	}
+
+	TraceEvent("QuietDatabaseGotMaxStorageServerQueueSize")
+	    .detail("Stage", "MaxComputed")
+	    .detail("Max", maxQueueSize)
+	    .detail("MaxQueueServer", format("%016" PRIx64, maxQueueServer.first()));
+	return maxQueueSize;
+}
+
+// Timeout wrapper when getting the storage metrics. This will do some additional tracing
+ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface wi) {
+	state Future<TraceEventFields> result =
+	    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
+	state Future<Void> timeout = delay(1.0);
+	choose {
+		when(TraceEventFields res = wait(result)) { return res; }
+		when(wait(timeout)) {
+			TraceEvent("QuietDatabaseFailure")
+			    .detail("Reason", "Could not fetch StorageMetrics")
+			    .detail("Storage", format("%016" PRIx64, storage.first()));
+			throw timed_out();
+		}
+	}
+};
+
 // Gets the maximum size of all the storage server queues
-ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("MaxStorageServerQueueSize").detail("Stage", "ContactingStorageServers");
 
 	Future<std::vector<StorageServerInterface>> serversFuture = getStorageServers(cx);
@@ -309,36 +359,14 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncV
 			    .detail("SS", servers[i].id());
 			throw attribute_not_found();
 		}
-		// Ignore TSS in add delay mode since it can purposefully freeze forever
-		if (!servers[i].isTss() || !g_network->isSimulated() ||
-		    g_simulator.tssMode != ISimulator::TSSMode::EnabledAddDelay) {
-			messages.push_back(timeoutError(itr->second.eventLogRequest.getReply(EventLogRequest(
-			                                    StringRef(servers[i].id().toString() + "/StorageMetrics"))),
-			                                1.0));
-		}
+		messages.push_back(getStorageMetricsTimeout(servers[i].id(), itr->second));
 	}
 
 	wait(waitForAll(messages));
 
 	TraceEvent("MaxStorageServerQueueSize").detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
 
-	state int64_t maxQueueSize = 0;
-	state int i = 0;
-	for (; i < messages.size(); i++) {
-		try {
-			maxQueueSize = std::max(maxQueueSize, getQueueSize(messages[i].get()));
-		} catch (Error& e) {
-			TraceEvent("QuietDatabaseFailure")
-			    .detail("Reason", "Failed to extract MaxStorageServerQueue")
-			    .detail("SS", servers[i].id());
-			for (auto& m : messages) {
-				TraceEvent("Messages").detail("Info", m.get().toString());
-			}
-			throw;
-		}
-	}
-
-	return maxQueueSize;
+	return extractMaxQueueSize(messages, servers);
 }
 
 // Gets the size of the data distribution queue.  If reportInFlight is true, then data in flight is considered part of
@@ -372,7 +400,7 @@ ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
 // Gets the size of the data distribution queue.  If reportInFlight is true, then data in flight is considered part of
 // the queue Convenience method that first finds the master worker from a zookeeper interface
 ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
-                                                   Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                                    bool reportInFlight) {
 	WorkerInterface distributorInterf = wait(getDataDistributorWorker(cx, dbInfo));
 	int64_t inQueue = wait(getDataDistributionQueueSize(cx, distributorInterf, reportInFlight));
@@ -489,7 +517,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 // Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
 // Convenience method that first finds the master worker from a zookeeper interface
-ACTOR Future<bool> getTeamCollectionValid(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<bool> getTeamCollectionValid(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	WorkerInterface dataDistributorWorker = wait(getDataDistributorWorker(cx, dbInfo));
 	bool valid = wait(getTeamCollectionValid(cx, dataDistributorWorker));
 	return valid;
@@ -538,7 +566,9 @@ ACTOR Future<bool> getStorageServersRecruiting(Database cx, WorkerInterface dist
 	}
 }
 
-ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string context) {
+ACTOR Future<Void> repairDeadDatacenter(Database cx,
+                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                        std::string context) {
 	if (g_network->isSimulated() && g_simulator.usableRegions > 1) {
 		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
 		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
@@ -546,7 +576,7 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
 		if (primaryDead && remoteDead) {
-			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration");
+			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration").log();
 			return Void();
 		}
 		if (primaryDead || remoteDead) {
@@ -574,15 +604,17 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 
 ACTOR Future<Void> reconfigureAfter(Database cx,
                                     double time,
-                                    Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                    Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                     std::string context) {
 	wait(delay(time));
 	wait(repairDeadDatacenter(cx, dbInfo, context));
 	return Void();
 }
 
+// Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
+// requires the database to be available and healthy in order to succeed.
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
-                                        Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string phase,
                                         int64_t dataInFlightGate = 2e6,
                                         int64_t maxTLogQueueGate = 5e6,
@@ -591,6 +623,13 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxPoppedVersionLag = 30e6) {
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
+	state Future<int64_t> dataInFlight;
+	state Future<std::pair<int64_t, int64_t>> tLogQueueInfo;
+	state Future<int64_t> dataDistributionQueueSize;
+	state Future<bool> teamCollectionValid;
+	state Future<int64_t> storageQueueSize;
+	state Future<bool> dataDistributionActive;
+	state Future<bool> storageServersRecruiting;
 
 	auto traceMessage = "QuietDatabase" + phase + "Begin";
 	TraceEvent(traceMessage.c_str());
@@ -598,31 +637,30 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if (g_network->isSimulated())
 		wait(delay(5.0));
-
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
-	wait(setPerpetualStorageWiggle(cx, false, true));
+	printf("Set perpetual_storage_wiggle=0 ...\n");
+	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
+	printf("Set perpetual_storage_wiggle=0 Done.\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
 
 	loop {
 		try {
-			TraceEvent("QuietDatabaseWaitingOnDataDistributor");
+			TraceEvent("QuietDatabaseWaitingOnDataDistributor").log();
 			WorkerInterface distributorWorker = wait(getDataDistributorWorker(cx, dbInfo));
 			UID distributorUID = dbInfo->get().distributor.get().id();
 			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID)
 			    .detail("Locality", distributorWorker.locality.toString());
 
-			state Future<int64_t> dataInFlight = getDataInFlight(cx, distributorWorker);
-			state Future<std::pair<int64_t, int64_t>> tLogQueueInfo = getTLogQueueInfo(cx, dbInfo);
-			state Future<int64_t> dataDistributionQueueSize =
-			    getDataDistributionQueueSize(cx, distributorWorker, dataInFlightGate == 0);
-			state Future<bool> teamCollectionValid = getTeamCollectionValid(cx, distributorWorker);
-			state Future<int64_t> storageQueueSize = getMaxStorageServerQueueSize(cx, dbInfo);
-			state Future<bool> dataDistributionActive = getDataDistributionActive(cx, distributorWorker);
-			state Future<bool> storageServersRecruiting =
-			    getStorageServersRecruiting(cx, distributorWorker, distributorUID);
+			dataInFlight = getDataInFlight(cx, distributorWorker);
+			tLogQueueInfo = getTLogQueueInfo(cx, dbInfo);
+			dataDistributionQueueSize = getDataDistributionQueueSize(cx, distributorWorker, dataInFlightGate == 0);
+			teamCollectionValid = getTeamCollectionValid(cx, distributorWorker);
+			storageQueueSize = getMaxStorageServerQueueSize(cx, dbInfo);
+			dataDistributionActive = getDataDistributionActive(cx, distributorWorker);
+			storageServersRecruiting = getStorageServersRecruiting(cx, distributorWorker, distributorUID);
 
 			wait(success(dataInFlight) && success(tLogQueueInfo) && success(dataDistributionQueueSize) &&
 			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
@@ -662,6 +700,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 				}
 			}
 		} catch (Error& e) {
+			TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e, true);
 			if (e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found &&
 			    e.code() != error_code_timed_out)
 				TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e);
@@ -671,7 +710,38 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			if (e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
 				throw;
 
-			TraceEvent(("QuietDatabase" + phase + "Retry").c_str()).error(e);
+			auto evtType = "QuietDatabase" + phase + "Retry";
+			TraceEvent evt(evtType.c_str());
+			evt.error(e);
+			int notReadyCount = 0;
+			if (dataInFlight.isReady() && dataInFlight.isError()) {
+				auto key = "NotReady" + std::to_string(notReadyCount++);
+				evt.detail(key.c_str(), "dataInFlight");
+			}
+			if (tLogQueueInfo.isReady() && tLogQueueInfo.isError()) {
+				auto key = "NotReady" + std::to_string(notReadyCount++);
+				evt.detail(key.c_str(), "tLogQueueInfo");
+			}
+			if (dataDistributionQueueSize.isReady() && dataDistributionQueueSize.isError()) {
+				auto key = "NotReady" + std::to_string(notReadyCount++);
+				evt.detail(key.c_str(), "dataDistributionQueueSize");
+			}
+			if (teamCollectionValid.isReady() && teamCollectionValid.isError()) {
+				auto key = "NotReady" + std::to_string(notReadyCount++);
+				evt.detail(key.c_str(), "teamCollectionValid");
+			}
+			if (storageQueueSize.isReady() && storageQueueSize.isError()) {
+				auto key = "NotReady" + std::to_string(notReadyCount++);
+				evt.detail(key.c_str(), "storageQueueSize");
+			}
+			if (dataDistributionActive.isReady() && dataDistributionActive.isError()) {
+				auto key = "NotReady" + std::to_string(notReadyCount++);
+				evt.detail(key.c_str(), "dataDistributionActive");
+			}
+			if (storageServersRecruiting.isReady() && storageServersRecruiting.isError()) {
+				auto key = "NotReady" + std::to_string(notReadyCount++);
+				evt.detail(key.c_str(), "storageServersRecruiting");
+			}
 			wait(delay(1.0));
 			numSuccesses = 0;
 		}
@@ -681,7 +751,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 }
 
 Future<Void> quietDatabase(Database const& cx,
-                           Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
+                           Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                            std::string phase,
                            int64_t dataInFlightGate,
                            int64_t maxTLogQueueGate,

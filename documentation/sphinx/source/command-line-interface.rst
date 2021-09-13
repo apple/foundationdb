@@ -112,7 +112,7 @@ For recommendations on appropriate values for process types in large clusters, s
 perpetual storage wiggle
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Set the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle.
+Set the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle. For more details, see :ref:`perpetual-storage-wiggle`.
 
 consistencycheck
 ----------------
@@ -139,9 +139,9 @@ For more information on setting the cluster description, see :ref:`configuration
 exclude
 -------
 
-The ``exclude`` command excludes servers from the database or marks them as failed. Its syntax is ``exclude [failed] <ADDRESS...>``. If no addresses are specified, the command provides the set of excluded and failed servers.
+The ``exclude`` command excludes servers from the database or marks them as failed. Its syntax is ``exclude [failed] [<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality``. If no addresses are specified, the command provides the set of excluded and failed servers and localities.
 
-For each IP address or IP:port pair in ``<ADDRESS...>``, the command adds the address to the set of excluded servers. It then waits until all database state has been safely moved off the specified servers.
+For each IP address or IP:port pair in ``<ADDRESS...>`` or locality (which include anything set on LocalityData like dcid, zoneid, machineid, processid), the command adds the address/locality to the set of excluded servers and localities. It then waits until all database state has been safely moved off the specified servers.
 
 If the ``failed`` keyword is specified, the address is marked as failed and added to the set of failed servers. It will not wait for the database state to move off the specified servers.
 
@@ -246,15 +246,15 @@ The following options are available for use with the ``option`` command:
 include
 -------
 
-The ``include`` command permits previously excluded or failed servers to rejoin the database. Its syntax is ``include [failed] all|<ADDRESS...>``.
+The ``include`` command permits previously excluded or failed servers/localities to rejoin the database. Its syntax is ``include [failed] all|[<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality``.
 
 The ``failed`` keyword is required if the servers were previously marked as failed rather than excluded.
 
-If ``all`` is specified, the excluded servers list is cleared. This will not clear the failed servers list.
+If ``all`` is specified, the excluded servers and localities list is cleared. This will not clear the failed servers and localities list.
 
-If ``failed all`` or ``all failed`` is specified, the failed servers list is cleared. This will not clear the excluded servers list.
+If ``failed all`` or ``all failed`` is specified, the failed servers and localities list is cleared. This will not clear the excluded servers and localities list.
 
-For each IP address or IP:port pair in ``<ADDRESS...>``, the command removes any matching exclusions from the excluded servers list. (A specified IP will match all ``IP:*`` exclusion entries).
+For each IP address or IP:port pair in ``<ADDRESS...>`` or locality, the command removes any matching exclusions from the excluded servers/localities list. (A specified IP will match all ``IP:*`` exclusion entries).
 
 For information on adding machines to a cluster, see :ref:`adding-machines-to-a-cluster`.
 

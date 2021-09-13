@@ -244,8 +244,8 @@ public:
 			TraceEvent("AsyncFileCachedDel")
 			    .detail("Filename", filename)
 			    .detail("Refcount", debugGetReferenceCount())
-			    .detail("CanDie", f.isReady())
-			    .backtrace();
+			    .detail("CanDie", f.isReady());
+			// .backtrace();
 			if (f.isReady())
 				delete this;
 			else
@@ -298,7 +298,7 @@ private:
 	                const std::string& filename,
 	                int64_t length,
 	                Reference<EvictablePageCache> pageCache)
-	  : uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache),
+	  : filename(filename), uncached(uncached), length(length), prevLength(length), pageCache(pageCache),
 	    currentTruncate(Void()), currentTruncateSize(0), rateControl(nullptr) {
 		if (!g_network->isSimulated()) {
 			countFileCacheWrites.init(LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
@@ -610,8 +610,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	AFCPage(AsyncFileCached* owner, int64_t offset)
-	  : EvictablePage(owner->pageCache), owner(owner), pageOffset(offset), dirty(false), valid(false), truncated(false),
-	    notReading(Void()), notFlushing(Void()), zeroCopyRefCount(0), flushableIndex(-1), writeThroughCount(0) {
+	  : EvictablePage(owner->pageCache), owner(owner), pageOffset(offset), notReading(Void()), notFlushing(Void()),
+	    dirty(false), valid(false), truncated(false), writeThroughCount(0), flushableIndex(-1), zeroCopyRefCount(0) {
 		pageCache->allocate(this);
 	}
 

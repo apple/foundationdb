@@ -41,8 +41,8 @@ struct StorefrontWorkload : TestWorkload {
 	PerfDoubleCounter totalLatency;
 
 	StorefrontWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Total Latency"),
-	    spuriousCommitFailures("Spurious Commit Failures") {
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"),
+	    spuriousCommitFailures("Spurious Commit Failures"), totalLatency("Total Latency") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 1000.0);
 		actorCount =
@@ -82,7 +82,7 @@ struct StorefrontWorkload : TestWorkload {
 	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
-		m.push_back(PerfMetric("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true));
+		m.emplace_back("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), Averaged::True);
 	}
 
 	/*static inline orderID valueToOrderID( const StringRef& v ) {

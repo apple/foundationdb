@@ -142,7 +142,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		TraceEvent("ConsistencyCheck");
+		TraceEvent("ConsistencyCheck").log();
 		return _start(cx, this);
 	}
 
@@ -186,10 +186,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload* self) {
 		loop {
 			while (self->suspendConsistencyCheck.get()) {
-				TraceEvent("ConsistencyCheck_Suspended");
+				TraceEvent("ConsistencyCheck_Suspended").log();
 				wait(self->suspendConsistencyCheck.onChange());
 			}
-			TraceEvent("ConsistencyCheck_StartingOrResuming");
+			TraceEvent("ConsistencyCheck_StartingOrResuming").log();
 			choose {
 				when(wait(self->runCheck(cx, self))) {
 					if (!self->indefinite)
@@ -222,7 +222,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						}
 						RangeResult res = wait(tr.getRange(configKeys, 1000));
 						if (res.size() == 1000) {
-							TraceEvent("ConsistencyCheck_TooManyConfigOptions");
+							TraceEvent("ConsistencyCheck_TooManyConfigOptions").log();
 							self->testFailure("Read too many configuration options");
 						}
 						for (int i = 0; i < res.size(); i++)
@@ -251,7 +251,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					// the allowed maximum number of teams
 					bool teamCollectionValid = wait(getTeamCollectionValid(cx, self->dbInfo));
 					if (!teamCollectionValid) {
-						TraceEvent(SevError, "ConsistencyCheck_TooManyTeams");
+						TraceEvent(SevError, "ConsistencyCheck_TooManyTeams").log();
 						self->testFailure("The number of process or machine teams is larger than the allowed maximum "
 						                  "number of teams");
 					}
@@ -663,16 +663,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									    .detail(format("StorageServer%d", j).c_str(), iter_ss[j].toString())
 									    .detail(format("StorageServer%d", firstValidServer).c_str(),
 									            iter_ss[firstValidServer].toString())
-									    .detail("ShardBegin", printable(req.begin.getKey()))
-									    .detail("ShardEnd", printable(req.end.getKey()))
+									    .detail("ShardBegin", req.begin.getKey())
+									    .detail("ShardEnd", req.end.getKey())
 									    .detail("VersionNumber", req.version)
 									    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-									    .detail(format("Server%dUniqueKey", j).c_str(), printable(currentUniqueKey))
+									    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
 									    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
 									    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
-									            printable(referenceUniqueKey))
+									            referenceUniqueKey)
 									    .detail("ValueMismatches", valueMismatches)
-									    .detail("ValueMismatchKey", printable(valueMismatchKey))
+									    .detail("ValueMismatchKey", valueMismatchKey)
 									    .detail("MatchingKVPairs", matchingKVPairs);
 
 									self->testFailure("Data inconsistent", true);
@@ -718,7 +718,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (bytesReadInRange > 0) {
 				TraceEvent("CacheConsistencyCheck_ReadRange")
 				    .suppressFor(1.0)
-				    .detail("Range", printable(iter->range()))
+				    .detail("Range", iter->range())
 				    .detail("BytesRead", bytesReadInRange);
 			}
 		}
@@ -1083,8 +1083,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						TraceEvent("ConsistencyCheck_InconsistentStorageMetrics")
 						    .detail("ByteEstimate1", estimatedBytes[firstValidStorageServer])
 						    .detail("ByteEstimate2", numBytes)
-						    .detail("Begin", printable(shard.begin))
-						    .detail("End", printable(shard.end))
+						    .detail("Begin", shard.begin)
+						    .detail("End", shard.end)
 						    .detail("StorageServer1", storageServers[firstValidStorageServer].id())
 						    .detail("StorageServer2", storageServers[i].id())
 						    .detail("IsTSS",
@@ -1451,17 +1451,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
 										    .detail(format("StorageServer%d", firstValidServer).c_str(),
 										            storageServers[firstValidServer].toString())
-										    .detail("ShardBegin", printable(req.begin.getKey()))
-										    .detail("ShardEnd", printable(req.end.getKey()))
+										    .detail("ShardBegin", req.begin.getKey())
+										    .detail("ShardEnd", req.end.getKey())
 										    .detail("VersionNumber", req.version)
 										    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-										    .detail(format("Server%dUniqueKey", j).c_str(), printable(currentUniqueKey))
+										    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
 										    .detail(format("Server%dUniques", firstValidServer).c_str(),
 										            referenceUniques)
 										    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
-										            printable(referenceUniqueKey))
+										            referenceUniqueKey)
 										    .detail("ValueMismatches", valueMismatches)
-										    .detail("ValueMismatchKey", printable(valueMismatchKey))
+										    .detail("ValueMismatchKey", valueMismatchKey)
 										    .detail("MatchingKVPairs", matchingKVPairs)
 										    .detail("IsTSS",
 										            storageServerInterfaces[j].isTss() ||
@@ -1498,10 +1498,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .error(e);
 
 								// All shards should be available in quiscence
-								if (self->performQuiescentChecks &&
-								    ((g_network->isSimulated() &&
-								      g_simulator.tssMode != ISimulator::TSSMode::EnabledAddDelay) ||
-								     !storageServerInterfaces[j].isTss())) {
+								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
 									self->testFailure("Storage server unavailable");
 									return false;
 								}
@@ -1676,7 +1673,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (bytesReadInRange > 0) {
 				TraceEvent("ConsistencyCheck_ReadRange")
 				    .suppressFor(1.0)
-				    .detail("Range", printable(range))
+				    .detail("Range", range)
 				    .detail("BytesRead", bytesReadInRange);
 			}
 		}
@@ -1777,6 +1774,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				if (!found) {
 					TraceEvent("ConsistencyCheck_NoStorage")
 					    .detail("Address", addr)
+					    .detail("ProcessId", workers[i].interf.locality.processId())
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
 					missingStorage.push_back(workers[i].interf.locality.dcId());
@@ -1819,7 +1817,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				self->testFailure("No storage server on worker");
 				return false;
 			} else {
-				TraceEvent(SevWarn, "ConsistencyCheck_TSSMissing");
+				TraceEvent(SevWarn, "ConsistencyCheck_TSSMissing").log();
 			}
 		}
 
@@ -1994,7 +1992,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
 
 				if (!currentKey.present()) {
-					TraceEvent("ConsistencyCheck_NoCoordinatorKey");
+					TraceEvent("ConsistencyCheck_NoCoordinatorKey").log();
 					return false;
 				}
 

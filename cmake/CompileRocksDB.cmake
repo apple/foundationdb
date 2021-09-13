@@ -22,6 +22,9 @@ if (RocksDB_FOUND)
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DWITH_TSAN=${USE_TSAN}
+               -DWITH_ASAN=${USE_ASAN}
+               -DWITH_UBSAN=${USE_UBSAN}
                -DROCKSDB_BUILD_SHARED=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a
@@ -33,8 +36,8 @@ if (RocksDB_FOUND)
       ${BINARY_DIR}/librocksdb.a)
 else()
   ExternalProject_Add(rocksdb
-    URL        https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz
-    URL_HASH   SHA256=d573d2f15cdda883714f7e0bc87b814a8d4a53a82edde558f08f940e905541ee
+    URL        https://github.com/facebook/rocksdb/archive/v6.22.1.tar.gz
+    URL_HASH   SHA256=2df8f34a44eda182e22cf84dee7a14f17f55d305ff79c06fb3cd1e5f8831e00d
     CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
@@ -49,6 +52,9 @@ else()
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DWITH_TSAN=${USE_TSAN}
+               -DWITH_ASAN=${USE_ASAN}
+               -DWITH_UBSAN=${USE_UBSAN}
                -DROCKSDB_BUILD_SHARED=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a

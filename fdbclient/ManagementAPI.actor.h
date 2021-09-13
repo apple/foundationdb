@@ -163,9 +163,20 @@ Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQu
 ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
 void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool failed = false);
 
+// Exclude the servers matching the given set of localities from use as state servers.  Returns as soon as the change
+// is durable, without necessarily waiting for the servers to be evacuated.
+ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed = false);
+void excludeLocalities(Transaction& tr, std::unordered_set<std::string> localities, bool failed = false);
+
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given
 // IP.  A NetworkAddress() means all servers (don't exclude anything)
 ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
+
+// Remove the given localities from the exclusion list.
+ACTOR Future<Void> includeLocalities(Database cx,
+                                     vector<std::string> localities,
+                                     bool failed = false,
+                                     bool includeAll = false);
 
 // Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on
 // the given IP.
@@ -174,6 +185,12 @@ ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass p
 // Get the current list of excluded servers
 ACTOR Future<vector<AddressExclusion>> getExcludedServers(Database cx);
 ACTOR Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr);
+
+// Get the current list of excluded localities
+ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx);
+ACTOR Future<vector<std::string>> getExcludedLocalities(Transaction* tr);
+
+std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers, const std::string& locality);
 
 // Check for the given, previously excluded servers to be evacuated (no longer used for state).  If waitForExclusion is
 // true, this actor returns once it is safe to shut down all such machines without impacting fault tolerance, until and
@@ -231,8 +248,81 @@ bool schemaMatch(json_spirit::mValue const& schema,
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
-Future<Void> addCachedRange(const Database& cx, KeyRangeRef range);
-Future<Void> removeCachedRange(const Database& cx, KeyRangeRef range);
+// Management API written in template code to support both IClientAPI and NativeAPI
+namespace ManagementAPI {
+
+ACTOR template <class DB>
+Future<Void> changeCachedRange(Reference<DB> db, KeyRangeRef range, bool add) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state KeyRange sysRange = KeyRangeRef(storageCacheKey(range.begin), storageCacheKey(range.end));
+	state KeyRange sysRangeClear = KeyRangeRef(storageCacheKey(range.begin), keyAfter(storageCacheKey(range.end)));
+	state KeyRange privateRange = KeyRangeRef(cacheKeysKey(0, range.begin), cacheKeysKey(0, range.end));
+	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
+	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
+	loop {
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		try {
+			tr->clear(sysRangeClear);
+			tr->clear(privateRange);
+			tr->addReadConflictRange(privateRange);
+			// hold the returned standalone object's memory
+			state typename DB::TransactionT::template FutureT<RangeResult> previousFuture =
+			    tr->getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, Snapshot::False, Reverse::True);
+			RangeResult previous = wait(safeThreadFutureToFuture(previousFuture));
+			bool prevIsCached = false;
+			if (!previous.empty()) {
+				std::vector<uint16_t> prevVal;
+				decodeStorageCacheValue(previous[0].value, prevVal);
+				prevIsCached = !prevVal.empty();
+			}
+			if (prevIsCached && !add) {
+				// we need to uncache from here
+				tr->set(sysRange.begin, falseValue);
+				tr->set(privateRange.begin, serverKeysFalse);
+			} else if (!prevIsCached && add) {
+				// we need to cache, starting from here
+				tr->set(sysRange.begin, trueValue);
+				tr->set(privateRange.begin, serverKeysTrue);
+			}
+			// hold the returned standalone object's memory
+			state typename DB::TransactionT::template FutureT<RangeResult> afterFuture =
+			    tr->getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, Snapshot::False, Reverse::False);
+			RangeResult after = wait(safeThreadFutureToFuture(afterFuture));
+			bool afterIsCached = false;
+			if (!after.empty()) {
+				std::vector<uint16_t> afterVal;
+				decodeStorageCacheValue(after[0].value, afterVal);
+				afterIsCached = afterVal.empty();
+			}
+			if (afterIsCached && !add) {
+				tr->set(sysRange.end, trueValue);
+				tr->set(privateRange.end, serverKeysTrue);
+			} else if (!afterIsCached && add) {
+				tr->set(sysRange.end, falseValue);
+				tr->set(privateRange.end, serverKeysFalse);
+			}
+			wait(safeThreadFutureToFuture(tr->commit()));
+			return Void();
+		} catch (Error& e) {
+			state Error err = e;
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+			TraceEvent(SevDebug, "ChangeCachedRangeError").error(err);
+		}
+	}
+}
+
+template <class DB>
+Future<Void> addCachedRange(Reference<DB> db, KeyRangeRef range) {
+	return changeCachedRange(db, range, true);
+}
+
+template <class DB>
+Future<Void> removeCachedRange(Reference<DB> db, KeyRangeRef range) {
+	return changeCachedRange(db, range, false);
+}
+
+} // namespace ManagementAPI
 
 #include "flow/unactorcompiler.h"
 #endif

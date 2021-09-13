@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -50,8 +51,10 @@ struct LowLatencyWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {
-			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("min_delay_cc_worst_fit_candidacy_seconds", "5"));
-			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("max_delay_cc_worst_fit_candidacy_seconds", "10"));
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("min_delay_cc_worst_fit_candidacy_seconds",
+			                                                          KnobValueRef::create(double{ 5.0 }));
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("max_delay_cc_worst_fit_candidacy_seconds",
+			                                                          KnobValueRef::create(double{ 10.0 }));
 		}
 		return Void();
 	}
@@ -74,7 +77,7 @@ struct LowLatencyWorkload : TestWorkload {
 				++self->operations;
 				loop {
 					try {
-						TraceEvent("StartLowLatencyTransaction");
+						TraceEvent("StartLowLatencyTransaction").log();
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						if (doCommit) {
@@ -111,7 +114,7 @@ struct LowLatencyWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
-		m.push_back(PerfMetric("Operations/sec", operations.getValue() / duration, false));
+		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());
 		m.push_back(retries.getMetric());
 	}

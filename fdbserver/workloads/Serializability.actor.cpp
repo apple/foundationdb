@@ -40,18 +40,18 @@ struct SerializabilityWorkload : TestWorkload {
 		KeySelector begin;
 		KeySelector end;
 		int limit;
-		bool snapshot;
-		bool reverse;
+		Snapshot snapshot{ Snapshot::False };
+		Reverse reverse{ Reverse::False };
 	};
 
 	struct GetKeyOperation {
 		KeySelector key;
-		bool snapshot;
+		Snapshot snapshot{ Snapshot::False };
 	};
 
 	struct GetOperation {
 		Key key;
-		bool snapshot;
+		Snapshot snapshot{ Snapshot::False };
 	};
 
 	struct TransactionOperation {
@@ -138,20 +138,20 @@ struct SerializabilityWorkload : TestWorkload {
 			if (operationType == 0) {
 				GetKeyOperation getKey;
 				getKey.key = getRandomKeySelector();
-				getKey.snapshot = deterministicRandom()->random01() < 0.5;
+				getKey.snapshot.set(deterministicRandom()->coinflip());
 				op.getKeyOp = getKey;
 			} else if (operationType == 1) {
 				GetRangeOperation getRange;
 				getRange.begin = getRandomKeySelector();
 				getRange.end = getRandomKeySelector();
 				getRange.limit = deterministicRandom()->randomInt(0, 1 << deterministicRandom()->randomInt(1, 10));
-				getRange.reverse = deterministicRandom()->random01() < 0.5;
-				getRange.snapshot = deterministicRandom()->random01() < 0.5;
+				getRange.reverse.set(deterministicRandom()->coinflip());
+				getRange.snapshot.set(deterministicRandom()->coinflip());
 				op.getRangeOp = getRange;
 			} else if (operationType == 2) {
 				GetOperation getOp;
 				getOp.key = getRandomKey();
-				getOp.snapshot = deterministicRandom()->random01() < 0.5;
+				getOp.snapshot.set(deterministicRandom()->coinflip());
 				op.getOp = getOp;
 			} else if (operationType == 3) {
 				KeyRange range = getRandomRange(maxClearSize);
@@ -258,13 +258,13 @@ struct SerializabilityWorkload : TestWorkload {
 			} else if (ops[opNum].mutationOp.present()) {
 				auto& op = ops[opNum].mutationOp.get();
 				if (op.type == MutationRef::SetValue) {
-					//TraceEvent("SRL_Set").detail("Mutation", op.toString());
+					//TraceEvent("SRL_Set").detail("Mutation", op);
 					tr->set(op.param1, op.param2);
 				} else if (op.type == MutationRef::ClearRange) {
-					//TraceEvent("SRL_Clear").detail("Mutation", op.toString());
+					//TraceEvent("SRL_Clear").detail("Mutation", op);
 					tr->clear(KeyRangeRef(op.param1, op.param2));
 				} else {
-					//TraceEvent("SRL_AtomicOp").detail("Mutation", op.toString());
+					//TraceEvent("SRL_AtomicOp").detail("Mutation", op);
 					tr->atomicOp(op.param1, op.param2, op.type);
 				}
 			} else if (ops[opNum].readConflictOp.present()) {

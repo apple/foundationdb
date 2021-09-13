@@ -75,7 +75,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override {
 		if (healthMetricsStoppedUpdating) {
-			TraceEvent(SevError, "HealthMetricsStoppedUpdating");
+			TraceEvent(SevError, "HealthMetricsStoppedUpdating").log();
 			return false;
 		}
 		bool correctHealthMetricsState = true;
@@ -108,14 +108,14 @@ struct HealthMetricsApiWorkload : TestWorkload {
 	}
 
 	void getMetrics(vector<PerfMetric>& m) override {
-		m.push_back(PerfMetric("WorstStorageQueue", worstStorageQueue, true));
-		m.push_back(PerfMetric("DetailedWorstStorageQueue", detailedWorstStorageQueue, true));
-		m.push_back(PerfMetric("WorstStorageDurabilityLag", worstStorageDurabilityLag, true));
-		m.push_back(PerfMetric("DetailedWorstStorageDurabilityLag", detailedWorstStorageDurabilityLag, true));
-		m.push_back(PerfMetric("WorstTLogQueue", worstTLogQueue, true));
-		m.push_back(PerfMetric("DetailedWorstTLogQueue", detailedWorstTLogQueue, true));
-		m.push_back(PerfMetric("DetailedWorstCpuUsage", detailedWorstCpuUsage, true));
-		m.push_back(PerfMetric("DetailedWorstDiskUsage", detailedWorstDiskUsage, true));
+		m.emplace_back("WorstStorageQueue", worstStorageQueue, Averaged::True);
+		m.emplace_back("DetailedWorstStorageQueue", detailedWorstStorageQueue, Averaged::True);
+		m.emplace_back("WorstStorageDurabilityLag", worstStorageDurabilityLag, Averaged::True);
+		m.emplace_back("DetailedWorstStorageDurabilityLag", detailedWorstStorageDurabilityLag, Averaged::True);
+		m.emplace_back("WorstTLogQueue", worstTLogQueue, Averaged::True);
+		m.emplace_back("DetailedWorstTLogQueue", detailedWorstTLogQueue, Averaged::True);
+		m.emplace_back("DetailedWorstCpuUsage", detailedWorstCpuUsage, Averaged::True);
+		m.emplace_back("DetailedWorstDiskUsage", detailedWorstDiskUsage, Averaged::True);
 	}
 
 	ACTOR static Future<Void> healthMetricsChecker(Database cx, HealthMetricsApiWorkload* self) {
@@ -168,6 +168,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 				traceDiskUsage.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.diskUsage);
 			}
 			TraceEvent traceTLogQueue("TLogQueue");
+			traceTLogQueue.setMaxEventLength(10000);
 			for (const auto& ss : healthMetrics.tLogQueue) {
 				self->detailedWorstTLogQueue = std::max(self->detailedWorstTLogQueue, ss.second);
 				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);

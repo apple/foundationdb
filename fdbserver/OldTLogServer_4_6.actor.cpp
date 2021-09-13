@@ -90,7 +90,7 @@ struct TLogQueueEntryRef {
 
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
-	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id),
+	  : id(from.id), version(from.version), knownCommittedVersion(from.knownCommittedVersion),
 	    messages(a, from.messages), tags(a, from.tags) {}
 
 	template <class Ar>
@@ -108,7 +108,7 @@ struct TLogQueueEntryRef {
 
 typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
 
-struct TLogQueue : public IClosable {
+struct TLogQueue final : public IClosable {
 public:
 	TLogQueue(IDiskQueue* queue, UID dbgid) : queue(queue), dbgid(dbgid) {}
 
@@ -291,7 +291,7 @@ struct TLogData : NonCopyable {
 	AsyncVar<bool>
 	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
 
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 
 	NotifiedVersion queueCommitEnd;
 	Version queueCommitBegin;
@@ -300,6 +300,7 @@ struct TLogData : NonCopyable {
 	int64_t instanceID;
 	int64_t bytesInput;
 	int64_t bytesDurable;
+	int activePeekStreams = 0;
 
 	Version prevVersion;
 
@@ -321,11 +322,11 @@ struct TLogData : NonCopyable {
 	         UID workerID,
 	         IKeyValueStore* persistentData,
 	         IDiskQueue* persistentQueue,
-	         Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
-	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
-	    persistentData(persistentData), rawPersistentQueue(persistentQueue),
-	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0),
-	    prevVersion(0), diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0),
+	         Reference<AsyncVar<ServerDBInfo> const> const& dbInfo)
+	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
+	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), diskQueueCommitBytes(0),
+	    largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0), queueCommitBegin(0),
+	    instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0), bytesDurable(0), prevVersion(0),
 	    updatePersist(Void()), terminated(false) {}
 };
 
@@ -339,7 +340,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		bool update_version_sizes;
 
 		TagData(Version popped, bool nothing_persistent, bool popped_recently, OldTag tag)
-		  : nothing_persistent(nothing_persistent), popped(popped), popped_recently(popped_recently),
+		  : nothing_persistent(nothing_persistent), popped_recently(popped_recently), popped(popped),
 		    update_version_sizes(tag != txsTagOld) {}
 
 		TagData(TagData&& r) noexcept
@@ -440,11 +441,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Future<Void> recovery;
 
 	explicit LogData(TLogData* tLogData, TLogInterface interf)
-	  : tLogData(tLogData), knownCommittedVersion(0), tli(interf), logId(interf.id()),
+	  : stopped(false), initialized(false), recoveryCount(), queueCommittingVersion(0), knownCommittedVersion(0),
 	    cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc),
-	    // These are initialized differently on init() or recovery
-	    recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0),
-	    newPersistentDataVersion(invalidVersion), recovery(Void()) {
+	    logId(interf.id()), newPersistentDataVersion(invalidVersion), tli(interf), tLogData(tLogData),
+	    recovery(Void()) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -478,6 +478,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		});
 		specialCounter(
 		    cc, "QueueDiskBytesTotal", [tLogData]() { return tLogData->rawPersistentQueue->getStorageBytes().total; });
+		specialCounter(cc, "ActivePeekStreams", [tLogData]() { return tLogData->activePeekStreams; });
 	}
 
 	~LogData() {
@@ -594,7 +595,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 				msg = std::upper_bound(tag->value.version_messages.begin(),
 				                       tag->value.version_messages.end(),
 				                       std::make_pair(currentVersion, LengthPrefixedStringRef()),
-				                       CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+				                       [](const auto& l, const auto& r) { return l.first < r.first; });
 			}
 		}
 
@@ -747,7 +748,7 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 				auto it = std::lower_bound(tag->value.version_messages.begin(),
 				                           tag->value.version_messages.end(),
 				                           std::make_pair(prevVersion, LengthPrefixedStringRef()),
-				                           CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+				                           [](const auto& l, const auto& r) { return l.first < r.first; });
 				for (; it != tag->value.version_messages.end() && it->first < nextVersion; ++it) {
 					totalSize += it->second.expectedSize();
 				}
@@ -932,18 +933,19 @@ ACTOR Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData
 }
 
 void peekMessagesFromMemory(Reference<LogData> self,
-                            TLogPeekRequest const& req,
+                            Tag tag,
+                            Version reqBegin,
                             BinaryWriter& messages,
                             Version& endVersion) {
-	OldTag oldTag = convertTag(req.tag);
+	OldTag oldTag = convertTag(tag);
 	ASSERT(!messages.getLength());
 
 	auto& deque = get_version_messages(self, oldTag);
-	Version begin = std::max(req.begin, self->persistentDataDurableVersion + 1);
+	Version begin = std::max(reqBegin, self->persistentDataDurableVersion + 1);
 	auto it = std::lower_bound(deque.begin(),
 	                           deque.end(),
 	                           std::make_pair(begin, LengthPrefixedStringRef()),
-	                           CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+	                           [](const auto& l, const auto& r) { return l.first < r.first; });
 
 	Version currentVersion = -1;
 	for (; it != deque.end(); ++it) {
@@ -964,24 +966,33 @@ void peekMessagesFromMemory(Reference<LogData> self,
 			uint32_t subVersion;
 			rd >> messageLength >> subVersion;
 			messageLength += sizeof(uint16_t) + sizeof(Tag);
-			messages << messageLength << subVersion << uint16_t(1) << req.tag;
+			messages << messageLength << subVersion << uint16_t(1) << tag;
 			messageLength -= (sizeof(subVersion) + sizeof(uint16_t) + sizeof(Tag));
 			messages.serializeBytes(rd.readBytes(messageLength), messageLength);
 		}
 	}
 }
 
-ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Reference<LogData> logData) {
+// Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
+ACTOR template <typename PromiseType>
+Future<Void> tLogPeekMessages(PromiseType replyPromise,
+                              TLogData* self,
+                              Reference<LogData> logData,
+                              Version reqBegin,
+                              Tag reqTag,
+                              bool reqReturnIfBlocked = false,
+                              bool reqOnlySpilled = false,
+                              Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>()) {
 	state BinaryWriter messages(Unversioned());
 	state BinaryWriter messages2(Unversioned());
 	state int sequence = -1;
 	state UID peekId;
-	state OldTag oldTag = convertTag(req.tag);
+	state OldTag oldTag = convertTag(reqTag);
 
-	if (req.sequence.present()) {
+	if (reqSequence.present()) {
 		try {
-			peekId = req.sequence.get().first;
-			sequence = req.sequence.get().second;
+			peekId = reqSequence.get().first;
+			sequence = reqSequence.get().second;
 			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
 			    self->peekTracker.find(peekId) == self->peekTracker.end()) {
 				throw operation_obsolete();
@@ -990,12 +1001,12 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 				auto& trackerData = self->peekTracker[peekId];
 				trackerData.lastUpdate = now();
 				Version ver = wait(trackerData.sequence_version[sequence].getFuture());
-				req.begin = std::max(ver, req.begin);
+				reqBegin = std::max(ver, reqBegin);
 				wait(yield());
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
-				req.reply.sendError(e);
+				replyPromise.sendError(e);
 				return Void();
 			} else {
 				throw;
@@ -1003,22 +1014,22 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		}
 	}
 
-	if (req.returnIfBlocked && logData->version.get() < req.begin) {
-		req.reply.sendError(end_of_stream());
+	if (reqReturnIfBlocked && logData->version.get() < reqBegin) {
+		replyPromise.sendError(end_of_stream());
 		return Void();
 	}
 
-	//TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
+	//TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
 	// Wait until we have something to return that the caller doesn't already have
-	if (logData->version.get() < req.begin) {
-		wait(logData->version.whenAtLeast(req.begin));
+	if (logData->version.get() < reqBegin) {
+		wait(logData->version.whenAtLeast(reqBegin));
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
 
 	state Version endVersion = logData->version.get() + 1;
 
 	Version poppedVer = poppedVersion(logData, oldTag);
-	if (poppedVer > req.begin) {
+	if (poppedVer > reqBegin) {
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
 		rep.minKnownCommittedVersion = 0;
@@ -1026,12 +1037,12 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		rep.end = poppedVer;
 		rep.onlySpilled = false;
 
-		if (req.sequence.present()) {
+		if (reqSequence.present()) {
 			auto& trackerData = self->peekTracker[peekId];
 			auto& sequenceData = trackerData.sequence_version[sequence + 1];
 			trackerData.lastUpdate = now();
 			if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
-				req.reply.sendError(operation_obsolete());
+				replyPromise.sendError(operation_obsolete());
 				if (!sequenceData.isSet())
 					sequenceData.sendError(operation_obsolete());
 				return Void();
@@ -1039,37 +1050,37 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 			if (sequenceData.isSet()) {
 				if (sequenceData.getFuture().get() != rep.end) {
 					TEST(true); // tlog peek second attempt ended at a different version
-					req.reply.sendError(operation_obsolete());
+					replyPromise.sendError(operation_obsolete());
 					return Void();
 				}
 			} else {
 				sequenceData.send(rep.end);
 			}
-			rep.begin = req.begin;
+			rep.begin = reqBegin;
 		}
 
-		req.reply.send(rep);
+		replyPromise.send(rep);
 		return Void();
 	}
 
 	// grab messages from disk
-	//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
-	if (req.begin <= logData->persistentDataDurableVersion) {
+	//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
+	if (reqBegin <= logData->persistentDataDurableVersion) {
 		// Just in case the durable version changes while we are waiting for the read, we grab this data from memory. We
 		// may or may not actually send it depending on whether we get enough data from disk. SOMEDAY: Only do this if
 		// an initial attempt to read from disk results in insufficient data and the required data is no longer in
 		// memory SOMEDAY: Should we only send part of the messages we collected, to actually limit the size of the
 		// result?
 
-		peekMessagesFromMemory(logData, req, messages2, endVersion);
+		peekMessagesFromMemory(logData, reqTag, reqBegin, messages2, endVersion);
 
 		RangeResult kvs = wait(self->persistentData->readRange(
-		    KeyRangeRef(persistTagMessagesKey(logData->logId, oldTag, req.begin),
+		    KeyRangeRef(persistTagMessagesKey(logData->logId, oldTag, reqBegin),
 		                persistTagMessagesKey(logData->logId, oldTag, logData->persistentDataDurableVersion + 1)),
 		    SERVER_KNOBS->DESIRED_TOTAL_BYTES,
 		    SERVER_KNOBS->DESIRED_TOTAL_BYTES));
 
-		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
+		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
 
 		for (auto& kv : kvs) {
 			auto ver = decodeTagMessagesKey(kv.key);
@@ -1081,7 +1092,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 				uint32_t subVersion;
 				rd >> messageLength >> subVersion;
 				messageLength += sizeof(uint16_t) + sizeof(Tag);
-				messages << messageLength << subVersion << uint16_t(1) << req.tag;
+				messages << messageLength << subVersion << uint16_t(1) << reqTag;
 				messageLength -= (sizeof(subVersion) + sizeof(uint16_t) + sizeof(Tag));
 				messages.serializeBytes(rd.readBytes(messageLength), messageLength);
 			}
@@ -1092,37 +1103,77 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		else
 			messages.serializeBytes(messages2.toValue());
 	} else {
-		peekMessagesFromMemory(logData, req, messages, endVersion);
-		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
+		peekMessagesFromMemory(logData, reqTag, reqBegin, messages, endVersion);
+		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
 	}
 
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
 	reply.minKnownCommittedVersion = 0;
 	reply.onlySpilled = false;
-	reply.messages = messages.toValue();
+	reply.messages = StringRef(reply.arena, messages.toValue());
 	reply.end = endVersion;
 
-	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
+	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress());
 
-	if (req.sequence.present()) {
+	if (reqSequence.present()) {
 		auto& trackerData = self->peekTracker[peekId];
 		trackerData.lastUpdate = now();
 		auto& sequenceData = trackerData.sequence_version[sequence + 1];
 		if (sequenceData.isSet()) {
 			if (sequenceData.getFuture().get() != reply.end) {
 				TEST(true); // tlog peek second attempt ended at a different version (2)
-				req.reply.sendError(operation_obsolete());
+				replyPromise.sendError(operation_obsolete());
 				return Void();
 			}
 		} else {
 			sequenceData.send(reply.end);
 		}
-		reply.begin = req.begin;
+		reply.begin = reqBegin;
 	}
 
-	req.reply.send(reply);
+	replyPromise.send(reply);
 	return Void();
+}
+
+// This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
+ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
+	self->activePeekStreams++;
+
+	state Version begin = req.begin;
+	state bool onlySpilled = false;
+	req.reply.setByteLimit(std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, req.limitBytes));
+	loop {
+		state TLogPeekStreamReply reply;
+		state Promise<TLogPeekReply> promise;
+		state Future<TLogPeekReply> future(promise.getFuture());
+		try {
+			wait(req.reply.onReady() && store(reply.rep, future) &&
+			     tLogPeekMessages(promise, self, logData, begin, req.tag, req.returnIfBlocked, onlySpilled));
+
+			reply.rep.begin = begin;
+			req.reply.send(reply);
+			begin = reply.rep.end;
+			onlySpilled = reply.rep.onlySpilled;
+			if (reply.rep.end > logData->version.get()) {
+				wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+			} else {
+				wait(delay(0, g_network->getCurrentTask()));
+			}
+		} catch (Error& e) {
+			self->activePeekStreams--;
+			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .error(e, true);
+
+			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
+				req.reply.sendError(e);
+				return Void();
+			} else {
+				throw;
+			}
+		}
+	}
 }
 
 ACTOR Future<Void> doQueueCommit(TLogData* self, Reference<LogData> logData) {
@@ -1289,7 +1340,13 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
                                       PromiseStream<Void> warningCollectorInput) {
 	loop choose {
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
-			logData->addActor.send(tLogPeekMessages(self, req, logData));
+			logData->addActor.send(tLogPeekMessages(
+			    req.reply, self, logData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
+		}
+		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
+			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
+			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
+			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPopRequest req = waitNext(tli.popMessages.getFuture())) {
 			logData->addActor.send(tLogPop(self, req, logData));
@@ -1387,7 +1444,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 	state KeyRange tagKeys;
 	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
 
-	TraceEvent("TLogRestorePersistentState", self->dbgid);
+	TraceEvent("TLogRestorePersistentState", self->dbgid).log();
 
 	IKeyValueStore* storage = self->persistentData;
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
@@ -1436,6 +1493,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 		recruited.initEndpoints();
 
 		DUMPTOKEN(recruited.peekMessages);
+		DUMPTOKEN(recruited.peekStreamMessages);
 		DUMPTOKEN(recruited.popMessages);
 		DUMPTOKEN(recruited.commit);
 		DUMPTOKEN(recruited.lock);
@@ -1568,14 +1626,14 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         UID tlogId,
                         UID workerID) {
 	state TLogData self(tlogId, workerID, persistentData, persistentQueue, db);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
-	TraceEvent("SharedTlog", tlogId);
+	TraceEvent("SharedTlog", tlogId).detail("Version", "4.6");
 
 	try {
 		wait(restorePersistentState(&self, locality));

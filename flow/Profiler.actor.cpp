@@ -128,7 +128,7 @@ struct Profiler {
 	bool timerInitialized;
 
 	Profiler(int period, std::string const& outfn, INetwork* network)
-	  : environmentInfoWriter(Unversioned()), signalClosure(signal_handler_for_closure, this), network(network),
+	  : signalClosure(signal_handler_for_closure, this), environmentInfoWriter(Unversioned()), network(network),
 	    timerInitialized(false) {
 		actor = profile(this, period, outfn);
 	}
@@ -142,6 +142,10 @@ struct Profiler {
 	}
 
 	void signal_handler() { // async signal safe!
+		static std::atomic<bool> inSigHandler = false;
+		if (inSigHandler.exchange(true)) {
+			return;
+		}
 		if (profilingEnabled) {
 			double t = timer();
 			output_buffer->push(*(void**)&t);
@@ -150,6 +154,7 @@ struct Profiler {
 				output_buffer->push(addresses[i]);
 			output_buffer->push((void*)-1LL);
 		}
+		inSigHandler.store(false);
 	}
 
 	static void signal_handler_for_closure(int, siginfo_t* si, void*, void* self) { // async signal safe!

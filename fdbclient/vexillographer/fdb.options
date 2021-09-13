@@ -57,6 +57,9 @@ description is not currently required but encouraged.
     <Option name="trace_file_identifier" code="36"
             paramType="String" paramDescription="The identifier that will be part of all trace file names"
             description="Once provided, this string will be used to replace the port/PID in the log file names." />
+    <Option name="trace_partial_file_suffix" code="39"
+            paramType="String" paramDesciption="Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension."
+            description="" />
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>
@@ -129,7 +132,7 @@ description is not currently required but encouraged.
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
             description="Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated" />
     <Option name="distributed_client_tracer" code="90"
-            paramType="String" paramDescription="Distributed tracer type. Choose from none, log_file, network_async, or network_lossy"
+            paramType="String" paramDescription="Distributed tracer type. Choose from none, log_file, or network_lossy"
             description="Set a tracer to run on the client. Should be set to the same value as the tracer set on the server." />
     <Option name="supported_client_versions" code="1000"
             paramType="String" paramDescription="[release version],[source version],[protocol version];..."
@@ -195,6 +198,8 @@ description is not currently required but encouraged.
     <Option name="transaction_bypass_unreadable" code="700"
             description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
             defaultFor="1100"/>
+    <Option name="use_config_database" code="800"
+            description="Use configuration database." />
   </Scope>
   
   <Scope name="TransactionOption">

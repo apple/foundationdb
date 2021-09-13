@@ -3,6 +3,7 @@ clearAfterTest=false
 
     testName=ConfigureDatabase
     testDuration=30.0
+    allowDescriptorChange=false
 
     testName=RandomClogging
     testDuration=30.0

@@ -358,8 +358,15 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 			// FIXME: this will not catch if the secondary address of the process was excluded
 			NetworkAddressList tempList;
 			tempList.address = it->first;
-			if (configuration.present() && !configuration.get().isExcludedServer(tempList))
-				notExcludedMap[machineId] = false;
+			bool excludedServer = false;
+			bool excludedLocality = false;
+			if (configuration.present() && configuration.get().isExcludedServer(tempList))
+				excludedServer = true;
+			if (locality.count(it->first) && configuration.present() &&
+			    configuration.get().isMachineExcluded(locality[it->first]))
+				excludedLocality = true;
+
+			notExcludedMap[machineId] = excludedServer || excludedLocality;
 			workerContribMap[machineId]++;
 		} catch (Error&) {
 			++failed;
@@ -1012,7 +1019,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			statusObj["roles"] = roles.getStatusForAddress(address);
 
 			if (configuration.present()) {
-				statusObj["excluded"] = configuration.get().isExcludedServer(workerItr->interf.addresses());
+				statusObj["excluded"] = configuration.get().isExcludedServer(workerItr->interf.addresses()) ||
+				                        configuration.get().isExcludedLocality(workerItr->interf.locality);
 			}
 
 			statusObj["class_type"] = workerItr->processClass.toString();
@@ -1603,6 +1611,12 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 			for (std::set<AddressExclusion>::iterator it = excludedServers.begin(); it != excludedServers.end(); it++) {
 				JsonBuilderObject statusObj;
 				statusObj["address"] = it->toString();
+				excludedServersArr.push_back(statusObj);
+			}
+			std::set<std::string> excludedLocalities = configuration.getExcludedLocalities();
+			for (const auto& it : excludedLocalities) {
+				JsonBuilderObject statusObj;
+				statusObj["locality"] = it;
 				excludedServersArr.push_back(statusObj);
 			}
 			statusObj["excluded_servers"] = excludedServersArr;
@@ -2591,10 +2605,9 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
                                                     std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 
-	state Database cx = openDBOnServer(db,
-	                                   TaskPriority::DefaultEndpoint,
-	                                   true,
-	                                   false); // Open a new database connection that isn't lock-aware
+	state Database cx =
+	    openDBOnServer(db,
+	                   TaskPriority::DefaultEndpoint); // Open a new database connection that isn't lock-aware
 	state Transaction tr(cx);
 	state int timeoutSeconds = 5;
 	state Future<Void> getTimeout = delay(timeoutSeconds);
@@ -2675,7 +2688,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> incompatibleConnections,
-    Version datacenterVersionDifference) {
+    Version datacenterVersionDifference,
+    ConfigBroadcaster const* configBroadcaster) {
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;
@@ -2907,6 +2921,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["workload"] = workerStatuses[1];
 
 			statusObj["layers"] = workerStatuses[2];
+			/*
+			if (configBroadcaster) {
+			    // TODO: Read from coordinators for more up-to-date config database status?
+			    statusObj["configuration_database"] = configBroadcaster->getStatus();
+			}
+			*/
 
 			// Add qos section if it was populated
 			if (!qos.empty())

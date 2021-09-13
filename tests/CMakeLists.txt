@@ -2,6 +2,7 @@ include(AddFdbTest)
 
 # We need some variables to configure the test setup
 set(ENABLE_BUGGIFY ON CACHE BOOL "Enable buggify for tests")
+set(ENABLE_SIMULATION_TESTS OFF CACHE BOOL "Enable simulation tests (useful if you can't run Joshua)")
 set(RUN_IGNORED_TESTS OFF CACHE BOOL "Run tests that are marked for ignore")
 set(TEST_KEEP_LOGS "FAILED" CACHE STRING "Which logs to keep (NONE, FAILED, ALL)")
 set(TEST_KEEP_SIMDIR "NONE" CACHE STRING "Which simfdb directories to keep (NONE, FAILED, ALL)")
@@ -29,7 +30,7 @@ if(WITH_PYTHON)
 
   set(TestRunner "${PROJECT_SOURCE_DIR}/tests/TestRunner/TestRunner.py")
 
-  configure_file(${PROJECT_SOURCE_DIR}/tests/CTestCustom.ctest ${PROJECT_BINARY_DIR}/CTestCustom.ctest @ONLY)
+  configure_file(${PROJECT_SOURCE_DIR}/tests/CTestCustom.ctest.cmake ${PROJECT_BINARY_DIR}/CTestCustom.ctest @ONLY)
 
   configure_testing(TEST_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
                     ERROR_ON_ADDITIONAL_FILES
@@ -87,6 +88,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES SlowTask.txt IGNORE)
   add_fdb_test(TEST_FILES SpecificUnitTest.txt IGNORE)
   add_fdb_test(TEST_FILES StorageMetricsSampleTests.txt IGNORE)
+  add_fdb_test(TEST_FILES WorkerTests.txt IGNORE)
+  add_fdb_test(TEST_FILES ClusterControllerTests.txt IGNORE)
   add_fdb_test(TEST_FILES StorageServerInterface.txt)
   add_fdb_test(TEST_FILES StreamingWrite.txt IGNORE)
   add_fdb_test(TEST_FILES SystemData.txt)
@@ -106,6 +109,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES pt.TXT IGNORE)
   add_fdb_test(TEST_FILES randomSelector.txt IGNORE)
   add_fdb_test(TEST_FILES selectorCorrectness.txt IGNORE)
+  add_fdb_test(TEST_FILES IThreadPool.txt IGNORE)
   add_fdb_test(TEST_FILES fast/AtomicBackupCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicBackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicOps.toml)
@@ -132,8 +136,11 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LocalRatekeeper.toml)
   add_fdb_test(TEST_FILES fast/LongStackWriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/LowLatency.toml)
+  # TODO: Fix failures and reenable this test:
+  add_fdb_test(TEST_FILES fast/LowLatencySingleClog.toml IGNORE)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
+  add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
   add_fdb_test(TEST_FILES fast/RandomSelector.toml)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
@@ -155,9 +162,11 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/Watches.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
+  add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
+  add_fdb_test(TEST_FILES rare/ConfigIncrement.toml)
   add_fdb_test(TEST_FILES rare/ConflictRangeCheck.toml)
   add_fdb_test(TEST_FILES rare/ConflictRangeRYOWCheck.toml)
   add_fdb_test(TEST_FILES rare/CycleRollbackClogged.toml)
@@ -169,6 +178,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectnessStatus.toml)
   add_fdb_test(TEST_FILES rare/RYWDisable.toml)
   add_fdb_test(TEST_FILES rare/RandomReadWriteTest.toml)
+  add_fdb_test(TEST_FILES rare/SpecificUnitTests.toml)
   add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.toml)
   add_fdb_test(TEST_FILES rare/Throttling.toml)
@@ -182,35 +192,59 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.txt
                restarting/from_7.0.0/ConfigureTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_5.0.0/CycleTestRestart-1.txt
-               restarting/from_5.0.0/CycleTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.txt
+               restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_5.0.0/StorefrontTestRestart-1.txt
-               restarting/from_5.0.0/StorefrontTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-1.txt
+               restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33/SnapTestAttrition-1.txt
-               restarting/from_6.2.33/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-1.txt
+               restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.33/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-1.txt
+               restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33/SnapTestRestart-1.txt
-               restarting/from_6.2.33/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestRestart-1.txt
+               restarting/from_6.2.33_until_6.3.0/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33/SnapCycleRestart-1.txt
-               restarting/from_6.2.33/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapCycleRestart-1.txt
+               restarting/from_6.2.33_until_6.3.0/SnapCycleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
-               restarting/from_5.1.7/DrUpgradeRestart-2.txt)
+    TEST_FILES restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-1.txt
+               restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
-               restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
+    TEST_FILES restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-1.txt
+               restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/ClientTransactionProfilingCorrectness-1.txt
+               restarting/from_6.3.13/ClientTransactionProfilingCorrectness-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/CycleTestRestart-1.txt
+               restarting/from_6.3.13/CycleTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/DrUpgradeRestart-1.txt
+               restarting/from_6.3.13/DrUpgradeRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/SnapCycleRestart-1.txt
+               restarting/from_6.3.13/SnapCycleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/SnapTestAttrition-1.txt
+               restarting/from_6.3.13/SnapTestAttrition-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/SnapTestRestart-1.txt
+               restarting/from_6.3.13/SnapTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/SnapTestSimpleRestart-1.txt
+               restarting/from_6.3.13/SnapTestSimpleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/StorefrontTestRestart-1.txt
+               restarting/from_6.3.13/StorefrontTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_6.3.10/CycleTestRestart-1.txt
-               restarting/to_6.3.10/CycleTestRestart-2.txt)
+    TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
+               restarting/to_7.0.0/CycleTestRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
@@ -270,10 +304,12 @@ if(WITH_PYTHON)
       NAME multiversion_client/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
     )
+    set_tests_properties("multiversion_client/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
     add_test(
       NAME threadsafe_threadfuture_to_future/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
     )
+    set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
   endif()
 
   verify_testing()

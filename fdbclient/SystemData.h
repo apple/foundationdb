@@ -124,6 +124,10 @@ extern const KeyRangeRef tssQuarantineKeys;
 const Key tssQuarantineKeyFor(UID serverID);
 UID decodeTssQuarantineKey(KeyRef const&);
 
+// \xff/tssMismatch/[[Tuple<TSSStorageUID, timestamp, mismatchUID>]] := [[TraceEventString]]
+// For recording tss mismatch details in the system keyspace
+extern const KeyRangeRef tssMismatchKeys;
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
 //	storage server's corresponding TLog in order to apply mutations.
@@ -224,8 +228,15 @@ extern const KeyRef excludedServersPrefix;
 extern const KeyRangeRef excludedServersKeys;
 extern const KeyRef excludedServersVersionKey; // The value of this key shall be changed by any transaction that
                                                // modifies the excluded servers list
-const AddressExclusion decodeExcludedServersKey(KeyRef const& key); // where key.startsWith(excludedServersPrefix)
+AddressExclusion decodeExcludedServersKey(KeyRef const& key); // where key.startsWith(excludedServersPrefix)
 std::string encodeExcludedServersKey(AddressExclusion const&);
+
+extern const KeyRef excludedLocalityPrefix;
+extern const KeyRangeRef excludedLocalityKeys;
+extern const KeyRef excludedLocalityVersionKey; // The value of this key shall be changed by any transaction that
+                                                // modifies the excluded localities list
+std::string decodeExcludedLocalityKey(KeyRef const& key); // where key.startsWith(excludedLocalityPrefix)
+std::string encodeExcludedLocalityKey(std::string const&);
 
 //   "\xff/conf/failed/1.2.3.4" := ""
 //   "\xff/conf/failed/1.2.3.4:4000" := ""
@@ -238,8 +249,15 @@ extern const KeyRef failedServersPrefix;
 extern const KeyRangeRef failedServersKeys;
 extern const KeyRef failedServersVersionKey; // The value of this key shall be changed by any transaction that modifies
                                              // the failed servers list
-const AddressExclusion decodeFailedServersKey(KeyRef const& key); // where key.startsWith(failedServersPrefix)
+AddressExclusion decodeFailedServersKey(KeyRef const& key); // where key.startsWith(failedServersPrefix)
 std::string encodeFailedServersKey(AddressExclusion const&);
+
+extern const KeyRef failedLocalityPrefix;
+extern const KeyRangeRef failedLocalityKeys;
+extern const KeyRef failedLocalityVersionKey; // The value of this key shall be changed by any transaction that modifies
+                                              // the failed localities list
+std::string decodeFailedLocalityKey(KeyRef const& key); // where key.startsWith(failedLocalityPrefix)
+std::string encodeFailedLocalityKey(std::string const&);
 
 //   "\xff/globalConfig/[[option]]" := "value"
 //	 An umbrella prefix for global configuration data synchronized to all nodes.
@@ -476,6 +494,12 @@ extern const ValueRef writeRecoveryKeyTrue;
 //	Written by master server during recovery if recovering from a snapshot.
 //	Allows incremental restore to read and set starting version for consistency.
 extern const KeyRef snapshotEndVersionKey;
+
+// Configuration database special keys
+extern const KeyRef configTransactionDescriptionKey;
+extern const KeyRange globalConfigKnobKeys;
+extern const KeyRangeRef configKnobKeys;
+extern const KeyRangeRef configClassKeys;
 
 #pragma clang diagnostic pop
 

@@ -11,6 +11,12 @@ set(FLOWBENCH_SRCS
   GlobalData.h
   GlobalData.cpp)
 
+if(WITH_TLS AND NOT WIN32)
+  set(FLOWBENCH_SRCS
+    ${FLOWBENCH_SRCS}
+    BenchEncrypt.cpp)
+endif()
+
 project (flowbench)
 # include the configurations from benchmark.cmake
 configure_file(benchmark.cmake googlebenchmark-download/CMakeLists.txt)

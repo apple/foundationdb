@@ -1,6 +1,7 @@
 set(FDBRPC_SRCS
   AsyncFileCached.actor.h
   AsyncFileEIO.actor.h
+  AsyncFileEncrypted.h
   AsyncFileKAIO.actor.h
   AsyncFileNonDurable.actor.h
   AsyncFileReadAhead.actor.h
@@ -14,10 +15,13 @@ set(FDBRPC_SRCS
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
   IAsyncFile.actor.cpp
+  LoadBalance.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
   Net2FileSystem.cpp
   networksender.actor.h
+  PerfMetric.cpp
+  PerfMetric.h
   QueueModel.cpp
   ReplicationPolicy.cpp
   ReplicationTypes.cpp
@@ -31,6 +35,12 @@ set(FDBRPC_SRCS
   TimedRequest.h
   TraceFileIO.cpp
   TSSComparison.h)
+
+if(WITH_TLS AND NOT WIN32)
+  set(FDBRPC_SRCS
+    ${FDBRPC_SRCS}
+    AsyncFileEncrypted.actor.cpp)
+endif()
 
 set(COMPILE_EIO OFF)
 
@@ -55,6 +65,17 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc PUBLIC flow)
+
+add_flow_target(STATIC_LIBRARY NAME fdbrpc_sampling
+  SRCS ${FDBRPC_SRCS}
+  DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
+target_include_directories(fdbrpc_sampling PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
+target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling)
+target_compile_definitions(fdbrpc_sampling PRIVATE -DENABLE_SAMPLING)
+if(WIN32)
+  add_dependencies(fdbrpc_sampling_actors fdbrpc_actors)
+endif()
+
 if(COMPILE_EIO)
   add_library(eio STATIC libeio/eio.c)
   if(USE_VALGRIND)
@@ -63,8 +84,10 @@ if(COMPILE_EIO)
   target_compile_definitions(eio PRIVATE USE_UCONTEXT)
   target_compile_options(eio BEFORE PRIVATE -w) # disable warnings for eio
   target_link_libraries(fdbrpc PRIVATE eio)
+  target_link_libraries(fdbrpc_sampling PRIVATE eio)
 endif()
 if(WIN32)
   add_library(coro STATIC libcoroutine/Common.c libcoroutine/Coro.c)
   target_link_libraries(fdbrpc PRIVATE coro)
+  target_link_libraries(fdbrpc_sampling PRIVATE coro)
 endif()

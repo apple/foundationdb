@@ -50,7 +50,7 @@ struct DDMetricsWorkload : TestWorkload {
 		try {
 			TraceEvent("DDMetricsWaiting").detail("StartDelay", self->startDelay);
 			wait(delay(self->startDelay));
-			TraceEvent("DDMetricsStarting");
+			TraceEvent("DDMetricsStarting").log();
 			state double startTime = now();
 			loop {
 				wait(delay(2.5));
@@ -71,7 +71,7 @@ struct DDMetricsWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override { m.push_back(PerfMetric("DDDuration", ddDone, false)); }
+	void getMetrics(vector<PerfMetric>& m) override { m.emplace_back("DDDuration", ddDone, Averaged::False); }
 };
 
 WorkloadFactory<DDMetricsWorkload> DDMetricsWorkloadFactory("DDMetrics");

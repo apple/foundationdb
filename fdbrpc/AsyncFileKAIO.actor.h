@@ -242,7 +242,12 @@ public:
 		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
 #endif
 
-		return success(result);
+		// auto& actorLineageSet = IAsyncFileSystem::filesystem()->getActorLineageSet();
+		// auto index = actorLineageSet.insert(*currentLineage);
+		// ASSERT(index != ActorLineageSet::npos);
+		Future<Void> res = success(result);
+		// actorLineageSet.erase(index);
+		return res;
 	}
 // TODO(alexmiller): Remove when we upgrade the dev docker image to >14.10
 #ifndef FALLOC_FL_ZERO_RANGE
@@ -568,8 +573,8 @@ private:
 
 		uint32_t opsIssued;
 		Context()
-		  : iocx(0), evfd(-1), outstanding(0), opsIssued(0), ioStallBegin(0), fallocateSupported(true),
-		    fallocateZeroSupported(true), submittedRequestList(nullptr) {
+		  : iocx(0), evfd(-1), outstanding(0), ioStallBegin(0), fallocateSupported(true), fallocateZeroSupported(true),
+		    submittedRequestList(nullptr), opsIssued(0) {
 			setIOTimeout(0);
 		}
 
@@ -619,7 +624,7 @@ private:
 	static Context ctx;
 
 	explicit AsyncFileKAIO(int fd, int flags, std::string const& filename)
-	  : fd(fd), flags(flags), filename(filename), failed(false) {
+	  : failed(false), fd(fd), flags(flags), filename(filename) {
 		ASSERT(!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO);
 		if (!g_network->isSimulated()) {
 			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);

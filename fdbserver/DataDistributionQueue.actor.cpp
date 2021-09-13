@@ -50,7 +50,7 @@ struct RelocateData {
 	TraceInterval interval;
 
 	RelocateData()
-	  : startTime(-1), priority(-1), boundaryPriority(-1), healthPriority(-1), workFactor(0), wantsNewServers(false),
+	  : priority(-1), boundaryPriority(-1), healthPriority(-1), startTime(-1), workFactor(0), wantsNewServers(false),
 	    interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
@@ -448,14 +448,14 @@ struct DDQueueData {
 	            FutureStream<RelocateShard> input,
 	            PromiseStream<GetMetricsRequest> getShardMetrics,
 	            double* lastLimited)
-	  : activeRelocations(0), queuedRelocations(0), bytesWritten(0), teamCollections(teamCollections),
-	    shardsAffectedByTeamFailure(sABTF), getAverageShardBytes(getAverageShardBytes), distributorId(mid), lock(lock),
-	    cx(cx), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize), output(output), input(input),
-	    getShardMetrics(getShardMetrics), startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
+	  : distributorId(mid), lock(lock), cx(cx), teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
+	    getAverageShardBytes(getAverageShardBytes),
+	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
-	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), lastLimited(lastLimited),
-	    suppressIntervals(0), lastInterval(0), unhealthyRelocations(0),
-	    rawProcessingUnhealthy(new AsyncVar<bool>(false)) {}
+	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
+	    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
+	    output(output), input(input), getShardMetrics(getShardMetrics), lastLimited(lastLimited), lastInterval(0),
+	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)), unhealthyRelocations(0) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -941,8 +941,6 @@ struct DDQueueData {
 	}
 };
 
-extern bool noUnseed;
-
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd, const DDEnabledState* ddEnabledState) {
@@ -993,7 +991,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				allHealthy = true;
 				anyWithSource = false;
 				bestTeams.clear();
-				// Get team from teamCollections in diffrent DCs and find the best one
+				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
 					double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 					if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
@@ -1662,6 +1660,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
 					    .detail("PriorityRebalanceOverutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
+					    .detail("PriorityStorageWiggle",
+					            self.priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
 					    .detail("PriorityTeamHealthy", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
 					    .detail("PriorityTeamContainsUndesiredServer",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])

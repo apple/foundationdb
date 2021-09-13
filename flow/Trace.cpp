@@ -70,7 +70,7 @@ struct SuppressionMap {
 	int64_t checkAndInsertSuppression(std::string type, double duration) {
 		ASSERT(g_network);
 		if (suppressionMap.size() >= FLOW_KNOBS->MAX_TRACE_SUPPRESSIONS) {
-			TraceEvent(SevWarnAlways, "ClearingTraceSuppressionMap");
+			TraceEvent(SevWarnAlways, "ClearingTraceSuppressionMap").log();
 			suppressionMap.clear();
 		}
 
@@ -107,7 +107,7 @@ private:
 	std::vector<TraceEventFields> eventBuffer;
 	int loggedLength;
 	int bufferLength;
-	bool opened;
+	std::atomic<bool> opened;
 	int64_t preopenOverflowCount;
 	std::string basename;
 	std::string logGroup;
@@ -115,6 +115,7 @@ private:
 	std::string directory;
 	std::string processName;
 	Optional<NetworkAddress> localAddress;
+	std::string tracePartialFileSuffix;
 
 	Reference<IThreadPool> writer;
 	uint64_t rollsize;
@@ -205,7 +206,7 @@ public:
 		WriterThread(Reference<BarrierList> barriers,
 		             Reference<ITraceLogWriter> logWriter,
 		             Reference<ITraceLogFormatter> formatter)
-		  : barriers(barriers), logWriter(logWriter), formatter(formatter) {}
+		  : logWriter(logWriter), formatter(formatter), barriers(barriers) {}
 
 		void init() override {}
 
@@ -277,8 +278,8 @@ public:
 	};
 
 	TraceLog()
-	  : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList),
-	    logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()), issues(new IssuesList) {}
+	  : formatter(new XmlTraceLogFormatter()), loggedLength(0), bufferLength(0), opened(false), preopenOverflowCount(0),
+	    logTraceEventMetrics(false), issues(new IssuesList), barriers(new BarrierList) {}
 
 	bool isOpen() const { return opened; }
 
@@ -288,13 +289,15 @@ public:
 	          std::string const& timestamp,
 	          uint64_t rs,
 	          uint64_t maxLogsSize,
-	          Optional<NetworkAddress> na) {
+	          Optional<NetworkAddress> na,
+	          std::string const& tracePartialFileSuffix) {
 		ASSERT(!writer && !opened);
 
 		this->directory = directory;
 		this->processName = processName;
 		this->logGroup = logGroup;
 		this->localAddress = na;
+		this->tracePartialFileSuffix = tracePartialFileSuffix;
 
 		basename = format("%s/%s.%s.%s",
 		                  directory.c_str(),
@@ -306,6 +309,7 @@ public:
 		    processName,
 		    basename,
 		    formatter->getExtension(),
+		    tracePartialFileSuffix,
 		    maxLogsSize,
 		    [this]() { barriers->triggerAll(); },
 		    issues));
@@ -503,7 +507,7 @@ public:
 		}
 	}
 
-	void addRole(std::string role) {
+	void addRole(std::string const& role) {
 		MutexHolder holder(mutex);
 
 		RoleInfo& r = mutateRoleInfo();
@@ -511,7 +515,7 @@ public:
 		r.refreshRolesString();
 	}
 
-	void removeRole(std::string role) {
+	void removeRole(std::string const& role) {
 		MutexHolder holder(mutex);
 
 		RoleInfo& r = mutateRoleInfo();
@@ -557,13 +561,13 @@ NetworkAddress getAddressIndex() {
 }
 
 // This does not check for simulation, and as such is not safe for external callers
-void clearPrefix_internal(std::map<std::string, TraceEventFields>& data, std::string prefix) {
+void clearPrefix_internal(std::map<std::string, TraceEventFields>& data, std::string const& prefix) {
 	auto first = data.lower_bound(prefix);
 	auto last = data.lower_bound(strinc(prefix).toString());
 	data.erase(first, last);
 }
 
-void LatestEventCache::clear(std::string prefix) {
+void LatestEventCache::clear(std::string const& prefix) {
 	clearPrefix_internal(latest[getAddressIndex()], prefix);
 }
 
@@ -575,7 +579,7 @@ void LatestEventCache::set(std::string tag, const TraceEventFields& contents) {
 	latest[getAddressIndex()][tag] = contents;
 }
 
-TraceEventFields LatestEventCache::get(std::string tag) {
+TraceEventFields LatestEventCache::get(std::string const& tag) {
 	return latest[getAddressIndex()][tag];
 }
 
@@ -655,15 +659,15 @@ bool traceClockSource(std::string& source) {
 
 std::string toString(ErrorKind errorKind) {
 	switch (errorKind) {
-		case ErrorKind::Unset:
-			return "Unset";
-		case ErrorKind::DiskIssue:
-			return "DiskIssue";
-		case ErrorKind::BugDetected:
-			return "BugDetected";
-		default:
-			UNSTOPPABLE_ASSERT(false);
-			return "";
+	case ErrorKind::Unset:
+		return "Unset";
+	case ErrorKind::DiskIssue:
+		return "DiskIssue";
+	case ErrorKind::BugDetected:
+		return "BugDetected";
+	default:
+		UNSTOPPABLE_ASSERT(false);
+		return "";
 	}
 }
 
@@ -715,7 +719,8 @@ void openTraceFile(const NetworkAddress& na,
                    std::string directory,
                    std::string baseOfBase,
                    std::string logGroup,
-                   std::string identifier) {
+                   std::string identifier,
+                   std::string tracePartialFileSuffix) {
 	if (g_traceLog.isOpen())
 		return;
 
@@ -739,7 +744,8 @@ void openTraceFile(const NetworkAddress& na,
 	                format("%lld", time(nullptr)),
 	                rollsize,
 	                maxLogsSize,
-	                !g_network->isSimulated() ? na : Optional<NetworkAddress>());
+	                !g_network->isSimulated() ? na : Optional<NetworkAddress>(),
+	                tracePartialFileSuffix);
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();
@@ -757,11 +763,11 @@ bool traceFileIsOpen() {
 	return g_traceLog.isOpen();
 }
 
-void addTraceRole(std::string role) {
+void addTraceRole(std::string const& role) {
 	g_traceLog.addRole(role);
 }
 
-void removeTraceRole(std::string role) {
+void removeTraceRole(std::string const& role) {
 	g_traceLog.removeRole(role);
 }
 
@@ -835,28 +841,27 @@ Future<Void> pingTraceLogWriterThread() {
 }
 
 TraceEvent::TraceEvent(const char* type, UID id)
-  : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
+  : initialized(false), enabled(true), logged(false), severity(SevInfo), type(type), id(id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
 TraceEvent::TraceEvent(Severity severity, const char* type, UID id)
-  : id(id), type(type), severity(severity), initialized(false), logged(false),
-    enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
+  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), logged(false),
+    severity(severity), type(type), id(id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
 TraceEvent::TraceEvent(TraceInterval& interval, UID id)
-  : id(id), type(interval.type), severity(interval.severity), initialized(false), logged(false),
-    enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity) {
-
+  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity),
+    logged(false), severity(interval.severity), type(interval.type), id(id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 
 	init(interval);
 }
 TraceEvent::TraceEvent(Severity severity, TraceInterval& interval, UID id)
-  : id(id), type(interval.type), severity(severity), initialized(false), logged(false),
-    enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
+  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), logged(false),
+    severity(severity), type(interval.type), id(id) {
 
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
@@ -916,7 +921,7 @@ bool TraceEvent::init() {
 		detail("Severity", int(severity));
 		if (severity >= SevError) {
 			detail("ErrorKind", errorKind);
-			errorKindIndex = fields.size()-1;
+			errorKindIndex = fields.size() - 1;
 		}
 		detail("Time", "0.000000");
 		timeIndex = fields.size() - 1;
@@ -1105,7 +1110,7 @@ TraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCoun
 	return *this;
 }
 
-TraceEvent &TraceEvent::setErrorKind(ErrorKind errorKind) {
+TraceEvent& TraceEvent::setErrorKind(ErrorKind errorKind) {
 	this->errorKind = errorKind;
 	return *this;
 }
@@ -1119,6 +1124,17 @@ TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
 	}
 
 	return *this;
+}
+
+// A unique, per-thread ID.  This is particularly important for multithreaded
+// or multiversion client setups and for multithreaded storage engines.
+thread_local uint64_t threadId = 0;
+
+void TraceEvent::setThreadId() {
+	while (threadId == 0) {
+		threadId = deterministicRandom()->randomUInt64();
+	}
+	this->detail("ThreadID", threadId);
 }
 
 int TraceEvent::getMaxFieldLength() const {
@@ -1173,6 +1189,8 @@ void TraceEvent::log() {
 				if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 					fields.mutate(timeIndex + 1).second = TraceEvent::printRealTime(time);
 				}
+
+				setThreadId();
 
 				if (this->severity == SevError) {
 					severity = SevInfo;

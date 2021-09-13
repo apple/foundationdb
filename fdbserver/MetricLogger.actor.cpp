@@ -29,7 +29,7 @@
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
-	  : enabled(enabled), minLevel(minLevel), namePattern(name) {}
+	  : namePattern(name), enabled(enabled), minLevel(minLevel) {}
 
 	Standalone<StringRef> typePattern;
 	Standalone<StringRef> namePattern;
@@ -182,7 +182,7 @@ public:
 	// levelKey is the prefix for the entire level, no timestamp at the end
 	ACTOR static Future<Optional<Standalone<StringRef>>> getLastBlock_impl(ReadYourWritesTransaction* tr,
 	                                                                       Standalone<StringRef> levelKey) {
-		RangeResult results = wait(tr->getRange(normalKeys.withPrefix(levelKey), 1, true, true));
+		RangeResult results = wait(tr->getRange(normalKeys.withPrefix(levelKey), 1, Snapshot::True, Reverse::True));
 		if (results.size() == 1)
 			return results[0].value;
 		return Optional<Standalone<StringRef>>();
@@ -374,7 +374,7 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
 	// Never log to an empty prefix, it's pretty much always a bad idea.
 	if (prefix.size() == 0) {
-		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix");
+		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix").log();
 		return Void();
 	}
 

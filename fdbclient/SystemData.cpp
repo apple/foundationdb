@@ -129,7 +129,7 @@ void decodeKeyServersValue(RangeResult result,
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
 	if (missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
-		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
+		TraceEvent(SevError, "AttemptedToDecodeMissingTag").log();
 		for (const KeyValueRef& kv : result) {
 			Tag tag = decodeServerTagValue(kv.value);
 			UID serverID = decodeServerTagKey(kv.key);
@@ -363,6 +363,8 @@ UID decodeTssQuarantineKey(KeyRef const& key) {
 	rd >> serverID;
 	return serverID;
 }
+
+const KeyRangeRef tssMismatchKeys(LiteralStringRef("\xff/tssMismatch/"), LiteralStringRef("\xff/tssMismatch0"));
 
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
 
@@ -634,7 +636,7 @@ const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoP
 const KeyRangeRef excludedServersKeys(LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0"));
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;
 const KeyRef excludedServersVersionKey = LiteralStringRef("\xff/conf/excluded");
-const AddressExclusion decodeExcludedServersKey(KeyRef const& key) {
+AddressExclusion decodeExcludedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(excludedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
@@ -648,10 +650,22 @@ std::string encodeExcludedServersKey(AddressExclusion const& addr) {
 	return excludedServersPrefix.toString() + addr.toString();
 }
 
+const KeyRangeRef excludedLocalityKeys(LiteralStringRef("\xff/conf/excluded_locality/"),
+                                       LiteralStringRef("\xff/conf/excluded_locality0"));
+const KeyRef excludedLocalityPrefix = excludedLocalityKeys.begin;
+const KeyRef excludedLocalityVersionKey = LiteralStringRef("\xff/conf/excluded_locality");
+std::string decodeExcludedLocalityKey(KeyRef const& key) {
+	ASSERT(key.startsWith(excludedLocalityPrefix));
+	return key.removePrefix(excludedLocalityPrefix).toString();
+}
+std::string encodeExcludedLocalityKey(std::string const& locality) {
+	return excludedLocalityPrefix.toString() + locality;
+}
+
 const KeyRangeRef failedServersKeys(LiteralStringRef("\xff/conf/failed/"), LiteralStringRef("\xff/conf/failed0"));
 const KeyRef failedServersPrefix = failedServersKeys.begin;
 const KeyRef failedServersVersionKey = LiteralStringRef("\xff/conf/failed");
-const AddressExclusion decodeFailedServersKey(KeyRef const& key) {
+AddressExclusion decodeFailedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(failedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
@@ -663,6 +677,18 @@ const AddressExclusion decodeFailedServersKey(KeyRef const& key) {
 std::string encodeFailedServersKey(AddressExclusion const& addr) {
 	// FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
 	return failedServersPrefix.toString() + addr.toString();
+}
+
+const KeyRangeRef failedLocalityKeys(LiteralStringRef("\xff/conf/failed_locality/"),
+                                     LiteralStringRef("\xff/conf/failed_locality0"));
+const KeyRef failedLocalityPrefix = failedLocalityKeys.begin;
+const KeyRef failedLocalityVersionKey = LiteralStringRef("\xff/conf/failed_locality");
+std::string decodeFailedLocalityKey(KeyRef const& key) {
+	ASSERT(key.startsWith(failedLocalityPrefix));
+	return key.removePrefix(failedLocalityPrefix).toString();
+}
+std::string encodeFailedLocalityKey(std::string const& locality) {
+	return failedLocalityPrefix.toString() + locality;
 }
 
 // const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
@@ -1003,6 +1029,11 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTON
 const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
+
+const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
+const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
+const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
+const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

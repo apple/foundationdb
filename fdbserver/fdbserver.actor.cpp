@@ -35,6 +35,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
+#include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
@@ -66,7 +68,9 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/Tracing.h"
+#include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
+#include "flow/FaultInjection.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -84,6 +88,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+using namespace std::literals;
+
 // clang-format off
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
@@ -91,7 +97,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -171,9 +177,14 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_METRICSPREFIX,         "--metrics_prefix",            SO_REQ_SEP },
 	{ OPT_IO_TRUST_SECONDS,      "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
-	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,          "--trace_format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
+	{ OPT_CONFIG_PATH,           "--config_path",               SO_REQ_SEP },
+	{ OPT_USE_TEST_CONFIG_DB,    "--use_test_config_db",        SO_NONE },
+	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
+	{ OPT_FAULT_INJECTION,       "--fault_injection",           SO_REQ_SEP },
+	{ OPT_PROFILER,	             "--profiler_",                 SO_REQ_SEP},
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -196,7 +207,6 @@ extern const char* getSourceVersion();
 
 extern void flushTraceFileVoid();
 
-extern bool noUnseed;
 extern const int MAX_CLUSTER_FILE_BYTES;
 
 #ifdef ALLOC_INSTRUMENTATION
@@ -617,6 +627,11 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Machine class (valid options are storage, transaction,"
 	                 " resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,"
 	                 " and cluster_controller).");
+	printOptionUsage("--profiler_",
+	                 "Set an actor profiler option. Supported options are:\n"
+	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
+	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
+	                 "  collector_protocol -- UDP or TCP (default is UDP)");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -644,6 +659,7 @@ static void printUsage(const char* name, bool devhelp) {
 		    "--kvfile FILE",
 		    "Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.");
 		printOptionUsage("-b [on,off], --buggify [on,off]", " Sets Buggify system state, defaults to `off'.");
+		printOptionUsage("-fi [on,off], --fault_injection [on,off]", " Sets fault injection, defaults to `on'.");
 		printOptionUsage("--crash", "Crash on serious errors instead of continuing.");
 		printOptionUsage("-N NETWORKIMPL, --network NETWORKIMPL",
 		                 " Select network implementation, `net2' (default),"
@@ -954,17 +970,18 @@ struct CLIOptions {
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = nullptr;
-	uint64_t memLimit =
+	int64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 	uint64_t storageMemLimit = 1LL << 30;
-	bool buggifyEnabled = false, restarting = false;
+	bool buggifyEnabled = false, faultInjectionEnabled = true, restarting = false;
 	Optional<Standalone<StringRef>> zoneId;
 	Optional<Standalone<StringRef>> dcId;
 	ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
 	bool useNet2 = true;
 	bool useThreadPool = false;
 	std::vector<std::pair<std::string, std::string>> knobs;
+	std::map<std::string, std::string> manualKnobOverrides;
 	LocalityData localities;
 	int minTesterCount = 1;
 	bool testOnServers = false;
@@ -976,9 +993,14 @@ struct CLIOptions {
 	std::vector<std::string> blobCredentials; // used for fast restore workers & backup workers
 	const char* blobCredsFromENV = nullptr;
 
+	std::string configPath;
+	ConfigDBType configDBType{ ConfigDBType::DISABLED };
+
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
 	UnitTestParameters testParams;
+
+	std::map<std::string, std::string> profilerConfig;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1051,8 +1073,21 @@ private:
 				}
 				syn = syn.substr(7);
 				knobs.emplace_back(syn, args.OptionArg());
+				manualKnobOverrides[syn] = args.OptionArg();
 				break;
 			}
+			case OPT_PROFILER: {
+				std::string syn = args.OptionSyntax();
+				std::string_view key = syn;
+				auto prefix = "--profiler_"sv;
+				if (key.find(prefix) != 0) {
+					fprintf(stderr, "ERROR: unable to parse profiler option '%s'\n", syn.c_str());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				key.remove_prefix(prefix.size());
+				profilerConfig.emplace(key, args.OptionArg());
+				break;
+			};
 			case OPT_UNITTESTPARAM: {
 				std::string syn = args.OptionSyntax();
 				if (!StringRef(syn).startsWith(LiteralStringRef("--test_"))) {
@@ -1375,6 +1410,17 @@ private:
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				break;
+			case OPT_FAULT_INJECTION:
+				if (!strcmp(args.OptionArg(), "on"))
+					faultInjectionEnabled = true;
+				else if (!strcmp(args.OptionArg(), "off"))
+					faultInjectionEnabled = false;
+				else {
+					fprintf(stderr, "ERROR: Unknown fault injection state `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
 			case OPT_CRASHONERROR:
 				g_crashOnError = true;
 				break;
@@ -1429,6 +1475,12 @@ private:
 					} while (t.size() != 0);
 				}
 				break;
+			case OPT_CONFIG_PATH:
+				configPath = args.OptionArg();
+				break;
+			case OPT_USE_TEST_CONFIG_DB:
+				configDBType = ConfigDBType::SIMPLE;
+				break;
 
 #ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
@@ -1451,6 +1503,13 @@ private:
 				break;
 #endif
 			}
+		}
+
+		try {
+			ProfilerConfig::instance().reset(profilerConfig);
+		} catch (ConfigError& e) {
+			printf("Error seting up profiler: %s", e.description.c_str());
+			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		if (seedConnString.length() && seedConnFile.length()) {
@@ -1593,6 +1652,11 @@ private:
 } // namespace
 
 int main(int argc, char* argv[]) {
+	// TODO: Remove later, this is just to force the statics to be initialized
+	// otherwise the unit test won't run
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet _;
+#endif
 	try {
 		platformInit();
 
@@ -1625,47 +1689,47 @@ int main(int argc, char* argv[]) {
 		setThreadLocalDeterministicRandomSeed(opts.randomSeed);
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
+		enableFaultInjection(opts.faultInjectionEnabled);
 
-		if (!globalServerKnobs->setKnob("log_directory", opts.logFolder))
-			ASSERT(false);
+		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,
+		                                         Randomize::True,
+		                                         role == ServerRole::Simulation ? IsSimulated::True
+		                                                                        : IsSimulated::False);
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("log_directory", KnobValue::create(opts.logFolder));
 		if (role != ServerRole::Simulation) {
-			if (!globalServerKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))
-				ASSERT(false);
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("commit_batches_mem_bytes_hard_limit",
+			                                                          KnobValue::create(int64_t{ opts.memLimit }));
 		}
-		for (auto k = opts.knobs.begin(); k != opts.knobs.end(); ++k) {
+
+		for (const auto& [knobName, knobValueString] : opts.knobs) {
 			try {
-				if (!globalFlowKnobs->setKnob(k->first, k->second) &&
-				    !globalClientKnobs->setKnob(k->first, k->second) &&
-				    !globalServerKnobs->setKnob(k->first, k->second)) {
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
-				}
+				auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+				g_knobs.setKnob(knobName, knobValue);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
 					fprintf(stderr,
 					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        k->second.c_str(),
-					        k->first.c_str());
+					        knobName.c_str(),
+					        knobValueString.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(k->first))
-					    .detail("Value", printable(k->second));
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
 				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
-					    .detail("Knob", printable(k->first))
-					    .detail("Value", printable(k->second))
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString))
 					    .error(e);
 					throw;
 				}
 			}
 		}
-		if (!globalServerKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit)))
-			ASSERT(false);
-
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("server_mem_limit",
+		                                                          KnobValue::create(int64_t{ opts.memLimit }));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		globalFlowKnobs->initialize(true, role == ServerRole::Simulation);
-		globalClientKnobs->initialize(true);
-		globalServerKnobs->initialize(true, globalClientKnobs.get(), role == ServerRole::Simulation);
+		IKnobCollection::getMutableGlobalKnobCollection().initialize(
+		    Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
@@ -1783,23 +1847,9 @@ int main(int argc, char* argv[]) {
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
+		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
 		    .trackLatest("ProgramStart");
-
-		// Test for TraceEvent length limits
-		/*std::string foo(4096, 'x');
-		TraceEvent("TooLongDetail").detail("Contents", foo);
-
-		TraceEvent("TooLongEvent")
-		    .detail("Contents1", foo)
-		    .detail("Contents2", foo)
-		    .detail("Contents3", foo)
-		    .detail("Contents4", foo)
-		    .detail("Contents5", foo)
-		    .detail("Contents6", foo)
-		    .detail("Contents7", foo)
-		    .detail("Contents8", foo)
-		    .detail("ExtraTest", 1776);*/
 
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
@@ -1818,18 +1868,23 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			for (int i = 0; i < directories.size(); i++)
-				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
-				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
+			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests" };
+
+			for (const auto& dir : directories) {
+				if (dir.size() != 32 && allowedDirectories.count(dir) == 0 && dir.find("snap") == std::string::npos) {
+
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
 					    .detail("DataFolder", dataFolder)
-					    .detail("SuspiciousFile", directories[i]);
+					    .detail("SuspiciousFile", dir);
+
 					fprintf(stderr,
 					        "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n",
 					        dataFolder.c_str(),
-					        directories[i].c_str());
+					        dir.c_str());
+
 					flushAndExit(FDB_EXIT_ERROR);
 				}
+			}
 			std::vector<std::string> files = platform::listFiles(dataFolder);
 			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);
@@ -1980,7 +2035,10 @@ int main(int argc, char* argv[]) {
 				                      opts.metricsConnFile,
 				                      opts.metricsPrefix,
 				                      opts.rsssize,
-				                      opts.whitelistBinPaths));
+				                      opts.whitelistBinPaths,
+				                      opts.configPath,
+				                      opts.manualKnobOverrides,
+				                      opts.configDBType));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 

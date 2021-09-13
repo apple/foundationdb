@@ -26,6 +26,51 @@
 #include <stdarg.h>
 #include <cinttypes>
 
+std::atomic<bool> startSampling = false;
+LineageReference rootLineage;
+thread_local LineageReference* currentLineage = &rootLineage;
+
+LineagePropertiesBase::~LineagePropertiesBase() {}
+
+#ifdef ENABLE_SAMPLING
+ActorLineage::ActorLineage() : properties(), parent(*currentLineage) {}
+#else
+ActorLineage::ActorLineage() : properties() {}
+#endif
+
+ActorLineage::~ActorLineage() {
+	for (auto property : properties) {
+		delete property.properties;
+	}
+}
+
+#ifdef ENABLE_SAMPLING
+LineageReference getCurrentLineage() {
+	if (!currentLineage->isValid() || !currentLineage->isAllocated()) {
+		currentLineage->allocate();
+	}
+	return *currentLineage;
+}
+#endif
+
+#ifdef ENABLE_SAMPLING
+void sample(LineageReference* lineagePtr);
+
+void replaceLineage(LineageReference* lineage) {
+	if (!startSampling) {
+		currentLineage = lineage;
+	} else {
+		startSampling = false;
+		sample(currentLineage);
+		currentLineage = lineage;
+	}
+}
+#endif
+
+using namespace std::literals;
+
+const std::string_view StackLineage::name = "StackLineage"sv;
+
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
 void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
@@ -93,7 +138,7 @@ std::string UID::shortString() const {
 
 void detectFailureAfter(int const& address, double const& delay);
 
-Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit) {
+Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit) {
 	char* endptr;
 
 	uint64_t ret = strtoull(toparse.c_str(), &endptr, 10);
@@ -144,7 +189,7 @@ Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_un
 // m - minutes
 // h - hours
 // d - days
-Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit) {
+Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit) {
 	char* endptr;
 	uint64_t ret = strtoull(str.c_str(), &endptr, 10);
 
@@ -284,7 +329,7 @@ std::vector<double> P_BUGGIFIED_SECTION_FIRES{ .25, .25 };
 
 double P_EXPENSIVE_VALIDATION = .05;
 
-int getSBVar(std::string file, int line, BuggifyType type) {
+int getSBVar(std::string const& file, int line, BuggifyType type) {
 	if (!buggifyActivated[int(type)])
 		return 0;
 

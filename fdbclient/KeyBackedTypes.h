@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/IClientApi.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Subspace.h"
 #include "flow/genericactors.actor.h"
@@ -150,7 +151,7 @@ template <typename T>
 class KeyBackedProperty {
 public:
 	KeyBackedProperty(KeyRef key) : key(key) {}
-	Future<Optional<T>> get(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) const {
+	Future<Optional<T>> get(Reference<ReadYourWritesTransaction> tr, Snapshot snapshot = Snapshot::False) const {
 		return map(tr->get(key, snapshot), [](Optional<Value> const& val) -> Optional<T> {
 			if (val.present())
 				return Codec<T>::unpack(Tuple::unpack(val.get()));
@@ -158,12 +159,14 @@ public:
 		});
 	}
 	// Get property's value or defaultValue if it doesn't exist
-	Future<T> getD(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, T defaultValue = T()) const {
+	Future<T> getD(Reference<ReadYourWritesTransaction> tr,
+	               Snapshot snapshot = Snapshot::False,
+	               T defaultValue = T()) const {
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
 	}
 	// Get property's value or throw error if it doesn't exist
 	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr,
-	                     bool snapshot = false,
+	                     Snapshot snapshot = Snapshot::False,
 	                     Error err = key_not_found()) const {
 		auto keyCopy = key;
 		auto backtrace = platform::get_backtrace();
@@ -180,7 +183,7 @@ public:
 		});
 	}
 
-	Future<Optional<T>> get(Database cx, bool snapshot = false) const {
+	Future<Optional<T>> get(Database cx, Snapshot snapshot = Snapshot::False) const {
 		auto& copy = *this;
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -190,7 +193,7 @@ public:
 		});
 	}
 
-	Future<T> getD(Database cx, bool snapshot = false, T defaultValue = T()) const {
+	Future<T> getD(Database cx, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
 		auto& copy = *this;
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -200,7 +203,7 @@ public:
 		});
 	}
 
-	Future<T> getOrThrow(Database cx, bool snapshot = false, Error err = key_not_found()) const {
+	Future<T> getOrThrow(Database cx, Snapshot snapshot = Snapshot::False, Error err = key_not_found()) const {
 		auto& copy = *this;
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -235,7 +238,7 @@ template <typename T>
 class KeyBackedBinaryValue {
 public:
 	KeyBackedBinaryValue(KeyRef key) : key(key) {}
-	Future<Optional<T>> get(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) const {
+	Future<Optional<T>> get(Reference<ReadYourWritesTransaction> tr, Snapshot snapshot = Snapshot::False) const {
 		return map(tr->get(key, snapshot), [](Optional<Value> const& val) -> Optional<T> {
 			if (val.present())
 				return BinaryReader::fromStringRef<T>(val.get(), Unversioned());
@@ -243,8 +246,11 @@ public:
 		});
 	}
 	// Get property's value or defaultValue if it doesn't exist
-	Future<T> getD(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, T defaultValue = T()) const {
-		return map(get(tr, false), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
+	Future<T> getD(Reference<ReadYourWritesTransaction> tr,
+	               Snapshot snapshot = Snapshot::False,
+	               T defaultValue = T()) const {
+		return map(get(tr, Snapshot::False),
+		           [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
 	}
 	void set(Reference<ReadYourWritesTransaction> tr, T const& val) {
 		return tr->set(key, BinaryWriter::toValue<T>(val, Unversioned()));
@@ -273,8 +279,8 @@ public:
 	                           KeyType const& begin,
 	                           Optional<KeyType> const& end,
 	                           int limit,
-	                           bool snapshot = false,
-	                           bool reverse = false) const {
+	                           Snapshot snapshot = Snapshot::False,
+	                           Reverse reverse = Reverse::False) const {
 		Subspace s = space; // 'this' could be invalid inside lambda
 		Key endKey = end.present() ? s.pack(Codec<KeyType>::pack(end.get())) : space.range().end;
 		return map(
@@ -293,7 +299,7 @@ public:
 
 	Future<Optional<ValueType>> get(Reference<ReadYourWritesTransaction> tr,
 	                                KeyType const& key,
-	                                bool snapshot = false) const {
+	                                Snapshot snapshot = Snapshot::False) const {
 		return map(tr->get(space.pack(Codec<KeyType>::pack(key)), snapshot),
 		           [](Optional<Value> const& val) -> Optional<ValueType> {
 			           if (val.present())
@@ -314,6 +320,10 @@ public:
 	}
 
 	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const& key) {
+		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
+	}
+
+	void erase(Reference<ITransaction> tr, KeyType const& key) {
 		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
 	}
 
@@ -339,7 +349,7 @@ public:
 	                        ValueType const& begin,
 	                        Optional<ValueType> const& end,
 	                        int limit,
-	                        bool snapshot = false) const {
+	                        Snapshot snapshot = Snapshot::False) const {
 		Subspace s = space; // 'this' could be invalid inside lambda
 		Key endKey = end.present() ? s.pack(Codec<ValueType>::pack(end.get())) : space.range().end;
 		return map(
@@ -353,7 +363,9 @@ public:
 		    });
 	}
 
-	Future<bool> exists(Reference<ReadYourWritesTransaction> tr, ValueType const& val, bool snapshot = false) const {
+	Future<bool> exists(Reference<ReadYourWritesTransaction> tr,
+	                    ValueType const& val,
+	                    Snapshot snapshot = Snapshot::False) const {
 		return map(tr->get(space.pack(Codec<ValueType>::pack(val)), snapshot),
 		           [](Optional<Value> const& val) -> bool { return val.present(); });
 	}

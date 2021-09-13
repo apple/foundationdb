@@ -2,6 +2,36 @@
 Release Notes
 #############
 
+6.3.19
+======
+* Add the ``trace_partial_file_suffix`` network option. This option will give unfinished trace files a special suffix to indicate they're not complete yet. When the trace file is complete, it is renamed to remove the suffix. `(PR #5330) <https://github.com/apple/foundationdb/pull/5330>`_
+
+6.3.18
+======
+* The multi-version client API would not propagate errors that occurred when creating databases on external clients. This could result in a invalid memory accesses. `(PR #5221) <https://github.com/apple/foundationdb/pull/5221>`_
+* Fixed a race between the multi-version client connecting to a cluster and destroying the database that could cause an assertion failure. `(PR #5221) <https://github.com/apple/foundationdb/pull/5221>`_
+* Added Mako latency measurements. `(PR #5255) <https://github.com/apple/foundationdb/pull/5255>`_
+* Fixed a bug introduced when porting restoring an inconsistent snapshot feature from 7.0 branch to 6.3 branch. The parameter that controls whether to perform an inconsistent snapshot restore may instead be used to lock the database during restore. `(PR #5228) <https://github.com/apple/foundationdb/pull/5228>`_
+* Added SidebandMultiThreadClientTest, which validates causal consistency for multi-threaded client. `(PR #5173) <https://github.com/apple/foundationdb/pull/5173>`_
+
+6.3.17
+======
+* Made readValuePrefix consistent regarding error messages. `(PR #5160) <https://github.com/apple/foundationdb/pull/5160>`_
+* Added ``TLogPopDetails`` trace event to tLog pop. `(PR #5134) <https://github.com/apple/foundationdb/pull/5134>`_
+* Added ``CommitBatchingEmptyMessageRatio`` metric to track the ratio of empty messages to tlogs. `(PR #5087) <https://github.com/apple/foundationdb/pull/5087>`_
+* Observability improvements in ProxyStats. `(PR #5046) <https://github.com/apple/foundationdb/pull/5046>`_
+* Added ``RecoveryInternal`` and ``ProxyReplies`` trace events to recovery_transaction step in recovery. `(PR #5038) <https://github.com/apple/foundationdb/pull/5038>`_
+* Multi-threaded client documentation improvements. `(PR #5033) <https://github.com/apple/foundationdb/pull/5033>`_
+* Added ``ClusterControllerWorkerFailed`` trace event when a worker is removed from cluster controller. `(PR #5035) <https://github.com/apple/foundationdb/pull/5035>`_
+* Added histograms for storage server write path components. `(PR #5019) <https://github.com/apple/foundationdb/pull/5019>`_
+
+6.3.15
+======
+* Added several counters to the ``MasterMetrics`` trace event to count the number of requests of each type received. `(PR #4829) <https://github.com/apple/foundationdb/pull/4829>`_
+* Added ``RecoveryCount`` to trace events when a transaction log begins. `(PR #4944) <https://github.com/apple/foundationdb/pull/4944>`_
+* Added metrics to compare the bandwidth used by data distributions and updates. `(PR #4907) <https://github.com/apple/foundationdb/pull/4907>`_
+* Batch transactions could be throttled with an error when the latency between ratekeeper and some proxies was high. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
+* Fix accounting issue that could cause higher priority GRV requests to be rejected after many batch priority requests have been rejected on a proxy. `(PR #4932) <https://github.com/apple/foundationdb/pull/4932>`_
 
 6.3.14
 ======

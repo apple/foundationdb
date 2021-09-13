@@ -24,7 +24,6 @@
 
 #include <exception>
 #include <map>
-#include <boost/preprocessor/assert_msg.hpp>
 #include <boost/preprocessor/facilities/is_empty.hpp>
 #include <boost/preprocessor/control/if.hpp>
 #include "flow/Platform.h"
@@ -221,7 +220,7 @@ void assert_num_impl(char const* a_nm,
 EXTERNC void breakpoint_me();
 
 #ifdef FDB_CLEAN_BUILD
-#define NOT_IN_CLEAN BOOST_STATIC_ASSERT_MSG(0, "This code can not be enabled in a clean build.");
+#define NOT_IN_CLEAN static_assert(false, "This code can not be enabled in a clean build.");
 #else
 #define NOT_IN_CLEAN
 #endif

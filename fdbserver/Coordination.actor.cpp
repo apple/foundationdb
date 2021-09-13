@@ -18,9 +18,12 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/ConfigNode.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/OnDemandStore.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/Status.h"
 #include "flow/ActorCollection.h"
@@ -33,6 +36,30 @@
 #include <cstdint>
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
+
+namespace {
+
+class LivenessChecker {
+	double threshold;
+	AsyncVar<double> lastTime;
+	ACTOR static Future<Void> checkStuck(LivenessChecker const* self) {
+		loop {
+			choose {
+				when(wait(delayUntil(self->lastTime.get() + self->threshold))) { return Void(); }
+				when(wait(self->lastTime.onChange())) {}
+			}
+		}
+	}
+
+public:
+	explicit LivenessChecker(double threshold) : threshold(threshold), lastTime(now()) {}
+
+	void confirmLiveness() { lastTime.set(now()); }
+
+	Future<Void> checkStuck() const { return checkStuck(this); }
+};
+
+} // namespace
 
 struct GenerationRegVal {
 	UniqueGeneration readGen, writeGen;
@@ -70,55 +97,11 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 ServerCoordinators::ServerCoordinators(Reference<ClusterConnectionFile> cf) : ClientCoordinators(cf) {
 	ClusterConnectionString cs = ccf->getConnectionString();
 	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
-		leaderElectionServers.push_back(LeaderElectionRegInterface(*s));
-		stateServers.push_back(GenerationRegInterface(*s));
+		leaderElectionServers.emplace_back(*s);
+		stateServers.emplace_back(*s);
+		configServers.emplace_back(*s);
 	}
 }
-
-// The coordination server wants to create its key value store only if it is actually used
-struct OnDemandStore {
-public:
-	OnDemandStore(std::string folder, UID myID) : folder(folder), store(nullptr), myID(myID) {}
-	~OnDemandStore() {
-		if (store)
-			store->close();
-	}
-
-	IKeyValueStore* get() {
-		if (!store)
-			open();
-		return store;
-	}
-
-	bool exists() {
-		if (store)
-			return true;
-		return fileExists(joinPath(folder, "coordination-0.fdq")) ||
-		       fileExists(joinPath(folder, "coordination-1.fdq")) || fileExists(joinPath(folder, "coordination.fdb"));
-	}
-
-	IKeyValueStore* operator->() { return get(); }
-
-	Future<Void> getError() { return onErr(err.getFuture()); }
-
-private:
-	std::string folder;
-	UID myID;
-	IKeyValueStore* store;
-	Promise<Future<Void>> err;
-
-	ACTOR static Future<Void> onErr(Future<Future<Void>> e) {
-		Future<Void> f = wait(e);
-		wait(f);
-		return Void();
-	}
-
-	void open() {
-		platform::createDirectory(folder);
-		store = keyValueStoreMemory(joinPath(folder, "coordination-"), myID, 500e6);
-		err.send(store->getError());
-	}
-};
 
 ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandStore* pstore) {
 	state GenerationRegVal v;
@@ -176,8 +159,7 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
-	state OnDemandStore store("simfdb/unittests/", //< FIXME
-	                          deterministicRandom()->randomUniqueID());
+	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), "coordination-");
 	state Future<Void> actor = localGenerationReg(reg, &store);
 	state Key the_key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 10)));
 
@@ -221,7 +203,10 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 ACTOR Future<Void> openDatabase(ClientData* db,
                                 int* clientCount,
                                 Reference<AsyncVar<bool>> hasConnectedClients,
-                                OpenDatabaseCoordRequest req) {
+                                OpenDatabaseCoordRequest req,
+                                Future<Void> checkStuck) {
+	state ErrorOr<CachedSerialization<ClientDBInfo>> replyContents;
+
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
@@ -233,18 +218,26 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 	while (db->clientInfo->get().read().id == req.knownClientInfoID &&
 	       !db->clientInfo->get().read().forward.present()) {
 		choose {
+			when(wait(checkStuck)) {
+				replyContents = failed_to_progress();
+				break;
+			}
 			when(wait(yieldedFuture(db->clientInfo->onChange()))) {}
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
+				if (req.supportedVersions.size() > 0) {
+					db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
+				}
+				replyContents = db->clientInfo->get();
 				break;
 			} // The client might be long gone!
 		}
 	}
 
-	if (req.supportedVersions.size() > 0) {
-		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
+	if (replyContents.present()) {
+		req.reply.send(replyContents.get());
+	} else {
+		req.reply.sendError(replyContents.getError());
 	}
-
-	req.reply.send(db->clientInfo->get());
 
 	if (--(*clientCount) == 0) {
 		hasConnectedClients->set(false);
@@ -297,6 +290,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state AsyncVar<Value> leaderInterface;
 	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader =
 	    makeReference<AsyncVar<Optional<LeaderInfo>>>();
+	state LivenessChecker canConnectToLeader(SERVER_KNOBS->COORDINATOR_LEADER_CONNECTION_TIMEOUT);
 
 	loop choose {
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
@@ -308,7 +302,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 					leaderMon =
 					    monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
 				}
-				actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
+				actors.add(
+				    openDatabase(&clientData, &clientCount, hasConnectedClients, req, canConnectToLeader.checkStuck()));
 			}
 		}
 		when(ElectionResultRequest req = waitNext(interf.electionResult.getFuture())) {
@@ -362,8 +357,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			// TODO: use notify to only send a heartbeat once per interval
 			availableLeaders.erase(LeaderInfo(req.prevChangeID));
 			availableLeaders.insert(req.myInfo);
-			req.reply.send(
-			    LeaderHeartbeatReply{ currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo) });
+			bool const isCurrentLeader = currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo);
+			if (isCurrentLeader) {
+				canConnectToLeader.confirmLiveness();
+			}
+			req.reply.send(LeaderHeartbeatReply{ isCurrentLeader });
 		}
 		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
 			LeaderInfo newInfo;
@@ -467,12 +465,18 @@ const KeyRangeRef fwdKeys(LiteralStringRef("\xff"
                           LiteralStringRef("\xff"
                                            "fwe"));
 
+// The time when forwarding was last set is stored in this range:
+const KeyRangeRef fwdTimeKeys(LiteralStringRef("\xff"
+                                               "fwdTime"),
+                              LiteralStringRef("\xff"
+                                               "fwdTimf"));
 struct LeaderRegisterCollection {
 	// SOMEDAY: Factor this into a generic tool?  Extend ActorCollection to support removal actions?  What?
 	ActorCollection actors;
 	Map<Key, LeaderElectionRegInterface> registerInterfaces;
 	Map<Key, LeaderInfo> forward;
 	OnDemandStore* pStore;
+	Map<Key, double> forwardStartTime;
 
 	LeaderRegisterCollection(OnDemandStore* pStore) : actors(false), pStore(pStore) {}
 
@@ -480,32 +484,58 @@ struct LeaderRegisterCollection {
 		if (!self->pStore->exists())
 			return Void();
 		OnDemandStore& store = *self->pStore;
-		RangeResult forwardingInfo = wait(store->readRange(fwdKeys));
+		state Future<Standalone<RangeResultRef>> forwardingInfoF = store->readRange(fwdKeys);
+		state Future<Standalone<RangeResultRef>> forwardingTimeF = store->readRange(fwdTimeKeys);
+		wait(success(forwardingInfoF) && success(forwardingTimeF));
+		Standalone<RangeResultRef> forwardingInfo = forwardingInfoF.get();
+		Standalone<RangeResultRef> forwardingTime = forwardingTimeF.get();
 		for (int i = 0; i < forwardingInfo.size(); i++) {
 			LeaderInfo forwardInfo;
 			forwardInfo.forward = true;
 			forwardInfo.serializedInfo = forwardingInfo[i].value;
 			self->forward[forwardingInfo[i].key.removePrefix(fwdKeys.begin)] = forwardInfo;
 		}
+		for (int i = 0; i < forwardingTime.size(); i++) {
+			double time = BinaryReader::fromStringRef<double>(forwardingTime[i].value, Unversioned());
+			self->forwardStartTime[forwardingTime[i].key.removePrefix(fwdTimeKeys.begin)] = time;
+		}
 		return Void();
 	}
 
 	Future<Void> onError() { return actors.getResult(); }
 
+	// Check if the this coordinator is no longer the leader, and the new one was stored in the "forward" keyspace.
+	// If the "forward" keyspace was set some time ago (as configured by knob), log an error to indicate the client is
+	// using a very old cluster file.
 	Optional<LeaderInfo> getForward(KeyRef key) {
 		auto i = forward.find(key);
+		auto t = forwardStartTime.find(key);
 		if (i == forward.end())
 			return Optional<LeaderInfo>();
+		if (t != forwardStartTime.end()) {
+			double forwardTime = t->value;
+			if (now() - forwardTime > SERVER_KNOBS->FORWARD_REQUEST_TOO_OLD) {
+				TraceEvent(SevWarnAlways, "AccessOldForward")
+				    .detail("ForwardSetSecondsAgo", now() - forwardTime)
+				    .detail("ForwardClusterKey", key);
+			}
+		}
 		return i->value;
 	}
 
+	// When the lead coordinator changes, store the new connection ID in the "fwd" keyspace.
+	// If a request arrives using an old connection id, resend it to the new coordinator using the stored connection id.
+	// Store when this change took place in the fwdTime keyspace.
 	ACTOR static Future<Void> setForward(LeaderRegisterCollection* self, KeyRef key, ClusterConnectionString conn) {
+		double forwardTime = now();
 		LeaderInfo forwardInfo;
 		forwardInfo.forward = true;
 		forwardInfo.serializedInfo = conn.toString();
 		self->forward[key] = forwardInfo;
+		self->forwardStartTime[key] = forwardTime;
 		OnDemandStore& store = *self->pStore;
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
+		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, Unversioned())));
 		wait(store->commit());
 		return Void();
 	}
@@ -688,19 +718,32 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	}
 }
 
-ACTOR Future<Void> coordinationServer(std::string dataFolder, Reference<ClusterConnectionFile> ccf) {
+ACTOR Future<Void> coordinationServer(std::string dataFolder,
+                                      Reference<ClusterConnectionFile> ccf,
+                                      ConfigDBType configDBType) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
-	state OnDemandStore store(dataFolder, myID);
-
+	state OnDemandStore store(dataFolder, myID, "coordination-");
+	state ConfigTransactionInterface configTransactionInterface;
+	state ConfigFollowerInterface configFollowerInterface;
+	state Reference<ConfigNode> configNode;
+	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
+	if (configDBType != ConfigDBType::DISABLED) {
+		configTransactionInterface.setupWellKnownEndpoints();
+		configFollowerInterface.setupWellKnownEndpoints();
+		configNode = makeReference<ConfigNode>(dataFolder);
+		configDatabaseServer =
+		    configNode->serve(configTransactionInterface) || configNode->serve(configFollowerInterface);
+	}
+
 	try {
 		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccf) ||
-		     store.getError());
+		     store.getError() || configDatabaseServer);
 		throw internal_error();
 	} catch (Error& e) {
 		TraceEvent("CoordinationServerError", myID).error(e, true);

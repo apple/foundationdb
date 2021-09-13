@@ -48,8 +48,8 @@ using namespace std;
 WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
-  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), dbInfo(r.dbInfo),
-    sharedRandomNumber(r.sharedRandomNumber) {}
+  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
+    dbInfo(r.dbInfo) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -234,6 +234,15 @@ vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, vector<st
 	return defaultValue;
 }
 
+bool hasOption(VectorRef<KeyValueRef> options, Key key) {
+	for (const auto& option : options) {
+		if (option.key == key) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // returns unconsumed options
 Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef> options) {
 	static StringRef nothing = LiteralStringRef("");
@@ -306,7 +315,7 @@ struct CompoundWorkload : TestWorkload {
 
 TestWorkload* getWorkloadIface(WorkloadRequest work,
                                VectorRef<KeyValueRef> options,
-                               Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
@@ -341,7 +350,7 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 	return workload;
 }
 
-TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
@@ -593,7 +602,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 
 ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
                                         Reference<ClusterConnectionFile> ccf,
-                                        Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                        Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                         LocalityData locality) {
 	state WorkloadInterface workIface;
 	state bool replied = false;
@@ -607,7 +616,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
-			cx = Database::createDatabase(ccf, -1, true, locality);
+			cx = Database::createDatabase(ccf, -1, IsInternal::True, locality);
 			wait(delay(1.0));
 		}
 
@@ -652,7 +661,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                    Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                     LocalityData locality) {
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
@@ -722,7 +731,7 @@ vector<PerfMetric> aggregateMetrics(vector<vector<PerfMetric>> metrics) {
 			sum += vec[i].value();
 		if (vec[0].averaged() && vec.size())
 			sum /= vec.size();
-		result.push_back(PerfMetric(vec[0].name(), sum, false, vec[0].format_code()));
+		result.emplace_back(vec[0].name(), sum, Averaged::False, vec[0].format_code());
 	}
 	return result;
 }
@@ -808,7 +817,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 		}
 
 		state std::vector<Future<ErrorOr<CheckReply>>> checks;
-		TraceEvent("CheckingResults");
+		TraceEvent("CheckingResults").log();
 
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
 
@@ -890,6 +899,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	StringRef performTSSCheck = LiteralStringRef("false");
 	if (doQuiescentCheck) {
 		performQuiescent = LiteralStringRef("true");
+		spec.restorePerpetualWiggleSetting = false;
 	}
 	if (doCacheCheck) {
 		performCacheCheck = LiteralStringRef("true");
@@ -1006,7 +1016,7 @@ ACTOR Future<bool> runTest(Database cx,
 
 	if (spec.useDB && spec.clearAfterTest) {
 		try {
-			TraceEvent("TesterClearingDatabase");
+			TraceEvent("TesterClearingDatabase").log();
 			wait(timeoutError(clearData(cx), 1000.0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "ErrorClearingDatabaseAfterTest").error(e);
@@ -1048,8 +1058,7 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeTypes", ""); } },
 	{ "maxTLogVersion",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } },
-	{ "disableTss",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } }
+	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1176,6 +1185,11 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      if (value == "true")
 		      spec->phases = TestWorkload::CHECK;
+	  } },
+	{ "restorePerpetualWiggleSetting",
+	  [](const std::string& value, TestSpec* spec) {
+	      if (value == "false")
+		      spec->restorePerpetualWiggleSetting = false;
 	  } },
 };
 
@@ -1385,6 +1399,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state bool useDB = false;
 	state bool waitForQuiescenceBegin = false;
 	state bool waitForQuiescenceEnd = false;
+	state bool restorePerpetualWiggleSetting = false;
+	state bool perpetualWiggleEnabled = false;
 	state double startDelay = 0.0;
 	state double databasePingDelay = 1e9;
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
@@ -1399,6 +1415,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			waitForQuiescenceBegin = true;
 		if (iter->waitForQuiescenceEnd)
 			waitForQuiescenceEnd = true;
+		if (iter->restorePerpetualWiggleSetting)
+			restorePerpetualWiggleSetting = true;
 		startDelay = std::max(startDelay, iter->startDelay);
 		databasePingDelay = std::min(databasePingDelay, iter->databasePingDelay);
 		if (iter->simBackupAgents != ISimulator::BackupAgentType::NoBackupAgents)
@@ -1437,6 +1455,15 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
 		}
+		if (restorePerpetualWiggleSetting) {
+			std::string_view confView(reinterpret_cast<const char*>(startingConfiguration.begin()),
+			                          startingConfiguration.size());
+			const std::string setting = "perpetual_storage_wiggle:=";
+			auto pos = confView.find(setting);
+			if (pos != confView.npos && confView.at(pos + setting.size()) == '1') {
+				perpetualWiggleEnabled = true;
+			}
+		}
 	}
 
 	if (useDB && waitForQuiescenceBegin) {
@@ -1451,6 +1478,12 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		} catch (Error& e) {
 			TraceEvent("QuietDatabaseStartExternalError").error(e);
 			throw;
+		}
+
+		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
+			printf("Set perpetual_storage_wiggle=1 ...\n");
+			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
+			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
 	}
 
@@ -1528,7 +1561,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			}
 			when(wait(cc->onChange())) {}
 			when(wait(testerTimeout)) {
-				TraceEvent(SevError, "TesterRecruitmentTimeout");
+				TraceEvent(SevError, "TesterRecruitmentTimeout").log();
 				throw timed_out();
 			}
 		}

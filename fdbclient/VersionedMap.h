@@ -58,11 +58,11 @@ struct PTree : public ReferenceCounted<PTree<T>>, FastAllocated<PTree<T>>, NonCo
 	Reference<PTree> left(Version at) const { return child(false, at); }
 	Reference<PTree> right(Version at) const { return child(true, at); }
 
-	PTree(const T& data, Version ver) : data(data), lastUpdateVersion(ver), updated(false) {
+	PTree(const T& data, Version ver) : lastUpdateVersion(ver), updated(false), data(data) {
 		priority = deterministicRandom()->randomUInt32();
 	}
 	PTree(uint32_t pri, T const& data, Reference<PTree> const& left, Reference<PTree> const& right, Version ver)
-	  : priority(pri), data(data), lastUpdateVersion(ver), updated(false) {
+	  : priority(pri), lastUpdateVersion(ver), updated(false), data(data) {
 		pointer[0] = left;
 		pointer[1] = right;
 	}
