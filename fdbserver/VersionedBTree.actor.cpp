@@ -7053,7 +7053,7 @@ public:
 		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
 
 		state PriorityMultiLock::Lock lock;
-		state bool inLock = false;
+		state bool isLocked = false;
 		++g_redwoodMetrics.metric.opGetRange;
 
 		state RangeResult result;
@@ -7066,11 +7066,11 @@ public:
 
 		if (rowLimit > 0) {
 			Future<Void> f = cur.seekGTE(keys.begin);
-			if (!inLock && !f.isReady()) {
-				inLock = true;
+			if (!isLocked && !f.isReady()) {
+				isLocked = true;
 				wait(store(lock, self->m_concurrentReads.lock()));
 			}
-			
+
 			if (self->prefetch) {
 				cur.prefetch(keys.end, true, rowLimit, byteLimit);
 			}
@@ -7117,8 +7117,8 @@ public:
 			}
 		} else {
 			Future<Void> f = cur.seekLT(keys.end);
-			if (!inLock && !f.isReady()) {
-				inLock = true;
+			if (!isLocked && !f.isReady()) {
+				isLocked = true;
 				wait(store(lock, self->m_concurrentReads.lock()));
 			}
 
