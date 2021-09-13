@@ -7054,6 +7054,7 @@ public:
 
 		state PriorityMultiLock::Lock lock;
 		state bool isLocked = false;
+		state Future<Void> f;
 		++g_redwoodMetrics.metric.opGetRange;
 
 		state RangeResult result;
@@ -7065,10 +7066,11 @@ public:
 		}
 
 		if (rowLimit > 0) {
-			Future<Void> f = cur.seekGTE(keys.begin);
+			f = cur.seekGTE(keys.begin);
 			if (!isLocked && !f.isReady()) {
 				isLocked = true;
 				wait(store(lock, self->m_concurrentReads.lock()));
+				wait(f);
 			}
 
 			if (self->prefetch) {
@@ -7116,10 +7118,11 @@ public:
 				wait(cur.moveNext());
 			}
 		} else {
-			Future<Void> f = cur.seekLT(keys.end);
+			f = cur.seekLT(keys.end);
 			if (!isLocked && !f.isReady()) {
 				isLocked = true;
 				wait(store(lock, self->m_concurrentReads.lock()));
+				wait(f);
 			}
 
 			if (self->prefetch) {
@@ -7188,9 +7191,10 @@ public:
 
 		++g_redwoodMetrics.metric.opGet;
 
-		Future<Void> f = cur.seekGTE(key);
+		state Future<Void> f = cur.seekGTE(key);
 		if (!f.isReady()) {
 			wait(store(lock, self->m_concurrentReads.lock()));
+			wait(f);
 		}
 		if (cur.isValid() && cur.get().key == key) {
 			// Return a Value whose arena depends on the source page arena
