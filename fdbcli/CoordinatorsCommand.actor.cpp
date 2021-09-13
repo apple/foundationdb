@@ -26,6 +26,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Schemas.h"
+#include "fdbclient/ManagementAPI.actor.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -126,8 +127,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
 				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
-				if (errorMsgStr ==
-				        "Too few fdbserver machines to provide coordination at the current redundancy level" &&
+				if (errorMsgStr == ManagementAPI::generateErrorMessage(CoordinatorsResult::NOT_ENOUGH_MACHINES) &&
 				    notEnoughMachineResults < 1) {
 					// we could get not_enough_machines if we happen to see the database while the cluster controller is
 					// updating the worker list, so make sure it happens twice before returning a failure
@@ -135,7 +135,8 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 					wait(delay(1.0));
 					tr->reset();
 					continue;
-				} else if (errorMsgStr == "No change (existing configuration satisfies request)") {
+				} else if (errorMsgStr ==
+				           ManagementAPI::generateErrorMessage(CoordinatorsResult::SAME_NETWORK_ADDRESSES)) {
 					if (retries)
 						printf("Coordination state changed\n");
 					else

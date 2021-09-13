@@ -2626,6 +2626,40 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 	}
 }
 
+std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
+	// Note: the error message here should not be changed if possible
+	// If you do change the message here,
+	// please update the corresponding fdbcli code to support both the old and the new message
+
+	std::string msg;
+	switch (res) {
+	case CoordinatorsResult::INVALID_NETWORK_ADDRESSES:
+		msg = "The specified network addresses are invalid";
+		break;
+	case CoordinatorsResult::SAME_NETWORK_ADDRESSES:
+		msg = "No change (existing configuration satisfies request)";
+		break;
+	case CoordinatorsResult::NOT_COORDINATORS:
+		msg = "Coordination servers are not running on the specified network addresses";
+		break;
+	case CoordinatorsResult::DATABASE_UNREACHABLE:
+		msg = "Database unreachable";
+		break;
+	case CoordinatorsResult::BAD_DATABASE_STATE:
+		msg = "The database is in an unexpected state from which changing coordinators might be unsafe";
+		break;
+	case CoordinatorsResult::COORDINATOR_UNREACHABLE:
+		msg = "One of the specified coordinators is unreachable";
+		break;
+	case CoordinatorsResult::NOT_ENOUGH_MACHINES:
+		msg = "Too few fdbserver machines to provide coordination at the current redundancy level";
+		break;
+	default:
+		break;
+	}
+	return msg;
+}
+
 TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	wait(Future<Void>(Void()));
 

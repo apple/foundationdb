@@ -1691,29 +1691,14 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
 	if (r.present()) {
 		auto res = r.get();
-		std::string error_msg;
 		bool retriable = false;
-		if (res == CoordinatorsResult::INVALID_NETWORK_ADDRESSES) {
-			error_msg = "The specified network addresses are invalid";
-		} else if (res == CoordinatorsResult::SAME_NETWORK_ADDRESSES) {
-			error_msg = "No change (existing configuration satisfies request)";
-		} else if (res == CoordinatorsResult::NOT_COORDINATORS) {
-			error_msg = "Coordination servers are not running on the specified network addresses";
-		} else if (res == CoordinatorsResult::DATABASE_UNREACHABLE) {
-			error_msg = "Database unreachable";
-		} else if (res == CoordinatorsResult::BAD_DATABASE_STATE) {
-			error_msg = "The database is in an unexpected state from which changing coordinators might be unsafe";
-		} else if (res == CoordinatorsResult::COORDINATOR_UNREACHABLE) {
-			error_msg = "One of the specified coordinators is unreachable";
+		if (res == CoordinatorsResult::COORDINATOR_UNREACHABLE) {
 			retriable = true;
-		} else if (res == CoordinatorsResult::NOT_ENOUGH_MACHINES) {
-			error_msg = "Too few fdbserver machines to provide coordination at the current redundancy level";
 		} else if (res == CoordinatorsResult::SUCCESS) {
 			TraceEvent(SevError, "SpecialKeysForCoordinators").detail("UnexpectedSuccessfulResult", "");
-		} else {
 			ASSERT(false);
 		}
-		msg = ManagementAPIError::toJsonString(retriable, "coordinators", error_msg);
+		msg = ManagementAPIError::toJsonString(retriable, "coordinators", ManagementAPI::generateErrorMessage(res));
 	}
 	return msg;
 }
