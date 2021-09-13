@@ -50,9 +50,7 @@ void TLogInterface_ActivelyPush::initEndpoints() {
 
 void TLogInterface_PassivelyPull::initEndpoints() {
 	// RequestSteam order must be the same as declared in TLogInterface_PassivelyPull
-	TLogInterfaceBase::initEndpointsImpl({ peekMessages.getReceiver(TaskPriority::TLogPeek),
-	                                       popMessages.getReceiver(TaskPriority::TLogPop),
-	                                       disablePopRequest.getReceiver(),
+	TLogInterfaceBase::initEndpointsImpl({ disablePopRequest.getReceiver(),
 	                                       enablePopRequest.getReceiver() });
 }
 
