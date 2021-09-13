@@ -1259,7 +1259,6 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 					allLocalities.insert(dcId_locality[decodeTLogDatacentersKey(it.key)]);
 				}
 
-				// If the storage server is in an invalid DC, remove the DC?
 				if (locality >= 0 && !allLocalities.count(locality)) {
 					for (auto& it : fTagLocalities.get()) {
 						if (locality == decodeTagLocalityListValue(it.value)) {
