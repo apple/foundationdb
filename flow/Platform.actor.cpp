@@ -2518,9 +2518,9 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 }
 
 ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
-                                            std::string extension,
-                                            bool directoryOnly,
-                                            bool async) {
+                                                 std::string extension,
+                                                 bool directoryOnly,
+                                                 bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed (Win32)
 	state std::vector<std::string> result;
 	state int64_t tsc_begin = timestampCounter();
@@ -2575,9 +2575,9 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 }
 
 ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
-                                            std::string extension,
-                                            bool directoryOnly,
-                                            bool async) {
+                                                 std::string extension,
+                                                 bool directoryOnly,
+                                                 bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed
 	state std::vector<std::string> result;
 	state int64_t tsc_begin = timestampCounter();

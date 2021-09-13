@@ -37,7 +37,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 //
 
-
 namespace platform {
 // e.g. extension==".fdb", returns filenames relative to directory
 Future<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension = "");

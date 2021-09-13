@@ -4234,11 +4234,11 @@ int main(int argc, char* argv[]) {
 #ifdef ALLOC_INSTRUMENTATION
 		{
 			std::cout << "Page Counts: " << FastAllocator<16>::pageCount << " " << FastAllocator<32>::pageCount << " "
-			     << FastAllocator<64>::pageCount << " " << FastAllocator<128>::pageCount << " "
-			     << FastAllocator<256>::pageCount << " " << FastAllocator<512>::pageCount << " "
-			     << FastAllocator<1024>::pageCount << " " << FastAllocator<2048>::pageCount << " "
-			     << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
-			     << FastAllocator<16384>::pageCount << std::endl;
+			          << FastAllocator<64>::pageCount << " " << FastAllocator<128>::pageCount << " "
+			          << FastAllocator<256>::pageCount << " " << FastAllocator<512>::pageCount << " "
+			          << FastAllocator<1024>::pageCount << " " << FastAllocator<2048>::pageCount << " "
+			          << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
+			          << FastAllocator<16384>::pageCount << std::endl;
 
 			std::vector<std::pair<std::string, const char*>> typeNames;
 			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
