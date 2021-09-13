@@ -1617,7 +1617,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			when(InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::DataDistributor;
-				DataDistributorInterface recruited(locality);
+				DataDistributorInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
 				if (ddInterf->get().present()) {
