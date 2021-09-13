@@ -30,15 +30,16 @@ struct DataDistributorInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltDataDistributorRequest> haltDataDistributor;
 	struct LocalityData locality;
+	UID myId;
 	RequestStream<struct DistributorSnapRequest> distributorSnapReq;
 	RequestStream<struct DistributorExclusionSafetyCheckRequest> distributorExclCheckReq;
 	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
 
 	DataDistributorInterface() {}
-	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l) {}
+	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
 
 	void initEndpoints() {}
-	UID id() const { return waitFailure.getEndpoint().token; }
+	UID id() const { return myId; }
 	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
 	bool operator==(const DataDistributorInterface& r) const { return id() == r.id(); }
 	bool operator!=(const DataDistributorInterface& r) const { return !(*this == r); }
@@ -49,6 +50,7 @@ struct DataDistributorInterface {
 		           waitFailure,
 		           haltDataDistributor,
 		           locality,
+		           myId,
 		           distributorSnapReq,
 		           distributorExclCheckReq,
 		           dataDistributorMetrics);

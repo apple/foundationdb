@@ -53,6 +53,8 @@
 
 void failAfter(Future<Void> trigger, Endpoint e);
 
+static const int PID_USED_AMP_FOR_NON_SINGLETON = 100;
+
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
 	ReplyPromise<RegisterWorkerReply> reply;
@@ -2711,7 +2713,9 @@ public:
 		return false;
 	}
 
-	bool isUsedNotMaster(Optional<Key> processId) {
+	// Returns true iff processId is currently being used
+	// for any non-singleton role other than master
+	bool isUsedNotMaster(Optional<Key> processId) const {
 		ASSERT(masterProcessId.present());
 		if (processId == masterProcessId)
 			return false;
@@ -2741,7 +2745,10 @@ public:
 		return false;
 	}
 
-	bool onMasterIsBetter(const WorkerDetails& worker, ProcessClass::ClusterRole role) {
+	// Returns true iff
+	// - role is master, or
+	// - role is a singleton AND worker's pid is being used for any non-singleton role
+	bool onMasterIsBetter(const WorkerDetails& worker, ProcessClass::ClusterRole role) const {
 		ASSERT(masterProcessId.present());
 		const auto& pid = worker.interf.locality.processId();
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper) ||
@@ -2751,6 +2758,7 @@ public:
 		return isUsedNotMaster(pid);
 	}
 
+	// Returns a map of <pid, numRolesUsingPid> for all non-singleton roles
 	std::map<Optional<Standalone<StringRef>>, int> getUsedIds() {
 		std::map<Optional<Standalone<StringRef>>, int> idUsed;
 		updateKnownIds(&idUsed);
@@ -3022,9 +3030,14 @@ public:
 	Version datacenterVersionDifference;
 	PromiseStream<Future<Void>> addActor;
 	bool versionDifferenceUpdated;
-	bool recruitingDistributor;
-	Optional<UID> recruitingRatekeeperID;
+
+	// recruitX is used to signal when role X needs to be (re)recruited.
+	// recruitingXID is used to track the ID of X's interface which is being recruited.
+	// We use AsyncVars to kill (i.e. halt) singletons that have been replaced.
+	AsyncVar<bool> recruitDistributor;
+	Optional<UID> recruitingDistributorID;
 	AsyncVar<bool> recruitRatekeeper;
+	Optional<UID> recruitingRatekeeperID;
 
 	// Stores the health information from a particular worker's perspective.
 	struct WorkerHealth {
@@ -3060,7 +3073,7 @@ public:
 	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
 	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
-	    recruitingDistributor(false), recruitRatekeeper(false),
+	    recruitDistributor(false), recruitRatekeeper(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
@@ -3082,6 +3095,63 @@ public:
 		ac.clear(false);
 		id_worker.clear();
 	}
+};
+
+// Wrapper for singleton interfaces
+template <class Interface>
+struct Singleton {
+	const Optional<Interface>& interface;
+
+	Singleton(const Optional<Interface>& interface) : interface(interface) {}
+
+	virtual Role getRole() const = 0;
+	virtual ProcessClass::ClusterRole getClusterRole() const = 0;
+
+	virtual void setOnDb(ClusterControllerData* cc) const = 0;
+	virtual void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const = 0;
+	virtual void recruit(ClusterControllerData* cc) const = 0;
+};
+
+struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
+
+	RatekeeperSingleton(const Optional<RatekeeperInterface>& interface) : Singleton(interface) {}
+
+	Role getRole() const { return Role::RATEKEEPER; }
+	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::Ratekeeper; }
+
+	void setOnDb(ClusterControllerData* cc) const {
+		if (interface.present()) {
+			cc->db.setRatekeeper(interface.get());
+		}
+	}
+	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
+		if (interface.present()) {
+			cc->id_worker[pid].haltRatekeeper =
+			    brokenPromiseToNever(interface.get().haltRatekeeper.getReply(HaltRatekeeperRequest(cc->id)));
+		}
+	}
+	void recruit(ClusterControllerData* cc) const { cc->recruitRatekeeper.set(true); }
+};
+
+struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
+
+	DataDistributorSingleton(const Optional<DataDistributorInterface>& interface) : Singleton(interface) {}
+
+	Role getRole() const { return Role::DATA_DISTRIBUTOR; }
+	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::DataDistributor; }
+
+	void setOnDb(ClusterControllerData* cc) const {
+		if (interface.present()) {
+			cc->db.setDistributor(interface.get());
+		}
+	}
+	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
+		if (interface.present()) {
+			cc->id_worker[pid].haltDistributor =
+			    brokenPromiseToNever(interface.get().haltDataDistributor.getReply(HaltDataDistributorRequest(cc->id)));
+		}
+	}
+	void recruit(ClusterControllerData* cc) const { cc->recruitDistributor.set(true); }
 };
 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterControllerData::DBInfo* db) {
@@ -3295,108 +3365,167 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 	}
 }
 
-void checkBetterDDOrRK(ClusterControllerData* self) {
+// Finds and returns a new process for role
+WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
+                                         const ProcessClass::ClusterRole role,
+                                         std::map<Optional<Standalone<StringRef>>, int>& id_used) {
+	// find new process in cluster for role
+	WorkerDetails newWorker =
+	    self->getWorkerForRoleInDatacenter(
+	            self->clusterControllerDcId, role, ProcessClass::NeverAssign, self->db.config, id_used, {}, true)
+	        .worker;
+
+	// check if master's process is actually better suited for role
+	if (self->onMasterIsBetter(newWorker, role)) {
+		newWorker = self->id_worker[self->masterProcessId.get()].details;
+	}
+
+	// acknowledge that the pid is now potentially used by this role as well
+	id_used[newWorker.interf.locality.processId()]++;
+
+	return newWorker;
+}
+
+// Return best possible fitness for singleton. Note that lower fitness is better.
+ProcessClass::Fitness findBestFitnessForSingleton(const ClusterControllerData* self,
+                                                  const WorkerDetails& worker,
+                                                  const ProcessClass::ClusterRole& role) {
+	auto bestFitness = worker.processClass.machineClassFitness(role);
+	// If the process has been marked as excluded, we take the max with ExcludeFit to ensure its fit
+	// is at least as bad as ExcludeFit. This assists with successfully offboarding such processes
+	// and removing them from the cluster.
+	if (self->db.config.isExcludedServer(worker.interf.addresses())) {
+		bestFitness = std::max(bestFitness, ProcessClass::ExcludeFit);
+	}
+	return bestFitness;
+}
+
+// Returns true iff the singleton is healthy. "Healthy" here means that
+// the singleton is stable (see below) and doesn't need to be rerecruited.
+// Side effects: (possibly) initiates recruitment
+template <class Interface>
+bool rerecruitSingleton(ClusterControllerData* self,
+                        const WorkerDetails& newWorker,
+                        const Singleton<Interface>& singleton,
+                        const ProcessClass::Fitness& bestFitness,
+                        const Optional<UID> recruitingID) {
+	// A singleton is stable if it exists in cluster, has not been killed off of proc and is not being recruited
+	bool isStableSingleton = singleton.interface.present() &&
+	                         self->id_worker.count(singleton.interface.get().locality.processId()) &&
+	                         (!recruitingID.present() || (recruitingID.get() == singleton.interface.get().id()));
+
+	if (!isStableSingleton) {
+		return false; // not healthy because unstable
+	}
+
+	auto& currWorker = self->id_worker[singleton.interface.get().locality.processId()];
+	auto currFitness = currWorker.details.processClass.machineClassFitness(singleton.getClusterRole());
+	if (currWorker.priorityInfo.isExcluded) {
+		currFitness = ProcessClass::ExcludeFit;
+	}
+	// If any of the following conditions are met, we will switch the singleton's process:
+	// - if the current proc is used by some non-master, non-singleton role
+	// - if the current fitness is less than optimal (lower fitness is better)
+	// - if currently at peak fitness but on same process as master, and the new worker is on different process
+	bool shouldRerecruit =
+	    self->isUsedNotMaster(currWorker.details.interf.locality.processId()) || bestFitness < currFitness ||
+	    (currFitness == bestFitness && currWorker.details.interf.locality.processId() == self->masterProcessId &&
+	     newWorker.interf.locality.processId() != self->masterProcessId);
+	if (shouldRerecruit) {
+		std::string roleAbbr = singleton.getRole().abbreviation;
+		TraceEvent(("CCHalt" + roleAbbr).c_str(), self->id)
+		    .detail(roleAbbr + "ID", singleton.interface.get().id())
+		    .detail("Excluded", currWorker.priorityInfo.isExcluded)
+		    .detail("Fitness", currFitness)
+		    .detail("BestFitness", bestFitness);
+		singleton.recruit(self);
+		return false; // not healthy since needed to be rerecruited
+	} else {
+		return true; // healthy because doesn't need to be rerecruited
+	}
+}
+
+// Returns a mapping from pid->pidCount for pids
+std::map<Optional<Standalone<StringRef>>, int> getColocCounts(const vector<Optional<Standalone<StringRef>>>& pids) {
+	std::map<Optional<Standalone<StringRef>>, int> counts;
+	for (const auto& pid : pids) {
+		if (counts.find(pid) == counts.end()) {
+			counts[pid] = 1;
+		} else {
+			++counts[pid];
+		}
+	}
+	return counts;
+}
+
+// Checks if there exists a better process for each singleton (e.g. DD) compared
+// to the process it is currently on.
+void checkBetterSingletons(ClusterControllerData* self) {
 	if (!self->masterProcessId.present() ||
 	    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		return;
 	}
 
+	// note: this map doesn't consider pids used by existing singletons
 	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-	WorkerDetails newRKWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-	                                                               ProcessClass::Ratekeeper,
-	                                                               ProcessClass::NeverAssign,
-	                                                               self->db.config,
-	                                                               id_used,
-	                                                               {},
-	                                                               true)
-	                                .worker;
-	if (self->onMasterIsBetter(newRKWorker, ProcessClass::Ratekeeper)) {
-		newRKWorker = self->id_worker[self->masterProcessId.get()].details;
-	}
-	id_used = self->getUsedIds();
-	for (auto& it : id_used) {
-		it.second *= 2;
-	}
-	id_used[newRKWorker.interf.locality.processId()]++;
-	WorkerDetails newDDWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-	                                                               ProcessClass::DataDistributor,
-	                                                               ProcessClass::NeverAssign,
-	                                                               self->db.config,
-	                                                               id_used,
-	                                                               {},
-	                                                               true)
-	                                .worker;
-	if (self->onMasterIsBetter(newDDWorker, ProcessClass::DataDistributor)) {
-		newDDWorker = self->id_worker[self->masterProcessId.get()].details;
-	}
-	auto bestFitnessForRK = newRKWorker.processClass.machineClassFitness(ProcessClass::Ratekeeper);
-	if (self->db.config.isExcludedServer(newRKWorker.interf.addresses())) {
-		bestFitnessForRK = std::max(bestFitnessForRK, ProcessClass::ExcludeFit);
-	}
-	auto bestFitnessForDD = newDDWorker.processClass.machineClassFitness(ProcessClass::DataDistributor);
-	if (self->db.config.isExcludedServer(newDDWorker.interf.addresses())) {
-		bestFitnessForDD = std::max(bestFitnessForDD, ProcessClass::ExcludeFit);
-	}
-	//TraceEvent("CheckBetterDDorRKNewRecruits", self->id).detail("MasterProcessId", self->masterProcessId)
-	//.detail("NewRecruitRKProcessId", newRKWorker.interf.locality.processId()).detail("NewRecruiteDDProcessId",
-	// newDDWorker.interf.locality.processId());
 
-	Optional<Standalone<StringRef>> currentRKProcessId;
-	Optional<Standalone<StringRef>> currentDDProcessId;
+	// TODO: moved this amplification to before getWorker, verify this is valid
+	// We prefer spreading out other roles more than separating singletons on their own process
+	// so we artificially amplify the pid count for the processes used by non-singleton roles.
+	// In other words, we make the processes used for other roles less desirable to be used
+	// by singletons as well.
+	id_used = self->getUsedIds(); // don't need this if the move was correct
+	for (auto& it : id_used) {
+		it.second *= PID_USED_AMP_FOR_NON_SINGLETON;
+	}
+
+	// Try to find a new process for each singleton.
+	WorkerDetails newRKWorker = findNewProcessForSingleton(self, ProcessClass::Ratekeeper, id_used);
+	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
+
+	// Find best possible fitnesses for each singleton.
+	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
+	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
 
 	auto& db = self->db.serverInfo->get();
-	bool ratekeeperHealthy = false;
-	if (db.ratekeeper.present() && self->id_worker.count(db.ratekeeper.get().locality.processId()) &&
-	    (!self->recruitingRatekeeperID.present() || (self->recruitingRatekeeperID.get() == db.ratekeeper.get().id()))) {
-		auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
-		currentRKProcessId = rkWorker.details.interf.locality.processId();
-		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::Ratekeeper);
-		if (rkWorker.priorityInfo.isExcluded) {
-			rkFitness = ProcessClass::ExcludeFit;
-		}
-		if (self->isUsedNotMaster(rkWorker.details.interf.locality.processId()) || bestFitnessForRK < rkFitness ||
-		    (rkFitness == bestFitnessForRK && rkWorker.details.interf.locality.processId() == self->masterProcessId &&
-		     newRKWorker.interf.locality.processId() != self->masterProcessId)) {
-			TraceEvent("CCHaltRK", self->id)
-			    .detail("RKID", db.ratekeeper.get().id())
-			    .detail("Excluded", rkWorker.priorityInfo.isExcluded)
-			    .detail("Fitness", rkFitness)
-			    .detail("BestFitness", bestFitnessForRK);
-			self->recruitRatekeeper.set(true);
-		} else {
-			ratekeeperHealthy = true;
-		}
+	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
+	auto ddSingleton = DataDistributorSingleton(db.distributor);
+
+	// Try to rerecruit the singletons to more optimal processes
+	bool rkHealthy = rerecruitSingleton<RatekeeperInterface>(
+	    self, newRKWorker, rkSingleton, bestFitnessForRK, self->recruitingRatekeeperID);
+
+	bool ddHealthy = rerecruitSingleton<DataDistributorInterface>(
+	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
+
+	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
+	// consider any further re-recruitments
+	if (!(rkHealthy && ddHealthy)) {
+		return;
 	}
 
-	if (!self->recruitingDistributor && db.distributor.present() &&
-	    self->id_worker.count(db.distributor.get().locality.processId())) {
-		auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
-		auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
-		currentDDProcessId = ddWorker.details.interf.locality.processId();
-		if (ddWorker.priorityInfo.isExcluded) {
-			ddFitness = ProcessClass::ExcludeFit;
-		}
-		if (self->isUsedNotMaster(ddWorker.details.interf.locality.processId()) || bestFitnessForDD < ddFitness ||
-		    (ddFitness == bestFitnessForDD && ddWorker.details.interf.locality.processId() == self->masterProcessId &&
-		     newDDWorker.interf.locality.processId() != self->masterProcessId) ||
-		    (ddFitness == bestFitnessForDD &&
-		     newRKWorker.interf.locality.processId() != newDDWorker.interf.locality.processId() && ratekeeperHealthy &&
-		     currentRKProcessId.present() && currentDDProcessId == currentRKProcessId &&
-		     (newRKWorker.interf.locality.processId() != self->masterProcessId &&
-		      newDDWorker.interf.locality.processId() != self->masterProcessId))) {
-			TraceEvent("CCHaltDD", self->id)
-			    .detail("DDID", db.distributor.get().id())
-			    .detail("Excluded", ddWorker.priorityInfo.isExcluded)
-			    .detail("Fitness", ddFitness)
-			    .detail("BestFitness", bestFitnessForDD)
-			    .detail("CurrentRateKeeperProcessId",
-			            currentRKProcessId.present() ? currentRKProcessId.get() : LiteralStringRef("None"))
-			    .detail("CurrentDDProcessId", currentDDProcessId)
-			    .detail("MasterProcessID", self->masterProcessId)
-			    .detail("NewRKWorkers", newRKWorker.interf.locality.processId())
-			    .detail("NewDDWorker", newDDWorker.interf.locality.processId());
-			ddWorker.haltDistributor = brokenPromiseToNever(
-			    db.distributor.get().haltDataDistributor.getReply(HaltDataDistributorRequest(self->id)));
+	// if we reach here, we know that the singletons are healthy so let's
+	// check if we can colocate the singletons in a more optimal way
+
+	// TODO: verify that we don't need to get the pid from the worker like we were doing before
+	Optional<Standalone<StringRef>> currentRKProcessId = rkSingleton.interface.get().locality.processId();
+	Optional<Standalone<StringRef>> currentDDProcessId = ddSingleton.interface.get().locality.processId();
+	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
+	Optional<Standalone<StringRef>> newDDProcessId = newRKWorker.interf.locality.processId();
+
+	auto currColocMap = getColocCounts({ currentRKProcessId, currentDDProcessId });
+	auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId });
+
+	auto currColocCounts = std::make_tuple(currColocMap[newRKProcessId], currColocMap[newDDProcessId]);
+	auto newColocCounts = std::make_tuple(newColocMap[newRKProcessId], newColocMap[newDDProcessId]);
+
+	// if the new coloc counts are collectively better (i.e. each singleton's coloc count has not increased)
+	if (newColocCounts <= currColocCounts) {
+		// rerecruit the singleton for which we have found a better process, if any
+		if (newColocMap[newRKProcessId] < currColocMap[currentRKProcessId]) {
+			rkSingleton.recruit(self);
+		} else if (newColocMap[newDDProcessId] < currColocMap[currentDDProcessId]) {
+			ddSingleton.recruit(self);
 		}
 	}
 }
@@ -3410,7 +3539,7 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 
 		checkOutstandingRecruitmentRequests(self);
 		checkOutstandingStorageRequests(self);
-		checkBetterDDOrRK(self);
+		checkBetterSingletons(self);
 
 		self->checkRecoveryStalled();
 		if (self->betterMasterExists()) {
@@ -3740,6 +3869,49 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	checkOutstandingRequests(self);
 }
 
+// Halts the registering (i.e. requesting) singleton if one is already in the process of being recruited
+// or, halts the existing singleton in favour of the requesting one
+template <class Interface>
+void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
+                                       const WorkerInterface& worker,
+                                       const Singleton<Interface>& currSingleton,
+                                       const Singleton<Interface>& registeringSingleton,
+                                       const Optional<UID> recruitingID) {
+	ASSERT(currSingleton.getRole() == registeringSingleton.getRole());
+	const UID registeringID = registeringSingleton.interface.get().id();
+	const std::string roleName = currSingleton.getRole().roleName;
+	const std::string roleAbbr = currSingleton.getRole().abbreviation;
+
+	// halt the requesting singleton if it isn't the one currently being recruited
+	if ((recruitingID.present() && recruitingID.get() != registeringID) ||
+	    self->clusterControllerDcId != worker.locality.dcId()) {
+		TraceEvent(("CCHaltRegistering" + roleName).c_str(), self->id)
+		    .detail(roleAbbr + "ID", registeringID)
+		    .detail("DcID", printable(self->clusterControllerDcId))
+		    .detail("ReqDcID", printable(worker.locality.dcId()))
+		    .detail("Recruiting" + roleAbbr + "ID", recruitingID.present() ? recruitingID.get() : UID());
+		if (registeringSingleton.getClusterRole() == ProcessClass::DataDistributor) {
+		}
+		registeringSingleton.halt(self, worker.locality.processId());
+	} else if (!recruitingID.present()) {
+		// if not currently recruiting, then halt previous one in favour of requesting one
+		TraceEvent(("CCRegister" + roleName).c_str(), self->id).detail(roleAbbr + "ID", registeringID);
+		if (currSingleton.interface.present() && currSingleton.interface.get().id() != registeringID &&
+		    self->id_worker.count(currSingleton.interface.get().locality.processId())) {
+			TraceEvent(("CCHaltPrevious" + roleName).c_str(), self->id)
+			    .detail(roleAbbr + "ID", currSingleton.interface.get().id())
+			    .detail("DcID", printable(self->clusterControllerDcId))
+			    .detail("ReqDcID", printable(worker.locality.dcId()))
+			    .detail("Recruiting" + roleAbbr + "ID", recruitingID.present() ? recruitingID.get() : UID());
+			currSingleton.halt(self, currSingleton.interface.get().locality.processId());
+		}
+		// set the curr singleton if it doesn't exist or its different from the requesting one
+		if (!currSingleton.interface.present() || currSingleton.interface.get().id() != registeringID) {
+			registeringSingleton.setOnDb(self);
+		}
+	}
+}
+
 void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
@@ -3866,43 +4038,21 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 		TEST(true); // Received an old worker registration request.
 	}
 
-	if (req.distributorInterf.present() && !self->db.serverInfo->get().distributor.present() &&
-	    self->clusterControllerDcId == req.distributorInterf.get().locality.dcId() && !self->recruitingDistributor) {
-		const DataDistributorInterface& di = req.distributorInterf.get();
-		TraceEvent("CCRegisterDataDistributor", self->id).detail("DDID", di.id());
-		self->db.setDistributor(di);
+	// For each singleton
+	// - if the registering singleton conflicts with the singleton being recruited, kill the registering one
+	// - if the singleton is not being recruited, kill the existing one in favour of the registering one
+	if (req.distributorInterf.present()) {
+		auto currSingleton = DataDistributorSingleton(self->db.serverInfo->get().distributor);
+		auto registeringSingleton = DataDistributorSingleton(req.distributorInterf);
+		haltRegisteringOrCurrentSingleton<DataDistributorInterface>(
+		    self, w, currSingleton, registeringSingleton, self->recruitingDistributorID);
 	}
+
 	if (req.ratekeeperInterf.present()) {
-		if ((self->recruitingRatekeeperID.present() &&
-		     self->recruitingRatekeeperID.get() != req.ratekeeperInterf.get().id()) ||
-		    self->clusterControllerDcId != w.locality.dcId()) {
-			TraceEvent("CCHaltRegisteringRatekeeper", self->id)
-			    .detail("RKID", req.ratekeeperInterf.get().id())
-			    .detail("DcID", printable(self->clusterControllerDcId))
-			    .detail("ReqDcID", printable(w.locality.dcId()))
-			    .detail("RecruitingRKID",
-			            self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
-			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(
-			    req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
-		} else if (!self->recruitingRatekeeperID.present()) {
-			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
-			const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
-			TraceEvent("CCRegisterRatekeeper", self->id).detail("RKID", rki.id());
-			if (ratekeeper.present() && ratekeeper.get().id() != rki.id() &&
-			    self->id_worker.count(ratekeeper.get().locality.processId())) {
-				TraceEvent("CCHaltPreviousRatekeeper", self->id)
-				    .detail("RKID", ratekeeper.get().id())
-				    .detail("DcID", printable(self->clusterControllerDcId))
-				    .detail("ReqDcID", printable(w.locality.dcId()))
-				    .detail("RecruitingRKID",
-				            self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
-				self->id_worker[ratekeeper.get().locality.processId()].haltRatekeeper =
-				    brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
-			}
-			if (!ratekeeper.present() || ratekeeper.get().id() != rki.id()) {
-				self->db.setRatekeeper(rki);
-			}
-		}
+		auto currSingleton = RatekeeperSingleton(self->db.serverInfo->get().ratekeeper);
+		auto registeringSingleton = RatekeeperSingleton(req.ratekeeperInterf);
+		haltRegisteringOrCurrentSingleton<RatekeeperInterface>(
+		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
 	}
 
 	// Notify the worker to register again with new process class/exclusive property
@@ -4537,41 +4687,64 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 	}
 }
 
-ACTOR Future<DataDistributorInterface> startDataDistributor(ClusterControllerData* self) {
+ACTOR Future<Void> startDataDistributor(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 
 	TraceEvent("CCStartDataDistributor", self->id).log();
 	loop {
 		try {
-			state bool no_distributor = !self->db.serverInfo->get().distributor.present();
+			state bool noDistributor = !self->db.serverInfo->get().distributor.present();
 			while (!self->masterProcessId.present() ||
 			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
 			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
-			if (no_distributor && self->db.serverInfo->get().distributor.present()) {
-				return self->db.serverInfo->get().distributor.get();
+			if (noDistributor && self->db.serverInfo->get().distributor.present()) {
+				// Existing distributor registers while waiting, so skip.
+				return Void();
 			}
 
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                        ProcessClass::DataDistributor,
-			                                                                        ProcessClass::NeverAssign,
-			                                                                        self->db.config,
-			                                                                        id_used);
-			state WorkerDetails worker = data_distributor.worker;
+			std::map<Optional<Standalone<StringRef>>, int> idUsed = self->getUsedIds();
+			WorkerFitnessInfo ddWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+			                                                                ProcessClass::DataDistributor,
+			                                                                ProcessClass::NeverAssign,
+			                                                                self->db.config,
+			                                                                idUsed);
+			InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
+			state WorkerDetails worker = ddWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
 
-			InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
-			TraceEvent("CCDataDistributorRecruit", self->id).detail("Addr", worker.interf.address());
+			self->recruitingDistributorID = req.reqId;
+			TraceEvent("CCRecruitDataDistributor", self->id)
+			    .detail("Addr", worker.interf.address())
+			    .detail("DDID", req.reqId);
 
-			ErrorOr<DataDistributorInterface> distributor = wait(worker.interf.dataDistributor.getReplyUnlessFailedFor(
+			ErrorOr<DataDistributorInterface> ddInterf = wait(worker.interf.dataDistributor.getReplyUnlessFailedFor(
 			    req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0));
-			if (distributor.present()) {
-				TraceEvent("CCDataDistributorRecruited", self->id).detail("Addr", worker.interf.address());
-				return distributor.get();
+
+			if (ddInterf.present()) {
+				self->recruitDistributor.set(false);
+				self->recruitingDistributorID = ddInterf.get().id();
+				const auto& distributor = self->db.serverInfo->get().distributor;
+				TraceEvent("CCDataDistributorRecruited", self->id)
+				    .detail("Addr", worker.interf.address())
+				    .detail("DDID", ddInterf.get().id());
+				if (distributor.present() && distributor.get().id() != ddInterf.get().id() &&
+				    self->id_worker.count(distributor.get().locality.processId())) {
+
+					TraceEvent("CCHaltDataDistributorAfterRecruit", self->id)
+					    .detail("DDID", distributor.get().id())
+					    .detail("DcID", printable(self->clusterControllerDcId));
+
+					DataDistributorSingleton(distributor).halt(self, distributor.get().locality.processId());
+				}
+				if (!distributor.present() || distributor.get().id() != ddInterf.get().id()) {
+					self->db.setDistributor(ddInterf.get());
+				}
+				checkOutstandingRequests(self);
+				return Void();
 			}
 		} catch (Error& e) {
 			TraceEvent("CCDataDistributorRecruitError", self->id).error(e);
@@ -4589,17 +4762,18 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 	}
 
 	loop {
-		if (self->db.serverInfo->get().distributor.present()) {
-			wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
-			                       SERVER_KNOBS->DD_FAILURE_TIME));
-			TraceEvent("CCDataDistributorDied", self->id)
-			    .detail("DistributorId", self->db.serverInfo->get().distributor.get().id());
-			self->db.clearInterf(ProcessClass::DataDistributorClass);
+		if (self->db.serverInfo->get().distributor.present() && !self->recruitDistributor.get()) {
+			choose {
+				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
+				                            SERVER_KNOBS->DATA_DISTRIBUTOR_FAILURE_TIME))) {
+					TraceEvent("CCDataDistributorDied", self->id)
+					    .detail("DDID", self->db.serverInfo->get().distributor.get().id());
+					self->db.clearInterf(ProcessClass::DataDistributorClass);
+				}
+				when(wait(self->recruitDistributor.onChange())) {}
+			}
 		} else {
-			self->recruitingDistributor = true;
-			DataDistributorInterface distributorInterf = wait(startDataDistributor(self));
-			self->recruitingDistributor = false;
-			self->db.setDistributor(distributorInterf);
+			wait(startDataDistributor(self));
 		}
 	}
 }
@@ -4652,8 +4826,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
 					TraceEvent("CCHaltRatekeeperAfterRecruit", self->id)
 					    .detail("RKID", ratekeeper.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
-					self->id_worker[ratekeeper.get().locality.processId()].haltRatekeeper =
-					    brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
+					RatekeeperSingleton(ratekeeper).halt(self, ratekeeper.get().locality.processId());
 				}
 				if (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
 					self->db.setRatekeeper(interf.get());
