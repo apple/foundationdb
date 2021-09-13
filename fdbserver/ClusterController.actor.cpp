@@ -5289,7 +5289,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			TEST(err.code() == error_code_master_backup_worker_failed); // Terminated due to backup worker failure
 			TEST(err.code() == error_code_operation_failed); 			// Terminated due to failed operation
 
-			if (recoveryData.isValid() && recoveryData->ccShouldCommitSuicide) {
+			if ((recoveryData.isValid() && recoveryData->ccShouldCommitSuicide) ||
+			    err.code() == error_code_coordinators_changed) {
 				TraceEvent("CCWDB", cluster->id)
 				    .error(err, true)
 				    .detail("ClusterControlled", recoveryData->clusterController.id());
