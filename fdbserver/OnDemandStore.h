@@ -26,7 +26,7 @@
 #include "fdbserver/IKeyValueStore.h"
 
 // Create a key value store if and only if it is actually used
-class OnDemandStore : NonCopyable {
+class OnDemandStore : public IClosable, NonCopyable {
 	std::string folder;
 	UID myID;
 	IKeyValueStore* store;
@@ -40,5 +40,9 @@ public:
 	IKeyValueStore* get();
 	bool exists() const;
 	IKeyValueStore* operator->();
-	Future<Void> getError() const;
+
+	Future<Void> getError() override;
+	Future<Void> onClosed() override;
+	void dispose() override;
+	void close() override;
 };
