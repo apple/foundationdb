@@ -63,6 +63,7 @@
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/ITrace.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
@@ -4058,6 +4059,7 @@ ACTOR Future<Void> configurationMonitor(Reference<ClusterRecoveryData> self, Dat
 				if (conf != self->configuration) {
 					if (self->recoveryState != RecoveryState::ALL_LOGS_RECRUITED &&
 					    self->recoveryState != RecoveryState::FULLY_RECOVERED) {
+						self->ccShouldCommitSuicide = true;
 						throw master_recovery_failed();
 					}
 
@@ -5014,7 +5016,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena,
 	       primaryDatacenterKey,
-	       self->dbInfo->get().myLocality.dcId().present() ? self->dbInfo->get().myLocality.dcId().get() : StringRef());
+	       self->controllerData->clusterControllerDcId.present() ? self->controllerData->clusterControllerDcId.get()
+	                                                             : StringRef());
 
 	tr.clear(recoveryCommitRequest.arena, tLogDatacentersKeys);
 	for (auto& dc : self->primaryDcId) {
