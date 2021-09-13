@@ -119,6 +119,10 @@ public:
 
 	ConfigFollowerInterface getFollowerInterface() const { return cfi; }
 
+	void close() const { node->close(); }
+
+	Future<Void> onClosed() const { return node->onClosed(); }
+
 	Future<Void> getError() const { return cfiServer || ctiServer; }
 };
 
@@ -201,6 +205,9 @@ public:
 	}
 
 	LocalConfiguration& getMutableLocalConfiguration() { return *localConfiguration; }
+
+	void close() const { localConfiguration->close(); }
+	Future<Void> onClosed() const { return localConfiguration->onClosed(); }
 
 	Future<Void> getError() const { return consumer; }
 
@@ -306,6 +313,10 @@ public:
 	}
 
 	void compact() { broadcaster.compact(lastWrittenVersion); }
+
+	void close() const { readFrom.close(); }
+
+	Future<Void> onClosed() const { return readFrom.onClosed(); }
 
 	Future<Void> getError() const { return readFrom.getError() || broadcaster.getError(); }
 };
@@ -427,8 +438,8 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer =
-		    broadcaster.registerWorker(readFrom.lastSeenVersion(), readFrom.configClassSet(), Never(), cbi->get());
+		broadcastServer = broadcaster.registerWorker(
+		    readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), cbi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -456,6 +467,11 @@ public:
 	Future<Void> check(V T::*member, Optional<E> value) const {
 		return readFrom.checkEventually(member, value);
 	}
+	void close() const {
+		writeTo.close();
+		readFrom.close();
+	}
+	Future<Void> onClosed() const { return writeTo.onClosed() && readFrom.onClosed(); }
 	Future<Void> getError() const { return writeTo.getError() || readFrom.getError() || broadcaster.getError(); }
 };
 
@@ -549,6 +565,9 @@ Future<Void> testKillWorker(UnitTestParameters params) {
 	env.killLocalConfig();
 	// Make sure broadcaster detects worker death in a timely manner.
 	wait(timeoutError(env.workerFailed(), 3));
+	Future<Void> closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
