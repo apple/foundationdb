@@ -893,6 +893,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return Void();
 	}
 
+	Optional<TCTeamInfo> getRandomHealthyTeam() {
+		
+	}
 	// SOMEDAY: Make bestTeam better about deciding to leave a shard where it is (e.g. in PRIORITY_TEAM_HEALTHY case)
 	//		    use keys, src, dest, metrics, priority, system load, etc.. to decide...
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
