@@ -2987,7 +2987,6 @@ public:
 			}
 		}
 
-		TraceEvent("none of the above").log();
 		return false;
 	}
 
