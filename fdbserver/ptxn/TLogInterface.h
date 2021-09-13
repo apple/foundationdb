@@ -452,8 +452,6 @@ struct TLogInterface_ActivelyPush : public TLogInterfaceBase {
 struct TLogInterface_PassivelyPull : public TLogInterfaceBase {
 	constexpr static FileIdentifier file_identifier = 748550;
 
-	RequestStream<TLogPeekRequest> peekMessages;
-	RequestStream<TLogPopRequest> popMessages;
 	RequestStream<TLogDisablePopRequest> disablePopRequest;
 	RequestStream<TLogEnablePopRequest> enablePopRequest;
 
@@ -461,10 +459,8 @@ struct TLogInterface_PassivelyPull : public TLogInterfaceBase {
 	void serialize(Ar& ar) {
 		TLogInterfaceBase::serializeImpl(ar);
 		if (Ar::isDeserializing) {
-			popMessages = RequestStream<TLogPopRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
-			popMessages = RequestStream<TLogPopRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
-			disablePopRequest = RequestStream<TLogDisablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
-			enablePopRequest = RequestStream<TLogEnablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(12));
+			disablePopRequest = RequestStream<TLogDisablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
+			enablePopRequest = RequestStream<TLogEnablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 		}
 	}
 

@@ -1428,8 +1428,6 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 	DUMPTOKEN(recruited.recoveryFinished);
 	DUMPTOKEN(recruited.snapRequest);
 
-	DUMPTOKEN(recruited.peekMessages);
-	DUMPTOKEN(recruited.popMessages);
 	DUMPTOKEN(recruited.disablePopRequest);
 	DUMPTOKEN(recruited.enablePopRequest);
 

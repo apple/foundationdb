@@ -438,15 +438,15 @@ ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriorit
 				       self->interf->get().present()) {
 					self->futureResults.push_back(recordRequestMetrics(
 					    self,
-					    self->interf->get().interf().peekMessages.getEndpoint().getPrimaryAddress(),
-					    self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->dbgid,
-					                                                                       self->messageVersion.version,
-					                                                                       Optional<Version>(),
-					                                                                       self->returnIfBlocked,
-					                                                                       self->onlySpilled,
-					                                                                       self->storageTeamId,
-					                                                                       self->tLogGroupID),
-					                                                       taskID)));
+					    self->interf->get().interf().peek.getEndpoint().getPrimaryAddress(),
+					    self->interf->get().interf().peek.getReply(TLogPeekRequest(self->dbgid,
+					                                                               self->messageVersion.version,
+					                                                               Optional<Version>(),
+					                                                               self->returnIfBlocked,
+					                                                               self->onlySpilled,
+					                                                               self->storageTeamId,
+					                                                               self->tLogGroupID),
+					                                               taskID)));
 				}
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
 					throw operation_obsolete();
@@ -516,7 +516,7 @@ ACTOR Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID
 	try {
 		loop choose {
 			when(TLogPeekReply res = wait(self->interf->get().present()
-			                                  ? brokenPromiseToNever(self->interf->get().interf().peekMessages.getReply(
+			                                  ? brokenPromiseToNever(self->interf->get().interf().peek.getReply(
 			                                        TLogPeekRequest(self->dbgid,
 			                                                        self->messageVersion.version,
 			                                                        Optional<Version>(),
@@ -576,7 +576,7 @@ ACTOR Future<Void> serverPeekOnFailed(ServerPeekCursor* self) {
 		choose {
 			when(wait(self->interf->get().present()
 			              ? IFailureMonitor::failureMonitor().onStateEqual(
-			                    self->interf->get().interf().peekMessages.getEndpoint(), FailureStatus())
+			                    self->interf->get().interf().peek.getEndpoint(), FailureStatus())
 			              : Never())) {
 				return Void();
 			}
@@ -594,7 +594,7 @@ bool ServerPeekCursor::isActive() const {
 		return false;
 	if (messageVersion >= end)
 		return false;
-	return IFailureMonitor::failureMonitor().getState(interf->get().interf().peekMessages.getEndpoint()).isAvailable();
+	return IFailureMonitor::failureMonitor().getState(interf->get().interf().peek.getEndpoint()).isAvailable();
 }
 
 bool ServerPeekCursor::isExhausted() const {
