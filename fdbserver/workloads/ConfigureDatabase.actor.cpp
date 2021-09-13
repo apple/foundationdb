@@ -234,7 +234,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
-	Future<bool> check(Database const& cx) override { return true; }
+	Future<bool> check(Database const& cx) override { return true;}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
@@ -266,6 +266,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR Future<bool> _check(ConfigureDatabaseWorkload* self, Database cx) {
+		wait(success(changeConfig(cx, "storage_migration_type=aggressive", true)));
+		return true;
+	}
+
 	static int randomRoleNumber() {
 		int i = deterministicRandom()->randomInt(0, 4);
 		return i ? i : -1;
@@ -277,7 +282,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if (g_simulator.speedUpSimulation) {
 				return Void();
 			}
-			state int randomChoice = deterministicRandom()->randomInt(0, 8);
+			state int randomChoice = deterministicRandom()->randomInt(0, 9);
 
 			if (randomChoice == 0) {
 				wait(success(

@@ -5649,7 +5649,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				TraceEvent("WrongStoreType", self->distributorId)
 				    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType)
 				    .detail("StorageMigrationMode", self->configuration.storageMigrationType.toString())
-				    .detail("Found", !self->wrongStoreTypeRemover.isValid() && !self->wrongStoreTypeRemover.isReady())
+				    .detail("Found", self->wrongStoreTypeRemover.isValid() && !self->wrongStoreTypeRemover.isReady())
 				    .trackLatest("WrongStoreType");
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
