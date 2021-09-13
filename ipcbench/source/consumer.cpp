@@ -42,12 +42,12 @@ void trace(int trace_period_milliseconds, std::atomic_int* counter, std::atomic_
 }
 
 void stop_handler(int s) {
-    started = 1;
+	started = 1;
 	stopped = 1;
 }
 
 void start_handler(int s) {
-    started = 1;
+	started = 1;
 }
 
 void nullCompletionHandler() {}
@@ -59,16 +59,15 @@ void sleep_handler(const boost::system::error_code& error, int signum, boost::as
 	}
 }
 
-
 // Consumer, receive the request and send back the reply
 int main(int argc, char* argv[]) {
 	signal(SIGINT, stop_handler);
-    signal(SIGUSR1, start_handler);
+	signal(SIGUSR1, start_handler);
 
-    while (!started) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
-    printf("Received signal from producer to start\n");
+	while (!started) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	}
+	printf("Received signal from producer to start\n");
 
 	// asio stuff
 	boost::asio::io_context context;
@@ -94,7 +93,7 @@ int main(int argc, char* argv[]) {
 		}
 	});
 
-    int size = std::stoi(argv[1]);
+	int size = std::stoi(argv[1]);
 	// this will throw error if memory not exists
 	managed_shared_memory segment(open_only, "MySharedMemory");
 
@@ -115,20 +114,12 @@ int main(int argc, char* argv[]) {
 	while (!stopped) {
 		// ptr to the reply message
 		offset_ptr<shm::message> ptr;
-		bool poped = false;
-		for (auto i = 0; i < 100000; ++i) {
+		for (auto i = 0; i < 1; ++i) {
 			if (request_queue->pop(ptr)) {
-				// printf("Consumer pops once\n");
-				poped = true;
-				break;
+				memcpy(buffer, ptr->data, size);
+				latency.fetch_add(shm::now() - ptr->start_time);
+				count.fetch_add(1);
 			}
-		}
-		// read the request
-		if (poped) {
-			memcpy(buffer, ptr->data, size);
-			latency.fetch_add(shm::now() - ptr->start_time);
-			count.fetch_add(1);
-			poped = false;
 		}
 		// Start an asynchronous wait for one of the signals to occur.
 		signals.async_wait(boost::bind(sleep_handler, _1, _2, &context));

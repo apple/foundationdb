@@ -33,6 +33,7 @@ int main(int argc, char* argv[]) {
 	signal(SIGINT, my_handler);
 
 	int pid = std::stoi(argv[1]);
+	std::atomic_int kill_count = 0;
 	int waiting_interval = 0;
 	if (argc == 3)
 		waiting_interval = std::stoi(argv[2]);
@@ -61,6 +62,7 @@ int main(int argc, char* argv[]) {
 
 	printf("Signal consumer to start\n");
 	kill(pid, SIGUSR1);
+	shm::bench_t last_print_time = shm::now();
 
 	shm::message* msg = static_cast<shm::message*>(segment.allocate(sizeof(shm::message)));
 	while (!stopped) {
@@ -70,7 +72,7 @@ int main(int argc, char* argv[]) {
 			// somehow the busy loop will die quickly
 			// add a very short sleep can avoid it
 			// 10 nano seconds is small enough to be ignored considering the latency is ~10us
-			std::this_thread::sleep_for(std::chrono::nanoseconds(10));
+			// std::this_thread::sleep_for(std::chrono::nanoseconds(10));
 		}
 		// shm::message* msg = static_cast<shm::message*>(segment.allocate(sizeof(shm::message)));
 		// write the message
@@ -81,6 +83,12 @@ int main(int argc, char* argv[]) {
 		};
 		if (sleepingFlag->load()) {
 			kill(pid, SIGUSR2);
+			++kill_count;
+			if (kill_count > 1000000) {
+				printf("Time delta: %f seconds\n", (shm::now() - last_print_time) / 1e9);
+				last_print_time = shm::now();
+				kill_count = 0;
+			}
 		}
 	}
 	segment.deallocate(msg);
