@@ -3966,10 +3966,12 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
 ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection) {
 	state ReadYourWritesTransaction tr(teamCollection->cx);
 	state Value writeValue;
+	state const KeyRef writeKey =
+	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> value = wait(tr.get(wigglingStorageServerKey));
+			Optional<Value> value = wait(tr.get(writeKey));
 			if (teamCollection->pid2server_info.empty()) {
 				writeValue = LiteralStringRef("");
 			} else {
@@ -3985,7 +3987,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 					writeValue = pid;
 				}
 			}
-			tr.set(wigglingStorageServerKey, writeValue);
+			tr.set(writeKey, writeValue);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -3993,6 +3995,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 		}
 	}
 	TraceEvent(SevDebug, "PerpetualNextWigglingStoragePID", teamCollection->distributorId)
+	    .detail("Primary", teamCollection->primary)
 	    .detail("WriteValue", writeValue);
 
 	return Void();
@@ -4032,14 +4035,16 @@ ACTOR Future<std::pair<Future<Void>, Value>> watchPerpetualStoragePIDChange(DDTe
 	state ReadYourWritesTransaction tr(self->cx);
 	state Future<Void> watchFuture;
 	state Value ret;
+	state const KeyRef readKey = wigglingStorageServerKey.withSuffix(self->primary ? "/primary"_sr : "/remote"_sr);
+
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> value = wait(tr.get(wigglingStorageServerKey));
+			Optional<Value> value = wait(tr.get(readKey));
 			if (value.present()) {
 				ret = value.get();
 			}
-			watchFuture = tr.watch(wigglingStorageServerKey);
+			watchFuture = tr.watch(readKey);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -4101,6 +4106,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
 				TraceEvent("PerpetualStorageWigglePause", self->distributorId)
+				    .detail("Primary", self->primary)
 				    .detail("ProcessId", pid)
 				    .detail("BestTeamKeepStuckCount", self->bestTeamKeepStuckCount)
 				    .detail("ExtraHealthyTeamCount", extraTeamCount)
@@ -4112,6 +4118,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				movingCount = fv.size();
 				moveFinishFuture = waitForAll(fv);
 				TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
+				    .detail("Primary", self->primary)
 				    .detail("ProcessId", pid)
 				    .detail("ExtraHealthyTeamCount", extraTeamCount)
 				    .detail("HealthyTeamCount", self->healthyTeamCount)
@@ -4138,6 +4145,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
 				TraceEvent("PerpetualStorageWiggleFinish", self->distributorId)
+				    .detail("Primary", self->primary)
 				    .detail("ProcessId", pid.toString())
 				    .detail("StorageCount", movingCount);
 
@@ -4157,6 +4165,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 	if (self->wigglingPid.present()) {
 		self->includeStorageServersForWiggle();
 		TraceEvent("PerpetualStorageWiggleExitingPause", self->distributorId)
+		    .detail("Primary", self->primary)
 		    .detail("ProcessId", self->wigglingPid.get());
 		self->wigglingPid.reset();
 	}
@@ -4194,14 +4203,16 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 					    &stopWiggleSignal, finishStorageWiggleSignal.getFuture(), teamCollection));
 					collection.add(
 					    perpetualStorageWiggler(&stopWiggleSignal, finishStorageWiggleSignal, teamCollection));
-					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId).log();
+					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId)
+					    .detail("Primary", teamCollection->primary);
 				} else if (speed == 0) {
 					if (!stopWiggleSignal.get()) {
 						stopWiggleSignal.set(true);
 						wait(collection.signalAndReset());
 						teamCollection->pauseWiggle->set(true);
 					}
-					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId).log();
+					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId)
+					    .detail("Primary", teamCollection->primary);
 				}
 				wait(watchFuture);
 				break;
@@ -4511,6 +4522,9 @@ ACTOR Future<Void> storageServerTracker(
 	    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 	state int targetTeamNumPerServer =
 	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
+	TraceEvent("StorageServerTrackerBegin", self->distributorId)
+	    .detail("ServerID", server->id)
+	    .detail("ProcessID", server->lastKnownInterface.locality.processId());
 
 	try {
 		loop {
@@ -4657,6 +4671,7 @@ ACTOR Future<Void> storageServerTracker(
 				if (worstStatus == DDTeamCollection::Status::WIGGLING && !isTss) {
 					status.isWiggling = true;
 					TraceEvent("PerpetualWigglingStorageServer", self->distributorId)
+					    .detail("Primary", self->primary)
 					    .detail("Server", server->id)
 					    .detail("ProcessId", server->lastKnownInterface.locality.processId())
 					    .detail("Address", worstAddr.toString());
@@ -5602,10 +5617,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		self->addActor.send(trackExcludedServers(self));
 		self->addActor.send(monitorHealthyTeams(self));
 		self->addActor.send(waitHealthyZoneChange(self));
-
-		if (self->primary) { // the primary dc also handle the satellite dc's perpetual wiggling
-			self->addActor.send(monitorPerpetualStorageWiggle(self));
-		}
+		self->addActor.send(monitorPerpetualStorageWiggle(self));
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
 		loop choose {

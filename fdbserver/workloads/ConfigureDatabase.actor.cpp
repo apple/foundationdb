@@ -220,13 +220,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	int additionalDBs;
 	bool allowDescriptorChange;
 	std::vector<Future<Void>> clients;
+	bool allowStorageMigrationTypeChange;
 	PerfIntCounter retries;
 
 	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 200.0);
 		allowDescriptorChange =
 		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
-
+		allowStorageMigrationTypeChange = getOption(options, LiteralStringRef("allowStorageMigrationTypeChange"), false);
 		g_simulator.usableRegions = 1;
 	}
 
@@ -383,11 +384,13 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				    backupTypes[deterministicRandom()->randomInt(0, sizeof(backupTypes) / sizeof(backupTypes[0]))],
 				    false)));
 			} else if (randomChoice == 8) {
-				wait(success(
-				    IssueConfigurationChange(cx,
-				                             storageMigrationTypes[deterministicRandom()->randomInt(
-				                                 0, sizeof(storageMigrationTypes) / sizeof(storageMigrationTypes[0]))],
-				                             false)));
+				if(self->allowStorageMigrationTypeChange) {
+					wait(success(IssueConfigurationChange(
+					    cx,
+					    storageMigrationTypes[deterministicRandom()->randomInt(
+					        0, sizeof(storageMigrationTypes) / sizeof(storageMigrationTypes[0]))],
+					    false)));
+				}
 			} else {
 				ASSERT(false);
 			}

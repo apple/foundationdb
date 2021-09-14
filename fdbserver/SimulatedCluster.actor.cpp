@@ -1246,7 +1246,7 @@ void SimulationConfig::setRandomConfig() {
 		set_config("perpetual_storage_wiggle=0");
 	} else {
 		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 1);
-		set_config("storage_migration_type=gradual perpetual_storage_wiggle=1");
+		set_config("perpetual_storage_wiggle=1");
 	}
 
 	if (deterministicRandom()->random01() < 0.5) {
