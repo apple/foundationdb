@@ -25,6 +25,7 @@
 
 #include "flow/Arena.h"
 
+#include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -46,7 +47,9 @@ void printUsage(StringRef command) {
 }
 
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
-	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(tr->get(fdb_cli::errorMsgSpecialKey)));
+	// hold the returned standalone object's memory
+	state ThreadFuture<Optional<Value>> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
+	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(errorMsgF));
 	// Error message should be present
 	ASSERT(errorMsg.present());
 	// Read the json string

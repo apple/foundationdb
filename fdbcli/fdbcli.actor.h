@@ -30,6 +30,7 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IClientApi.h"
+#include "fdbclient/StatusClient.h"
 #include "flow/Arena.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -65,6 +66,8 @@ extern const KeyRef consistencyCheckSpecialKey;
 // datadistribution
 extern const KeyRef ddModeSpecialKey;
 extern const KeyRef ddIgnoreRebalanceSpecialKey;
+// lock/unlock
+extern const KeyRef lockSpecialKey;
 // maintenance
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
@@ -93,6 +96,11 @@ ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
                                          Reference<FlowLock> connectLock,
                                          KeyValue kv);
+// print cluster status info
+void printStatus(StatusObjectReader statusObj,
+                 StatusClient::StatusLevel level,
+                 bool displayDatabaseAvailable = true,
+                 bool hideErrorMessages = false);
 
 // All fdbcli commands (alphabetically)
 // advanceversion command
@@ -118,6 +126,9 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     Reference<ITransaction> tr,
                                     std::vector<StringRef> tokens,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+// lock/unlock command
+ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
@@ -130,6 +141,11 @@ ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<S
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
 ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// status command
+ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
+                                      Database localDb,
+                                      std::vector<StringRef> tokens,
+                                      bool isExecMode = false);
 // suspend command
 ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        Reference<ITransaction> tr,

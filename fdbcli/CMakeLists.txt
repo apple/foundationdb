@@ -10,10 +10,12 @@ set(FDBCLI_SRCS
   FlowLineNoise.h
   ForceRecoveryWithDataLossCommand.actor.cpp
   KillCommand.actor.cpp
+  LockCommand.actor.cpp
   MaintenanceCommand.actor.cpp
   ProfileCommand.actor.cpp
   SetClassCommand.actor.cpp
   SnapshotCommand.actor.cpp
+  StatusCommand.actor.cpp
   SuspendCommand.actor.cpp
   ThrottleCommand.actor.cpp
   TriggerDDTeamInfoLogCommand.actor.cpp
