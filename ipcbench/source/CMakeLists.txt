@@ -10,3 +10,7 @@ target_link_libraries(producer PRIVATE librt.so)
 add_executable(consumer consumer.cpp)
 target_link_libraries(consumer PUBLIC boost_target Threads::Threads)
 target_link_libraries(consumer PRIVATE librt.so)
+
+add_executable(ipc-client client.cpp)
+target_link_libraries(ipc-client PUBLIC boost_target Threads::Threads)
+target_link_libraries(ipc-client PRIVATE librt.so)
