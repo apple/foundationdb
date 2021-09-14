@@ -25,6 +25,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
@@ -234,7 +235,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
-	Future<bool> check(Database const& cx) override { return true;}
+	Future<bool> check(Database const& cx) override { return _check(this, cx);}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
@@ -267,7 +268,34 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(ConfigureDatabaseWorkload* self, Database cx) {
-		wait(success(changeConfig(cx, "storage_migration_type=aggressive", true)));
+		state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
+		state int i;
+		loop {
+			state bool pass = true;
+			state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+
+			for (i = 0; i < storageServers.size(); i++) {
+				// Check that each storage server has the correct key value store type
+				if(!storageServers[i].isTss()) {
+					ReplyPromise<KeyValueStoreType> typeReply;
+					ErrorOr<KeyValueStoreType> keyValueStoreType =
+					    wait(storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
+					if (!keyValueStoreType.present() || keyValueStoreType.get() != conf.storageServerStoreType) {
+						TraceEvent(SevWarn, "ConfigureDatabase_WrongStoreType")
+						    .suppressFor(5.0)
+						    .detail("ServerID", storageServers[i].id())
+						    .detail("ProcessID", storageServers[i].locality.processId())
+						    .detail("ServerStoreType", keyValueStoreType.present() ? keyValueStoreType.get().toString() : "?")
+						    .detail("ConfigStoreType", conf.storageServerStoreType.toString());
+						pass = false;
+						break;
+					}
+				}
+			}
+			if(pass)
+				break;
+			wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
+		}
 		return true;
 	}
 

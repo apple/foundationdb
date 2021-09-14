@@ -103,11 +103,40 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<As
 
 // Gets whether there still has SS with wrong storage type the data distributor.
 ACTOR Future<bool> getWrongStoreTypeCheck(Database cx, WorkerInterface distributorWorker) {
+	state bool res;
 	try {
 		TraceEvent("GetWrongStoreTypeCheck").detail("Stage", "ContactingDataDistributor");
 		TraceEventFields md =
 		    wait(timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("WrongStoreType"_sr)), 1.0));
-		return boost::lexical_cast<bool>(md.getValue("Found"));
+		res = boost::lexical_cast<bool>(md.getValue("Found"));
+		if(res) {
+			return true;
+		}
+
+		// check remote region
+		TraceEvent("GetWrongStoreTypeCheck").detail("Stage", "ReadRegionsValue");
+		Optional<Value> regionsValue =
+		    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+			    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			    return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
+		    }));
+		int usableRegions = 1;
+		if (regionsValue.present()) {
+			usableRegions = atoi(regionsValue.get().toString().c_str());
+		}
+
+		if(usableRegions > 1) {
+			TraceEvent("GetWrongStoreTypeCheck").detail("Stage", "CheckWrongStoreTypeRemote");
+			TraceEventFields md1 = wait(timeoutError(
+			    distributorWorker.eventLogRequest.getReply(EventLogRequest("WrongStoreTypeRemote"_sr)), 1.0));
+			std::string val;
+			if (md1.tryGetValue("Found", val)) {
+				res = boost::lexical_cast<bool>(val);
+			}
+		}
+
+		return res;
 	} catch (Error& e) {
 		TraceEvent("QuietDatabaseFailure", distributorWorker.id())
 		    .error(e)
@@ -711,7 +740,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 		wait(delay(5.0));
 
 	// make sure we don't stop perpetual wiggle while we're migrating store type
-	wait(waitForNoWrongStoreType(cx, dbInfo, phase));
+	// wait(waitForNoWrongStoreType(cx, dbInfo, phase));
 	printf("Set perpetual_storage_wiggle=0 ...\n");
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
