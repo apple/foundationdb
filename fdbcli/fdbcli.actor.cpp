@@ -588,15 +588,6 @@ void initHelp() {
 	helpMap["writemode"] = CommandHelp("writemode <on|off>",
 	                                   "enables or disables sets and clears",
 	                                   "Setting or clearing keys from the CLI is not recommended.");
-	helpMap["lock"] = CommandHelp(
-	    "lock",
-	    "lock the database with a randomly generated lockUID",
-	    "Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
-	helpMap["unlock"] =
-	    CommandHelp("unlock <UID>",
-	                "unlock the database with the provided lockUID",
-	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
-	                "user will be asked to enter a passphrase to confirm their intent.");
 }
 
 void printVersion() {
@@ -2285,15 +2276,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "lock")) {
-					if (tokens.size() != 1) {
-						printUsage(tokens[0]);
+					bool _result = wait(lockCommandActor(db, tokens));
+					if (!_result)
 						is_error = true;
-					} else {
-						state UID lockUID = deterministicRandom()->randomUniqueID();
-						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
-						wait(makeInterruptable(lockDatabase(localDb, lockUID)));
-						printf("Database locked.\n");
-					}
 					continue;
 				}
 
@@ -2314,16 +2299,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
-							try {
-								wait(makeInterruptable(unlockDatabase(localDb, unlockUID)));
-								printf("Database unlocked.\n");
-							} catch (Error& e) {
-								if (e.code() == error_code_database_locked) {
-									printf(
-									    "Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
-								}
-								throw e;
-							}
+							bool _result = wait(makeInterruptable(unlockDatabaseActor(db, unlockUID)));
+							if (!_result)
+								is_error = true;
 						} else {
 							fprintf(stderr, "ERROR: Incorrect passphrase entered.\n");
 							is_error = true;
