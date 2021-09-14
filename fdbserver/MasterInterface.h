@@ -102,12 +102,15 @@ struct TLogRejoinRequest {
 	constexpr static FileIdentifier file_identifier = 15692200;
 	TLogInterface myInterface;
 	ReplyPromise<TLogRejoinReply> reply;
+	ptxn::TLogInterface_PassivelyPull ptxnInterface;
 
 	TLogRejoinRequest() {}
 	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
+	explicit TLogRejoinRequest(const ptxn::TLogInterface_PassivelyPull& interf) : ptxnInterface(interf) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, myInterface, reply);
+		serializer(ar, myInterface, reply, ptxnInterface);
 	}
 };
 
