@@ -180,12 +180,13 @@ struct TransactionInfo {
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
+	bool readVersionObtainedFromGrvProxy;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
 	TransactionInfo() : taskID(), spanID(), useProvisionalProxies() {}
 
 	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
-	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
+	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false), readVersionObtainedFromGrvProxy(true) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -387,6 +388,8 @@ public:
 	void fullReset();
 	double getBackoff(int errCode);
 	void debugTransaction(UID dID) { info.debugID = dID; }
+	std::string getVersionVector() const;
+	UID getSpanID() const { return info.spanID; }
 
 	Future<Void> commitMutations();
 	void setupWatches();

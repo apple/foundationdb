@@ -668,6 +668,7 @@ void MultiVersionTransaction::setVersion(Version v) {
 		tr.transaction->setVersion(v);
 	}
 }
+
 ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getReadVersion() : ThreadFuture<Version>(Never());
@@ -823,6 +824,24 @@ Version MultiVersionTransaction::getCommittedVersion() {
 	}
 
 	return invalidVersion;
+}
+
+std::string MultiVersionTransaction::getVersionVector() {
+	auto tr = getTransaction();
+	if (tr.transaction) {
+		return tr.transaction->getVersionVector();
+	}
+
+	return std::string("transaction not found");
+}
+
+UID MultiVersionTransaction::getSpanID() {
+	auto tr = getTransaction();
+	if (tr.transaction) {
+		return tr.transaction->getSpanID();
+	}
+
+	return UID();
 }
 
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {

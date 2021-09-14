@@ -123,6 +123,9 @@ public:
 
 	[[nodiscard]] Future<Void> commit() override;
 	Version getCommittedVersion() const override { return tr.getCommittedVersion(); }
+	std::string getVersionVector() const override { return tr.getVersionVector(); }
+	UID getSpanID() const override { return tr.getSpanID(); }
+
 	int64_t getApproximateSize() const override { return approximateSize; }
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp() override;
 

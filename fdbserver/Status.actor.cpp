@@ -1264,6 +1264,8 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction* 
 
 	ASSERT(sourceTr->getReadVersion().isReady());
 	tr->setVersion(sourceTr->getReadVersion().get());
+	tr->getDatabase()->ssVersionVectorCache = sourceTr->getDatabase()->ssVersionVectorCache;
+	tr->info.readVersionObtainedFromGrvProxy = sourceTr->info.readVersionObtainedFromGrvProxy;
 
 	state double start = g_network->timer_monotonic();
 

@@ -96,6 +96,8 @@ struct VersionVector {
 		for (auto& [version, tags] : tmpVersionMap) {
 			delta.setVersion(tags, version);
 		}
+
+		delta.maxVersion = maxVersion;
 	}
 
 	// @note this method, together with method getDelta(), helps minimize
@@ -120,7 +122,10 @@ struct VersionVector {
 		for (auto& [version, tags] : tmpVersionMap) {
 			setVersion(tags, version);
 		}
+
+		maxVersion = delta.maxVersion;
 	}
+
 	std::string toString() const {
 		std::stringstream vector;
 		vector << "[";
