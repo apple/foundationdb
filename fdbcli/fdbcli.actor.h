@@ -66,6 +66,8 @@ extern const KeyRef consistencyCheckSpecialKey;
 // datadistribution
 extern const KeyRef ddModeSpecialKey;
 extern const KeyRef ddIgnoreRebalanceSpecialKey;
+// lock/unlock
+extern const KeyRef lockSpecialKey;
 // maintenance
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
@@ -124,6 +126,9 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     Reference<ITransaction> tr,
                                     std::vector<StringRef> tokens,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+// lock/unlock command
+ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,

@@ -150,6 +150,20 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = value;
 		}
+		if (key == "storage_migration_type") {
+			StorageMigrationType type;
+			if (value == "disabled") {
+				type = StorageMigrationType::DISABLED;
+			} else if (value == "aggressive") {
+				type = StorageMigrationType::AGGRESSIVE;
+			} else if (value == "gradual") {
+				type = StorageMigrationType::GRADUAL;
+			} else {
+				printf("Error: Only disabled|aggressive|gradual are valid for storage_migration_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", type);
+		}
 		return out;
 	}
 
@@ -445,6 +459,8 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 	state Future<Void> tooLong = delay(60);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 	state bool oldReplicationUsesDcId = false;
+	state bool warnPPWGradual = false;
+	state bool warnChangeStorageNoMigrate = false;
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -615,6 +631,16 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 							return ConfigurationResult::NOT_ENOUGH_WORKERS;
 						}
 					}
+
+					if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
+					    newConfig.storageMigrationType == StorageMigrationType::DISABLED) {
+						warnChangeStorageNoMigrate = true;
+					} else if ((newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
+					            newConfig.perpetualStorageWiggleSpeed == 0) ||
+					           (newConfig.perpetualStorageWiggleSpeed > 0 &&
+					            newConfig.storageMigrationType == StorageMigrationType::DISABLED)) {
+						warnPPWGradual = true;
+					}
 				}
 			}
 			if (creating) {
@@ -670,7 +696,14 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 			wait(tr.onError(e1));
 		}
 	}
-	return ConfigurationResult::SUCCESS;
+
+	if (warnPPWGradual) {
+		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
+	} else if (warnChangeStorageNoMigrate) {
+		return ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE;
+	} else {
+		return ConfigurationResult::SUCCESS;
+	}
 }
 
 ConfigureAutoResult parseConfig(StatusObject const& status) {

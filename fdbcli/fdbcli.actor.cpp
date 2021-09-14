@@ -473,7 +473,8 @@ void initHelp() {
 	    "configure [new|tss]"
 	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
 	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
-	    "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>",
+	    "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|storage_migration_type={disabled|gradual|"
+	    "aggressive}",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -587,15 +588,6 @@ void initHelp() {
 	helpMap["writemode"] = CommandHelp("writemode <on|off>",
 	                                   "enables or disables sets and clears",
 	                                   "Setting or clearing keys from the CLI is not recommended.");
-	helpMap["lock"] = CommandHelp(
-	    "lock",
-	    "lock the database with a randomly generated lockUID",
-	    "Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
-	helpMap["unlock"] =
-	    CommandHelp("unlock <UID>",
-	                "unlock the database with the provided lockUID",
-	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
-	                "user will be asked to enter a passphrase to confirm their intent.");
 }
 
 void printVersion() {
@@ -891,6 +883,27 @@ ACTOR Future<bool> configure(Database db,
 		break;
 	case ConfigurationResult::LOCKED_NOT_NEW:
 		fprintf(stderr, "ERROR: `only new databases can be configured as locked`\n");
+		ret = false;
+		break;
+	case ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL:
+		printf("Configuration changed, with warnings\n");
+		fprintf(stderr,
+		        "WARN: To make progress toward the desired storage type with storage_migration_type=gradual, the "
+		        "Perpetual Wiggle must be enabled.\n");
+		fprintf(stderr,
+		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
+		        "storage_migration_type=gradual' to set the gradual migration type.\n");
+		ret = true;
+		break;
+	case ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE:
+		printf("Configuration changed, with warnings\n");
+		fprintf(stderr,
+		        "WARN: Storage engine type changed, but nothing will be migrated because "
+		        "storage_migration_mode=disabled.\n");
+		fprintf(stderr,
+		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
+		        "migration with the perpetual wiggle, or `configure "
+		        "storage_migration_type=aggressive' for aggressive migration.\n");
 		ret = true;
 		break;
 	default:
@@ -1575,6 +1588,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "logs=",
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
+		                   "storage_migration_type=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -2262,15 +2276,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "lock")) {
-					if (tokens.size() != 1) {
-						printUsage(tokens[0]);
+					bool _result = wait(lockCommandActor(db, tokens));
+					if (!_result)
 						is_error = true;
-					} else {
-						state UID lockUID = deterministicRandom()->randomUniqueID();
-						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
-						wait(makeInterruptable(lockDatabase(localDb, lockUID)));
-						printf("Database locked.\n");
-					}
 					continue;
 				}
 
@@ -2291,16 +2299,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
-							try {
-								wait(makeInterruptable(unlockDatabase(localDb, unlockUID)));
-								printf("Database unlocked.\n");
-							} catch (Error& e) {
-								if (e.code() == error_code_database_locked) {
-									printf(
-									    "Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
-								}
-								throw e;
-							}
+							bool _result = wait(makeInterruptable(unlockDatabaseActor(db, unlockUID)));
+							if (!_result)
+								is_error = true;
 						} else {
 							fprintf(stderr, "ERROR: Incorrect passphrase entered.\n");
 							is_error = true;
