@@ -757,9 +757,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Blob granlues
 	init( BG_URL,                                                 "" );
-	// TODO CHANGE BACK
-	// init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 );
-	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    1000000 );
+	// TODO CHANGE BACK!!
+	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 ); if( randomize && BUGGIFY ) { deterministicRandom()->random01() < 0.1 ? BG_SNAPSHOT_FILE_TARGET_BYTES /= 100 : BG_SNAPSHOT_FILE_TARGET_BYTES /= 10; }
 	init( BG_DELTA_BYTES_BEFORE_COMPACT, BG_SNAPSHOT_FILE_TARGET_BYTES/2 );
 	init( BG_DELTA_FILE_TARGET_BYTES,   BG_DELTA_BYTES_BEFORE_COMPACT/10 );
 

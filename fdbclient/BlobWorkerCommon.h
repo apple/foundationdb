@@ -38,6 +38,7 @@ struct BlobWorkerStats {
 
 	int numRangesAssigned;
 	int mutationBytesBuffered;
+	int activeReadRequests;
 
 	Future<Void> logger;
 
@@ -45,20 +46,18 @@ struct BlobWorkerStats {
 	explicit BlobWorkerStats(UID id, double interval)
 	  : cc("BlobWorkerStats", id.toString()),
 
-		s3PutReqs("S3PutReqs", cc), s3GetReqs("S3GetReqs", cc), s3DeleteReqs("S3DeleteReqs", cc),
-		deltaFilesWritten("DeltaFilesWritten", cc), snapshotFilesWritten("SnapshotFilesWritten", cc),
-		deltaBytesWritten("DeltaBytesWritten", cc), snapshotBytesWritten("SnapshotBytesWritten", cc),
-		bytesReadFromFDBForInitialSnapshot("BytesReadFromFDBForInitialSnapshot", cc),
-		bytesReadFromS3ForCompaction("BytesReadFromS3ForCompaction", cc),
-		rangeAssignmentRequests("RangeAssignmentRequests", cc), readRequests("ReadRequests", cc),
-		wrongShardServer("WrongShardServer", cc),
-		changeFeedInputBytes("RangeFeedInputBytes", cc),
-		readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
-		readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc),
-		numRangesAssigned(0), mutationBytesBuffered(0)
-	{
+	    s3PutReqs("S3PutReqs", cc), s3GetReqs("S3GetReqs", cc), s3DeleteReqs("S3DeleteReqs", cc),
+	    deltaFilesWritten("DeltaFilesWritten", cc), snapshotFilesWritten("SnapshotFilesWritten", cc),
+	    deltaBytesWritten("DeltaBytesWritten", cc), snapshotBytesWritten("SnapshotBytesWritten", cc),
+	    bytesReadFromFDBForInitialSnapshot("BytesReadFromFDBForInitialSnapshot", cc),
+	    bytesReadFromS3ForCompaction("BytesReadFromS3ForCompaction", cc),
+	    rangeAssignmentRequests("RangeAssignmentRequests", cc), readRequests("ReadRequests", cc),
+	    wrongShardServer("WrongShardServer", cc), changeFeedInputBytes("RangeFeedInputBytes", cc),
+	    readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
+	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), numRangesAssigned(0), mutationBytesBuffered(0) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
+		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
 
 		logger = traceCounters("BlobWorkerMetrics", id, interval, &cc, "BlobWorkerMetrics");
 	}

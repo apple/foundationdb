@@ -33,8 +33,9 @@
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include "flow/flow.h"
 
-#define BM_DEBUG 1
+#define BM_DEBUG false
 
 // TODO add comments + documentation
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
@@ -408,6 +409,10 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> collection = actorCollection(addActor.getFuture());
 	loop {
+		// inject delay into range assignments
+		if (BUGGIFY_WITH_PROB(0.05)) {
+			wait(delay(deterministicRandom()->random01()));
+		}
 		RangeAssignment assignment = waitNext(bmData->rangesToAssign.getFuture());
 		int64_t seqNo = bmData->seqNo;
 		bmData->seqNo++;
@@ -463,10 +468,12 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Blo
 	if (currentEpoch != bmData->epoch) {
 		ASSERT(currentEpoch > bmData->epoch);
 
-		printf("BM %s found new epoch %d > %d in lock check\n",
-		       bmData->id.toString().c_str(),
-		       currentEpoch,
-		       bmData->epoch);
+		if (BM_DEBUG) {
+			printf("BM %s found new epoch %d > %d in lock check\n",
+			       bmData->id.toString().c_str(),
+			       currentEpoch,
+			       bmData->epoch);
+		}
 		if (bmData->iAmReplaced.canBeSet()) {
 			bmData->iAmReplaced.send(Void());
 		}
@@ -656,12 +663,14 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 			ASSERT(lockValue.present());
 			std::tuple<int64_t, int64_t, UID> prevGranuleLock = decodeBlobGranuleLockValue(lockValue.get());
 			if (std::get<0>(prevGranuleLock) > bmData->epoch) {
-				printf("BM %s found a higher epoch %d than %d for granule lock of [%s - %s)\n",
-				       bmData->id.toString().c_str(),
-				       std::get<0>(prevGranuleLock),
-				       bmData->epoch,
-				       range.begin.printable().c_str(),
-				       range.end.printable().c_str());
+				if (BM_DEBUG) {
+					printf("BM %s found a higher epoch %d than %d for granule lock of [%s - %s)\n",
+					       bmData->id.toString().c_str(),
+					       std::get<0>(prevGranuleLock),
+					       bmData->epoch,
+					       range.begin.printable().c_str(),
+					       range.end.printable().c_str());
+				}
 
 				if (bmData->iAmReplaced.canBeSet()) {
 					bmData->iAmReplaced.send(Void());

@@ -29,6 +29,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define BGV_DEBUG false
+
 /*
  * This workload is designed to verify the correctness of the blob data produced by the blob workers.
  * As a read-only validation workload, it can piggyback off of other write or read/write workloads.
@@ -68,18 +70,30 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		threads = getOption(options, LiteralStringRef("threads"), 1);
 		ASSERT(threads >= 1);
 
-		printf("Initializing Blob Granule Verifier s3 stuff\n");
+		if (BGV_DEBUG) {
+			printf("Initializing Blob Granule Verifier s3 stuff\n");
+		}
 		try {
 			if (g_network->isSimulated()) {
-				printf("Blob Granule Verifier constructing simulated backup container\n");
+
+				if (BGV_DEBUG) {
+					printf("Blob Granule Verifier constructing simulated backup container\n");
+				}
 				bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
 			} else {
-				printf("Blob Granule Verifier constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+				if (BGV_DEBUG) {
+					printf("Blob Granule Verifier constructing backup container from %s\n",
+					       SERVER_KNOBS->BG_URL.c_str());
+				}
 				bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
-				printf("Blob Granule Verifier constructed backup container\n");
+				if (BGV_DEBUG) {
+					printf("Blob Granule Verifier constructed backup container\n");
+				}
 			}
 		} catch (Error& e) {
-			printf("BW got backup container init error %s\n", e.name());
+			if (BGV_DEBUG) {
+				printf("Blob Granule Verifier got backup container init error %s\n", e.name());
+			}
 			throw e;
 		}
 	}
@@ -96,7 +110,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
 				wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(normalKeys), LiteralStringRef("1")));
 				wait(tr->commit());
-				printf("Successfully set up blob granule range for normalKeys\n");
+				if (BGV_DEBUG) {
+					printf("Successfully set up blob granule range for normalKeys\n");
+				}
 				TraceEvent("BlobGranuleVerifierSetup");
 				return Void();
 			} catch (Error& e) {
@@ -109,7 +125,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override {
 		if (doSetup) {
 			double initialDelay = deterministicRandom()->random01() * (maxDelay - minDelay) + minDelay;
-			printf("BGW setup initial delay of %.3f\n", initialDelay);
+			if (BGV_DEBUG) {
+				printf("BGW setup initial delay of %.3f\n", initialDelay);
+			}
 			return setUpBlobRange(cx, delay(initialDelay));
 		}
 		return delay(0);
@@ -118,7 +136,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	ACTOR Future<Void> findGranules(Database cx, BlobGranuleVerifierWorkload* self) {
 		// updates the current set of granules in the database, but on a delay, so there can be some mismatch if ranges
 		// change
-		// printf("BGV find granules starting\n");
 		loop {
 			state std::vector<KeyRange> allGranules;
 			state Transaction tr(cx);
@@ -168,18 +185,21 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		return std::pair(out, v);
 	}
 
-	ACTOR Future<RangeResult> readFromBlob(Database cx,
-	                                       BlobGranuleVerifierWorkload* self,
-	                                       KeyRange range,
-	                                       Version version) {
+	ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
+	readFromBlob(Database cx, BlobGranuleVerifierWorkload* self, KeyRange range, Version version) {
 		state RangeResult out;
+		state Standalone<VectorRef<BlobGranuleChunkRef>> replyOut;
 		state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
 		state Future<Void> requester = cx->readBlobGranulesStream(chunkStream, range, 0, version);
 		loop {
 			try {
 				Standalone<BlobGranuleChunkRef> nextChunk = waitNext(chunkStream.getFuture());
 				out.arena().dependsOn(
-				    nextChunk.arena()); // TODO this wastes extra memory but we'll se   e if it fixes segfault
+				    nextChunk.arena()); // FIXME: this wastes extra memory but fixes a segfault because nextChunk gets
+				                        // deallocated as soon as we wait on readBlobGranule.
+				replyOut.arena().dependsOn(nextChunk.arena());
+				replyOut.push_back(replyOut.arena(), nextChunk);
+
 				RangeResult chunkRows = wait(readBlobGranule(nextChunk, range, version, self->bstore));
 				out.arena().dependsOn(chunkRows.arena());
 				out.append(out.arena(), chunkRows.begin(), chunkRows.size());
@@ -190,19 +210,89 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				throw e;
 			}
 		}
-		return out;
+		return std::pair(out, replyOut);
 	}
 
-	bool compareResult(RangeResult fdb, RangeResult blob, KeyRange range, Version v, bool initialRequest) {
-		bool correct = fdb == blob;
+	bool compareResult(RangeResult fdb,
+	                   std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob,
+	                   KeyRange range,
+	                   Version v,
+	                   bool initialRequest) {
+		bool correct = fdb == blob.first;
 		if (!correct) {
 			mismatches++;
 			TraceEvent ev(SevError, "GranuleMismatch");
 			ev.detail("RangeStart", range.begin)
 			    .detail("RangeEnd", range.end)
 			    .detail("Version", v)
-			    .detail("RequestType", initialRequest ? "RealTime" : "TimeTravel");
+			    .detail("RequestType", initialRequest ? "RealTime" : "TimeTravel")
+			    .detail("FDBSize", fdb.size())
+			    .detail("BlobSize", blob.first.size());
 			// TODO debugging details!
+
+			if (BGV_DEBUG) {
+				printf("\nMismatch for [%s - %s) @ %lld (%s). F(%d) B(%d):\n",
+				       range.begin.printable().c_str(),
+				       range.end.printable().c_str(),
+				       v,
+				       initialRequest ? "RealTime" : "TimeTravel",
+				       fdb.size(),
+				       blob.first.size());
+
+				Optional<KeyValueRef> lastCorrect;
+				for (int i = 0; i < std::max(fdb.size(), blob.first.size()); i++) {
+					if (i >= fdb.size() || i >= blob.first.size() || fdb[i] != blob.first[i]) {
+						printf("  Found mismatch at %d.\n", i);
+						if (lastCorrect.present()) {
+							printf("    last correct: %s=%s\n",
+							       lastCorrect.get().key.printable().c_str(),
+							       lastCorrect.get().value.printable().c_str());
+						}
+						if (i < fdb.size()) {
+							printf(
+							    "    FDB: %s=%s\n", fdb[i].key.printable().c_str(), fdb[i].value.printable().c_str());
+						} else {
+							printf("    FDB: <missing>\n");
+						}
+						if (i < blob.first.size()) {
+							printf("    BLB: %s=%s\n",
+							       blob.first[i].key.printable().c_str(),
+							       blob.first[i].value.printable().c_str());
+						} else {
+							printf("    BLB: <missing>\n");
+						}
+						printf("\n");
+						break;
+					}
+					if (i < fdb.size()) {
+						lastCorrect = fdb[i];
+					} else {
+						lastCorrect = blob.first[i];
+					}
+				}
+
+				printf("Chunks:\n");
+				for (auto& chunk : blob.second) {
+					printf("[%s - %s)\n",
+					       chunk.keyRange.begin.printable().c_str(),
+					       chunk.keyRange.end.printable().c_str());
+
+					printf("  SnapshotFile:\n    %s\n",
+					       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
+					printf("  DeltaFiles:\n");
+					for (auto& df : chunk.deltaFiles) {
+						printf("    %s\n", df.toString().c_str());
+					}
+					printf("  Deltas: (%d)", chunk.newDeltas.size());
+					if (chunk.newDeltas.size() > 0) {
+						printf(" with version [%lld - %lld]",
+						       chunk.newDeltas[0].version,
+						       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+					}
+					printf("  IncludedVersion: %lld\n", chunk.includedVersion);
+				}
+				printf("\n");
+			}
 		}
 		return correct;
 	}
@@ -225,12 +315,16 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state int64_t timeTravelChecksMemory = 0;
 
 		TraceEvent("BlobGranuleVerifierStart");
-		printf("BGV thread starting\n");
+		if (BGV_DEBUG) {
+			printf("BGV thread starting\n");
+		}
 
 		// wait for first set of ranges to be loaded
 		wait(self->granuleRanges.onChange());
 
-		printf("BGV got ranges\n");
+		if (BGV_DEBUG) {
+			printf("BGV got ranges\n");
+		}
 
 		loop {
 			try {
@@ -238,11 +332,14 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				state std::map<double, OldRead>::iterator timeTravelIt = timeTravelChecks.begin();
 				while (timeTravelIt != timeTravelChecks.end() && currentTime >= timeTravelIt->first) {
 					state OldRead oldRead = timeTravelIt->second;
-					RangeResult reReadResult = wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
-					self->compareResult(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, false);
-
 					timeTravelChecksMemory -= oldRead.oldResult.expectedSize();
 					timeTravelIt = timeTravelChecks.erase(timeTravelIt);
+					// advance iterator before doing read, so if it gets error we don't retry it
+
+					std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
+					    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
+					self->compareResult(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, false);
+
 					self->timeTravelReads++;
 				}
 
@@ -251,7 +348,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				state KeyRange range = self->granuleRanges.get()[rIndex];
 
 				state std::pair<RangeResult, Version> fdb = wait(self->readFromFDB(cx, range));
-				RangeResult blob = wait(self->readFromBlob(cx, self, range, fdb.second));
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
+				    wait(self->readFromBlob(cx, self, range, fdb.second));
 				if (self->compareResult(fdb.first, blob, range, fdb.second, true)) {
 					// TODO: bias for immediately re-reading to catch rollback cases
 					double reReadTime = currentTime + deterministicRandom()->random01() * self->timeTravelLimit;
@@ -270,7 +368,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				if (e.code() == error_code_operation_cancelled) {
 					throw;
 				}
-				if (e.code() != error_code_transaction_too_old && e.code() != error_code_wrong_shard_server) {
+				if (e.code() != error_code_transaction_too_old && e.code() != error_code_wrong_shard_server &&
+				    BGV_DEBUG) {
 					printf("BGVerifier got unexpected error %s\n", e.name());
 				}
 				self->errors++;
@@ -288,8 +387,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			clients.push_back(
 			    timeout(reportErrors(verifyGranules(cx, this), "BlobGranuleVerifier"), testDuration, Void()));
 		}
-
-		printf("BGF start launched\n");
 		return delay(testDuration);
 	}
 
@@ -304,7 +401,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
 			state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
-			printf("Final availability check [%s - %s)\n", r.begin.printable().c_str(), r.end.printable().c_str());
+			if (BGV_DEBUG) {
+				printf("Final availability check [%s - %s)\n", r.begin.printable().c_str(), r.end.printable().c_str());
+			}
 			state Future<Void> requester = cx->readBlobGranulesStream(chunkStream, r, 0, readVersion);
 			loop {
 				try {
@@ -316,11 +415,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					if (e.code() == error_code_end_of_stream) {
 						break;
 					}
-					printf("BG Verifier failed final availability check for [%s - %s) @ %lld with error %s\n",
-					       r.begin.printable().c_str(),
-					       r.end.printable().c_str(),
-					       readVersion,
-					       e.name());
+					if (BGV_DEBUG) {
+						printf("BG Verifier failed final availability check for [%s - %s) @ %lld with error %s\n",
+						       r.begin.printable().c_str(),
+						       r.end.printable().c_str(),
+						       readVersion,
+						       e.name());
+					}
 					throw e;
 				}
 			}

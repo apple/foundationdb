@@ -1591,6 +1591,7 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	return Void();
 }
 
+// FIXME: this overwrites mutations in change feed buffer!!!
 void filterMutations(Arena& arena, VectorRef<MutationRef>& mutations, KeyRange const& range) {
 	if (mutations.size() == 1 && mutations.back().param1 == lastEpochEndPrivateKey) {
 		return;
@@ -1644,6 +1645,7 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 
 	auto feed = data->uidChangeFeed.find(req.rangeID);
 	if (feed == data->uidChangeFeed.end()) {
+		// TODO should unknown_change_feed be replyable?
 		printf("Unknown change feed %s\n", req.rangeID.printable().c_str());
 		throw unknown_change_feed();
 	}
@@ -1660,7 +1662,6 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + it.expectedSize();
 			}
 		}
-		// printf("  Found %d in memory mutations\n", reply.mutations.size());
 	} else {
 		state std::deque<Standalone<MutationsAndVersionRef>> mutationsDeque = feed->second->mutations;
 		state Version startingDurableVersion = feed->second->durableVersion;
@@ -1735,6 +1736,18 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0) {
 		reply.mutations.push_back(reply.arena, MutationsAndVersionRef(finalVersion));
 	}
+
+	// TODO REMOVE or only do if mutation tracking is enabled
+	for (auto& mutations : reply.mutations) {
+		for (auto& m : mutations.mutations) {
+			DEBUG_MUTATION("ChangeFeedRead", mutations.version, m, data->thisServerID)
+			    .detail("ChangeFeedID", req.rangeID)
+			    .detail("ReqBegin", req.begin)
+			    .detail("ReqEnd", req.end)
+			    .detail("ReqRange", req.range);
+		}
+	}
+
 	return reply;
 }
 
@@ -2947,6 +2960,10 @@ void applyMutation(StorageServer* self,
 				if (it->mutations.empty() || it->mutations.back().version != version) {
 					it->mutations.push_back(MutationsAndVersionRef(version));
 				}
+				DEBUG_MUTATION("ChangeFeedWriteSet", version, m, self->thisServerID)
+				    .detail("Range", it->range)
+				    .detail("ChangeFeedID", it->id);
+
 				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 				self->currentChangeFeeds.insert(it->id);
 			}
@@ -2965,6 +2982,9 @@ void applyMutation(StorageServer* self,
 					if (it->mutations.empty() || it->mutations.back().version != version) {
 						it->mutations.push_back(MutationsAndVersionRef(version));
 					}
+					DEBUG_MUTATION("ChangeFeedWriteClear", version, m, self->thisServerID)
+					    .detail("Range", it->range)
+					    .detail("ChangeFeedID", it->id);
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 					self->currentChangeFeeds.insert(it->id);
 				}
@@ -4082,7 +4102,8 @@ private:
 				if (feed == data->uidChangeFeed.end()) {
 					TraceEvent("AddingChangeFeed", data->thisServerID)
 					    .detail("RangeID", changeFeedId.printable())
-					    .detail("Range", changeFeedRange.toString());
+					    .detail("Range", changeFeedRange.toString())
+					    .detail("CreateVersion", currentVersion);
 					Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
 					changeFeedInfo->range = changeFeedRange;
 					changeFeedInfo->id = changeFeedId;
