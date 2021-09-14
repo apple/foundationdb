@@ -439,6 +439,7 @@ struct BackupData {
 				                                                       &GrvProxyInterface::getConsistentReadVersion,
 				                                                       request,
 				                                                       self->cx->taskID))) {
+					self->cx->ssVersionVectorCache.applyDelta(reply.ssVersionVectorDelta);
 					return reply.version;
 				}
 			}

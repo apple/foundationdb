@@ -127,6 +127,8 @@ public:
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
+	std::string getVersionVector() override;
+	UID getSpanID() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	ThreadFuture<uint64_t> getProtocolVersion();

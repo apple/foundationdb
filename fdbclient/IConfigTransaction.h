@@ -44,6 +44,8 @@ public:
 
 	// Not implemented:
 	void setVersion(Version) override { throw client_invalid_operation(); }
+	std::string getVersionVector() const override { throw client_invalid_operation(); }
+	UID getSpanID() const override { throw client_invalid_operation(); }
 	Future<Key> getKey(KeySelector const& key, Snapshot snapshot = Snapshot::False) override {
 		throw client_invalid_operation();
 	}

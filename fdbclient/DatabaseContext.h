@@ -455,6 +455,7 @@ public:
 	// commit version of that storage server is below the specified "readVersion".
 	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
 	                             Version readVersion,
+	                             const TransactionInfo& info,
 	                             VersionVector& latestCommitVersions);
 
 	// used in template functions to create a transaction

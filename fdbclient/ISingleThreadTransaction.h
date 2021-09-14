@@ -76,6 +76,8 @@ public:
 	virtual void addWriteConflictRange(KeyRangeRef const& keys) = 0;
 	virtual Future<Void> commit() = 0;
 	virtual Version getCommittedVersion() const = 0;
+	virtual std::string getVersionVector() const = 0;
+	virtual UID getSpanID() const = 0;
 	virtual int64_t getApproximateSize() const = 0;
 	virtual Future<Standalone<StringRef>> getVersionstamp() = 0;
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;

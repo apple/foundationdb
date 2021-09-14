@@ -239,6 +239,8 @@ public:
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
+	std::string getVersionVector() override { return std::string("DLTransaction::Not implemented"); }
+	UID getSpanID() override { return UID(); };
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -378,6 +380,8 @@ public:
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
+	std::string getVersionVector() override;
+	UID getSpanID() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
