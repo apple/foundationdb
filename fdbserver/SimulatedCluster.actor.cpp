@@ -1297,8 +1297,7 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 
 // Sets storage engine based on testConfig details
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
-	// int storage_engine_type = deterministicRandom()->randomInt(0, 5);
-	int storage_engine_type = 3;
+	int storage_engine_type = deterministicRandom()->randomInt(0, 5);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
