@@ -953,9 +953,8 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	if (deterministicRandom()->random01() < 0.5) {
 		set_config("perpetual_storage_wiggle=0");
 	} else {
-		set_config("storage_migration_type=gradual perpetual_storage_wiggle=1");
+		set_config("perpetual_storage_wiggle=1");
 	}
-	// 	set_config("storage_migration_type=gradual perpetual_storage_wiggle=1");
 
 	if (simple) {
 		db.desiredTLogCount = 1;
