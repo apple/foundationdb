@@ -1127,7 +1127,7 @@ ACTOR Future<Void> rejoinMasters(Reference<TLogServerData> self,
 			if (self->dbInfo->get().master.id() != lastMasterID) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
 				// TLogInterface
-				TLogRejoinRequest req;
+				TLogRejoinRequest req(tli);
 				TraceEvent("TLogRejoining", tli.id()).detail("Master", self->dbInfo->get().master.id());
 				choose {
 					when(TLogRejoinReply rep =
