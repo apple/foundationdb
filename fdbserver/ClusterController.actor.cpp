@@ -25,6 +25,7 @@
 #include <set>
 #include <vector>
 
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/ConfigBroadcaster.h"
@@ -1565,6 +1566,12 @@ public:
 
 		updateKnownIds(&id_used);
 
+		if (req.dbgId.present()) {
+			TraceEvent("FindRemoteWorkersForConf", req.dbgId.get())
+			    .detail("RemoteDcId", req.dcId)
+			    .detail("Configuration", req.configuration.toString());
+		}
+
 		std::set<Optional<Key>> remoteDC;
 		remoteDC.insert(req.dcId);
 
@@ -1576,12 +1583,29 @@ public:
 		                                     false,
 		                                     remoteDC,
 		                                     req.exclusionWorkerIds);
+
+		if (req.dbgId.present()) {
+			TraceEvent("FindRemoteWorkersForConf_GetWorkersForLogs", req.dbgId.get())
+			    .detail("RemoteDcId", req.dcId)
+			    .detail("RemoteLog.size", remoteLogs.size());
+		} else {
+			TraceEvent("FindRemoteWorkersForConf_GetWorkersForLogs")
+			    .detail("RemoteDcId", req.dcId)
+			    .detail("RemoteLog.size", remoteLogs.size());
+		}
+
 		for (int i = 0; i < remoteLogs.size(); i++) {
 			result.remoteTLogs.push_back(remoteLogs[i].interf);
 		}
 
 		auto logRouters = getWorkersForRoleInDatacenter(
 		    req.dcId, ProcessClass::LogRouter, req.logRouterCount, req.configuration, id_used);
+		if (req.dbgId.present()) {
+			TraceEvent("FindRemoteWorkersForConf_GetWorkersForRoleInDc", req.dbgId.get())
+			    .detail("RemoteDcId", req.dcId)
+			    .detail("LogRouters.size", logRouters.size());
+		}
+
 		for (int i = 0; i < logRouters.size(); i++) {
 			result.logRouters.push_back(logRouters[i].interf);
 		}
@@ -1593,6 +1617,12 @@ public:
 		     (RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.logRouterCount, ProcessClass::LogRouter)
 		          .betterCount(RoleFitness(logRouters, ProcessClass::LogRouter, id_used))))) {
 			throw operation_failed();
+		}
+		if (req.dbgId.present()) {
+			TraceEvent("FindRemoteWorkersForConf_ReturnResult", req.dbgId.get())
+			    .detail("RemoteDcId", req.dcId)
+			    .detail("Result_RemoteLogs", result.remoteTLogs.size());
+			result.dbgId = req.dbgId;
 		}
 
 		return result;
@@ -3012,6 +3042,7 @@ public:
 	RangeResult lastProcessClasses;
 	bool gotProcessClasses;
 	bool gotFullyRecoveredConfig;
+	bool shouldCommitSuicide;
 	Optional<Standalone<StringRef>> masterProcessId;
 	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	Optional<Standalone<StringRef>> clusterControllerDcId;
@@ -3029,6 +3060,7 @@ public:
 	Future<Void> outstandingRequestChecker;
 	Future<Void> outstandingRemoteRequestChecker;
 	AsyncTrigger updateDBInfo;
+	AsyncTrigger cancelClusterRecovery;
 	std::set<Endpoint> updateDBInfoEndpoints;
 	std::set<Endpoint> removedDBInfoEndpoints;
 
@@ -3074,11 +3106,11 @@ public:
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators)
-	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), clusterControllerProcessId(locality.processId()),
-	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
-	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
-	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
-	    recruitingDistributor(false), recruitRatekeeper(false),
+	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
+	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
+	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
+	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
+	    versionDifferenceUpdated(false), recruitingDistributor(false), recruitRatekeeper(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
@@ -3176,7 +3208,7 @@ public:
 	Future<Void> read() { return _read(this); }
 
 	Future<Void> write(DBCoreState newState, bool finalWrite = false) {
-		// TraceEvent("write db").detail("prvTLogs", prevDBState.tLogs.size()).detail("newTLog", newState.tLogs.size());
+		// TraceEvent("Write db").detail("PrvTLogs", prevDBState.tLogs.size()).detail("NewTLog", newState.tLogs.size());
 		previousWrite = _write(this, newState, finalWrite);
 		return previousWrite;
 	}
@@ -3321,7 +3353,6 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	bool neverCreated;
 	int8_t safeLocality;
 	int8_t primaryLocality;
-	bool ccShouldCommitSuicide;
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
@@ -3343,14 +3374,14 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	                    PromiseStream<Future<Void>> const& addActor,
 	                    bool forceRecovery)
 
-	  : controllerData(controllerData), dbgid(clusterController.id()), lastEpochEnd(invalidVersion),
+	  : controllerData(controllerData), dbgid(masterInterface.id()), lastEpochEnd(invalidVersion),
 	    recoveryTransactionVersion(invalidVersion), lastCommitTime(0), liveCommittedVersion(invalidVersion),
 	    databaseLocked(false), minKnownCommittedVersion(invalidVersion), hasConfiguration(false),
 	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr),
 	    memoryLimit(2e9), dbId(dbId), masterInterface(masterInterface), clusterController(clusterController),
 	    cstate(coordinators, addActor, dbgid), dbInfo(dbInfo), registrationCount(0), addActor(addActor),
 	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), ccShouldCommitSuicide(false),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid),
 	    cc("ClusterController", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
@@ -3412,14 +3443,13 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 
 			*newMaster = fNewMaster.get().get();
 
-			break;
+			return Void();
+
 		} else {
 			TEST(true); // clusterWatchDatabase() !newMaster.present()
 			wait(delay(SERVER_KNOBS->MASTER_SPIN_DELAY));
 		}
 	}
-
-	return Void();
 }
 
 ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
@@ -3517,6 +3547,16 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		               recr.satelliteTLogs.end(),
 		               std::back_inserter(exclusionWorkerIds),
 		               [](const WorkerInterface& in) { return in.id(); });
+
+		/*
+		state RecruitRemoteFromConfigurationRequest recruitReq;
+		recruitReq.configuration = self->configuration;
+		recruitReq.dcId = remoteDcId;
+		recruitReq.logRouterCount =
+		    recr.tLogs.size() *
+		    std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size()));
+		recruitReq.dbgId = self->dbgid;
+
 		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever(
 		    self->clusterController.recruitRemoteFromConfiguration.getReply(RecruitRemoteFromConfigurationRequest(
 		        self->configuration,
@@ -3524,6 +3564,18 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		        recr.tLogs.size() *
 		            std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size())),
 		        exclusionWorkerIds)));
+		TraceEvent("NewTLogServers", self->dbgid).log();
+		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNeverWithLogs(
+		    self->clusterController.recruitRemoteFromConfiguration.getReply(recruitReq), self->dbgid);
+		*/
+
+		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers =
+		    self->controllerData->findRemoteWorkersForConfiguration(RecruitRemoteFromConfigurationRequest(
+		        self->configuration,
+		        remoteDcId,
+		        recr.tLogs.size() *
+		            std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size())),
+		        exclusionWorkerIds));
 
 		self->primaryLocality = self->dcId_locality[recr.dcId];
 		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
@@ -3658,133 +3710,6 @@ Future<Void> waitResolverFailure(vector<ResolverInterface> const& resolvers) {
 	return tagError<Void>(quorum(failed, 1), resolver_failed());
 }
 
-ACTOR Future<Void> getVersion(Reference<ClusterRecoveryData> self, GetCommitVersionRequest req) {
-	state Span span("M:getVersion"_loc, { req.spanContext });
-	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
-	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
-
-	++self->getCommitVersionRequests;
-
-	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
-		// Request from invalid proxy (e.g. from duplicate recruitment request)
-		req.reply.send(Never());
-		return Void();
-	}
-
-	TEST(proxyItr->second.latestRequestNum.get() < req.requestNum - 1); // Commit version request queued up
-	wait(proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1));
-
-	auto itr = proxyItr->second.replies.find(req.requestNum);
-	if (itr != proxyItr->second.replies.end()) {
-		TEST(true); // Duplicate request for sequence
-		req.reply.send(itr->second);
-	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
-		TEST(true); // Old request for previously acknowledged sequence - may be impossible with current FlowTransport
-		ASSERT(req.requestNum <
-		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
-		req.reply.send(Never());
-	} else {
-		GetCommitVersionReply rep;
-
-		if (self->version == invalidVersion) {
-			self->lastVersionTime = now();
-			self->version = self->recoveryTransactionVersion;
-			rep.prevVersion = self->lastEpochEnd;
-		} else {
-			double t1 = now();
-			if (BUGGIFY) {
-				t1 = self->lastVersionTime;
-			}
-			rep.prevVersion = self->version;
-			self->version +=
-			    std::max<Version>(1,
-			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
-			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
-
-			TEST(self->version - rep.prevVersion == 1); // Minimum possible version gap
-
-			bool maxVersionGap = self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			TEST(maxVersionGap); // Maximum possible version gap
-			self->lastVersionTime = t1;
-
-			if (self->resolverNeedingChanges.count(req.requestingProxy)) {
-				rep.resolverChanges = self->resolverChanges.get();
-				rep.resolverChangesVersion = self->resolverChangesVersion;
-				self->resolverNeedingChanges.erase(req.requestingProxy);
-
-				if (self->resolverNeedingChanges.empty())
-					self->resolverChanges.set(Standalone<VectorRef<ResolverMoveRef>>());
-			}
-		}
-
-		rep.version = self->version;
-		rep.requestNum = req.requestNum;
-
-		proxyItr->second.replies.erase(proxyItr->second.replies.begin(),
-		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
-		proxyItr->second.replies[req.requestNum] = rep;
-		ASSERT(rep.prevVersion >= 0);
-		req.reply.send(rep);
-
-		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
-		proxyItr->second.latestRequestNum.set(req.requestNum);
-	}
-
-	return Void();
-}
-
-ACTOR Future<Void> provideVersions(Reference<ClusterRecoveryData> self) {
-	state ActorCollection versionActors(false);
-
-	for (auto& p : self->commitProxies)
-		self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
-
-	loop {
-		choose {
-			when(GetCommitVersionRequest req = waitNext(self->masterInterface.getCommitVersion.getFuture())) {
-				versionActors.add(getVersion(self, req));
-			}
-			when(wait(versionActors.getResult())) {}
-		}
-	}
-}
-
-ACTOR Future<Void> serveLiveCommittedVersion(Reference<ClusterRecoveryData> self) {
-	loop {
-		choose {
-			when(GetRawCommittedVersionRequest req =
-			         waitNext(self->masterInterface.getLiveCommittedVersion.getFuture())) {
-				if (req.debugID.present())
-					g_traceBatch.addEvent("TransactionDebug",
-					                      req.debugID.get().first(),
-					                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
-
-				if (self->liveCommittedVersion == invalidVersion) {
-					self->liveCommittedVersion = self->recoveryTransactionVersion;
-				}
-				++self->getLiveCommittedVersionRequests;
-				GetRawCommittedVersionReply reply;
-				reply.version = self->liveCommittedVersion;
-				reply.locked = self->databaseLocked;
-				reply.metadataVersion = self->proxyMetadataVersion;
-				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-				req.reply.send(reply);
-			}
-			when(ReportRawCommittedVersionRequest req =
-			         waitNext(self->masterInterface.reportLiveCommittedVersion.getFuture())) {
-				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
-				if (req.version > self->liveCommittedVersion) {
-					self->liveCommittedVersion = req.version;
-					self->databaseLocked = req.locked;
-					self->proxyMetadataVersion = req.metadataVersion;
-				}
-				++self->reportLiveCommittedVersionRequests;
-				req.reply.send(Void());
-			}
-		}
-	}
-}
-
 ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 	loop {
 		TLogRejoinRequest req = waitNext(self->clusterController.tlogRejoin.getFuture());
@@ -3801,7 +3726,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	state DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
-	// printf("trackTLogRecovery %p\n", self.getPtr());
+
 	loop {
 		state DBCoreState newState;
 		self->logSystem->toCoreState(newState);
@@ -3815,13 +3740,11 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		    newState.tLogs.size() ==
 		    configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		state bool finalUpdate = !newState.oldTLogData.size() && allLogs;
-		/* 
-		TraceEvent("trackTlogRecovery")
-		    .detail("finalUpdate", finalUpdate)
-		    .detail("newState.tlogs", newState.tLogs.size())
-		    .detail("expected.tlogs",
+		TraceEvent("TrackTlogRecovery")
+		    .detail("FinalUpdate", finalUpdate)
+		    .detail("NewState.tlogs", newState.tLogs.size())
+		    .detail("Expected.tlogs",
 		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()));
-		*/
 		wait(self->cstate.write(newState, finalUpdate));
 		wait(minRecoveryDuration);
 		self->logSystem->coreStateWritten(newState);
@@ -4012,11 +3935,12 @@ ACTOR Future<Void> resolutionBalancing(Reference<ClusterRecoveryData> self) {
 ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->clusterController.changeCoordinators.getFuture());
+		TraceEvent("ChangeCoordiantor", self->dbgid).log();
 		++self->changeCoordinatorsRequests;
 
 		// Kill cluster controller to facilitate coordinator registration update
-		ASSERT(!self->ccShouldCommitSuicide);
-		self->ccShouldCommitSuicide = true;
+		ASSERT(!self->controllerData->shouldCommitSuicide);
+		self->controllerData->shouldCommitSuicide = true;
 
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
 
@@ -4058,7 +3982,7 @@ ACTOR Future<Void> configurationMonitor(Reference<ClusterRecoveryData> self, Dat
 				if (conf != self->configuration) {
 					if (self->recoveryState != RecoveryState::ALL_LOGS_RECRUITED &&
 					    self->recoveryState != RecoveryState::FULLY_RECOVERED) {
-						self->ccShouldCommitSuicide = true;
+						self->controllerData->shouldCommitSuicide = true;
 						throw master_recovery_failed();
 					}
 
@@ -4273,13 +4197,14 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 		trigger = self->registrationTrigger.onTrigger();
 
 		auto logSystemConfig = logSystem->getLogSystemConfig();
-		/* 
+		
 		TraceEvent("UpdateRegistration", self->dbgid)
 		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
 		    .detail("Logs", describe(logSystemConfig.tLogs))
-			.detail("cstateUpdated", self->cstateUpdated.isSet());
-		*/
+			.detail("CStateUpdated", self->cstateUpdated.isSet())
+			.detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
+			.detail("LastEpochEnd", self->lastEpochEnd);
 
 		if (!self->cstateUpdated.isSet()) {
 			wait(sendMasterRegistration(self.getPtr(),
@@ -4884,7 +4809,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	                                                                       self->dbgid,
 	                                                                       self->cstate.prevDBState,
 	                                                                       self->clusterController.tlogRejoin.getFuture(),
-	                                                                       self->dbInfo->get().myLocality,
+	                                                                       self->controllerData->db.serverInfo->get().myLocality,
 	                                                                       &self->forceRecovery);
 
 	DBCoreState newState = self->cstate.myDBState;
@@ -4954,7 +4879,9 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	recoveryCommitRequest.flags = recoveryCommitRequest.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 	CommitTransactionRef& tr = recoveryCommitRequest.transaction;
 	recoveryCommitRequest.debugID = debugId;
-	TraceEvent("ClusterRecoveryCommitReq", debugId).log();
+	TraceEvent("ClusterRecoveryCommitReq", debugId)
+	    .detail("RecoveryDbgId", self->dbgid)
+	    .detail("MasterLifetime", self->masterInterface.id().toString());
 	int mmApplied = 0; // The number of mutations in tr.mutations that have been applied to the txnStateStore so far
 	if (self->lastEpochEnd != 0) {
 		Optional<Value> snapRecoveryFlag = self->txnStateStore->readValue(writeRecoveryKey).get();
@@ -5045,8 +4972,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(waitResolverFailure(self->resolvers));
 	self->addActor.send(waitCommitProxyFailure(self->commitProxies));
 	self->addActor.send(waitGrvProxyFailure(self->grvProxies));
-	// self->addActor.send(provideVersions(self));
-	// self->addActor.send(serveLiveCommittedVersion(self));
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 
@@ -5068,6 +4993,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("StatusCode", RecoveryStatus::writing_coordinated_state)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::writing_coordinated_state])
 	    .detail("TLogList", self->logSystem->describe())
+		.detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
 	    .trackLatest("ClusterRecoveryState");
 
 	// Multiple masters prevent conflicts between themselves via CoordinatedState (self->cstate)
@@ -5084,6 +5010,9 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(trackTlogRecovery(self, oldLogSystems, minRecoveryDuration));
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
 	wait(self->cstateUpdated.getFuture());
+	TraceEvent("AdvanceTxnVersion", self->dbgid)
+	    .detail("Min", self->recoveryTransactionVersion)
+	    .detail("Max", self->recoveryTransactionVersion);
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
 	if (debugResult) {
@@ -5112,6 +5041,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::accepting_commits])
 	    .detail("StoreType", self->configuration.storageServerStoreType)
 	    .detail("RecoveryDuration", recoveryDuration)
+		.detail("ClientDBInfo", self->controllerData->db.serverInfo->get().client.id.toString())
+		.detail("ServerDBInfo", self->controllerData->db.serverInfo->get().id.toString())
 	    .trackLatest("ClusterRecoveryState");
 
 	TraceEvent("ClusterRecoveryAvailable", self->dbgid)
@@ -5129,6 +5060,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	} else {
 		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
 	}
+
+	TraceEvent("ClusterRecovery end", self->dbgid).log();
 
 	wait(Future<Void>(Never()));
 	throw internal_error();
@@ -5149,9 +5082,20 @@ ACTOR Future<Void> cleanupActorCollection(Reference<ClusterRecoveryData> self, b
 
 } // namespace ClusterControllerRecovery
 
+ACTOR Future<Void> handleLeaderReplacement(Reference<ClusterControllerRecovery::ClusterRecoveryData> self) {
+	loop {
+		choose {
+			when(wait(self->controllerData->cancelClusterRecovery.onTrigger())) {
+				throw coordinators_changed();
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
-                                        ServerCoordinators coordinators) {
+                                        ServerCoordinators coordinators,
+                                         Future<Void> leaderFail) {
 	state MasterInterface iMaster;
 	state Reference<ClusterControllerRecovery::ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
@@ -5175,12 +5119,9 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				newMaster.initEndpoints();
 
 				DUMPTOKEN_PROCESS(newMaster, newMaster.waitFailure);
-				// DUMPTOKEN_PROCESS(newMaster, newMaster.tlogRejoin);
-				// DUMPTOKEN_PROCESS(newMaster, newMaster.changeCoordinators);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.getCommitVersion);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.getLiveCommittedVersion);
 				DUMPTOKEN_PROCESS(newMaster, newMaster.reportLiveCommittedVersion);
-				// DUMPTOKEN_PROCESS(newMaster, newMaster.notifyBackupWorkerDone);
 
 				TraceEvent("ClusterRecovery init master interface", cluster->id)
 				    .detail("Address", iMaster.address())
@@ -5202,6 +5143,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.distributor = db->serverInfo->get().distributor;
 			dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
+			dbInfo.myLocality = db->serverInfo->get().myLocality;
+			dbInfo.client = ClientDBInfo();
 
 			TraceEvent("CCWDB", cluster->id)
 			    .detail("Lifetime", dbInfo.masterLifetime.toString())
@@ -5227,9 +5170,10 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				    LiteralStringRef(""),
 				    addActor,
 				    db->forceRecovery);
-				// printf("allocated new recoveryData %p\n", recoveryData.getPtr());
 
+				recoveryData->addActor.send(handleLeaderReplacement(recoveryData));
 				collection = actorCollection(recoveryData->addActor.getFuture());
+				TraceEvent("ClusterRecovery start", recoveryData->dbgid);
 				recoveryCore = ClusterControllerRecovery::clusterRecoveryCore(recoveryData);
 			} else {
 				recoveryCore = Never();
@@ -5263,16 +5207,17 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				}
 				when(wait(collection)) { throw internal_error(); }
 			}
-			wait(spinDelay);
-
-			TEST(true); // clusterWatchDatabase() recovery failed
 
 			recoveryCore.cancel();
 			wait(ClusterControllerRecovery::cleanupActorCollection(recoveryData, false /* exThrown */));
 			ASSERT(addActor.isEmpty());
+
+			wait(spinDelay);
+			TEST(true); // clusterWatchDatabase() recovery failed
+			TraceEvent(SevWarn, "DetectedFailedRecovery", cluster->id).detail("OldMaster", iMaster.id());
 		} catch (Error& e) {
 			state Error err = e;
-			TraceEvent("CCWDB", cluster->id).error(e, true).detail("Master", iMaster.id());
+			TraceEvent("ClusterRecovery failed", cluster->id).error(e, true).detail("Master", iMaster.id());
 			if (e.code() != error_code_actor_cancelled) {
 				wait(delay(0.0));
 			}
@@ -5288,13 +5233,12 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			TEST(err.code() == error_code_master_backup_worker_failed); // Terminated due to backup worker failure
 			TEST(err.code() == error_code_operation_failed); 			// Terminated due to failed operation
 
-			if ((recoveryData.isValid() && recoveryData->ccShouldCommitSuicide) ||
-			    err.code() == error_code_coordinators_changed) {
-				TraceEvent("CCWDB", cluster->id)
+			if (cluster->shouldCommitSuicide || err.code() == error_code_coordinators_changed) {
+				TraceEvent("CCTerminateCoordinatorChanged", cluster->id)
 				    .error(err, true)
-				    .detail("ClusterControlled", recoveryData->clusterController.id());
+				    .detail("ClusterController", recoveryData->clusterController.id());
 
-				return Void();
+				throw coordinators_changed();
 			}
 
 			if (ClusterControllerRecovery::normalClusterRecoveryErrors().count(err.code())) {
@@ -5726,6 +5670,10 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration(ClusterControllerData* 
 	loop {
 		try {
 			RecruitRemoteFromConfigurationReply rep = self->findRemoteWorkersForConfiguration(req);
+			if (rep.dbgId.present()) {
+				TraceEvent("ClusterRecuitmentRemoteFromConf", rep.dbgId.get())
+				    .detail("Result_RemoteLogs", rep.remoteTLogs.size());
+			}
 			req.reply.send(rep);
 			return Void();
 		} catch (Error& e) {
@@ -5827,6 +5775,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
+		TraceEvent("ClientDBInfo").detail("Id", clientInfo.id.toString()).detail("Master", db->serverInfo->get().master.id());
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		db->clientInfo->set(clientInfo);
@@ -6922,7 +6871,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
-	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators)); // Start the master database
+	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators, leaderFail)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
@@ -6954,7 +6903,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {
-			if (err.isError()) {
+			if (err.isError() && err.getError().code() != error_code_coordinators_changed) {
 				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Error", false, err.getError());
 			} else {
 				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Signal", true);
@@ -7031,6 +6980,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
 		}
 		when(wait(leaderFail)) {
+			self.cancelClusterRecovery.trigger();
 			// We are no longer the leader if this has changed.
 			endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Leader Replaced", true);
 			TEST(true); // Lost Cluster Controller Role
@@ -7085,6 +7035,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType));
 			}
 		} catch (Error& e) {
+			TraceEvent("ClusterController", cci.id()).error(e, true);
 			if (inRole)
 				endRole(Role::CLUSTER_CONTROLLER,
 				        cci.id(),

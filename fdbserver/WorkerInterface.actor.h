@@ -326,10 +326,11 @@ struct RecruitRemoteFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 9091392;
 	std::vector<WorkerInterface> remoteTLogs;
 	std::vector<WorkerInterface> logRouters;
+	Optional<UID> dbgId;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, remoteTLogs, logRouters);
+		serializer(ar, remoteTLogs, logRouters, dbgId);
 	}
 };
 
@@ -339,6 +340,7 @@ struct RecruitRemoteFromConfigurationRequest {
 	Optional<Key> dcId;
 	int logRouterCount;
 	std::vector<UID> exclusionWorkerIds;
+	Optional<UID> dbgId;
 	ReplyPromise<RecruitRemoteFromConfigurationReply> reply;
 
 	RecruitRemoteFromConfigurationRequest() {}
@@ -351,7 +353,7 @@ struct RecruitRemoteFromConfigurationRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, reply);
+		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, dbgId, reply);
 	}
 };
 

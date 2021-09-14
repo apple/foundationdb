@@ -639,6 +639,9 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	pProxyCommitData->stats.lastCommitVersionAssigned = versionReply.version;
 	pProxyCommitData->stats.getCommitVersionDist->sampleSeconds(now() - beforeGettingCommitVersion);
 
+	TraceEvent("GetCommitVersionReply")
+	    .detail("Version", versionReply.version)
+	    .detail("PrvVersion", versionReply.prevVersion);
 	self->commitVersion = versionReply.version;
 	self->prevVersion = versionReply.prevVersion;
 
@@ -878,6 +881,9 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	if (!self->isMyFirstBatch &&
 	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->oldCoordinators.get()) {
+		if (self->debugID.present()) {
+			TraceEvent("ApplyMutationToCommittedTxn change coordinator", self->debugID.get());
+		}
 		wait(brokenPromiseToNever(pProxyCommitData->db->get().clusterInterface.changeCoordinators.getReply(
 		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get()))));
 		ASSERT(false); // ChangeCoordinatorsRequest should always throw
@@ -1093,7 +1099,17 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	applyMetadataEffect(self);
 
+	if (debugID.present()) {
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaEffect");
+	}
+
 	determineCommittedTransactions(self);
+
+	if (debugID.present()) {
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaEffect");
+	}
 
 	if (self->forceRecovery) {
 		wait(Future<Void>(Never()));
@@ -1102,8 +1118,18 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// First pass
 	wait(applyMetadataToCommittedTransactions(self));
 
+	if (debugID.present()) {
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaToCommittedTxn");
+	}
+
 	// Second pass
 	wait(assignMutationsToStorageServers(self));
+
+	if (debugID.present()) {
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AssignMutationToSS");
+	}
 
 	// Serialize and backup the mutations as a single mutation
 	if ((pProxyCommitData->vecBackupKeys.size() > 1) && self->logRangeMutations.size()) {
@@ -1273,8 +1299,47 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 
 	state const Optional<UID>& debugID = self->debugID;
 
-	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
+	if (debugID.present()) {
+		TraceEvent("TrMutation")
+		    .detail("DbgId", debugID.get().toString())
+		    .detail("TxSize", self->trs.size())
+		    .detail("CommitVersion", self->commitVersion)
+		    .detail("PrvVersion", self->prevVersion)
+			.detail("MasterInf", self->pProxyCommitData->master.id().toString());
+	} else {
+		TraceEvent("TrMutation")
+		    .detail("DbgId", "null")
+		    .detail("TxSize", self->trs.size())
+		    .detail("CommitVersion", self->commitVersion)
+		    .detail("PrvVersion", self->prevVersion)
+			.detail("MasterInf", self->pProxyCommitData->master.id().toString());
+	}
+	for (const auto &tr : self->trs) {
+		for (const auto &m : tr.transaction.mutations) {
+			TraceEvent("TrMutation").detail("M", m.toString());
+		}
+	}
+	if (debugID.present()) {
+		TraceEvent("AdvanceTxnMinVersion")
+		    .detail("Min", self->commitVersion)
+		    .detail("PrevVersion", self->prevVersion)
+		    .detail("DbgId", debugID.get())
+		    .detail("Advance",
+		            self->prevVersion &&
+		                self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
+			.detail("ClientDBInfo", pProxyCommitData->db->get().client.id.toString());
+	} else {
+		TraceEvent("AdvanceTxnMinVersion")
+		    .detail("Min", self->commitVersion)
+		    .detail("PrevVersion", self->prevVersion)
+		    .detail("Advance",
+		            self->prevVersion &&
+		                self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
+			.detail("ClientDBInfo", pProxyCommitData->db->get().client.id.toString());
+	}
+	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
+	}
 
 	//TraceEvent("ProxyPushed", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion);
 	if (debugID.present())
