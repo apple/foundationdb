@@ -144,6 +144,8 @@ void TLogGroupCollection::recruitEverything() {
 
 			recruitedGroups.push_back(group);
 			TraceEvent("TLogGroupAdd")
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(10000)
 			    .detail("GroupID", group->id())
 			    .detail("Servers", describe(group->servers()))
 			    .detail("TotalGroups", recruitedGroups.size());
@@ -167,8 +169,10 @@ LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::uno
 	return localityMap;
 }
 
-void TLogGroupCollection::addTLogGroup(TLogGroupRef group) {
-	TraceEvent("TLogGroupAdd")
+void TLogGroupCollection::addTLogGroup(UID debugID, TLogGroupRef group) {
+	TraceEvent("TLogGroupAdd", debugID)
+	    .setMaxEventLength(-1)
+	    .setMaxFieldLength(10000)
 	    .detail("GroupID", group->id())
 	    .detail("Size", group->size())
 	    .detail("Group", group->toString());

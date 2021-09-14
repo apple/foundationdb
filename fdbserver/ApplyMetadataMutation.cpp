@@ -231,7 +231,7 @@ private:
 		auto groupId = decodeTLogGroupKey(m.param1);
 		auto servers = TLogGroup::fromValue(
 		    groupId, m.param2, std::unordered_map<UID, TLogWorkerDataRef>({ /* TODO: add recruits */ }));
-		tLogGroupCollection->addTLogGroup(servers);
+		tLogGroupCollection->addTLogGroup(dbgid, servers);
 
 		if (!initialCommit) {
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));

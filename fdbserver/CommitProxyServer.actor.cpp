@@ -2009,7 +2009,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	const auto& logset = commitData.db->get().logSystemConfig.tLogs[0];
 	for (const auto& gid : logset.tLogGroupIDs) {
 		TLogGroupRef group = makeReference<TLogGroup>(gid);
-		commitData.tLogGroupCollection->addTLogGroup(group);
+		commitData.tLogGroupCollection->addTLogGroup(commitData.dbgid, group);
 	}
 
 	commitData.resolvers = commitData.db->get().resolvers;
