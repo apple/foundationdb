@@ -1,5 +1,5 @@
 storageEngineExcludeTypes=3
-maxTLogVersion=6
+maxTLogVersion=5
 disableTss=true
 testTitle=Clogged
     clearAfterTest=false
