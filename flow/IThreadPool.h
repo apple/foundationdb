@@ -91,8 +91,9 @@ public:
 	Future<T> getFuture() { // Call only on the originating thread!
 		return promise.getFuture();
 	}
-
-	void send(T const& t) { // Can be called safely from another thread.  Call send or sendError at most once.
+    
+	template<class U>
+	void send(U const& t) { // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
 		tagAndForward(&promise, t, signal.getFuture());
 		g_network->onMainThread(std::move(signal),
@@ -106,6 +107,7 @@ public:
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
 		                                                    : TaskPriority::DefaultOnMainThread);
 	}
+	bool isValid() { return promise.isValid(); }
 
 private:
 	Promise<T> promise;
