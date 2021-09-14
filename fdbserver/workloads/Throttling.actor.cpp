@@ -200,7 +200,7 @@ struct ThrottlingWorkload : KVWorkload {
 	Future<bool> check(Database const& cx) override { return correctSpecialKeys; }
 
 	void getMetrics(vector<PerfMetric>& m) override {
-		m.push_back(PerfMetric("TransactionsCommitted", transactionsCommitted, false));
+		m.emplace_back("TransactionsCommitted", transactionsCommitted, Averaged::False);
 	}
 };
 

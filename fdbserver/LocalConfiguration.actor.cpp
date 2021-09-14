@@ -355,21 +355,13 @@ public:
 		return addChanges(this, changes, mostRecentVersion);
 	}
 
-	FlowKnobs const& getFlowKnobs() const {
-		return getKnobs().getFlowKnobs();
-	}
+	FlowKnobs const& getFlowKnobs() const { return getKnobs().getFlowKnobs(); }
 
-	ClientKnobs const& getClientKnobs() const {
-		return getKnobs().getClientKnobs();
-	}
+	ClientKnobs const& getClientKnobs() const { return getKnobs().getClientKnobs(); }
 
-	ServerKnobs const& getServerKnobs() const {
-		return getKnobs().getServerKnobs();
-	}
+	ServerKnobs const& getServerKnobs() const { return getKnobs().getServerKnobs(); }
 
-	TestKnobs const& getTestKnobs() const {
-		return getKnobs().getTestKnobs();
-	}
+	TestKnobs const& getTestKnobs() const { return getKnobs().getTestKnobs(); }
 
 	Future<Void> consume(ConfigBroadcastInterface const& broadcastInterface) {
 		return consume(this, broadcastInterface);
@@ -387,6 +379,10 @@ public:
 		}
 		return initFuture;
 	}
+
+	void close() { kvStore.close(); }
+
+	Future<Void> onClosed() { return kvStore.onClosed(); }
 
 	static void testManualKnobOverridesInvalidName() {
 		std::map<std::string, std::string> invalidOverrides;
@@ -462,6 +458,14 @@ Future<Void> LocalConfiguration::consume(ConfigBroadcastInterface const& broadca
 Future<Void> LocalConfiguration::addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes,
                                             Version mostRecentVersion) {
 	return impl->addChanges(changes, mostRecentVersion);
+}
+
+void LocalConfiguration::close() {
+	impl->close();
+}
+
+Future<Void> LocalConfiguration::onClosed() {
+	return impl->onClosed();
 }
 
 UID LocalConfiguration::getID() const {

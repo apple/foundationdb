@@ -150,6 +150,20 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = value;
 		}
+		if (key == "storage_migration_type") {
+			StorageMigrationType type;
+			if (value == "disabled") {
+				type = StorageMigrationType::DISABLED;
+			} else if (value == "aggressive") {
+				type = StorageMigrationType::AGGRESSIVE;
+			} else if (value == "gradual") {
+				type = StorageMigrationType::GRADUAL;
+			} else {
+				printf("Error: Only disabled|aggressive|gradual are valid for storage_migration_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", type);
+		}
 		return out;
 	}
 
@@ -445,6 +459,8 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 	state Future<Void> tooLong = delay(60);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 	state bool oldReplicationUsesDcId = false;
+	state bool warnPPWGradual = false;
+	state bool warnChangeStorageNoMigrate = false;
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -615,6 +631,16 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 							return ConfigurationResult::NOT_ENOUGH_WORKERS;
 						}
 					}
+
+					if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
+					    newConfig.storageMigrationType == StorageMigrationType::DISABLED) {
+						warnChangeStorageNoMigrate = true;
+					} else if ((newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
+					            newConfig.perpetualStorageWiggleSpeed == 0) ||
+					           (newConfig.perpetualStorageWiggleSpeed > 0 &&
+					            newConfig.storageMigrationType == StorageMigrationType::DISABLED)) {
+						warnPPWGradual = true;
+					}
 				}
 			}
 			if (creating) {
@@ -670,7 +696,14 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 			wait(tr.onError(e1));
 		}
 	}
-	return ConfigurationResult::SUCCESS;
+
+	if (warnPPWGradual) {
+		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
+	} else if (warnChangeStorageNoMigrate) {
+		return ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE;
+	} else {
+		return ConfigurationResult::SUCCESS;
+	}
 }
 
 ConfigureAutoResult parseConfig(StatusObject const& status) {
@@ -2457,68 +2490,6 @@ ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 			wait(tr.onError(e));
 		}
 	}
-}
-
-ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
-	state ReadYourWritesTransaction tr(cx);
-	state KeyRange sysRange = KeyRangeRef(storageCacheKey(range.begin), storageCacheKey(range.end));
-	state KeyRange sysRangeClear = KeyRangeRef(storageCacheKey(range.begin), keyAfter(storageCacheKey(range.end)));
-	state KeyRange privateRange = KeyRangeRef(cacheKeysKey(0, range.begin), cacheKeysKey(0, range.end));
-	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
-	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
-	loop {
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		try {
-			tr.clear(sysRangeClear);
-			tr.clear(privateRange);
-			tr.addReadConflictRange(privateRange);
-			RangeResult previous =
-			    wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, Snapshot::True));
-			bool prevIsCached = false;
-			if (!previous.empty()) {
-				std::vector<uint16_t> prevVal;
-				decodeStorageCacheValue(previous[0].value, prevVal);
-				prevIsCached = !prevVal.empty();
-			}
-			if (prevIsCached && !add) {
-				// we need to uncache from here
-				tr.set(sysRange.begin, falseValue);
-				tr.set(privateRange.begin, serverKeysFalse);
-			} else if (!prevIsCached && add) {
-				// we need to cache, starting from here
-				tr.set(sysRange.begin, trueValue);
-				tr.set(privateRange.begin, serverKeysTrue);
-			}
-			RangeResult after = wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, Snapshot::False));
-			bool afterIsCached = false;
-			if (!after.empty()) {
-				std::vector<uint16_t> afterVal;
-				decodeStorageCacheValue(after[0].value, afterVal);
-				afterIsCached = afterVal.empty();
-			}
-			if (afterIsCached && !add) {
-				tr.set(sysRange.end, trueValue);
-				tr.set(privateRange.end, serverKeysTrue);
-			} else if (!afterIsCached && add) {
-				tr.set(sysRange.end, falseValue);
-				tr.set(privateRange.end, serverKeysFalse);
-			}
-			wait(tr.commit());
-			return Void();
-		} catch (Error& e) {
-			state Error err = e;
-			wait(tr.onError(err));
-			TraceEvent(SevDebug, "ChangeCachedRangeError").error(err);
-		}
-	}
-}
-
-Future<Void> addCachedRange(const Database& cx, KeyRangeRef range) {
-	return changeCachedRange(cx, range, true);
-}
-Future<Void> removeCachedRange(const Database& cx, KeyRangeRef range) {
-	return changeCachedRange(cx, range, false);
 }
 
 json_spirit::Value_type normJSONType(json_spirit::Value_type type) {

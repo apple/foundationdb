@@ -316,9 +316,13 @@ class ConfigNodeImpl {
 
 	ACTOR static Future<Void> commit(ConfigNodeImpl* self, ConfigTransactionCommitRequest req) {
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
-		if (req.generation != currentGeneration) {
+		if (req.generation.committedVersion != currentGeneration.committedVersion) {
 			++self->failedCommits;
-			req.reply.sendError(transaction_too_old());
+			req.reply.sendError(commit_unknown_result());
+			return Void();
+		} else if (req.generation.liveVersion != currentGeneration.liveVersion) {
+			++self->failedCommits;
+			req.reply.sendError(not_committed());
 			return Void();
 		}
 		int index = 0;
@@ -484,6 +488,10 @@ public:
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
 
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
+
+	void close() { kvStore.close(); }
+
+	Future<Void> onClosed() { return kvStore.onClosed(); }
 };
 
 ConfigNode::ConfigNode(std::string const& folder) : impl(PImpl<ConfigNodeImpl>::create(folder)) {}
@@ -496,4 +504,12 @@ Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {
 
 Future<Void> ConfigNode::serve(ConfigFollowerInterface const& cfi) {
 	return impl->serve(cfi);
+}
+
+void ConfigNode::close() {
+	impl->close();
+}
+
+Future<Void> ConfigNode::onClosed() {
+	return impl->onClosed();
 }

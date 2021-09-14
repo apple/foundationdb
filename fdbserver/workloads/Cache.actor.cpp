@@ -14,7 +14,7 @@ struct CacheWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			// Call management API to cache keys under the given prefix
-			return addCachedRange(cx, prefixRange(keyPrefix));
+			return ManagementAPI::addCachedRange(cx.getReference(), prefixRange(keyPrefix));
 		}
 		return Void();
 	}

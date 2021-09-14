@@ -60,6 +60,8 @@ enum class ConfigurationResult {
 	REGION_REPLICATION_MISMATCH,
 	DCID_MISSING,
 	LOCKED_NOT_NEW,
+	SUCCESS_WARN_PPW_GRADUAL,
+	SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE,
 	SUCCESS,
 };
 
@@ -248,8 +250,81 @@ bool schemaMatch(json_spirit::mValue const& schema,
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
-Future<Void> addCachedRange(const Database& cx, KeyRangeRef range);
-Future<Void> removeCachedRange(const Database& cx, KeyRangeRef range);
+// Management API written in template code to support both IClientAPI and NativeAPI
+namespace ManagementAPI {
+
+ACTOR template <class DB>
+Future<Void> changeCachedRange(Reference<DB> db, KeyRangeRef range, bool add) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state KeyRange sysRange = KeyRangeRef(storageCacheKey(range.begin), storageCacheKey(range.end));
+	state KeyRange sysRangeClear = KeyRangeRef(storageCacheKey(range.begin), keyAfter(storageCacheKey(range.end)));
+	state KeyRange privateRange = KeyRangeRef(cacheKeysKey(0, range.begin), cacheKeysKey(0, range.end));
+	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
+	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
+	loop {
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		try {
+			tr->clear(sysRangeClear);
+			tr->clear(privateRange);
+			tr->addReadConflictRange(privateRange);
+			// hold the returned standalone object's memory
+			state typename DB::TransactionT::template FutureT<RangeResult> previousFuture =
+			    tr->getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, Snapshot::False, Reverse::True);
+			RangeResult previous = wait(safeThreadFutureToFuture(previousFuture));
+			bool prevIsCached = false;
+			if (!previous.empty()) {
+				std::vector<uint16_t> prevVal;
+				decodeStorageCacheValue(previous[0].value, prevVal);
+				prevIsCached = !prevVal.empty();
+			}
+			if (prevIsCached && !add) {
+				// we need to uncache from here
+				tr->set(sysRange.begin, falseValue);
+				tr->set(privateRange.begin, serverKeysFalse);
+			} else if (!prevIsCached && add) {
+				// we need to cache, starting from here
+				tr->set(sysRange.begin, trueValue);
+				tr->set(privateRange.begin, serverKeysTrue);
+			}
+			// hold the returned standalone object's memory
+			state typename DB::TransactionT::template FutureT<RangeResult> afterFuture =
+			    tr->getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, Snapshot::False, Reverse::False);
+			RangeResult after = wait(safeThreadFutureToFuture(afterFuture));
+			bool afterIsCached = false;
+			if (!after.empty()) {
+				std::vector<uint16_t> afterVal;
+				decodeStorageCacheValue(after[0].value, afterVal);
+				afterIsCached = afterVal.empty();
+			}
+			if (afterIsCached && !add) {
+				tr->set(sysRange.end, trueValue);
+				tr->set(privateRange.end, serverKeysTrue);
+			} else if (!afterIsCached && add) {
+				tr->set(sysRange.end, falseValue);
+				tr->set(privateRange.end, serverKeysFalse);
+			}
+			wait(safeThreadFutureToFuture(tr->commit()));
+			return Void();
+		} catch (Error& e) {
+			state Error err = e;
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+			TraceEvent(SevDebug, "ChangeCachedRangeError").error(err);
+		}
+	}
+}
+
+template <class DB>
+Future<Void> addCachedRange(Reference<DB> db, KeyRangeRef range) {
+	return changeCachedRange(db, range, true);
+}
+
+template <class DB>
+Future<Void> removeCachedRange(Reference<DB> db, KeyRangeRef range) {
+	return changeCachedRange(db, range, false);
+}
+
+} // namespace ManagementAPI
 
 #include "flow/unactorcompiler.h"
 #endif

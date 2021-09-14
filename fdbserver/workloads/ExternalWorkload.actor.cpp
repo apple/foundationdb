@@ -227,7 +227,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		std::vector<FDBPerfMetric> metrics;
 		workloadImpl->getMetrics(metrics);
 		for (const auto& m : metrics) {
-			out.emplace_back(m.name, m.value, m.averaged, m.format_code);
+			out.emplace_back(m.name, m.value, Averaged{ m.averaged }, m.format_code);
 		}
 	}
 

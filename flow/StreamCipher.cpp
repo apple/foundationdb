@@ -55,7 +55,8 @@ void StreamCipher::Key::initializeKey(RawKeyType&& arr) {
 
 void StreamCipher::Key::initializeRandomTestKey() {
 	ASSERT(g_network->isSimulated());
-	if (globalKey) return;
+	if (globalKey)
+		return;
 	globalKey = std::make_unique<Key>(ConstructorTag{});
 	generateRandomData(globalKey->arr.data(), globalKey->arr.size());
 }
