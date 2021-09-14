@@ -152,18 +152,17 @@ void* fdb_network_thread(void* args) {
 }
 
 int genprefix(char* str, char* prefix, int prefixlen, int prefixpadding, int rows, int len) {
-        const int rowdigit = digits(rows);
-        const int paddinglen = len - (prefixlen + rowdigit) - 1;
-        int offset = 0;
-        if (prefixpadding) {
-                memset(str, 'x', paddinglen);
-                offset += paddinglen;
-        }
-        memcpy(str + offset, prefix, prefixlen);
-        str[len - 1] = '\0';
-        return offset + prefixlen;
+	const int rowdigit = digits(rows);
+	const int paddinglen = len - (prefixlen + rowdigit) - 1;
+	int offset = 0;
+	if (prefixpadding) {
+		memset(str, 'x', paddinglen);
+		offset += paddinglen;
+	}
+	memcpy(str + offset, prefix, prefixlen);
+	str[len - 1] = '\0';
+	return offset + prefixlen;
 }
-
 
 /* cleanup database */
 int cleanup(FDBTransaction* transaction, mako_args_t* args) {
@@ -555,7 +554,13 @@ retryTxn:
 					if (keyend > args->rows - 1) {
 						keyend = args->rows - 1;
 					}
-				  genkey(keystr2, KEYPREFIX, KEYPREFIXLEN, args->prefixpadding, keyend, args->rows, args->key_length + 1);
+					genkey(keystr2,
+					       KEYPREFIX,
+					       KEYPREFIXLEN,
+					       args->prefixpadding,
+					       keyend,
+					       args->rows,
+					       args->key_length + 1);
 				}
 
 				if (stats->xacts % args->sampling == 0) {
@@ -1209,7 +1214,8 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	/* Set client Log group */
 	if (strlen(args->log_group) != 0) {
-		err = fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP, (uint8_t*)args->log_group, strlen(args->log_group));
+		err =
+		    fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP, (uint8_t*)args->log_group, strlen(args->log_group));
 		if (err) {
 			fprintf(stderr, "ERROR: fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP): %s\n", fdb_get_error(err));
 		}

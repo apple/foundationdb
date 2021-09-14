@@ -454,7 +454,7 @@ public:
 
 	bool isEnabled() const { return enabled; }
 
-	TraceEvent &setErrorKind(ErrorKind errorKind);
+	TraceEvent& setErrorKind(ErrorKind errorKind);
 
 	void log();
 
@@ -480,7 +480,7 @@ private:
 	int maxFieldLength;
 	int maxEventLength;
 	int timeIndex;
-	int errorKindIndex { -1 };
+	int errorKindIndex{ -1 };
 
 	void setSizeLimits();
 

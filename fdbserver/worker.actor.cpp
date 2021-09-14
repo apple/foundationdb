@@ -784,7 +784,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 			}
 
 			if (!currentDegradedPeers.empty()) {
-				degradedPeers->set(currentDegradedPeers);
+				degradedPeers->setUnconditional(currentDegradedPeers);
 			}
 		}
 		choose {

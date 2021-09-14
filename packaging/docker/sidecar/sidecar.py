@@ -1,4 +1,4 @@
-#! /usr/bin/python
+#!/usr/bin/env python3
 
 # entrypoint.py
 #
@@ -236,7 +236,7 @@ class Config(object):
             # As long as the public IP is not set fallback to the
             # Pod IP address.
             pod_ip = os.getenv("FDB_POD_IP")
-            if pod_ip is none:
+            if pod_ip is None:
                 pod_ip = socket.gethostbyname(socket.gethostname())
             self.substitutions["FDB_PUBLIC_IP"] = pod_ip
 

@@ -94,10 +94,6 @@ enum class TLSEndpointType { UNSET = 0, CLIENT, SERVER };
 class TLSConfig;
 template <typename T>
 class LoadAsyncActorState;
-// TODO: Remove this once this code is merged with master/to-be 7.0 and actors can access private variables.
-#ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
-#define PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP private
-#endif
 
 class LoadedTLSConfig {
 public:
@@ -123,7 +119,10 @@ public:
 
 	void print(FILE* fp);
 
-PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
+#ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
+private:
+#endif
+
 	std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;
 	std::string tlsPassword;
 	std::vector<std::string> tlsVerifyPeers;
@@ -206,7 +205,7 @@ public:
 	std::string getKeyPathSync() const;
 	std::string getCAPathSync() const;
 
-PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
+private:
 	ACTOR static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self);
 	template <typename T>
 	friend class LoadAsyncActorState;

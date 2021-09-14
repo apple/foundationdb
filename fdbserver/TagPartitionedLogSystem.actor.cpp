@@ -525,6 +525,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	ACTOR static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
+	                                                       Reference<Histogram> dist,
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in) {
 		state double startTime = now();
@@ -539,6 +540,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				self->fastReplies++;
 			}
 		}
+		dist->sampleSeconds(now() - startTime);
 		return t;
 	}
 
@@ -560,12 +562,21 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						    Reference<ConnectionResetInfo>(new ConnectionResetInfo()));
 					}
 				}
+				if (it->tlogPushDistTrackers.empty()) {
+					for (int i = 0; i < it->logServers.size(); i++) {
+						it->tlogPushDistTrackers.push_back(
+						    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
+						                            it->logServers[i]->get().interf().address().toString(),
+						                            Histogram::Unit::microseconds));
+					}
+				}
 				vector<Future<Void>> tLogCommitResults;
 				for (int loc = 0; loc < it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
 					data.recordEmptyMessage(location, msg);
 					allReplies.push_back(recordPushMetrics(
 					    it->connectionResetTrackers[loc],
+					    it->tlogPushDistTrackers[loc],
 					    it->logServers[loc]->get().interf().address(),
 					    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(msg.arena(),
 					                                                                          prevVersion,
@@ -1526,11 +1537,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
+		state UID dbgid = self->dbgid;
 		state Future<Void> maxGetPoppedDuration = delay(SERVER_KNOBS->TXS_POPPED_MAX_DELAY);
 		wait(waitForAll(poppedReady) || maxGetPoppedDuration);
 
 		if (maxGetPoppedDuration.isReady()) {
-			TraceEvent(SevWarnAlways, "PoppedTxsNotReady", self->dbgid);
+			TraceEvent(SevWarnAlways, "PoppedTxsNotReady", dbgid);
 		}
 
 		Version maxPopped = 1;

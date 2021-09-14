@@ -283,7 +283,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                              std::min(value.size(), size_t(a.maxLength)))));
 			} else {
 				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix");
+					TraceEvent(SevError, "RocksDBError")
+					    .detail("Error", s.ToString())
+					    .detail("Method", "ReadValuePrefix");
 				}
 				a.result.send(Optional<Value>());
 			}

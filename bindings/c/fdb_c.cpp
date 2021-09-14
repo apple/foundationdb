@@ -433,9 +433,7 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
 
 	/* The progression used for FDB_STREAMING_MODE_ITERATOR.
 	   Goes 1.5 * previous. */
-	static const int iteration_progression[] = {
-		4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000, 120000 
-	};
+	static const int iteration_progression[] = { 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000, 120000 };
 
 	/* length(iteration_progression) */
 	static const int max_iteration = sizeof(iteration_progression) / sizeof(int);

@@ -69,12 +69,14 @@ class CoordinatedState : NonCopyable {
 	bool initial;
 
 	bool isDoomed(GenerationRegReadReply const& rep) const {
-		return rep.gen > gen; // setExclusive is doomed, because there was a write at least started at a higher generation, which means a read completed at that higher generation
-			// || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
+		return rep.gen >
+		       gen; // setExclusive is doomed, because there was a write at least started at a higher generation, which
+		            // means a read completed at that higher generation
+		            // || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
 	}
 
 	ACTOR static Future<Value> read(CoordinatedState* self) {
-		ASSERT( self->stage == 0 );
+		ASSERT(self->stage == 0);
 
 		{
 			self->stage = 1;
@@ -99,8 +101,9 @@ class CoordinatedState : NonCopyable {
 		}
 	}
 	ACTOR static Future<Void> onConflict(CoordinatedState* self) {
-		ASSERT( self->stage == 4 );
-		if (self->doomed) return Void();
+		ASSERT(self->stage == 4);
+		if (self->doomed)
+			return Void();
 		loop {
 			wait(delay(SERVER_KNOBS->COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL));
 			GenerationRegReadReply rep = wait(self->replicatedRead(
@@ -115,7 +118,7 @@ class CoordinatedState : NonCopyable {
 		return Void();
 	}
 	ACTOR static Future<Void> setExclusive(CoordinatedState* self, Value v) {
-		ASSERT( self->stage == 4 );
+		ASSERT(self->stage == 4);
 		self->stage = 5;
 
 		UniqueGeneration wgen = wait(self->replicatedWrite(
@@ -138,14 +141,15 @@ class CoordinatedState : NonCopyable {
 	}
 
 	ACTOR static Future<GenerationRegReadReply> replicatedRead(CoordinatedState* self, GenerationRegReadRequest req) {
-		state std::vector<GenerationRegInterface> &replicas = self->coordinators.stateServers;
-		state vector< Future<GenerationRegReadReply> > rep_empty_reply;
-		state vector< Future<GenerationRegReadReply> > rep_reply;
-		for(int i=0; i<replicas.size(); i++) {
-			Future<GenerationRegReadReply> reply = waitAndSendRead( replicas[i].read, GenerationRegReadRequest(req.key, req.gen) );
-			rep_empty_reply.push_back( nonemptyToNever( reply ) );
-			rep_reply.push_back( emptyToNever( reply ) );
-			self->ac.add( success( reply ) );
+		state std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
+		state vector<Future<GenerationRegReadReply>> rep_empty_reply;
+		state vector<Future<GenerationRegReadReply>> rep_reply;
+		for (int i = 0; i < replicas.size(); i++) {
+			Future<GenerationRegReadReply> reply =
+			    waitAndSendRead(replicas[i].read, GenerationRegReadRequest(req.key, req.gen));
+			rep_empty_reply.push_back(nonemptyToNever(reply));
+			rep_reply.push_back(emptyToNever(reply));
+			self->ac.add(success(reply));
 		}
 
 		state Future<Void> majorityEmpty =
@@ -179,12 +183,13 @@ class CoordinatedState : NonCopyable {
 	}
 
 	ACTOR static Future<UniqueGeneration> replicatedWrite(CoordinatedState* self, GenerationRegWriteRequest req) {
-		state std::vector<GenerationRegInterface> &replicas = self->coordinators.stateServers;
-		state vector< Future<UniqueGeneration> > wrep_reply;
-		for(int i=0; i<replicas.size(); i++) {
-			Future<UniqueGeneration> reply = waitAndSendWrite( replicas[i].write, GenerationRegWriteRequest( req.kv, req.gen ) );
-			wrep_reply.push_back( reply );
-			self->ac.add( success( reply ) );
+		state std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
+		state vector<Future<UniqueGeneration>> wrep_reply;
+		for (int i = 0; i < replicas.size(); i++) {
+			Future<UniqueGeneration> reply =
+			    waitAndSendWrite(replicas[i].write, GenerationRegWriteRequest(req.kv, req.gen));
+			wrep_reply.push_back(reply);
+			self->ac.add(success(reply));
 		}
 
 		wait(quorum(wrep_reply, self->initial ? replicas.size() : replicas.size() / 2 + 1));
@@ -351,13 +356,18 @@ struct MovableCoordinatedStateImpl {
 };
 
 MovableCoordinatedState& MovableCoordinatedState::operator=(MovableCoordinatedState&& av) = default;
-MovableCoordinatedState::MovableCoordinatedState( class ServerCoordinators const& coord ) : impl( new MovableCoordinatedStateImpl(coord) ) {}
+MovableCoordinatedState::MovableCoordinatedState(class ServerCoordinators const& coord)
+  : impl(new MovableCoordinatedStateImpl(coord)) {}
 MovableCoordinatedState::~MovableCoordinatedState() = default;
 Future<Value> MovableCoordinatedState::read() {
 	return MovableCoordinatedStateImpl::read(impl.get());
 }
-Future<Void> MovableCoordinatedState::onConflict() { return impl->onConflict(); }
-Future<Void> MovableCoordinatedState::setExclusive(Value v) { return impl->setExclusive(v); }
+Future<Void> MovableCoordinatedState::onConflict() {
+	return impl->onConflict();
+}
+Future<Void> MovableCoordinatedState::setExclusive(Value v) {
+	return impl->setExclusive(v);
+}
 Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
 	return MovableCoordinatedStateImpl::move(impl.get(), nc);
 }
