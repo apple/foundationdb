@@ -7051,7 +7051,7 @@ public:
 		state VersionedBTree::BTreeCursor cur;
 		wait(
 		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
-
+		std::cout<<"visit here?\n";
 		state PriorityMultiLock::Lock lock;
 		state bool isLocked = false;
 		state Future<Void> f;
@@ -7067,11 +7067,13 @@ public:
 
 		if (rowLimit > 0) {
 			f = cur.seekGTE(keys.begin);
+			TEST(f.isReady()); // readRange_impl seekGTE acquire lock and wait on disk
+			TEST(!f.isReady()); // readRange_impl seekGTE skip lock because data is cached
 			if (!isLocked && !f.isReady()) {
 				isLocked = true;
 				wait(store(lock, self->m_concurrentReads.lock()));
-				wait(f);
 			}
+			wait(f);
 
 			if (self->prefetch) {
 				cur.prefetch(keys.end, true, rowLimit, byteLimit);
@@ -7119,11 +7121,13 @@ public:
 			}
 		} else {
 			f = cur.seekLT(keys.end);
+			TEST(f.isReady()); // readRange_impl seekLT acquire lock and wait on disk
+			TEST(!f.isReady()); // readRange_impl seekLT skip lock because data is cached
 			if (!isLocked && !f.isReady()) {
 				isLocked = true;
 				wait(store(lock, self->m_concurrentReads.lock()));
-				wait(f);
 			}
+			wait(f);
 
 			if (self->prefetch) {
 				cur.prefetch(keys.begin, false, -rowLimit, byteLimit);
@@ -7192,10 +7196,12 @@ public:
 		++g_redwoodMetrics.metric.opGet;
 
 		state Future<Void> f = cur.seekGTE(key);
+		TEST(f.isReady()); // Acquire lock and wait on disk
+		TEST(!f.isReady()); // Skip lock because data is cached
 		if (!f.isReady()) {
 			wait(store(lock, self->m_concurrentReads.lock()));
-			wait(f);
 		}
+		wait(f);
 		if (cur.isValid() && cur.get().key == key) {
 			// Return a Value whose arena depends on the source page arena
 			Value v;
