@@ -1254,9 +1254,10 @@ void tagAndForward(Promise<T>* pOutputPromise, T value, Future<Void> signal) {
 }
 
 ACTOR template <class T>
-void tagAndForward(PromiseStream<T>* output, T value, Future<Void> signal) {
+void tagAndForward(std::shared_ptr<PromiseStream<T>> output, T value, Future<Void> signal) {
+	state std::shared_ptr<PromiseStream<T>> out = output;
 	wait(signal);
-	output->send(value);
+	out->send(value);
 }
 
 ACTOR template <class T>
@@ -1267,9 +1268,10 @@ void tagAndForwardError(Promise<T>* pOutputPromise, Error value, Future<Void> si
 }
 
 ACTOR template <class T>
-void tagAndForwardError(PromiseStream<T>* output, Error value, Future<Void> signal) {
+void tagAndForwardError(std::shared_ptr<PromiseStream<T>> output, Error value, Future<Void> signal) {
+	state std::shared_ptr<PromiseStream<T>> out = output;
 	wait(signal);
-	output->sendError(value);
+	out->sendError(value);
 }
 
 ACTOR template <class T>
