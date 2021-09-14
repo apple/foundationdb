@@ -1666,6 +1666,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	g_simulator.connectionString = conn.toString();
 	g_simulator.testerCount = testerCount;
 
+	if (!testConfig.simpleConfig && simconfig.replication_type > 0 &&
+	    (machineCount / dataCenters > simconfig.replication_type)) {
+		//	in each DC, only when machineCount > replication_type, storage_migration_type=gradual will make progress
+		g_simulator.allowStorageMigrationTypeChange = true;
+	}
+
 	TraceEvent("SimulatedClusterStarted")
 	    .detail("DataCenters", dataCenters)
 	    .detail("ServerMachineCount", machineCount)
