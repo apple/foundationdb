@@ -101,7 +101,7 @@ public:
 	void recruitEverything();
 
 	// Add a TLogGroup
-	void addTLogGroup(TLogGroupRef group);
+	void addTLogGroup(UID debugID, TLogGroupRef group);
 
 	// Find a TLogGroup for assigning a storage team.
 	TLogGroupRef selectFreeGroup(int seed = 0);
