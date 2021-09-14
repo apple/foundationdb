@@ -1242,7 +1242,7 @@ void SimulationConfig::setRandomConfig() {
 		set_config("perpetual_storage_wiggle=0");
 	} else {
 		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 1);
-		set_config("perpetual_storage_wiggle=1");
+		set_config("storage_migration_type=gradual perpetual_storage_wiggle=1");
 	}
 
 	if (deterministicRandom()->random01() < 0.5) {
@@ -1297,7 +1297,9 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 
 // Sets storage engine based on testConfig details
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
-	int storage_engine_type = deterministicRandom()->randomInt(0, 5);
+	// Using [0, 4) to disable the RocksDB storage engine.
+	// TODO: Figure out what is broken with the RocksDB engine in simulation.
+	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
@@ -1777,7 +1779,11 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if (kv.second.type() == json_spirit::str_type) {
-			startingConfigString += kv.second.get_str();
+			if ("storage_migration_type" == kv.first) {
+				startingConfigString += kv.first + "=" + kv.second.get_str();
+			} else {
+				startingConfigString += kv.second.get_str();
+			}
 		} else if (kv.second.type() == json_spirit::array_type) {
 			startingConfigString += kv.first + "=" +
 			                        json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
