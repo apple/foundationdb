@@ -256,7 +256,7 @@
             "excluded":false,
             "address":"1.2.3.4:1234",
             "disk":{
-               "free_bytes":3451233456234, // an estimate of how many bytes are free to allocate to fdbservers without swapping
+               "free_bytes":3451233456234,
                "reads":{
                   "hz":0.0,
                   "counter":0,
@@ -268,7 +268,7 @@
                   "counter":0,
                   "sectors":0
                },
-               "total_bytes":123412341234 // an estimate of total physical RAM
+               "total_bytes":123412341234
             },
             "uptime_seconds":1234.2345,
             "cpu":{
