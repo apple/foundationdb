@@ -1334,18 +1334,19 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 
-				// for (int i = 0; i < keyServers.size() && teamForDroppedRange.empty(); ++i) {
-				// 	decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
-				// 	if (std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
-				// 		teamForDroppedRange.insert(teamForDroppedRange.end(), dest.begin(), dest.end());
-				// 	}
-				// 	if (!teamForDroppedRange.empty()) {
-				// 		break;
-				// 	}
-				// 	if (std::find(src.begin(), src.end(), serverID) == src.end()) {
-				// 		teamForDroppedRange.insert(teamForDroppedRange.end(), src.begin(), src.end());
-				// 	}
-				// }
+				teamForDroppedRange.clear();
+				for (int i = 0; i < keyServers.size() && teamForDroppedRange.empty(); ++i) {
+					decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+					if (std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
+						teamForDroppedRange.insert(teamForDroppedRange.end(), dest.begin(), dest.end());
+					}
+					if (!teamForDroppedRange.empty()) {
+						break;
+					}
+					if (std::find(src.begin(), src.end(), serverID) == src.end()) {
+						teamForDroppedRange.insert(teamForDroppedRange.end(), src.begin(), src.end());
+					}
+				}
 
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
 				state int i = 0;
@@ -1384,9 +1385,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 					// Remove the shard from keyServers/ if the src list is empty, and also remove the shard from all
 					// dest servers.
 					if (src.empty()) {
-						if (teamForDroppedRange.empty()) {
-							throw internal_error_msg("No team for the dropped range.");
-						}
+						assert(!teamForDroppedRange.empty());
 						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
 						vector<Future<Void>> actors;
 						for (const UID& id : dest) {
