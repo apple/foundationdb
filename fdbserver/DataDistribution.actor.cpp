@@ -893,9 +893,22 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return Void();
 	}
 
-	Optional<TCTeamInfo> getRandomHealthyTeam() {
-		
+	std::vector<UID> getRandomHealthyTeam() {
+		int count = 0;
+		Optional<int> idx;
+		for (int i = 0; i < teams.size(); ++i) {
+			if (teams[i]->isHealthy()) {
+				if (std::rand() % ++count == 0) {
+					idx = i;
+				}
+			}
+		}
+		if (idx.present()) {
+			return teams[idx.get()]->getServerIDs();
+		}
+		return std::vector<UID>();
 	}
+
 	// SOMEDAY: Make bestTeam better about deciding to leave a shard where it is (e.g. in PRIORITY_TEAM_HEALTHY case)
 	//		    use keys, src, dest, metrics, priority, system load, etc.. to decide...
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
@@ -6125,6 +6138,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
+			state std::vector<UID> teamForDroppedRange;
+			std::vector<UID> pTeam = primaryTeamCollection->getRandomHealthyTeam();
+			teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
+			if (configuration.usableRegions > 1) {
+				std::vector<UID> rTeam = remoteTeamCollection->getRandomHealthyTeam();
+				teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
+			}
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
@@ -6132,7 +6152,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
-				wait(removeKeysFromFailedServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
+				wait(removeKeysFromFailedServer(
+				    cx, removeFailedServer.getFuture().get(), teamForDroppedRange, lock, ddEnabledState));
 				Optional<UID> tssPairID;
 				wait(removeStorageServer(cx, removeFailedServer.getFuture().get(), tssPairID, lock, ddEnabledState));
 			} else {
