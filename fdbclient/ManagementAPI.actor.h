@@ -60,6 +60,8 @@ enum class ConfigurationResult {
 	REGION_REPLICATION_MISMATCH,
 	DCID_MISSING,
 	LOCKED_NOT_NEW,
+	SUCCESS_WARN_PPW_GRADUAL,
+	SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE,
 	SUCCESS,
 };
 
@@ -321,6 +323,10 @@ template <class DB>
 Future<Void> removeCachedRange(Reference<DB> db, KeyRangeRef range) {
 	return changeCachedRange(db, range, false);
 }
+
+// return the corresponding error message for the CoordinatorsResult
+// used by special keys and fdbcli
+std::string generateErrorMessage(const CoordinatorsResult& res);
 
 } // namespace ManagementAPI
 

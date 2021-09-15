@@ -488,6 +488,10 @@ public:
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
 
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
+
+	void close() { kvStore.close(); }
+
+	Future<Void> onClosed() { return kvStore.onClosed(); }
 };
 
 ConfigNode::ConfigNode(std::string const& folder) : impl(PImpl<ConfigNodeImpl>::create(folder)) {}
@@ -500,4 +504,12 @@ Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {
 
 Future<Void> ConfigNode::serve(ConfigFollowerInterface const& cfi) {
 	return impl->serve(cfi);
+}
+
+void ConfigNode::close() {
+	impl->close();
+}
+
+Future<Void> ConfigNode::onClosed() {
+	return impl->onClosed();
 }

@@ -747,7 +747,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 						msg = std::upper_bound(tagData->versionMessages.begin(),
 						                       tagData->versionMessages.end(),
 						                       std::make_pair(currentVersion, LengthPrefixedStringRef()),
-						                       CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+						                       [](const auto& l, const auto& r) { return l.first < r.first; });
 					}
 				}
 
@@ -1187,7 +1187,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
 	auto it = std::lower_bound(deque.begin(),
 	                           deque.end(),
 	                           std::make_pair(begin, LengthPrefixedStringRef()),
-	                           CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+	                           [](const auto& l, const auto& r) { return l.first < r.first; });
 
 	Version currentVersion = -1;
 	for (; it != deque.end(); ++it) {
