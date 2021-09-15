@@ -7,6 +7,7 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
+#include <rocksdb/version.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
@@ -23,6 +24,13 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
+
+static_assert(ROCKSDB_MAJOR >= 6
+                  ? (ROCKSDB_MAJOR == 6
+                         ? (ROCKSDB_MINOR >= 22 ? (ROCKSDB_MINOR == 22 ? ROCKSDB_PATCH >= 1 : true) : false)
+                         : true)
+                  : false,
+              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
 
 namespace {
 
@@ -464,12 +472,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
 			auto options = getReadOptions();
-			// TODO: Deadline option is not supported with current rocksdb verion. Re-enable the code
-			// below when deadline option is supported.
-			/* uint64_t deadlineMircos =
+			uint64_t deadlineMircos =
 			    db->GetEnv()->NowMicros() + (readRangeTimeout - (timer_monotonic() - a.startTime)) * 1000000;
 			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
-			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds); */
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			// When using a prefix extractor, ensure that keys are returned in order even if they cross
 			// a prefix boundary.
 			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
