@@ -127,9 +127,9 @@ class StorageTeamPeekCursor : public PeekCursorBase {
 	SubsequencedMessageDeserializer deserializer;
 	SubsequencedMessageDeserializer::iterator deserializerIter;
 
-	// When the cursor checks remoteMoreAvailable, it depends on an ACTOR which accepts TLogPeekReply. TLogPeekReply will
-	// include an Arena and a StringRef, representing serialized data. We need to add a reference to the Arena so it will
-	// not be GCed after the ACTOR terminates.
+	// When the cursor checks remoteMoreAvailable, it depends on an ACTOR which accepts TLogPeekReply. TLogPeekReply
+	// will include an Arena and a StringRef, representing serialized data. We need to add a reference to the Arena so
+	// it will not be GCed after the ACTOR terminates.
 	Arena workArena;
 
 	// Returns the begin verion for the cursor. The cursor will start from the begin version.
@@ -176,7 +176,7 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	const StorageTeamID storageTeamId;
 	const TLogGroupID tLogGroupID;
 
-	TLogPeekReply results;
+	ptxn::TLogPeekReply results;
 	ArenaReader rd;
 	LogMessageVersion messageVersion, end;
 	Version poppedVersion;
@@ -186,10 +186,13 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	UID dbgid; // i.e., unique debugID of this cursor.
 	bool returnIfBlocked;
 
+	int numMessagesInCurrentVersion = 0;
+	int messageIndexInCurrentVersion = 0;
+
 	bool onlySpilled = false;
 	bool parallelGetMore;
 	int sequence = 0;
-	Deque<Future<TLogPeekReply>> futureResults;
+	Deque<Future<ptxn::TLogPeekReply>> futureResults;
 	Future<Void> interfaceChanged;
 
 	double lastReset = 0;

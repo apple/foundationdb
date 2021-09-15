@@ -26,6 +26,7 @@
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ptxn/TLogInterface.h"
+#include "fdbserver/ptxn/test/Utils.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 
@@ -76,10 +77,11 @@ struct PeekRemoteContext {
 	                  const std::vector<TLogInterfaceBase*>& pInterfaces_,
 	                  SubsequencedMessageDeserializer* pDeserializer_,
 	                  SubsequencedMessageDeserializer::iterator* pDeserializerIterator_,
-					  Arena* pWorkArena_,
+	                  Arena* pWorkArena_,
 	                  Arena* pAttachArena_ = nullptr)
 	  : debugID(debugID_), storageTeamID(storageTeamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
-	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pWorkArena(pWorkArena_), pAttachArena(pAttachArena_) {
+	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pWorkArena(pWorkArena_),
+	    pAttachArena(pAttachArena_) {
 
 		for (const auto pTLogInterface : pTLogInterfaces) {
 			ASSERT(pTLogInterface != nullptr);
@@ -210,7 +212,7 @@ Future<bool> StorageTeamPeekCursor::remoteMoreAvailableImpl() {
 	                          pTLogInterfaces,
 	                          &deserializer,
 	                          &deserializerIter,
-							  &workArena,
+	                          &workArena,
 	                          pAttachArena);
 
 	return peekRemote(context);
@@ -301,32 +303,38 @@ void ServerPeekCursor::nextMessage() {
 		hasMsg = false;
 		return;
 	}
-	if (*(int32_t*)rd.peekBytes(4) == VERSION_HEADER) {
-		// A version
-		int32_t dummy;
-		Version ver;
-		rd >> dummy >> ver;
-
-		TraceEvent(SevDebug, "SPC_ProcessSeq", dbgid).detail("MessageVersion", messageVersion.toString()).detail("Ver", ver).detail("Tag", tag.toString());
-		// ASSERT( ver >= messageVersion.version );
-
-		messageVersion.reset(ver);
-
-		if (messageVersion >= end) {
-			messageVersion = end;
-			hasMsg = false;
+	if (messageIndexInCurrentVersion >= numMessagesInCurrentVersion) {
+		// Read the version header
+		while (!rd.empty()) {
+			details::SubsequencedItemsHeader sih;
+			rd >> sih;
+			if (sih.version >= end.version) {
+				messageVersion.reset(sih.version);
+				hasMsg = false;
+				numMessagesInCurrentVersion = 0;
+				messageIndexInCurrentVersion = 0;
+				return;
+			}
+			messageVersion.reset(sih.version);
+			hasMsg = sih.numItems > 0;
+			numMessagesInCurrentVersion = sih.numItems;
+			messageIndexInCurrentVersion = 0;
+			if (hasMsg) {
+				break;
+			}
+		}
+		if (rd.empty()) {
 			return;
 		}
-		ASSERT(!rd.empty());
+		ASSERT(rd.empty());
 	}
-
-	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
-	DEBUG_TAGS_AND_MESSAGE("ServerPeekCursor", messageVersion.version, messageAndTags.getRawMessage())
-	    .detail("CursorID", this->dbgid);
-	// Rewind and consume the header so that reader() starts from the message.
-	rd.rewind();
-	rd.readBytes(messageAndTags.getHeaderSize());
+	Subsequence subsequence;
+	rd >> subsequence;
+	messageVersion.sub = subsequence;
 	hasMsg = true;
+	++messageIndexInCurrentVersion;
+
+	// StorageServer.actor.cpp will directly read message from ArenaReader.
 	TraceEvent(SevDebug, "SPC_NextMessageB", dbgid).detail("MessageVersion", messageVersion.toString());
 }
 
@@ -338,6 +346,7 @@ StringRef ServerPeekCursor::getMessage() {
 }
 
 StringRef ServerPeekCursor::getMessageWithTags() {
+	ASSERT(false);
 	StringRef rawMessage = messageAndTags.getRawMessage();
 	rd.readBytes(rawMessage.size() - messageAndTags.getHeaderSize()); // Consumes the message.
 	return rawMessage;
@@ -475,7 +484,10 @@ ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriorit
 					self->hasMsg = true;
 					self->nextMessage();
 					self->advanceTo(skipSeq);
-					TraceEvent(SevDebug, "SPC_GetMoreB", self->dbgid).detail("Has", self->hasMessage()).detail("End", res.endVersion).detail("Popped", res.popped.present() ? res.popped.get() : 0);
+					TraceEvent(SevDebug, "SPC_GetMoreB", self->dbgid)
+					    .detail("Has", self->hasMessage())
+					    .detail("End", res.endVersion)
+					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
 				when(wait(self->interfaceChanged)) {
@@ -530,7 +542,11 @@ ACTOR Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID
 				self->onlySpilled = res.onlySpilled;
 				if (res.popped.present())
 					self->poppedVersion = std::min(std::max(self->poppedVersion, res.popped.get()), self->end.version);
-				self->rd = ArenaReader(self->results.arena, self->results.data, Unversioned());
+				self->rd = ArenaReader(self->results.arena,
+				                       self->results.data,
+				                       IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+				details::MessageHeader messageHeader;
+				self->rd >> messageHeader;
 				LogMessageVersion skipSeq = self->messageVersion;
 				self->hasMsg = true;
 				self->nextMessage();
