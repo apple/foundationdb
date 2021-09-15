@@ -505,7 +505,7 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParame
 // MultiVersionTransaction
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db,
                                                  UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions)
-  : db(db) {
+  : db(db), startTime(timer_monotonic()), timeoutFuture(new ThreadSingleAssignmentVar<Void>()) {
 	setDefaultOptions(defaultOptions);
 	updateTransaction();
 }
@@ -521,20 +521,23 @@ void MultiVersionTransaction::updateTransaction() {
 	TransactionInfo newTr;
 	if (currentDb.value) {
 		newTr.transaction = currentDb.value->createTransaction();
+	}
 
-		Optional<StringRef> timeout;
-		for (auto option : persistentOptions) {
-			if (option.first == FDBTransactionOptions::TIMEOUT) {
-				timeout = option.second.castTo<StringRef>();
-			} else {
-				newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
-			}
+	Optional<StringRef> timeout;
+	for (auto option : persistentOptions) {
+		if (option.first == FDBTransactionOptions::TIMEOUT) {
+			timeout = option.second.castTo<StringRef>();
+		} else if (currentDb.value) {
+			newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
 		}
+	}
 
-		// Setting a timeout can immediately cause a transaction to fail. The only timeout
-		// that matters is the one most recently set, so we ignore any earlier set timeouts
-		// that might inadvertently fail the transaction.
-		if (timeout.present()) {
+	// Setting a timeout can immediately cause a transaction to fail. The only timeout
+	// that matters is the one most recently set, so we ignore any earlier set timeouts
+	// that might inadvertently fail the transaction.
+	if (timeout.present()) {
+		setTimeout(timeout);
+		if (currentDb.value) {
 			newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
 		}
 	}
@@ -569,19 +572,19 @@ void MultiVersionTransaction::setVersion(Version v) {
 }
 ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getReadVersion() : ThreadFuture<Version>(Never());
+	auto f = tr.transaction ? tr.transaction->getReadVersion() : makeTimeout<Version>();
 	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<Optional<Value>> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->get(key, snapshot) : ThreadFuture<Optional<Value>>(Never());
+	auto f = tr.transaction ? tr.transaction->get(key, snapshot) : makeTimeout<Optional<Value>>();
 	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<Key> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getKey(key, snapshot) : ThreadFuture<Key>(Never());
+	auto f = tr.transaction ? tr.transaction->getKey(key, snapshot) : makeTimeout<Key>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -592,7 +595,7 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
                                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(begin, end, limit, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	                        : makeTimeout<Standalone<RangeResultRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -603,7 +606,7 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
                                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(begin, end, limits, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	                        : makeTimeout<Standalone<RangeResultRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -613,7 +616,7 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
                                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(keys, limit, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	                        : makeTimeout<Standalone<RangeResultRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -622,21 +625,20 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
                                                                            bool snapshot,
                                                                            bool reverse) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	auto f = tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse) : makeTimeout<Standalone<RangeResultRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<Standalone<StringRef>> MultiVersionTransaction::getVersionstamp() {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getVersionstamp() : ThreadFuture<Standalone<StringRef>>(Never());
+	auto f = tr.transaction ? tr.transaction->getVersionstamp() : makeTimeout<Standalone<StringRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<Standalone<VectorRef<const char*>>> MultiVersionTransaction::getAddressesForKey(const KeyRef& key) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getAddressesForKey(key)
-	                        : ThreadFuture<Standalone<VectorRef<const char*>>>(Never());
+	auto f =
+	    tr.transaction ? tr.transaction->getAddressesForKey(key) : makeTimeout<Standalone<VectorRef<const char*>>>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -649,7 +651,7 @@ void MultiVersionTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 
 ThreadFuture<int64_t> MultiVersionTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getEstimatedRangeSizeBytes(keys) : ThreadFuture<int64_t>(Never());
+	auto f = tr.transaction ? tr.transaction->getEstimatedRangeSizeBytes(keys) : makeTimeout<int64_t>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -690,7 +692,7 @@ void MultiVersionTransaction::clear(const KeyRef& key) {
 
 ThreadFuture<Void> MultiVersionTransaction::watch(const KeyRef& key) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->watch(key) : ThreadFuture<Void>(Never());
+	auto f = tr.transaction ? tr.transaction->watch(key) : makeTimeout<Void>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -703,7 +705,7 @@ void MultiVersionTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
 
 ThreadFuture<Void> MultiVersionTransaction::commit() {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->commit() : ThreadFuture<Void>(Never());
+	auto f = tr.transaction ? tr.transaction->commit() : makeTimeout<Void>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -718,7 +720,7 @@ Version MultiVersionTransaction::getCommittedVersion() {
 
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getApproximateSize() : ThreadFuture<int64_t>(Never());
+	auto f = tr.transaction ? tr.transaction->getApproximateSize() : makeTimeout<int64_t>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -732,6 +734,11 @@ void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Op
 	if (MultiVersionApi::apiVersionAtLeast(610) && itr->second.persistent) {
 		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
 	}
+
+	if (itr->first == FDBTransactionOptions::TIMEOUT) {
+		setTimeout(value);
+	}
+
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->setOption(option, value);
@@ -744,7 +751,7 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 		return ThreadFuture<Void>(Void());
 	} else {
 		auto tr = getTransaction();
-		auto f = tr.transaction ? tr.transaction->onError(e) : ThreadFuture<Void>(Never());
+		auto f = tr.transaction ? tr.transaction->onError(e) : makeTimeout<Void>();
 		f = abortableFuture(f, tr.onChange);
 
 		return flatMapThreadFuture<Void, Void>(f, [this, e](ErrorOr<Void> ready) {
@@ -760,6 +767,46 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 			return ErrorOr<ThreadFuture<Void>>(onError(e));
 		});
 	}
+}
+
+ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVarBase> tsav, double duration) {
+	wait(delay(duration));
+	if (!tsav->isReady()) {
+		tsav->sendError(transaction_timed_out());
+	}
+
+	return Void();
+}
+
+void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
+	double timeoutDuration = extractIntOption(value, 0, std::numeric_limits<int>::max()) / 1000.0;
+
+	ThreadFuture<Void> prevTimeout;
+	{
+		ThreadSpinLockHolder holder(timeoutLock);
+
+		prevTimeout = currentTimeout;
+		currentTimeout = onMainThread([this, timeoutDuration]() {
+			return timeoutImpl(Reference<ThreadSingleAssignmentVarBase>::addRef(timeoutFuture.getPtr()),
+			                   timeoutDuration - std::max(0.0, now() - startTime));
+		});
+	}
+
+	if (prevTimeout.isValid()) {
+		prevTimeout.cancel();
+	}
+}
+
+template <class T>
+ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
+	return mapThreadFuture<Void, T>(timeoutFuture, [](ErrorOr<Void> v) {
+		ASSERT(v.isError());
+		if (v.getError().code() == error_code_transaction_timed_out) {
+			return ErrorOr<T>(v.getError());
+		} else {
+			return ErrorOr<T>(transaction_cancelled());
+		}
+	});
 }
 
 void MultiVersionTransaction::reset() {
