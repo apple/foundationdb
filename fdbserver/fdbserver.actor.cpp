@@ -1681,7 +1681,7 @@ int main(int argc, char* argv[]) {
 		const auto role = opts.role;
 
 #ifdef _WIN32
-		//For now, ignore all tests for Windows
+		// For now, ignore all tests for Windows
 		if (role == ServerRole::Simulation || role == ServerRole::UnitTests || role == ServerRole::Test) {
 			printf("Windows tests are not supported yet\n");
 			flushAndExit(FDB_EXIT_SUCCESS);
