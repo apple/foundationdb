@@ -1334,19 +1334,19 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 
-				teamForDroppedRange.clear();
-				for (int i = 0; i < keyServers.size() && teamForDroppedRange.empty(); ++i) {
-					decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
-					if (std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
-						teamForDroppedRange.insert(teamForDroppedRange.end(), dest.begin(), dest.end());
-					}
-					if (!teamForDroppedRange.empty()) {
-						break;
-					}
-					if (std::find(src.begin(), src.end(), serverID) == src.end()) {
-						teamForDroppedRange.insert(teamForDroppedRange.end(), src.begin(), src.end());
-					}
-				}
+				// teamForDroppedRange.clear();
+				// for (int i = 0; i < keyServers.size() && teamForDroppedRange.empty(); ++i) {
+				// 	decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+				// 	if (std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
+				// 		teamForDroppedRange.insert(teamForDroppedRange.end(), dest.begin(), dest.end());
+				// 	}
+				// 	if (!teamForDroppedRange.empty()) {
+				// 		break;
+				// 	}
+				// 	if (std::find(src.begin(), src.end(), serverID) == src.end()) {
+				// 		teamForDroppedRange.insert(teamForDroppedRange.end(), src.begin(), src.end());
+				// 	}
+				// }
 
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
 				for (int i = 0; i < keyServers.size() - 1; ++i) {

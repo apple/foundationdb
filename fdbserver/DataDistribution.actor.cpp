@@ -893,11 +893,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return Void();
 	}
 
-	std::vector<UID> getRandomHealthyTeam() {
+	std::vector<UID> getRandomHealthyTeam(const UID& excludeServer) {
 		int count = 0;
 		Optional<int> idx;
 		for (int i = 0; i < teams.size(); ++i) {
-			if (teams[i]->isHealthy()) {
+			if (teams[i]->isHealthy() && !teams[i]->hasServer(excludeServer)) {
 				if (std::rand() % ++count == 0) {
 					idx = i;
 				}
@@ -6169,11 +6169,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			state std::vector<UID> teamForDroppedRange;
-			std::vector<UID> pTeam = primaryTeamCollection->getRandomHealthyTeam();
-			teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
-			if (configuration.usableRegions > 1) {
-				std::vector<UID> rTeam = remoteTeamCollection->getRandomHealthyTeam();
-				teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
+			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
+				const UID serverID = removeFailedServer.getFuture().get();
+				std::vector<UID> pTeam = primaryTeamCollection->getRandomHealthyTeam(serverID);
+				teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
+				if (configuration.usableRegions > 1) {
+					std::vector<UID> rTeam = remoteTeamCollection->getRandomHealthyTeam(serverID);
+					teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
+				}
 			}
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
