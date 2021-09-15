@@ -212,8 +212,7 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 
 	if (readVersion > ssVersionVectorCache.getMaxVersion()) {
-		// @todo Use SevError here (and drop "ASSERT(false)").
-		TraceEvent("GetLatestCommitVersions")
+		TraceEvent(SevError, "GetLatestCommitVersions")
 		    .detail("ReadVersion", readVersion)
 		    .detail("Version vector", ssVersionVectorCache.toString());
 		ASSERT(false);
