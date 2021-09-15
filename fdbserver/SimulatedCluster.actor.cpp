@@ -1270,7 +1270,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 	// reduce tss to half of extra non-seed servers that can be recruited in usable regions.
 	tssCount =
-	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
+	    std::max(0, std::min(tssCount, db.usableRegions * ((machine_count / datacenters) - db.storageTeamSize) / 2));
 
 	if (tssCount > 0) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
@@ -1666,9 +1666,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	g_simulator.connectionString = conn.toString();
 	g_simulator.testerCount = testerCount;
 
-	if (!testConfig.simpleConfig && simconfig.replication_type > 0 &&
-	    (machineCount / dataCenters > simconfig.replication_type)) {
-		//	in each DC, only when machineCount > replication_type, storage_migration_type=gradual will make progress
+	if (!testConfig.simpleConfig &&
+	    (machineCount / dataCenters - simconfig.db.desiredTLogCount > simconfig.db.storageTeamSize)) {
+		// in each DC, only when available_machine_count > storageTeamSize, storage_migration_type=gradual will make progress
 		g_simulator.allowStorageMigrationTypeChange = true;
 	}
 
