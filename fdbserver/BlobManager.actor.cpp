@@ -197,6 +197,7 @@ struct BlobWorkerStats {
 struct BlobManagerData {
 	UID id;
 	Database db;
+	PromiseStream<Future<Void>> addActor;
 
 	std::unordered_map<UID, BlobWorkerInterface> workersById;
 	std::unordered_map<UID, BlobWorkerStats> workerStats; // mapping between workerID -> workerStats
@@ -479,35 +480,6 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Blo
 	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
 
 	return Void();
-}
-
-// TODO eventually CC should probably do this and pass it as part of recruitment?
-ACTOR Future<int64_t> acquireManagerLock(BlobManagerData* bmData) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
-
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		try {
-			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
-			state int64_t newEpoch;
-			if (oldEpoch.present()) {
-				newEpoch = decodeBlobManagerEpochValue(oldEpoch.get()) + 1;
-			} else {
-				newEpoch = 1; // start at 1
-			}
-
-			tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
-
-			wait(tr->commit());
-			return newEpoch;
-		} catch (Error& e) {
-			if (BM_DEBUG) {
-				printf("Acquiring blob manager lock got error %s\n", e.name());
-			}
-			wait(tr->onError(e));
-		}
-	}
 }
 
 // FIXME: this does all logic in one transaction. Adding a giant range to an existing database to hybridize would spread
@@ -853,9 +825,9 @@ ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
 	}
 }
 
-// TODO MOVE ELSEWHERE
-// TODO replace locality with full BlobManagerInterface eventually
-ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
+                               Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                               int64_t epoch) {
 	state BlobManagerData self(deterministicRandom()->randomUniqueID(),
 	                           openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 
@@ -873,15 +845,41 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 		printf("Blob manager taking lock\n");
 	}
 
-	int64_t _epoch = wait(acquireManagerLock(&self));
-	self.epoch = _epoch;
+	self.epoch = epoch;
+
+	// make sure the epoch hasn't gotten stale
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self.db);
+
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		try {
+			wait(checkManagerLock(tr, &self));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_granule_assignment_conflict) {
+				if (BM_DEBUG) {
+					printf("Blob manager dying...\n");
+				}
+				throw;
+			}
+
+			// if we get here, most likely error is a read-write conflict
+			if (BM_DEBUG) {
+				printf("Blob manager lock check got unexpected error %s\n", e.name());
+			}
+			wait(tr->onError(e));
+		}
+	}
+
 	if (BM_DEBUG) {
-		printf("Blob manager acquired lock at epoch %lld\n", _epoch);
+		printf("Blob manager acquired lock at epoch %lld\n", epoch);
 	}
 
 	int numWorkers = 2;
 	for (int i = 0; i < numWorkers; i++) {
-		state BlobWorkerInterface bwInterf(locality, deterministicRandom()->randomUniqueID());
+		state BlobWorkerInterface bwInterf(bmInterf.locality, deterministicRandom()->randomUniqueID());
 		bwInterf.initEndpoints();
 		self.workersById.insert({ bwInterf.id(), bwInterf });
 		self.workerStats.insert({ bwInterf.id(), BlobWorkerStats() });
@@ -918,8 +916,8 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 // DB has [B - D). It should show up coalesced in knownBlobRanges, and [C - D) should be removed.
 // DB has [A - D). It should show up coalesced in knownBlobRanges, and [A - B) should be removed.
 // DB has [A - B) and [C - D). They should show up in knownBlobRanges, and [B - C) should be in removed.
-// DB has [B - C). It should show up in knownBlobRanges, [B - C) should be in added, and [A - B) and [C - D) should be
-// in removed.
+// DB has [B - C). It should show up in knownBlobRanges, [B - C) should be in added, and [A - B) and [C - D) should
+// be in removed.
 TEST_CASE("/blobmanager/updateranges") {
 	KeyRangeMap<bool> knownBlobRanges(false, normalKeys.end);
 	Arena ar;
