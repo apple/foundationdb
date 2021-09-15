@@ -203,11 +203,16 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
                                               VersionVector& latestCommitVersions) {
 	latestCommitVersions.clear();
 
+	if (info.debugID.present()) {
+		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getLatestCommitVersions");
+	}
+
 	if (!info.readVersionObtainedFromGrvProxy) {
 		return;
 	}
 
 	if (readVersion > ssVersionVectorCache.getMaxVersion()) {
+		// @todo Use SevError here (and drop "ASSERT(false)").
 		TraceEvent("GetLatestCommitVersions")
 		    .detail("ReadVersion", readVersion)
 		    .detail("Version vector", ssVersionVectorCache.toString());
@@ -4245,8 +4250,8 @@ void Transaction::flushTrLogsIfEnabled() {
 	}
 }
 
-std::string Transaction::getVersionVector() const {
-	return cx->ssVersionVectorCache.toString();
+VersionVector Transaction::getVersionVector() const {
+	return cx->ssVersionVectorCache;
 }
 
 void Transaction::setVersion(Version v) {
