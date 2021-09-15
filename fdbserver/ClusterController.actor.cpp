@@ -3405,7 +3405,7 @@ ProcessClass::Fitness findBestFitnessForSingleton(const ClusterControllerData* s
 // the singleton is stable (see below) and doesn't need to be rerecruited.
 // Side effects: (possibly) initiates recruitment
 template <class Interface>
-bool rerecruitSingleton(ClusterControllerData* self,
+bool isHealthySingleton(ClusterControllerData* self,
                         const WorkerDetails& newWorker,
                         const Singleton<Interface>& singleton,
                         const ProcessClass::Fitness& bestFitness,
@@ -3439,7 +3439,7 @@ bool rerecruitSingleton(ClusterControllerData* self,
 		    .detail("Excluded", currWorker.priorityInfo.isExcluded)
 		    .detail("Fitness", currFitness)
 		    .detail("BestFitness", bestFitness);
-		singleton.recruit(self);
+		singleton.recruit(self); // SIDE EFFECT: initiating recruitment
 		return false; // not healthy since needed to be rerecruited
 	} else {
 		return true; // healthy because doesn't need to be rerecruited
@@ -3492,11 +3492,12 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
 	auto ddSingleton = DataDistributorSingleton(db.distributor);
 
-	// Try to rerecruit the singletons to more optimal processes
-	bool rkHealthy = rerecruitSingleton<RatekeeperInterface>(
+	// Check if the singletons are healthy.
+	// side effect: try to rerecruit the singletons to more optimal processes
+	bool rkHealthy = isHealthySingleton<RatekeeperInterface>(
 	    self, newRKWorker, rkSingleton, bestFitnessForRK, self->recruitingRatekeeperID);
 
-	bool ddHealthy = rerecruitSingleton<DataDistributorInterface>(
+	bool ddHealthy = isHealthySingleton<DataDistributorInterface>(
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
