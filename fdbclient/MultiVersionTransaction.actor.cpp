@@ -625,7 +625,8 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
                                                                            bool snapshot,
                                                                            bool reverse) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse) : makeTimeout<Standalone<RangeResultRef>>();
+	auto f = tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse)
+	                        : makeTimeout<Standalone<RangeResultRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -835,7 +836,7 @@ void MultiVersionTransaction::reset() {
 		ThreadSpinLockHolder holder(timeoutLock);
 
 		prevTimeoutTsav = timeoutTsav;
-		timeoutTsav = makeReference<ThreadSingleAssignmentVar<Void>>();
+		timeoutTsav = Reference<ThreadSingleAssignmentVar<Void>>(new ThreadSingleAssignmentVar<Void>());
 
 		prevTimeout = currentTimeout;
 		currentTimeout = ThreadFuture<Void>();
