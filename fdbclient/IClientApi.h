@@ -27,6 +27,8 @@
 
 #include "flow/ThreadHelper.actor.h"
 
+class VersionVector;
+
 // An interface that represents a transaction created by a client
 class ITransaction {
 public:
@@ -79,7 +81,7 @@ public:
 
 	virtual ThreadFuture<Void> commit() = 0;
 	virtual Version getCommittedVersion() = 0;
-	virtual std::string getVersionVector() = 0;
+	virtual VersionVector getVersionVector() = 0;
 	virtual UID getSpanID() = 0;
 	virtual ThreadFuture<int64_t> getApproximateSize() = 0;
 

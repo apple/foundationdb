@@ -285,6 +285,10 @@ void DLTransaction::reset() {
 	api->transactionReset(tr);
 }
 
+VersionVector DLTransaction::getVersionVector() {
+	return VersionVector(); // not implemented
+}
+
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -826,13 +830,13 @@ Version MultiVersionTransaction::getCommittedVersion() {
 	return invalidVersion;
 }
 
-std::string MultiVersionTransaction::getVersionVector() {
+VersionVector MultiVersionTransaction::getVersionVector() {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		return tr.transaction->getVersionVector();
 	}
 
-	return std::string("transaction not found");
+	return VersionVector();
 }
 
 UID MultiVersionTransaction::getSpanID() {

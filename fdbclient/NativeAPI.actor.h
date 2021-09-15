@@ -388,7 +388,7 @@ public:
 	void fullReset();
 	double getBackoff(int errCode);
 	void debugTransaction(UID dID) { info.debugID = dID; }
-	std::string getVersionVector() const;
+	VersionVector getVersionVector() const;
 	UID getSpanID() const { return info.spanID; }
 
 	Future<Void> commitMutations();

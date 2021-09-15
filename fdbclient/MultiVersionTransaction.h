@@ -239,7 +239,7 @@ public:
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
-	std::string getVersionVector() override { return std::string("DLTransaction::Not implemented"); }
+	VersionVector getVersionVector() override;
 	UID getSpanID() override { return UID(); };
 	ThreadFuture<int64_t> getApproximateSize() override;
 
@@ -380,7 +380,7 @@ public:
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
-	std::string getVersionVector() override;
+	VersionVector getVersionVector() override;
 	UID getSpanID() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 

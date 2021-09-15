@@ -353,7 +353,7 @@ Version ThreadSafeTransaction::getCommittedVersion() {
 	return tr->getCommittedVersion();
 }
 
-std::string ThreadSafeTransaction::getVersionVector() {
+VersionVector ThreadSafeTransaction::getVersionVector() {
 	return tr->getVersionVector();
 }
 
