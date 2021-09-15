@@ -400,6 +400,15 @@ private:
 		ThreadFuture<Void> onChange;
 	};
 
+	double startTime;
+	ThreadSpinLock timeoutLock;
+	ThreadFuture<Void> timeoutFuture;
+	ThreadFuture<Void> currentTimeout;
+	void setTimeout(Optional<StringRef> value);
+
+	template <class T>
+	ThreadFuture<T> makeTimeout();
+
 	TransactionInfo transaction;
 
 	TransactionInfo getTransaction();
