@@ -505,7 +505,7 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParame
 // MultiVersionTransaction
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db,
                                                  UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions)
-  : db(db), startTime(timer_monotonic()), timeoutFuture(new ThreadSingleAssignmentVar<Void>()) {
+  : db(db), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
 	setDefaultOptions(defaultOptions);
 	updateTransaction();
 }
@@ -769,50 +769,90 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 	}
 }
 
-ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVarBase> tsav, double duration) {
+// Waits for the specified duration and signals the assignment variable with a timed out error
+// This will be canceled if a new timeout is set, in which case the tsav will not be signaled.
+ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double duration) {
 	wait(delay(duration));
-	if (!tsav->isReady()) {
-		tsav->sendError(transaction_timed_out());
-	}
 
+	tsav->trySendError(transaction_timed_out());
 	return Void();
 }
 
+// Configure a timeout based on the options set for this transaction. This timeout only applies
+// if we don't have an underlying database object to connect with.
 void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
 	double timeoutDuration = extractIntOption(value, 0, std::numeric_limits<int>::max()) / 1000.0;
 
 	ThreadFuture<Void> prevTimeout;
-	{
+	ThreadFuture<Void> newTimeout = onMainThread([this, timeoutDuration]() {
+		return timeoutImpl(timeoutTsav, timeoutDuration - std::max(0.0, now() - startTime));
+	});
+
+	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
 
 		prevTimeout = currentTimeout;
-		currentTimeout = onMainThread([this, timeoutDuration]() {
-			return timeoutImpl(Reference<ThreadSingleAssignmentVarBase>::addRef(timeoutFuture.getPtr()),
-			                   timeoutDuration - std::max(0.0, now() - startTime));
-		});
+		currentTimeout = newTimeout;
 	}
 
+	// Cancel the previous timeout now that we have a new one. This means that changing the timeout
+	// affects in-flight operations, which is consistent with the behavior in RYW.
 	if (prevTimeout.isValid()) {
 		prevTimeout.cancel();
 	}
 }
 
+// Creates a ThreadFuture<T> that will signal an error if the transaction times out.
 template <class T>
 ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
-	return mapThreadFuture<Void, T>(timeoutFuture, [](ErrorOr<Void> v) {
+	ThreadFuture<Void> f;
+
+	// We create a ThreadFuture that holds a reference to this below,
+	// but the ThreadFuture does not increment the ref count
+	timeoutTsav->addref();
+
+	{ // lock scope
+		ThreadSpinLockHolder holder(timeoutLock);
+		f = ThreadFuture<Void>(timeoutTsav.getPtr());
+	}
+
+	// When our timeoutTsav gets set, map it to the appropriate type
+	return mapThreadFuture<Void, T>(f, [](ErrorOr<Void> v) {
 		ASSERT(v.isError());
-		if (v.getError().code() == error_code_transaction_timed_out) {
-			return ErrorOr<T>(v.getError());
-		} else {
-			return ErrorOr<T>(transaction_cancelled());
-		}
+		return ErrorOr<T>(v.getError());
 	});
 }
 
 void MultiVersionTransaction::reset() {
 	persistentOptions.clear();
+
+	// Reset the timeout state
+	Reference<ThreadSingleAssignmentVar<Void>> prevTimeoutTsav;
+	ThreadFuture<Void> prevTimeout;
+	startTime = timer_monotonic();
+
+	{ // lock scope
+		ThreadSpinLockHolder holder(timeoutLock);
+
+		prevTimeoutTsav = timeoutTsav;
+		timeoutTsav = makeReference<ThreadSingleAssignmentVar<Void>>();
+
+		prevTimeout = currentTimeout;
+		currentTimeout = ThreadFuture<Void>();
+	}
+
+	// Cancel any outstanding operations if they don't have an underlying transaction object to cancel them
+	prevTimeoutTsav->trySendError(transaction_cancelled());
+	if (prevTimeout.isValid()) {
+		prevTimeout.cancel();
+	}
+
 	setDefaultOptions(db->dbState->transactionDefaultOptions);
 	updateTransaction();
+}
+
+MultiVersionTransaction::~MultiVersionTransaction() {
+	timeoutTsav->trySendError(transaction_cancelled());
 }
 
 // MultiVersionDatabase
