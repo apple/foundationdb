@@ -458,10 +458,10 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
 			    .detail("TSSGetKeyLatency99", it.second->TSSgetKeyLatency.percentile(0.99));
 
-			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyLatency.mean())
-			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyLatency.median())
-			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyLatency.percentile(0.90))
-			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyLatency.percentile(0.99));
+			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.mean())
+			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.median())
+			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyValuesLatency.percentile(0.90))
+			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyValuesLatency.percentile(0.99));
 
 			tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
 			    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
