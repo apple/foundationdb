@@ -1303,9 +1303,10 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 // Changes to keyServer and serverKey must happen symmetrically in a transaction.
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               UID serverID,
+                                              std::vector<UID> teamForDroppedRange,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState) {
-	state std::vector<UID> targetTeam;
+	// state std::vector<UID> teamForDroppedRange;
 	state Key begin = allKeys.begin;
 
 	state vector<UID> src;
@@ -1333,18 +1334,18 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 
-				for (int i = 0; i < keyServers.size() && targetTeam.empty(); ++i) {
-					decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
-					if (std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
-						targetTeam.insert(targetTeam.end(), dest.begin(), dest.end());
-					}
-					if (!targetTeam.empty()) {
-						break;
-					}
-					if (std::find(src.begin(), src.end(), serverID) == src.end()) {
-						targetTeam.insert(targetTeam.end(), src.begin(), src.end());
-					}
-				}
+				// for (int i = 0; i < keyServers.size() && teamForDroppedRange.empty(); ++i) {
+				// 	decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+				// 	if (std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
+				// 		teamForDroppedRange.insert(teamForDroppedRange.end(), dest.begin(), dest.end());
+				// 	}
+				// 	if (!teamForDroppedRange.empty()) {
+				// 		break;
+				// 	}
+				// 	if (std::find(src.begin(), src.end(), serverID) == src.end()) {
+				// 		teamForDroppedRange.insert(teamForDroppedRange.end(), src.begin(), src.end());
+				// 	}
+				// }
 
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
 				for (int i = 0; i < keyServers.size() - 1; ++i) {
@@ -1384,8 +1385,10 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 					// Remove the shard from keyServers/ if the src list is empty, and also remove the shard from all
 					// dest servers.
 					if (src.empty()) {
-						ASSERT(!targetTeam.empty());
-						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, targetTeam, {}));
+						if (teamForDroppedRange.empty()) {
+							throw internal_error_msg("No team for the dropped range.");
+						}
+						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
 						vector<Future<Void>> actors;
 						for (const UID& id : dest) {
 							actors.push_back(krmSetRangeCoalescing(&tr,
@@ -1395,7 +1398,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							                                       serverKeysFalse));
 						}
 						// Update serverKeys to include keys.
-						for (const UID& id : targetTeam) {
+						for (const UID& id : teamForDroppedRange) {
 							actors.push_back(krmSetRangeCoalescing(&tr,
 							                                       serverKeysPrefixFor(id),
 							                                       KeyRangeRef(it.key, keyServers[i + 1].key),
@@ -1405,12 +1408,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						TraceEvent(SevWarn, "FailedServerRemoveRange", serverID)
 						    .detail("Key", it.key)
 						    .detail("OldDest", describe(dest))
-						    .detail("NewTeam", describe(targetTeam));
+						    .detail("NewTeam", describe(teamForDroppedRange));
 						wait(waitForAll(actors));
-						TraceEvent(SevWarn, "FailedServerRemoveRangeEnd", serverID)
-						    .detail("Key", it.key)
-						    .detail("OldDest", describe(dest))
-						    .detail("NewTeam", describe(targetTeam));
 					} else {
 						TraceEvent("FailedServerSetKey", serverID)
 						    .detail("Key", it.key)
