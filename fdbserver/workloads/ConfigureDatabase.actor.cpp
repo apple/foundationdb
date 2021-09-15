@@ -219,6 +219,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	int additionalDBs;
 
 	bool allowDescriptorChange;
+	bool allowTestStorageMigration;
 	vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
@@ -226,6 +227,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 200.0);
 		allowDescriptorChange =
 		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
+		allowTestStorageMigration =
+		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
 		g_simulator.usableRegions = 1;
 	}
 
@@ -234,7 +237,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
-	Future<bool> check(Database const& cx) override { return _check(this, cx);}
+	Future<bool> check(Database const& cx) override { return _check(this, cx); }
 
 	void getMetrics(vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
@@ -275,23 +278,24 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 			for (i = 0; i < storageServers.size(); i++) {
 				// Check that each storage server has the correct key value store type
-				if(!storageServers[i].isTss()) {
+				if (!storageServers[i].isTss()) {
 					ReplyPromise<KeyValueStoreType> typeReply;
 					ErrorOr<KeyValueStoreType> keyValueStoreType =
 					    wait(storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
-					if (!keyValueStoreType.present() || keyValueStoreType.get() != conf.storageServerStoreType) {
+					if (keyValueStoreType.present() && keyValueStoreType.get() != conf.storageServerStoreType) {
 						TraceEvent(SevWarn, "ConfigureDatabase_WrongStoreType")
 						    .suppressFor(5.0)
 						    .detail("ServerID", storageServers[i].id())
 						    .detail("ProcessID", storageServers[i].locality.processId())
-						    .detail("ServerStoreType", keyValueStoreType.present() ? keyValueStoreType.get().toString() : "?")
+						    .detail("ServerStoreType",
+						            keyValueStoreType.present() ? keyValueStoreType.get().toString() : "?")
 						    .detail("ConfigStoreType", conf.storageServerStoreType.toString());
 						pass = false;
 						break;
 					}
 				}
 			}
-			if(pass)
+			if (pass)
 				break;
 			wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
 		}
@@ -309,7 +313,13 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if (g_simulator.speedUpSimulation) {
 				return Void();
 			}
-			state int randomChoice = deterministicRandom()->randomInt(0, 8);
+
+			state int randomChoice;
+			if (self->allowTestStorageMigration) {
+				randomChoice = deterministicRandom()->randomInt(4, 9);
+			} else {
+				randomChoice = deterministicRandom()->randomInt(0, 8);
+			}
 			if (randomChoice == 0) {
 				wait(success(
 				    runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
@@ -375,7 +385,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				    backupTypes[deterministicRandom()->randomInt(0, sizeof(backupTypes) / sizeof(backupTypes[0]))],
 				    false)));
 			} else if (randomChoice == 8) {
-				if(g_simulator.allowStorageMigrationTypeChange) {
+				if (self->allowTestStorageMigration) {
 					wait(success(IssueConfigurationChange(
 					    cx,
 					    storageMigrationTypes[deterministicRandom()->randomInt(
