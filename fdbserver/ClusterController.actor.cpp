@@ -3510,23 +3510,21 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// check if we can colocate the singletons in a more optimal way
 
 	// TODO: verify that we don't need to get the pid from the worker like we were doing before
-	Optional<Standalone<StringRef>> currentRKProcessId = rkSingleton.interface.get().locality.processId();
-	Optional<Standalone<StringRef>> currentDDProcessId = ddSingleton.interface.get().locality.processId();
+	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
+	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newDDProcessId = newRKWorker.interf.locality.processId();
 
-	auto currColocMap = getColocCounts({ currentRKProcessId, currentDDProcessId });
+	auto currColocMap = getColocCounts({ currRKProcessId, currDDProcessId });
 	auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId });
 
-	auto currColocCounts = std::make_tuple(currColocMap[newRKProcessId], currColocMap[newDDProcessId]);
-	auto newColocCounts = std::make_tuple(newColocMap[newRKProcessId], newColocMap[newDDProcessId]);
-
-	// if the new coloc counts are collectively better (i.e. each singleton's coloc count has not increased)
-	if (newColocCounts <= currColocCounts) {
+	// if the new coloc counts are not worse (i.e. each singleton's coloc count has not increased)
+	if (newColocMap[newRKProcessId] <= currColocMap[currRKProcessId] &&
+	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId]) {
 		// rerecruit the singleton for which we have found a better process, if any
-		if (newColocMap[newRKProcessId] < currColocMap[currentRKProcessId]) {
+		if (newColocMap[newRKProcessId] < currColocMap[currRKProcessId]) {
 			rkSingleton.recruit(self);
-		} else if (newColocMap[newDDProcessId] < currColocMap[currentDDProcessId]) {
+		} else if (newColocMap[newDDProcessId] < currColocMap[currDDProcessId]) {
 			ddSingleton.recruit(self);
 		}
 	}
@@ -3892,8 +3890,6 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 		    .detail("DcID", printable(self->clusterControllerDcId))
 		    .detail("ReqDcID", printable(worker.locality.dcId()))
 		    .detail("Recruiting" + roleAbbr + "ID", recruitingID.present() ? recruitingID.get() : UID());
-		if (registeringSingleton.getClusterRole() == ProcessClass::DataDistributor) {
-		}
 		registeringSingleton.halt(self, worker.locality.processId());
 	} else if (!recruitingID.present()) {
 		// if not currently recruiting, then halt previous one in favour of requesting one
@@ -4767,7 +4763,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 		if (self->db.serverInfo->get().distributor.present() && !self->recruitDistributor.get()) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
-				                            SERVER_KNOBS->DATA_DISTRIBUTOR_FAILURE_TIME))) {
+				                            SERVER_KNOBS->DD_FAILURE_TIME))) {
 					TraceEvent("CCDataDistributorDied", self->id)
 					    .detail("DDID", self->db.serverInfo->get().distributor.get().id());
 					self->db.clearInterf(ProcessClass::DataDistributorClass);
