@@ -108,7 +108,7 @@ struct VersionVector {
 			return;
 		}
 
-		if (maxVersion == delta.maxVersion) {
+		if (maxVersion >= delta.maxVersion) {
 			return;
 		}
 
