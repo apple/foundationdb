@@ -1301,6 +1301,8 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 }
 // Remove the server from keyServer list and set serverKeysFalse to the server's serverKeys list.
 // Changes to keyServer and serverKey must happen symmetrically in a transaction.
+// If serverID is the last source server for a shard, the shard will be erased, and then be assigned
+// to teamForDroppedRange.
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               UID serverID,
                                               std::vector<UID> teamForDroppedRange,
@@ -1333,21 +1335,6 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				                                                 KeyRangeRef(begin, allKeys.end),
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
-
-				// teamForDroppedRange.clear();
-				// for (int i = 0; i < keyServers.size() && teamForDroppedRange.empty(); ++i) {
-				// 	decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
-				// 	if (std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
-				// 		teamForDroppedRange.insert(teamForDroppedRange.end(), dest.begin(), dest.end());
-				// 	}
-				// 	if (!teamForDroppedRange.empty()) {
-				// 		break;
-				// 	}
-				// 	if (std::find(src.begin(), src.end(), serverID) == src.end()) {
-				// 		teamForDroppedRange.insert(teamForDroppedRange.end(), src.begin(), src.end());
-				// 	}
-				// }
-
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
 				for (int i = 0; i < keyServers.size() - 1; ++i) {
 					auto it = keyServers[i];
@@ -1361,17 +1348,13 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						continue;
 					}
 
-					TraceEvent("FailedServerRemoveBegin", serverID)
-					    .detail("Key", it.key)
-					    .detail("ValueSrc", describe(src))
-					    .detail("ValueDest", describe(dest));
-
 					// Update the vectors to remove failed server then set the value again
 					// Dest is usually empty, but keep this in case there is parallel data movement
 					src.erase(std::remove(src.begin(), src.end(), serverID), src.end());
 					dest.erase(std::remove(dest.begin(), dest.end(), serverID), dest.end());
+
 					// If the last src server is to be removed, first check if there are dest servers who is
-					// hosting a read-write copy of the data, and move such dest servers to the src list.
+					// hosting a read-write copy of the keyrange, and move such dest servers to the src list.
 					if (src.empty() && !dest.empty()) {
 						std::vector<UID> newSources =
 						    wait(pickReadWriteServers(&tr, dest, KeyRangeRef(it.key, keyServers[i + 1].key)));
@@ -1383,12 +1366,18 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							src.push_back(id);
 						}
 					}
-					// Remove the shard from keyServers/ if the src list is empty, and also remove the shard from all
-					// dest servers.
+
+					// Move the keyrange to teamForDroppedRange if the src list becomes empty, and also remove the shard
+					// from all dest servers.
 					if (src.empty()) {
 						assert(!teamForDroppedRange.empty());
+
+						// Assign the shard to teamFroDroppedRange in keyServer space.
 						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
+
 						vector<Future<Void>> actors;
+
+						// Unassign the shard from the dest servers.
 						for (const UID& id : dest) {
 							actors.push_back(krmSetRangeCoalescing(&tr,
 							                                       serverKeysPrefixFor(id),
@@ -1396,7 +1385,15 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							                                       allKeys,
 							                                       serverKeysFalse));
 						}
-						// Update serverKeys to include keys.
+						if (!dest.empty()) {
+							TraceEvent(SevWarn, "FailedServerDropRangeFromDest", serverID)
+							    .detail("Begin", it.key)
+							    .detail("End", keyServers[i + 1].key)
+							    .detail("Dest", describe(dest));
+						}
+
+						// Assign the shard to the new team as an empty range.
+						// Note, there could be data loss.
 						for (const UID& id : teamForDroppedRange) {
 							actors.push_back(krmSetRangeCoalescing(&tr,
 							                                       serverKeysPrefixFor(id),
@@ -1404,13 +1401,14 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							                                       allKeys,
 							                                       serverKeysTrueEmptyRange));
 						}
-						TraceEvent(SevWarn, "FailedServerRemoveRange", serverID)
-						    .detail("Key", it.key)
-						    .detail("OldDest", describe(dest))
-						    .detail("NewTeam", describe(teamForDroppedRange));
+
 						wait(waitForAll(actors));
+						TraceEvent(SevWarn, "FailedServerDropRange", serverID)
+						    .detail("Begin", it.key)
+						    .detail("End", keyServers[i + 1].key)
+						    .detail("NewTeam", describe(teamForDroppedRange));
 					} else {
-						TraceEvent("FailedServerSetKey", serverID)
+						TraceEvent(SevDebug, "FailedServerSetKey", serverID)
 						    .detail("Key", it.key)
 						    .detail("ValueSrc", describe(src))
 						    .detail("ValueDest", describe(dest));
@@ -1419,12 +1417,12 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				}
 
 				// Set entire range for our serverID in serverKeys keyspace to false to signal erasure
-				TraceEvent("FailedServerSetRange", serverID)
+				TraceEvent(SevDebug, "FailedServerSetRange", serverID)
 				    .detail("Begin", currentKeys.begin)
 				    .detail("End", currentKeys.end);
 				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverID), currentKeys, allKeys, serverKeysFalse));
 				wait(tr.commit());
-				TraceEvent("FailedServerCommitSuccess", serverID)
+				TraceEvent(SevDebug, "FailedServerCommitSuccess", serverID)
 				    .detail("Begin", currentKeys.begin)
 				    .detail("End", currentKeys.end)
 				    .detail("CommitVersion", tr.getCommittedVersion());

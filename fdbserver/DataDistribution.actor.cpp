@@ -893,6 +893,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return Void();
 	}
 
+	// Returns a random healthy team, which does not contain excludeServer.
 	std::vector<UID> getRandomHealthyTeam(const UID& excludeServer) {
 		int count = 0;
 		Optional<int> idx;
@@ -6170,6 +6171,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			state std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
+				// Choose a random healthy team to host the to-be-dropped range.
 				const UID serverID = removeFailedServer.getFuture().get();
 				std::vector<UID> pTeam = primaryTeamCollection->getRandomHealthyTeam(serverID);
 				teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());

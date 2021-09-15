@@ -3535,7 +3535,7 @@ private:
 	bool processedCacheStartKey;
 
 	void applyPrivateData(StorageServer* data, MutationRef const& m) {
-		TraceEvent("SSPrivateMutation", data->thisServerID).detail("Mutation", m);
+		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m);
 
 		if (processedStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -3551,6 +3551,8 @@ private:
 
 				// The changes for version have already been received (and are being processed now).  We need to fetch
 				// the data for change.version-1 (changes from versions < change.version)
+				// If emptyRange, treat the shard as empty, see removeKeysFromFailedServer() for more details about this
+				// scenario.
 				const Version shardVersion = (emptyRange && nowAssigned) ? 0 : currentVersion - 1;
 				changeServerKeys(data, keys, nowAssigned, shardVersion, CSK_UPDATE);
 			}
