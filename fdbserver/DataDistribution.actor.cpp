@@ -2500,6 +2500,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		TraceEvent(newServer.isTss() ? "AddedTSS" : "AddedStorageServer", distributorId)
 		    .detail("ServerID", newServer.id())
+		    .detail("ProcessID", newServer.locality.processId())
 		    .detail("ProcessClass", processClass.toString())
 		    .detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token)
 		    .detail("Address", newServer.waitFailure.getEndpoint().getPrimaryAddress());
@@ -4017,6 +4018,7 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 					// there must not have other teams to place wiggled data
 					takeRest = teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
 					           teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
+					teamCollection->doBuildTeams = true;
 				}
 				wait(updateNextWigglingStoragePID(teamCollection));
 			}
@@ -4105,6 +4107,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				TEST(true); // paused because cluster is unhealthy
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
+				self->doBuildTeams = true;
 				TraceEvent("PerpetualStorageWigglePause", self->distributorId)
 				    .detail("Primary", self->primary)
 				    .detail("ProcessId", pid)
@@ -4522,9 +4525,6 @@ ACTOR Future<Void> storageServerTracker(
 	    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 	state int targetTeamNumPerServer =
 	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
-	TraceEvent("StorageServerTrackerBegin", self->distributorId)
-	    .detail("ServerID", server->id)
-	    .detail("ProcessID", server->lastKnownInterface.locality.processId());
 
 	try {
 		loop {
