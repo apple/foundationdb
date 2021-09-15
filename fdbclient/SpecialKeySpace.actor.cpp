@@ -1322,7 +1322,7 @@ ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransa
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
 		// check database not locked
 		// if locked already, throw error
-		msg = ManagementAPIError::toJsonString(false, "lock", "Database has already been locked");
+		throw database_locked();
 	} else if (!val.present()) {
 		// lock database
 		ryw->getTransaction().atomicOp(databaseLockedKey,
@@ -1623,7 +1623,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	state int index;
 	state bool parse_error = false;
 
-	// check update for cluster_description
+	// check update for coordinators
 	Key processes_key = LiteralStringRef("processes").withPrefix(kr.begin);
 	auto processes_entry = ryw->getSpecialKeySpaceWriteMap()[processes_key];
 	if (processes_entry.first) {
@@ -1691,29 +1691,14 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
 	if (r.present()) {
 		auto res = r.get();
-		std::string error_msg;
 		bool retriable = false;
-		if (res == CoordinatorsResult::INVALID_NETWORK_ADDRESSES) {
-			error_msg = "The specified network addresses are invalid";
-		} else if (res == CoordinatorsResult::SAME_NETWORK_ADDRESSES) {
-			error_msg = "No change (existing configuration satisfies request)";
-		} else if (res == CoordinatorsResult::NOT_COORDINATORS) {
-			error_msg = "Coordination servers are not running on the specified network addresses";
-		} else if (res == CoordinatorsResult::DATABASE_UNREACHABLE) {
-			error_msg = "Database unreachable";
-		} else if (res == CoordinatorsResult::BAD_DATABASE_STATE) {
-			error_msg = "The database is in an unexpected state from which changing coordinators might be unsafe";
-		} else if (res == CoordinatorsResult::COORDINATOR_UNREACHABLE) {
-			error_msg = "One of the specified coordinators is unreachable";
+		if (res == CoordinatorsResult::COORDINATOR_UNREACHABLE) {
 			retriable = true;
-		} else if (res == CoordinatorsResult::NOT_ENOUGH_MACHINES) {
-			error_msg = "Too few fdbserver machines to provide coordination at the current redundancy level";
 		} else if (res == CoordinatorsResult::SUCCESS) {
 			TraceEvent(SevError, "SpecialKeysForCoordinators").detail("UnexpectedSuccessfulResult", "");
-		} else {
 			ASSERT(false);
 		}
-		msg = ManagementAPIError::toJsonString(retriable, "coordinators", error_msg);
+		msg = ManagementAPIError::toJsonString(retriable, "coordinators", ManagementAPI::generateErrorMessage(res));
 	}
 	return msg;
 }
@@ -1758,7 +1743,9 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 		// we could get not_enough_machines if we happen to see the database while the cluster controller is updating
 		// the worker list, so make sure it happens twice before returning a failure
 		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
-		    true, "auto_coordinators", "The auto change attempt did not get enough machines, please try again"));
+		    true,
+		    "auto_coordinators",
+		    "Too few fdbserver machines to provide coordination at the current redundancy level"));
 		throw special_keys_api_failure();
 	}
 
