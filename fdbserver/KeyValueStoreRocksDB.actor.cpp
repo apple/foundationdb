@@ -624,15 +624,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
 	std::shared_ptr<RocksDBErrorListener> errorListener;
-	Future<Void> errorFuture;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	Optional<Future<Void>> metrics;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
-	  : path(path), id(id), errorListener(std::make_shared<RocksDBErrorListener>()),
-	    errorFuture(errorListener->getFuture()) {
+	  : path(path), id(id), errorListener(std::make_shared<RocksDBErrorListener>()) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
