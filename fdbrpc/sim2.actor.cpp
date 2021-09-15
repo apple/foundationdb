@@ -1891,7 +1891,7 @@ public:
 
 		KillType ktResult, ktMin = kt;
 		for (auto& datacenterMachine : datacenterMachines) {
-			if (deterministicRandom()->random01() < 0.99) {
+			if (deterministicRandom()->random01() < 0.99 || forceKill) {
 				killMachine(datacenterMachine.first, kt, true, &ktResult);
 				if (ktResult != kt) {
 					TraceEvent(SevWarn, "KillDCFail")
