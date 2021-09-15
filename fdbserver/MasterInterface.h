@@ -206,7 +206,8 @@ struct GetTLogPrevCommitVersionRequest {
 	Version prev;
 	ReplyPromise<GetTLogPrevCommitVersionReply> reply;
 	GetTLogPrevCommitVersionRequest() {}
-	GetTLogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs, Version commitVersion, Version prev) : writtenTLogs(writtenTLogs), commitVersion(commitVersion), prev(prev) {}
+	GetTLogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs, Version commitVersion, Version prev)
+	  : writtenTLogs(writtenTLogs), commitVersion(commitVersion), prev(prev) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, writtenTLogs, commitVersion, prev, reply);

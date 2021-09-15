@@ -132,7 +132,7 @@ struct Traceable<Tag> : std::true_type {
 namespace std {
 template <>
 struct hash<Tag> {
-	std::size_t operator() (const Tag& tag) const {
+	std::size_t operator()(const Tag& tag) const {
 		std::size_t seed = 0;
 		boost::hash_combine(seed, std::hash<int8_t>{}(tag.locality));
 		boost::hash_combine(seed, std::hash<uint16_t>{}(tag.id));
