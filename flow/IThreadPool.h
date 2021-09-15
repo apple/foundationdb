@@ -91,8 +91,8 @@ public:
 	Future<T> getFuture() { // Call only on the originating thread!
 		return promise.getFuture();
 	}
-    
-	template<class U>
+
+	template <class U>
 	void send(U const& t) { // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
 		tagAndForward(&promise, t, signal.getFuture());
