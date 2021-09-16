@@ -496,7 +496,7 @@ class ConfigNodeImpl {
 			req.reply.sendError(not_committed());
 			return Void();
 		}
-		ASSERT(req.mutations[0].version > currentGeneration.committedVersion);
+		ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
 		wait(commitMutations(self, req.mutations, req.annotations, req.target));
 		req.reply.send(Void());
 		return Void();
