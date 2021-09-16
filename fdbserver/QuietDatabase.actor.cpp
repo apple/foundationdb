@@ -101,50 +101,6 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<As
 	}
 }
 
-// Gets whether there still has SS with wrong storage type the data distributor.
-ACTOR Future<bool> getWrongStoreTypeCheck(Database cx, WorkerInterface distributorWorker) {
-	state bool res;
-	try {
-		TraceEvent("GetWrongStoreTypeCheck").detail("Stage", "ContactingDataDistributor");
-		TraceEventFields md =
-		    wait(timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("WrongStoreType"_sr)), 1.0));
-		res = boost::lexical_cast<bool>(md.getValue("Found"));
-		if (res) {
-			return true;
-		}
-
-		// check remote region
-		TraceEvent("GetWrongStoreTypeCheck").detail("Stage", "ReadRegionsValue");
-		Optional<Value> regionsValue =
-		    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-			    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			    return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
-		    }));
-		int usableRegions = 1;
-		if (regionsValue.present()) {
-			usableRegions = atoi(regionsValue.get().toString().c_str());
-		}
-
-		if (usableRegions > 1) {
-			TraceEvent("GetWrongStoreTypeCheck").detail("Stage", "CheckWrongStoreTypeRemote");
-			TraceEventFields md1 = wait(timeoutError(
-			    distributorWorker.eventLogRequest.getReply(EventLogRequest("WrongStoreTypeRemote"_sr)), 1.0));
-			std::string val;
-			if (md1.tryGetValue("Found", val)) {
-				res = boost::lexical_cast<bool>(val);
-			}
-		}
-
-		return res;
-	} catch (Error& e) {
-		TraceEvent("QuietDatabaseFailure", distributorWorker.id())
-		    .error(e)
-		    .detail("Reason", "Failed to extract WrongStoreTypeCheck");
-		throw;
-	}
-}
-
 // Gets the number of bytes in flight from the data distributor.
 ACTOR Future<int64_t> getDataInFlight(Database cx, WorkerInterface distributorWorker) {
 	try {
@@ -656,63 +612,6 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 	return Void();
 }
 
-ACTOR Future<Void> waitForNoWrongStoreType(Database cx,
-                                           Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                           std::string phase) {
-	state Future<bool> wrongStoreTypeCheck;
-	// Require 3 consecutive successful no wrong store type check spaced 2 second apart
-	state int numSuccesses = 0;
-
-	auto traceMessage = "QuietDatabaseWrongStoreTypeCheck" + phase + "Begin";
-	TraceEvent(traceMessage.c_str()).log();
-	loop {
-		try {
-			TraceEvent("QuietDatabaseWrongStoreTypeCheckWaitingOnDataDistributor").log();
-			WorkerInterface distributorWorker = wait(getDataDistributorWorker(cx, dbInfo));
-			UID distributorUID = dbInfo->get().distributor.get().id();
-			TraceEvent("QuietDatabaseWrongStoreTypeCheckGotDataDistributor", distributorUID)
-			    .detail("Locality", distributorWorker.locality.toString());
-
-			wrongStoreTypeCheck = getWrongStoreTypeCheck(cx, distributorWorker);
-			wait(success(wrongStoreTypeCheck));
-			if (wrongStoreTypeCheck.get()) {
-				wait(delay(1.0));
-				numSuccesses = 0;
-			} else {
-				if (++numSuccesses >= 3) {
-					auto msg = "QuietDatabaseWrongStoreTypeCheck" + phase + "Done";
-					TraceEvent(msg.c_str()).log();
-					break;
-				} else {
-					wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
-				}
-			}
-		} catch (Error& e) {
-			TraceEvent(("QuietDatabaseWrongStoreTypeCheck" + phase + "Error").c_str()).error(e, true);
-			if (e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found &&
-			    e.code() != error_code_timed_out)
-				TraceEvent(("QuietDatabaseWrongStoreTypeCheck" + phase + "Error").c_str()).error(e);
-
-			// Client invalid operation occurs if we don't get back a message from one of the servers, often corrected
-			// by retrying
-			if (e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
-				throw;
-
-			auto evtType = "QuietDatabaseWrongStoreTypeCheck" + phase + "Retry";
-			TraceEvent evt(evtType.c_str());
-			evt.error(e);
-			int notReadyCount = 0;
-			if (wrongStoreTypeCheck.isValid() && wrongStoreTypeCheck.isReady() && wrongStoreTypeCheck.isError()) {
-				auto key = "NotReady" + std::to_string(notReadyCount++);
-				evt.detail(key.c_str(), "wrongStoreTypeCheck");
-			}
-			wait(delay(1.0));
-			numSuccesses = 0;
-		}
-	}
-	return Void();
-}
-
 // Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
 // requires the database to be available and healthy in order to succeed.
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
@@ -739,8 +638,9 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	if (g_network->isSimulated())
 		wait(delay(5.0));
 
-	// make sure we don't stop perpetual wiggle while we're migrating store type
-	// wait(waitForNoWrongStoreType(cx, dbInfo, phase));
+	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
+	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
+
 	printf("Set perpetual_storage_wiggle=0 ...\n");
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
