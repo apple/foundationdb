@@ -413,6 +413,9 @@ public:
 	template <class U>
 	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
+			if (queue->acknowledgements.failures.isError()) {
+				throw queue->acknowledgements.failures.getError();
+			}
 			if (!queue->acknowledgements.getRawEndpoint().isValid()) {
 				// register acknowledge receiver on sender and tell the receiver where to send acknowledge messages
 				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::ReadSocket).token;
