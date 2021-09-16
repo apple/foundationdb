@@ -374,9 +374,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				}
 				self->errors++;
 			}
-			// TODO increase frequency a lot!! just for initial testing
-			wait(poisson(&last, 5.0));
-			// wait(poisson(&last, 0.1));
+			// wait(poisson(&last, 5.0));
+			wait(poisson(&last, 0.1));
 		}
 	}
 
