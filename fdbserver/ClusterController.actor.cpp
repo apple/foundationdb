@@ -3470,12 +3470,11 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// note: this map doesn't consider pids used by existing singletons
 	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 
-	// TODO: moved this amplification to before getWorker, verify this is valid
+	// TODO: moved this amplification to before getWorker, verify this is valid.
 	// We prefer spreading out other roles more than separating singletons on their own process
 	// so we artificially amplify the pid count for the processes used by non-singleton roles.
 	// In other words, we make the processes used for other roles less desirable to be used
 	// by singletons as well.
-	id_used = self->getUsedIds(); // don't need this if the move was correct
 	for (auto& it : id_used) {
 		it.second *= PID_USED_AMP_FOR_NON_SINGLETON;
 	}
@@ -3513,7 +3512,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
-	Optional<Standalone<StringRef>> newDDProcessId = newRKWorker.interf.locality.processId();
+	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
 
 	auto currColocMap = getColocCounts({ currRKProcessId, currDDProcessId });
 	auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId });
