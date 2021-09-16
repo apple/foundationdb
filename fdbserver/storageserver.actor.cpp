@@ -2190,7 +2190,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					throw transaction_too_old();
 				}
 
-				state int byteLimit = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				state int byteLimit = (BUGGIFY && g_simulator.tssMode == ISimulator::TSSMode::Disabled)
+				                          ? 1
+				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				GetKeyValuesReply _r =
 				    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context));
 				GetKeyValuesStreamReply r(_r);
