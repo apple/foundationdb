@@ -1249,6 +1249,9 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		}
 	}
 
+	machine_count += datacenters * testConfig.extraMachineCountDC;
+
+
 	// because we protect a majority of coordinators from being killed, it is better to run with low numbers of
 	// coordinators to prevent too many processes from being protected
 	coordinators = (testConfig.minimumRegions <= 1 && BUGGIFY)
@@ -1504,6 +1507,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 
 	bool requiresExtraDBMachines = testConfig.extraDB && g_simulator.extraDB->toString() != conn.toString();
 	int assignedMachines = 0, nonVersatileMachines = 0;
+	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
 	for (int dc = 0; dc < dataCenters; dc++) {
@@ -1512,6 +1516,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		std::vector<UID> machineIdentities;
 		int machines = machineCount / dataCenters +
 		               (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
+		int possible_ss = machines;
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount % dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n",
 		       dc,
@@ -1552,8 +1557,13 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
 				if (processClass ==
-				    ProcessClass::StatelessClass) // *can't* be assigned to other roles, even in an emergency
+				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
+					possible_ss --;
+				}
+				if(processClass == ProcessClass::TransactionClass) {
+					possible_ss --;
+				}
 			}
 
 			// FIXME: temporarily code to test storage cache
@@ -1619,6 +1629,10 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 
 			assignedMachines++;
 		}
+
+		if(possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
+			gradualMigrationPossible = false;
+		}
 	}
 
 	g_simulator.desiredCoordinators = coordinatorCount;
@@ -1665,12 +1679,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	// save some state that we only need when restarting the simulator.
 	g_simulator.connectionString = conn.toString();
 	g_simulator.testerCount = testerCount;
-
-	if (!testConfig.simpleConfig &&
-	    (machineCount / dataCenters - simconfig.db.desiredTLogCount > simconfig.db.storageTeamSize)) {
-		// in each DC, only when available_machine_count > storageTeamSize, storage_migration_type=gradual will make progress
-		g_simulator.allowStorageMigrationTypeChange = true;
-	}
+	g_simulator.allowStorageMigrationTypeChange = gradualMigrationPossible;
 
 	TraceEvent("SimulatedClusterStarted")
 	    .detail("DataCenters", dataCenters)
@@ -1679,6 +1688,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	    .detail("SSLEnabled", sslEnabled)
 	    .detail("SSLOnly", sslOnly)
 	    .detail("ClassesAssigned", assignClasses)
+	    .detail("GradualMigrationPossible", gradualMigrationPossible)
 	    .detail("StartingConfiguration", pStartingConfiguration->toString());
 }
 

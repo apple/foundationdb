@@ -270,34 +270,39 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(ConfigureDatabaseWorkload* self, Database cx) {
-		state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
-		state int i;
-		loop {
-			state bool pass = true;
-			state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
+		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
+		// there
+		if (self->allowTestStorageMigration) {
+			state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
+			state int i;
+			loop {
+				state bool pass = true;
+				state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 
-			for (i = 0; i < storageServers.size(); i++) {
-				// Check that each storage server has the correct key value store type
-				if (!storageServers[i].isTss()) {
-					ReplyPromise<KeyValueStoreType> typeReply;
-					ErrorOr<KeyValueStoreType> keyValueStoreType =
-					    wait(storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
-					if (keyValueStoreType.present() && keyValueStoreType.get() != conf.storageServerStoreType) {
-						TraceEvent(SevWarn, "ConfigureDatabase_WrongStoreType")
-						    .suppressFor(5.0)
-						    .detail("ServerID", storageServers[i].id())
-						    .detail("ProcessID", storageServers[i].locality.processId())
-						    .detail("ServerStoreType",
-						            keyValueStoreType.present() ? keyValueStoreType.get().toString() : "?")
-						    .detail("ConfigStoreType", conf.storageServerStoreType.toString());
-						pass = false;
-						break;
+				for (i = 0; i < storageServers.size(); i++) {
+					// Check that each storage server has the correct key value store type
+					if (!storageServers[i].isTss()) {
+						ReplyPromise<KeyValueStoreType> typeReply;
+						ErrorOr<KeyValueStoreType> keyValueStoreType =
+						    wait(storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
+						if (keyValueStoreType.present() && keyValueStoreType.get() != conf.storageServerStoreType) {
+							TraceEvent(SevWarn, "ConfigureDatabase_WrongStoreType")
+							    .suppressFor(5.0)
+							    .detail("ServerID", storageServers[i].id())
+							    .detail("ProcessID", storageServers[i].locality.processId())
+							    .detail("ServerStoreType",
+							            keyValueStoreType.present() ? keyValueStoreType.get().toString() : "?")
+							    .detail("ConfigStoreType", conf.storageServerStoreType.toString());
+							pass = false;
+							break;
+						}
 					}
 				}
+				if (pass)
+					break;
+				wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
 			}
-			if (pass)
-				break;
-			wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
 		}
 		return true;
 	}
@@ -386,6 +391,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				    false)));
 			} else if (randomChoice == 8) {
 				if (self->allowTestStorageMigration) {
+					TEST(true); // storage migration type change
 					wait(success(IssueConfigurationChange(
 					    cx,
 					    storageMigrationTypes[deterministicRandom()->randomInt(
