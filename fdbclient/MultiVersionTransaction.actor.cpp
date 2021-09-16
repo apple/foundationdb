@@ -1891,13 +1891,25 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 		return;
 	}
 
+	FDBOptionParamType curParamType;
+	int64_t intParamVal;
 	for (auto option : FDBNetworkOptions::optionInfo) {
 		if (!option.second.hidden) {
 			std::string valueStr;
 			try {
 				if (platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {
+					curParamType = option.second.paramType;
 					for (auto value : parseOptionValues(valueStr)) {
-						Standalone<StringRef> currentValue = StringRef(value);
+						Standalone<StringRef> currentValue;
+						if (curParamType == Int) {
+							char* end;
+							intParamVal = strtoull(value.c_str(),&end,10);
+							ASSERT(!(*end) && intParamVal);
+							currentValue = StringRef((uint8_t*)(&intParamVal),8);
+						}
+						else{
+							currentValue = StringRef(value);
+						}
 						{ // lock scope
 							MutexHolder holder(lock);
 							if (setEnvOptions[option.first].count(currentValue) == 0) {
@@ -1938,7 +1950,6 @@ void ClientInfo::loadProtocolVersion() {
 	char* next;
 	std::string protocolVersionStr = ClientVersionRef(StringRef(version)).protocolVersion.toString();
 	protocolVersion = ProtocolVersion(strtoull(protocolVersionStr.c_str(), &next, 16));
-
 	ASSERT(protocolVersion.version() != 0 && protocolVersion.version() != ULLONG_MAX);
 	ASSERT_EQ(next, &protocolVersionStr[protocolVersionStr.length()]);
 }
