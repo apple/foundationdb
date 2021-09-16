@@ -53,6 +53,10 @@
 
 void failAfter(Future<Void> trigger, Endpoint e);
 
+// This is used to artificially amplify the used count for processes
+// occupied by non-singletons. This ultimately makes it less desirable
+// for singletons to use those processes as well. This constant should
+// be increased if we ever have more than 100 singletons (unlikely).
 static const int PID_USED_AMP_FOR_NON_SINGLETON = 100;
 
 struct WorkerInfo : NonCopyable {
@@ -3107,7 +3111,7 @@ struct Singleton {
 	virtual Role getRole() const = 0;
 	virtual ProcessClass::ClusterRole getClusterRole() const = 0;
 
-	virtual void setOnDb(ClusterControllerData* cc) const = 0;
+	virtual void setInterfaceToDbInfo(ClusterControllerData* cc) const = 0;
 	virtual void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const = 0;
 	virtual void recruit(ClusterControllerData* cc) const = 0;
 };
@@ -3119,7 +3123,7 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 	Role getRole() const { return Role::RATEKEEPER; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::Ratekeeper; }
 
-	void setOnDb(ClusterControllerData* cc) const {
+	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
 			cc->db.setRatekeeper(interface.get());
 		}
@@ -3140,7 +3144,7 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 	Role getRole() const { return Role::DATA_DISTRIBUTOR; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::DataDistributor; }
 
-	void setOnDb(ClusterControllerData* cc) const {
+	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
 			cc->db.setDistributor(interface.get());
 		}
@@ -3903,7 +3907,7 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 		}
 		// set the curr singleton if it doesn't exist or its different from the requesting one
 		if (!currSingleton.interface.present() || currSingleton.interface.get().id() != registeringID) {
-			registeringSingleton.setOnDb(self);
+			registeringSingleton.setInterfaceToDbInfo(self);
 		}
 	}
 }
