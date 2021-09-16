@@ -1024,6 +1024,10 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		}
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
+		auto tssModeStr = ini.GetValue("META", "tssMode");
+		if (tssModeStr != nullptr) {
+			g_simulator.tssMode = (ISimulator::TSSMode)atoi(tssModeStr);
+		}
 		bool enableExtraDB = (testConfig.extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (enableExtraDB) {
@@ -1126,6 +1130,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 
 		g_simulator.desiredCoordinators = desiredCoordinators;
 		g_simulator.processesPerMachine = processesPerMachine;
+		g_simulator.tssMode = ISimulator::TSSMode::Unknown;
 
 		uniquify(dcIds);
 		if (!BUGGIFY && dcIds.size() == 2 && dcIds[0] != "" && dcIds[1] != "") {
