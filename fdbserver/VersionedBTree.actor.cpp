@@ -881,7 +881,6 @@ public:
 				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext waiting for page load\n",
 				             self->toString().c_str());
 				wait(success(self->nextPageReader));
-				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext page loaded\n", self->toString().c_str());
 			}
 
 			state Optional<T> result = wait(self->readNext(upperBound, &localLock));
@@ -2563,14 +2562,12 @@ public:
 	                               VectorRef<PhysicalPageID> pageIDs,
 	                               Reference<ArenaPage> page,
 	                               bool header = false) {
-		debug_printf("writePhysicalPage %s \n", toString(pageIDs).c_str());
 		Future<Void> f = writePhysicalPage_impl(this, reason, level, pageIDs, page, header);
 		operations.add(f);
 		return f;
 	}
 
 	Future<Void> writeHeaderPage(PhysicalPageID pageID, Reference<ArenaPage> page) {
-		debug_printf("writeHeaderPage %s \n", toString(pageID).c_str());
 		return writePhysicalPage(
 		    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page, true);
 	}
