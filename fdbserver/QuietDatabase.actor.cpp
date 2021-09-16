@@ -577,6 +577,8 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 	return Void();
 }
 
+// Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
+// requires the database to be available and healthy in order to succeed.
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                         std::string phase,
