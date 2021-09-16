@@ -162,14 +162,14 @@ set(unversioned_postfix "${PROJECT_VERSION}${prerelease_string}")
 # RPM filenames
 set(rpm-clients-filename "foundationdb-clients-${unversioned_postfix}")
 set(rpm-server-filename "foundationdb-server-${unversioned_postfix}")
-set(rpm-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients-${prerelease_string}")
-set(rpm-server-versioned-filename "foundationdb${PROJECT_VERSION}-server-${prerelease_string}")
+set(rpm-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients${prerelease_string}")
+set(rpm-server-versioned-filename "foundationdb${PROJECT_VERSION}-server${prerelease_string}")
 
 # Deb filenames
 set(deb-clients-filename "foundationdb-clients_${unversioned_postfix}")
 set(deb-server-filename "foundationdb-server_${unversioned_postfix}")
-set(deb-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients_${prerelease_string}")
-set(deb-server-versioned-filename "foundationdb${PROJECT_VERSION}-server_${prerelease_string}")
+set(deb-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients${prerelease_string}")
+set(deb-server-versioned-filename "foundationdb${PROJECT_VERSION}-server${prerelease_string}")
 
 ################################################################################
 # Configuration for RPM
