@@ -1,3 +1,6 @@
+[configuration]
+extraMachineCountDC = 2
+
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'
 
@@ -5,3 +8,13 @@ testTitle = 'CloggedConfigureDatabaseTest'
     testName = 'ConfigureDatabase'
     testDuration = 300.0
     allowTestStorageMigration = true
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 300.0
+    scale = 0.1
+    clogginess = 2.0

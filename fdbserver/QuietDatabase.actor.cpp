@@ -109,7 +109,7 @@ ACTOR Future<bool> getWrongStoreTypeCheck(Database cx, WorkerInterface distribut
 		TraceEventFields md =
 		    wait(timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("WrongStoreType"_sr)), 1.0));
 		res = boost::lexical_cast<bool>(md.getValue("Found"));
-		if(res) {
+		if (res) {
 			return true;
 		}
 
@@ -126,7 +126,7 @@ ACTOR Future<bool> getWrongStoreTypeCheck(Database cx, WorkerInterface distribut
 			usableRegions = atoi(regionsValue.get().toString().c_str());
 		}
 
-		if(usableRegions > 1) {
+		if (usableRegions > 1) {
 			TraceEvent("GetWrongStoreTypeCheck").detail("Stage", "CheckWrongStoreTypeRemote");
 			TraceEventFields md1 = wait(timeoutError(
 			    distributorWorker.eventLogRequest.getReply(EventLogRequest("WrongStoreTypeRemote"_sr)), 1.0));
