@@ -327,7 +327,7 @@ class ConfigNodeImpl {
 				continue;
 			}
 			// Mutations should be in ascending version order.
-			ASSERT(mutation.version >= latestVersion);
+			ASSERT_GE(mutation.version, latestVersion);
 			if (mutation.version > latestVersion) {
 				latestVersion = mutation.version;
 				index = 0;
