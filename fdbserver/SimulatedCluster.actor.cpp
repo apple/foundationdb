@@ -1559,10 +1559,10 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 				if (processClass ==
 				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
-					possible_ss --;
+					possible_ss--;
 				}
-				if(processClass == ProcessClass::TransactionClass) {
-					possible_ss --;
+				if (processClass == ProcessClass::TransactionClass) {
+					possible_ss--;
 				}
 			}
 
@@ -1630,7 +1630,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 			assignedMachines++;
 		}
 
-		if(possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
+		if (possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
 			gradualMigrationPossible = false;
 		}
 	}
