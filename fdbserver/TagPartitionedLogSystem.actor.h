@@ -327,7 +327,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                   bool* forceRecovery);
 
 	ACTOR static Future<Void> recruitOldLogRouters(TagPartitionedLogSystem* self,
-	                                               vector<WorkerInterface> workers,
+	                                               std::vector<WorkerInterface> workers,
 	                                               LogEpoch recoveryCount,
 	                                               int8_t locality,
 	                                               Version startVersion,
@@ -366,11 +366,11 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	ACTOR static Future<TLogLockResult> lockTLog(UID myID, Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog);
 
 	template <class T>
-	static vector<T> getReadyNonError(vector<Future<T>> const& futures);
+	static std::vector<T> getReadyNonError(std::vector<Future<T>> const& futures);
 };
 
 template <class T>
-vector<T> TagPartitionedLogSystem::getReadyNonError(vector<Future<T>> const& futures) {
+std::vector<T> TagPartitionedLogSystem::getReadyNonError(std::vector<Future<T>> const& futures) {
 	// Return the values of those futures which have (non-error) values ready
 	std::vector<T> result;
 	for (auto& f : futures)

@@ -685,7 +685,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 				ASSERT(self->getRangeResultInOrder(result));
 				// check correctness of classType of each process
-				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				if (workers.size()) {
 					for (const auto& worker : workers) {
 						Key addr =
@@ -754,7 +754,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(!class_source_result.more && class_source_result.size() < CLIENT_KNOBS->TOO_MANY);
 				ASSERT(self->getRangeResultInOrder(class_source_result));
 				// check correctness of classType of each process
-				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				if (workers.size()) {
 					for (const auto& worker : workers) {
 						Key addr =
@@ -965,7 +965,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					boost::split(
 					    old_coordinators_processes, processes_key.get().toString(), [](char c) { return c == ','; });
 					// pick up one non-coordinator process if possible
-					vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+					std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 					TraceEvent(SevDebug, "CoordinatorsManualChange")
 					    .detail("OldCoordinators", describe(old_coordinators_processes))
 					    .detail("WorkerSize", workers.size());

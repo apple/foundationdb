@@ -134,7 +134,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		return _start(this, cx);
 	}
 	Future<bool> check(Database const& cx) override { return !testFailed; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 } // namespace

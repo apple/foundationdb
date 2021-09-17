@@ -36,16 +36,16 @@
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 //
-using std::vector;
+
 
 namespace platform {
 // e.g. extension==".fdb", returns filenames relative to directory
-Future<vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension = "");
+Future<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension = "");
 
 // returns directory names relative to directory
-Future<vector<std::string>> listDirectoriesAsync(std::string const& directory);
+Future<std::vector<std::string>> listDirectoriesAsync(std::string const& directory);
 
-ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string>* out);
+ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out);
 } // namespace platform
 
 #include "flow/unactorcompiler.h"

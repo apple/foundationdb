@@ -1017,6 +1017,423 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	return ret;
 }
 
+// FIXME: Factor address parsing from coordinators, include, exclude
+
+ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool isClusterTLS) {
+	state StringRef setName;
+	StringRef nameTokenBegin = LiteralStringRef("description=");
+	for (auto tok = tokens.begin() + 1; tok != tokens.end(); ++tok)
+		if (tok->startsWith(nameTokenBegin)) {
+			setName = tok->substr(nameTokenBegin.size());
+			std::copy(tok + 1, tokens.end(), tok);
+			tokens.resize(tokens.size() - 1);
+			break;
+		}
+
+	bool automatic = tokens.size() == 2 && tokens[1] == LiteralStringRef("auto");
+
+	state Reference<IQuorumChange> change;
+	if (tokens.size() == 1 && setName.size()) {
+		change = noQuorumChange();
+	} else if (automatic) {
+		// Automatic quorum change
+		change = autoQuorumChange();
+	} else {
+		state std::set<NetworkAddress> addresses;
+		state std::vector<StringRef>::iterator t;
+		for (t = tokens.begin() + 1; t != tokens.end(); ++t) {
+			try {
+				// SOMEDAY: Check for keywords
+				auto const& addr = NetworkAddress::parse(t->toString());
+				if (addresses.count(addr)) {
+					fprintf(stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
+					return true;
+				}
+				addresses.insert(addr);
+			} catch (Error& e) {
+				if (e.code() == error_code_connection_string_invalid) {
+					fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+					return true;
+				}
+				throw;
+			}
+		}
+
+		std::vector<NetworkAddress> addressesVec(addresses.begin(), addresses.end());
+		change = specifiedQuorumChange(addressesVec);
+	}
+	if (setName.size())
+		change = nameQuorumChange(setName.toString(), change);
+
+	CoordinatorsResult r = wait(makeInterruptable(changeQuorum(db, change)));
+
+	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
+	// there are various results specific to changeConfig() that we need to report:
+	bool err = true;
+	switch (r) {
+	case CoordinatorsResult::INVALID_NETWORK_ADDRESSES:
+		fprintf(stderr, "ERROR: The specified network addresses are invalid\n");
+		break;
+	case CoordinatorsResult::SAME_NETWORK_ADDRESSES:
+		printf("No change (existing configuration satisfies request)\n");
+		err = false;
+		break;
+	case CoordinatorsResult::NOT_COORDINATORS:
+		fprintf(stderr, "ERROR: Coordination servers are not running on the specified network addresses\n");
+		break;
+	case CoordinatorsResult::DATABASE_UNREACHABLE:
+		fprintf(stderr, "ERROR: Database unreachable\n");
+		break;
+	case CoordinatorsResult::BAD_DATABASE_STATE:
+		fprintf(stderr,
+		        "ERROR: The database is in an unexpected state from which changing coordinators might be unsafe\n");
+		break;
+	case CoordinatorsResult::COORDINATOR_UNREACHABLE:
+		fprintf(stderr, "ERROR: One of the specified coordinators is unreachable\n");
+		break;
+	case CoordinatorsResult::SUCCESS:
+		printf("Coordination state changed\n");
+		err = false;
+		break;
+	case CoordinatorsResult::NOT_ENOUGH_MACHINES:
+		fprintf(stderr, "ERROR: Too few fdbserver machines to provide coordination at the current redundancy level\n");
+		break;
+	default:
+		ASSERT(false);
+	};
+	return err;
+}
+
+// Includes the servers that could be IP addresses or localities back to the cluster.
+ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
+	std::vector<AddressExclusion> addresses;
+	state std::vector<std::string> localities;
+	state bool failed = false;
+	state bool all = false;
+	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
+		if (*t == LiteralStringRef("all")) {
+			all = true;
+		} else if (*t == LiteralStringRef("failed")) {
+			failed = true;
+		} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
+			// if the token starts with 'locality_' prefix.
+			localities.push_back(t->toString());
+		} else {
+			auto a = AddressExclusion::parse(*t);
+			if (!a.isValid()) {
+				fprintf(stderr,
+				        "ERROR: '%s' is neither a valid network endpoint address nor a locality\n",
+				        t->toString().c_str());
+				if (t->toString().find(":tls") != std::string::npos)
+					printf("        Do not include the `:tls' suffix when naming a process\n");
+				return true;
+			}
+			addresses.push_back(a);
+		}
+	}
+	if (all) {
+		std::vector<AddressExclusion> includeAll;
+		includeAll.push_back(AddressExclusion());
+		wait(makeInterruptable(includeServers(db, includeAll, failed)));
+		wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
+	} else {
+		if (!addresses.empty()) {
+			wait(makeInterruptable(includeServers(db, addresses, failed)));
+		}
+		if (!localities.empty()) {
+			// includes the servers that belong to given localities.
+			wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
+		}
+	}
+	return false;
+};
+
+ACTOR Future<bool> exclude(Database db,
+                           std::vector<StringRef> tokens,
+                           Reference<ClusterConnectionFile> ccf,
+                           Future<Void> warn) {
+	if (tokens.size() <= 1) {
+		state Future<std::vector<AddressExclusion>> fexclAddresses = makeInterruptable(getExcludedServers(db));
+		state Future<std::vector<std::string>> fexclLocalities = makeInterruptable(getExcludedLocalities(db));
+
+		wait(success(fexclAddresses) && success(fexclLocalities));
+		std::vector<AddressExclusion> exclAddresses = fexclAddresses.get();
+		std::vector<std::string> exclLocalities = fexclLocalities.get();
+
+		if (!exclAddresses.size() && !exclLocalities.size()) {
+			printf("There are currently no servers or localities excluded from the database.\n"
+			       "To learn how to exclude a server, type `help exclude'.\n");
+			return false;
+		}
+
+		printf("There are currently %zu servers or localities being excluded from the database:\n",
+		       exclAddresses.size() + exclLocalities.size());
+		for (const auto& e : exclAddresses)
+			printf("  %s\n", e.toString().c_str());
+		for (const auto& e : exclLocalities)
+			printf("  %s\n", e.c_str());
+
+		printf("To find out whether it is safe to remove one or more of these\n"
+		       "servers from the cluster, type `exclude <addresses>'.\n"
+		       "To return one of these servers to the cluster, type `include <addresses>'.\n");
+
+		return false;
+	} else {
+		state std::vector<AddressExclusion> exclusionVector;
+		state std::set<AddressExclusion> exclusionSet;
+		state std::vector<AddressExclusion> exclusionAddresses;
+		state std::unordered_set<std::string> exclusionLocalities;
+		state std::vector<std::string> noMatchLocalities;
+		state bool force = false;
+		state bool waitForAllExcluded = true;
+		state bool markFailed = false;
+		state std::vector<ProcessData> workers = wait(makeInterruptable(getWorkers(db)));
+		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
+			if (*t == LiteralStringRef("FORCE")) {
+				force = true;
+			} else if (*t == LiteralStringRef("no_wait")) {
+				waitForAllExcluded = false;
+			} else if (*t == LiteralStringRef("failed")) {
+				markFailed = true;
+			} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) &&
+			           t->toString().find(':') != std::string::npos) {
+				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, t->toString());
+				if (localityAddresses.empty()) {
+					noMatchLocalities.push_back(t->toString());
+				} else {
+					// add all the server ipaddresses that belong to the given localities to the exclusionSet.
+					exclusionVector.insert(exclusionVector.end(), localityAddresses.begin(), localityAddresses.end());
+					exclusionSet.insert(localityAddresses.begin(), localityAddresses.end());
+				}
+				exclusionLocalities.insert(t->toString());
+			} else {
+				auto a = AddressExclusion::parse(*t);
+				if (!a.isValid()) {
+					fprintf(stderr,
+					        "ERROR: '%s' is neither a valid network endpoint address nor a locality\n",
+					        t->toString().c_str());
+					if (t->toString().find(":tls") != std::string::npos)
+						printf("        Do not include the `:tls' suffix when naming a process\n");
+					return true;
+				}
+				exclusionVector.push_back(a);
+				exclusionSet.insert(a);
+				exclusionAddresses.push_back(a);
+			}
+		}
+
+		if (exclusionAddresses.empty() && exclusionLocalities.empty()) {
+			fprintf(stderr, "ERROR: At least one valid network endpoint address or a locality is not provided\n");
+			return true;
+		}
+
+		if (!force) {
+			if (markFailed) {
+				state bool safe;
+				try {
+					bool _safe = wait(makeInterruptable(checkSafeExclusions(db, exclusionVector)));
+					safe = _safe;
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled)
+						throw;
+					TraceEvent("CheckSafeExclusionsError").error(e);
+					safe = false;
+				}
+				if (!safe) {
+					std::string errorStr =
+					    "ERROR: It is unsafe to exclude the specified servers at this time.\n"
+					    "Please check that this exclusion does not bring down an entire storage team.\n"
+					    "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
+					    "You may add more storage processes or coordinators to make the operation safe.\n"
+					    "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.\n";
+					printf("%s", errorStr.c_str());
+					return true;
+				}
+			}
+			StatusObject status = wait(makeInterruptable(StatusClient::statusFetcher(db)));
+
+			state std::string errorString =
+			    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+			    "Please try the exclude again in 30 seconds.\n"
+			    "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n";
+
+			StatusObjectReader statusObj(status);
+
+			StatusObjectReader statusObjCluster;
+			if (!statusObj.get("cluster", statusObjCluster)) {
+				fprintf(stderr, "%s", errorString.c_str());
+				return true;
+			}
+
+			StatusObjectReader processesMap;
+			if (!statusObjCluster.get("processes", processesMap)) {
+				fprintf(stderr, "%s", errorString.c_str());
+				return true;
+			}
+
+			state int ssTotalCount = 0;
+			state int ssExcludedCount = 0;
+			state double worstFreeSpaceRatio = 1.0;
+			try {
+				for (auto proc : processesMap.obj()) {
+					bool storageServer = false;
+					StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+					for (StatusObjectReader role : rolesArray) {
+						if (role["role"].get_str() == "storage") {
+							storageServer = true;
+							break;
+						}
+					}
+					// Skip non-storage servers in free space calculation
+					if (!storageServer)
+						continue;
+
+					StatusObjectReader process(proc.second);
+					std::string addrStr;
+					if (!process.get("address", addrStr)) {
+						fprintf(stderr, "%s", errorString.c_str());
+						return true;
+					}
+					NetworkAddress addr = NetworkAddress::parse(addrStr);
+					bool excluded =
+					    (process.has("excluded") && process.last().get_bool()) || addressExcluded(exclusionSet, addr);
+					ssTotalCount++;
+					if (excluded)
+						ssExcludedCount++;
+
+					if (!excluded) {
+						StatusObjectReader disk;
+						if (!process.get("disk", disk)) {
+							fprintf(stderr, "%s", errorString.c_str());
+							return true;
+						}
+
+						int64_t total_bytes;
+						if (!disk.get("total_bytes", total_bytes)) {
+							fprintf(stderr, "%s", errorString.c_str());
+							return true;
+						}
+
+						int64_t free_bytes;
+						if (!disk.get("free_bytes", free_bytes)) {
+							fprintf(stderr, "%s", errorString.c_str());
+							return true;
+						}
+
+						worstFreeSpaceRatio = std::min(worstFreeSpaceRatio, double(free_bytes) / total_bytes);
+					}
+				}
+			} catch (...) // std::exception
+			{
+				fprintf(stderr, "%s", errorString.c_str());
+				return true;
+			}
+
+			if (ssExcludedCount == ssTotalCount ||
+			    (1 - worstFreeSpaceRatio) * ssTotalCount / (ssTotalCount - ssExcludedCount) > 0.9) {
+				fprintf(stderr,
+				        "ERROR: This exclude may cause the total free space in the cluster to drop below 10%%.\n"
+				        "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n");
+				return true;
+			}
+		}
+
+		if (!exclusionAddresses.empty()) {
+			wait(makeInterruptable(excludeServers(db, exclusionAddresses, markFailed)));
+		}
+		if (!exclusionLocalities.empty()) {
+			wait(makeInterruptable(excludeLocalities(db, exclusionLocalities, markFailed)));
+		}
+
+		if (waitForAllExcluded) {
+			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
+			printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
+		}
+
+		if (warn.isValid())
+			warn.cancel();
+
+		state std::set<NetworkAddress> notExcludedServers =
+		    wait(makeInterruptable(checkForExcludingServers(db, exclusionVector, waitForAllExcluded)));
+		std::map<IPAddress, std::set<uint16_t>> workerPorts;
+		for (auto addr : workers)
+			workerPorts[addr.address.ip].insert(addr.address.port);
+
+		// Print a list of all excluded addresses that don't have a corresponding worker
+		std::set<AddressExclusion> absentExclusions;
+		for (const auto& addr : exclusionVector) {
+			auto worker = workerPorts.find(addr.ip);
+			if (worker == workerPorts.end())
+				absentExclusions.insert(addr);
+			else if (addr.port > 0 && worker->second.count(addr.port) == 0)
+				absentExclusions.insert(addr);
+		}
+
+		for (const auto& exclusion : exclusionVector) {
+			if (absentExclusions.find(exclusion) != absentExclusions.end()) {
+				if (exclusion.port == 0) {
+					fprintf(stderr,
+					        "  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
+					        "correct machines before removing them from the cluster!\n",
+					        exclusion.ip.toString().c_str());
+				} else {
+					fprintf(stderr,
+					        "  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
+					        "before removing them from the cluster!\n",
+					        exclusion.toString().c_str());
+				}
+			} else if (std::any_of(notExcludedServers.begin(), notExcludedServers.end(), [&](const NetworkAddress& a) {
+				           return addressExcluded({ exclusion }, a);
+			           })) {
+				if (exclusion.port == 0) {
+					fprintf(stderr,
+					        "  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
+					        "machine from the cluster\n",
+					        exclusion.ip.toString().c_str());
+				} else {
+					fprintf(stderr,
+					        "  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
+					        "cluster\n",
+					        exclusion.toString().c_str());
+				}
+			} else {
+				if (exclusion.port == 0) {
+					printf("  %s(Whole machine)  ---- Successfully excluded. It is now safe to remove this machine "
+					       "from the cluster.\n",
+					       exclusion.ip.toString().c_str());
+				} else {
+					printf(
+					    "  %s  ---- Successfully excluded. It is now safe to remove this process from the cluster.\n",
+					    exclusion.toString().c_str());
+				}
+			}
+		}
+
+		for (const auto& locality : noMatchLocalities) {
+			fprintf(
+			    stderr,
+			    "  %s  ---- WARNING: Currently no servers found with this locality match! Be sure that you excluded "
+			    "the correct locality.\n",
+			    locality.c_str());
+		}
+
+		bool foundCoordinator = false;
+		auto ccs = ClusterConnectionFile(ccf->getFilename()).getConnectionString();
+		for (const auto& c : ccs.coordinators()) {
+			if (std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip, c.port)) ||
+			    std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip))) {
+				fprintf(stderr, "WARNING: %s is a coordinator!\n", c.toString().c_str());
+				foundCoordinator = true;
+			}
+		}
+		if (foundCoordinator)
+			printf("Type `help coordinators' for information on how to change the\n"
+			       "cluster's coordination servers before removing them.\n");
+
+		return false;
+	}
+}
+
 ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	state Standalone<StringRef> snapCmd;
 	state UID snapUID = deterministicRandom()->randomUniqueID();

@@ -35,10 +35,10 @@
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
+ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
 		choose {
-			when(vector<WorkerDetails> w = wait(brokenPromiseToNever(
+			when(std::vector<WorkerDetails> w = wait(brokenPromiseToNever(
 			         dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(flags))))) {
 				return w;
 			}
@@ -52,7 +52,7 @@ ACTOR Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<Se
 	TraceEvent("GetMasterWorker").detail("Stage", "GettingWorkers");
 
 	loop {
-		state vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+		state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
 		for (int i = 0; i < workers.size(); i++) {
 			if (workers[i].interf.address() == dbInfo->get().master.address()) {
@@ -79,7 +79,7 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<As
 	TraceEvent("GetDataDistributorWorker").detail("Stage", "GettingWorkers");
 
 	loop {
-		state vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+		state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 		if (!dbInfo->get().distributor.present())
 			continue;
 
@@ -144,7 +144,8 @@ int64_t getPoppedVersionLag(const TraceEventFields& md) {
 	return persistentDataDurableVersion - queuePoppedVersion;
 }
 
-ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx,
+                                                           Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
 	Optional<Value> coordinators =
@@ -164,7 +165,7 @@ ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<Asy
 		coordinatorsAddrSet.insert(addr);
 	}
 
-	vector<WorkerInterface> result;
+	std::vector<WorkerInterface> result;
 	for (const auto& worker : workers) {
 		NetworkAddress primary = worker.interf.address();
 		Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
@@ -223,7 +224,7 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 	return std::make_pair(maxQueueSize, maxPoppedVersionLag);
 }
 
-ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
+ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
 	state Transaction tr(cx);
 	loop {
 		if (use_system_priority) {
@@ -234,7 +235,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool
 			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
-			vector<StorageServerInterface> servers;
+			std::vector<StorageServerInterface> servers;
 			servers.reserve(serverList.size());
 			for (int i = 0; i < serverList.size(); i++)
 				servers.push_back(decodeServerListValue(serverList[i].value));
@@ -245,9 +246,9 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool
 	}
 }
 
-ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx,
-                                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                                        bool localOnly) {
+ACTOR Future<std::vector<WorkerInterface>> getStorageWorkers(Database cx,
+                                                             Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                             bool localOnly) {
 	state std::vector<StorageServerInterface> servers = wait(getStorageServers(cx));
 	state std::map<NetworkAddress, WorkerInterface> workersMap;
 	std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
@@ -267,7 +268,7 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx,
 	}
 	auto masterDcId = dbInfo->get().master.locality.dcId();
 
-	vector<WorkerInterface> result;
+	std::vector<WorkerInterface> result;
 	for (const auto& server : servers) {
 		TraceEvent(SevDebug, "DcIdInfo")
 		    .detail("ServerLocalityID", server.locality.dcId())

@@ -48,7 +48,7 @@ struct ActorFuzzWorkload : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return fuzzResults.first == fuzzResults.second; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<ActorFuzzWorkload> ActorFuzzWorkloadFactory("ActorFuzz");

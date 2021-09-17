@@ -45,7 +45,7 @@ struct DiskDurabilityTest : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	static Value encodeValue(int64_t x) {
 		x = bigEndian64(x);
@@ -78,7 +78,7 @@ struct DiskDurabilityTest : TestWorkload {
 		    IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNBUFFERED |
 		        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_LOCK,
 		    0600));
-		state vector<uint8_t> pagedata(4096 * 128);
+		state std::vector<uint8_t> pagedata(4096 * 128);
 		state uint8_t* page = (uint8_t*)((intptr_t(&pagedata[0]) | intptr_t(4095)) + 1);
 
 		state int64_t size = wait(file->size());
@@ -119,7 +119,7 @@ struct DiskDurabilityTest : TestWorkload {
 		// Run
 		state bool first = true;
 		loop {
-			state vector<int64_t> targetPages;
+			state std::vector<int64_t> targetPages;
 			for (int i = deterministicRandom()->randomInt(1, 100); i > 0 && targetPages.size() < size / 4096; i--) {
 				auto p = deterministicRandom()->randomInt(0, size / 4096);
 				if (!std::count(targetPages.begin(), targetPages.end(), p))
@@ -130,7 +130,7 @@ struct DiskDurabilityTest : TestWorkload {
 				size += 4096;
 			}
 
-			state vector<int64_t> targetValues(targetPages.size());
+			state std::vector<int64_t> targetValues(targetPages.size());
 			for (auto& v : targetValues)
 				v = deterministicRandom()->randomUniqueID().first();
 
@@ -156,7 +156,7 @@ struct DiskDurabilityTest : TestWorkload {
 			tr.reset();
 			state Future<Version> rv = tr.getReadVersion(); // hide this latency
 
-			vector<Future<Void>> fresults;
+			std::vector<Future<Void>> fresults;
 
 			for (int i = 0; i < targetPages.size(); i++) {
 				uint8_t* p = page + 4096 * i;

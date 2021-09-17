@@ -36,7 +36,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> _start(Database cx, TimeKeeperCorrectnessWorkload* self) {
 		TraceEvent(SevInfo, "TKCorrectness_Start").log();

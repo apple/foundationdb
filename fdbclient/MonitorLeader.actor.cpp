@@ -328,7 +328,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	return Void();
 }
 
-ClusterConnectionString::ClusterConnectionString(vector<NetworkAddress> servers, Key key) : coord(servers) {
+ClusterConnectionString::ClusterConnectionString(std::vector<NetworkAddress> servers, Key key) : coord(servers) {
 	parseKey(key.toString());
 }
 
@@ -427,13 +427,13 @@ ACTOR Future<Void> monitorNominee(Key key,
 // Also used in fdbserver/LeaderElection.actor.cpp!
 // bool represents if the LeaderInfo is a majority answer or not.
 // This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
-Optional<std::pair<LeaderInfo, bool>> getLeader(const vector<Optional<LeaderInfo>>& nominees) {
+Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees) {
 	// If any coordinator says that the quorum is forwarded, then it is
 	for (int i = 0; i < nominees.size(); i++)
 		if (nominees[i].present() && nominees[i].get().forward)
 			return std::pair<LeaderInfo, bool>(nominees[i].get(), true);
 
-	vector<std::pair<UID, int>> maskedNominees;
+	std::vector<std::pair<UID, int>> maskedNominees;
 	maskedNominees.reserve(nominees.size());
 	for (int i = 0; i < nominees.size(); i++) {
 		if (nominees[i].present()) {
@@ -655,10 +655,10 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 }
 
 ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
-                                                 vector<NetworkAddress> coordinators,
+                                                 std::vector<NetworkAddress> coordinators,
                                                  ClientData* clientData,
                                                  Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo) {
-	state vector<ClientLeaderRegInterface> clientLeaderServers;
+	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state Future<Void> allActors;
@@ -757,7 +757,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
-	state vector<NetworkAddress> addrs = cs.coordinators();
+	state std::vector<NetworkAddress> addrs = cs.coordinators();
 	state int idx = 0;
 	state int successIndex = 0;
 	state Optional<double> incorrectTime;

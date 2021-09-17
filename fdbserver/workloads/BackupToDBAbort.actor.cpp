@@ -107,7 +107,7 @@ struct BackupToDBAbort : TestWorkload {
 
 	Future<bool> check(const Database& cx) override { return _check(this, cx); }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 REGISTER_WORKLOAD(BackupToDBAbort);
