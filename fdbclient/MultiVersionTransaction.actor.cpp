@@ -29,6 +29,7 @@
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <cstddef>
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if (e) {
@@ -1978,7 +1979,11 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 						int64_t intParamVal;
 						if (curParamType == FDBOptionInfo::ParamType::Int) {
 							try {
-								intParamVal = std::stoll(value, nullptr, 10);
+								size_t nextIdx = -1;
+								intParamVal = std::stoll(value, &nextIdx);
+								if (nextIdx != value.length()) {
+									throw invalid_option_value();
+								}
 							} catch (std::exception e) {
 								TraceEvent(SevError, "EnvironmentVariableParseIntegerFailed")
 								    .detail("Option", option.second.name)
