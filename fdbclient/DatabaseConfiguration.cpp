@@ -201,8 +201,7 @@ bool DatabaseConfiguration::isValid() const {
 	      (regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") &&
 	      // We cannot specify regions with three_datacenter replication
 	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
-	      (perpetualStorageWiggleLocality.find(':') != std::string::npos ||
-	       !perpetualStorageWiggleLocality.compare("0")) &&
+	      isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality) &&
 	      storageMigrationType != StorageMigrationType::UNSET)) {
 		return false;
 	}
@@ -550,7 +549,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("perpetual_storage_wiggle")) {
 		parse(&perpetualStorageWiggleSpeed, value);
 	} else if (ck == LiteralStringRef("perpetual_storage_wiggle_locality")) {
-		if (value.toString().find(':') == std::string::npos && value.toString().compare("0")) {
+		if (!isValidPerpetualStorageWiggleLocality(value.toString())) {
 			return false;
 		}
 		perpetualStorageWiggleLocality = value.toString();

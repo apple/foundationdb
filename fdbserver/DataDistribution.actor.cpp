@@ -4005,7 +4005,7 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
 // to a sorted PID set maintained by the data distributor. If now no storage server exists, the new Process ID is 0.
 ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection) {
 	state ReadYourWritesTransaction tr(teamCollection->cx);
-	state Value writeValue = LiteralStringRef("");
+	state Value writeValue = ""_sr;
 	state const Key writeKey =
 	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
 	loop {
@@ -4014,14 +4014,14 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 			Optional<Value> locality = wait(tr.get(perpetualStorageWiggleLocalityKey));
 
 			if (teamCollection->pid2server_info.empty()) {
-				writeValue = LiteralStringRef("");
+				writeValue = ""_sr;
 			} else if (locality.present() && locality.get().toString().compare("0")) {
 				// if perpetual_storage_wiggle_locality has value and not 0(disabled).
 				state std::string localityKeyValue = locality.get().toString();
-				int split = localityKeyValue.find(':');
-				ASSERT(split != std::string::npos);
+				ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
 
 				// get key and value from perpetual_storage_wiggle_locality.
+				int split = localityKeyValue.find(':');
 				state std::string localityKey = localityKeyValue.substr(0, split);
 				state std::string localityValue = localityKeyValue.substr(split + 1);
 				state Value prevValue;
@@ -4043,8 +4043,8 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 
 				// If first entry of pid2server_info, did not match the locality.
 				if (!(writeValue.compare(LiteralStringRef("")))) {
+					auto nextIt = teamCollection->pid2server_info.upper_bound(prevValue);
 					while (true) {
-						auto nextIt = teamCollection->pid2server_info.upper_bound(prevValue);
 						if (nextIt == teamCollection->pid2server_info.end()) {
 							nextIt = teamCollection->pid2server_info.begin();
 						}
@@ -4063,7 +4063,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 							    .detail("PerpetualStorageWiggleLocality", localityKeyValue);
 							break;
 						}
-						prevValue = nextIt->first;
+						nextIt++;
 					}
 				}
 			} else {
