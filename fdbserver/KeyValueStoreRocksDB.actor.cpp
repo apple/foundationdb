@@ -3,6 +3,7 @@
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
+#include <rocksdb/listener.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
@@ -626,13 +627,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
 	std::shared_ptr<RocksDBErrorListener> errorListener;
+	Future<Void> errorFuture;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	Optional<Future<Void>> metrics;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
-	  : path(path), id(id), errorListener(std::make_shared<RocksDBErrorListener>()) {
+	  : path(path), id(id), errorListener(std::make_shared<RocksDBErrorListener>()),
+	    errorFuture(errorListener->getFuture()) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
@@ -656,7 +659,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	Future<Void> getError() const override { return errorPromise.getFuture(); }
+	Future<Void> getError() const override { return errorFuture; }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
