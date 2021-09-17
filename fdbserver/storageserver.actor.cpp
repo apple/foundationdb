@@ -311,7 +311,7 @@ static int mvccStorageBytes(MutationRef const& m) {
 
 struct FetchInjectionInfo {
 	Arena arena;
-	vector<VerUpdateRef> changes;
+	std::vector<VerUpdateRef> changes;
 };
 
 class ServerWatchMetadata : public ReferenceCounted<ServerWatchMetadata> {
@@ -445,8 +445,8 @@ public:
 	} currentRunningFetchKeys;
 
 	Tag tag;
-	vector<std::pair<Version, Tag>> history;
-	vector<std::pair<Version, Tag>> allHistory;
+	std::vector<std::pair<Version, Tag>> history;
+	std::vector<std::pair<Version, Tag>> allHistory;
 	Version poppedAllAfter;
 	std::map<Version, Arena>
 	    freeable; // for each version, an Arena that must be held until that version is < oldestVersion
@@ -499,8 +499,8 @@ public:
 				poppedAllAfter = std::numeric_limits<Version>::max();
 			}
 
-			vector<std::pair<Version, Tag>>* hist = &history;
-			vector<std::pair<Version, Tag>> allHistoryCopy;
+			std::vector<std::pair<Version, Tag>>* hist = &history;
+			std::vector<std::pair<Version, Tag>> allHistoryCopy;
 			if (popAllTags) {
 				allHistoryCopy = allHistory;
 				hist = &allHistoryCopy;
@@ -646,7 +646,7 @@ public:
 	FlowLock fetchKeysParallelismLock;
 	int64_t fetchKeysBytesBudget;
 	AsyncVar<bool> fetchKeysBudgetUsed;
-	vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
+	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
 
 	int64_t instanceID;
 
@@ -2389,21 +2389,21 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 	eager->finishKeyBegin();
 
 	if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
-		vector<Future<Key>> keyEnd(eager->keyBegin.size());
+		std::vector<Future<Key>> keyEnd(eager->keyBegin.size());
 		for (int i = 0; i < keyEnd.size(); i++)
 			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i]);
 
-		state Future<vector<Key>> futureKeyEnds = getAll(keyEnd);
-		state vector<Key> keyEndVal = wait(futureKeyEnds);
+		state Future<std::vector<Key>> futureKeyEnds = getAll(keyEnd);
+		state std::vector<Key> keyEndVal = wait(futureKeyEnds);
 		eager->keyEnd = keyEndVal;
 	}
 
-	vector<Future<Optional<Value>>> value(eager->keys.size());
+	std::vector<Future<Optional<Value>>> value(eager->keys.size());
 	for (int i = 0; i < value.size(); i++)
 		value[i] = data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second);
 
-	state Future<vector<Optional<Value>>> futureValues = getAll(value);
-	vector<Optional<Value>> optionalValues = wait(futureValues);
+	state Future<std::vector<Optional<Value>>> futureValues = getAll(value);
+	std::vector<Optional<Value>> optionalValues = wait(futureValues);
 	eager->value = optionalValues;
 
 	return Void();
@@ -3268,7 +3268,7 @@ void changeServerKeys(StorageServer* data,
 
 	// Save a backup of the ShardInfo references before we start messing with shards, in order to defer fetchKeys
 	// cancellation (and its potential call to removeDataRange()) until shards is again valid
-	vector<Reference<ShardInfo>> oldShards;
+	std::vector<Reference<ShardInfo>> oldShards;
 	auto os = data->shards.intersectingRanges(keys);
 	for (auto r = os.begin(); r != os.end(); ++r)
 		oldShards.push_back(r->value());

@@ -67,7 +67,7 @@ struct SuspendProcessesWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<SuspendProcessesWorkload> SuspendProcessesWorkloadFactory("SuspendProcesses");

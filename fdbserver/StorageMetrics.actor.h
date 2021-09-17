@@ -136,7 +136,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	}
 	void erase(KeyRangeRef keys) { sample.erase(keys.begin, keys.end); }
 
-	void poll(KeyRangeMap<vector<PromiseStream<StorageMetrics>>>& waitMap, StorageMetrics m) {
+	void poll(KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>>& waitMap, StorageMetrics m) {
 		double now = ::now();
 		while (queue.size() && queue.front().first <= now) {
 			KeyRef key = queue.front().second.first;
@@ -196,7 +196,7 @@ private:
 };
 
 struct StorageServerMetrics {
-	KeyRangeMap<vector<PromiseStream<StorageMetrics>>> waitMetricsMap;
+	KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>> waitMetricsMap;
 	StorageMetricSample byteSample;
 	TransientStorageMetricSample iopsSample,
 	    bandwidthSample; // FIXME: iops and bandwidth calculations are not effectively tested, since they aren't
@@ -621,7 +621,8 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/simple") {
 	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 
-	vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 2000 * sampleUnit);
+	std::vector<KeyRef> t =
+	    ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 2000 * sampleUnit);
 
 	ASSERT(t.size() == 1 && t[0] == LiteralStringRef("Bah"));
 
@@ -642,7 +643,8 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/multipleReturnedPoint
 	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 
-	vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 600 * sampleUnit);
+	std::vector<KeyRef> t =
+	    ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 600 * sampleUnit);
 
 	ASSERT(t.size() == 3 && t[0] == LiteralStringRef("Absolute") && t[1] == LiteralStringRef("Apple") &&
 	       t[2] == LiteralStringRef("Bah"));
@@ -664,7 +666,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/noneSplitable") {
 	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 
-	vector<KeyRef> t =
+	std::vector<KeyRef> t =
 	    ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 10000 * sampleUnit);
 
 	ASSERT(t.size() == 0);
@@ -686,7 +688,8 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/chunkTooLarge") {
 	ssm.byteSample.sample.insert(LiteralStringRef("But"), 10 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 30 * sampleUnit);
 
-	vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 1000 * sampleUnit);
+	std::vector<KeyRef> t =
+	    ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 1000 * sampleUnit);
 
 	ASSERT(t.size() == 0);
 

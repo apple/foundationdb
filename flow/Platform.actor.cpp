@@ -196,9 +196,6 @@ std::string removeWhitespace(const std::string& t) {
 #error What platform is this?
 #endif
 
-using std::cout;
-using std::endl;
-
 #if defined(_WIN32)
 __int64 FiletimeAsInt64(FILETIME& t) {
 	return *(__int64*)&t;
@@ -1932,7 +1929,7 @@ static int ModifyPrivilege(const char* szPrivilege, bool fEnable) {
 		return ERROR_FUNCTION_FAILED;
 	}
 
-	// cout << luid.HighPart << " " << luid.LowPart << endl;
+	// std::cout << luid.HighPart << " " << luid.LowPart << std::endl;
 
 	// Assign values to the TOKEN_PRIVILEGE structure.
 	NewState.PrivilegeCount = 1;
@@ -2520,12 +2517,12 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-ACTOR Future<vector<std::string>> findFiles(std::string directory,
+ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
                                             std::string extension,
                                             bool directoryOnly,
                                             bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed (Win32)
-	state vector<std::string> result;
+	state std::vector<std::string> result;
 	state int64_t tsc_begin = timestampCounter();
 
 	state WIN32_FIND_DATA fd;
@@ -2577,12 +2574,12 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 	return S_ISDIR(fileAttributes);
 }
 
-ACTOR Future<vector<std::string>> findFiles(std::string directory,
+ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
                                             std::string extension,
                                             bool directoryOnly,
                                             bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed
-	state vector<std::string> result;
+	state std::vector<std::string> result;
 	state int64_t tsc_begin = timestampCounter();
 
 	state DIR* dip = nullptr;
@@ -2635,7 +2632,7 @@ std::vector<std::string> listFiles(std::string const& directory, std::string con
 	return findFiles(directory, extension, false /* directoryOnly */, false).get();
 }
 
-Future<vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension) {
+Future<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension) {
 	return findFiles(directory, extension, false /* directoryOnly */, true);
 }
 
@@ -2643,7 +2640,7 @@ std::vector<std::string> listDirectories(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, false).get();
 }
 
-Future<vector<std::string>> listDirectoriesAsync(std::string const& directory) {
+Future<std::vector<std::string>> listDirectoriesAsync(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, true);
 }
 
@@ -2661,14 +2658,14 @@ void findFilesRecursively(std::string const& path, std::vector<std::string>& out
 	}
 }
 
-ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string>* out) {
+ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out) {
 	// Add files to output, prefixing path
-	state vector<std::string> files = wait(listFilesAsync(path, ""));
+	state std::vector<std::string> files = wait(listFilesAsync(path, ""));
 	for (auto const& f : files)
 		out->push_back(joinPath(path, f));
 
 	// Recurse for directories
-	state vector<std::string> directories = wait(listDirectoriesAsync(path));
+	state std::vector<std::string> directories = wait(listDirectoriesAsync(path));
 	for (auto const& dir : directories) {
 		if (dir != "." && dir != "..")
 			wait(findFilesRecursivelyAsync(joinPath(path, dir), out));

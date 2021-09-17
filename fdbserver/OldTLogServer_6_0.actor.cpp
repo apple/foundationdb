@@ -42,10 +42,8 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using std::make_pair;
 using std::max;
 using std::min;
-using std::pair;
 
 namespace oldTLog_6_0 {
 
@@ -880,7 +878,7 @@ ACTOR Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData
 		TraceEvent("EnableTLogPlayAllIgnoredPops").log();
 		// use toBePopped and issue all the pops
 		state std::map<Tag, Version>::iterator it;
-		state vector<Future<Void>> ignoredPops;
+		state std::vector<Future<Void>> ignoredPops;
 		self->ignorePopRequest = false;
 		self->ignorePopUid = "";
 		self->ignorePopDeadline = 0.0;
@@ -1923,7 +1921,7 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 	TraceEvent("EnableTLogPlayAllIgnoredPops2").log();
 	// use toBePopped and issue all the pops
 	std::map<Tag, Version>::iterator it;
-	vector<Future<Void>> ignoredPops;
+	std::vector<Future<Void>> ignoredPops;
 	self->ignorePopRequest = false;
 	self->ignorePopDeadline = 0.0;
 	self->ignorePopUid = "";

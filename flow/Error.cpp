@@ -18,14 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/Error.h"
-#include "flow/Trace.h"
-#include "flow/Knobs.h"
-#include "flow/UnitTest.h"
 #include <iostream>
-using std::cout;
-using std::endl;
-using std::make_pair;
+
+#include "flow/Error.h"
+#include "flow/Knobs.h"
+#include "flow/Trace.h"
+#include "flow/UnitTest.h"
 
 bool g_crashOnError = false;
 

@@ -41,7 +41,7 @@
 #include "fdbrpc/TSSComparison.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using std::vector;
+
 
 ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
 
@@ -609,7 +609,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		if (!stream && !firstRequestData.isValid()) {
 			// Everything is down!  Wait for someone to be up.
 
-			vector<Future<Void>> ok(alternatives->size());
+			std::vector<Future<Void>> ok(alternatives->size());
 			for (int i = 0; i < ok.size(); i++) {
 				ok[i] = IFailureMonitor::failureMonitor().onStateEqual(alternatives->get(i, channel).getEndpoint(),
 				                                                       FailureStatus(false));
@@ -769,7 +769,7 @@ Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> al
 		if (!stream) {
 			// Everything is down!  Wait for someone to be up.
 
-			vector<Future<Void>> ok(alternatives->size());
+			std::vector<Future<Void>> ok(alternatives->size());
 			for (int i = 0; i < ok.size(); i++) {
 				ok[i] = IFailureMonitor::failureMonitor().onStateEqual(alternatives->get(i, channel).getEndpoint(),
 				                                                       FailureStatus(false));

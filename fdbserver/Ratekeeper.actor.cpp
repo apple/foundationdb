@@ -750,7 +750,8 @@ ACTOR Future<Void> monitorServerListChange(
 				    .detail("Latency", now() - self->lastSSListFetchedTimestamp);
 			}
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			vector<std::pair<StorageServerInterface, ProcessClass>> results = wait(getServerListAndProcessClasses(&tr));
+			std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+			    wait(getServerListAndProcessClasses(&tr));
 			self->lastSSListFetchedTimestamp = now();
 
 			std::map<UID, StorageServerInterface> newServers;

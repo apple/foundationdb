@@ -30,7 +30,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	// Tests the time it takes for a watch to be fired after the value has changed in the storage server
 	int nodes, keyBytes;
 	double testDuration;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter operations, retries;
 	Value defaultValue;
 
@@ -163,7 +163,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		return ok;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());

@@ -132,11 +132,12 @@ struct DistributorExclusionSafetyCheckReply {
 
 struct DistributorExclusionSafetyCheckRequest {
 	constexpr static FileIdentifier file_identifier = 5830931;
-	vector<AddressExclusion> exclusions;
+	std::vector<AddressExclusion> exclusions;
 	ReplyPromise<DistributorExclusionSafetyCheckReply> reply;
 
 	DistributorExclusionSafetyCheckRequest() {}
-	explicit DistributorExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+	explicit DistributorExclusionSafetyCheckRequest(std::vector<AddressExclusion> exclusions)
+	  : exclusions(exclusions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
