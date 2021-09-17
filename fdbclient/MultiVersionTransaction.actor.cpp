@@ -1896,11 +1896,20 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 			std::string valueStr;
 			try {
 				if (platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {
-					FDBOptionInfo::FDBOptionParamType curParamType = option.second.paramType;
+					FDBOptionInfo::ParamType curParamType = option.second.paramType;
 					for (auto value : parseOptionValues(valueStr)) {
 						Standalone<StringRef> currentValue;
-						if (curParamType == FDBOptionInfo::FDBOptionParamType::Int) {
-							int64_t intParamVal = std::stoll(value.c_str(), nullptr, 10);
+						int64_t intParamVal;
+						if (curParamType == FDBOptionInfo::ParamType::Int) {
+							try {
+								intParamVal = std::stoll(value, nullptr, 10);
+							} catch (std::exception e) {
+								TraceEvent(SevError, "EnvironmentVariableParseIntegerFailed")
+								    .detail("Option", option.second.name)
+								    .detail("Value", valueStr)
+								    .detail("Error", e.what());
+								throw invalid_option_value();
+							}
 							currentValue = StringRef(reinterpret_cast<uint8_t*>(&intParamVal), 8);
 						} else {
 							currentValue = StringRef(value);
