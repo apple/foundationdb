@@ -58,10 +58,6 @@ struct TLogCommitRequest {
 
 	TLogGroupID tLogGroupID;
 
-	// TODO:
-	// std::unordered_map<StorageTeamID, StringRef> commits
-	// TLogGroupID group
-
 	// Arena
 	Arena arena;
 
@@ -120,7 +116,9 @@ struct TLogPeekReply {
 	// StringRef referring the serialized mutation data
 	StringRef data;
 
+	// The first version of this reply. May be non-present if reply is empty.
 	Optional<Version> beginVersion;
+	// Non-inclusive end version of this reply.
 	Version endVersion;
 
 	Optional<Version> popped;
@@ -382,6 +380,7 @@ struct TLogInterfaceBase {
 	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return commit.getEndpoint().addresses.secondaryAddress; }
 	const LocalityData& getLocality() const { return filteredLocality; }
+	LocalityData& getFilteredLocality() { return filteredLocality; }
 
 	MessageTransferModel getMessageTransferModel() const;
 
