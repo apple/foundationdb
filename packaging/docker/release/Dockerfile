@@ -74,7 +74,7 @@ RUN	/var/fdb/scripts/download_multiversion_libraries.bash $FDB_WEBSITE $FDB_ADDI
 
 RUN	rm -rf /mnt/website
 
-RUN	mkdir -p logs
+RUN	mkdir -p /var/fdb/logs
 
 VOLUME /var/fdb/data
 

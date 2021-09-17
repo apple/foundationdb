@@ -454,7 +454,7 @@ public:
 
 	bool isEnabled() const { return enabled; }
 
-	TraceEvent &setErrorKind(ErrorKind errorKind);
+	TraceEvent& setErrorKind(ErrorKind errorKind);
 
 	void log();
 
@@ -480,7 +480,7 @@ private:
 	int maxFieldLength;
 	int maxEventLength;
 	int timeIndex;
-	int errorKindIndex { -1 };
+	int errorKindIndex{ -1 };
 
 	void setSizeLimits();
 
@@ -577,7 +577,8 @@ void openTraceFile(const NetworkAddress& na,
                    std::string directory = ".",
                    std::string baseOfBase = "trace",
                    std::string logGroup = "default",
-                   std::string identifier = "");
+                   std::string identifier = "",
+                   std::string tracePartialFileSuffix = "");
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();

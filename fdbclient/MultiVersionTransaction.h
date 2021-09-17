@@ -55,7 +55,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
-	fdb_error_t* (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
+	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
 
 	// Database
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
@@ -369,12 +369,15 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	ProtocolVersion protocolVersion;
 	IClientApi* api;
 	bool failed;
+	std::atomic_bool initialized;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
-	ClientInfo() : ClientDesc(std::string(), false), protocolVersion(0), api(NULL), failed(true) {}
-	ClientInfo(IClientApi* api) : ClientDesc("internal", false), protocolVersion(0), api(api), failed(false) {}
+	ClientInfo()
+	  : ClientDesc(std::string(), false), protocolVersion(0), api(nullptr), failed(true), initialized(false) {}
+	ClientInfo(IClientApi* api)
+	  : ClientDesc("internal", false), protocolVersion(0), api(api), failed(false), initialized(false) {}
 	ClientInfo(IClientApi* api, std::string libPath)
-	  : ClientDesc(libPath, true), protocolVersion(0), api(api), failed(false) {}
+	  : ClientDesc(libPath, true), protocolVersion(0), api(api), failed(false), initialized(false) {}
 
 	void loadProtocolVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
@@ -448,10 +451,9 @@ public:
 		// this will be a specially created local db.
 		Reference<IDatabase> versionMonitorDb;
 
+		bool closed;
+
 		ThreadFuture<Void> changed;
-
-		bool cancelled;
-
 		ThreadFuture<Void> dbReady;
 		ThreadFuture<Void> protocolVersionMonitor;
 
@@ -501,10 +503,6 @@ public:
 
 	const Reference<DatabaseState> dbState;
 	friend class MultiVersionTransaction;
-
-	// Clients must create a database object in order to initialize some of their state.
-	// This needs to be done only once, and this flag tracks whether that has happened.
-	static std::atomic_flag externalClientsInitialized;
 };
 
 class MultiVersionApi : public IClientApi {

@@ -27,7 +27,7 @@
 
 class MovableCoordinatedState : NonCopyable {
 public:
-	MovableCoordinatedState( class ServerCoordinators const& );
+	MovableCoordinatedState(class ServerCoordinators const&);
 	MovableCoordinatedState& operator=(MovableCoordinatedState&& av);
 	~MovableCoordinatedState();
 

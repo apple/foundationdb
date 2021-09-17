@@ -150,8 +150,8 @@ Future<uint64_t> setupRangeWorker(Database cx,
 }
 
 // Periodically determines how many keys have been inserted.  If the count has just exceeded a count of interest,
-// computes the time taken to reach that mark.  Returns a vector of times (in seconds) corresponding to the counts in the
-// countsOfInterest vector.
+// computes the time taken to reach that mark.  Returns a vector of times (in seconds) corresponding to the counts in
+// the countsOfInterest vector.
 
 // Expects countsOfInterest to be sorted in ascending order
 ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Database cx,

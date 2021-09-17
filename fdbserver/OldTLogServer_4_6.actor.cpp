@@ -1520,7 +1520,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 
 					//TraceEvent("TLogRecoveredQE", self->dbgid).detail("LogId", qe.id).detail("Ver", qe.version).detail("MessageBytes", qe.messages.size()).detail("Tags", qe.tags.size())
 					//	.detail("Tag0", qe.tags.size() ? qe.tags[0].tag : invalidTag).detail("Version",
-					//logData->version.get());
+					// logData->version.get());
 
 					if (logData) {
 						logData->knownCommittedVersion =

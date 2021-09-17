@@ -366,6 +366,7 @@ struct RegisterWorkerRequest {
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
+	std::vector<NetworkAddress> degradedPeers;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -377,10 +378,11 @@ struct RegisterWorkerRequest {
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
 	                      Optional<std::pair<uint16_t, StorageServerInterface>> storageCacheInterf,
-	                      bool degraded)
+	                      bool degraded,
+	                      std::vector<NetworkAddress> degradedPeers)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
-	    storageCacheInterf(storageCacheInterf), degraded(degraded) {}
+	    storageCacheInterf(storageCacheInterf), degraded(degraded), degradedPeers(degradedPeers) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -396,7 +398,8 @@ struct RegisterWorkerRequest {
 		           issues,
 		           incompatiblePeers,
 		           reply,
-		           degraded);
+		           degraded,
+		           degradedPeers);
 	}
 };
 

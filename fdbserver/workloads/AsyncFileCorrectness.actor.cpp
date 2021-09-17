@@ -345,7 +345,8 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	}
 
 	// Checks if a file is already locked for a given set of bytes.  The file is locked if it is being written
-	// (fileLock[i] = 0xFFFFFFFF) or if we are trying to perform a write and the read count is nonzero (fileLock[i] != 0)
+	// (fileLock[i] = 0xFFFFFFFF) or if we are trying to perform a write and the read count is nonzero (fileLock[i] !=
+	// 0)
 	bool checkFileLocked(int operation, int offset, int length) {
 		for (int i = offset; i < offset + length && i < fileLock.size(); i++)
 			if (fileLock[i] == 0xFFFFFFFF || (fileLock[i] != 0 && operation == WRITE))

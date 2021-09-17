@@ -1,6 +1,6 @@
 <img alt="FoundationDB logo" src="documentation/FDB_logo.png?raw=true" width="400">
 
-![Build Status](https://codebuild.us-west-2.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiSFd4OEl4QllpbUQrQ0xyN25ZM1FIM3MyZ0tBV3Y1cm9wU293V2Rlb3Qyei9XMlIrb2Y0YkFqOTBzc2w5ZjZScFdjME9pcGRXTGNRMWkwY2ZPbGMwUUdNPSIsIml2UGFyYW1ldGVyU3BlYyI6IlBqTkJjeCt5QkNuTlBGZEwiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=release-6.3)
+![Build Status](https://codebuild.us-west-2.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiZ1FhRlNwU0JXeHVpZkt0a0k0QlNJK3BEUkplTGVRYnk3azBoT1FOazBQbGlIeDgrYmRJZVhuSUI4RTd3RWJWcjVMT3ZPTzV0NXlCTWpPTGlPVlMzckJJPSIsIml2UGFyYW1ldGVyU3BlYyI6IlB0TWVCM0VYdU5PQWtMUFYiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=release-6.3)
 
 FoundationDB is a distributed database designed to handle large volumes of structured data across clusters of commodity servers. It organizes data as an ordered key-value store and employs ACID transactions for all operations. It is especially well-suited for read/write workloads but also has excellent performance for write-intensive workloads. Users interact with the database using API language binding.
 

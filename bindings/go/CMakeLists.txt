@@ -43,7 +43,8 @@ set(go_options_file ${GO_DEST}/src/fdb/generated.go)
 
 set(go_env GOPATH=${GOPATH}
   C_INCLUDE_PATH=${CMAKE_BINARY_DIR}/bindings/c/foundationdb:${CMAKE_SOURCE_DIR}/bindings/c
-  CGO_LDFLAGS=-L${CMAKE_BINARY_DIR}/lib)
+  CGO_LDFLAGS=-L${CMAKE_BINARY_DIR}/lib
+  GO111MODULE=off)
 
 foreach(src_file IN LISTS SRCS)
   set(dest_file ${GO_DEST}/${src_file})

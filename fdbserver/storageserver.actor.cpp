@@ -1774,13 +1774,13 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
-		//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
+		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
 		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
 			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
-			//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
-			//shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -3501,8 +3501,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->sourceTLogID = curSourceTLogID;
 
 				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
-					.detail("SourceTLogID", data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-					.trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
+				    .detail("SourceTLogID",
+				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
+				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
 			}
 
 			data->noRecentUpdates.set(false);
@@ -3530,10 +3531,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
 			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest",
-			//data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
+			// data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
 			//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed",
-			//proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag",
-			//data->tag.toString());
+			// proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag",
+			// data->tag.toString());
 
 			while (!data->recoveryVersionSkips.empty() &&
 			       proposedOldestVersion > data->recoveryVersionSkips.front().first) {

@@ -19,6 +19,7 @@
  */
 
 #include "flow/FileTraceLogWriter.h"
+#include "flow/Platform.h"
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
 
@@ -51,11 +52,13 @@ FileTraceLogWriter::FileTraceLogWriter(std::string directory,
                                        std::string processName,
                                        std::string basename,
                                        std::string extension,
+                                       std::string tracePartialFileSuffix,
                                        uint64_t maxLogsSize,
                                        std::function<void()> onError,
                                        Reference<ITraceLogIssuesReporter> issues)
-  : directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize),
-    traceFileFD(-1), index(0), onError(onError), issues(issues) {}
+  : directory(directory), processName(processName), basename(basename), extension(extension),
+    tracePartialFileSuffix(tracePartialFileSuffix), maxLogsSize(maxLogsSize), traceFileFD(-1), index(0),
+    onError(onError), issues(issues) {}
 
 void FileTraceLogWriter::addref() {
 	ReferenceCounted<FileTraceLogWriter>::addref();
@@ -114,7 +117,8 @@ void FileTraceLogWriter::open() {
 	// log10(index) < 10
 	UNSTOPPABLE_ASSERT(indexWidth < 10);
 
-	auto finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
+	finalname =
+	    format("%s.%d.%d.%s%s", basename.c_str(), indexWidth, index, extension.c_str(), tracePartialFileSuffix.c_str());
 	while ((traceFileFD = __open(finalname.c_str(), TRACEFILE_FLAGS, TRACEFILE_MODE)) == -1) {
 		lastError(errno);
 		if (errno == EEXIST) {
@@ -122,7 +126,12 @@ void FileTraceLogWriter::open() {
 			indexWidth = unsigned(::floor(log10f(float(index))));
 
 			UNSTOPPABLE_ASSERT(indexWidth < 10);
-			finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
+			finalname = format("%s.%d.%d.%s%s",
+			                   basename.c_str(),
+			                   indexWidth,
+			                   index,
+			                   extension.c_str(),
+			                   tracePartialFileSuffix.c_str());
 		} else {
 			fprintf(stderr,
 			        "ERROR: could not create trace log file `%s' (%d: %s)\n",
@@ -134,7 +143,7 @@ void FileTraceLogWriter::open() {
 
 			int errorNum = errno;
 			onMainThreadVoid(
-			    [finalname, errorNum] {
+			    [finalname = finalname, errorNum] {
 				    TraceEvent(SevWarnAlways, "TraceFileOpenError")
 				        .detail("Filename", finalname)
 				        .detail("ErrorCode", errorNum)
@@ -157,6 +166,11 @@ void FileTraceLogWriter::close() {
 		while (__close(traceFileFD))
 			threadSleep(0.1);
 	}
+	traceFileFD = -1;
+	if (!tracePartialFileSuffix.empty()) {
+		renameFile(finalname, finalname.substr(0, finalname.size() - tracePartialFileSuffix.size()));
+	}
+	finalname = "";
 }
 
 void FileTraceLogWriter::roll() {
@@ -172,6 +186,15 @@ void FileTraceLogWriter::cleanupTraceFiles() {
 	// Setting maxLogsSize=0 disables trace file cleanup based on dir size
 	if (!g_network->isSimulated() && maxLogsSize > 0) {
 		try {
+			// Rename/finalize any stray files ending in tracePartialFileSuffix for this process.
+			if (!tracePartialFileSuffix.empty()) {
+				for (const auto& f : platform::listFiles(directory, tracePartialFileSuffix)) {
+					if (f.substr(0, processName.length()) == processName) {
+						renameFile(f, f.substr(0, f.size() - tracePartialFileSuffix.size()));
+					}
+				}
+			}
+
 			std::vector<std::string> existingFiles = platform::listFiles(directory, extension);
 			std::vector<std::string> existingTraceFiles;
 
