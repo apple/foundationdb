@@ -74,8 +74,9 @@ using StorageTeamID = UID;
 // Transaction subsystem state (txnState) team.
 const StorageTeamID txsTeam = UID(1, 1);
 
-// Map from storage team id to a TLog group
-TLogGroupID tLogGroupByStorageTeamID(const std::vector<TLogGroupID>& tLogGroups, const StorageTeamID& storageTeamID);
+// Map from storage team id to a TLog group. "tLogGroups" will be sorted so
+// that the assignment is consistent across calls/machines.
+TLogGroupID tLogGroupByStorageTeamID(std::vector<TLogGroupID>& tLogGroups, const StorageTeamID& storageTeamID);
 
 } // namespace ptxn
 
