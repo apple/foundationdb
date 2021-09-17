@@ -167,6 +167,7 @@ struct BlobWorkerData {
 
 	AsyncVar<int> pendingDeltaFileCommitChecks;
 	AsyncVar<Version> knownCommittedVersion;
+	uint64_t knownCommittedCheckCount = 0;
 
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 	~BlobWorkerData() { printf("Destroying blob worker data for %s\n", id.toString().c_str()); }
@@ -465,8 +466,10 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
                                            Optional<KeyRange> oldChangeFeedDataComplete,
                                            Optional<UID> oldChangeFeedId) {
 	// potentially kick off delta file commit check, if our version isn't already known to be committed
+	state uint64_t checkCount = -1;
 	if (bwData->knownCommittedVersion.get() < currentDeltaVersion) {
 		bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() + 1);
+		checkCount = bwData->knownCommittedCheckCount;
 	}
 
 	// TODO some sort of directory structure would be useful?
@@ -490,6 +493,11 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 	try {
 		// before updating FDB, wait for the delta file version to be committed and previous delta files to finish
 		while (bwData->knownCommittedVersion.get() < currentDeltaVersion) {
+			if (bwData->knownCommittedCheckCount != checkCount) {
+				checkCount = bwData->knownCommittedCheckCount;
+				// a check happened between the start and now, and the version is still lower. Kick off another one.
+				bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() + 1);
+			}
 			wait(bwData->knownCommittedVersion.onChange());
 		}
 		BlobFileIndex prev = wait(previousDeltaFileFuture);
@@ -583,11 +591,6 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 		       keyRange.begin.printable().c_str(),
 		       keyRange.end.printable().c_str(),
 		       snapshot.size());
-		if (snapshot.size() < 10) {
-			for (auto& row : snapshot) {
-				printf("  %s=%s\n", row.key.printable().c_str(), row.value.printable().c_str());
-			}
-		}
 	}
 
 	// TODO REMOVE sanity checks!
@@ -1079,10 +1082,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					    !readOldChangeFeed && !lastFromOldChangeFeed) {
 
 						if (BW_DEBUG && (inFlightBlobSnapshot.isValid() || !inFlightDeltaFiles.empty())) {
-							printf("Granule [%s - %s) ready to re-snapshot, waiting for outstanding snapshot+deltas to "
+							printf("Granule [%s - %s) ready to re-snapshot, waiting for outstanding %d snapshot and %d "
+							       "deltas to "
 							       "finish\n",
 							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str());
+							       metadata->keyRange.end.printable().c_str(),
+							       inFlightBlobSnapshot.isValid() ? 1 : 0,
+							       inFlightDeltaFiles.size());
 						}
 						// wait for all in flight snapshot/delta files
 						if (inFlightBlobSnapshot.isValid()) {
@@ -1410,13 +1416,14 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 			// new deltas (if version is larger than version of last delta file)
 			// FIXME: do trivial key bounds here if key range is not fully contained in request key range
 
-			if (req.readVersion >= metadata->durableDeltaVersion.get()) {
+			if (req.readVersion > metadata->durableDeltaVersion.get()) {
 				ASSERT(metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion);
 				rep.arena.dependsOn(metadata->deltaArena);
 				for (auto& delta : metadata->currentDeltas) {
-					if (delta.version <= req.readVersion) {
-						chunk.newDeltas.push_back_deep(rep.arena, delta);
+					if (delta.version > req.readVersion) {
+						break;
 					}
+					chunk.newDeltas.push_back_deep(rep.arena, delta);
 				}
 			}
 
@@ -1802,10 +1809,10 @@ ACTOR Future<Void> runGrvChecks(BlobWorkerData* bwData) {
 
 		ASSERT(readVersion >= bwData->knownCommittedVersion.get());
 		if (readVersion > bwData->knownCommittedVersion.get()) {
+			++bwData->knownCommittedCheckCount;
 			bwData->knownCommittedVersion.set(readVersion);
+			bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() - checksToResolve);
 		}
-
-		bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() - checksToResolve);
 	}
 }
 
