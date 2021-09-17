@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'DataLossRecovery'
+useDB = true
+
+    [[test.workload]]
+    testName = 'DataLossRecovery'
