@@ -1990,7 +1990,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		std::vector<UID> machineIdentities;
 		int machines = machineCount / dataCenters +
 		               (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
-		int possible_ss = machines;
+		int possible_ss = 0;
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount % dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n",
 		       dc,
@@ -2033,10 +2033,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				if (processClass ==
 				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
-					possible_ss--;
 				}
-				if (processClass == ProcessClass::TransactionClass) {
-					possible_ss--;
+				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
+					possible_ss++;
 				}
 			}
 
