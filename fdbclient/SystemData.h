@@ -43,7 +43,7 @@ extern const KeyRangeRef specialKeys; // [FF][FF] to [FF][FF][FF], some client f
                                       // using these special keys, see pr#2662
 extern const KeyRef afterAllKeys;
 
-//    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, vector<serverID>]|[vector<Tag>, vector<Tag>]]"
+//    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, std::vector<serverID>]|[vector<Tag>, std::vector<Tag>]]"
 //	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
 //	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
 //	as data movement occurs.
@@ -330,9 +330,9 @@ extern const KeyRef logsKey;
 //	Used during backup/recovery to restrict version requirements
 extern const KeyRef minRequiredCommitVersionKey;
 
-const Value logsValue(const vector<std::pair<UID, NetworkAddress>>& logs,
-                      const vector<std::pair<UID, NetworkAddress>>& oldLogs);
-std::pair<vector<std::pair<UID, NetworkAddress>>, vector<std::pair<UID, NetworkAddress>>> decodeLogsValue(
+const Value logsValue(const std::vector<std::pair<UID, NetworkAddress>>& logs,
+                      const std::vector<std::pair<UID, NetworkAddress>>& oldLogs);
+std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID, NetworkAddress>>> decodeLogsValue(
     const ValueRef& value);
 
 // The "global keys" are sent to each storage server any time they are changed

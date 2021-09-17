@@ -393,8 +393,8 @@ ACTOR Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> s
 }
 
 ACTOR Future<Void> changeSizes(DataDistributionTracker* self, KeyRange keys, int64_t oldShardsEndingSize) {
-	state vector<Future<int64_t>> sizes;
-	state vector<Future<int64_t>> systemSizes;
+	state std::vector<Future<int64_t>> sizes;
+	state std::vector<Future<int64_t>> systemSizes;
 	for (auto it : self->shards.intersectingRanges(keys)) {
 		Future<int64_t> thisSize = getFirstSize(it->value().stats);
 		sizes.push_back(thisSize);
@@ -964,8 +964,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	}
 }
 
-vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) {
-	vector<KeyRange> r;
+std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) {
+	std::vector<KeyRange> r;
 	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
 	     it != team_shards.end() && it->first == team;
 	     ++it)
@@ -983,7 +983,7 @@ int ShardsAffectedByTeamFailure::getNumberOfShards(UID ssID) const {
 	return it == storageServerShards.end() ? 0 : it->second;
 }
 
-std::pair<vector<ShardsAffectedByTeamFailure::Team>, vector<ShardsAffectedByTeamFailure::Team>>
+std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>>
 ShardsAffectedByTeamFailure::getTeamsFor(KeyRangeRef keys) {
 	return shard_teams[keys.begin];
 }
@@ -1107,7 +1107,7 @@ void ShardsAffectedByTeamFailure::check() {
 		}
 		auto rs = shard_teams.ranges();
 		for (auto i = rs.begin(); i != rs.end(); ++i)
-			for (vector<Team>::iterator t = i->value().first.begin(); t != i->value().first.end(); ++t)
+			for (std::vector<Team>::iterator t = i->value().first.begin(); t != i->value().first.end(); ++t)
 				if (!team_shards.count(std::make_pair(*t, i->range()))) {
 					std::string teamDesc, shards;
 					for (int k = 0; k < t->servers.size(); k++)

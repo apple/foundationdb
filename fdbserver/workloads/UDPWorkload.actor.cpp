@@ -238,7 +238,7 @@ struct UDPWorkload : TestWorkload {
 	}
 	Future<Void> start(Database const& cx) override { return delay(runFor) || _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		unsigned totalReceived = 0, totalSent = 0, totalAcked = 0, totalSuccess = 0;
 		for (const auto& p : sent) {
 			totalSent += p.second;
@@ -252,10 +252,10 @@ struct UDPWorkload : TestWorkload {
 		for (const auto& p : successes) {
 			totalSuccess += p.second;
 		}
-		m.emplace_back("Sent", totalSent, false);
-		m.emplace_back("Received", totalReceived, false);
-		m.emplace_back("Acknknowledged", totalAcked, false);
-		m.emplace_back("Successes", totalSuccess, false);
+		m.emplace_back("Sent", totalSent, Averaged::False);
+		m.emplace_back("Received", totalReceived, Averaged::False);
+		m.emplace_back("Acknknowledged", totalAcked, Averaged::False);
+		m.emplace_back("Successes", totalSuccess, Averaged::False);
 	}
 };
 

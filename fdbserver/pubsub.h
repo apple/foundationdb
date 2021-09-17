@@ -81,7 +81,7 @@ public:
 
 	Future<Inbox> createInbox(Standalone<StringRef> metadata);
 
-	Future<bool> createSubcription(Feed feed, Inbox inbox);
+	Future<bool> createSubscription(Feed feed, Inbox inbox);
 
 	Future<MessageId> postMessage(Feed feed, Standalone<StringRef> data);
 

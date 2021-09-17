@@ -392,6 +392,9 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTransaction>::delref(); }
 
+	// return true if the underlying transaction pointer is not empty
+	bool isValid() override;
+
 private:
 	const Reference<MultiVersionDatabase> db;
 	ThreadSpinLock lock;

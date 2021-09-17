@@ -144,7 +144,7 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req,
 // This is done before we assign restore roles for restore workers.
 ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Database cx, int min_num_workers) {
 	state Transaction tr(cx);
-	state vector<RestoreWorkerInterface> agents; // agents is cmdsInterf
+	state std::vector<RestoreWorkerInterface> agents; // agents is cmdsInterf
 
 	loop {
 		try {

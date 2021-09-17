@@ -90,8 +90,8 @@ struct RWTransactor : ITransactor {
 	}
 
 	ACTOR static Future<Void> rwTransaction(Database db, Reference<RWTransactor> self, Stats* stats) {
-		state vector<Key> keys;
-		state vector<Value> values;
+		state std::vector<Key> keys;
+		state std::vector<Value> values;
 		state Transaction tr(db);
 
 		for (int op = 0; op < self->reads || op < self->writes; op++)
@@ -107,7 +107,7 @@ struct RWTransactor : ITransactor {
 				state double t_rv = now();
 				state double rrLatency = -t_rv * self->reads;
 
-				state vector<Future<Optional<Value>>> reads;
+				state std::vector<Future<Optional<Value>>> reads;
 				reads.reserve(self->reads);
 				for (int i = 0; i < self->reads; i++)
 					reads.push_back(getLatency(tr.get(keys[i]), &rrLatency));
@@ -177,7 +177,7 @@ struct IMeasurer : ReferenceCounted<IMeasurer> {
 	// This could be an ITransactor, but then it needs an actor to wait for the transaction to actually finish
 	virtual Future<Void> start() { return Void(); }
 	virtual void addTransaction(ITransactor::Stats* stats, double now) = 0;
-	virtual void getMetrics(vector<PerfMetric>& m) = 0;
+	virtual void getMetrics(std::vector<PerfMetric>& m) = 0;
 	IMeasurer& operator=(IMeasurer const&) {
 		return *this;
 	} // allow copy operator for non-reference counted instances of subclasses
@@ -214,25 +214,25 @@ struct MeasureSinglePeriod : IMeasurer {
 
 		stats += *st;
 	}
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double measureDuration = duration;
-		m.push_back(PerfMetric("Transactions/sec", stats.transactions / measureDuration, false));
-		m.push_back(PerfMetric("Retries/sec", stats.retries / measureDuration, false));
-		m.push_back(PerfMetric("Operations/sec", (stats.reads + stats.writes) / measureDuration, false));
-		m.push_back(PerfMetric("Read rows/sec", stats.reads / measureDuration, false));
-		m.push_back(PerfMetric("Write rows/sec", stats.writes / measureDuration, false));
+		m.emplace_back("Transactions/sec", stats.transactions / measureDuration, Averaged::False);
+		m.emplace_back("Retries/sec", stats.retries / measureDuration, Averaged::False);
+		m.emplace_back("Operations/sec", (stats.reads + stats.writes) / measureDuration, Averaged::False);
+		m.emplace_back("Read rows/sec", stats.reads / measureDuration, Averaged::False);
+		m.emplace_back("Write rows/sec", stats.writes / measureDuration, Averaged::False);
 
-		m.push_back(PerfMetric("Mean Latency (ms)", 1000 * totalLatency.mean(), true));
-		m.push_back(PerfMetric("Median Latency (ms, averaged)", 1000 * totalLatency.median(), true));
-		m.push_back(PerfMetric("90% Latency (ms, averaged)", 1000 * totalLatency.percentile(0.90), true));
-		m.push_back(PerfMetric("98% Latency (ms, averaged)", 1000 * totalLatency.percentile(0.98), true));
+		m.emplace_back("Mean Latency (ms)", 1000 * totalLatency.mean(), Averaged::True);
+		m.emplace_back("Median Latency (ms, averaged)", 1000 * totalLatency.median(), Averaged::True);
+		m.emplace_back("90% Latency (ms, averaged)", 1000 * totalLatency.percentile(0.90), Averaged::True);
+		m.emplace_back("98% Latency (ms, averaged)", 1000 * totalLatency.percentile(0.98), Averaged::True);
 
-		m.push_back(PerfMetric("Mean Row Read Latency (ms)", 1000 * rowReadLatency.mean(), true));
-		m.push_back(PerfMetric("Median Row Read Latency (ms, averaged)", 1000 * rowReadLatency.median(), true));
-		m.push_back(PerfMetric("Mean GRV Latency (ms)", 1000 * grvLatency.mean(), true));
-		m.push_back(PerfMetric("Median GRV Latency (ms, averaged)", 1000 * grvLatency.median(), true));
-		m.push_back(PerfMetric("Mean Commit Latency (ms)", 1000 * commitLatency.mean(), true));
-		m.push_back(PerfMetric("Median Commit Latency (ms, averaged)", 1000 * commitLatency.median(), true));
+		m.emplace_back("Mean Row Read Latency (ms)", 1000 * rowReadLatency.mean(), Averaged::True);
+		m.emplace_back("Median Row Read Latency (ms, averaged)", 1000 * rowReadLatency.median(), Averaged::True);
+		m.emplace_back("Mean GRV Latency (ms)", 1000 * grvLatency.mean(), Averaged::True);
+		m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * grvLatency.median(), Averaged::True);
+		m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatency.mean(), Averaged::True);
+		m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatency.median(), Averaged::True);
 	}
 };
 
@@ -240,7 +240,7 @@ struct MeasurePeriodically : IMeasurer {
 	double period;
 	std::set<std::string> includeMetrics;
 	MeasureSinglePeriod msp, msp0;
-	vector<PerfMetric> accumulatedMetrics;
+	std::vector<PerfMetric> accumulatedMetrics;
 
 	MeasurePeriodically(double period, std::set<std::string> includeMetrics)
 	  : period(period), includeMetrics(includeMetrics), msp(0, period), msp0(0, period) {}
@@ -250,13 +250,13 @@ struct MeasurePeriodically : IMeasurer {
 		return periodicActor(this);
 	}
 	void addTransaction(ITransactor::Stats* st, double now) override { msp.addTransaction(st, now); }
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.insert(m.end(), accumulatedMetrics.begin(), accumulatedMetrics.end());
 	}
 	void nextPeriod(double t) {
 		// output stats
 		std::string prefix = format("T=%04.0fs:", t);
-		vector<PerfMetric> m;
+		std::vector<PerfMetric> m;
 		msp.getMetrics(m);
 		for (auto i = m.begin(); i != m.end(); ++i)
 			if (includeMetrics.count(i->name())) {
@@ -280,9 +280,9 @@ struct MeasurePeriodically : IMeasurer {
 };
 
 struct MeasureMulti : IMeasurer {
-	vector<Reference<IMeasurer>> ms;
+	std::vector<Reference<IMeasurer>> ms;
 	Future<Void> start() override {
-		vector<Future<Void>> s;
+		std::vector<Future<Void>> s;
 		for (auto m = ms.begin(); m != ms.end(); ++m)
 			s.push_back((*m)->start());
 		return waitForAll(s);
@@ -291,7 +291,7 @@ struct MeasureMulti : IMeasurer {
 		for (auto m = ms.begin(); m != ms.end(); ++m)
 			(*m)->addTransaction(stats, now);
 	}
-	void getMetrics(vector<PerfMetric>& metrics) override {
+	void getMetrics(std::vector<PerfMetric>& metrics) override {
 		for (auto m = ms.begin(); m != ms.end(); ++m)
 			(*m)->getMetrics(metrics);
 	}
@@ -346,8 +346,8 @@ struct ThroughputWorkload : TestWorkload {
 		multi->ms.push_back(Reference<IMeasurer>(new MeasureSinglePeriod(measureDelay, measureDuration)));
 
 		double measurePeriod = getOption(options, LiteralStringRef("measurePeriod"), 0.0);
-		vector<std::string> periodicMetrics =
-		    getOption(options, LiteralStringRef("measurePeriodicMetrics"), vector<std::string>());
+		std::vector<std::string> periodicMetrics =
+		    getOption(options, LiteralStringRef("measurePeriodicMetrics"), std::vector<std::string>());
 		if (measurePeriod) {
 			ASSERT(periodicMetrics.size() != 0);
 			multi->ms.push_back(Reference<IMeasurer>(new MeasurePeriodically(
@@ -418,6 +418,6 @@ struct ThroughputWorkload : TestWorkload {
 		return Void();
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override { measurer->getMetrics(m); }
+	void getMetrics(std::vector<PerfMetric>& m) override { measurer->getMetrics(m); }
 };
 WorkloadFactory<ThroughputWorkload> ThroughputWorkloadFactory("Throughput");

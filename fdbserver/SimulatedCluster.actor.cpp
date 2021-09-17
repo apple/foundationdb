@@ -242,7 +242,7 @@ class TestConfig {
 				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
 			if (attrib == "disableTss") {
-				sscanf(value.c_str(), "%d", &disableTss);
+				disableTss = strcmp(value.c_str(), "true") == 0;
 			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
@@ -536,7 +536,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				                              1);
 				Sim2FileSystem::newFileSystem();
 
-				vector<Future<Void>> futures;
+				std::vector<Future<Void>> futures;
 				for (int listenPort = port; listenPort < port + listenPerProcess; ++listenPort) {
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind(n, n));
@@ -997,7 +997,7 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 // Configures the system according to the given specifications in order to run
 // simulation, but with the additional consideration that it is meant to act
 // like a "rebooted" machine, mostly used for restarting tests.
-ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
+ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
                                           std::string baseFolder,
                                           int* pTesterCount,
                                           Optional<ClusterConnectionString>* pConnString,
@@ -1242,7 +1242,7 @@ void SimulationConfig::setRandomConfig() {
 		set_config("perpetual_storage_wiggle=0");
 	} else {
 		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 1);
-		set_config("perpetual_storage_wiggle=1");
+		set_config("storage_migration_type=gradual perpetual_storage_wiggle=1");
 	}
 
 	if (deterministicRandom()->random01() < 0.5) {
@@ -1337,7 +1337,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		set_config("ssd-rocksdb-experimental");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
-		TraceEvent(SevWarn, "RocksDBNonDeterminism")
+		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
 		    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
 		noUnseed = true;
 		break;
@@ -1689,11 +1689,11 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 	tssCount =
 	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
 
-	if (!testConfig.config.present() && tssCount > 0 && faultInjectionActivated) {
+	if (!testConfig.config.present() && tssCount > 0) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
 		set_config(confStr);
 		double tssRandom = deterministicRandom()->random01();
-		if (tssRandom > 0.5) {
+		if (tssRandom > 0.5 || !faultInjectionActivated) {
 			// normal tss mode
 			g_simulator.tssMode = ISimulator::TSSMode::EnabledNormal;
 		} else if (tssRandom < 0.25 && !testConfig.isFirstTestInRestart) {
@@ -1752,7 +1752,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 // Configures the system according to the given specifications in order to run
 // simulation under the correct conditions
-void setupSimulatedSystem(vector<Future<Void>>* systemActors,
+void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           std::string baseFolder,
                           int* pTesterCount,
                           Optional<ClusterConnectionString>* pConnString,
@@ -1779,7 +1779,11 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if (kv.second.type() == json_spirit::str_type) {
-			startingConfigString += kv.second.get_str();
+			if ("storage_migration_type" == kv.first) {
+				startingConfigString += kv.first + "=" + kv.second.get_str();
+			} else {
+				startingConfigString += kv.second.get_str();
+			}
 		} else if (kv.second.type() == json_spirit::array_type) {
 			startingConfigString += kv.first + "=" +
 			                        json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
@@ -1868,8 +1872,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	TEST(useIPv6); // Use IPv6
 	TEST(!useIPv6); // Use IPv4
 
-	vector<NetworkAddress> coordinatorAddresses;
-	vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
+	std::vector<NetworkAddress> coordinatorAddresses;
+	std::vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
 	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
 		int nonPrimaryDcs = dataCenters / 2;
@@ -2163,7 +2167,7 @@ ACTOR void setupAndRun(std::string dataFolder,
                        bool rebooting,
                        bool restoring,
                        std::string whitelistBinPaths) {
-	state vector<Future<Void>> systemActors;
+	state std::vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connFile;
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
@@ -2176,6 +2180,13 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// snapshot of the storage engine without a snapshotting file system.
 	// https://github.com/apple/foundationdb/issues/5155
 	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.push_back(4);
+	}
+
+	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
+	// possibly due to running the rocksdb in single thread in simulation.
+	// Re-enable the backup and restore related simulation tests when the tests are passing again.
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
 	}
 

@@ -80,7 +80,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		}
 	};
 
-	vector<FileBlock> blocks;
+	std::vector<FileBlock> blocks;
 	int pagesPerWrite;
 	int filePages;
 	int writers;
@@ -181,7 +181,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		return Void();
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<DiskDurabilityWorkload> DiskDurabilityWorkloadFactory("DiskDurability");

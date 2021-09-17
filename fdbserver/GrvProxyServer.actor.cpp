@@ -793,7 +793,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		int defaultPriTransactionsStarted[2] = { 0, 0 };
 		int batchPriTransactionsStarted[2] = { 0, 0 };
 
-		vector<vector<GetReadVersionRequest>> start(
+		std::vector<std::vector<GetReadVersionRequest>> start(
 		    2); // start[0] is transactions starting with !(flags&CAUSAL_READ_RISKY), start[1] is transactions starting
 		        // with flags&CAUSAL_READ_RISKY
 		Optional<UID> debugID;

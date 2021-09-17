@@ -154,7 +154,7 @@ private:
 
 		KeyRef end = keyInfo->rangeContaining(k).end();
 		KeyRangeRef insertRange(k, end);
-		vector<UID> src, dest;
+		std::vector<UID> src, dest;
 		// txnStateStore is always an in-memory KVS, and must always be recovered before
 		// applyMetadataMutations is called, so a wait here should never be needed.
 		Future<RangeResult> fResult = txnStateStore->readRange(serverTagKeys);
@@ -261,7 +261,7 @@ private:
 			}
 			if (k != allKeys.end) {
 				KeyRef end = cacheInfo->rangeContaining(k).end();
-				vector<uint16_t> serverIndices;
+				std::vector<uint16_t> serverIndices;
 				decodeStorageCacheValue(m.param2, serverIndices);
 				cacheInfo->insert(KeyRangeRef(k, end), serverIndices.size() > 0);
 			}
@@ -904,7 +904,7 @@ private:
 
 		std::map<KeyRef, MutationRef>::iterator itr;
 		KeyRef keyBegin, keyEnd;
-		vector<uint16_t> serverIndices;
+		std::vector<uint16_t> serverIndices;
 		MutationRef mutationBegin, mutationEnd;
 
 		for (itr = cachedRangeInfo.begin(); itr != cachedRangeInfo.end(); ++itr) {

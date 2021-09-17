@@ -900,6 +900,11 @@ void MultiVersionTransaction::reset() {
 	updateTransaction();
 }
 
+bool MultiVersionTransaction::isValid() {
+	auto tr = getTransaction();
+	return tr.transaction.isValid();
+}
+
 // MultiVersionDatabase
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            int threadIdx,
@@ -1021,12 +1026,17 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 }
 
 // Get network thread busyness
+// Return the busyness for the main thread. When using external clients, take the larger of the local client
+// and the external client's busyness.
 double MultiVersionDatabase::getMainThreadBusyness() {
+	ASSERT(g_network);
+
+	double localClientBusyness = g_network->networkInfo.metrics.networkBusyness;
 	if (dbState->db) {
-		return dbState->db->getMainThreadBusyness();
+		return std::max(dbState->db->getMainThreadBusyness(), localClientBusyness);
 	}
 
-	return 0;
+	return localClientBusyness;
 }
 
 // Returns the protocol version reported by the coordinator this client is connected to

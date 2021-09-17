@@ -61,17 +61,23 @@ struct MonitorLeaderInfo {
 	  : hasConnected(false), intermediateConnFile(intermediateConnFile) {}
 };
 
-// Monitors the given coordination group's leader election process and provides a best current guess
-// of the current leader.  If a leader is elected for long enough and communication with a quorum of
-// coordinators is possible, eventually outKnownLeader will be that leader's interface.
+Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees);
+
+// This is one place where the leader election algorithm is run. The coodinator contacts all coodinators to collect
+// nominees, the nominee with the most nomination is the leader. This function also monitors the change of the leader.
+// If a leader is elected for long enough and communication with a quorum of coordinators is possible, eventually
+// outKnownLeader will be that leader's interface.
 template <class LeaderInterface>
 Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
                            Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader);
 
-Future<Void> monitorLeaderForProxies(Value const& key,
-                                     vector<NetworkAddress> const& coordinators,
-                                     ClientData* const& clientData,
-                                     Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo);
+// This is one place where the leader election algorithm is run. The coodinator contacts all coodinators to collect
+// nominees, the nominee with the most nomination is the leader, and collects client data from the leader. This function
+// also monitors the change of the leader.
+Future<Void> monitorLeaderAndGetClientInfo(Value const& key,
+                                           std::vector<NetworkAddress> const& coordinators,
+                                           ClientData* const& clientData,
+                                           Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo);
 
 Future<Void> monitorProxies(
     Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile,
