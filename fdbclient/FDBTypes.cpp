@@ -68,7 +68,8 @@ std::string KeySelectorRef::toString() const {
 
 namespace ptxn {
 
-TLogGroupID tLogGroupByStorageTeamID(const std::vector<TLogGroupID>& tLogGroups, const StorageTeamID& storageTeamID) {
+TLogGroupID tLogGroupByStorageTeamID(std::vector<TLogGroupID>& tLogGroups, const StorageTeamID& storageTeamID) {
+	std::sort(tLogGroups.begin(), tLogGroups.end());
 	return tLogGroups[storageTeamID.hash() % tLogGroups.size()];
 }
 
