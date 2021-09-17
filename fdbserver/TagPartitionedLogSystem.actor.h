@@ -191,7 +191,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
 	                     SpanID const& spanContext,
-	                     Optional<UID> debugID) final;
+	                     Optional<UID> debugID,
+	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final;
 
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 

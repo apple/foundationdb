@@ -502,88 +502,6 @@ ACTOR Future<TLogCommitReply> TagPartitionedLogSystem::recordPushMetrics(Referen
 	return t;
 }
 
-<<<<<<< HEAD
-	ACTOR static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
-	                                                       Reference<Histogram> dist,
-	                                                       NetworkAddress addr,
-	                                                       Future<TLogCommitReply> in) {
-		state double startTime = now();
-		TLogCommitReply t = wait(in);
-		if (now() - self->lastReset > SERVER_KNOBS->PUSH_RESET_INTERVAL) {
-			if (now() - startTime > SERVER_KNOBS->PUSH_MAX_LATENCY) {
-				if (self->resetCheck.isReady()) {
-					self->resetCheck = pushResetChecker(self, addr);
-				}
-				self->slowReplies++;
-			} else {
-				self->fastReplies++;
-			}
-		}
-		dist->sampleSeconds(now() - startTime);
-		return t;
-	}
-
-	Future<Version> push(Version prevVersion,
-	                     Version version,
-	                     Version knownCommittedVersion,
-	                     Version minKnownCommittedVersion,
-	                     LogPushData& data,
-	                     SpanID const& spanContext,
-	                     Optional<UID> debugID,
-	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final {
-		// FIXME: Randomize request order as in LegacyLogSystem?
-		vector<Future<Void>> quorumResults;
-		vector<Future<TLogCommitReply>> allReplies;
-		int location = 0;
-		Span span("TPLS:push"_loc, spanContext);
-		for (auto& it : tLogs) {
-			if (it->isLocal && it->logServers.size()) {
-				if (it->connectionResetTrackers.size() == 0) {
-					for (int i = 0; i < it->logServers.size(); i++) {
-						it->connectionResetTrackers.push_back(makeReference<ConnectionResetInfo>());
-					}
-				}
-				if (it->tlogPushDistTrackers.empty()) {
-					for (int i = 0; i < it->logServers.size(); i++) {
-						it->tlogPushDistTrackers.push_back(
-						    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
-						                            it->logServers[i]->get().interf().address().toString(),
-						                            Histogram::Unit::microseconds));
-					}
-				}
-				vector<Future<Void>> tLogCommitResults;
-				for (int loc = 0; loc < it->logServers.size(); loc++) {
-					if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-						if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
-							prevVersion = tpcvMap.get()[location];
-						} else {
-							// Do not send empty commit to tLog if its not a destination of the transaction
-							location++;
-							continue;
-						}
-					}
-					Standalone<StringRef> msg = data.getMessages(location);
-					data.recordEmptyMessage(location, msg);
-					allReplies.push_back(recordPushMetrics(
-					    it->connectionResetTrackers[loc],
-					    it->tlogPushDistTrackers[loc],
-					    it->logServers[loc]->get().interf().address(),
-					    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
-					                                                                          msg.arena(),
-					                                                                          prevVersion,
-					                                                                          version,
-					                                                                          knownCommittedVersion,
-					                                                                          minKnownCommittedVersion,
-					                                                                          msg,
-					                                                                          debugID),
-					                                                        TaskPriority::ProxyTLogCommitReply)));
-					Future<Void> commitSuccess = success(allReplies.back());
-					addActor.get().send(commitSuccess);
-					tLogCommitResults.push_back(commitSuccess);
-					location++;
-				}
-				quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size() - it->tLogWriteAntiQuorum));
-=======
 Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               Version version,
                                               Version knownCommittedVersion,
@@ -591,7 +509,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               LogPushData& data,
                                               SpanID const& spanContext,
                                               Optional<UID> debugID,
-	                     					  Optional<std::unordered_map<uint16_t, Version>> tpcvMap) {
+                                              Optional<std::unordered_map<uint16_t, Version>> tpcvMap) {
 	// FIXME: Randomize request order as in LegacyLogSystem?
 	std::vector<Future<Void>> quorumResults;
 	std::vector<Future<TLogCommitReply>> allReplies;
@@ -672,7 +590,6 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 			localSets.push_back(log);
 			if (log->locality != tagLocalitySatellite) {
 				bestSet = localSets.size() - 1;
->>>>>>> apple-upstream/master
 			}
 		}
 	}
