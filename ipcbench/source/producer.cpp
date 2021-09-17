@@ -181,12 +181,6 @@ int main(int argc, char* argv[]) {
 
 	shm::message* msg = static_cast<shm::message*>(segment.allocate(sizeof(shm::message)));
 
-	int producer_fd = eventfd(0, 0);
-	if (producer_fd == -1) {
-		fprintf(stderr, "Failed to create event fd\n");
-		return 1;
-	}
-
 	/***********************************************************************/
 	/* Variable and structure definitions.                                 */
 	/***********************************************************************/
@@ -233,7 +227,6 @@ int main(int argc, char* argv[]) {
 		}
 
 		event_fd = recvfd(sd);
-		sendfd(sd, producer_fd);
 
 	} while (FALSE);
 
@@ -242,35 +235,13 @@ int main(int argc, char* argv[]) {
 	/***********************************************************************/
 	if (sd != -1)
 		close(sd);
-	
+
 	// main process : epoll wait
-	int event_count;
-	struct epoll_event event, events[MAX_EVENTS];
-	int epoll_fd = epoll_create1(0);
-
-	if (epoll_fd == -1) {
-		fprintf(stderr, "Failed to create epoll file descriptor\n");
-		return 1;
-	}
-
-	event.events = EPOLLIN;// | EPOLLET;
-	event.data.fd = producer_fd;
-
-	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, producer_fd, &event)) {
-		fprintf(stderr, "Failed to add file descriptor to epoll\n");
-		printf("Error: %s\n", strerror(errno));
-		return 1;
-	}
-
-	uint64_t num = 19950811;
+	// the 64-bytes int to add to event_fd counter
+	uint64_t num = 1;
 	while (!stopped) {
-		if (waiting_interval)
+		if (waiting_interval) {
 			std::this_thread::sleep_for(std::chrono::microseconds(waiting_interval));
-		else {
-			// somehow the busy loop will die quickly
-			// add a very short sleep can avoid it
-			// 10 nano seconds is small enough to be ignored considering the latency is ~10us
-			// std::this_thread::sleep_for(std::chrono::nanoseconds(10));
 		}
 		// write the message
 		memset(msg->data, '-', 100);
@@ -287,16 +258,13 @@ int main(int argc, char* argv[]) {
 			}
 			++kill_count;
 			if (shm::now() - last_print_time > 1e9) {
-				printf("%f wake/seconds\n", kill_count * 1e9 / (shm::now() - last_print_time));
+				printf("%f epoll/seconds\n", kill_count * 1e9 / (shm::now() - last_print_time));
 				last_print_time = shm::now();
 				kill_count = 0;
 			}
 		}
-		event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, 50000);
 	}
 	close(event_fd);
-	close(producer_fd);
-	close(epoll_fd);
 
 	segment.deallocate(msg);
 	// When done, destroy the queues from the segment

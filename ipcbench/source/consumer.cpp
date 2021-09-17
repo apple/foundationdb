@@ -199,7 +199,6 @@ int main(int argc, char* argv[]) {
 		fprintf(stderr, "Failed to create event fd\n");
 		return 1;
 	}
-	int producer_fd = -1;
 
 	/***********************************************************************/
 	/* Variable and structure definitions.                                 */
@@ -270,8 +269,6 @@ int main(int argc, char* argv[]) {
 
 		// send the fd to producer
 		sendfd(connectSocket, event_fd);
-		// recv fd from producer
-		producer_fd = recvfd(connectSocket);
 
 		/********************************************************************/
 		/* Program complete                                                 */
@@ -337,13 +334,11 @@ int main(int argc, char* argv[]) {
 	while (!stopped) {
 		// ptr to the reply message
 		offset_ptr<shm::message> ptr;
-		for (auto i = 0; i < 100000; ++i) {
+		for (auto i = 0; i < 1; ++i) {
 			if (request_queue->pop(ptr)) {
 				memcpy(buffer, ptr->data, size);
 				latency.fetch_add(shm::now() - ptr->start_time);
 				count.fetch_add(1);
-				num = 1;
-				write(producer_fd, &num, sizeof(num));
 			}
 		}
 		// sleep
@@ -353,8 +348,6 @@ int main(int argc, char* argv[]) {
 			memcpy(buffer, ptr->data, size);
 			latency.fetch_add(shm::now() - ptr->start_time);
 			count.fetch_add(1);
-			num = 1;
-			write(producer_fd, &num, sizeof(num));
 		}
 		event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, 50000);
 		if (stopped)
@@ -369,7 +362,6 @@ int main(int argc, char* argv[]) {
 	free(buffer);
 	close(epoll_fd);
 	close(event_fd);
-	close(producer_fd);
 
 	std::cout << "Consumer finished.\n";
 }
