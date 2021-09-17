@@ -234,7 +234,7 @@ bool StorageTeamPeekCursor::hasRemainingImpl() const {
 // ServerPeekCursor used for demo
 //////////////////////////////////////////////////////////////////////////////////
 
-ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> const& interf,
+ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> interf,
                                    Tag tag,
                                    StorageTeamID storageTeamId,
                                    TLogGroupID tLogGroupID,
@@ -242,10 +242,11 @@ ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInte
                                    Version end,
                                    bool returnIfBlocked,
                                    bool parallelGetMore)
-  : interf(interf), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID), messageVersion(begin), end(end),
-    hasMsg(false), rd(results.arena, results.data, Unversioned()), dbgid(deterministicRandom()->randomUniqueID()),
-    poppedVersion(0), returnIfBlocked(returnIfBlocked), parallelGetMore(parallelGetMore) {
-
+  : interf(interf), results(Optional<UID>(), emptyCursorHeader().arena(), emptyCursorHeader()),
+    rd(results.arena, results.data, IncludeVersion(ProtocolVersion::withPartitionTransaction())), tag(tag),
+    storageTeamId(storageTeamId), tLogGroupID(tLogGroupID), messageVersion(begin), end(end), hasMsg(false),
+    dbgid(deterministicRandom()->randomUniqueID()), poppedVersion(0), returnIfBlocked(returnIfBlocked),
+    parallelGetMore(parallelGetMore) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	TraceEvent(SevDebug, "SPC_Starting", dbgid)
@@ -266,10 +267,10 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
                                    StorageTeamID storageTeamId,
                                    TLogGroupID tLogGroupID)
   : results(results), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID),
-    rd(results.arena, results.data, Unversioned()), messageVersion(messageVersion), end(end), messageAndTags(message),
-    hasMsg(hasMsg), dbgid(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion),
-    returnIfBlocked(false), parallelGetMore(false) {
-
+    rd(results.arena, results.data, IncludeVersion(ProtocolVersion::withPartitionTransaction())),
+    messageVersion(messageVersion), end(end), messageAndTags(message), hasMsg(hasMsg),
+    dbgid(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false),
+    parallelGetMore(false) {
 	TraceEvent(SevDebug, "SPC_Clone", dbgid);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;

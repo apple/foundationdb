@@ -205,7 +205,7 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	int fastReplies = 0;
 	int unknownReplies = 0;
 
-	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> const& interf,
+	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> interf,
 	                 Tag tag,
 	                 StorageTeamID storageTeamID,
 	                 TLogGroupID tLogGroupID,

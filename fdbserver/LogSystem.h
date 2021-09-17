@@ -64,6 +64,8 @@ public:
 	std::vector<ptxn::TLogGroupID> tLogGroupIDs;
 	std::map<ptxn::TLogGroupID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
 	    groupIdToInterfaces;
+
+	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
