@@ -1135,6 +1135,7 @@ void printStatus(StatusObjectReader statusObj,
 					                       excludedServersArr.size());
 				}
 
+<<<<<<< HEAD
 				if (statusObjConfig.get("commit_proxies", intVal))
 					outputString += format("\n  Desired Commit Proxies - %d", intVal);
 
@@ -2136,6 +2137,16 @@ ACTOR Future<bool> configure(Database db,
 		fprintf(stderr, "ERROR: These changes would make the configuration invalid\n");
 		ret = true;
 		break;
+	case ConfigurationResult::STORAGE_MIGRATION_DISABLED:
+		fprintf(stderr,
+		        "ERROR: Storage engine type cannot be changed because "
+		        "storage_migration_mode=disabled.\n");
+		fprintf(stderr,
+		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
+		        "migration with the perpetual wiggle, or `configure "
+		        "storage_migration_type=aggressive' for aggressive migration.\n");
+		ret = true;
+		break;
 	case ConfigurationResult::DATABASE_ALREADY_CREATED:
 		fprintf(stderr, "ERROR: Database already exists! To change configuration, don't say `new'\n");
 		ret = true;
@@ -2203,17 +2214,6 @@ ACTOR Future<bool> configure(Database db,
 		fprintf(stderr,
 		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
 		        "storage_migration_type=gradual' to set the gradual migration type.\n");
-		ret = true;
-		break;
-	case ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE:
-		printf("Configuration changed, with warnings\n");
-		fprintf(stderr,
-		        "WARN: Storage engine type changed, but nothing will be migrated because "
-		        "storage_migration_mode=disabled.\n");
-		fprintf(stderr,
-		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
-		        "migration with the perpetual wiggle, or `configure "
-		        "storage_migration_type=aggressive' for aggressive migration.\n");
 		ret = true;
 		break;
 	default:
