@@ -736,7 +736,7 @@
          "proxies":6, // this field will be absent if a value has not been explicitly set
          "backup_worker_enabled":1,
          "perpetual_storage_wiggle": 0,
-         "perpetual_storage_wiggle_locality":"0"
+         "perpetual_storage_wiggle_locality":"0",
          "storage_migration_type":{
          "$enum":[
              "disabled",

@@ -1781,7 +1781,14 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {
-		if ("tss_storage_engine" == kv.first || "perpetual_storage_wiggle_locality" == kv.first) {
+		if ("tss_storage_engine" == kv.first) {
+			continue;
+		}
+		if ("perpetual_storage_wiggle_locality" == kv.first) {
+			if (deterministicRandom()->random01() < 0.25) {
+				int dcId = deterministicRandom()->randomInt(0, simconfig.datacenters);
+				startingConfigString += " " + kv.first + "=" + "data_hall:" + std::to_string(dcId);
+			}
 			continue;
 		}
 		startingConfigString += " ";
