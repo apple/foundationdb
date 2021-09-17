@@ -1982,8 +1982,17 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 			std::string valueStr;
 			try {
 				if (platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {
+					FDBOptionInfo::FDBOptionParamType curParamType = option.second.paramType;
+					int64_t intParamVal;
 					for (auto value : parseOptionValues(valueStr)) {
-						Standalone<StringRef> currentValue = StringRef(value);
+						Standalone<StringRef> currentValue;
+						if (curParamType == FDBOptionInfo::Int) {
+							intParamVal = std::stoll(value.c_str(),nullptr,10);
+							currentValue = StringRef(reinterpret_cast<uint8_t*>(&intParamVal),8);
+						}
+						else{
+							currentValue = StringRef(value);
+						}
 						{ // lock scope
 							MutexHolder holder(lock);
 							if (setEnvOptions[option.first].count(currentValue) == 0) {
