@@ -2574,7 +2574,7 @@ public:
 
 	void updatePage(PagerEventReasons reason,
 	                unsigned int level,
-	                VectorRef<LogicalPageID> pageIDs,
+	                Standalone<VectorRef<LogicalPageID>> pageIDs,
 	                Reference<ArenaPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
 		// or as a cache miss because there is no benefit to the page already being in cache
@@ -5479,7 +5479,7 @@ private:
 					emptyPages[i] = id;
 				}
 				debug_printf("writePages: newPages %s", toString(emptyPages).c_str());
-				self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages.contents(), pages);
+				self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages, pages);
 				for (const LogicalPageID id : emptyPages) {
 					childPageID.push_back(records.arena(), id);
 				}
@@ -5671,7 +5671,7 @@ private:
 			emptyPages[i] = id;
 		}
 		debug_printf("updateBTreePage: newPages %s", toString(emptyPages).c_str());
-		self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages.contents(), page);
+		self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages, page);
 		i = 0;
 		for (const LogicalPageID id : emptyPages) {
 			newID[i] = id;

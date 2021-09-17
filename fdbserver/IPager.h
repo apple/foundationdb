@@ -213,7 +213,7 @@ public:
 	// may see the effects of this write.
 	virtual void updatePage(PagerEventReasons reason,
 	                        unsigned int level,
-	                        VectorRef<LogicalPageID> pageIDs,
+	                        Standalone<VectorRef<LogicalPageID>> pageIDs,
 	                        Reference<ArenaPage> data) = 0;
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
