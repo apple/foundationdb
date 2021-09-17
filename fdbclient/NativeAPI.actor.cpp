@@ -207,7 +207,7 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 		return;
 	}
 
-	if (readVersion > ssVersionVectorCache.getMaxVersion()) {
+	if (ssVersionVectorCache.getMaxVersion() != invalidVersion && readVersion > ssVersionVectorCache.getMaxVersion()) {
 		TraceEvent(SevError, "GetLatestCommitVersions")
 		    .detail("ReadVersion", readVersion)
 		    .detail("Version vector", ssVersionVectorCache.toString());
