@@ -42,9 +42,9 @@ struct FDBOptionInfo {
 	// be no cumulative effects from calling multiple times).
 	int defaultFor;
 
-	enum class FDBOptionParamType { None, String, Int, Bytes };
+	enum class ParamType { None, String, Int, Bytes };
 
-	FDBOptionParamType paramType;
+	ParamType paramType;
 
 	FDBOptionInfo(std::string name,
 	              std::string comment,
@@ -53,7 +53,7 @@ struct FDBOptionInfo {
 	              bool hidden,
 	              bool persistent,
 	              int defaultFor,
-	              FDBOptionParamType paramType)
+	              ParamType paramType)
 	  : name(name), comment(comment), parameterComment(parameterComment), hasParameter(hasParameter), hidden(hidden),
 	    persistent(persistent), defaultFor(defaultFor), paramType(paramType) {}
 
