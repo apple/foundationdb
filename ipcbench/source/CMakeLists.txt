@@ -14,3 +14,11 @@ target_link_libraries(consumer PRIVATE librt.so)
 add_executable(ipc-client client.cpp)
 target_link_libraries(ipc-client PUBLIC boost_target Threads::Threads)
 target_link_libraries(ipc-client PRIVATE librt.so)
+
+add_executable(ipc-server server.cpp)
+target_link_libraries(ipc-server PUBLIC boost_target Threads::Threads)
+target_link_libraries(ipc-server PRIVATE librt.so)
+
+add_executable(ipc-debug debug.cpp)
+target_link_libraries(ipc-debug PUBLIC boost_target Threads::Threads)
+target_link_libraries(ipc-debug PRIVATE librt.so)

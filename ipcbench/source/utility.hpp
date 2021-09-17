@@ -29,7 +29,7 @@ using alloc = bip::allocator<T, bip::managed_shared_memory::segment_manager>;
 
 using message_alloc = alloc<message>;
 
-using message_queue = boost::lockfree::spsc_queue<bip::offset_ptr<message>, boost::lockfree::capacity<1000>>;
+using message_queue = boost::lockfree::spsc_queue<bip::offset_ptr<message>, boost::lockfree::capacity<10>>;
 // using message_queue = std::queue<bip::offset_ptr<char>>;
 
 bench_t now() {
@@ -37,5 +37,9 @@ bench_t now() {
 	timespec_get(&ts, TIME_UTC);
 	return ts.tv_sec * 1e9 + ts.tv_nsec;
 };
+
+int recvfd(int sockfd);
+
+void sendfd(int sockfd, int fd);
 
 } // namespace shm

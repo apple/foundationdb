@@ -6,28 +6,32 @@
 #include <boost/asio/signal_set.hpp>
 #include <boost/bind.hpp>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <stdlib.h>
 #include <string>
 #include <cstdlib> //std::system
-#include "flow/Error.h"
 #include "thread"
-#include <signal.h>
 #include "sys/epoll.h"
-#include <sys/eventfd.h>
 #include <sys/socket.h>
 
 #include "utility.hpp"
 
+/**************************************************************************/
+/* Constants used by this program                                         */
+/**************************************************************************/
+#define SERVER_PATH "/tmp/server"
 #define READ_SIZE 1024
 #define MAX_EVENTS 300
+#define FALSE 0
 
 using namespace boost::interprocess;
+namespace ipc = boost::interprocess;
 
 volatile sig_atomic_t stopped = 0;
-volatile sig_atomic_t started = 0;
 
 void trace(int trace_period_milliseconds, std::atomic_int* counter, std::atomic_ullong* latency) {
 	shm::bench_t prev_time = shm::now();
@@ -48,19 +52,13 @@ void trace(int trace_period_milliseconds, std::atomic_int* counter, std::atomic_
 }
 
 void stop_handler(int s) {
-	started = 1;
 	stopped = 1;
-}
-
-void start_handler(int s) {
-	started = 1;
 }
 
 void nullCompletionHandler() {}
 
 void sleep_handler(const boost::system::error_code& error, int signum, boost::asio::io_context* context) {
 	if (!error && signum == SIGUSR2) {
-		// printf("Received SIGUSR2!\n");
 		context->post(nullCompletionHandler);
 	}
 }
@@ -73,36 +71,69 @@ int closeEpollFD(int epoll_fd) {
 	return 0;
 }
 
-// void sendFD(int socket, int fd) // send fd by socket
-// {
-// 	struct msghdr msg = { 0 };
-// 	char buf[CMSG_SPACE(sizeof(fd))];
-// 	memset(buf, '\0', sizeof(buf));
-// 	char m_buffer[128];
-// 	memset(m_buffer, '\0', sizeof(m_buffer));
-// 	struct iovec io = { .iov_base = m_buffer, .iov_len = sizeof(m_buffer) };
+static int recvfd(int sockfd) {
+	struct msghdr msgh;
+	struct iovec iov;
+	int data, fd;
+	ssize_t nr;
 
-// 	msg.msg_iov = &io;
-// 	msg.msg_iovlen = 1;
-// 	msg.msg_control = buf;
-// 	msg.msg_controllen = sizeof(buf);
+	/* Allocate a char buffer for the ancillary data. See the comments
+	   in sendfd() */
+	union {
+		char buf[CMSG_SPACE(sizeof(int))];
+		struct cmsghdr align;
+	} controlMsg;
+	struct cmsghdr* cmsgp;
 
-// 	struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
-// 	cmsg->cmsg_level = SOL_SOCKET;
-// 	cmsg->cmsg_type = SCM_RIGHTS;
-// 	cmsg->cmsg_len = CMSG_LEN(sizeof(fd));
+	/* The 'msg_name' field can be used to obtain the address of the
+	   sending socket. However, we do not need this information. */
 
-// 	// *((int *) CMSG_DATA(cmsg)) = fd;
-// 	memcpy((int*)CMSG_DATA(cmsg), &fd, sizeof(int));
+	msgh.msg_name = NULL;
+	msgh.msg_namelen = 0;
 
-// 	int bytes = sendmsg(socket, &msg, 0);
-// 	if (bytes < 0) {
-// 		fprintf(stderr, "Failed to send FD\n");
-// 		printf("Error: %s\n", strerror(errno));
-// 	} else {
-// 		printf("Event fd:%d, send bytes: %d\n", fd, bytes);
-// 	}
-// }
+	/* Specify buffer for receiving real data */
+
+	msgh.msg_iov = &iov;
+	msgh.msg_iovlen = 1;
+	iov.iov_base = &data; /* Real data is an 'int' */
+	iov.iov_len = sizeof(int);
+
+	/* Set 'msghdr' fields that describe ancillary data */
+
+	msgh.msg_control = controlMsg.buf;
+	msgh.msg_controllen = sizeof(controlMsg.buf);
+
+	/* Receive real plus ancillary data; real data is ignored */
+
+	nr = recvmsg(sockfd, &msgh, 0);
+	if (nr < 0) {
+		fprintf(stderr, "Failed to receive message\n");
+		printf("Error: %s\n", strerror(errno));
+	} else {
+		printf("Received bytes: %d\n", nr);
+	}
+
+	cmsgp = CMSG_FIRSTHDR(&msgh);
+
+	/* Check the validity of the 'cmsghdr' */
+
+	if (cmsgp == NULL || cmsgp->cmsg_len != CMSG_LEN(sizeof(int)) || cmsgp->cmsg_level != SOL_SOCKET ||
+	    cmsgp->cmsg_type != SCM_RIGHTS) {
+		errno = EINVAL;
+		fprintf(stderr,
+		        "Error: invalid cmsghdr, %s, %s, %s, %s\n",
+		        cmsgp == NULL ? "y" : "n",
+		        cmsgp->cmsg_len != CMSG_LEN(sizeof(int)) ? "y" : "n",
+		        cmsgp->cmsg_level != SOL_SOCKET ? "y" : "n",
+		        cmsgp->cmsg_type != SCM_RIGHTS ? "y" : "n");
+		return -1;
+	}
+
+	/* Return the received file descriptor to our caller */
+
+	memcpy(&fd, CMSG_DATA(cmsgp), sizeof(int));
+	return fd;
+}
 
 static void sendfd(int sockfd, int fd) {
 	struct msghdr msgh;
@@ -139,7 +170,6 @@ static void sendfd(int sockfd, int fd) {
 	/* Set 'msghdr' fields that describe ancillary data */
 	msgh.msg_control = controlMsg.buf;
 	msgh.msg_controllen = sizeof(controlMsg.buf);
-	printf("Size: %d\n", msgh.msg_controllen);
 
 	/* Set up ancillary data describing file descriptor to send */
 
@@ -161,32 +191,110 @@ static void sendfd(int sockfd, int fd) {
 
 // Consumer, receive the request and send back the reply
 int main(int argc, char* argv[]) {
-	// signal(SIGINT, stop_handler);
-	// signal(SIGUSR1, start_handler);
+	signal(SIGINT, stop_handler);
 
-	// while (!started) {
-	// 	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-	// }
-	// printf("Received signal from producer to start\n");
-
-	// sigset_t mask;
-	// sigemptyset(&mask);
-	// sigaddset(&mask, SIGTERM);
-	// sigaddset(&mask, SIGINT);
-	// int r = sigprocmask(SIG_BLOCK, &mask, 0);
-	// if (r == -1) {
-	// 	fprintf(stderr, "Failed: sigprocmask\n");
-	// 	return 1;
-	// }
+	// create event fd
 	int event_fd = eventfd(0, 0);
 	if (event_fd == -1) {
-		fprintf(stderr, "Failed: event_fd\n");
+		fprintf(stderr, "Failed to create event fd\n");
 		return 1;
 	}
+	int producer_fd = -1;
 
+	/***********************************************************************/
+	/* Variable and structure definitions.                                 */
+	/***********************************************************************/
+	int sd = -1, connectSocket = -1, rc;
+	struct sockaddr_un serveraddr;
+	/***********************************************************************/
+	/* A do/while(FALSE) loop is used to make error cleanup easier.  The   */
+	/* close() of each of the socket descriptors is only done once at the  */
+	/* very end of the program.                                            */
+	/***********************************************************************/
+	do {
+		/********************************************************************/
+		/* The socket() function returns a socket descriptor, which represents   */
+		/* an endpoint.  The statement also identifies that the UNIX        */
+		/* address family with the stream transport (SOCK_STREAM) will be   */
+		/* used for this socket.                                            */
+		/********************************************************************/
+		sd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (sd < 0) {
+			perror("socket() failed");
+			break;
+		}
+
+		/********************************************************************/
+		/* After the socket descriptor is created, a bind() function gets a */
+		/* unique name for the socket.                                      */
+		/********************************************************************/
+		memset(&serveraddr, 0, sizeof(serveraddr));
+		serveraddr.sun_family = AF_UNIX;
+		strcpy(serveraddr.sun_path, SERVER_PATH);
+
+		rc = bind(sd, (struct sockaddr*)&serveraddr, SUN_LEN(&serveraddr));
+		if (rc < 0) {
+			perror("bind() failed");
+			break;
+		}
+
+		/********************************************************************/
+		/* The listen() function allows the server to accept incoming       */
+		/* client connections.  In this example, the backlog is set to 10.  */
+		/* This means that the system will queue 10 incoming connection     */
+		/* requests before the system starts rejecting the incoming         */
+		/* requests.                                                        */
+		/********************************************************************/
+		rc = listen(sd, 10);
+		if (rc < 0) {
+			perror("listen() failed");
+			break;
+		}
+
+		printf("Ready for producer to connect...\n");
+
+		/********************************************************************/
+		/* The server uses the accept() function to accept an incoming      */
+		/* connection request.  The accept() call will block indefinitely   */
+		/* waiting for the incoming connection to arrive.                   */
+		/********************************************************************/
+		socklen_t clientAddressLength;
+		struct sockaddr_in clientAddress;
+		connectSocket = accept(sd, (struct sockaddr*)&clientAddress, &clientAddressLength);
+		if (connectSocket < 0) {
+			perror("accept() failed");
+			break;
+		}
+
+		std::cout << "Connected to " << inet_ntoa(clientAddress.sin_addr) << std::endl;
+
+		// send the fd to producer
+		sendfd(connectSocket, event_fd);
+		// recv fd from producer
+		producer_fd = recvfd(connectSocket);
+
+		/********************************************************************/
+		/* Program complete                                                 */
+		/********************************************************************/
+
+	} while (FALSE);
+
+	/***********************************************************************/
+	/* Close down any open socket descriptors                              */
+	/***********************************************************************/
+	if (sd != -1)
+		close(sd);
+
+	if (connectSocket != -1)
+		close(connectSocket);
+
+	/***********************************************************************/
+	/* Remove the UNIX path name from the file system                      */
+	/***********************************************************************/
+	unlink(SERVER_PATH);
+
+	// main process : epoll wait
 	int event_count;
-	size_t bytes_read;
-	char read_buffer[READ_SIZE + 1];
 	struct epoll_event event, events[MAX_EVENTS];
 	int epoll_fd = epoll_create1(0);
 
@@ -195,211 +303,73 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	event.events = EPOLLHUP | EPOLLERR | EPOLLIN;
+	event.events = EPOLLIN;// | EPOLLET;
 	event.data.fd = event_fd;
 
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, event_fd, &event)) {
 		fprintf(stderr, "Failed to add file descriptor to epoll\n");
 		printf("Error: %s\n", strerror(errno));
-		return closeEpollFD(epoll_fd);
-	}
-
-	int listenSocket, connectSocket;
-
-	unsigned short int listenPort = 6000;
-
-	socklen_t clientAddressLength;
-
-	struct sockaddr_in clientAddress, serverAddress;
-
-	// Create socket for listening for client connection requests.
-
-	listenSocket = socket(AF_INET, SOCK_STREAM, 0);
-
-	if (listenSocket < 0) {
-		fprintf(stderr, "cannot create listen socket\n");
-		closeEpollFD(epoll_fd);
-		close(event_fd);
 		return 1;
 	}
 
-	// Bind listen socket to listen port.  First set various fields in
+	std::atomic_int count = 0;
+	std::atomic_ullong latency = 0;
+	std::thread traceT{ trace, 1000, &count, &latency };
+	uint64_t num;
 
-	// the serverAddress structure, then call bind().
+	int size = std::stoi(argv[1]);
+	// this will throw error if memory not exists
+	managed_shared_memory segment(open_only, "MySharedMemory");
 
-	// htonl() and htons() convert long integers and short integers
-
-	// (respectively) from host byte order (on x86 this is Least
-
-	// Significant Byte first) to network byte order (Most Significant
-
-	// Byte first).
-
-	serverAddress.sin_family = AF_INET;
-
-	serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
-
-	serverAddress.sin_port = htons(listenPort);
-
-	if (bind(listenSocket,
-
-	         (struct sockaddr*)&serverAddress,
-
-	         sizeof(serverAddress)) < 0) {
-
-		fprintf(stderr, "cannot bind socket\n");
-		closeEpollFD(epoll_fd);
-		close(event_fd);
-		return 1;
+	shm::message_queue* request_queue;
+	// Find the message queue using the name
+	try {
+		request_queue = segment.find<shm::message_queue>("request_queue").first;
+	} catch (ipc::interprocess_exception& e) {
+		printf("Error %s\n", e.what());
+		return 0;
 	}
+	// sleeping flag
+	std::atomic_bool* isSleeping = segment.find<std::atomic_bool>("sleeping_flag").first;
 
-	// Wait for connections from clients.
+	void* buffer = malloc(size * sizeof(char));
 
-	// This is a non-blocking call; i.e., it registers this program with
-
-	// the system as expecting connections on this socket, and then
-
-	// this thread of execution continues on.
-
-	listen(listenSocket, 5);
-
-	while (1) {
-
-		std::cout << "Waiting for TCP connection on port " << listenPort << " ...\n";
-
-		// Accept a connection with a client that is requesting one.  The
-
-		// accept() call is a blocking call; i.e., this thread of
-
-		// execution stops until a connection comes in.
-
-		// connectSocket is a new socket that the system provides,
-
-		// separate from listenSocket.  We *could* accept more
-
-		// connections on listenSocket, before connectSocket is closed,
-
-		// but this program doesn't do that.
-
-		clientAddressLength = sizeof(clientAddress);
-
-		connectSocket = accept(listenSocket,
-
-		                       (struct sockaddr*)&clientAddress,
-
-		                       &clientAddressLength);
-
-		if (connectSocket < 0) {
-			fprintf(stderr, "cannot accept connection\n");
-			closeEpollFD(epoll_fd);
-			close(event_fd);
-			return 1;
+	while (!stopped) {
+		// ptr to the reply message
+		offset_ptr<shm::message> ptr;
+		for (auto i = 0; i < 100000; ++i) {
+			if (request_queue->pop(ptr)) {
+				memcpy(buffer, ptr->data, size);
+				latency.fetch_add(shm::now() - ptr->start_time);
+				count.fetch_add(1);
+				num = 1;
+				write(producer_fd, &num, sizeof(num));
+			}
 		}
-
-		// Show the IP address of the client.
-
-		// inet_ntoa() converts an IP address from binary form to the
-
-		// standard "numbers and dots" notation.
-
-		std::cout << "  connected to " << inet_ntoa(clientAddress.sin_addr);
-
-		// Show the client's port number.
-
-		// ntohs() converts a short int from network byte order (which is
-
-		// Most Significant Byte first) to host byte order (which on x86,
-
-		// for example, is Least Significant Byte first).
-
-		std::cout << ":" << ntohs(clientAddress.sin_port) << "\n";
-		break;
+		// sleep
+		isSleeping->store(true);
+		// pull once to avoid deadlock
+		if (request_queue->pop(ptr)) {
+			memcpy(buffer, ptr->data, size);
+			latency.fetch_add(shm::now() - ptr->start_time);
+			count.fetch_add(1);
+			num = 1;
+			write(producer_fd, &num, sizeof(num));
+		}
+		event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, 50000);
+		if (stopped)
+			break;
+		int s = read(event_fd, &num, sizeof(uint64_t));
+		if (s != sizeof(uint64_t)) {
+			fprintf(stderr, "Failed to read from event fd-%d\n", event_fd);
+		}
+		isSleeping->store(false);
 	}
-
-	sendfd(connectSocket, event_fd);
-
-	printf("\nPolling for input...\n");
-	event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, 30000);
-	printf("%d ready events\n", event_count);
-	for (int i = 0; i < event_count; i++) {
-		printf("Reading file descriptor '%d' -- ", events[i].data.fd);
-		bytes_read = read(events[i].data.fd, read_buffer, READ_SIZE);
-		printf("%zd bytes read.\n", bytes_read);
-		read_buffer[bytes_read] = '\0';
-		printf("Read '%s'\n", read_buffer);
-	}
-
-	closeEpollFD(epoll_fd);
+	traceT.join();
+	free(buffer);
+	close(epoll_fd);
 	close(event_fd);
+	close(producer_fd);
 
-	// std::atomic_int count = 0;
-	// std::atomic_ullong latency = 0;
-	// std::thread traceT{ trace, 1000, &count, &latency };
-
-	// wake up if stopped
-	// std::thread stopThread([&context] {
-	// 	while (true) {
-	// 		if (stopped) {
-	// 			context.post(nullCompletionHandler);
-	// 			break;
-	// 		}
-	// 		// check every 1 second
-	// 		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-	// 	}
-	// });
-
-	// int size = std::stoi(argv[1]);
-	// // this will throw error if memory not exists
-	// managed_shared_memory segment(open_only, "MySharedMemory");
-
-	// shm::message_queue* request_queue;
-	// // Find the message queue using the name
-	// try {
-	// 	request_queue = segment.find<shm::message_queue>("request_queue").first;
-	// } catch (Error& e) {
-	// 	printf("Error\n");
-	// 	return 0;
-	// }
-	// // sleeping flag
-	// std::atomic_bool* isSleeping = segment.find<std::atomic_bool>("sleeping_flag").first;
-
-	// char* reply = static_cast<char*>(segment.allocate(size * sizeof(char)));
-	// void* buffer = malloc(size * sizeof(char));
-
-	// while (!stopped) {
-	// 	// ptr to the reply message
-	// 	offset_ptr<shm::message> ptr;
-	// 	bool poped = false;
-	// 	for (auto i = 0; i < 100000; ++i) {
-	// 		if (request_queue->pop(ptr)) {
-	// 			// printf("Consumer pops once\n");
-	// 			poped = true;
-	// 			break;
-	// 		}
-	// 	}
-	// 	// read the request
-	// 	if (poped) {
-	// 		memcpy(buffer, ptr->data, size);
-	// 		latency.fetch_add(shm::now() - ptr->start_time);
-	// 		count.fetch_add(1);
-	// 		poped = false;
-	// 	}
-	// 	// Start an asynchronous wait for one of the signals to occur.
-	// 	// signals.async_wait(boost::bind(sleep_handler, _1, _2, &context));
-	// 	// sleep
-	// 	isSleeping->store(true);
-	// 	// pull once to avoid deadlock
-	// 	if (request_queue->pop(ptr)) {
-	// 		memcpy(buffer, ptr->data, size);
-	// 		latency.fetch_add(shm::now() - ptr->start_time);
-	// 		count.fetch_add(1);
-	// 	}
-	// 	// context.run_one();
-	// 	isSleeping->store(false);
-	// }
-	// segment.deallocate(reply);
-	// // stopThread.join();
-	// traceT.join();
-	// free(buffer);
 	std::cout << "Consumer finished.\n";
 }
