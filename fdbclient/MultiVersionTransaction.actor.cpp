@@ -1979,7 +1979,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 						int64_t intParamVal;
 						if (curParamType == FDBOptionInfo::ParamType::Int) {
 							try {
-								size_t nextIdx = -1;
+								size_t nextIdx;
 								intParamVal = std::stoll(value, &nextIdx);
 								if (nextIdx != value.length()) {
 									throw invalid_option_value();
