@@ -649,10 +649,10 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state int numSuccesses = 0;
 	loop {
 		try {
-			TraceEvent("QuietDatabaseWaitingOnDataDistributor1").log();
+			TraceEvent("QuietDatabaseWaitingOnDataDistributor").log();
 			WorkerInterface distributorWorker = wait(getDataDistributorWorker(cx, dbInfo));
 			UID distributorUID = dbInfo->get().distributor.get().id();
-			TraceEvent("QuietDatabaseGotDataDistributor1", distributorUID)
+			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID)
 			    .detail("Locality", distributorWorker.locality.toString());
 
 			dataInFlight = getDataInFlight(cx, distributorWorker);
