@@ -1018,6 +1018,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req, Reference<LogGeneration
 
 	TLogPeekReply reply;
 	TLogSubsequencedMessageSerializer serializer(req.storageTeamID);
+	int versionCount = 0;
 	Version version = req.beginVersion;
 	Optional<std::pair<Version, StringRef>> serializedData;
 	while ((serializedData = logData->getSerializedTLogData(version, req.storageTeamID)).present()) {
@@ -1031,6 +1032,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req, Reference<LogGeneration
 
 		serializer.writeSerializedVersionSection(data);
 		++version;
+		versionCount++;
 
 		if (serializer.getTotalBytes() > TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) {
 			break;
@@ -1046,6 +1048,11 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req, Reference<LogGeneration
 	reply.arena = serialized.arena();
 	reply.data = serialized;
 	reply.endVersion = version;
+	if (versionCount == 0) {
+		// Up to this version is empty. This is because within a group,
+		// all version data must be continuously received.
+		reply.endVersion = logData->version.get() + 1;
+	}
 	reply.maxKnownVersion = logData->version.get();
 	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
 
