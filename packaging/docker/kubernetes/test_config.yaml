@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: foundationdb
-          image: foundationdb/foundationdb-kubernetes:latest
+          image: foundationdb/foundationdb-kubernetes:6.3.13-local
           imagePullPolicy: IfNotPresent
           args:
             - --input-dir
@@ -91,7 +91,7 @@ spec:
             - name: logs
               mountPath: /var/fdb/logs
         - name: foundationdb-sidecar
-          image: foundationdb/foundationdb-kubernetes:latest-sidecar
+          image: foundationdb/foundationdb-kubernetes:6.3.15-local
           imagePullPolicy: IfNotPresent
           args:
             - --mode

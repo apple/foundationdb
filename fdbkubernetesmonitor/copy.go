@@ -21,15 +21,11 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"io/ioutil"
 	"os"
 	"path"
 
 	"github.com/go-logr/logr"
-)
-
-const (
-	bufferSize = 1024
 )
 
 // copyFile copies a file into the output directory.
@@ -52,29 +48,34 @@ func copyFile(logger logr.Logger, inputPath string, outputPath string, required 
 		return fmt.Errorf("File %s is empty", inputPath)
 	}
 
-	outputFile, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY, inputInfo.Mode())
+	outputDir := path.Dir(outputPath)
+
+	tempFile, err := ioutil.TempFile(outputDir, "")
 	if err != nil {
 		return err
 	}
-	defer outputFile.Close()
+	defer tempFile.Close()
 
-	var buffer = make([]byte, bufferSize)
-	for {
-		readLength, readError := inputFile.Read(buffer)
-		if readError == io.EOF {
-			break
-		}
-		if readError != nil {
-			logger.Error(readError, "Error reading file", "path", inputPath)
-			return readError
-		}
-
-		_, writeError := outputFile.Write(buffer[:readLength])
-		if writeError != nil {
-			logger.Error(writeError, "Error writing file", "path", outputPath)
-			return writeError
-		}
+	_, err = tempFile.ReadFrom(inputFile)
+	if err != nil {
+		return err
 	}
+
+	err = tempFile.Close()
+	if err != nil {
+		return err
+	}
+
+	err = os.Chmod(tempFile.Name(), inputInfo.Mode())
+	if err != nil {
+		return err
+	}
+
+	err = os.Rename(tempFile.Name(), outputPath)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

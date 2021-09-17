@@ -68,6 +68,8 @@ type Monitor struct {
 	ProcessIDs []int
 
 	// Mutex defines a mutex around working with configuration.
+	// This is used to synchronize access to local state like the active
+	// configuration and the process IDs from multiple goroutines.
 	Mutex sync.Mutex
 
 	// PodClient is a client for posting updates about this pod to
@@ -137,9 +139,15 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 
-	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
+	monitor.acceptConfiguration(configuration, configurationBytes)
+}
+
+// acceptConfiguration is called when the monitor process parses and accepts
+// a configuration from the local config file.
+func (monitor *Monitor) acceptConfiguration(configuration *ProcessConfiguration, configurationBytes []byte) {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
+	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 
 	if monitor.ProcessIDs == nil {
 		monitor.ProcessIDs = make([]int, configuration.ServerCount+1)
@@ -161,7 +169,7 @@ func (monitor *Monitor) LoadConfiguration() {
 		}
 	}
 
-	err = monitor.PodClient.UpdateAnnotations(monitor)
+	err := monitor.PodClient.UpdateAnnotations(monitor)
 	if err != nil {
 		monitor.Logger.Error(err, "Error updating pod annotations")
 	}
@@ -173,14 +181,9 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "RunProcess")
 	logger.Info("Starting run loop")
 	for {
-		monitor.Mutex.Lock()
-		if monitor.ActiveConfiguration.ServerCount < processNumber {
-			logger.Info("Terminating run loop")
-			monitor.ProcessIDs[processNumber] = 0
-			monitor.Mutex.Unlock()
+		if !monitor.checkProcessRequired(processNumber) {
 			return
 		}
-		monitor.Mutex.Unlock()
 
 		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, monitor.CustomEnvironment)
 		if err != nil {
@@ -220,9 +223,7 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 		startTime := time.Now()
 		logger.Info("Subprocess started", "PID", pid)
 
-		monitor.Mutex.Lock()
-		monitor.ProcessIDs[processNumber] = pid
-		monitor.Mutex.Unlock()
+		monitor.updateProcessID(processNumber, pid)
 
 		if stdout != nil {
 			stdoutScanner := bufio.NewScanner(stdout)
@@ -254,9 +255,7 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 		logger.Info("Subprocess terminated", "exitCode", exitCode, "PID", pid)
 
 		endTime := time.Now()
-		monitor.Mutex.Lock()
-		monitor.ProcessIDs[processNumber] = -1
-		monitor.Mutex.Unlock()
+		monitor.updateProcessID(processNumber, -1)
 
 		processDuration := endTime.Sub(startTime)
 		if processDuration.Seconds() < errorBackoffSeconds {
@@ -264,6 +263,30 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 			time.Sleep(errorBackoffSeconds * time.Second)
 		}
 	}
+}
+
+// checkProcessRequired determines if the latest configuration requires that a
+// process stay running.
+// If the process is no longer desired, this will remove it from the process ID
+// list and return false. If the process is still desired, this will return
+// true.
+func (monitor *Monitor) checkProcessRequired(processNumber int) bool {
+	monitor.Mutex.Lock()
+	defer monitor.Mutex.Unlock()
+	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "checkProcessRequired")
+	if monitor.ActiveConfiguration.ServerCount < processNumber {
+		logger.Info("Terminating run loop")
+		monitor.ProcessIDs[processNumber] = 0
+		return false
+	}
+	return true
+}
+
+// updateProcessID records a new Process ID from a newly launched process.
+func (monitor *Monitor) updateProcessID(processNumber int, pid int) {
+	monitor.Mutex.Lock()
+	defer monitor.Mutex.Unlock()
+	monitor.ProcessIDs[processNumber] = pid
 }
 
 // WatchConfiguration detects changes to the monitor configuration file.
