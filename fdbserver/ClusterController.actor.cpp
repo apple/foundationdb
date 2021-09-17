@@ -3453,11 +3453,7 @@ bool isHealthySingleton(ClusterControllerData* self,
 std::map<Optional<Standalone<StringRef>>, int> getColocCounts(const vector<Optional<Standalone<StringRef>>>& pids) {
 	std::map<Optional<Standalone<StringRef>>, int> counts;
 	for (const auto& pid : pids) {
-		if (counts.find(pid) == counts.end()) {
-			counts[pid] = 1;
-		} else {
-			++counts[pid];
-		}
+		++counts[pid];
 	}
 	return counts;
 }
@@ -3473,7 +3469,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// note: this map doesn't consider pids used by existing singletons
 	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 
-	// TODO: moved this amplification to before getWorker, verify this is valid.
 	// We prefer spreading out other roles more than separating singletons on their own process
 	// so we artificially amplify the pid count for the processes used by non-singleton roles.
 	// In other words, we make the processes used for other roles less desirable to be used
@@ -3511,7 +3506,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// if we reach here, we know that the singletons are healthy so let's
 	// check if we can colocate the singletons in a more optimal way
 
-	// TODO: verify that we don't need to get the pid from the worker like we were doing before
 	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
