@@ -2559,7 +2559,7 @@ public:
 
 	Future<Void> writePhysicalPage(PagerEventReasons reason,
 	                               unsigned int level,
-	                               VectorRef<PhysicalPageID> pageIDs,
+	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                               Reference<ArenaPage> page,
 	                               bool header = false) {
 		Future<Void> f = writePhysicalPage_impl(this, reason, level, pageIDs, page, header);
