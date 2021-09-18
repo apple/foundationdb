@@ -706,7 +706,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Maste
 	}
 }
 
-ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(
+ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
     Reference<MasterData> self,
     std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>* seedServers,
     Reference<ILogSystem> oldLogSystem) {
@@ -803,8 +803,8 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(
 
 		// Assign storage teams to tLogGroups.
 		for (const auto& [teamId, _] : self->tLogGroupCollection->getStorageTeams()) {
-			auto group = self->tLogGroupCollection->selectFreeGroup();
-			self->tLogGroupCollection->assignStorageTeam(teamId, group);
+			auto group = self->tLogGroupCollection->assignStorageTeam(teamId);
+			std::cout << "Assign team " << teamId.shortString() << " to Group " << group->id().shortString() << "\n";
 		}
 	}
 
@@ -971,7 +971,7 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 	if (SERVER_KNOBS->TLOG_NEW_INTERFACE && self->lastEpochEnd == 0) {
 		for (const auto& pair : *servers) {
 			std::vector<UID> serverSrcUID(1, pair.first.id());
-			std::cout << "SS/Team :: " << pair.first.id().toString() << " " << pair.second.toString() << std::endl;
+			std::cout << "SS/Team :: " << pair.first.id().shortString() << " " << pair.second.shortString() << std::endl;
 			auto teamId = pair.second;
 			for (const auto& ss : serverSrcUID) {
 				Key teamIdKey = storageServerToTeamIdKey(ss);
@@ -1535,6 +1535,7 @@ ACTOR Future<Void> changeCoordinators(Reference<MasterData> self) {
 ACTOR Future<Void> rejoinRequestHandler(Reference<MasterData> self) {
 	loop {
 		TLogRejoinRequest req = waitNext(self->myInterface.tlogRejoin.getFuture());
+		TraceEvent("TLogJoinedMeMaster", self->dbgid);
 		req.reply.send(true);
 	}
 }

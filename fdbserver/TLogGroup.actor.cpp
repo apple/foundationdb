@@ -179,11 +179,6 @@ void TLogGroupCollection::addTLogGroup(UID debugID, TLogGroupRef group) {
 	recruitedGroups.push_back(group);
 }
 
-TLogGroupRef TLogGroupCollection::selectFreeGroup(int seed) {
-	ASSERT(recruitedGroups.size() > 0);
-	return recruitedGroups[seed % recruitedGroups.size()];
-}
-
 bool TLogGroupCollection::tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers) {
 	auto it = storageTeams.find(teamId);
 	if (it != storageTeams.end()) {
@@ -195,21 +190,25 @@ bool TLogGroupCollection::tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<U
 	return true;
 }
 
-bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId) {
+TLogGroupRef TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId) {
 	// ASSERT(storageTeamToTLogGroupMap.find(teamId) == storageTeamToTLogGroupMap.end());
 	auto group = getGroup(groupId, true);
 	ASSERT(group.isValid());
 	storageTeamToTLogGroupMap[teamId] = group;
 	group->assignStorageTeam(teamId);
 	TraceEvent("TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", groupId);
-	return true;
+	return group;
 }
 
-bool TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group) {
-	TraceEvent("TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", group->id());
-	storageTeamToTLogGroupMap[teamId] = group;
-	group->assignStorageTeam(teamId);
-	return true;
+TLogGroupRef TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId) {
+	ASSERT_WE_THINK(!recruitedGroups.empty());
+	std::vector<ptxn::TLogGroupID> groups;
+	groups.reserve(recruitedGroups.size());
+	for (const auto& g : recruitedGroups) {
+		groups.push_back(g->id());
+	}
+	ptxn::TLogGroupID gid = ptxn::tLogGroupByStorageTeamID(groups, teamId);
+	return assignStorageTeam(teamId, gid);
 }
 
 void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq) {
@@ -269,10 +268,9 @@ void TLogGroupCollection::seedTLogGroupAssignment(
 		}
 
 		// Step 3: Assign the storage team to a TLogGroup (Storage Team -> TLogGroup).
-		TLogGroupRef group = selectFreeGroup();
+		TLogGroupRef group = assignStorageTeam(teamId);
 		TraceEvent("TLogGroupSeedTeam").detail("StorageTeamId", teamId);
 		tr.set(arena, storageTeamIdToTLogGroupKey(teamId), encodeStorageServerToTeamIdValue({ group->id() }));
-		assignStorageTeam(teamId, group);
 		storageTeams[teamId] = serverSrcUID;
 	}
 }
