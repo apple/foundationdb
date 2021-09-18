@@ -971,8 +971,8 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 	if (SERVER_KNOBS->TLOG_NEW_INTERFACE && self->lastEpochEnd == 0) {
 		for (const auto& pair : *servers) {
 			std::vector<UID> serverSrcUID(1, pair.first.id());
-			std::cout << "SS/Team :: " << pair.first.id().shortString() << " " << pair.second.shortString() << std::endl;
 			auto teamId = pair.second;
+			TraceEvent("MasterAssignTeam").detail("SS", pair.first.id()).detail("Team", teamId);
 			for (const auto& ss : serverSrcUID) {
 				Key teamIdKey = storageServerToTeamIdKey(ss);
 				Value val = encodeStorageServerToTeamIdValue({ teamId });
