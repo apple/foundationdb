@@ -1800,18 +1800,16 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 				args->txntagging = 1000;
 			}
 			break;
-		case ARG_TXNTAGGINGPREFIX: {
+		case ARG_TXNTAGGINGPREFIX:
 			if (strlen(optarg) > TAGPREFIXLENGTH_MAX) {
 				fprintf(stderr, "Error: the length of txntagging_prefix is larger than %d\n", TAGPREFIXLENGTH_MAX);
 				exit(0);
 			}
 			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
 			break;
-		}
-		case ARG_CLIENT_THREADS_PER_VERSION: {
+		case ARG_CLIENT_THREADS_PER_VERSION:
 			args->client_threads_per_version = atoi(optarg);
 			break;
-		}
 		}
 	}
 
@@ -1855,8 +1853,11 @@ int validate_args(mako_args_t* args) {
 		fprintf(stderr, "ERROR: --vallen must be a positive integer\n");
 		return -1;
 	}
-	if (args->num_databases < args->num_fdb_clusters) {
-		fprintf(stderr, "ERROR: --num_databases must be >= number of clusters\n");
+	if (args->num_databases < args->num_fdb_clusters || args->num_databases > MAX_NUM_DATABASES) {
+		fprintf(stderr,
+		        "ERROR: --num_databases must be >= number of clusters (%d) and <= %d\n",
+		        args->num_fdb_clusters,
+		        MAX_NUM_DATABASES);
 		return -1;
 	}
 	if (args->key_length < 4 /* "mako" */ + digits(args->rows)) {
