@@ -27,6 +27,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <memory>
 #include <stdint.h>
 
 class Knobs {
