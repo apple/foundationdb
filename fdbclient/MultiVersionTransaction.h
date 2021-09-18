@@ -288,6 +288,8 @@ public:
 	MultiVersionTransaction(Reference<MultiVersionDatabase> db,
 	                        UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions);
 
+	~MultiVersionTransaction() override;
+
 	void cancel() override;
 	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
@@ -348,6 +350,29 @@ private:
 		Reference<ITransaction> transaction;
 		ThreadFuture<Void> onChange;
 	};
+
+	// Timeout related variables for MultiVersionTransaction objects that do not have an underlying ITransaction
+
+	// The time when the MultiVersionTransaction was last created or reset
+	std::atomic<double> startTime;
+
+	// A lock that needs to be held if using timeoutTsav or currentTimeout
+	ThreadSpinLock timeoutLock;
+
+	// A single assignment var (i.e. promise) that gets set with an error when the timeout elapses or the transaction
+	// is reset or destroyed.
+	Reference<ThreadSingleAssignmentVar<Void>> timeoutTsav;
+
+	// A reference to the current actor waiting for the timeout. This actor will set the timeoutTsav promise.
+	ThreadFuture<Void> currentTimeout;
+
+	// Configure a timeout based on the options set for this transaction. This timeout only applies
+	// if we don't have an underlying database object to connect with.
+	void setTimeout(Optional<StringRef> value);
+
+	// Creates a ThreadFuture<T> that will signal an error if the transaction times out.
+	template <class T>
+	ThreadFuture<T> makeTimeout();
 
 	TransactionInfo transaction;
 
