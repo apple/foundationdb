@@ -1995,9 +1995,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		       coordinatorCount);
 		ASSERT_LE(dcCoordinators, machines);
 
-		// FIXME: temporarily code to test storage cache
 		// TODO: caching disabled for this merge
 		if (dc == 0) {
+			// FIXME: we hardcode the second last (i.e. i=machines-2) machine to specifically test storage cache
+			machines++;
+
+			// FIXME: we hardcode the last (i.e. i=machines-1) machine to specifically test blob worker
 			machines++;
 		}
 
@@ -2030,10 +2033,16 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 					nonVersatileMachines++;
 			}
 
-			// FIXME: temporarily code to test storage cache
+			// FIXME: hack to add machine specifically to test storage cache
 			// TODO: caching disabled for this merge
-			if (machine == machines - 1 && dc == 0) {
+			if (machine == machines - 2 && dc == 0) {
 				processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
+				nonVersatileMachines++;
+			}
+
+			// FIXME: hack to add machine specifically to test blob worker
+			if (machine == machines - 1 && dc == 0) {
+				processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
 				nonVersatileMachines++;
 			}
 

@@ -44,6 +44,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::NeverAssign;
@@ -61,6 +62,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::NeverAssign;
@@ -78,6 +80,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -95,6 +98,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -112,6 +116,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -129,6 +134,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -146,6 +152,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -164,6 +171,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::MasterClass:
 		case ProcessClass::TesterClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -191,6 +199,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -208,6 +217,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -225,6 +235,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -242,9 +253,21 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
+		}
+	case ProcessClass::BlobWorker:
+		switch (_class) {
+		case ProcessClass::BlobWorker:
+			return ProcessClass::BestFit;
+		// TODO: do we want this? If there's an unset process available,
+		//       would we rather have _no_ BW as opposed to one recruited on unset?
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		default:
+			return ProcessClass::NeverAssign;
 		}
 	case ProcessClass::StorageCache:
 		switch (_class) {
