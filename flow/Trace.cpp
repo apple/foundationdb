@@ -927,7 +927,7 @@ bool TraceEvent::init() {
 		detail("Type", type);
 		if (g_network && g_network->isSimulated()) {
 			NetworkAddress local = g_network->getLocalAddress();
-			detail("Machine", formatIpPort(local.ip, local.port));
+			detail("Machine", local);
 		}
 		detail("ID", id);
 		if (err.isValid()) {

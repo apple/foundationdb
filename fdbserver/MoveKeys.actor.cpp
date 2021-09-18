@@ -20,6 +20,7 @@
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -1568,7 +1569,7 @@ void seedShardServers(Arena& arena,
 	StringRef keyRangeStart = allKeys.begin;
 	for (int index = 0; index < keySplits.size(); ++index) {
 		auto keyRange = KeyRangeRef(keyRangeStart, keySplits[index]);
-		std::cout << " Assigning range " << keyRange.toString() << " to " << serverSrcUID[serverIndex].toString() << std::endl;
+		TraceEvent("SeedShard", serverSrcUID[serverIndex]).detail("KeyRange", keyRange.toString());
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, serverKeysPrefixFor(servers[serverIndex].first.id()), keyRange, serverKeysTrue, serverKeysFalse);
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, keyRange, getServersValue(serverIndex), serverKeysFalse);
@@ -1579,10 +1580,8 @@ void seedShardServers(Arena& arena,
 	if (keySplits.size() != 0) {
 		keyRangeStart = keySplits.back();
 	}
-
-	std::cout << " Assigning range " << KeyRangeRef(keyRangeStart, allKeys.end).toString() << " to "
-	          << servers[serverIndex].first.id().toString() << std::endl;
-	// TODO (Vishesh) \xff keyspace should goto specific storage servers?
+	TraceEvent("SeedShard", serverSrcUID[serverIndex])
+	    .detail("KeyRange", KeyRangeRef(keyRangeStart, allKeys.end).toString());
 	krmSetPreviouslyEmptyRange(tr,
 	                           arena,
 	                           serverKeysPrefixFor(serverSrcUID[serverIndex]),
