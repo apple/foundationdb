@@ -247,10 +247,9 @@ private:
 
 		if (SERVER_KNOBS->TLOG_NEW_INTERFACE &&
 		    tLogGroupCollection->tryAddStorageTeam(teamid, decodeStorageTeams(m.param2))) {
-			auto group = tLogGroupCollection->selectFreeGroup(teamid.hash());
+			auto group = tLogGroupCollection->assignStorageTeam(teamid);
 			// TODO: This may be unnessary, as ApplyMetadataMutation case for this key-range
 			//     should do the assignment.
-			tLogGroupCollection->assignStorageTeam(teamid, group);
 			txnStateStore->set(
 			    KeyValueRef(storageTeamIdToTLogGroupKey(teamid), BinaryWriter::toValue(group->id(), Unversioned())));
 		}

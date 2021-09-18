@@ -103,9 +103,6 @@ public:
 	// Add a TLogGroup
 	void addTLogGroup(UID debugID, TLogGroupRef group);
 
-	// Find a TLogGroup for assigning a storage team.
-	TLogGroupRef selectFreeGroup(int seed = 0);
-
 	// Return storage team to list of storage server map.
 	const std::map<ptxn::StorageTeamID, vector<UID>>& getStorageTeams() const { return storageTeams; }
 
@@ -113,11 +110,12 @@ public:
 	// already exists, else return `true`.
 	bool tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers);
 
-	// Assigns a storage team to given group
-	bool assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId);
+	// Assigns a storage team to given group. This is only called when we know
+	// the group for the team, i.e., in applyMetadataMutations().
+	TLogGroupRef assignStorageTeam(ptxn::StorageTeamID teamId, UID groupId);
 
-	// Assigns a storage team to given group
-	bool assignStorageTeam(ptxn::StorageTeamID teamId, TLogGroupRef group);
+	// Returns the group the storage team is assigned to.
+	TLogGroupRef assignStorageTeam(ptxn::StorageTeamID teamId);
 
 	// Add mutations to store state to given txnStoreState transaction request 'recoveryCommitReq'.
 	void storeState(CommitTransactionRequest* recoveryCommitReq);
@@ -163,7 +161,7 @@ private:
 	std::unordered_map<UID, TLogWorkerDataRef> recruitMap;
 
 	// Map from storage TeamID to list of list of storage servers in that team.
-	std::map<ptxn::StorageTeamID, vector<UID>> storageTeams;
+	std::map<ptxn::StorageTeamID, std::vector<UID>> storageTeams;
 
 	// Map from storage TeamID to the TLogGroup managing that team.
 	std::map<ptxn::StorageTeamID, TLogGroupRef> storageTeamToTLogGroupMap;

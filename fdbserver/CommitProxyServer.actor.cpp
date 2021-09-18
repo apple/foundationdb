@@ -571,7 +571,7 @@ void CommitBatchContext::evaluateBatchSize() {
 void CommitBatchContext::trackStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams) {
 	ASSERT(!pProxyCommitData->tLogGroupCollection->groups().empty());
 	ASSERT(storageTeams.size() == 1);
-	auto tLogGroupId = pProxyCommitData->tLogGroupCollection->selectFreeGroup(storageTeams.begin()->hash())->id();
+	auto tLogGroupId = pProxyCommitData->tLogGroupCollection->assignStorageTeam(*storageTeams.begin())->id();
 	if (!pGroupMessageBuilders.count(tLogGroupId)) {
 		pGroupMessageBuilders.emplace(tLogGroupId,
 		                              std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
@@ -618,7 +618,7 @@ void CommitBatchContext::findOverlappingTLogGroups() {
 
 void CommitBatchContext::writeToStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams, MutationRef m) {
 	for (const auto& team : storageTeams) {
-		auto groupID = pProxyCommitData->tLogGroupCollection->selectFreeGroup(team.hash())->id();
+		auto groupID = pProxyCommitData->tLogGroupCollection->assignStorageTeam(team)->id();
 		ASSERT(pGroupMessageBuilders.count(groupID));
 		pGroupMessageBuilders[groupID]->write(m, team);
 	}
@@ -1280,6 +1280,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			self->toCommit.addTxsTag();
 		}
 		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
+		std::cout << "Unhandled TXS mutation: " << printable(StringRef(m.begin(), m.size())) << "\n";
 		// FIXME(rdar://78341241)
 		// self->writeToStorageTeams({ptxn::txsTeam}, StringRef(m.begin(), m.size()));
 		firstMessage = false;
@@ -1320,7 +1321,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    [](const std::vector<Version>& versions) -> Version {
 			return *std::min_element(versions.begin(), versions.end());
 		};
-		// TODO: empty commits can happen
+		// Empty commits can never happen: write empty messages to all groups
 		ASSERT(!pushResults.empty());
 		self->loggingComplete = getAll(pushResults, reduce);
 	} else {
@@ -1405,16 +1406,14 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state Span span("MP:reply"_loc, self->span.context);
 
-	const Optional<UID>& debugID = self->debugID;
-
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
 
 	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
 	//     .detail("PrevVersion", self->prevVersion)
 	//     .detail("Version", self->commitVersion);
-	if (debugID.present())
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterLogPush");
+	if (self->debugID.present())
+		g_traceBatch.addEvent("CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterLogPush");
 
 	for (auto& p : self->storeCommits) {
 		ASSERT(!p.second.isReady());
