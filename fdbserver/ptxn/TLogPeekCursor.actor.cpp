@@ -326,7 +326,6 @@ void ServerPeekCursor::nextMessage() {
 		if (rd.empty()) {
 			return;
 		}
-		ASSERT(rd.empty());
 	}
 	Subsequence subsequence;
 	rd >> subsequence;
@@ -353,6 +352,7 @@ StringRef ServerPeekCursor::getMessageWithTags() {
 }
 
 VectorRef<Tag> ServerPeekCursor::getTags() const {
+	ASSERT(false);
 	return messageAndTags.tags;
 }
 
@@ -560,6 +560,7 @@ ACTOR Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID
 			when(wait(self->interf->onChange())) { self->onlySpilled = false; }
 		}
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "SPC_PeekGetMoreError", self->dbgid).error(e, true);
 		if (e.code() == error_code_end_of_stream) {
 			self->end.reset(self->messageVersion.version);
 			return Void();
@@ -570,7 +571,6 @@ ACTOR Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID
 
 Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
 	TraceEvent(SevDebug, "SPC_GetMore", dbgid)
-	    .detail("HasMessage", hasMessage())
 	    .detail("More", !more.isValid() || more.isReady())
 	    .detail("MessageVersion", messageVersion.toString())
 	    .detail("End", end.toString());
@@ -617,10 +617,11 @@ bool ServerPeekCursor::isExhausted() const {
 	return messageVersion >= end;
 }
 
+// Call only after nextMessage(). The sequence of the current message, or
+// results.end if nextMessage() has returned false.
 const LogMessageVersion& ServerPeekCursor::version() const {
 	return messageVersion;
-} // Call only after nextMessage().  The sequence of the current message, or results.end if nextMessage() has returned
-// false.
+}
 
 Version ServerPeekCursor::getMinKnownCommittedVersion() const {
 	return results.minKnownCommittedVersion;
