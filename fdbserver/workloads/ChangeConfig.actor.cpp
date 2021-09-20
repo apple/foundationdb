@@ -99,7 +99,8 @@ struct ChangeConfigWorkload : TestWorkload {
 			if (g_network->isSimulated() && g_simulator.startingDisabledConfiguration != "") {
 				// It is not safe to allow automatic failover to a region which is not fully replicated,
 				// so wait for both regions to be fully replicated before enabling failover
-				wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator.startingDisabledConfiguration, true)));
+				wait(success(
+				    ManagementAPI::changeConfig(cx.getReference(), g_simulator.startingDisabledConfiguration, true)));
 				TraceEvent("WaitForReplicas").log();
 				wait(waitForFullReplication(cx));
 				TraceEvent("WaitForReplicasEnd").log();
