@@ -1371,7 +1371,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 					if (src.empty()) {
 						assert(!teamForDroppedRange.empty());
 
-						// Assign the shard to teamFroDroppedRange in keyServer space.
+						// Assign the shard to teamForDroppedRange in keyServer space.
 						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
 
 						vector<Future<Void>> actors;
@@ -1383,12 +1383,6 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							                                       KeyRangeRef(it.key, keyServers[i + 1].key),
 							                                       allKeys,
 							                                       serverKeysFalse));
-						}
-						if (!dest.empty()) {
-							TraceEvent(SevWarn, "FailedServerDropRangeFromDest", serverID)
-							    .detail("Begin", it.key)
-							    .detail("End", keyServers[i + 1].key)
-							    .detail("Dest", describe(dest));
 						}
 
 						// Assign the shard to the new team as an empty range.
@@ -1402,10 +1396,14 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						}
 
 						wait(waitForAll(actors));
-						TraceEvent(SevWarn, "FailedServerDropRange", serverID)
-						    .detail("Begin", it.key)
-						    .detail("End", keyServers[i + 1].key)
-						    .detail("NewTeam", describe(teamForDroppedRange));
+
+						TraceEvent trace(SevWarnAlways, "ShardLossAllReplicasDropShard", serverID);
+						trace.detail("Begin", it.key);
+						trace.detail("End", keyServers[i + 1].key);
+						if (!dest.empty()) {
+							trace.detail("DropedDest", describe(dest));
+						}
+						trace.detail("NewTeamForDroppedShard", describe(teamForDroppedRange));
 					} else {
 						TraceEvent(SevDebug, "FailedServerSetKey", serverID)
 						    .detail("Key", it.key)

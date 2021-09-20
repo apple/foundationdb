@@ -898,12 +898,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Returns a random healthy team, which does not contain excludeServer.
+	// The simplest reservoir sampling algorithm is used, since efficiency is not a big concern here,
+	// given that dropping an entire team is considerred a rare event. 
 	std::vector<UID> getRandomHealthyTeam(const UID& excludeServer) {
 		int count = 0;
 		Optional<int> idx;
 		for (int i = 0; i < teams.size(); ++i) {
 			if (teams[i]->isHealthy() && !teams[i]->hasServer(excludeServer)) {
-				if (std::rand() % ++count == 0) {
+				if (deterministicRandom().randomInt(0, ++count) == 0) {
 					idx = i;
 				}
 			}
