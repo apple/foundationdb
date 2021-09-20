@@ -580,7 +580,7 @@ struct RatekeeperData {
 
 	bool autoThrottlingEnabled;
 
-	std::vector<Reference<EventCacheHolder>> storageQueueInfoHolder;
+	std::queue<Reference<EventCacheHolder>> storageQueueInfoHolder;
 
 	RatekeeperData(UID id, Database db)
 	  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
@@ -899,6 +899,9 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 	}
 	double elapsed = now() - self->lastBusiestCommitTagPick;
 	// for each SS, select the busiest commit tag from ssTrTagCommitCost
+	while(!self->storageQueueInfoHolder.empty()){
+		self->storageQueueInfoHolder.pop();
+	}
 	for (auto it = self->storageQueueInfo.begin(); it != self->storageQueueInfo.end(); ++it) {
 		it->value.busiestWriteTag.reset();
 		TransactionTag busiestTag;
@@ -922,7 +925,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 		}
 
 		auto tempEventCacheHolder = makeReference<EventCacheHolder>(it->key.toString() + "/BusiestWriteTag");
-		self->storageQueueInfoHolder.emplace_back(tempEventCacheHolder);
+		self->storageQueueInfoHolder.emplace(tempEventCacheHolder);
 		TraceEvent("BusiestWriteTag", it->key)
 		    .detail("Elapsed", elapsed)
 		    .detail("Tag", printable(busiestTag))
