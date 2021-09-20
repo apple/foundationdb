@@ -75,7 +75,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 
 			if (!conf.get().isValid()) {
 				printf("Unable to provide advice for the current configuration.\n");
-				return true;
+				return false;
 			}
 
 			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
@@ -143,13 +143,13 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 			std::printf("%s", outputString.c_str());
 
 			if (noChanges)
-				return false;
+				return true;
 
 			// TODO: disable completion
 			Optional<std::string> line = wait(linenoise->read("Would you like to make these changes? [y/n]> "));
 
 			if (!line.present() || (line.get() != "y" && line.get() != "Y")) {
-				return false;
+				return true;
 			}
 		}
 
@@ -160,73 +160,71 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
-	bool ret;
+	bool ret = true;
 	switch (result) {
 	case ConfigurationResult::NO_OPTIONS_PROVIDED:
 	case ConfigurationResult::CONFLICTING_OPTIONS:
 	case ConfigurationResult::UNKNOWN_OPTION:
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
 		printUsage(LiteralStringRef("configure"));
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::INVALID_CONFIGURATION:
 		fprintf(stderr, "ERROR: These changes would make the configuration invalid\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::DATABASE_ALREADY_CREATED:
 		fprintf(stderr, "ERROR: Database already exists! To change configuration, don't say `new'\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::DATABASE_CREATED:
 		printf("Database created\n");
-		ret = false;
 		break;
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		fprintf(stderr, "ERROR: The database is unavailable\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
 		fprintf(stderr, "ERROR: All storage servers must be in one of the known regions\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
 		fprintf(stderr,
 		        "ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated "
 		        "before changing the configuration\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
 		fprintf(stderr, "ERROR: When changing usable_regions, only one region can have priority >= 0\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		fprintf(stderr,
 		        "ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
 		fprintf(stderr, "ERROR: Not enough processes exist to support the specified configuration\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
 		fprintf(stderr, "ERROR: `three_datacenter' replication is incompatible with region configuration\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::DCID_MISSING:
 		fprintf(stderr, "ERROR: `No storage servers in one of the specified regions\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
-		ret = false;
 		break;
 	case ConfigurationResult::LOCKED_NOT_NEW:
 		fprintf(stderr, "ERROR: `only new databases can be configured as locked`\n");
@@ -240,7 +238,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		fprintf(stderr,
 		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
 		        "storage_migration_type=gradual' to set the gradual migration type.\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE:
 		printf("Configuration changed, with warnings\n");
@@ -251,11 +249,11 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
 		        "migration with the perpetual wiggle, or `configure "
 		        "storage_migration_type=aggressive' for aggressive migration.\n");
-		ret = true;
+		ret = false;
 		break;
 	default:
 		ASSERT(false);
-		ret = true;
+		ret = false;
 	};
 	return ret;
 }
