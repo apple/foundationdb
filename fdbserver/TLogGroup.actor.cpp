@@ -196,7 +196,7 @@ TLogGroupRef TLogGroupCollection::assignStorageTeam(ptxn::StorageTeamID teamId, 
 	ASSERT(group.isValid());
 	storageTeamToTLogGroupMap[teamId] = group;
 	group->assignStorageTeam(teamId);
-	TraceEvent("TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", groupId);
+	TraceEvent(SevDebug, "TLogGroupAssignTeam").detail("StorageTeamId", teamId).detail("TLogGroupId", groupId);
 	return group;
 }
 

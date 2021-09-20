@@ -182,7 +182,13 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 
 	ptxn::TLogPeekReply results;
 	ArenaReader rd;
-	LogMessageVersion messageVersion, end;
+
+	// Current message version (initialized by begin version).
+	LogMessageVersion messageVersion;
+
+	// Exclusive end version of the cursor
+	LogMessageVersion end;
+
 	Version poppedVersion;
 	TagsAndMessage messageAndTags; // TODO: do we still have tag concept in a message
 	bool hasMsg;
