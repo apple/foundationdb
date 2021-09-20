@@ -3377,7 +3377,9 @@ void changeServerKeys(StorageServer* data,
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
-				TraceEvent("ChangeServerKeysEmptyRange", data->thisServerID);
+				TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+				    .detail("Begin", range.begin)
+				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);
