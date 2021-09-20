@@ -2534,15 +2534,16 @@ public:
 		Future<Void> f;
 		if (pageIDs.size() == 1) {
 			f = writePhysicalPage_impl(this, reason, level, pageIDs.front(), blockSize, header, (Void*)page->mutate());
-		} else {
-			std::vector<Future<Void>> writers;
-			for (int i = 0; i < pageIDs.size(); ++i) {
-				Future<Void> p = writePhysicalPage_impl(
-				    this, reason, level, pageIDs[i], blockSize, header, (Void*)page->mutate() + i * blockSize);
-				writers.push_back(p);
-			}
-			f = waitForAll(writers);
+			operations.add(f);
+			return f;
 		}
+		std::vector<Future<Void>> writers;
+		for (int i = 0; i < pageIDs.size(); ++i) {
+			Future<Void> p = writePhysicalPage_impl(
+			    this, reason, level, pageIDs[i], blockSize, header, (Void*)page->mutate() + i * blockSize);
+			writers.push_back(p);
+		}
+		f = waitForAll(writers);
 		operations.add(f);
 		return f;
 	}
