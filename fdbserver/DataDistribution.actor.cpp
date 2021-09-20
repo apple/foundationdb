@@ -894,21 +894,31 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Returns a random healthy team, which does not contain excludeServer.
-	// The simplest reservoir sampling algorithm is used, since efficiency is not a big concern here,
-	// given that dropping an entire team is considerred a rare event. 
 	std::vector<UID> getRandomHealthyTeam(const UID& excludeServer) {
-		int count = 0;
-		Optional<int> idx;
+		std::vector<int> candidates, backup;
 		for (int i = 0; i < teams.size(); ++i) {
 			if (teams[i]->isHealthy() && !teams[i]->hasServer(excludeServer)) {
-				if (deterministicRandom().randomInt(0, ++count) == 0) {
-					idx = i;
-				}
+				candidates.push_back(i);
+			} else if (teams[i]->size() - (teams[i]->hasServer(excludeServer) ? 1 : 0) > 0) {
+				// If a team has at least one other server besides excludeServer, select it
+				// as a backup candidate.
+				backup.push_back(i);
 			}
 		}
-		if (idx.present()) {
-			return teams[idx.get()]->getServerIDs();
+
+		// Prefer a healthy team not containing excludeServer.
+		if (candidates.size() > 0) {
+			return teams[deterministicRandom()->randomInt(0, candidates.size())]->getServerIDs();
 		}
+
+		// The backup choice is a team with at least one server besides excludeServer, in this
+		// case, the team  will be possibily relocated to a healthy destination later by DD.
+		if (backup.size() > 0) {
+			std::vector<UID> res = teams[deterministicRandom()->randomInt(0, backup.size())]->getServerIDs();
+			std::remove(res.begin(), res.end(), excludeServer);
+			return res;
+		}
+
 		return std::vector<UID>();
 	}
 
