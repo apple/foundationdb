@@ -9,6 +9,7 @@ set(FDBCLI_SRCS
   DataDistributionCommand.actor.cpp
   ExcludeCommand.actor.cpp
   ExpensiveDataCheckCommand.actor.cpp
+  FileConfigureCommand.actor.cpp
   FlowLineNoise.actor.cpp
   FlowLineNoise.h
   ForceRecoveryWithDataLossCommand.actor.cpp
