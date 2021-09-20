@@ -32,7 +32,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <memory>
 
 enum limitReason_t {
 	unlimited, // TODO: rename to workload?
@@ -528,8 +527,7 @@ struct RatekeeperLimits {
 	        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
 	                                                           // be durable on the storage servers
 	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
-	    context(context),
-		rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate"+context)){}
+	    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
 };
 
 namespace RatekeeperActorCpp {
@@ -582,7 +580,7 @@ struct RatekeeperData {
 
 	bool autoThrottlingEnabled;
 
-	std::vector<std::shared_ptr<Reference<EventCacheHolder>>> storageQueueInfoHolder;
+	std::vector<Reference<EventCacheHolder>> storageQueueInfoHolder;
 
 	RatekeeperData(UID id, Database db)
 	  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
@@ -923,8 +921,8 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 			it->value.busiestWriteTagRate = maxRate;
 		}
 
-		auto tempEventCacheHolderPtr = std::make_shared<Reference<EventCacheHolder>>(makeReference<EventCacheHolder>(it->key.toString() + "/BusiestWriteTag"));
-		self->storageQueueInfoHolder.push_back(tempEventCacheHolderPtr);
+		auto tempEventCacheHolder = makeReference<EventCacheHolder>(it->key.toString() + "/BusiestWriteTag");
+		self->storageQueueInfoHolder.emplace_back(tempEventCacheHolder);
 		TraceEvent("BusiestWriteTag", it->key)
 		    .detail("Elapsed", elapsed)
 		    .detail("Tag", printable(busiestTag))
@@ -932,7 +930,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 		    .detail("TagCost", maxCost.getCostSum())
 		    .detail("TotalCost", it->value.totalWriteCosts)
 		    .detail("Reported", it->value.busiestWriteTag.present())
-		    .trackLatest(tempEventCacheHolderPtr.get()->getPtr()->trackingKey);
+		    .trackLatest(tempEventCacheHolder.getPtr()->trackingKey);
 
 		// reset statistics
 		it->value.tagCostEst.clear();
