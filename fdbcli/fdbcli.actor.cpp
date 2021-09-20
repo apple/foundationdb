@@ -1783,7 +1783,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
-					wait(triggerddteaminfologCommandActor(db));
+					wait(success(makeInterruptable(triggerddteaminfologCommandActor(db))));
 					continue;
 				}
 
