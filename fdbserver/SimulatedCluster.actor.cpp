@@ -1130,7 +1130,6 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 
 		g_simulator.desiredCoordinators = desiredCoordinators;
 		g_simulator.processesPerMachine = processesPerMachine;
-		g_simulator.tssMode = ISimulator::TSSMode::Unknown;
 
 		uniquify(dcIds);
 		if (!BUGGIFY && dcIds.size() == 2 && dcIds[0] != "" && dcIds[1] != "") {
