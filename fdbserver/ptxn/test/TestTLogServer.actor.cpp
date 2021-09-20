@@ -190,8 +190,6 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	auto& tLogSet = dbInfoBuilder.logSystemConfig.tLogs.back();
 	tLogSet.locality = locality;
 
-	tLogSet.storageTeamIDTLogGroupIDMapper = pContext->storageTeamIDTLogGroupIDMapper;
-
 	printTiming << "Assign TLog group leaders" << std::endl;
 	for (auto tLogGroup : pContext->tLogGroupLeaders) {
 		OptionalInterface<ptxn::TLogInterface_PassivelyPull> optionalInterface =

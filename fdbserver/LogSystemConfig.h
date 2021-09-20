@@ -102,11 +102,6 @@ struct TLogSet {
 	// A list of interface sets, one for each group of "tLogGroupIDs"
 	std::vector<std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>> ptxnTLogGroups;
 
-	std::unordered_map<ptxn::TLogGroupID,
-	                   std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
-	    ptxnTLogGroupsMapper;
-	std::unordered_map<ptxn::StorageTeamID, ptxn::TLogGroupID> storageTeamIDTLogGroupIDMapper;
-
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
 	std::vector<OptionalInterface<BackupInterface>> backupWorkers;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
