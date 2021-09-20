@@ -28,6 +28,8 @@
 #elif !defined(FDBCLI_FDBCLI_ACTOR_H)
 #define FDBCLI_FDBCLI_ACTOR_H
 
+#include "fdbcli/FlowLineNoise.h"
+
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/StatusClient.h"
@@ -123,6 +125,12 @@ void printStatus(StatusObjectReader statusObj,
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // cache_range command
 ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// configure command
+ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
+                                         Database localDb,
+                                         std::vector<StringRef> tokens,
+                                         LineNoise* linenoise,
+                                         Future<Void> warn);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,
