@@ -273,9 +273,9 @@ std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID
 	return std::make_pair(logs, oldLogs);
 }
 
-const KeyRef serverKeysPrefix ="\xff/serverKeys/"_sr;
+const KeyRef serverKeysPrefix = "\xff/serverKeys/"_sr;
 const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTrue
-    serverKeysTrueEmptyRange ="3"_sr, // the server treats the range as empty.
+    serverKeysTrueEmptyRange = "3"_sr, // the server treats the range as empty.
     serverKeysFalse;
 
 const Key serverKeysKey(UID serverID, const KeyRef& key) {
