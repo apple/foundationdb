@@ -3,6 +3,7 @@ set(FDBCLI_SRCS
   fdbcli.actor.h
   AdvanceVersionCommand.actor.cpp
   CacheRangeCommand.actor.cpp
+  ConfigureCommand.actor.cpp
   ConsistencyCheckCommand.actor.cpp
   CoordinatorsCommand.actor.cpp
   DataDistributionCommand.actor.cpp
