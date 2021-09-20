@@ -32,6 +32,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <memory>
 
 enum limitReason_t {
 	unlimited, // TODO: rename to workload?
@@ -508,6 +509,9 @@ struct RatekeeperLimits {
 	TransactionPriority priority;
 	std::string context;
 
+//std::string name = "RkUpdate" + limits->context;
+	Reference<EventCacheHolder> rkUpdateEventCacheHolder;
+
 	RatekeeperLimits(TransactionPriority priority,
 	                 std::string context,
 	                 int64_t storageTargetBytes,
@@ -525,7 +529,8 @@ struct RatekeeperLimits {
 	        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
 	                                                           // be durable on the storage servers
 	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
-	    context(context) {}
+	    context(context),
+		rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate"+context)){}
 };
 
 namespace RatekeeperActorCpp {
@@ -577,6 +582,8 @@ struct RatekeeperData {
 	Future<Void> expiredTagThrottleCleanup;
 
 	bool autoThrottlingEnabled;
+
+	std::vector<std::shared_ptr<Reference<EventCacheHolder>>> storageQueueInfoHolder;
 
 	RatekeeperData(UID id, Database db)
 	  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
@@ -916,6 +923,8 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 			it->value.busiestWriteTagRate = maxRate;
 		}
 
+		auto tempEventCacheHolderPtr = std::make_shared<Reference<EventCacheHolder>>(makeReference<EventCacheHolder>(it->key.toString() + "/BusiestWriteTag"));
+		self->storageQueueInfoHolder.push_back(tempEventCacheHolderPtr);
 		TraceEvent("BusiestWriteTag", it->key)
 		    .detail("Elapsed", elapsed)
 		    .detail("Tag", printable(busiestTag))
@@ -923,7 +932,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 		    .detail("TagCost", maxCost.getCostSum())
 		    .detail("TotalCost", it->value.totalWriteCosts)
 		    .detail("Reported", it->value.busiestWriteTag.present())
-		    .trackLatest(it->key.toString() + "/BusiestWriteTag");
+		    .trackLatest(tempEventCacheHolderPtr.get()->getPtr()->trackingKey);
 
 		// reset statistics
 		it->value.tagCostEst.clear();
@@ -1344,7 +1353,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	limits->reasonMetric = limitReason;
 
 	if (deterministicRandom()->random01() < 0.1) {
-		std::string name = "RkUpdate" + limits->context;
+		std::string name = limits->rkUpdateEventCacheHolder.getPtr()->trackingKey;
 		TraceEvent(name.c_str(), self->id)
 		    .detail("TPSLimit", limits->tpsLimit)
 		    .detail("Reason", limitReason)
