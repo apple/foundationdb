@@ -51,7 +51,11 @@ using Generation = uint64_t;
 using SpanID = UID;
 
 enum {
-	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
+	// tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
+	// When configured with single region, primary locality is set to this one.
+	tagLocalitySpecial = -1,
+
+	// Log routers' locality.
 	tagLocalityLogRouter = -2,
 	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
 	tagLocalityUpgraded = -4,

@@ -110,7 +110,7 @@ private:
 	// non-null if these mutations were part of a new commit handled by this commit proxy
 	LogPushData* toCommit = nullptr;
 
-	// Flag indicates if the configure is changed
+	// Flag indicates if the configuration has changed.
 	bool& confChange;
 
 	Reference<ILogSystem> logSystem = Reference<ILogSystem>();
