@@ -121,6 +121,7 @@ void printStatus(StatusObjectReader statusObj,
                  bool hideErrorMessages = false);
 
 // All fdbcli commands (alphabetically)
+// All below actors return true if the command is executed successfully
 // advanceversion command
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // cache_range command
@@ -147,6 +148,11 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
     Reference<ITransaction> tr,
     std::vector<StringRef> tokens,
     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+// fileconfigure command
+ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
+                                             std::string filePath,
+                                             bool isNewDatabase,
+                                             bool force);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
