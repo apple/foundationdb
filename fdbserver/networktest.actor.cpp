@@ -25,7 +25,7 @@
 #include "flow/UnitTest.h"
 #include <inttypes.h>
 
-UID WLTOKEN_NETWORKTEST(-1, 2);
+constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 
 struct LatencyStats {
 	using sample = double;
@@ -55,7 +55,8 @@ struct LatencyStats {
 	double stddev() { return sqrt(x2 / n - (x / n) * (x / n)); }
 };
 
-NetworkTestInterface::NetworkTestInterface(NetworkAddress remote) : test(Endpoint({ remote }, WLTOKEN_NETWORKTEST)) {}
+NetworkTestInterface::NetworkTestInterface(NetworkAddress remote)
+  : test(Endpoint::wellKnown({ remote }, WLTOKEN_NETWORKTEST)) {}
 
 NetworkTestInterface::NetworkTestInterface(INetwork* local) {
 	test.makeWellKnownEndpoint(WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint);

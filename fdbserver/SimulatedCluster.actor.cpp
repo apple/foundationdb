@@ -38,6 +38,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
@@ -533,7 +534,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				// SOMEDAY: test lower memory limits, without making them too small and causing the database to stop
 				// making progress
 				FlowTransport::createInstance(processClass == ProcessClass::TesterClass || runBackupAgents == AgentOnly,
-				                              1);
+				                              1,
+				                              WLTOKEN_RESERVED_COUNT);
 				Sim2FileSystem::newFileSystem();
 
 				std::vector<Future<Void>> futures;
@@ -2225,7 +2227,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           currentProtocolVersion),
 	    TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1);
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 	TEST(true); // Simulation start
 
 	try {

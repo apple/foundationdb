@@ -41,6 +41,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -1780,7 +1781,7 @@ int main(int argc, char* argv[]) {
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
-			FlowTransport::createInstance(false, 1);
+			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 
 			const bool expectsPublicAddress =
 			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
