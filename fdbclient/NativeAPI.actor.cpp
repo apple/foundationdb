@@ -55,6 +55,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
@@ -2064,7 +2065,7 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
 	g_network->addStopCallback(Net2FileSystem::stop);
 	g_network->addStopCallback(TLS::DestroyOpenSSLGlobalState);
-	FlowTransport::createInstance(true, transportId);
+	FlowTransport::createInstance(true, transportId, WLTOKEN_RESERVED_COUNT);
 	Net2FileSystem::newFileSystem();
 
 	uncancellable(monitorNetworkBusyness());
@@ -5800,7 +5801,8 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 
 // Gets the protocol version reported by a coordinator via the protocol info interface
 ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddressList coordinatorAddresses) {
-	RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { coordinatorAddresses }, WLTOKEN_PROTOCOL_INFO } };
+	RequestStream<ProtocolInfoRequest> requestStream{ Endpoint::wellKnown({ coordinatorAddresses },
+		                                                                  WLTOKEN_PROTOCOL_INFO) };
 	ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 
 	return reply.version;

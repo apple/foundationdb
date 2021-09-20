@@ -319,8 +319,8 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		state std::vector<Future<ProtocolInfoReply>> coordProtocols;
 		coordProtocols.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
-				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
+			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint::wellKnown(
+				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO) };
 			coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 		}
 

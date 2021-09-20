@@ -27,22 +27,9 @@
 #include "fdbrpc/Locality.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClusterInterface.h"
+#include "fdbclient/WellKnownEndpoints.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
-
-// well known endpoints published to the client.
-constexpr UID WLTOKEN_CLIENTLEADERREG_GETLEADER(-1, 2);
-constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
-
-// the value of this endpoint should be stable and not change.
-constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 10);
-constexpr UID WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE(-1, 11);
-
-constexpr UID WLTOKEN_CONFIGTXN_GETGENERATION(-1, 12);
-constexpr UID WLTOKEN_CONFIGTXN_GET(-1, 13);
-constexpr UID WLTOKEN_CONFIGTXN_GETCLASSES(-1, 14);
-constexpr UID WLTOKEN_CONFIGTXN_GETKNOBS(-1, 15);
-constexpr UID WLTOKEN_CONFIGTXN_COMMIT(-1, 16);
 
 struct ClientLeaderRegInterface {
 	RequestStream<struct GetLeaderRequest> getLeader;
