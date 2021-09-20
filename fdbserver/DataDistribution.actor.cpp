@@ -5833,16 +5833,16 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state MoveKeysLock lock;
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
-	state bool trackerCancelled;
 	loop {
-		trackerCancelled = false;
 
 		// Stored outside of data distribution tracker to avoid slow tasks
 		// when tracker is cancelled
 		state KeyRangeMap<ShardTrackedData> shards;
 		state Promise<UID> removeFailedServer;
+		state std::vector<Future<Void>> actors;
 		try {
 			loop {
+				actors.clear();
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
 				MoveKeysLock lock_ = wait(takeMoveKeysLock(cx, self->ddId));
 				lock = lock_;
@@ -6011,7 +6011,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 			int storageTeamSize = configuration.storageTeamSize;
 
-			std::vector<Future<Void>> actors;
 			if (configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
 				storageTeamSize = 2 * configuration.storageTeamSize;
@@ -6034,8 +6033,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                            readyToStart,
 			                                                            anyZeroHealthyTeams,
 			                                                            self->ddId,
-			                                                            &shards,
-			                                                            &trackerCancelled),
+			                                                            &shards),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -6120,12 +6118,15 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			wait(waitForAll(actors));
 			return Void();
 		} catch (Error& e) {
-			trackerCancelled = true;
-			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
+			state Error err = e;
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
+			if (e.code() == error_code_actor_cancelled) {
+				uncancellable(holdWhile(actors, shards.clearAsync()));
+				throw;
+			}
 			wait(shards.clearAsync());
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
