@@ -1751,7 +1751,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "waitopen")) {
-					wait(success(safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
+					wait(makeInterruptable(
+					    success(safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion()))));
 					continue;
 				}
 
@@ -1795,7 +1796,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "configure")) {
-					bool _result = wait(configureCommandActor(db, localDb, tokens, &linenoise, warn));
+					bool _result =
+					    wait(makeInterruptable(configureCommandActor(db, localDb, tokens, &linenoise, warn)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1804,10 +1806,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "fileconfigure")) {
 					if (tokens.size() == 2 || (tokens.size() == 3 && (tokens[1] == LiteralStringRef("new") ||
 					                                                  tokens[1] == LiteralStringRef("FORCE")))) {
-						bool _result = wait(fileConfigureCommandActor(db,
-						                                              tokens.back().toString(),
-						                                              tokens[1] == LiteralStringRef("new"),
-						                                              tokens[1] == LiteralStringRef("FORCE")));
+						bool _result =
+						    wait(makeInterruptable(fileConfigureCommandActor(db,
+						                                                     tokens.back().toString(),
+						                                                     tokens[1] == LiteralStringRef("new"),
+						                                                     tokens[1] == LiteralStringRef("FORCE"))));
 						if (!_result)
 							is_error = true;
 					} else {
@@ -1839,14 +1842,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "snapshot")) {
-					bool _result = wait(snapshotCommandActor(db, tokens));
+					bool _result = wait(makeInterruptable(snapshotCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "lock")) {
-					bool _result = wait(lockCommandActor(db, tokens));
+					bool _result = wait(makeInterruptable(lockCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2258,7 +2261,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "throttle")) {
-					bool _result = wait(throttleCommandActor(db, tokens));
+					bool _result = wait(makeInterruptable(throttleCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
