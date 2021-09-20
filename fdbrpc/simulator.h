@@ -305,6 +305,19 @@ public:
 		}
 	}
 
+	std::set<std::string> getRolesSet(NetworkAddress const& address, bool skipWorkers = true) const {
+		std::set<std::string> roles;
+		auto addressIt = roleAddresses.find(address);
+		if (addressIt != roleAddresses.end()) {
+			for (auto& roleIt : addressIt->second) {
+				if ((!skipWorkers) || (roleIt.first != "Worker")) {
+					roles.insert(roleIt.first);
+				}
+			}
+		}
+		return roles;
+	}
+
 	std::string getRoles(NetworkAddress const& address, bool skipWorkers = true) const {
 		auto addressIt = roleAddresses.find(address);
 		std::string roleText;

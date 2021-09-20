@@ -54,6 +54,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeDataDistributorRequest> dataDistributor;
 	RequestStream<struct InitializeRatekeeperRequest> ratekeeper;
 	RequestStream<struct InitializeBlobManagerRequest> blobManager;
+	RequestStream<struct InitializeBlobWorkerRequest> blobWorker;
 	RequestStream<struct InitializeResolverRequest> resolver;
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
@@ -108,6 +109,7 @@ struct WorkerInterface {
 		           dataDistributor,
 		           ratekeeper,
 		           blobManager,
+		           blobWorker,
 		           resolver,
 		           storage,
 		           logRouter,
@@ -153,6 +155,7 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct RecruitFromConfigurationRequest> recruitFromConfiguration;
 	RequestStream<struct RecruitRemoteFromConfigurationRequest> recruitRemoteFromConfiguration;
 	RequestStream<struct RecruitStorageRequest> recruitStorage;
+	RequestStream<struct RecruitBlobWorkerRequest> recruitBlobWorker;
 	RequestStream<struct RegisterWorkerRequest> registerWorker;
 	RequestStream<struct GetWorkersRequest> getWorkers;
 	RequestStream<struct RegisterMasterRequest> registerMaster;
@@ -167,16 +170,17 @@ struct ClusterControllerFullInterface {
 	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
-		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
-		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
-		       updateWorkerHealth.getFuture().isReady();
+		       recruitBlobWorker.getFuture().isReady() || registerWorker.getFuture().isReady() ||
+		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
+		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady();
 	}
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
 		recruitFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
 		recruitRemoteFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
-		recruitStorage.getEndpoint(TaskPriority::ClusterController);
+		recruitStorage.getEndpoint(TaskPriority::ClusterController); // should this be ClusterControllerRecruit
+		recruitBlobWorker.getEndpoint(TaskPriority::ClusterController); // should this be ClusterControllerRecruit
 		registerWorker.getEndpoint(TaskPriority::ClusterControllerWorker);
 		getWorkers.getEndpoint(TaskPriority::ClusterController);
 		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
@@ -194,6 +198,7 @@ struct ClusterControllerFullInterface {
 		           recruitFromConfiguration,
 		           recruitRemoteFromConfiguration,
 		           recruitStorage,
+		           recruitBlobWorker,
 		           registerWorker,
 		           getWorkers,
 		           registerMaster,
@@ -366,6 +371,28 @@ struct RecruitStorageRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, excludeMachines, excludeAddresses, includeDCs, criticalRecruitment, reply);
+	}
+};
+
+struct RecruitBlobWorkerReply {
+	constexpr static FileIdentifier file_identifier = 9908409;
+	WorkerInterface worker;
+	ProcessClass processClass;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, worker, processClass);
+	}
+};
+
+struct RecruitBlobWorkerRequest {
+	constexpr static FileIdentifier file_identifier = 72435;
+	std::vector<AddressExclusion> excludeAddresses;
+	ReplyPromise<RecruitBlobWorkerReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, excludeAddresses, reply);
 	}
 };
 
@@ -673,6 +700,28 @@ struct InitializeStorageRequest {
 	}
 };
 
+struct InitializeBlobWorkerReply {
+	constexpr static FileIdentifier file_identifier = 6095215;
+	BlobWorkerInterface interf;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, interf);
+	}
+};
+
+struct InitializeBlobWorkerRequest {
+	constexpr static FileIdentifier file_identifier = 5838547;
+	UID reqId;
+	UID interfaceId;
+	ReplyPromise<InitializeBlobWorkerReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, interfaceId, reply);
+	}
+};
+
 struct TraceBatchDumpRequest {
 	constexpr static FileIdentifier file_identifier = 8184121;
 	ReplyPromise<Void> reply;
@@ -930,6 +979,10 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
                                      ConfigDBType configDBType);
+
+ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
+                              ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 // These servers are started by workerServer
 class IKeyValueStore;

@@ -44,6 +44,7 @@ struct BlobWorkerInterface {
 	void initEndpoints() {}
 	UID id() const { return myId; }
 	NetworkAddress address() const { return blobGranuleFileRequest.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress stableAddress() const { return blobGranuleFileRequest.getEndpoint().getStableAddress(); }
 	bool operator==(const BlobWorkerInterface& r) const { return id() == r.id(); }
 	bool operator!=(const BlobWorkerInterface& r) const { return !(*this == r); }
 	std::string toString() const { return id().shortString(); }

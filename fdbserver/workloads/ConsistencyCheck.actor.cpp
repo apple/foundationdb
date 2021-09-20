@@ -295,6 +295,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					wait(::success(self->checkForStorage(cx, configuration, tssMapping, self)));
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
+					// Check blob workers are operating as expected
+					bool blobWorkersCorrect = wait(self->checkBlobWorkers(cx, configuration, self));
+					if (!blobWorkersCorrect)
+						self->testFailure("Blob workers incorrect");
+
 					// Check that each machine is operating as its desired class
 					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
 					if (!usingDesiredClasses)
@@ -1930,6 +1935,89 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
+		return true;
+	}
+
+	// Checks if the blob workers are "correct".
+	// Returns false if ANY of the following
+	// - any blob worker is on a diff DC than the blob manager/CC, or
+	// - any worker that should have a blob worker does not have one, or
+	// - any worker that should NOT have a blob worker does indeed have one
+	ACTOR Future<bool> checkBlobWorkers(Database cx,
+	                                    DatabaseConfiguration configuration,
+	                                    ConsistencyCheckWorkload* self) {
+		state vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
+		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		state std::set<NetworkAddress> blobWorkerAddrs;
+		Optional<Key> ccDcId;
+		NetworkAddress ccAddr = self->dbInfo->get().clusterInterface.clientInterface.address();
+
+		// get the CC's DCID
+		for (const auto& worker : workers) {
+			if (ccAddr == worker.interf.address()) {
+				ccDcId = worker.interf.locality.dcId();
+			}
+		}
+
+		if (!ccDcId.present()) {
+			TraceEvent("ConsistencyCheck_DidNotFindCC");
+			return false;
+		}
+
+		for (const auto& bwi : blobWorkers) {
+			if (bwi.locality.dcId() != ccDcId) {
+				TraceEvent("ConsistencyCheck_BWOnDiffDcThanCC")
+				    .detail("BWID", bwi.id())
+				    .detail("BwDcId", bwi.locality.dcId())
+				    .detail("CcDcId", ccDcId);
+				return false;
+			}
+			blobWorkerAddrs.insert(bwi.stableAddress());
+		}
+
+		for (int i = 0; i < workers.size(); i++) {
+			NetworkAddress addr = workers[i].interf.stableAddress();
+			if (!configuration.isExcludedServer(workers[i].interf.addresses())) {
+				if (workers[i].processClass == ProcessClass::BlobWorkerClass) {
+					// this is a worker with processClass == BWClass, so should have a blob worker
+					if (blobWorkerAddrs.find(addr) == blobWorkerAddrs.end()) {
+						TraceEvent("ConsistencyCheck_NoBWOnBWClass").detail("Address", addr);
+						return false;
+					}
+
+					// FIXME: improve this check (relies on simulation). It's currently brittle since it relies on
+					// status roles to be set.
+					//
+					// Basically, We want to ensure there are no other roles on this worker. But this might
+					// be technically done by ensuring that all other roles are not at NeverAssign fitness. But if there
+					// was a bug in how we configured fitnesses, then this explicit check would catch it, but relying on
+					// other roles to check fitnesses wouldn't.
+					//
+					// If we do use `rolesSet`, we could technically do all the other checks with it
+					// and get rid of blobWorkerAddrs...
+					//
+					// TODO: actually... if there is critical recruitment, we might see other roles on a BW process
+					/*
+					if (g_network->isSimulated()) {
+					    auto rolesSet = g_simulator.getRolesSet(addr);
+					    if (rolesSet.size() > 1 ||
+					        (rolesSet.size() == 1 && rolesSet.find(Role::BLOB_WORKER.roleName) == rolesSet.end())) {
+					        TraceEvent("ConsistencyCheck_NonBWOnBWClass")
+					            .detail("Address", addr)
+					            .detail("RolesSet", rolesSet);
+					        return false;
+					    }
+					}
+					*/
+				} else {
+					// this is a worker with processClass != BWClass, so there should be no BWs on it
+					if (blobWorkerAddrs.find(addr) != blobWorkerAddrs.end()) {
+						TraceEvent("ConsistencyCheck_BWOnNonBWClass").detail("Address", addr);
+						return false;
+					}
+				}
+			}
+		}
 		return true;
 	}
 

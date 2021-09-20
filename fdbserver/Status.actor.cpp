@@ -725,6 +725,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
     vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
     ServerCoordinators coordinators,
+    vector<BlobWorkerInterface> blobWorkers,
     Database cx,
     Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone,
@@ -859,6 +860,11 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state std::vector<ResolverInterface> resolvers = db->get().resolvers;
 	for (res = resolvers.begin(); res != resolvers.end(); ++res) {
 		roles.addRole("resolver", *res);
+		wait(yield());
+	}
+
+	for (const auto& blobWorker : blobWorkers) {
+		roles.addRole("blob_worker", blobWorker);
 		wait(yield());
 	}
 
@@ -2992,6 +2998,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				messages.push_back(
 				    JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
 			}
+
+			// ...also blob workers
+			state vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx, true));
+
 			wait(waitForAll(warningFutures));
 		} else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
@@ -3016,6 +3026,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              commitProxies,
 		                              grvProxies,
 		                              coordinators,
+		                              blobWorkers,
 		                              cx,
 		                              configuration,
 		                              loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),

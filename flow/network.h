@@ -91,6 +91,7 @@ enum class TaskPriority {
 	UnknownEndpoint = 4000,
 	MoveKeys = 3550,
 	DataDistributionLaunch = 3530,
+	BlobManager = 3520,
 	Ratekeeper = 3510,
 	DataDistribution = 3502,
 	DataDistributionLow = 3501,
