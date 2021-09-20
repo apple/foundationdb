@@ -238,13 +238,13 @@ ACTOR Future<vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 
 // Returns storage servers selected from 'candidates', who is serving a read-write copy of 'range'.
 ACTOR Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> candidates, KeyRangeRef range) {
-	vector<Future<Optional<Value>>> serverListEntries;
+	std::vector<Future<Optional<Value>>> serverListEntries;
 
 	for (const UID id : candidates) {
 		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
 	}
 
-	vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+	std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 
 	std::vector<StorageServerInterface> ssis;
 	for (auto& v : serverListValues) {
