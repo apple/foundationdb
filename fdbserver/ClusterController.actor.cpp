@@ -3450,7 +3450,8 @@ bool isHealthySingleton(ClusterControllerData* self,
 }
 
 // Returns a mapping from pid->pidCount for pids
-std::map<Optional<Standalone<StringRef>>, int> getColocCounts(const vector<Optional<Standalone<StringRef>>>& pids) {
+std::map<Optional<Standalone<StringRef>>, int> getColocCounts(
+    const std::vector<Optional<Standalone<StringRef>>>& pids) {
 	std::map<Optional<Standalone<StringRef>>, int> counts;
 	for (const auto& pid : pids) {
 		++counts[pid];
