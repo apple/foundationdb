@@ -2497,63 +2497,19 @@ public:
 	ACTOR static Future<Void> writePhysicalPage_impl(DWALPager* self,
 	                                                 PagerEventReasons reason,
 	                                                 unsigned int level,
-	                                                 Standalone<VectorRef<PhysicalPageID>> pageIDs,
-	                                                 Reference<ArenaPage> page,
-	                                                 bool header = false) {
-
-		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
-		             self->filename.c_str(),
-		             (header ? "writePhysicalHeader" : "writePhysical"),
-		             toString(pageIDs).c_str(),
-		             page->begin());
-
-		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
-		page->updateChecksum(pageIDs.front());
-		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
-		             self->filename.c_str(),
-		             toString(pageIDs).c_str(),
-		             page->calculateChecksum(pageIDs.front()),
-		             page->getChecksum());
+	                                                 PhysicalPageID pageID,
+	                                                 int blockSize,
+	                                                 bool header,
+	                                                 Void* data) {
 
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(header ? ioMaxPriority : ioMinPriority));
 		++g_redwoodMetrics.metric.pagerDiskWrite;
 		g_redwoodMetrics.level(level).metrics.events.addEventReason(PagerEvents::PageWrite, reason);
-
 		if (self->memoryOnly) {
 			return Void();
 		}
-
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
-		state int blockSize = header ? smallestPhysicalBlock : self->physicalPageSize;
-		if (pageIDs.size() == 1) {
-			wait(self->pageFile->write(page->begin(), blockSize, (int64_t)pageIDs.front() * blockSize));
-			debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
-			             self->filename.c_str(),
-			             (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
-			             toString(pageIDs.front()).c_str(),
-			             page->begin(),
-			             (pageIDs.front() * blockSize));
-
-			return Void();
-		}
-		state std::vector<Future<Void>> writers;
-		state int i = 0;
-		for (const auto pageID : pageIDs) {
-			Future<Void> p =
-			    self->pageFile->write(page->mutate() + i * blockSize, blockSize, ((int64_t)pageID) * blockSize);
-			i += 1;
-			writers.push_back(p);
-		}
-		wait(waitForAll(writers));
-		if (REDWOOD_DEBUG) {
-			Standalone<VectorRef<PhysicalPageID>> pageIDsCopy = pageIDs;
-			debug_printf("DWALPager(%s) op=%s %s ptr=%p file offset=%d\n",
-			             self->filename.c_str(),
-			             (header ? "writePhysicalHeaderComplete" : "writePhysicalComplete"),
-			             toString(pageIDsCopy).c_str(),
-			             page->begin(),
-			             (pageIDsCopy.front() * blockSize));
-		}
+		wait(self->pageFile->write(data, blockSize, (int64_t)pageID * blockSize));
 		return Void();
 	}
 
@@ -2562,7 +2518,31 @@ public:
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                               Reference<ArenaPage> page,
 	                               bool header = false) {
-		Future<Void> f = writePhysicalPage_impl(this, reason, level, pageIDs, page, header);
+		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
+		             filename.c_str(),
+		             (header ? "writePhysicalHeader" : "writePhysical"),
+		             toString(pageIDs).c_str(),
+		             page->begin());
+		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
+		page->updateChecksum(pageIDs.front());
+		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
+		             filename.c_str(),
+		             toString(pageIDs).c_str(),
+		             page->calculateChecksum(pageIDs.front()),
+		             page->getChecksum());
+		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
+		Future<Void> f;
+		if (pageIDs.size() == 1) {
+			f = writePhysicalPage_impl(this, reason, level, pageIDs.front(), blockSize, header, (Void*)page->mutate());
+		} else {
+			std::vector<Future<Void>> writers;
+			for (int i = 0; i < pageIDs.size(); ++i) {
+				Future<Void> p = writePhysicalPage_impl(
+				    this, reason, level, pageIDs[i], blockSize, header, (Void*)page->mutate() + i * blockSize);
+				writers.push_back(p);
+			}
+			f = waitForAll(writers);
+		}
 		operations.add(f);
 		return f;
 	}
