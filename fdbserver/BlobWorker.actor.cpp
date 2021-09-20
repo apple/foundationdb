@@ -1031,10 +1031,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 				if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
 				    deltas.version > metadata->bufferedDeltaVersion.get()) {
 					if (BW_DEBUG) {
-						printf("Granule [%s - %s) flushing delta file after %d bytes%s\n",
+						printf("Granule [%s - %s) flushing delta file after %d bytes @ %lld%s\n",
 						       metadata->keyRange.begin.printable().c_str(),
 						       metadata->keyRange.end.printable().c_str(),
 						       metadata->bufferedDeltaBytes,
+						       metadata->bufferedDeltaVersion.get(),
 						       oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 					}
 					TraceEvent("BlobGranuleDeltaFile", bwData->id)
@@ -1379,7 +1380,15 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 			}
 			// if version is older than oldest snapshot file (or no snapshot files), throw too old
 			// FIXME: probably want a dedicated exception like blob_range_too_old or something instead
-			ASSERT(i >= 0);
+			if (i < 0) {
+				if (BW_REQUEST_DEBUG) {
+					printf("Req [%s - %s) @ %lld Got too old after initial check.\n",
+					       req.keyRange.begin.printable().c_str(),
+					       req.keyRange.end.printable().c_str(),
+					       req.readVersion);
+				}
+				throw transaction_too_old();
+			}
 
 			BlobFileIndex snapshotF = metadata->files.snapshotFiles[i];
 			chunk.snapshotFile = BlobFilenameRef(rep.arena, snapshotF.filename, snapshotF.offset, snapshotF.length);

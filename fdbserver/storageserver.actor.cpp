@@ -1809,7 +1809,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			state ChangeFeedRequest feedRequest;
 			feedRequest.rangeID = req.rangeID;
 			feedRequest.begin = begin;
-			feedRequest.end = req.end;
+			// Set to min of request end and buffered version to skip any potentially partially buffered mutations
+			feedRequest.end = std::min(req.end, data->version.get() + 1);
 			feedRequest.range = req.range;
 			ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
 
