@@ -57,8 +57,6 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 // The set of tLog servers, logRouters and backupWorkers for a log tag
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
-	std::unordered_map<ptxn::StorageTeamID, ptxn::TLogGroupID> storageTeamIDTLogGroupIDMapper;
-
 	std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>> logServersPtxn;
 	std::vector<ptxn::TLogGroupID> tLogGroupIDs;
 	std::map<ptxn::TLogGroupID, std::vector<Reference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>>>
