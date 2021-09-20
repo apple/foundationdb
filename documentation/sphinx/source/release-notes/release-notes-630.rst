@@ -4,7 +4,8 @@ Release Notes
 
 6.3.20
 ======
-* Several minor problems with the versioned packages have been fixed `(PR 5607) <https://github.com/apple/foundationdb/pull/5607>`_
+* Several minor problems with the versioned packages have been fixed. `(PR 5607) <https://github.com/apple/foundationdb/pull/5607>`_
+* A client might not honor transaction timeouts when using the multi-version client if it cannot connect to the cluster. `(Issue #5595) <https://github.com/apple/foundationdb/issues/5595>`_
 
 6.3.19
 ======
