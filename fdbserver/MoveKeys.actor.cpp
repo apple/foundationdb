@@ -1369,7 +1369,12 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 					// Move the keyrange to teamForDroppedRange if the src list becomes empty, and also remove the shard
 					// from all dest servers.
 					if (src.empty()) {
-						assert(!teamForDroppedRange.empty());
+						if (teamForDroppedRange.empty()) {
+							TraceEvent(SevError, "ShardLossAllReplicasNoDestinationTeam", serverID)
+							    .detail("Begin", it.key)
+							    .detail("End", keyServers[i + 1].key);
+							throw internal_error();
+						}
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
 						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
