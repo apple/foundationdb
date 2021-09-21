@@ -3071,7 +3071,7 @@ public:
 	Counter registerMasterRequests;
 	Counter statusRequests;
 
-	Reference<EventCacheHolder> clusterControllerEventHolder;
+	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
 
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
@@ -3088,7 +3088,7 @@ public:
 	    getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
 	    registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
 	    statusRequests("StatusRequests", clusterControllerMetrics),
-	    clusterControllerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
+	    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
 		auto serverInfo = ServerDBInfo();
 		serverInfo.id = deterministicRandom()->randomUniqueID();
 		serverInfo.infoGeneration = ++db.dbInfoCount;
