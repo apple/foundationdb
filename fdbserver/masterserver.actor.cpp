@@ -261,11 +261,11 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Future<Void> logger;
 
-	Reference<EventCacheHolder> masterRecoveryStateHolder;
-	Reference<EventCacheHolder> masterRecoveryGenerationsHolder;
-	Reference<EventCacheHolder> masterRecoveryDurationHolder;
-	Reference<EventCacheHolder> masterRecoveryAvailableHolder;
-	Reference<EventCacheHolder> recoveredConfigHolder;
+	Reference<EventCacheHolder> masterRecoveryStateEventHolder;
+	Reference<EventCacheHolder> masterRecoveryGenerationsEventHolder;
+	Reference<EventCacheHolder> masterRecoveryDurationEventHolder;
+	Reference<EventCacheHolder> masterRecoveryAvailableEventHolder;
+	Reference<EventCacheHolder> recoveredConfigEventHolder;
 
 	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	           MasterInterface const& myInterface,
@@ -288,11 +288,11 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-	    masterRecoveryStateHolder(makeReference<EventCacheHolder>("MasterRecoveryState")),
-	    masterRecoveryGenerationsHolder(makeReference<EventCacheHolder>("MasterRecoveryGenerations")),
-	    masterRecoveryDurationHolder(makeReference<EventCacheHolder>("MasterRecoveryDuration")),
-	    masterRecoveryAvailableHolder(makeReference<EventCacheHolder>("MasterRecoveryAvailable")),
-	    recoveredConfigHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
+	    masterRecoveryStateEventHolder(makeReference<EventCacheHolder>("MasterRecoveryState")),
+	    masterRecoveryGenerationsEventHolder(makeReference<EventCacheHolder>("MasterRecoveryGenerations")),
+	    masterRecoveryDurationEventHolder(makeReference<EventCacheHolder>("MasterRecoveryDuration")),
+	    masterRecoveryAvailableEventHolder(makeReference<EventCacheHolder>("MasterRecoveryAvailable")),
+	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
