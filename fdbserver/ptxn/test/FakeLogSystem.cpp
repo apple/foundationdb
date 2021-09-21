@@ -32,18 +32,12 @@ static void logMethodName(std::string methodName) {
 	}
 }
 
-FakeLogSystem::FakeLogSystem() {
-	logMethodName(__func__);
-}
+#ifndef __INTEL_COMPILER
+#pragma region FakeLogSystem
+#endif
 
-FakeLogSystem::FakeLogSystem(const FakeLogSystem& that) : cursor(that.cursor) {
+FakeLogSystem::FakeLogSystem(const UID& creatorDebugID_) : creatorDebugID(creatorDebugID_) {
 	logMethodName(__func__);
-}
-
-FakeLogSystem& FakeLogSystem::operator=(const FakeLogSystem& that) {
-	logMethodName(__func__);
-	cursor = that.cursor;
-	return *this;
 }
 
 void FakeLogSystem::addref() {
@@ -96,7 +90,7 @@ Future<Version> FakeLogSystem::push(Version prevVersion,
                                     struct LogPushData& data,
                                     const SpanID& spanContext,
                                     Optional<UID> debugID,
-									Optional<ptxn::TLogGroupID> tLogGroup) {
+                                    Optional<ptxn::TLogGroupID> tLogGroup) {
 	logMethodName(__func__);
 	return Future<Version>();
 }
@@ -126,7 +120,7 @@ Reference<ILogSystem::IPeekCursor> FakeLogSystem::peekSingle(UID dbgid,
                                                              Optional<ptxn::StorageTeamID> storageTeam,
                                                              std::vector<std::pair<Version, Tag>> history) {
 	logMethodName(__func__);
-	return cursor;
+	return Reference<IPeekCursor>();
 }
 
 Reference<ILogSystem::IPeekCursor> FakeLogSystem::peekLogRouter(UID dbgid, Version begin, Tag tag) {
@@ -200,7 +194,7 @@ Future<Reference<ILogSystem>> FakeLogSystem::newEpoch(
     int8_t remoteLocality,
     const vector<Tag>& allTags,
     const Reference<AsyncVar<bool>>& recruitmentStalled,
-	TLogGroupCollectionRef tLogGroupCollection) {
+    TLogGroupCollectionRef tLogGroupCollection) {
 	logMethodName(__func__);
 	return Future<Reference<ILogSystem>>();
 }
@@ -285,5 +279,43 @@ LogEpoch FakeLogSystem::getOldestBackupEpoch() const {
 void FakeLogSystem::setOldestBackupEpoch(LogEpoch epoch) {
 	logMethodName(__func__);
 }
+
+#ifndef __INTEL_COMPILER
+#pragma endregion FakeLogSystem
+#endif
+
+#ifndef __INTEL_COMPILER
+#pragma region FakeLogSystem_CustomPeekCursor
+#endif
+
+std::unordered_map<UID, Reference<::ILogSystem::IPeekCursor>> FakeLogSystem_CustomPeekCursor::cursorIDMapping;
+
+FakeLogSystem_CustomPeekCursor::FakeLogSystem_CustomPeekCursor(const UID& creatorDebugID_)
+  : FakeLogSystem(creatorDebugID_) {
+	if (cursorIDMapping.find(creatorDebugID) == cursorIDMapping.end()) {
+		cursorIDMapping[creatorDebugID] = Reference<::ILogSystem::IPeekCursor>();
+	}
+}
+
+Reference<::ILogSystem::IPeekCursor> FakeLogSystem_CustomPeekCursor::peekSingle(
+    UID _1,
+    Version _2,
+    Tag _3,
+    Optional<ptxn::StorageTeamID> _4,
+    std::vector<std::pair<Version, Tag>> _5) {
+	return cursorIDMapping[creatorDebugID];
+}
+
+Reference<::ILogSystem::IPeekCursor>& FakeLogSystem_CustomPeekCursor::getCursorByID(const UID& id) {
+	if (cursorIDMapping.find(id) == cursorIDMapping.end()) {
+		cursorIDMapping[id] = Reference<::ILogSystem::IPeekCursor>();
+	}
+
+	return cursorIDMapping[id];
+}
+
+#ifndef __INTEL_COMPILER
+#pragma endregion FakeLogSystem_CustomPeekCursor
+#endif
 
 } // namespace ptxn::test

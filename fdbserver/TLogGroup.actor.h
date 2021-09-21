@@ -92,7 +92,7 @@ public:
 	// Only the one with WorkerInterface should be kept.
 
 	// Add 'logWorkers' to current collection of workers that can be recruited into a TLogGroup.
-	void addWorkers(const std::vector<WorkerInterface>& logWorkers);
+	void addWorkers(const std::vector<struct WorkerInterface>& logWorkers);
 	void addWorkers(const std::vector<ptxn::TLogInterface_PassivelyPull>& logWorkers);
 	void addWorkers(const std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>& logWorkers);
 

@@ -27,7 +27,7 @@ namespace ptxn::test {
 const static bool LOG_METHOD_CALLS = false;
 const static bool LOG_MESSAGES = false;
 
-std::ostream& operator<<(std::ostream& os, const MockPeekCursor::VersionedMessage& versionedMessage) {
+std::ostream& operator<<(std::ostream& os, const FakePeekCursor::VersionedMessage& versionedMessage) {
 	os << "VersionedMessage [version: " << versionedMessage.version << " sub: " << versionedMessage.sub
 	   << " message: " << StringRef(versionedMessage.message).toHexString() << " tags: ";
 	for (auto tag : versionedMessage.tags) {
@@ -43,7 +43,7 @@ static void logMethodName(std::string methodName) {
 	}
 }
 
-MockPeekCursor::MockPeekCursor(int nMutationsPerMore,
+FakePeekCursor::FakePeekCursor(int nMutationsPerMore,
                                Optional<int> maxMutations,
                                const VersionedMessageSupplier& supplier,
                                const Arena& cursorArena)
@@ -51,7 +51,7 @@ MockPeekCursor::MockPeekCursor(int nMutationsPerMore,
 	logMethodName(__func__);
 }
 
-MockPeekCursor::MockPeekCursor(const VersionedMessageSupplier& supplier,
+FakePeekCursor::FakePeekCursor(const VersionedMessageSupplier& supplier,
                                const Arena& cursorArena,
                                const Optional<VersionedMessage>& curVersionedMessage,
                                const LogMessageVersion& curVersion)
@@ -60,55 +60,55 @@ MockPeekCursor::MockPeekCursor(const VersionedMessageSupplier& supplier,
 	logMethodName(__func__);
 }
 
-Reference<ILogSystem::IPeekCursor> MockPeekCursor::cloneNoMore() {
+Reference<ILogSystem::IPeekCursor> FakePeekCursor::cloneNoMore() {
 	logMethodName(__func__);
-	return makeReference<MockPeekCursor>(supplier, cursorArena, curVersionedMessage, curVersion);
+	return makeReference<FakePeekCursor>(supplier, cursorArena, curVersionedMessage, curVersion);
 }
 
 // Ignore setProtocolVersion. Always use IncludeVersion(). TODO: It hits segfault when copy construct if I use
 // IncludeVersion().
-void MockPeekCursor::setProtocolVersion(ProtocolVersion version) {
+void FakePeekCursor::setProtocolVersion(ProtocolVersion version) {
 	logMethodName(__func__);
 }
 
-bool MockPeekCursor::hasMessage() const {
+bool FakePeekCursor::hasMessage() const {
 	logMethodName(__func__);
 	return curVersionedMessage.present();
 }
 
-VectorRef<Tag> MockPeekCursor::getTags() const {
+VectorRef<Tag> FakePeekCursor::getTags() const {
 	logMethodName(__func__);
 	// It should return something like allVersionMessages[pVersion].second[pMessage].tags;
 	UNREACHABLE() // Not yet supported
 }
 
-Arena& MockPeekCursor::arena() {
+Arena& FakePeekCursor::arena() {
 	logMethodName(__func__);
 	UNREACHABLE() // Not yet supported
 }
 
-ArenaReader* MockPeekCursor::reader() {
+ArenaReader* FakePeekCursor::reader() {
 	logMethodName(__func__);
 	curReader.reset(new ArenaReader(cursorArena, getMessage(), AssumeVersion(currentProtocolVersion)));
 	return curReader.get();
 }
 
-StringRef MockPeekCursor::getMessage() {
+StringRef FakePeekCursor::getMessage() {
 	logMethodName(__func__);
 	ASSERT(curVersionedMessage.present());
 	StringRef message = curVersionedMessage.get().message;
 	if (LOG_MESSAGES) {
-		std::cout << "MockPeekCursor gets message from: " << curVersionedMessage.get() << std::endl;
+		std::cout << "FakePeekCursor gets message from: " << curVersionedMessage.get() << std::endl;
 	}
 	return message;
 }
 
-StringRef MockPeekCursor::getMessageWithTags() {
+StringRef FakePeekCursor::getMessageWithTags() {
 	logMethodName(__func__);
 	return StringRef();
 }
 
-void MockPeekCursor::nextMessage() {
+void FakePeekCursor::nextMessage() {
 	logMethodName(__func__);
 	curVersionedMessage = supplier.get();
 	if (curVersionedMessage.present()) {
@@ -128,14 +128,14 @@ void MockPeekCursor::nextMessage() {
 	}
 }
 
-void MockPeekCursor::advanceTo(LogMessageVersion n) {
+void FakePeekCursor::advanceTo(LogMessageVersion n) {
 	logMethodName(__func__);
 	while (hasMessage() && version() < n) {
 		nextMessage();
 	}
 }
 
-Future<Void> MockPeekCursor::getMore(TaskPriority taskID) {
+Future<Void> FakePeekCursor::getMore(TaskPriority taskID) {
 	logMethodName(__func__);
 
 	int nextEnd = supplier.end + nMutationsPerMore;
@@ -148,54 +148,54 @@ Future<Void> MockPeekCursor::getMore(TaskPriority taskID) {
 	return Void();
 }
 
-Future<Void> MockPeekCursor::onFailed() {
+Future<Void> FakePeekCursor::onFailed() {
 	logMethodName(__func__);
 	return Future<Void>();
 }
 
-bool MockPeekCursor::isActive() const {
+bool FakePeekCursor::isActive() const {
 	logMethodName(__func__);
 	return false;
 }
 
-bool MockPeekCursor::isExhausted() const {
+bool FakePeekCursor::isExhausted() const {
 	logMethodName(__func__);
 	return false;
 }
 
-const LogMessageVersion& MockPeekCursor::version() const {
+const LogMessageVersion& FakePeekCursor::version() const {
 	logMethodName(__func__);
 	return curVersion;
 }
 
-Version MockPeekCursor::popped() const {
+Version FakePeekCursor::popped() const {
 	logMethodName(__func__);
 	return 0;
 }
 
-Version MockPeekCursor::getMinKnownCommittedVersion() const {
+Version FakePeekCursor::getMinKnownCommittedVersion() const {
 	logMethodName(__func__);
 	return 0;
 }
 
-Optional<UID> MockPeekCursor::getPrimaryPeekLocation() const {
+Optional<UID> FakePeekCursor::getPrimaryPeekLocation() const {
 	logMethodName(__func__);
 	return Optional<UID>();
 }
 
-Optional<UID> MockPeekCursor::getCurrentPeekLocation() const {
+Optional<UID> FakePeekCursor::getCurrentPeekLocation() const {
 	logMethodName(__func__);
 	return Optional<UID>();
 }
 
-void MockPeekCursor::addref() {
+void FakePeekCursor::addref() {
 	logMethodName(__func__);
-	ReferenceCounted<MockPeekCursor>::addref();
+	ReferenceCounted<FakePeekCursor>::addref();
 }
 
-void MockPeekCursor::delref() {
+void FakePeekCursor::delref() {
 	logMethodName(__func__);
-	ReferenceCounted<MockPeekCursor>::delref();
+	ReferenceCounted<FakePeekCursor>::delref();
 }
 
 } // namespace ptxn::test

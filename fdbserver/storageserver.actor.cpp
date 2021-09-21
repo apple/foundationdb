@@ -58,14 +58,12 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/MockLogSystem.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/genericactors.actor.h"
-#include "fdbserver/MockPeekCursor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -360,7 +358,6 @@ private:
 	std::map<Version, Standalone<VerUpdateRef>> mutationLog; // versions (durableVersion, version]
 	std::unordered_map<KeyRef, Reference<ServerWatchMetadata>> watchMap; // keep track of server watches
 
-public:
 public:
 	// Histograms
 	struct FetchKeysHistograms {
@@ -816,8 +813,7 @@ public:
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo>> const& db,
-	              StorageServerInterface const& ssi,
-	              bool mocked = false)
+	              StorageServerInterface const& ssi)
 	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
 	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
@@ -858,9 +854,7 @@ public:
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
 		desiredOldestVersion.initMetric(LiteralStringRef("StorageServer.DesiredOldestVersion"), counters.cc.id);
 
-		// TODO: Unit tests may need to have a better way to feed these information. And there should be tests
-		// that actually changes server key by update or restore.
-		if (mocked) {
+		if (db->get().isTestEnvironment) {
 			newestAvailableVersion.insert(allKeys, latestVersion);
 			newestDirtyVersion.insert(allKeys, latestVersion);
 			addShard(ShardInfo::newReadWrite(allKeys, this));
@@ -872,8 +866,6 @@ public:
 
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 	}
-
-	//~StorageServer() { fclose(log); }
 
 	// Puts the given shard into shards.  The caller is responsible for adding shards
 	//   for all ranges in shards.getAffectedRangesAfterInsertion(newShard->keys)), because these
@@ -2120,21 +2112,13 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
 		state uint64_t changeCounter = data->shardChangeCounter;
-		//		try {
 		state KeyRange shard = getShardKeyRange(data, req.begin);
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent(
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.AfterVersion");
-		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
-		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
-		//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
-		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
-			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
-			//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
-			//shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -2209,13 +2193,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 						ASSERT(r.data[i].key >= begin && r.data[i].key < end);
 					ASSERT(r.data.size() <= std::abs(req.limit));
 				}
-
-				/*for( int i = 0; i < r.data.size(); i++ ) {
-					StorageMetrics m;
-					m.bytesPerKSecond = r.data[i].expectedSize();
-					m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
-					data->metrics.notify(r.data[i].key, m);
-				}*/
 
 				// For performance concerns, the cost of a range read is billed to the start key and end key of the
 				// range.
@@ -3655,6 +3632,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
+		ASSERT(cursor.isValid());
 
 		state double beforeTLogCursorReads = now();
 		loop {
@@ -4986,9 +4964,7 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	}
 }
 
-ACTOR Future<Void> storageServerCore(StorageServer* self,
-                                     StorageServerInterface ssi,
-                                     std::shared_ptr<MockLogSystem> mockLogSystem = nullptr) {
+ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived =
 	    false; // true iff the current update() actor assigned to doUpdate has already received an update from the tlog
@@ -5042,15 +5018,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self,
 				TEST(self->logSystem); // shardServer dbInfo changed
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					if (mockLogSystem) {
-						// It would be better to pass in Reference<MockLogSystem> to avoid additional construction. But
-						// we cannot do it because MockLogSystem can only be forward declared in
-						// WorkerInterface.actor.h, so storageServer actor cannot take a Reference or unique_ptr but
-						// only shared_ptr of MockLogSystem.
-						self->logSystem = makeReference<MockLogSystem>(*mockLogSystem).castTo<ILogSystem>();
-					} else {
-						self->logSystem = ILogSystem::fromServerDBInfo(self->thisServerID, self->db->get());
-					}
+					self->logSystem = ILogSystem::fromServerDBInfo(self->thisServerID, self->db->get());
 					if (self->logSystem) {
 						if (self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
@@ -5183,11 +5151,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo>> db,
                                  std::string folder,
-                                 // Only applicable when logSystemType is mock.
-                                 std::shared_ptr<MockLogSystem> mockLogSystem,
                                  Optional<ptxn::StorageTeamID> storageTeamID) {
 
-	state StorageServer self(persistentData, db, ssi, mockLogSystem != nullptr);
+	state StorageServer self(persistentData, db, ssi);
 
 	self.storageTeamID = storageTeamID;
 	if (storageTeamID.present()) {
@@ -5232,7 +5198,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		rep.addedVersion = self.version.get();
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
-		wait(storageServerCore(&self, ssi, mockLogSystem));
+		wait(storageServerCore(&self, ssi));
 
 		throw internal_error();
 	} catch (Error& e) {

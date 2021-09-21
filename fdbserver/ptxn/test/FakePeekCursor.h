@@ -22,10 +22,11 @@
 #define FDBSERVER_PTXN_TEST_MOCK_PEEK_CURSOR
 
 #include <iosfwd>
+
 #include "fdbserver/LogSystem.h"
 
 namespace ptxn::test {
-struct MockPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<MockPeekCursor> {
+struct FakePeekCursor final : ::ILogSystem::IPeekCursor, ReferenceCounted<FakePeekCursor> {
 
 	struct VersionedMessage {
 		// Every message should be able to have independent arenas so that they can be freed separately after consumed.
@@ -49,7 +50,6 @@ struct MockPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<MockPeek
 		int advanceVersionsPerMutation;
 
 		Optional<VersionedMessage> get() {
-			// std::cout << "OnDemandVersionedMessageSupplier get " << i << ", end " << end << std::endl;
 			ASSERT(i <= end);
 			if (i == end) {
 				return Optional<VersionedMessage>();
@@ -106,38 +106,38 @@ struct MockPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<MockPeek
 	// managing the pointer returned by reader().
 	std::unique_ptr<ArenaReader> curReader = nullptr;
 
-	MockPeekCursor(int nMutationsPerMore,
+	FakePeekCursor(int nMutationsPerMore,
 	               Optional<int> maxMutations,
 	               const VersionedMessageSupplier& supplier,
 	               const Arena& cursorArena);
 
 	// When cloneNoMore().
-	MockPeekCursor(const VersionedMessageSupplier& supplier,
+	FakePeekCursor(const VersionedMessageSupplier& supplier,
 	               const Arena& cursorArena,
 	               const Optional<VersionedMessage>& curVersionedMessage,
 	               const LogMessageVersion& curVersion);
 
-	Reference<IPeekCursor> cloneNoMore() override;
-	void setProtocolVersion(ProtocolVersion version) override;
-	bool hasMessage() const override;
-	VectorRef<Tag> getTags() const override;
-	Arena& arena() override;
-	ArenaReader* reader() override;
-	StringRef getMessage() override;
-	StringRef getMessageWithTags() override;
-	void nextMessage() override;
-	void advanceTo(LogMessageVersion n) override;
-	Future<Void> getMore(TaskPriority taskID) override;
-	Future<Void> onFailed() override;
-	bool isActive() const override;
-	bool isExhausted() const override;
-	const LogMessageVersion& version() const override;
-	Version popped() const override;
-	Version getMinKnownCommittedVersion() const override;
-	Optional<UID> getPrimaryPeekLocation() const override;
-	Optional<UID> getCurrentPeekLocation() const override;
-	void addref() override;
-	void delref() override;
+	virtual Reference<IPeekCursor> cloneNoMore() override;
+	virtual void setProtocolVersion(ProtocolVersion version) override;
+	virtual bool hasMessage() const override;
+	virtual VectorRef<Tag> getTags() const override;
+	virtual Arena& arena() override;
+	virtual ArenaReader* reader() override;
+	virtual StringRef getMessage() override;
+	virtual StringRef getMessageWithTags() override;
+	virtual void nextMessage() override;
+	virtual void advanceTo(LogMessageVersion n) override;
+	virtual Future<Void> getMore(TaskPriority taskID) override;
+	virtual Future<Void> onFailed() override;
+	virtual bool isActive() const override;
+	virtual bool isExhausted() const override;
+	virtual const LogMessageVersion& version() const override;
+	virtual Version popped() const override;
+	virtual Version getMinKnownCommittedVersion() const override;
+	virtual Optional<UID> getPrimaryPeekLocation() const override;
+	virtual Optional<UID> getCurrentPeekLocation() const override;
+	virtual void addref() override;
+	virtual void delref() override;
 };
 } // namespace ptxn::test
 

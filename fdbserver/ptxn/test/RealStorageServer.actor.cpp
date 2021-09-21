@@ -18,20 +18,21 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/simulator.h"
-#include "fdbserver/MockPeekCursor.h"
-#include "fdbserver/MockLogSystem.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/RecoveryState.h"
 #include "fdbserver/ptxn/test/Driver.h"
+#include "fdbserver/ptxn/test/FakeLogSystem.h"
+#include "fdbserver/ptxn/test/FakePeekCursor.h"
+#include "fdbserver/ptxn/test/Utils.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/WorkerInterface.actor.h"
 
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
-namespace ptxn {
+namespace ptxn::test {
 
 struct ServerTestDriver {
 	ISimulator::ProcessInfo* previousProcess;
@@ -81,7 +82,7 @@ struct StorageServerTestDriver : ServerTestDriver {
 		    storeType(KeyValueStoreType::fromString(params.get("keyValueStoreType").orDefault("ssd-2"))) {}
 	} options;
 
-	Reference<MockPeekCursor> mockPeekCursor;
+	Reference<ptxn::test::FakePeekCursor> cursor;
 
 	// Default tag.
 	Tag tag = Tag(1, 1);
@@ -97,93 +98,98 @@ struct StorageServerTestDriver : ServerTestDriver {
 		ssi.locality = LocalityData();
 		ssi.initEndpoints();
 	}
-
-	ACTOR static Future<Void> runStorageServer(StorageServerTestDriver* self) {
-		wait(delay(1));
-
-		StorageServerInterface& ssi = self->ssi;
-
-		auto storeType = self->options.storeType;
-		state std::string folder = ".";
-		std::string fileName = joinPath(folder, "storage-" + ssi.id().toString() + "." + storeType.toString());
-		std::cout << "new Storage Server file name: " << fileName << std::endl;
-		deleteFile(fileName);
-		state IKeyValueStore* data = openKVStore(storeType, fileName, ssi.id(), 0);
-
-		state ReplyPromise<InitializeStorageReply> storageReady;
-
-		ServerDBInfo dbInfoBuilder;
-		dbInfoBuilder.recoveryState = RecoveryState::ACCEPTING_COMMITS;
-		state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
-
-		std::shared_ptr<MockLogSystem> mockLogSystem = std::make_shared<MockLogSystem>();
-		mockLogSystem->cursor = self->mockPeekCursor.castTo<ILogSystem::IPeekCursor>();
-
-		std::cout << "Starting Storage Server." << std::endl;
-		const Version tssSeedVersion = 0;
-		state Future<Void> ss =
-		    storageServer(data, ssi, self->tag, tssSeedVersion, storageReady, dbInfo, folder, mockLogSystem);
-		std::cout << "Storage Server started." << std::endl;
-
-		self->actors.add(ss);
-		wait(ss);
-
-		return Void();
-	}
-
-	ACTOR static Future<Void> verifyGetValueFromId(StorageServerTestDriver* self, int id, Version version) {
-		auto idStr = std::to_string(id);
-		wait(verifyGetValue(
-		    self, Standalone<StringRef>("Key-" + idStr), version, Standalone<StringRef>("Value-" + idStr)));
-		return Void();
-	}
-
-	ACTOR static Future<Void> verifyGetValue(StorageServerTestDriver* self,
-	                                         Key key,
-	                                         Version version,
-	                                         Value expectedValue) {
-		wait(switchToServerProcess(self));
-
-		GetValueRequest getValueRequest = GetValueRequest(UID(), // spanContext
-		                                                  key,
-		                                                  version,
-		                                                  Optional<TagSet>(), // tags
-		                                                  Optional<UID>()); // debugID
-		std::cout << "Sending getValue request for key " << key.toString() << std::endl;
-
-		self->ssi.getValue.send(getValueRequest);
-
-		GetValueReply getValueReply = wait(getValueRequest.reply.getFuture());
-		const Value& value = getValueReply.value.get();
-		std::cout << "Get value: " << value.toString() << ", expected " << expectedValue.toString() << std::endl;
-		ASSERT(value == expectedValue);
-
-		wait(switchBack(self));
-		return Void();
-	}
 };
-} // namespace ptxn
+
+ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
+	state print::PrintTiming printTiming(__FUNCTION__);
+
+	wait(delay(1));
+
+	StorageServerInterface& ssi = self->ssi;
+
+	const auto storeType = self->options.storeType;
+
+	const std::string folder = ".";
+	const std::string fileName = joinPath(folder, "storage-" + ssi.id().toString() + "." + storeType.toString());
+	printTiming << "new Storage Server file name: " << fileName << std::endl;
+	deleteFile(fileName);
+	IKeyValueStore* data = openKVStore(storeType, fileName, ssi.id(), 0);
+
+	ServerDBInfo dbInfoBuilder;
+	dbInfoBuilder.logSystemConfig.logSystemType = LogSystemType::fake_FakePeekCursor;
+	dbInfoBuilder.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	dbInfoBuilder.isTestEnvironment = true;
+
+	Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
+	ReplyPromise<InitializeStorageReply> storageReady;
+	const Version tssSeedVersion = 0;
+
+	// Initialize the cursor for the storage server interface
+	FakeLogSystem_CustomPeekCursor::getCursorByID(ssi.uniqueID) = self->cursor;
+
+	printTiming << "Starting Storage Server." << std::endl;
+	state Future<Void> ss =
+	    storageServer(data, ssi, self->tag, tssSeedVersion, storageReady, dbInfo, folder);
+	printTiming << "Storage Server started." << std::endl;
+
+	self->actors.add(ss);
+	wait(ss);
+
+	return Void();
+}
+
+ACTOR Future<Void> verifyGetValue(StorageServerTestDriver* self, Key key, Version version, Value expectedValue) {
+	state print::PrintTiming printTiming(__FUNCTION__);
+
+	wait(ServerTestDriver::switchToServerProcess(self));
+
+	GetValueRequest getValueRequest = GetValueRequest(UID(), // spanContext
+	                                                  key,
+	                                                  version,
+	                                                  Optional<TagSet>(), // tags
+	                                                  Optional<UID>()); // debugID
+	printTiming << "Sending getValue request for key " << key.toString() << std::endl;
+
+	self->ssi.getValue.send(getValueRequest);
+
+	GetValueReply getValueReply = wait(getValueRequest.reply.getFuture());
+	const Value& value = getValueReply.value.get();
+	printTiming << "Get value: " << value.toString() << ", expected " << expectedValue.toString() << std::endl;
+	ASSERT(value == expectedValue);
+
+	wait(ServerTestDriver::switchBack(self));
+	return Void();
+}
+
+ACTOR Future<Void> verifyGetValueFromId(StorageServerTestDriver* self, int id, Version version) {
+	auto idStr = std::to_string(id);
+	wait(verifyGetValue(self, Standalone<StringRef>("Key-" + idStr), version, Standalone<StringRef>("Value-" + idStr)));
+	return Void();
+}
+
+} // namespace ptxn::test
 
 TEST_CASE("fdbserver/ptxn/test/storageserver") {
-	state ptxn::StorageServerTestDriver driver(params);
+	state ptxn::test::print::PrintTiming printTiming("fdbserver/ptxn/test/storageserver");
+	state ptxn::test::StorageServerTestDriver driver(params);
 
 	Arena arena;
 	Standalone<VectorRef<Tag>> tags;
 	tags.push_back(tags.arena(), driver.tag);
-	auto supplier = MockPeekCursor::VersionedMessageSupplier(0, tags, driver.options.advanceVersionsPerMutation);
-	driver.mockPeekCursor =
-	    makeReference<MockPeekCursor>(driver.options.nMutationsPerMore, driver.options.maxMutations, supplier, arena);
+	auto supplier =
+	    ptxn::test::FakePeekCursor::VersionedMessageSupplier(0, tags, driver.options.advanceVersionsPerMutation);
+	driver.cursor = makeReference<ptxn::test::FakePeekCursor>(
+	    driver.options.nMutationsPerMore, driver.options.maxMutations, supplier, arena);
 
 	int verifyId = params.getInt("verifyId").get();
-	state Future<Void> verify = ptxn::StorageServerTestDriver::verifyGetValueFromId(
-	    &driver,
-	    verifyId,
-	    // Other versions after commitVersion should work too.
-	    MockPeekCursor::VersionedMessageSupplier::commitVersion(verifyId, driver.options.advanceVersionsPerMutation));
+	state Version commitVersion = ptxn::test::FakePeekCursor::VersionedMessageSupplier::commitVersion(
+	    verifyId, driver.options.advanceVersionsPerMutation);
+	printTiming << "Commit version = " << commitVersion << std::endl;
+	state Future<Void> verify = ptxn::test::verifyGetValueFromId(&driver, verifyId, commitVersion);
 
 	loop choose {
-		when(wait(ptxn::StorageServerTestDriver::runStorageServer(&driver))) {
-			std::cout << "Storage serves exited unexpectedly" << std::endl;
+		when(wait(ptxn::test::runStorageServer(&driver))) {
+			printTiming << "Storage serves exited unexpectedly" << std::endl;
 			ASSERT(false);
 		}
 		when(wait(verify)) { break; }

@@ -120,10 +120,6 @@ set(FDBSERVER_SRCS
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
-  MockLogSystem.h
-  MockLogSystem.cpp
-  MockPeekCursor.h
-  MockPeekCursor.cpp
   template_fdb.h
 
   ptxn/Config.h
@@ -146,6 +142,11 @@ set(FDBSERVER_SRCS
   ptxn/test/CommitUtils.h
   ptxn/test/Driver.actor.cpp
   ptxn/test/Driver.h
+  ptxn/test/FakeLogSystem.h
+  ptxn/test/FakeLogSystem.cpp
+  ptxn/test/FakePeekCursor.h
+  ptxn/test/FakePeekCursor.h
+  ptxn/test/FakePeekCursor.cpp
   ptxn/test/FakeProxy.actor.cpp
   ptxn/test/FakeProxy.actor.h
   ptxn/test/FakeResolver.actor.h

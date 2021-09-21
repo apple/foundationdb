@@ -134,48 +134,6 @@ OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
 	}
 }
 
-Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem,
-                                            UID const& dbgid,
-                                            DBCoreState const& oldState,
-                                            FutureStream<TLogRejoinRequest> const& rejoins,
-                                            LocalityData const& locality,
-                                            bool* forceRecovery) {
-	return TagPartitionedLogSystem::recoverAndEndEpoch(outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery);
-}
-
-Reference<ILogSystem> ILogSystem::fromLogSystemConfig(UID const& dbgid,
-                                                      struct LocalityData const& locality,
-                                                      struct LogSystemConfig const& conf,
-                                                      bool excludeRemote,
-                                                      bool useRecoveredAt,
-                                                      Optional<PromiseStream<Future<Void>>> addActor) {
-	if (conf.logSystemType == LogSystemType::empty)
-		return Reference<ILogSystem>();
-	else if (conf.logSystemType == LogSystemType::tagPartitioned)
-		return TagPartitionedLogSystem::fromLogSystemConfig(
-		    dbgid, locality, conf, excludeRemote, useRecoveredAt, addActor);
-	else
-		throw internal_error();
-}
-
-Reference<ILogSystem> ILogSystem::fromOldLogSystemConfig(UID const& dbgid,
-                                                         struct LocalityData const& locality,
-                                                         struct LogSystemConfig const& conf) {
-	if (conf.logSystemType == LogSystemType::empty)
-		return Reference<ILogSystem>();
-	else if (conf.logSystemType == LogSystemType::tagPartitioned)
-		return TagPartitionedLogSystem::fromOldLogSystemConfig(dbgid, locality, conf);
-	else
-		throw internal_error();
-}
-
-Reference<ILogSystem> ILogSystem::fromServerDBInfo(UID const& dbgid,
-                                                   ServerDBInfo const& dbInfo,
-                                                   bool useRecoveredAt,
-                                                   Optional<PromiseStream<Future<Void>>> addActor) {
-	return fromLogSystemConfig(dbgid, dbInfo.myLocality, dbInfo.logSystemConfig, false, useRecoveredAt, addActor);
-}
-
 std::string TagPartitionedLogSystem::describe() const {
 	std::string result;
 	for (int i = 0; i < tLogs.size(); i++) {
@@ -272,9 +230,6 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromLogSystemConfig(UID const& db
 
 	for (const auto& oldTlogConf : lsConf.oldTLogs) {
 		logSystem->oldLogData.emplace_back(oldTlogConf);
-		//TraceEvent("BWFromLSConf")
-		//    .detail("Epoch", logSystem->oldLogData.back().epoch)
-		//    .detail("Version", logSystem->oldLogData.back().epochEnd);
 	}
 
 	logSystem->logSystemType = lsConf.logSystemType;
@@ -297,7 +252,6 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromOldLogSystemConfig(UID const&
 		}
 		logSystem->logRouterTags = lsConf.oldTLogs[0].logRouterTags;
 		logSystem->txsTags = lsConf.oldTLogs[0].txsTags;
-		// logSystem->epochEnd = lsConf.oldTLogs[0].epochEnd;
 
 		for (int i = 1; i < lsConf.oldTLogs.size(); i++) {
 			logSystem->oldLogData.emplace_back(lsConf.oldTLogs[i]);

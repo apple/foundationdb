@@ -65,6 +65,9 @@ struct ServerDBInfo {
 	int64_t infoGeneration;
 	ConfigBroadcastFollowerInterface configBroadcaster;
 
+	// Flag that checks if in the test environtment.
+	bool isTestEnvironment = false;
+
 	ServerDBInfo()
 	  : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
 

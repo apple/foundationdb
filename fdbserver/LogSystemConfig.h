@@ -176,11 +176,18 @@ struct OldTLogConf {
 };
 
 enum class LogSystemType {
-	empty = 0, // Never used.
-	tagPartitioned = 2, // each TLog is primary for a partition of tags and is secondary for any arbitrary tag.
-	teamPartitioned = 3, // TLogs are logically partitoned by TLogGroups while each TLogGroup is responsible for
+	// Used as the "0" value of LogSystem
+	empty = 0,
+	// each TLog is primary for a partition of tags and is secondary for any arbitrary tag.
+	tagPartitioned = 2,
+	// TLogs are logically partitoned by TLogGroups while each TLogGroup is responsible for
 	// a set of storage shard, e.e., key range. Each TLog is a bed of slots for TLogGroups, i.e.,
 	// contains an arbitrary number of TLogGroup member.
+	teamPartitioned = 3,
+	// A fake LogSystem used for testing
+	fake = 65535,
+	// A fake LogSystem that returns ptxn::test::FakePeekCursor when peeking
+	fake_FakePeekCursor
 };
 
 struct LogSystemConfig {
@@ -199,8 +206,8 @@ struct LogSystemConfig {
 	LogEpoch oldestBackupEpoch;
 
 	LogSystemConfig(LogEpoch e = 0)
-	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false),
-	    epoch(e), oldestBackupEpoch(e) {}
+	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),
+	    oldestBackupEpoch(e) {}
 
 	std::string toString() const;
 
@@ -251,4 +258,4 @@ void LogSystemConfig::serialize(Ar& ar) {
 	           oldestBackupEpoch);
 }
 
-#endif 	// FDBSERVER_LOGSYSTEMCONFIG_H
+#endif // FDBSERVER_LOGSYSTEMCONFIG_H
