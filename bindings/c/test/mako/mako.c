@@ -1331,7 +1331,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fdb_create_database(args->cluster_file, &process.database);
 #endif
 	if (args->disable_ryw) {
-		fdb_database_set_option(process.database, FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t *) NULL, 0);
+		fdb_database_set_option(process.database, FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
 	}
 	fprintf(debugme, "DEBUG: creating %d worker threads\n", args->num_threads);
 	worker_threads = (pthread_t*)calloc(sizeof(pthread_t), args->num_threads);
@@ -1656,7 +1656,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
 			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			                                    { "version", no_argument, NULL, ARG_VERSION },
-												{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
+			                                    { "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			                                    { NULL, 0, NULL, 0 }
 		};
 		idx = 0;
