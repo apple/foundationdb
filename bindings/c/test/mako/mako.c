@@ -1330,7 +1330,9 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 #else /* >= 610 */
 	fdb_create_database(args->cluster_file, &process.database);
 #endif
-
+	if (args->disable_ryw) {
+		fdb_database_set_option(process.database, FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t *) NULL, 0);
+	}
 	fprintf(debugme, "DEBUG: creating %d worker threads\n", args->num_threads);
 	worker_threads = (pthread_t*)calloc(sizeof(pthread_t), args->num_threads);
 	if (!worker_threads) {
@@ -1444,6 +1446,7 @@ int init_args(mako_args_t* args) {
 	for (i = 0; i < MAX_OP; i++) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
+	args->disable_ryw = 0;
 	return 0;
 }
 
@@ -1653,6 +1656,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
 			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			                                    { "version", no_argument, NULL, ARG_VERSION },
+												{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			                                    { NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1800,14 +1804,16 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 				args->txntagging = 1000;
 			}
 			break;
-		case ARG_TXNTAGGINGPREFIX: {
+		case ARG_TXNTAGGINGPREFIX:
 			if (strlen(optarg) > TAGPREFIXLENGTH_MAX) {
 				fprintf(stderr, "Error: the length of txntagging_prefix is larger than %d\n", TAGPREFIXLENGTH_MAX);
 				exit(0);
 			}
 			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
 			break;
-		}
+		case ARG_DISABLE_RYW:
+			args->disable_ryw = 1;
+			break;
 		}
 	}
 
