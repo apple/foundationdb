@@ -49,6 +49,7 @@ enum class ConfigurationResult {
 	UNKNOWN_OPTION,
 	INCOMPLETE_CONFIGURATION,
 	INVALID_CONFIGURATION,
+	STORAGE_MIGRATION_DISABLED,
 	DATABASE_ALREADY_CREATED,
 	DATABASE_CREATED,
 	DATABASE_UNAVAILABLE,
@@ -61,7 +62,6 @@ enum class ConfigurationResult {
 	DCID_MISSING,
 	LOCKED_NOT_NEW,
 	SUCCESS_WARN_PPW_GRADUAL,
-	SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE,
 	SUCCESS,
 };
 
@@ -569,11 +569,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 					if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
 					    newConfig.storageMigrationType == StorageMigrationType::DISABLED) {
-						warnChangeStorageNoMigrate = true;
-					} else if ((newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
-					            newConfig.perpetualStorageWiggleSpeed == 0) ||
-					           (newConfig.perpetualStorageWiggleSpeed > 0 &&
-					            newConfig.storageMigrationType == StorageMigrationType::DISABLED)) {
+						return ConfigurationResult::STORAGE_MIGRATION_DISABLED;
+					} else if (newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
+					           newConfig.perpetualStorageWiggleSpeed == 0) {
 						warnPPWGradual = true;
 					}
 				}
@@ -636,8 +634,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 	if (warnPPWGradual) {
 		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
-	} else if (warnChangeStorageNoMigrate) {
-		return ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE;
 	} else {
 		return ConfigurationResult::SUCCESS;
 	}
