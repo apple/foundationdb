@@ -4341,6 +4341,7 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key
 	                    // case where this key is being relocated. But 'src' is the canonical location until the move is
 	                    // finished, because it could be cancelled at any time.
 	decodeKeyServersValue(serverTagResult, serverUids[0].value, src, ignore);
+	std::cout << "src: " << describe(src) << ", dest: " << describe(ignore) << std::endl;
 	Optional<vector<StorageServerInterface>> serverInterfaces =
 	    wait(transactionalGetServerInterfaces(ver, cx, info, src, options.readTags));
 
