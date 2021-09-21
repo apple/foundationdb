@@ -219,6 +219,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	double testDuration;
 	int additionalDBs;
 	bool allowDescriptorChange;
+	bool allowTestStorageMigration;
 	std::vector<Future<Void>> clients;
 	bool allowStorageMigrationTypeChange;
 	PerfIntCounter retries;
@@ -278,7 +279,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			state int i;
 			loop {
 				state bool pass = true;
-				state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+				state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 
 				for (i = 0; i < storageServers.size(); i++) {
 					// Check that each storage server has the correct key value store type
