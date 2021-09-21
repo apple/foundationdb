@@ -1755,6 +1755,9 @@ void checkTestConf(const char* testFile, TestConfig* testConfig) {
 		if (attrib == "disableTss") {
 			testConfig->disableTss = strcmp(value.c_str(), "true") == 0;
 		}
+		if (attrib == "extraMachineCountDC") {
+			testConfig->extraMachineCountDC = std::stoi(value);
+		}
 	}
 
 	ifs.close();
