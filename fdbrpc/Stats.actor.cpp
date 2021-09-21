@@ -99,6 +99,8 @@ ACTOR Future<Void> traceCounters(std::string traceEventName,
 	for (ICounter* c : counters->counters)
 		c->resetInterval();
 
+	state Reference<EventCacheHolder> tempEventHolder = makeReference<EventCacheHolder>(trackLatestName);
+
 	state double last_interval = now();
 
 	loop {
@@ -109,7 +111,7 @@ ACTOR Future<Void> traceCounters(std::string traceEventName,
 		decorator(te);
 
 		if (!trackLatestName.empty()) {
-			te.trackLatest(trackLatestName);
+			te.trackLatest(tempEventHolder->trackingKey);
 		}
 
 		last_interval = now();
