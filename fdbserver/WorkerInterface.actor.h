@@ -108,6 +108,11 @@ struct InitializePtxnTLogRequest {
 	}
 };
 
+namespace test {
+	struct FakeLogSystem;
+	struct FakePeekCursor;
+};
+
 } // namespace ptxn
 
 struct WorkerInterface {
@@ -516,7 +521,7 @@ struct InitializeTLogRequest {
 	Version knownCommittedVersion;
 	Version startVersion;
 	Version recoverAt; // This log generation need to store [startVersion, recoverAt] either from old disk queue or
-					   // other TLogs.
+	                   // other TLogs.
 	LogEpoch epoch;
 	std::vector<Tag> recoverTags; // The tags we need to recover for the above version range.
 	std::vector<Tag> allTags;
@@ -938,7 +943,7 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-struct MockLogSystem;
+
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
@@ -947,9 +952,6 @@ ACTOR Future<Void> storageServer(
     ReplyPromise<InitializeStorageReply> recruitReply,
     Reference<AsyncVar<ServerDBInfo>> db,
     std::string folder,
-    // Only applicable when logSystemType is mock.
-    // This has to be a shared_ptr rather than unique_ptr or Reference because MockLogSystem is only forward declared.
-    std::shared_ptr<MockLogSystem> mockLogSystem = nullptr,
     // Storage team id of a ptxn storage server
     Optional<ptxn::StorageTeamID> storageTeamId = Optional<ptxn::StorageTeamID>());
 ACTOR Future<Void> storageServer(

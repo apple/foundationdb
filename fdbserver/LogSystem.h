@@ -44,6 +44,9 @@
 struct DBCoreState;
 struct TLogSet;
 struct CoreTLogSet;
+struct RecruitFromConfigurationReply;
+struct RecruitRemoteFromConfigurationReply;
+struct InitializeBackupReply;
 
 struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	double lastReset;

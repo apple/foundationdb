@@ -19,6 +19,12 @@
  */
 
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/ptxn/test/FakeLogSystem.h"
+#include "fdbserver/TagPartitionedLogSystem.actor.h"
+
+#ifndef __INTEL_COMPILER
+#pragma region LogSet
+#endif
 
 std::string LogSet::logRouterString() {
 	std::string result;
@@ -268,6 +274,14 @@ void LogSet::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, 
 	//	.detail("Included", alsoServers.size()).detail("Duration", timer() - t);
 }
 
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
+
+#ifndef __INTEL_COMPILER
+#pragma region LogPushData
+#endif
+
 void LogPushData::addTxsTag() {
 	if (logSystem->getTLogVersion() >= TLogVersion::V4) {
 		next_message_tags.push_back(logSystem->getRandomTxsTag());
@@ -354,3 +368,75 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 	*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
 	return true;
 }
+
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
+
+#ifndef __INTEL_COMPILER
+#pragma region ILogSystem
+#endif
+
+Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem,
+                                            UID const& dbgid,
+                                            DBCoreState const& oldState,
+                                            FutureStream<TLogRejoinRequest> const& rejoins,
+                                            LocalityData const& locality,
+                                            bool* forceRecovery) {
+	return TagPartitionedLogSystem::recoverAndEndEpoch(outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery);
+}
+
+Reference<ILogSystem> ILogSystem::fromLogSystemConfig(UID const& dbgid,
+                                                      struct LocalityData const& locality,
+                                                      struct LogSystemConfig const& conf,
+                                                      bool excludeRemote,
+                                                      bool useRecoveredAt,
+                                                      Optional<PromiseStream<Future<Void>>> addActor) {
+	switch (conf.logSystemType) {
+	case LogSystemType::empty:
+		TraceEvent(SevDebug, "ILogSystem::fromLogSystemConfig").detail("LogSystemType", "empty");
+		return Reference<ILogSystem>();
+	case LogSystemType::tagPartitioned:
+		TraceEvent(SevDebug, "ILogSystem::fromLogSystemConfig").detail("LogSystemType", "empty");
+		return TagPartitionedLogSystem::fromLogSystemConfig(
+		    dbgid, locality, conf, excludeRemote, useRecoveredAt, addActor);
+	case LogSystemType::teamPartitioned:
+		throw internal_error_msg("Not supported yet");
+	case LogSystemType::fake:
+		return makeReference<ptxn::test::FakeLogSystem>(dbgid);
+	case LogSystemType::fake_FakePeekCursor:
+		return makeReference<ptxn::test::FakeLogSystem_CustomPeekCursor>(dbgid);
+	default:
+		throw internal_error();
+	}
+}
+
+Reference<ILogSystem> ILogSystem::fromOldLogSystemConfig(UID const& dbgid,
+                                                         struct LocalityData const& locality,
+                                                         struct LogSystemConfig const& conf) {
+	switch (conf.logSystemType) {
+	case LogSystemType::empty:
+		return Reference<ILogSystem>();
+	case LogSystemType::tagPartitioned:
+		return TagPartitionedLogSystem::fromOldLogSystemConfig(dbgid, locality, conf);
+	case LogSystemType::teamPartitioned:
+		throw internal_error_msg("Not supported yet");
+	case LogSystemType::fake:
+		return makeReference<ptxn::test::FakeLogSystem>(dbgid);
+	case LogSystemType::fake_FakePeekCursor:
+		return makeReference<ptxn::test::FakeLogSystem_CustomPeekCursor>(dbgid);
+	default:
+		throw internal_error();
+	}
+}
+
+Reference<ILogSystem> ILogSystem::fromServerDBInfo(UID const& dbgid,
+                                                   ServerDBInfo const& dbInfo,
+                                                   bool useRecoveredAt,
+                                                   Optional<PromiseStream<Future<Void>>> addActor) {
+	return fromLogSystemConfig(dbgid, dbInfo.myLocality, dbInfo.logSystemConfig, false, useRecoveredAt, addActor);
+}
+
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif

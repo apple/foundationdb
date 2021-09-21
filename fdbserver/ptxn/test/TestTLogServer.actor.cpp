@@ -220,7 +220,6 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 		                                storageInitializations.back().reply,
 		                                dbInfo,
 		                                folder,
-		                                nullptr,
 		                                pContext->storageTeamIDs[i]));
 		initializeStorage.send(storageInitializations.back());
 		printTiming << "Recruited storage server " << i << " : " << recruited.id().shortString() << "\n";

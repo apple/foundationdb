@@ -23,92 +23,124 @@
 
 #pragma once
 
+#include <unordered_map>
+
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/ptxn/test/FakePeekCursor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+struct InitializeBackupReply;
+struct RecruitFromConfigurationReply;
+struct RecruitRemoteFromConfigurationReply;
 
 namespace ptxn::test {
 
-struct FakeLogSystem : ILogSystem, ReferenceCounted<FakeLogSystem> {
-	Reference<ILogSystem::IPeekCursor> cursor;
+class FakeLogSystem : public ::ILogSystem, public ReferenceCounted<FakeLogSystem> {
 
-	FakeLogSystem();
+protected:
+	// The debug ID for the object that created the log system
+	const UID creatorDebugID;
 
-	FakeLogSystem(const FakeLogSystem&);
-	FakeLogSystem& operator=(const FakeLogSystem&);
+public:
+	FakeLogSystem(const UID& creatorDebugID_ = UID());
 
 	FakeLogSystem(const FakeLogSystem&&) = delete;
 	FakeLogSystem& operator=(const FakeLogSystem&&) = delete;
 
-	void addref() final;
-	void delref() final;
-	std::string describe() const final;
-	UID getDebugID() const final;
-	void toCoreState(DBCoreState& coreState) final;
-	bool remoteStorageRecovered() final;
-	Future<Void> onCoreStateChanged() final;
-	void coreStateWritten(const DBCoreState& newState) final;
-	Future<Void> onError() final;
-	Future<Version> push(Version prevVersion,
-	                     Version version,
-	                     Version knownCommittedVersion,
-	                     Version minKnownCommittedVersion,
-	                     struct LogPushData& data,
-	                     const SpanID& spanContext,
-	                     Optional<UID> debugID,
-						 Optional<ptxn::TLogGroupID> tLogGroup) final;
-	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) final;
-	Reference<IPeekCursor> peek(UID dbgid,
-	                            Version begin,
-	                            Optional<Version> end,
-	                            std::vector<Tag> tags,
-	                            bool parallelGetMore) final;
-	Reference<IPeekCursor> peekSingle(UID dbgid,
-	                                  Version begin,
-	                                  Tag tag,
-	                                  Optional<ptxn::StorageTeamID> storageTeam,
-	                                  std::vector<std::pair<Version, Tag>> history) final;
-	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) final;
-	Reference<IPeekCursor> peekTxs(UID dbgid,
-	                               Version begin,
-	                               int8_t peekLocality,
-	                               Version localEnd,
-	                               bool canDiscardPopped) final;
-	Future<Version> getTxsPoppedVersion() final;
-	Version getKnownCommittedVersion() final;
-	Future<Void> onKnownCommittedVersionChange() final;
-	void popTxs(Version upTo, int8_t popLocality) final;
-	void pop(Version upTo, Tag tag, Version knownCommittedVersion, int8_t popLocality) final;
-	Future<Void> confirmEpochLive(Optional<UID> debugID) final;
-	Future<Void> endEpoch() final;
-	Version getEnd() const final;
-	Version getBackupStartVersion() const final;
-	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const final;
-	Future<Reference<ILogSystem>> newEpoch(const RecruitFromConfigurationReply& recr,
-	                                       const Future<struct RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
-	                                       const DatabaseConfiguration& config,
-	                                       LogEpoch recoveryCount,
-	                                       int8_t primaryLocality,
-	                                       int8_t remoteLocality,
-	                                       const vector<Tag>& allTags,
-	                                       const Reference<AsyncVar<bool>>& recruitmentStalled,
-										   TLogGroupCollectionRef tLogGroupCollection) final;
-	LogSystemConfig getLogSystemConfig() const final;
-	Standalone<StringRef> getLogsValue() const final;
-	Future<Void> onLogSystemConfigChange() final;
-	void getPushLocations(VectorRef<Tag> tags, vector<int>& locations, bool allLocations) const final;
-	bool hasRemoteLogs() const final;
-	Tag getRandomRouterTag() const final;
-	int getLogRouterTags() const final;
-	Tag getRandomTxsTag() const final;
-	TLogVersion getTLogVersion() const final;
-	void stopRejoins() final;
-	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const final;
-	bool hasPseudoLocality(int8_t locality) const final;
-	Version popPseudoLocalityTag(Tag tag, Version upTo) final;
-	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) final;
-	bool removeBackupWorker(const BackupWorkerDoneRequest& req) final;
-	LogEpoch getOldestBackupEpoch() const final;
-	void setOldestBackupEpoch(LogEpoch epoch) final;
+	virtual void addref() override;
+	virtual void delref() override;
+	virtual std::string describe() const override;
+	virtual UID getDebugID() const override;
+	virtual void toCoreState(DBCoreState& coreState) override;
+	virtual bool remoteStorageRecovered() override;
+	virtual Future<Void> onCoreStateChanged() override;
+	virtual void coreStateWritten(const DBCoreState& newState) override;
+	virtual Future<Void> onError() override;
+	virtual Future<Version> push(Version prevVersion,
+	                             Version version,
+	                             Version knownCommittedVersion,
+	                             Version minKnownCommittedVersion,
+	                             struct LogPushData& data,
+	                             const SpanID& spanContext,
+	                             Optional<UID> debugID,
+	                             Optional<ptxn::TLogGroupID> tLogGroup) override;
+	virtual Reference<IPeekCursor> peek(UID dbgid,
+	                                    Version begin,
+	                                    Optional<Version> end,
+	                                    Tag tag,
+	                                    bool parallelGetMore) override;
+	virtual Reference<IPeekCursor> peek(UID dbgid,
+	                                    Version begin,
+	                                    Optional<Version> end,
+	                                    std::vector<Tag> tags,
+	                                    bool parallelGetMore) override;
+	virtual Reference<IPeekCursor> peekSingle(UID dbgid,
+	                                          Version begin,
+	                                          Tag tag,
+	                                          Optional<ptxn::StorageTeamID> storageTeam,
+	                                          std::vector<std::pair<Version, Tag>> history) override;
+	virtual Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) override;
+	virtual Reference<IPeekCursor> peekTxs(UID dbgid,
+	                                       Version begin,
+	                                       int8_t peekLocality,
+	                                       Version localEnd,
+	                                       bool canDiscardPopped) override;
+	virtual Future<Version> getTxsPoppedVersion() override;
+	virtual Version getKnownCommittedVersion() override;
+	virtual Future<Void> onKnownCommittedVersionChange() override;
+	virtual void popTxs(Version upTo, int8_t popLocality) override;
+	virtual void pop(Version upTo, Tag tag, Version knownCommittedVersion, int8_t popLocality) override;
+	virtual Future<Void> confirmEpochLive(Optional<UID> debugID) override;
+	virtual Future<Void> endEpoch() override;
+	virtual Version getEnd() const override;
+	virtual Version getBackupStartVersion() const override;
+	virtual std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const override;
+	virtual Future<Reference<ILogSystem>> newEpoch(const RecruitFromConfigurationReply& recr,
+	                                               const Future<::RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
+	                                               const DatabaseConfiguration& config,
+	                                               LogEpoch recoveryCount,
+	                                               int8_t primaryLocality,
+	                                               int8_t remoteLocality,
+	                                               const vector<Tag>& allTags,
+	                                               const Reference<AsyncVar<bool>>& recruitmentStalled,
+	                                               TLogGroupCollectionRef tLogGroupCollection) override;
+	virtual LogSystemConfig getLogSystemConfig() const override;
+	virtual Standalone<StringRef> getLogsValue() const override;
+	virtual Future<Void> onLogSystemConfigChange() override;
+	virtual void getPushLocations(VectorRef<Tag> tags, vector<int>& locations, bool allLocations) const override;
+	virtual bool hasRemoteLogs() const override;
+	virtual Tag getRandomRouterTag() const override;
+	virtual int getLogRouterTags() const override;
+	virtual Tag getRandomTxsTag() const override;
+	virtual TLogVersion getTLogVersion() const override;
+	virtual void stopRejoins() override;
+	virtual Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const override;
+	virtual bool hasPseudoLocality(int8_t locality) const override;
+	virtual Version popPseudoLocalityTag(Tag tag, Version upTo) override;
+	virtual void setBackupWorkers(const std::vector<::InitializeBackupReply>& replies) override;
+	virtual bool removeBackupWorker(const BackupWorkerDoneRequest& req) override;
+	virtual LogEpoch getOldestBackupEpoch() const override;
+	virtual void setOldestBackupEpoch(LogEpoch epoch) override;
+};
+
+// FakeLogSystem that returns a FakePeekCursor binding to an id, this allows the cursor can be manipulated
+// outside the scope the LogSystem is created.
+class FakeLogSystem_CustomPeekCursor : public FakeLogSystem {
+private:
+	static std::unordered_map<UID, Reference<::ILogSystem::IPeekCursor>> cursorIDMapping;
+
+public:
+	FakeLogSystem_CustomPeekCursor(const UID& creatorDebugID_ = UID());
+
+	virtual Reference<::ILogSystem::IPeekCursor> peekSingle(UID dbgid,
+	                                                        Version begin,
+	                                                        Tag tag,
+	                                                        Optional<ptxn::StorageTeamID> storageTeam,
+	                                                        std::vector<std::pair<Version, Tag>> history) override;
+
+	// Get the cursor by its ID
+	// Any LogSystems that are created by the
+	static Reference<::ILogSystem::IPeekCursor>& getCursorByID(const UID& id);
 };
 
 } // namespace ptxn::test
