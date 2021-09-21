@@ -98,6 +98,8 @@ struct StorageQueueInfo {
 	double busiestReadTagFractionalBusyness = 0, busiestWriteTagFractionalBusyness = 0;
 	double busiestReadTagRate = 0, busiestWriteTagRate = 0;
 
+	Reference<EventCacheHolder> busiestWriteTagEventHolder;
+
 	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
 	uint64_t totalWriteCosts = 0;
@@ -108,7 +110,9 @@ struct StorageQueueInfo {
 	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    limitReason(limitReason_t::unlimited) {
+	    limitReason(limitReason_t::unlimited),
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag"));
+	{
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
@@ -580,8 +584,6 @@ struct RatekeeperData {
 
 	bool autoThrottlingEnabled;
 
-	std::queue<Reference<EventCacheHolder>> storageQueueInfoHolder;
-
 	RatekeeperData(UID id, Database db)
 	  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
@@ -899,9 +901,6 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 	}
 	double elapsed = now() - self->lastBusiestCommitTagPick;
 	// for each SS, select the busiest commit tag from ssTrTagCommitCost
-	while(!self->storageQueueInfoHolder.empty()){
-		self->storageQueueInfoHolder.pop();
-	}
 	for (auto it = self->storageQueueInfo.begin(); it != self->storageQueueInfo.end(); ++it) {
 		it->value.busiestWriteTag.reset();
 		TransactionTag busiestTag;
@@ -924,8 +923,6 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 			it->value.busiestWriteTagRate = maxRate;
 		}
 
-		auto tempEventCacheHolder = makeReference<EventCacheHolder>(it->key.toString() + "/BusiestWriteTag");
-		self->storageQueueInfoHolder.emplace(tempEventCacheHolder);
 		TraceEvent("BusiestWriteTag", it->key)
 		    .detail("Elapsed", elapsed)
 		    .detail("Tag", printable(busiestTag))
@@ -933,7 +930,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 		    .detail("TagCost", maxCost.getCostSum())
 		    .detail("TotalCost", it->value.totalWriteCosts)
 		    .detail("Reported", it->value.busiestWriteTag.present())
-		    .trackLatest(tempEventCacheHolder.getPtr()->trackingKey);
+		    .trackLatest(it->value.busiestWriteTagEventHolder->trackingKey);
 
 		// reset statistics
 		it->value.tagCostEst.clear();
