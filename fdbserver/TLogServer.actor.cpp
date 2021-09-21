@@ -26,6 +26,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
@@ -225,6 +226,8 @@ static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("Tag
 static const KeyRange persistTagMessageRefsKeys = prefixRange(LiteralStringRef("TagMsgRef/"));
 static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
 
+static const KeyRef persistClusterIdKey = LiteralStringRef("clusterId");
+
 static Key persistTagMessagesKey(UID id, Tag tag, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistTagMessagesKeys.begin);
@@ -312,6 +315,7 @@ struct TLogData : NonCopyable {
 	Deque<UID> spillOrder;
 	std::map<UID, Reference<struct LogData>> id_data;
 
+	UID clusterId;
 	UID dbgid;
 	UID workerID;
 
@@ -2807,6 +2811,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	wait(storage->init());
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
+	state Future<Optional<Value>> fClusterId = storage->readValue(persistClusterIdKey);
 	state Future<RangeResult> fVers = storage->readRange(persistCurrentVersionKeys);
 	state Future<RangeResult> fKnownCommitted = storage->readRange(persistKnownCommittedVersionKeys);
 	state Future<RangeResult> fLocality = storage->readRange(persistLocalityKeys);
@@ -2818,7 +2823,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 	// FIXME: metadata in queue?
 
-	wait(waitForAll(std::vector{ fFormat, fRecoveryLocation }));
+	wait(waitForAll(std::vector{ fFormat, fRecoveryLocation, fClusterId }));
 	wait(waitForAll(std::vector{ fVers,
 	                             fKnownCommitted,
 	                             fLocality,
@@ -2827,6 +2832,10 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	                             fRecoverCounts,
 	                             fProtocolVersions,
 	                             fTLogSpillTypes }));
+
+	if (fClusterId.get().present()) {
+		self->clusterId = BinaryReader::fromStringRef<UID>(fClusterId.get().get(), Unversioned());
+	}
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains(fFormat.get().get())) {
 		// FIXME: remove when we no longer need to test upgrades from 4.X releases
@@ -3334,12 +3343,29 @@ ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Referen
 	return Void();
 }
 
+ACTOR Future<UID> getClusterId(TLogData* self) {
+	state Transaction tr(self->cx);
+	loop {
+		try {
+			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
+			if (clusterId.present()) {
+				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
+			} else {
+				return UID();
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // New tLog (if !recoverFrom.size()) or restore from network
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
+                        Optional<UID> clusterId,
                         UID tlogId,
                         UID workerID,
                         bool restoreFromDisk,
@@ -3353,48 +3379,90 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 	TraceEvent("SharedTlog", tlogId).log();
 	try {
-		if (restoreFromDisk) {
-			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
-		} else {
-			wait(ioTimeoutError(checkEmptyQueue(&self) && checkRecovered(&self),
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
-		}
+		try {
+			if (restoreFromDisk) {
+				wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
+			} else {
+				wait(ioTimeoutError(checkEmptyQueue(&self) && checkRecovered(&self),
+				                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			}
 
-		// Disk errors need a chance to kill this actor.
-		wait(delay(0.000001));
+			// Disk errors need a chance to kill this actor.
+			wait(delay(0.000001));
 
-		if (recovered.canBeSet())
-			recovered.send(Void());
+			if (recovered.canBeSet())
+				recovered.send(Void());
 
-		self.sharedActors.send(commitQueue(&self));
-		self.sharedActors.send(updateStorageLoop(&self));
-		self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
-		state Future<Void> activeSharedChange = Void();
+			self.sharedActors.send(commitQueue(&self));
+			self.sharedActors.send(updateStorageLoop(&self));
+			self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
+			state Future<Void> activeSharedChange = Void();
 
-		loop {
-			choose {
-				when(InitializeTLogRequest req = waitNext(tlogRequests.getFuture())) {
-					if (!self.tlogCache.exists(req.recruitmentID)) {
-						self.tlogCache.set(req.recruitmentID, req.reply.getFuture());
-						self.sharedActors.send(
-						    self.tlogCache.removeOnReady(req.recruitmentID, tLogStart(&self, req, locality)));
-					} else {
-						forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
+			loop {
+				choose {
+					when(state InitializeTLogRequest req = waitNext(tlogRequests.getFuture())) {
+						ASSERT(req.clusterId.isValid());
+						// Disallow recruitment of this TLog into a new
+						// cluster. To prevent accidental data loss, an
+						// operator must first manually clear the data files on
+						// the TLog before adding it to a new cluster.
+						if (self.clusterId.isValid() && self.clusterId != req.clusterId) {
+							throw worker_removed();
+						}
+
+						if (!self.clusterId.isValid()) {
+							self.clusterId = req.clusterId;
+							// Will let commit loop durably write the cluster ID.
+							self.persistentData->set(
+							    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(req.clusterId, Unversioned())));
+						}
+
+						if (!self.tlogCache.exists(req.recruitmentID)) {
+							self.tlogCache.set(req.recruitmentID, req.reply.getFuture());
+							self.sharedActors.send(
+							    self.tlogCache.removeOnReady(req.recruitmentID, tLogStart(&self, req, locality)));
+						} else {
+							forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
+						}
 					}
-				}
-				when(wait(error)) { throw internal_error(); }
-				when(wait(activeSharedChange)) {
-					if (activeSharedTLog->get() == tlogId) {
-						TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
-						self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
-					} else {
-						stopAllTLogs(&self, tlogId);
-						TraceEvent("SharedTLogQueueSpilling", self.dbgid).detail("NowActive", activeSharedTLog->get());
-						self.sharedActors.send(startSpillingInTenSeconds(&self, tlogId, activeSharedTLog));
+					when(wait(error)) { throw internal_error(); }
+					when(wait(activeSharedChange)) {
+						if (activeSharedTLog->get() == tlogId) {
+							TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
+							self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
+						} else {
+							stopAllTLogs(&self, tlogId);
+							TraceEvent("SharedTLogQueueSpilling", self.dbgid)
+							    .detail("NowActive", activeSharedTLog->get());
+							self.sharedActors.send(startSpillingInTenSeconds(&self, tlogId, activeSharedTLog));
+						}
+						activeSharedChange = activeSharedTLog->onChange();
 					}
-					activeSharedChange = activeSharedTLog->onChange();
 				}
 			}
+		} catch (Error& e) {
+			if (e.code() != error_code_worker_removed) {
+				throw;
+			}
+			// It's possible to have an invalid cluster ID when restoring from
+			// disk if this is an upgrade from an FDB version that did not
+			// support cluster IDs.
+			ASSERT(self.clusterId.isValid() || (!self.clusterId.isValid() && restoreFromDisk));
+			state UID fetchedClusterId;
+			if (!clusterId.present()) {
+				// TODO: This hangs sometimes...
+				UID tmpClusterId = wait(getClusterId(&self));
+				fetchedClusterId = tmpClusterId;
+			} else {
+				fetchedClusterId = clusterId.get();
+			}
+			if (!fetchedClusterId.isValid() || fetchedClusterId == self.clusterId) {
+				throw worker_removed();
+			}
+			// Exclude the TLog to prevent its data files from being deleted.
+			NetworkAddress address = g_network->getLocalAddress();
+			wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+			throw invalid_cluster_id();
 		}
 	} catch (Error& e) {
 		self.terminated.send(Void());

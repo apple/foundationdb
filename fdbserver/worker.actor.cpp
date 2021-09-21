@@ -1538,6 +1538,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				           locality,
 				           !logData.actor.isValid() || logData.actor.isReady() ? logData.requests
 				                                                               : PromiseStream<InitializeTLogRequest>(),
+				           Optional<UID>(),
 				           s.storeID,
 				           interf.id(),
 				           true,
@@ -1875,6 +1876,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               dbInfo,
 					                               locality,
 					                               logData.requests,
+					                               req.clusterId,
 					                               logId,
 					                               interf.id(),
 					                               false,
@@ -1903,6 +1905,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                 runningStorages.end(),
 				                 [&req](const auto& p) { return p.second != req.storeType; }) ||
 				     req.seedTag != invalidTag)) {
+					ASSERT(req.clusterId.isValid());
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 					bool isTss = req.tssPairIDAndVersion.present();
@@ -1946,6 +1949,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
+					                               req.clusterId,
 					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 					                               storageReady,
 					                               dbInfo,
