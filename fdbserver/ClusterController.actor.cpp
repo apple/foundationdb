@@ -3204,7 +3204,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				// for status tool
 				TraceEvent("RecruitedMasterWorker", cluster->id)
 				    .detail("Address", fNewMaster.get().get().address())
-				    .trackLatest(cluster->clusterControllerEventHolder->trackingKey);
+				    .trackLatest(cluster->recruitedMasterWorkerEventHolder->trackingKey);
 
 				iMaster = fNewMaster.get().get();
 
