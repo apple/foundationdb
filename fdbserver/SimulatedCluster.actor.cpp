@@ -1251,7 +1251,6 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 	machine_count += datacenters * testConfig.extraMachineCountDC;
 
-
 	// because we protect a majority of coordinators from being killed, it is better to run with low numbers of
 	// coordinators to prevent too many processes from being protected
 	coordinators = (testConfig.minimumRegions <= 1 && BUGGIFY)
@@ -1754,6 +1753,9 @@ void checkTestConf(const char* testFile, TestConfig* testConfig) {
 		}
 		if (attrib == "disableTss") {
 			testConfig->disableTss = strcmp(value.c_str(), "true") == 0;
+		}
+		if (attrib == "extraMachineCountDC") {
+			testConfig->extraMachineCountDC = std::stoi(value);
 		}
 	}
 

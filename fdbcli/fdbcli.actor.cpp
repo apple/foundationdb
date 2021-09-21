@@ -1135,7 +1135,6 @@ void printStatus(StatusObjectReader statusObj,
 					                       excludedServersArr.size());
 				}
 
-<<<<<<< HEAD
 				if (statusObjConfig.get("commit_proxies", intVal))
 					outputString += format("\n  Desired Commit Proxies - %d", intVal);
 
