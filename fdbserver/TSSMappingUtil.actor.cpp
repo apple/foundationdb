@@ -52,7 +52,7 @@ ACTOR Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerIn
 	return Void();
 }
 
-ACTOR Future<Void> removeTSSPairsFromCluster(Database cx, vector<std::pair<UID, UID>> pairsToRemove) {
+ACTOR Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 	loop {

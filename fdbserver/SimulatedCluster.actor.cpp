@@ -38,6 +38,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
@@ -533,10 +534,11 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				// SOMEDAY: test lower memory limits, without making them too small and causing the database to stop
 				// making progress
 				FlowTransport::createInstance(processClass == ProcessClass::TesterClass || runBackupAgents == AgentOnly,
-				                              1);
+				                              1,
+				                              WLTOKEN_RESERVED_COUNT);
 				Sim2FileSystem::newFileSystem();
 
-				vector<Future<Void>> futures;
+				std::vector<Future<Void>> futures;
 				for (int listenPort = port; listenPort < port + listenPerProcess; ++listenPort) {
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind(n, n));
@@ -997,7 +999,7 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 // Configures the system according to the given specifications in order to run
 // simulation, but with the additional consideration that it is meant to act
 // like a "rebooted" machine, mostly used for restarting tests.
-ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
+ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
                                           std::string baseFolder,
                                           int* pTesterCount,
                                           Optional<ClusterConnectionString>* pConnString,
@@ -1024,6 +1026,10 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 		}
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
+		auto tssModeStr = ini.GetValue("META", "tssMode");
+		if (tssModeStr != nullptr) {
+			g_simulator.tssMode = (ISimulator::TSSMode)atoi(tssModeStr);
+		}
 		bool enableExtraDB = (testConfig.extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (enableExtraDB) {
@@ -1752,7 +1758,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 // Configures the system according to the given specifications in order to run
 // simulation under the correct conditions
-void setupSimulatedSystem(vector<Future<Void>>* systemActors,
+void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           std::string baseFolder,
                           int* pTesterCount,
                           Optional<ClusterConnectionString>* pConnString,
@@ -1872,8 +1878,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	TEST(useIPv6); // Use IPv6
 	TEST(!useIPv6); // Use IPv4
 
-	vector<NetworkAddress> coordinatorAddresses;
-	vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
+	std::vector<NetworkAddress> coordinatorAddresses;
+	std::vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
 	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
 		int nonPrimaryDcs = dataCenters / 2;
@@ -2167,7 +2173,7 @@ ACTOR void setupAndRun(std::string dataFolder,
                        bool rebooting,
                        bool restoring,
                        std::string whitelistBinPaths) {
-	state vector<Future<Void>> systemActors;
+	state std::vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connFile;
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
@@ -2221,7 +2227,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           currentProtocolVersion),
 	    TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1);
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 	TEST(true); // Simulation start
 
 	try {

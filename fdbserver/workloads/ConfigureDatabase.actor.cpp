@@ -214,7 +214,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	double testDuration;
 	int additionalDBs;
 	bool allowDescriptorChange;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
 	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
@@ -232,7 +232,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
+	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
 	static inline uint64_t valueToUInt64(const StringRef& v) {
 		long long unsigned int x = 0;
@@ -246,11 +246,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	static Future<ConfigurationResult> IssueConfigurationChange(Database cx, const std::string& config, bool force) {
 		printf("Issuing configuration change: %s\n", config.c_str());
-		return changeConfig(cx, config, force);
+		return ManagementAPI::changeConfig(cx.getReference(), config, force);
 	}
 
 	ACTOR Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
-		wait(success(changeConfig(cx, "single", true)));
+		wait(success(ManagementAPI::changeConfig(cx.getReference(), "single", true)));
 		return Void();
 	}
 

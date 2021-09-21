@@ -40,9 +40,9 @@ uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValu
 int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue);
 double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue);
 bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
-vector<std::string> getOption(VectorRef<KeyValueRef> options,
-                              Key key,
-                              vector<std::string> defaultValue); // comma-separated strings
+std::vector<std::string> getOption(VectorRef<KeyValueRef> options,
+                                   Key key,
+                                   std::vector<std::string> defaultValue); // comma-separated strings
 bool hasOption(VectorRef<KeyValueRef> options, Key key);
 
 struct WorkloadContext {
@@ -72,7 +72,7 @@ struct TestWorkload : NonCopyable, WorkloadContext {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) = 0;
 	virtual Future<bool> check(Database const& cx) = 0;
-	virtual void getMetrics(vector<PerfMetric>& m) = 0;
+	virtual void getMetrics(std::vector<PerfMetric>& m) = 0;
 
 	virtual double getCheckTimeout() const { return 3000; }
 
@@ -127,12 +127,12 @@ struct WorkloadFactory : IWorkloadFactory {
 #define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory(#classname)
 
 struct DistributedTestResults {
-	vector<PerfMetric> metrics;
+	std::vector<PerfMetric> metrics;
 	int successes, failures;
 
 	DistributedTestResults() {}
 
-	DistributedTestResults(vector<PerfMetric> const& metrics, int successes, int failures)
+	DistributedTestResults(std::vector<PerfMetric> const& metrics, int successes, int failures)
 	  : metrics(metrics), successes(successes), failures(failures) {}
 
 	bool ok() const { return successes && !failures; }
@@ -208,7 +208,7 @@ public:
 
 ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
 
-void logMetrics(vector<PerfMetric> metrics);
+void logMetrics(std::vector<PerfMetric> metrics);
 
 ACTOR Future<Void> poisson(double* last, double meanInterval);
 ACTOR Future<Void> uniform(double* last, double meanInterval);

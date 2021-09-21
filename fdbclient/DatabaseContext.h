@@ -182,10 +182,10 @@ public:
 
 	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
 	bool getCachedLocations(const KeyRangeRef&,
-	                        vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
+	                        std::vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
 	                        int limit,
 	                        Reverse reverse);
-	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
+	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
 	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
 	void invalidateCache(const KeyRangeRef&);
 

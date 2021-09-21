@@ -47,11 +47,6 @@
 #include "flow/Histogram.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using std::make_pair;
-using std::max;
-using std::min;
-using std::pair;
-
 struct TLogQueueEntryRef {
 	UID id;
 	Version version;

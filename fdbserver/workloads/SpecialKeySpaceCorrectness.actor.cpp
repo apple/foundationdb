@@ -685,7 +685,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 				ASSERT(self->getRangeResultInOrder(result));
 				// check correctness of classType of each process
-				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				if (workers.size()) {
 					for (const auto& worker : workers) {
 						Key addr =
@@ -754,7 +754,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(!class_source_result.more && class_source_result.size() < CLIENT_KNOBS->TOO_MANY);
 				ASSERT(self->getRangeResultInOrder(class_source_result));
 				// check correctness of classType of each process
-				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				if (workers.size()) {
 					for (const auto& worker : workers) {
 						Key addr =
@@ -828,6 +828,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					// special_key_space_management_api_error_msg schema validation
 					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 					ASSERT(valueObj["command"].get_str() == "lock" && !valueObj["retriable"].get_bool());
+					break;
+				} else if (e.code() == error_code_database_locked) {
+					// Database is already locked. This can happen if a previous attempt
+					// failed with unknown_result.
 					break;
 				} else {
 					wait(tx->onError(e));
@@ -965,7 +969,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					boost::split(
 					    old_coordinators_processes, processes_key.get().toString(), [](char c) { return c == ','; });
 					// pick up one non-coordinator process if possible
-					vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+					std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 					TraceEvent(SevDebug, "CoordinatorsManualChange")
 					    .detail("OldCoordinators", describe(old_coordinators_processes))
 					    .detail("WorkerSize", workers.size());
