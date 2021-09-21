@@ -1354,7 +1354,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	limits->reasonMetric = limitReason;
 
 	if (deterministicRandom()->random01() < 0.1) {
-		std::string name = limits->rkUpdateEventCacheHolder.getPtr()->trackingKey;
+		const std::string& name = limits->rkUpdateEventCacheHolder.getPtr()->trackingKey;
 		TraceEvent(name.c_str(), self->id)
 		    .detail("TPSLimit", limits->tpsLimit)
 		    .detail("Reason", limitReason)
