@@ -685,6 +685,8 @@ public:
 
 		Optional<TagInfo> previousBusiestTag;
 
+		Reference<EventCacheHolder> transactionTagCounterHolder;
+
 		int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
 		void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
@@ -811,6 +813,8 @@ public:
 		}
 	} counters;
 
+	Reference<EventCacheHolder> storageServerEventHolder;
+
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi)
@@ -848,7 +852,10 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
-	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this) {
+	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this),
+	    storageServerEventHolder(makeReference<EventCacheHolder>(ssi.id().toString() + "/BusiestReadTag")) {
+		transactionTagCounter.transactionTagCounterHolder =
+		    makeReference<EventCacheHolder>(ssi.id().toString() + +"/StorageServerSourceTLogID");
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
