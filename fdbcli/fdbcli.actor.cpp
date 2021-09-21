@@ -632,7 +632,6 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 }
 
 // FIXME: Factor address parsing from coordinators, include, exclude
-
 ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool isClusterTLS) {
 	state StringRef setName;
 	StringRef nameTokenBegin = LiteralStringRef("description=");
