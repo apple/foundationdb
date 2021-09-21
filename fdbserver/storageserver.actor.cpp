@@ -332,27 +332,10 @@ public:
 	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
-struct TenantProperties {
-	enum class LockState {
-		UNLOCKED, // Regular access allowed
-		LOCKED, // Cannot read or write data
-		LOCKED_EMPTY // This tenant is treated as empty for reads
-	};
-
-	Key begin;
-
-	// This can only be set for tenants created implicitly for moving data between clusters.
-	// If set, the tenant will be span from begin to end rather than being prefixed by begin.
-	// In this case, the prefix will not be prepended to keys in a request.
-	Optional<Key> end;
-
-	LockState lockState;
-};
-
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
-	typedef VersionedMap<TenantName, TenantProperties> TenantMap;
-	typedef VersionedMap<KeyRef, TenantName> TenantIndex;
+	typedef VersionedMap<Standalone<StringRef>, Key> TenantMap;
+	typedef VersionedMap<KeyRef, StringRef> TenantIndex;
 
 private:
 	// versionedData contains sets and clears.
@@ -388,7 +371,7 @@ private:
 
 public:
 	TenantMap tenantMap;
-	TenantIndex tenantIndex;
+	TenantIndex lockedTenantsIndex;
 	bool allowDefaultTenant = true;
 
 	// Histograms
@@ -1255,10 +1238,53 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
+std::vector<KeyRef> checkTenant(StorageServer* data,
+                                Version version,
+                                TenantName const& tenantName,
+                                KeyRef begin,
+                                Optional<KeyRef> end = Optional<KeyRef>()) {
+	    .detail("Version", version)
+	    .detail("Name", tenantName)
+	    .detail("Begin", begin)
+	    .detail("End", end);
+
+	std::vector<KeyRef> lockedPrefixes;
+	if (tenantName.hasName()) {
+		auto view = data->tenantMap.at(version);
+		auto itr = view.find(StringRef(tenantName.getTenantName()));
+		if (itr == view.end()) {
+			throw tenant_not_found();
+		}
+
+		if (!begin.startsWith(*itr) || (end.present() && !end.get().startsWith(*itr))) {
+			throw key_not_in_tenant();
+		}
+	} else if (tenantName.isDefaultTenant()) {
+		TraceEvent("TenantDebug_CheckingDefaultTenant");
+		if (!data->allowDefaultTenant) {
+			throw tenant_name_required();
+		}
+
+		auto view = data->lockedTenantsIndex.at(version);
+		auto itr = view.lastLessOrEqual(begin);
+		while (itr != view.end()) {
+			if (begin.substr(0, itr.key().size()) <= itr.key() && itr.key() <= end.orDefault(begin)) {
+				lockedPrefixes.push_back(itr.key());
+			}
+
+			++itr;
+		}
+	}
+
+	return lockedPrefixes;
+}
+
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
-	span.addTag("tenant"_sr, req.tenant);
+	if (req.tenant.hasName()) {
+		span.addTag("tenant"_sr, req.tenant.getTenantName());
+	}
 	span.addTag("key"_sr, req.key);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
@@ -1287,84 +1313,40 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
 		state uint64_t changeCounter = data->shardChangeCounter;
+		std::vector<KeyRef> lockedPrefixes = checkTenant(data, version, req.tenant, req.key);
 
-		if (req.tenant.empty() && !data->allowDefaultTenant) {
-			throw tenant_name_required();
-		}
-
-		state Key resolvedKey = req.key;
-		std::string tenantName = req.tenant;
-		Optional<TenantProperties> tenantProperties;
-
-		if (tenantName.empty()) {
-			auto view = data->tenantIndex.at(version);
-			auto itr = view.lastLessOrEqual(resolvedKey);
-			if (itr != view.end() && resolvedKey.startsWith(itr.key())) {
-				tenantName = *itr;
-			}
-		}
-
-		if (!tenantName.empty()) {
-			auto view = data->tenantMap.at(version);
-			auto itr = view.find(tenantName);
-			if (itr == view.end()) {
-				ASSERT(!req.tenant.empty());
-				throw tenant_not_found();
-			}
-
-			tenantProperties = *itr;
-
-			if (!itr->end.present()) {
-				resolvedKey = req.key.withPrefix(itr->begin);
-			} else if (resolvedKey < itr->begin || resolvedKey >= itr->end.get()) {
-				ASSERT(!req.tenant.empty());
-				throw key_not_in_tenant();
-			}
-		}
-
-		if (!data->shards[resolvedKey]->isReadable()) {
-			//TraceEvent("WrongShardServer", data->thisServerID).detail("Key", resolvedKey).detail("Version", version).detail("In", "getValueQ");
+		if (!data->shards[req.key]->isReadable()) {
+			//TraceEvent("WrongShardServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
 			throw wrong_shard_server();
 		}
 
-		bool returnEmpty = false;
-		if (tenantProperties.present()) {
-			auto lockState = tenantProperties.get().lockState;
-			if (lockState == TenantProperties::LockState::LOCKED) {
-				throw key_range_locked();
-			} else if (lockState == TenantProperties::LockState::LOCKED_EMPTY) {
-				returnEmpty = true;
-			}
-		}
-
-		if (!returnEmpty) {
-			state int path = 0;
-			auto i = data->data().at(version).lastLessOrEqual(resolvedKey);
-			if (i && i->isValue() && i.key() == resolvedKey) {
+		state int path = 0;
+		if (lockedPrefixes.empty()) {
+			auto i = data->data().at(version).lastLessOrEqual(req.key);
+			if (i && i->isValue() && i.key() == req.key) {
 				v = (Value)i->getValue();
 				path = 1;
-			} else if (!i || !i->isClearTo() || i->getEndKey() <= resolvedKey) {
+			} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 				path = 2;
-				Optional<Value> vv = wait(data->storage.readValue(resolvedKey, req.debugID));
+				Optional<Value> vv = wait(data->storage.readValue(req.key, req.debugID));
 				// Validate that while we were reading the data we didn't lose the version or shard
 				if (version < data->storageVersion()) {
 					TEST(true); // transaction_too_old after readValue
 					throw transaction_too_old();
 				}
-				data->checkChangeCounter(changeCounter, resolvedKey);
+				data->checkChangeCounter(changeCounter, req.key);
 				v = vv;
 			}
 		}
 
-		DEBUG_MUTATION(
-		    "ShardGetValue",
-		    version,
-		    MutationRef(MutationRef::DebugKey, resolvedKey, v.present() ? v.get() : LiteralStringRef("<null>")),
-		    data->thisServerID);
+		DEBUG_MUTATION("ShardGetValue",
+		               version,
+		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")),
+		               data->thisServerID);
 		DEBUG_MUTATION("ShardGetPath",
 		               version,
 		               MutationRef(MutationRef::DebugKey,
-		                           resolvedKey,
+		                           req.key,
 		                           path == 0   ? LiteralStringRef("0")
 		                           : path == 1 ? LiteralStringRef("1")
 		                                       : LiteralStringRef("2")),
@@ -1372,9 +1354,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		/*
 		StorageMetrics m;
-		m.bytesPerKSecond = resolvedKey.size() + (v.present() ? v.get().size() : 0);
+		m.bytesPerKSecond = req.key.size() + (v.present() ? v.get().size() : 0);
 		m.iosPerKSecond = 1;
-		data->metrics.notify(resolvedKey, m);
+		data->metrics.notify(req.key, m);
 		*/
 
 		if (v.present()) {
@@ -1388,9 +1370,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			// If the read yields no value, randomly sample the empty read.
 			int64_t bytesReadPerKSecond =
-			    v.present() ? std::max((int64_t)(resolvedKey.size() + v.get().size()), SERVER_KNOBS->EMPTY_READ_PENALTY)
+			    v.present() ? std::max((int64_t)(req.key.size() + v.get().size()), SERVER_KNOBS->EMPTY_READ_PENALTY)
 			                : SERVER_KNOBS->EMPTY_READ_PENALTY;
-			data->metrics.notifyBytesReadPerKSecond(resolvedKey, bytesReadPerKSecond);
+			data->metrics.notifyBytesReadPerKSecond(req.key, bytesReadPerKSecond);
 		}
 
 		if (req.debugID.present())
@@ -1399,9 +1381,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
 		// Check if the desired key might be cached
-		auto cached = data->cachedRangeMap[resolvedKey];
+		auto cached = data->cachedRangeMap[req.key];
 		// if (cached)
-		//	TraceEvent(SevDebug, "SSGetValueCached").detail("Key", resolvedKey);
+		//	TraceEvent(SevDebug, "SSGetValueCached").detail("Key", req.key);
 
 		GetValueReply reply(v, cached);
 		reply.penalty = data->getPenalty();
@@ -3706,30 +3688,39 @@ private:
 
 void StorageServer::insertTenant(KeyRef key, KeyRef value, Version version) {
 	tenantMap.createNewVersion(version);
-	tenantIndex.createNewVersion(version);
+	lockedTenantsIndex.createNewVersion(version);
 
-	TenantProperties props;
-	props.begin = "a"_sr;
-	props.lockState = TenantProperties::LockState::LOCKED;
-	tenantMap.insert("LockedTenant", props);
-	tenantIndex.insert(props.begin, "LockedTenant");
+	// TODO: extract these from value
+	Standalone<StringRef> tenantName = "Tenant1"_sr.withPrefix(lockedTenantPrefix);
+	Key tenantPrefix = "a"_sr;
+
+	tenantMap.insert(tenantName, tenantPrefix);
+
+	if (tenantName.startsWith(lockedTenantPrefix)) {
+		lockedTenantsIndex.insert(tenantPrefix, tenantName);
+	}
 
 	auto& mLV = addVersionToMutationLog(version);
 	addMutationToMutationLog(
-	    mLV, MutationRef(MutationRef::SetValue, persistTenantMapKeys.begin.toString() + "LockedTenant", value));
-	TraceEvent("DebugTenant_SetKey").detail("Key", persistTenantMapKeys.begin.toString() + "LockedTenant");
+	    mLV, MutationRef(MutationRef::SetValue, persistTenantMapKeys.begin.toString() + tenantName.toString(), value));
+	TraceEvent("DebugTenant_SetKey").detail("Key", persistTenantMapKeys.begin.toString() + tenantName.toString());
 }
 
 void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version) {
 	tenantMap.createNewVersion(version);
-	tenantIndex.createNewVersion(version);
+	lockedTenantsIndex.createNewVersion(version);
 
-	tenantMap.erase("LockedTenant");
-	tenantIndex.erase("a"_sr);
+	// TODO: extract these from value
+	Standalone<StringRef> tenantName = "Tenant1"_sr.withPrefix(lockedTenantPrefix);
+	Key tenantPrefix = "a"_sr;
+
+	tenantMap.erase(tenantName);
+	lockedTenantsIndex.erase(tenantPrefix);
 
 	auto& mLV = addVersionToMutationLog(version);
 	addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistTenantMapKeys.begin, persistTenantMapKeys.end));
+
 	TraceEvent("DebugTenant_ClearedKeys")
 	    .detail("Begin", persistTenantMapKeys.begin)
 	    .detail("End", persistTenantMapKeys.end);
@@ -4565,18 +4556,18 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state RangeResult tenantMap = fTenantMap.get();
 	state int tenantMapLoc;
 	for (tenantMapLoc = 0; tenantMapLoc < tenantMap.size(); tenantMapLoc++) {
-		TenantProperties props;
-		props.begin = "a"_sr;
-		props.lockState = TenantProperties::LockState::LOCKED;
-		data->tenantMap.insert("LockedTenant", props);
-		data->tenantIndex.insert(props.begin, "LockedTenant");
+		// TODO: extract these from value
+		Standalone<StringRef> tenantName = "Tenant1"_sr.withPrefix(lockedTenantPrefix);
+		Key tenantPrefix = "a"_sr;
+
+		data->tenantMap.insert(tenantName, tenantPrefix);
+		data->lockedTenantsIndex.insert(tenantPrefix, tenantName);
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
-		    .detail("TenantName", "LockedTenant")
-		    .detail("Begin", props.begin)
-		    .detail("End", props.end)
-		    .detail("LockState", props.lockState);
+		    .detail("TenantName", tenantName)
+		    .detail("Prefix", tenantPrefix);
+
 		wait(yield());
 	}
 
@@ -5309,9 +5300,9 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			state Version version = wait(tr->getReadVersion());
-			RangeResult tenantMapKeys = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
 
-			for (auto kv : tenantMapKeys) {
+			for (auto kv : entries) {
 				// TODO: we need to make sure whatever version we use for reading the tenant map is the minimum we can
 				// use for reads, and that we will get all updates after that point
 				self->insertTenant(kv.key, kv.value, version);
@@ -5374,7 +5365,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		self.byteSampleRecovery = Void();
 
 		if (seedTag == invalidTag) {
-			// TODO: we need to make sure that if we fail before the result here is made durable, then we can recover and read it again
+			// TODO: we need to make sure that if we fail before the result here is made durable, then we can recover
+			// and read it again
 			wait(initTenantMap(&self));
 		}
 

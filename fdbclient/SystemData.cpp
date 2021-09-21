@@ -1039,6 +1039,7 @@ const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/config
 const KeyRangeRef tenantMapKeys("\xff\x02/tenantMap/"_sr, "\xff\x02/tenantMap0"_sr);
 const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff\x02/tenantMap/"_sr;
+const StringRef lockedTenantPrefix = "\xfflockedTenant/"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

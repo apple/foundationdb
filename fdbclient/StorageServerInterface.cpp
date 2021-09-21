@@ -24,6 +24,9 @@
 // Includes template specializations for all tss operations on storage server types.
 // New StorageServerInterface reply types must be added here or it won't compile.
 
+const TenantName TenantName::DEFAULT = TenantName(TenantName::TenantType::DEFAULT_TENANT_TYPE);
+const TenantName TenantName::DO_NOT_VALIDATE = TenantName(TenantName::TenantType::DO_NOT_VALIDATE_TENANT_TYPE);
+
 // if size + hex of checksum is shorter than value, record that instead of actual value. break-even point is 12
 // characters
 std::string traceChecksumValue(ValueRef s) {

@@ -47,7 +47,56 @@ struct VersionReply {
 	}
 };
 
-typedef std::string TenantName;
+struct TenantName {
+	constexpr static FileIdentifier file_identifier = 13733271;
+	enum class TenantType {
+		DEFAULT_TENANT_TYPE = 0,
+		VALIDATE_TENANT_TYPE = 1,
+		DO_NOT_VALIDATE_TENANT_TYPE = 2
+	} uint8_t;
+
+	TenantName() : tenantType(TenantType::DEFAULT_TENANT_TYPE) {}
+	TenantName(std::string tenantName) : tenantType(TenantType::VALIDATE_TENANT_TYPE), tenantName(tenantName) {}
+
+	bool isDefaultTenant() const { return tenantType == TenantType::DEFAULT_TENANT_TYPE; }
+
+	bool hasName() const { return tenantType == TenantType::VALIDATE_TENANT_TYPE; }
+
+	std::string getTenantName() const {
+		ASSERT(hasName());
+		return tenantName;
+	}
+
+	static const TenantName DEFAULT;
+	static const TenantName DO_NOT_VALIDATE;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tenantType);
+		if (tenantType == TenantType::VALIDATE_TENANT_TYPE) {
+			serializer(ar, tenantName);
+		}
+	}
+
+private:
+	TenantName(TenantType tenantType) : tenantType(tenantType) {}
+
+	TenantType tenantType;
+	std::string tenantName;
+};
+
+template <>
+struct Traceable<TenantName> : std::true_type {
+	static std::string toString(const TenantName& value) {
+		if (value.isDefaultTenant()) {
+			return "DefaultTenant";
+		} else if (value.hasName()) {
+			return "Validate: " + value.getTenantName();
+		} else {
+			return "DoNotValidate";
+		}
+	}
+};
 
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
@@ -219,7 +268,7 @@ struct GetValueRequest : TimedRequest {
 	GetValueRequest() {}
 
 	GetValueRequest(SpanID spanContext, const Key& key, Version ver, Optional<TagSet> tags, Optional<UID> debugID)
-	  : spanContext(spanContext), key(key), version(ver), tags(tags), debugID(debugID) {}
+	  : spanContext(spanContext), tenant(TenantName::DEFAULT), key(key), version(ver), tags(tags), debugID(debugID) {}
 
 	GetValueRequest(SpanID spanContext,
 	                const TenantName& tenant,
@@ -231,7 +280,7 @@ struct GetValueRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenant, key, version, tags, debugID, reply, spanContext);
+		serializer(ar, key, version, tags, debugID, reply, spanContext, tenant);
 	}
 };
 
@@ -268,7 +317,8 @@ struct WatchValueRequest {
 	                  Version ver,
 	                  Optional<TagSet> tags,
 	                  Optional<UID> debugID)
-	  : spanContext(spanContext), key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
+	  : spanContext(spanContext), tenant(TenantName::DEFAULT), key(key), value(value), version(ver), tags(tags),
+	    debugID(debugID) {}
 
 	WatchValueRequest(SpanID spanContext,
 	                  const TenantName& tenant,
@@ -281,7 +331,7 @@ struct WatchValueRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenant, key, value, version, tags, debugID, reply, spanContext);
+		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenant);
 	}
 };
 
@@ -318,7 +368,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(
-		    ar, tenant, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		    ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, tenant, arena);
 	}
 };
 
@@ -366,7 +416,7 @@ struct GetKeyValuesStreamRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(
-		    ar, tenant, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		    ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, tenant, arena);
 	}
 };
 
@@ -402,7 +452,7 @@ struct GetKeyRequest : TimedRequest {
 	              Version version,
 	              Optional<TagSet> tags,
 	              Optional<UID> debugID)
-	  : spanContext(spanContext), sel(sel), version(version), debugID(debugID) {}
+	  : spanContext(spanContext), tenant(TenantName::DEFAULT), sel(sel), version(version), debugID(debugID) {}
 
 	GetKeyRequest(SpanID spanContext,
 	              TenantName const& tenant,
@@ -414,7 +464,7 @@ struct GetKeyRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenant, sel, version, tags, debugID, reply, spanContext, arena);
+		serializer(ar, sel, version, tags, debugID, reply, spanContext, tenant, arena);
 	}
 };
 
