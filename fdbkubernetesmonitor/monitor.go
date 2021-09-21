@@ -22,6 +22,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -123,13 +124,9 @@ func (monitor *Monitor) LoadConfiguration() {
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version, "fdbserver")
 	}
 
-	binaryStat, err := os.Stat(configuration.BinaryPath)
+	err = checkOwnerExecutable(configuration.BinaryPath)
 	if err != nil {
-		monitor.Logger.Error(err, "Error checking binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return
-	}
-	if binaryStat.Mode()&0o100 == 0 {
-		monitor.Logger.Error(nil, "New binary path is not executable", "configuration", configuration, "binaryPath", configuration.BinaryPath)
+		monitor.Logger.Error(err, "Error with binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return
 	}
 
@@ -140,6 +137,19 @@ func (monitor *Monitor) LoadConfiguration() {
 	}
 
 	monitor.acceptConfiguration(configuration, configurationBytes)
+}
+
+// checkOwnerExecutable validates that a path is a file that exists and is
+// executable by its owner.
+func checkOwnerExecutable(path string) error {
+	binaryStat, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if binaryStat.Mode()&0o100 == 0 {
+		return fmt.Errorf("Binary is not executable")
+	}
+	return nil
 }
 
 // acceptConfiguration is called when the monitor process parses and accepts
@@ -217,7 +227,7 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 		if cmd.Process != nil {
 			pid = cmd.Process.Pid
 		} else {
-			logger.Error(nil, "No Process information availale for subprocess")
+			logger.Error(nil, "No Process information available for subprocess")
 		}
 
 		startTime := time.Now()

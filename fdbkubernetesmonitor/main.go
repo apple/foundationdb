@@ -103,20 +103,21 @@ func main() {
 	}
 
 	mode := executionMode(executionModeString)
-	if mode == executionModeLauncher {
+	switch mode {
+	case executionModeLauncher:
 		customEnvironment, err := loadAdditionalEnvironment(logger)
 		if err != nil {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
 		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment)
-	} else if mode == executionModeInit {
+	case executionModeInit:
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
 			logger.Error(err, "Error copying files")
 			os.Exit(1)
 		}
-	} else if mode == executionModeSidecar {
+	case executionModeSidecar:
 		if mainContainerVersion != currentContainerVersion {
 			err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 			if err != nil {
@@ -126,7 +127,7 @@ func main() {
 			done := make(chan bool)
 			<-done
 		}
-	} else {
+	default:
 		logger.Error(nil, "Unknown execution mode", "mode", mode)
 		os.Exit(1)
 	}

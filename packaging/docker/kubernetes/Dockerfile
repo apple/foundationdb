@@ -30,22 +30,24 @@ RUN go build -o /fdb-kubernetes-monitor ./...
 
 # Build the main image
 
-FROM ubuntu:18.04
+FROM centos:7.9.2009
 
-RUN apt-get update && \
-	apt-get install -y curl>=7.58.0-2ubuntu3.6 \
-		dnsutils>=1:9.11.3+dfsg-1ubuntu1.7 \
-		lsof>=4.89+dfsg-0.1 \
-		tcptraceroute>=1.5beta7+debian-4build1 \
-		telnet>=0.17-41 \
-		netcat>=1.10-41.1 \
-		strace>=4.21-1ubuntu1 \
-		tcpdump>=4.9.3-0ubuntu0.18.04.1 \
-		less>=487-0.1 \
-		vim>=2:8.0.1453-1ubuntu1.4 \
-		net-tools>=1.60+git20161116.90da8a0-1ubuntu1 \
-		jq>=1.5+dfsg-2 && \
-	rm -rf /var/lib/apt/lists/*
+RUN yum install -y \
+	binutils-2.27-44.base.el7 \
+	bind-utils-9.11.4-26.P2.el7_9.7 \
+	curl-7.29.0-59.el7_9.1 \
+	less-458-9.el7 \
+	lsof-4.87-6.el7 \
+	nano-2.3.1-10.el7 \
+	nmap-ncat-6.40-19.el7 \
+	net-tools-2.0-0.25.20131004git.el7 \
+	strace-4.24-6.el7 \
+	tar-1.26-35.el7 \
+	telnet-0.17-66.el7 \
+	traceroute-2.0.22-2.el7 \
+	tcpdump-4.9.2-4.el7_7.1 \
+	vim-enhanced-7.4.629-8.el7_9 \
+	&& yum clean all
 
 ARG FDB_VERSION
 ARG FDB_LIBRARY_VERSIONS="${FDB_VERSION}"
