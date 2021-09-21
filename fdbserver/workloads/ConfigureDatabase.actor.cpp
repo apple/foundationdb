@@ -218,15 +218,12 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	double testDuration;
 	int additionalDBs;
 
-	bool allowDescriptorChange;
 	bool allowTestStorageMigration;
 	vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
 	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 200.0);
-		allowDescriptorChange =
-		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 		allowTestStorageMigration =
 		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
 		g_simulator.usableRegions = 1;
