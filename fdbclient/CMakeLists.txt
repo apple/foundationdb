@@ -127,6 +127,7 @@ set(FDBCLIENT_SRCS
   VersionedMap.actor.h
   VersionedMap.h
   VersionedMap.cpp
+  WellKnownEndpoints.h
   WriteMap.h
   json_spirit/json_spirit_error_position.h
   json_spirit/json_spirit_reader_template.h

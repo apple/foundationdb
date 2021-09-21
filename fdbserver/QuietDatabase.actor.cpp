@@ -587,17 +587,17 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator.usableRegions = 1;
-			wait(success(changeConfig(cx,
-			                          (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) +
-			                              " repopulate_anti_quorum=1",
-			                          true)));
+			wait(success(ManagementAPI::changeConfig(
+			    cx.getReference(),
+			    (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1",
+			    true)));
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				wait(dbInfo->onChange());
 			}
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 			    .detail("Location", context)
 			    .detail("Stage", "Usable_Regions");
-			wait(success(changeConfig(cx, "usable_regions=1", true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true)));
 		}
 	}
 	return Void();

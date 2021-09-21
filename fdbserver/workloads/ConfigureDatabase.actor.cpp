@@ -221,7 +221,6 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	bool allowDescriptorChange;
 	bool allowTestStorageMigration;
 	std::vector<Future<Void>> clients;
-	bool allowStorageMigrationTypeChange;
 	PerfIntCounter retries;
 
 	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
@@ -254,11 +253,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	static Future<ConfigurationResult> IssueConfigurationChange(Database cx, const std::string& config, bool force) {
 		printf("Issuing configuration change: %s\n", config.c_str());
-		return changeConfig(cx, config, force);
+		return ManagementAPI::changeConfig(cx.getReference(), config, force);
 	}
 
 	ACTOR Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
-		wait(success(changeConfig(cx, "single storage_migration_type=aggressive", true)));
+		wait(success(ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true)));
 		return Void();
 	}
 
