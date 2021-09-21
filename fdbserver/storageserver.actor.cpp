@@ -691,7 +691,7 @@ public:
 
 		TransactionTagCounter(UID thisServerID)
 		  : thisServerID(thisServerID), busiestReadTagEventHolder(makeReference<EventCacheHolder>(
-		                                    thisServerID.toString() + "/StorageServerSourceTLogID")) {}
+		                                    thisServerID.toString() + "/BusiestReadTag")) {}
 
 		int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
