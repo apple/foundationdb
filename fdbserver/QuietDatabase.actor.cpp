@@ -631,22 +631,22 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<int64_t> storageQueueSize;
 	state Future<bool> dataDistributionActive;
 	state Future<bool> storageServersRecruiting;
-
 	auto traceMessage = "QuietDatabase" + phase + "Begin";
-	TraceEvent(traceMessage.c_str());
+	TraceEvent(traceMessage.c_str()).log();
 
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if (g_network->isSimulated())
 		wait(delay(5.0));
+
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
+
 	printf("Set perpetual_storage_wiggle=0 ...\n");
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
-
 	loop {
 		try {
 			TraceEvent("QuietDatabaseWaitingOnDataDistributor").log();
@@ -686,15 +686,15 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate ||
 			    tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
-			    storageQueueSize.get() > maxStorageServerQueueGate || dataDistributionActive.get() == false ||
-			    storageServersRecruiting.get() == true || teamCollectionValid.get() == false) {
+			    storageQueueSize.get() > maxStorageServerQueueGate || !dataDistributionActive.get() ||
+			    storageServersRecruiting.get() || !teamCollectionValid.get()) {
 
 				wait(delay(1.0));
 				numSuccesses = 0;
 			} else {
 				if (++numSuccesses == 3) {
 					auto msg = "QuietDatabase" + phase + "Done";
-					TraceEvent(msg.c_str());
+					TraceEvent(msg.c_str()).log();
 					break;
 				} else {
 					wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
