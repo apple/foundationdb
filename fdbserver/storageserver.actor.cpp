@@ -1592,7 +1592,9 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 }
 
 // FIXME: this overwrites mutations in change feed buffer!!!
+// Also skip if range is empty?..
 void filterMutations(Arena& arena, VectorRef<MutationRef>& mutations, KeyRange const& range) {
+	ASSERT(false);
 	if (mutations.size() == 1 && mutations.back().param1 == lastEpochEndPrivateKey) {
 		return;
 	}
@@ -1610,6 +1612,7 @@ void filterMutations(Arena& arena, VectorRef<MutationRef>& mutations, KeyRange c
 			}
 		} else {
 			ASSERT(mutations[i].type == MutationRef::ClearRange);
+			// FIXME: this condition doesn't match the below one!!
 			if (!modifiedMutations.present() &&
 			    (mutations[i].param1 < range.begin || mutations[i].param2 > range.end)) {
 				modifiedMutations = mutations;
@@ -1649,6 +1652,9 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 		printf("Unknown change feed %s\n", req.rangeID.printable().c_str());
 		throw unknown_change_feed();
 	}
+
+	// FIXME: fail request if range isn't empty and doesn't intersect feed's range?
+	// FIXME: add back mutation filtering!
 	if (req.end <= feed->second->emptyVersion + 1) {
 	} else if (feed->second->durableVersion == invalidVersion || req.begin > feed->second->durableVersion) {
 		for (auto it : feed->second->mutations) {
@@ -1657,7 +1663,7 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 			}
 			if (it.version >= req.begin) {
 				reply.arena.dependsOn(it.arena());
-				filterMutations(reply.arena, it.mutations, req.range);
+				// filterMutations(reply.arena, it.mutations, req.range);
 				reply.mutations.push_back(reply.arena, it);
 				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + it.expectedSize();
 			}
@@ -1682,7 +1688,7 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 			std::tie(id, version) = decodeChangeFeedDurableKey(kv.key);
 			auto mutations = decodeChangeFeedDurableValue(kv.value);
 			reply.arena.dependsOn(mutations.arena());
-			filterMutations(reply.arena, mutations, req.range);
+			// filterMutations(reply.arena, mutations, req.range);
 			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(mutations, version));
 			remainingLimitBytes -=
 			    sizeof(KeyValueRef) +
@@ -1699,7 +1705,7 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 					isEmpty = false;
 				}
 				reply.arena.dependsOn(it.arena());
-				filterMutations(reply.arena, it.mutations, req.range);
+				// filterMutations(reply.arena, it.mutations, req.range);
 				reply.mutations.push_back(reply.arena, it);
 				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + it.expectedSize();
 			}
@@ -1762,6 +1768,7 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 			feedRequest.rangeID = rangeID;
 			feedRequest.begin = begin;
 			feedRequest.end = end;
+			// FIXME: this should set request range, otherwise filterMutations won't work?..
 			state ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
 			begin = feedReply.mutations.back().version + 1;
 			state int resultLoc = 0;
@@ -1832,6 +1839,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 		}
 	} catch (Error& e) {
+		// TODO REMOVE
+		printf("CF Stream got error %s\n", e.name());
 		if (e.code() != error_code_operation_obsolete) {
 			if (!canReplyWith(e))
 				throw;
@@ -5933,6 +5942,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
+		printf("SS %s crashed with error %s\n", self.thisServerID.toString().c_str(), e.name());
 		// If we die with an error before replying to the recruitment request, send the error to the recruiter
 		// (ClusterController, and from there to the DataDistributionTeamCollection)
 		if (!recruitReply.isSet())
@@ -6144,7 +6154,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
-		printf("SS crashed with error %s\n", e.name());
+		printf("SS %s crashed with error %s\n", self.thisServerID.toString().c_str(), e.name());
 		if (recovered.canBeSet())
 			recovered.send(Void());
 		if (storageServerTerminated(self, persistentData, e))
