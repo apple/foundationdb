@@ -507,7 +507,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// We must ensure no backup workers are running, otherwise the clear DB
 				// below can be picked up by backup workers and applied during restore.
-				wait(success(changeConfig(cx, "backup_worker_enabled:=0", true)));
+				wait(success(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=0", true)));
 
 				// Clear DB before restore
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
