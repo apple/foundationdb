@@ -934,24 +934,26 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 	state double grvDelay = 0.001;
 	cx->lastTimedGrv = 0.0;
 	cx->cachedRv = Version(0);
-	loop {
-		wait(refreshTransaction(cx, &tr));
-		state double curTime = now();
-		state double lastTime = cx->lastTimedGrv.get();
-		if (curTime - lastTime > (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay)) {
-			try {
-				Version v = wait(tr.getReadVersion());
-				// Take the average of what we expect and what we got as the delay
-				grvDelay = (grvDelay + (now() - curTime)) / 2.0;
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw;
+	try {
+		loop {
+			wait(refreshTransaction(cx, &tr));
+			state double curTime = now();
+			state double lastTime = cx->lastTimedGrv.get();
+			if (curTime - lastTime >= (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay)) {
+				try {
+					wait(success(tr.getReadVersion()));
+					grvDelay = (grvDelay + (now() - curTime)) / 2.0;
+				} catch (Error& e) {
+					TraceEvent("BackgroundGrvUpdaterTxnError").error(e, true);
+					wait(tr.onError(e));
 				}
-				wait(tr.onError(e));
+			} else {
+				wait(delay(0.001 + (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) - (curTime - lastTime)));
 			}
-		} else {
-			wait(delay((CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) - (curTime - lastTime)));
 		}
+	} catch (Error& e) {
+		TraceEvent("BackgroundGrvUpdaterFailed").error(e, true);
+		throw;
 	}
 }
 
@@ -5767,7 +5769,8 @@ ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx) {
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
 		if (options.useGrvCache && cx->cachedRv > Version(0)) {
-			return getDBCachedReadVersion(getDatabase().getPtr());
+			readVersion = getDBCachedReadVersion(getDatabase().getPtr());
+			return readVersion;
 		}
 		++cx->transactionReadVersions;
 		flags |= options.getReadVersionFlags;
