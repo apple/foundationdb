@@ -103,6 +103,11 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
 		throw movekeys_conflict();
 	}
+
+	if (ddEnabledState->shouldSkipCheckMoveKeysLock()) {
+		return Void();
+	}
+
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
@@ -404,7 +409,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-					// wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
+					wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
 
 					if (!loadedTssMapping) {
 						// share transaction for loading tss mapping with the rest of start move keys
@@ -703,7 +708,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
 					releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
 
-					// wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
+					wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
 					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
