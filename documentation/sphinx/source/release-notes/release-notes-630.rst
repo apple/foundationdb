@@ -2,6 +2,12 @@
 Release Notes
 #############
 
+6.3.20
+======
+* Several minor problems with the versioned packages have been fixed. `(PR 5607) <https://github.com/apple/foundationdb/pull/5607>`_
+* A client might not honor transaction timeouts when using the multi-version client if it cannot connect to the cluster. `(Issue #5595) <https://github.com/apple/foundationdb/issues/5595>`_
+* Fixed a very rare bug where recovery could potentially roll back a committed transaction `(PR 5461) <https://github.com/apple/foundationdb/pull/5461>`_
+
 6.3.19
 ======
 * Add the ``trace_partial_file_suffix`` network option. This option will give unfinished trace files a special suffix to indicate they're not complete yet. When the trace file is complete, it is renamed to remove the suffix. `(PR #5330) <https://github.com/apple/foundationdb/pull/5330>`_

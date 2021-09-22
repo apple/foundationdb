@@ -29,7 +29,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 	bool testReadYourWrites;
 	double testDuration;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
 
 	SelectorCorrectnessWorkload(WorkloadContext const& wcx)
@@ -57,7 +57,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 	}

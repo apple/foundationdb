@@ -862,8 +862,7 @@ public:
 	    Helper function to enable support for common swap implementation pattern based on \c std::swap:
 	    \code
 	    void swap(MyClass& a, MyClass& b) {
-	        using std::swap;
-	        swap(a.value, b.value);
+	        std::swap(a.value, b.value);
 	        // ...
 	    }
 	    \endcode
@@ -2326,8 +2325,7 @@ public:
 	    Helper function to enable support for common swap implementation pattern based on \c std::swap:
 	    \code
 	    void swap(MyClass& a, MyClass& b) {
-	        using std::swap;
-	        swap(a.doc, b.doc);
+	        std::swap(a.doc, b.doc);
 	        // ...
 	    }
 	    \endcode

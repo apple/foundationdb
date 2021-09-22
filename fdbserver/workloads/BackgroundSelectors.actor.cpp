@@ -34,7 +34,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 	int actorsPerClient, maxDiff, minDrift, maxDrift, resultLimit;
 	double testDuration, transactionsPerSecond;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter operations, checks, retries;
 
 	BackgroundSelectorWorkload(WorkloadContext const& wcx)
@@ -71,7 +71,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 		return ok;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());

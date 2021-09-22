@@ -74,7 +74,8 @@ struct GenerationRegVal {
 };
 
 GenerationRegInterface::GenerationRegInterface(NetworkAddress remote)
-  : read(Endpoint({ remote }, WLTOKEN_GENERATIONREG_READ)), write(Endpoint({ remote }, WLTOKEN_GENERATIONREG_WRITE)) {}
+  : read(Endpoint::wellKnown({ remote }, WLTOKEN_GENERATIONREG_READ)),
+    write(Endpoint::wellKnown({ remote }, WLTOKEN_GENERATIONREG_WRITE)) {}
 
 GenerationRegInterface::GenerationRegInterface(INetwork* local) {
 	read.makeWellKnownEndpoint(WLTOKEN_GENERATIONREG_READ, TaskPriority::Coordination);
@@ -82,10 +83,10 @@ GenerationRegInterface::GenerationRegInterface(INetwork* local) {
 }
 
 LeaderElectionRegInterface::LeaderElectionRegInterface(NetworkAddress remote)
-  : ClientLeaderRegInterface(remote), candidacy(Endpoint({ remote }, WLTOKEN_LEADERELECTIONREG_CANDIDACY)),
-    electionResult(Endpoint({ remote }, WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT)),
-    leaderHeartbeat(Endpoint({ remote }, WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT)),
-    forward(Endpoint({ remote }, WLTOKEN_LEADERELECTIONREG_FORWARD)) {}
+  : ClientLeaderRegInterface(remote), candidacy(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_CANDIDACY)),
+    electionResult(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT)),
+    leaderHeartbeat(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT)),
+    forward(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_FORWARD)) {}
 
 LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : ClientLeaderRegInterface(local) {
 	candidacy.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_CANDIDACY, TaskPriority::Coordination);
@@ -299,8 +300,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(clientData.clientInfo->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon =
-					    monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon = monitorLeaderAndGetClientInfo(
+					    req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(
 				    openDatabase(&clientData, &clientCount, hasConnectedClients, req, canConnectToLeader.checkStuck()));
@@ -312,7 +313,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(currentElectedLeader->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon =
+					    monitorLeaderAndGetClientInfo(req.key, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
 			}
