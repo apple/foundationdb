@@ -82,7 +82,8 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), commitVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_) {}
+	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
+	    tLogGroupCollection(proxyCommitData_.tLogGroupCollection) {}
 
 private:
 	// The following variables are incoming parameters
