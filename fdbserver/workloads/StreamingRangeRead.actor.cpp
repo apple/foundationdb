@@ -39,7 +39,7 @@ ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Trans
 		loop {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, 1e6);
 			limits.minRows = 0;
-			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
+			state RangeResult rep = wait(tr->getRange(begin, end, limits, true));
 			if (!rep.more) {
 				rep.readThrough = keys.end;
 			}
