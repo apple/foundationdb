@@ -2495,12 +2495,12 @@ public:
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
 	ACTOR static Future<Void> writePhysicalPage_impl(DWALPager* self,
+	                                                 Void* data,
 	                                                 PagerEventReasons reason,
 	                                                 unsigned int level,
 	                                                 PhysicalPageID pageID,
 	                                                 int blockSize,
-	                                                 bool header,
-	                                                 Void* data) {
+	                                                 bool header) {
 
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(header ? ioMaxPriority : ioMinPriority));
 		++g_redwoodMetrics.metric.pagerDiskWrite;
@@ -2533,14 +2533,14 @@ public:
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
 		Future<Void> f;
 		if (pageIDs.size() == 1) {
-			f = writePhysicalPage_impl(this, reason, level, pageIDs.front(), blockSize, header, (Void*)page->mutate());
+			f = writePhysicalPage_impl(this, (Void*)page->mutate(), reason, level, pageIDs.front(), blockSize, header);
 			operations.add(f);
 			return f;
 		}
 		std::vector<Future<Void>> writers;
 		for (int i = 0; i < pageIDs.size(); ++i) {
 			Future<Void> p = writePhysicalPage_impl(
-			    this, reason, level, pageIDs[i], blockSize, header, (Void*)page->mutate() + i * blockSize);
+			    this, (Void*)page->mutate() + i * blockSize, reason, level, pageIDs[i], blockSize, header);
 			writers.push_back(p);
 		}
 		f = waitForAll(writers);
