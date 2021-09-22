@@ -7,13 +7,9 @@ bindings/java/foundationdb-client*.jar
 bindings/java/foundationdb-tests*.jar
 bindings/java/fdb-java-*-sources.jar
 packaging/msi/FDBInstaller.msi
-<<<<<<< HEAD
-builds/
-cmake-build-debug/
-=======
 build/
 cmake-build-debug*
->>>>>>> 9ac379fd8 (check store migration)
+
 # Generated source, build, and packaging files
 *.g.cpp
 *.g.h
