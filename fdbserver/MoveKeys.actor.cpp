@@ -265,7 +265,7 @@ ACTOR Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector
 
 	wait(waitForAll(checks));
 
-	vector<UID> result;
+	std::vector<UID> result;
 	for (const auto& it : checks) {
 		if (it.get().present()) {
 			result.push_back(it.get().get());
@@ -1308,11 +1308,10 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               std::vector<UID> teamForDroppedRange,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState) {
-	// state std::vector<UID> teamForDroppedRange;
 	state Key begin = allKeys.begin;
 
-	state vector<UID> src;
-	state vector<UID> dest;
+	state std::vector<UID> src;
+	state std::vector<UID> dest;
 	// Multi-transactional removal in case of large number of shards, concern in violating 5s transaction limit
 	while (begin < allKeys.end) {
 		state Transaction tr(cx);
@@ -1379,7 +1378,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						// Assign the shard to teamForDroppedRange in keyServer space.
 						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
 
-						vector<Future<Void>> actors;
+						std::vector<Future<Void>> actors;
 
 						// Unassign the shard from the dest servers.
 						for (const UID& id : dest) {
