@@ -1478,7 +1478,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 void seedShardServers(Arena& arena,
                       CommitTransactionRef& tr,
                       std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers,
-                      const std::vector<StringRef>& keySplits) {
+                      const std::vector<StringRef>& keySplits_) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
 	int8_t nextLocality = 0;
@@ -1542,6 +1542,8 @@ void seedShardServers(Arena& arena,
 		           : keyServersValue(RangeResult(), { serverSrcUID[serverIndex] }, serverTeamIDs[serverIndex]);
 	};
 
+	auto keySplits = keySplits_;
+	keySplits.push_back("\xff"_sr);
 	const int numServers = servers.size();
 	const int numKeyRanges = keySplits.size() + 1;
 
@@ -1563,7 +1565,10 @@ void seedShardServers(Arena& arena,
 	if (keySplits.size() != 0) {
 		keyRangeStart = keySplits.back();
 	}
-	std::cout << " Assigning range " << KeyRangeRef(keyRangeStart, allKeys.end).toString() << " to " << servers[serverIndex].first.id().toString() << std::endl;
+
+	std::cout << " Assigning range " << KeyRangeRef(keyRangeStart, allKeys.end).toString() << " to "
+	          << servers[serverIndex].first.id().toString() << std::endl;
+	// TODO (Vishesh) \xff keyspace should goto specific storage servers?
 	krmSetPreviouslyEmptyRange(tr,
 	                           arena,
 	                           serverKeysPrefixFor(serverSrcUID[serverIndex]),
