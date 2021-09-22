@@ -827,6 +827,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 					ASSERT(valueObj["command"].get_str() == "lock" && !valueObj["retriable"].get_bool());
 					break;
+				} else if (e.code() == error_code_database_locked) {
+					// Database is already locked. This can happen if a previous attempt
+					// failed with unknown_result.
+					break;
 				} else {
 					wait(tx->onError(e));
 				}
