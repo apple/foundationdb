@@ -3071,6 +3071,8 @@ public:
 	Counter registerMasterRequests;
 	Counter statusRequests;
 
+	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
+
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators)
@@ -3085,7 +3087,8 @@ public:
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
 	    getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
 	    registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
-	    statusRequests("StatusRequests", clusterControllerMetrics) {
+	    statusRequests("StatusRequests", clusterControllerMetrics),
+	    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
 		auto serverInfo = ServerDBInfo();
 		serverInfo.id = deterministicRandom()->randomUniqueID();
 		serverInfo.infoGeneration = ++db.dbInfoCount;
@@ -3201,7 +3204,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				// for status tool
 				TraceEvent("RecruitedMasterWorker", cluster->id)
 				    .detail("Address", fNewMaster.get().get().address())
-				    .trackLatest("RecruitedMasterWorker");
+				    .trackLatest(cluster->recruitedMasterWorkerEventHolder->trackingKey);
 
 				iMaster = fNewMaster.get().get();
 
