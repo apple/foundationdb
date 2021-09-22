@@ -104,10 +104,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		throw movekeys_conflict();
 	}
 
-	if (ddEnabledState->shouldSkipCheckMoveKeysLock()) {
-		return Void();
-	}
-
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 

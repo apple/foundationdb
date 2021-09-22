@@ -60,9 +60,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
-		std::cout << clientId << " started" << std::endl;
 		if (!enabled) {
-			std::cout << clientId << " skipping" << std::endl;
 			return Void();
 		}
 		return _start(this, cx);
@@ -75,21 +73,22 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Value newValue = "TestNewValue"_sr;
 
 		wait(self->writeAndVerify(self, cx, key, oldValue));
-		int ignore = wait(setDDMode(cx, 0));
+		
+		// Move [key, endKey) to team: {address}.
 		state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, KeyRangeRef(key, endKey)));
 		wait(self->readAndVerify(self, cx, key, oldValue));
+
+		// Kill team {address}, and expect read to timeout.
 		self->killProcess(self, address);
 		wait(self->readAndVerify(self, cx, key, "Timeout"_sr));
 
-		state Transaction tr(cx);
-		Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(key));
-		std::cout << "After kill, source server size: " << addresses.size() << "Address: " << addresses[0] << std::endl;
-
+		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
+		// Expect read to return 'value not found'.
 		int ignore = wait(setDDMode(cx, 1));
-		wait(self->exclude(self, cx, key));
-		wait(delay(1.0));
+		wait(self->exclude(self, cx, key, address));
 		wait(self->readAndVerify(self, cx, key, Optional<Value>()));
-		std::cout << "Read done after excluding server." << std::endl;
+
+		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, newValue));
 
 		return Void();
@@ -105,25 +104,20 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			tr.reset();
 			try {
 				state Optional<Value> res = wait(timeout(tr.get(key), 10.0, Optional<Value>("Timeout"_sr)));
-				std::cout << "Read: " << printValue(res) << ", expected: " << printValue(expectedValue) << std::endl;
 				if (res != expectedValue) {
 					self->validationFailed(expectedValue, res);
 				}
 				break;
 			} catch (Error& e) {
-				std::cout << "Read error: " << e.name() << std::endl;
 				wait(tr.onError(e));
 			}
 		}
-
-		std::cout << "Exp: " << printValue(expectedValue) << std::endl;
 
 		return Void();
 	}
 
 	ACTOR Future<Void> writeAndVerify(DataLossRecoveryWorkload* self, Database cx, Key key, Optional<Value> value) {
 		state Transaction tr(cx);
-
 		loop {
 			tr.reset();
 			try {
@@ -138,20 +132,17 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-		std::cout << "Write Done" << std::endl;
 
 		wait(self->readAndVerify(self, cx, key, value));
 
 		return Void();
 	}
 
-	ACTOR Future<Void> exclude(DataLossRecoveryWorkload* self, Database cx, Key key) {
+	ACTOR Future<Void> exclude(DataLossRecoveryWorkload* self, Database cx, Key key, NetworkAddress addr) {
 		state Transaction tr(cx);
 		Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(key));
-		std::cout << "Excluding: source server size: " << addresses.size() << "Address: " << addresses[0] << std::endl;
 		state std::vector<AddressExclusion> servers;
-		servers.push_back(AddressExclusion(self->addr.ip, self->addr.port));
-		std::cout << "Excluding " << self->addr.toString() << std::endl;
+		servers.push_back(AddressExclusion(addr.ip, addr.port));
 		loop {
 			tr.reset();
 			try {
@@ -163,12 +154,11 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			}
 		}
 
-		std::cout << "Waiting for exclude to complete..." << std::endl;
 		// Wait until all data are moved out of servers.
 		std::set<NetworkAddress> inProgress = wait(checkForExcludingServers(cx, servers, true));
 		ASSERT(inProgress.empty());
 
-		std::cout << "Exclude done." << std::endl;
+		TraceEvent("ExcludedTestKey").detail("Address", addr.toString());
 		return Void();
 	}
 
@@ -177,7 +167,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	// Returns the address of the single SS of the new team.
 	ACTOR Future<NetworkAddress> disableDDAndMoveShard(DataLossRecoveryWorkload* self, Database cx, KeyRange keys) {
 		// Disable DD to avoid DD undoing of our move.
-		// state int oldMode = wait(setDDMode(cx, 0));
+		state int ignore = wait(setDDMode(cx, 0));
 		state NetworkAddress addr;
 
 		// Pick a random SS as the dest, keys will reside on a single server after the move.
@@ -194,46 +184,57 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			}
 		}
 
+		state UID owner = deterministicRandom()->randomUniqueID();
 		state DDEnabledState ddEnabledState;
-		ddEnabledState.setSkipCheckMoveKeysLock(true);
-		wait(moveKeys(cx,
-		              keys,
-		              dest,
-		              dest,
-		              MoveKeysLock(),
-		              Promise<Void>(),
-		              &self->startMoveKeysParallelismLock,
-		              &self->finishMoveKeysParallelismLock,
-		              false,
-		              UID(), // for logging only
-		              &ddEnabledState));
+		ddEnabledState.setSkipCheckMoveKeysLock(false);
+
+		state Transaction tr(cx);
+
+		loop {
+			tr.reset();
+			try {
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << owner;
+				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				wait(tr.commit());
+
+				MoveKeysLock moveKeysLock;
+				moveKeysLock.myOwner = owner;
+
+				wait(moveKeys(cx,
+				              keys,
+				              dest,
+				              dest,
+				              moveKeysLock,
+				              Promise<Void>(),
+				              &self->startMoveKeysParallelismLock,
+				              &self->finishMoveKeysParallelismLock,
+				              false,
+				              UID(), // for logging only
+				              &ddEnabledState));
+				break;
+			} catch (Error& e) {
+				if (e.code() != error_code_movekeys_conflict) {
+					throw e;
+				}
+			}
+		}
 
 		TraceEvent("TestKeyMoved").detail("NewTeam", describe(dest)).detail("Address", addr.toString());
 
-		state Transaction tr(cx);
+		tr.reset();
 		Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(keys.begin));
 
 		// The move function is not what we are testing here, crash the test if the move fails.
-		std::cout << "source size: " << addresses.size() << "Address: " << addresses[0] << std::endl;
 		ASSERT(addresses.size() == 1);
 		ASSERT(std::string(addresses[0]) == addr.toString());
-
-		// tr.reset();
-		// Standalone<VectorRef<const char*>> endKeyAddrs = wait(tr.getAddressesForKey(keys.end));
-
-		// The move function is not what we are testing here, crash the test if the move fails.
-		// std::cout << "source size for endKey: " << endKeyAddrs.size() << std::endl;
-
-		// std::cout << "Moved to " << self->addr.toString() << std::endl;
-
-		// int ignore = wait(setDDMode(cx, oldMode));
 
 		return addr;
 	}
 
 	void killProcess(DataLossRecoveryWorkload* self, const NetworkAddress& addr) {
 		ISimulator::ProcessInfo* process = g_simulator.getProcessByAddress(addr);
-		ASSERT(process->address == addr);
+		ASSERT(process->addresses.contains(addr));
 		g_simulator.killProcess(process, ISimulator::KillInstantly);
 		TraceEvent("TestTeamKilled").detail("Address", addr.toString());
 	}
