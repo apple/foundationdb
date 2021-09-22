@@ -309,14 +309,14 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		state ClientCoordinators coord(f);
 		state StatusObject statusObj;
 
-		state vector<Future<Optional<LeaderInfo>>> leaderServers;
+		state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 		leaderServers.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
 			                                           GetLeaderRequest(coord.clusterKey, UID()),
 			                                           TaskPriority::CoordinationReply));
 
-		state vector<Future<ProtocolInfoReply>> coordProtocols;
+		state std::vector<Future<ProtocolInfoReply>> coordProtocols;
 		coordProtocols.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{

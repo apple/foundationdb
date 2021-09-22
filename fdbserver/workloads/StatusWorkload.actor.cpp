@@ -69,14 +69,14 @@ struct StatusWorkload : TestWorkload {
 	}
 	Future<bool> check(Database const& cx) override { return errors.getValue() == 0; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (clientId != 0)
 			return;
 
 		m.push_back(requests.getMetric());
 		m.push_back(replies.getMetric());
-		m.push_back(PerfMetric(
-		    "Average Reply Size", replies.getValue() ? totalSize.getValue() / replies.getValue() : 0, false));
+		m.emplace_back(
+		    "Average Reply Size", replies.getValue() ? totalSize.getValue() / replies.getValue() : 0, Averaged::False);
 		m.push_back(errors.getMetric());
 	}
 

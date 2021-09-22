@@ -160,7 +160,7 @@ struct CandidacyRequest {
 struct ElectionResultRequest {
 	constexpr static FileIdentifier file_identifier = 11815465;
 	Key key;
-	vector<NetworkAddress> coordinators;
+	std::vector<NetworkAddress> coordinators;
 	UID knownLeader;
 	ReplyPromise<Optional<LeaderInfo>> reply;
 

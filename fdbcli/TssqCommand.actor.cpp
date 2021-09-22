@@ -64,7 +64,9 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			// Do some validation first to make sure the command is valid
-			Optional<Value> serverListValue = wait(safeThreadFutureToFuture(tr->get(serverListKeyFor(tssId))));
+			// hold the returned standalone object's memory
+			state ThreadFuture<Optional<Value>> serverListValueF = tr->get(serverListKeyFor(tssId));
+			Optional<Value> serverListValue = wait(safeThreadFutureToFuture(serverListValueF));
 			if (!serverListValue.present()) {
 				printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
 				return false;
@@ -75,8 +77,9 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 				return false;
 			}
 
-			Optional<Value> currentQuarantineValue =
-			    wait(safeThreadFutureToFuture(tr->get(tssQuarantineKeyFor(tssId))));
+			// hold the returned standalone object's memory
+			state ThreadFuture<Optional<Value>> currentQuarantineValueF = tr->get(tssQuarantineKeyFor(tssId));
+			Optional<Value> currentQuarantineValue = wait(safeThreadFutureToFuture(currentQuarantineValueF));
 			if (enable && currentQuarantineValue.present()) {
 				printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
 				return false;

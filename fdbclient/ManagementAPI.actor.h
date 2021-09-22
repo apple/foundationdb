@@ -60,6 +60,8 @@ enum class ConfigurationResult {
 	REGION_REPLICATION_MISMATCH,
 	DCID_MISSING,
 	LOCKED_NOT_NEW,
+	SUCCESS_WARN_PPW_GRADUAL,
+	SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE,
 	SUCCESS,
 };
 
@@ -140,10 +142,10 @@ ACTOR Future<Void> waitForFullReplication(Database cx);
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 	virtual ~IQuorumChange() {}
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                              vector<NetworkAddress> oldCoordinators,
-	                                                              Reference<ClusterConnectionFile>,
-	                                                              CoordinatorsResult&) = 0;
+	virtual Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                                   std::vector<NetworkAddress> oldCoordinators,
+	                                                                   Reference<ClusterConnectionFile>,
+	                                                                   CoordinatorsResult&) = 0;
 	virtual std::string getDesiredClusterKeyName() const { return std::string(); }
 };
 
@@ -154,14 +156,14 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
 Reference<IQuorumChange> noQuorumChange();
-Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const&);
+Reference<IQuorumChange> specifiedQuorumChange(std::vector<NetworkAddress> const&);
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other);
 
 // Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without
 // necessarily waiting for the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the
 // given IP.
-ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
-void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool failed = false);
+ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed = false);
+void excludeServers(Transaction& tr, std::vector<AddressExclusion>& servers, bool failed = false);
 
 // Exclude the servers matching the given set of localities from use as state servers.  Returns as soon as the change
 // is durable, without necessarily waiting for the servers to be evacuated.
@@ -170,11 +172,11 @@ void excludeLocalities(Transaction& tr, std::unordered_set<std::string> localiti
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given
 // IP.  A NetworkAddress() means all servers (don't exclude anything)
-ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
+ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, bool failed = false);
 
 // Remove the given localities from the exclusion list.
 ACTOR Future<Void> includeLocalities(Database cx,
-                                     vector<std::string> localities,
+                                     std::vector<std::string> localities,
                                      bool failed = false,
                                      bool includeAll = false);
 
@@ -183,12 +185,12 @@ ACTOR Future<Void> includeLocalities(Database cx,
 ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass processClass);
 
 // Get the current list of excluded servers
-ACTOR Future<vector<AddressExclusion>> getExcludedServers(Database cx);
-ACTOR Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr);
+ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Database cx);
+ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Transaction* tr);
 
 // Get the current list of excluded localities
-ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx);
-ACTOR Future<vector<std::string>> getExcludedLocalities(Transaction* tr);
+ACTOR Future<std::vector<std::string>> getExcludedLocalities(Database cx);
+ACTOR Future<std::vector<std::string>> getExcludedLocalities(Transaction* tr);
 
 std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers, const std::string& locality);
 
@@ -196,15 +198,15 @@ std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>
 // true, this actor returns once it is safe to shut down all such machines without impacting fault tolerance, until and
 // unless any of them are explicitly included with includeServers()
 ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx,
-                                                                vector<AddressExclusion> servers,
+                                                                std::vector<AddressExclusion> servers,
                                                                 bool waitForAllExcluded);
 ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
                                                    std::set<AddressExclusion>* exclusions,
                                                    std::set<NetworkAddress>* inProgressExclusion);
 
 // Gets a list of all workers in the cluster (excluding testers)
-ACTOR Future<vector<ProcessData>> getWorkers(Database cx);
-ACTOR Future<vector<ProcessData>> getWorkers(Transaction* tr);
+ACTOR Future<std::vector<ProcessData>> getWorkers(Database cx);
+ACTOR Future<std::vector<ProcessData>> getWorkers(Transaction* tr);
 
 ACTOR Future<Void> timeKeeperSetDisable(Database cx);
 
@@ -321,6 +323,10 @@ template <class DB>
 Future<Void> removeCachedRange(Reference<DB> db, KeyRangeRef range) {
 	return changeCachedRange(db, range, false);
 }
+
+// return the corresponding error message for the CoordinatorsResult
+// used by special keys and fdbcli
+std::string generateErrorMessage(const CoordinatorsResult& res);
 
 } // namespace ManagementAPI
 

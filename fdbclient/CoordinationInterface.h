@@ -62,8 +62,8 @@ class ClusterConnectionString {
 public:
 	ClusterConnectionString() {}
 	ClusterConnectionString(std::string const& connectionString);
-	ClusterConnectionString(vector<NetworkAddress>, Key);
-	vector<NetworkAddress> const& coordinators() const { return coord; }
+	ClusterConnectionString(std::vector<NetworkAddress>, Key);
+	std::vector<NetworkAddress> const& coordinators() const { return coord; }
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const {
 		return keyDesc;
@@ -74,7 +74,7 @@ public:
 private:
 	void parseKey(std::string const& key);
 
-	vector<NetworkAddress> coord;
+	std::vector<NetworkAddress> coord;
 	Key key, keyDesc;
 };
 
@@ -199,7 +199,7 @@ struct OpenDatabaseCoordRequest {
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	UID knownClientInfoID;
 	Key clusterKey;
-	vector<NetworkAddress> coordinators;
+	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
 
 	template <class Ar>
@@ -210,7 +210,7 @@ struct OpenDatabaseCoordRequest {
 
 class ClientCoordinators {
 public:
-	vector<ClientLeaderRegInterface> clientLeaderServers;
+	std::vector<ClientLeaderRegInterface> clientLeaderServers;
 	Key clusterKey;
 	Reference<ClusterConnectionFile> ccf;
 

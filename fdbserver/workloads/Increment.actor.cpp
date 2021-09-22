@@ -28,7 +28,7 @@ struct Increment : TestWorkload {
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
@@ -61,14 +61,14 @@ struct Increment : TestWorkload {
 		clients.clear();
 		return incrementCheck(cx->clone(), this, !errors);
 	}
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 		m.push_back(tooOldRetries.getMetric());
 		m.push_back(commitFailedRetries.getMetric());
-		m.push_back(PerfMetric("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true));
-		m.push_back(PerfMetric("Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, false));
-		m.push_back(PerfMetric("Write rows/simsec (approx)", transactions.getValue() * 4 / testDuration, false));
+		m.emplace_back("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), Averaged::True);
+		m.emplace_back("Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, Averaged::False);
+		m.emplace_back("Write rows/simsec (approx)", transactions.getValue() * 4 / testDuration, Averaged::False);
 	}
 
 	static Key intToTestKey(int i) { return StringRef(format("%016d", i)); }

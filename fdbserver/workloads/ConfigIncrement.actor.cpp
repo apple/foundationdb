@@ -161,7 +161,7 @@ public:
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 		m.push_back(commitUnknownResult.getMetric());
-		m.emplace_back("Last Known Value", lastKnownValue, false);
+		m.emplace_back("Last Known Value", lastKnownValue, Averaged::False);
 	}
 };
 

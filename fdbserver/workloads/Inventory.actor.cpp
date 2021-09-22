@@ -31,7 +31,7 @@ struct InventoryTestWorkload : TestWorkload {
 
 	int actorCount, productsPerWrite, nProducts;
 	double testDuration, transactionsPerSecond, fractionWriteTransactions;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 
 	PerfIntCounter transactions, retries;
 	PerfDoubleCounter totalLatency;
@@ -75,19 +75,18 @@ struct InventoryTestWorkload : TestWorkload {
 		return inventoryTestCheck(cx->clone(), this);
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
-		m.push_back(PerfMetric("Client Failures", failures(), false));
+	void getMetrics(std::vector<PerfMetric>& m) override {
+		m.emplace_back("Client Failures", failures(), Averaged::False);
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
-		m.push_back(PerfMetric("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true));
-		m.push_back(PerfMetric("Read rows/simsec (approx)",
-		                       transactions.getValue() *
-		                           (2 * fractionWriteTransactions + 1 * (1.0 - fractionWriteTransactions)) /
-		                           testDuration,
-		                       true));
-		m.push_back(PerfMetric("Write rows/simsec (approx)",
-		                       transactions.getValue() * 2 * fractionWriteTransactions / testDuration,
-		                       true));
+		m.emplace_back("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), Averaged::True);
+		m.emplace_back("Read rows/simsec (approx)",
+		               transactions.getValue() *
+		                   (2 * fractionWriteTransactions + 1 * (1.0 - fractionWriteTransactions)) / testDuration,
+		               Averaged::True);
+		m.emplace_back("Write rows/simsec (approx)",
+		               transactions.getValue() * 2 * fractionWriteTransactions / testDuration,
+		               Averaged::True);
 	}
 
 	Key chooseProduct() const {
@@ -176,7 +175,7 @@ struct InventoryTestWorkload : TestWorkload {
 				for (auto p = products.begin(); p != products.end(); ++p)
 					self->maxExpectedResults[*p]++;
 				while (1) {
-					vector<Future<Void>> todo;
+					std::vector<Future<Void>> todo;
 					for (auto p = products.begin(); p != products.end(); ++p)
 						todo.push_back(self->inventoryTestWrite(&tr, *p));
 					try {

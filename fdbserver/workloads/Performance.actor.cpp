@@ -28,8 +28,8 @@ struct PerformanceWorkload : TestWorkload {
 	Value probeWorkload;
 	Standalone<VectorRef<KeyValueRef>> savedOptions;
 
-	vector<PerfMetric> metrics;
-	vector<TesterInterface> testers;
+	std::vector<PerfMetric> metrics;
+	std::vector<TesterInterface> testers;
 	PerfMetric latencyBaseline, latencySaturation;
 	PerfMetric maxAchievedTPS;
 
@@ -65,13 +65,13 @@ struct PerformanceWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		for (int i = 0; i < metrics.size(); i++)
 			m.push_back(metrics[i]);
 		if (!clientId) {
-			m.push_back(PerfMetric("Baseline Latency (average, ms)", latencyBaseline.value(), false));
-			m.push_back(PerfMetric("Saturation Transactions/sec", maxAchievedTPS.value(), false));
-			m.push_back(PerfMetric("Saturation Median Latency (average, ms)", latencySaturation.value(), false));
+			m.emplace_back("Baseline Latency (average, ms)", latencyBaseline.value(), Averaged::False);
+			m.emplace_back("Saturation Transactions/sec", maxAchievedTPS.value(), Averaged::False);
+			m.emplace_back("Saturation Median Latency (average, ms)", latencySaturation.value(), Averaged::False);
 		}
 	}
 
@@ -104,13 +104,13 @@ struct PerformanceWorkload : TestWorkload {
 	}
 
 	// FIXME: does not use testers which are recruited on workers
-	ACTOR Future<vector<TesterInterface>> getTesters(PerformanceWorkload* self) {
-		state vector<WorkerDetails> workers;
+	ACTOR Future<std::vector<TesterInterface>> getTesters(PerformanceWorkload* self) {
+		state std::vector<WorkerDetails> workers;
 
 		loop {
 			choose {
 				when(
-				    vector<WorkerDetails> w = wait(
+				    std::vector<WorkerDetails> w = wait(
 				        brokenPromiseToNever(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(
 				            GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY))))) {
 					workers = w;
@@ -120,7 +120,7 @@ struct PerformanceWorkload : TestWorkload {
 			}
 		}
 
-		vector<TesterInterface> ts;
+		std::vector<TesterInterface> ts;
 		ts.reserve(workers.size());
 		for (int i = 0; i < workers.size(); i++)
 			ts.push_back(workers[i].interf.testerInterface);
@@ -131,7 +131,7 @@ struct PerformanceWorkload : TestWorkload {
 		state Standalone<VectorRef<VectorRef<KeyValueRef>>> options = self->getOpts(1000.0);
 		self->logOptions(options);
 
-		vector<TesterInterface> testers = wait(self->getTesters(self));
+		std::vector<TesterInterface> testers = wait(self->getTesters(self));
 		self->testers = testers;
 
 		TestSpec spec(LiteralStringRef("PerformanceSetup"), false, false);
@@ -142,7 +142,7 @@ struct PerformanceWorkload : TestWorkload {
 		return Void();
 	}
 
-	PerfMetric getNamedMetric(std::string name, vector<PerfMetric> metrics) {
+	PerfMetric getNamedMetric(std::string name, std::vector<PerfMetric> metrics) {
 		for (int i = 0; i < metrics.size(); i++) {
 			if (metrics[i].name() == name) {
 				return metrics[i];

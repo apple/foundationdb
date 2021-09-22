@@ -7,6 +7,7 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
+#include <rocksdb/version.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
@@ -23,6 +24,13 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
+
+// Enforcing rocksdb version to be 6.22.1 or greater.
+static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
+static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 22 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
+static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
 
 namespace {
 
@@ -181,6 +189,14 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 	}
 }
 
+void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
+	TraceEvent e(SevError, "RocksDBError");
+	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
+	if (status.IsIOError()) {
+		e.detail("SubCode", status.subcode());
+	}
+}
+
 Error statusToError(const rocksdb::Status& s) {
 	if (s.IsIOError()) {
 		return io_error();
@@ -224,14 +240,19 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			auto options = getOptions();
 			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
+				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
 			} else {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
-				onMainThread([&] {
-					a.metrics = rocksDBMetricLogger(options.statistics, db);
-					return Future<bool>(true);
-				}).blockUntilReady();
+				// The current thread and main thread are same when the code runs in simulation.
+				// blockUntilReady() is getting the thread into deadlock state, so avoiding the
+				// metric logger in simulation.
+				if (!g_network->isSimulated()) {
+					onMainThread([&] {
+						a.metrics = rocksDBMetricLogger(options.statistics, db);
+						return Future<bool>(true);
+					}).blockUntilReady();
+				}
 				a.done.send(Void());
 			}
 		}
@@ -266,7 +287,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
+				logRocksDBError(s, "Commit");
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
@@ -292,14 +313,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			auto s = db->Close();
 			if (!s.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
+				logRocksDBError(s, "Close");
 			}
 			if (a.deleteOnClose) {
 				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 					"default", getCFOptions() } };
 				s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
 				if (!s.ok()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Destroy");
+					logRocksDBError(s, "Destroy");
 				} else {
 					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Destroy");
 				}
@@ -420,7 +441,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
 			} else {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix");
+				logRocksDBError(s, "ReadValuePrefix");
 				a.result.sendError(statusToError(s));
 			}
 		}
@@ -512,7 +533,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			if (!s.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
+				logRocksDBError(s, "ReadRange");
 				a.result.sendError(statusToError(s));
 				return;
 			}

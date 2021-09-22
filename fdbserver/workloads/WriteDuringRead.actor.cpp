@@ -116,7 +116,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return success; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 	}
