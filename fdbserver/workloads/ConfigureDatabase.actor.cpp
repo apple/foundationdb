@@ -24,12 +24,17 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
 static const char* storeTypes[] = {
 	"ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta"
 };
+static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",
+	                                           "perpetual_storage_wiggle=1",
+	                                           "perpetual_storage_wiggle=1 storage_migration_type=gradual",
+	                                           "storage_migration_type=aggressive" };
 static const char* logTypes[] = { "log_engine:=1",  "log_engine:=2",  "log_spill:=1",
 	                              "log_spill:=2",   "log_version:=2", "log_version:=3",
 	                              "log_version:=4", "log_version:=5", "log_version:=6" };
@@ -213,11 +218,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	double testDuration;
 	int additionalDBs;
 
+	bool allowTestStorageMigration;
 	vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
 	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 200.0);
+		allowTestStorageMigration =
+		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
 		g_simulator.usableRegions = 1;
 	}
 
@@ -226,7 +234,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
-	Future<bool> check(Database const& cx) override { return true; }
+	Future<bool> check(Database const& cx) override { return _check(this, cx); }
 
 	void getMetrics(vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
@@ -246,7 +254,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
-		wait(success(changeConfig(cx, "single", true)));
+		wait(success(changeConfig(cx, "single storage_migration_type=aggressive", true)));
 		return Void();
 	}
 
@@ -256,6 +264,44 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			wait(waitForAll(self->clients));
 		}
 		return Void();
+	}
+
+	ACTOR Future<bool> _check(ConfigureDatabaseWorkload* self, Database cx) {
+		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
+		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
+		// there
+		if (self->allowTestStorageMigration) {
+			state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
+			state int i;
+			loop {
+				state bool pass = true;
+				state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+
+				for (i = 0; i < storageServers.size(); i++) {
+					// Check that each storage server has the correct key value store type
+					if (!storageServers[i].isTss()) {
+						ReplyPromise<KeyValueStoreType> typeReply;
+						ErrorOr<KeyValueStoreType> keyValueStoreType =
+						    wait(storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
+						if (keyValueStoreType.present() && keyValueStoreType.get() != conf.storageServerStoreType) {
+							TraceEvent(SevWarn, "ConfigureDatabase_WrongStoreType")
+							    .suppressFor(5.0)
+							    .detail("ServerID", storageServers[i].id())
+							    .detail("ProcessID", storageServers[i].locality.processId())
+							    .detail("ServerStoreType",
+							            keyValueStoreType.present() ? keyValueStoreType.get().toString() : "?")
+							    .detail("ConfigStoreType", conf.storageServerStoreType.toString());
+							pass = false;
+							break;
+						}
+					}
+				}
+				if (pass)
+					break;
+				wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
+			}
+		}
+		return true;
 	}
 
 	static int randomRoleNumber() {
@@ -269,7 +315,13 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if (g_simulator.speedUpSimulation) {
 				return Void();
 			}
-			state int randomChoice = deterministicRandom()->randomInt(0, 8);
+
+			state int randomChoice;
+			if (self->allowTestStorageMigration) {
+				randomChoice = deterministicRandom()->randomInt(4, 9);
+			} else {
+				randomChoice = deterministicRandom()->randomInt(0, 8);
+			}
 			if (randomChoice == 0) {
 				wait(success(
 				    runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
@@ -334,6 +386,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				    cx,
 				    backupTypes[deterministicRandom()->randomInt(0, sizeof(backupTypes) / sizeof(backupTypes[0]))],
 				    false)));
+			} else if (randomChoice == 8) {
+				if (self->allowTestStorageMigration) {
+					TEST(true); // storage migration type change
+					wait(success(IssueConfigurationChange(
+					    cx,
+					    storageMigrationTypes[deterministicRandom()->randomInt(
+					        0, sizeof(storageMigrationTypes) / sizeof(storageMigrationTypes[0]))],
+					    false)));
+				}
 			} else {
 				ASSERT(false);
 			}
