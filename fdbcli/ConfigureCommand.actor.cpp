@@ -181,7 +181,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
 		        "migration with the perpetual wiggle, or `configure "
 		        "storage_migration_type=aggressive' for aggressive migration.\n");
-		ret = true;
+		ret = false;
 		break;
 	case ConfigurationResult::DATABASE_ALREADY_CREATED:
 		fprintf(stderr, "ERROR: Database already exists! To change configuration, don't say `new'\n");
