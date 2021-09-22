@@ -2897,10 +2897,14 @@ public:
 	Counter registerMasterRequests;
 	Counter statusRequests;
 
-	ClusterControllerData(ClusterControllerFullInterface const& ccInterface, LocalityData const& locality)
-	  : clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
-	    gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
+	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
+
+	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
+	                      LocalityData const& locality,
+	                      ServerCoordinators const& coordinators)
+	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), clusterControllerProcessId(locality.processId()),
+	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
+	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
 	    recruitingDistributor(false), recruitRatekeeper(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
@@ -2909,7 +2913,8 @@ public:
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
 	    getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
 	    registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
-	    statusRequests("StatusRequests", clusterControllerMetrics) {
+	    statusRequests("StatusRequests", clusterControllerMetrics),
+	    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
 		auto serverInfo = ServerDBInfo();
 		serverInfo.id = deterministicRandom()->randomUniqueID();
 		serverInfo.infoGeneration = ++db.dbInfoCount;
@@ -2968,7 +2973,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				// for status tool
 				TraceEvent("RecruitedMasterWorker", cluster->id)
 				    .detail("Address", fNewMaster.get().get().address())
-				    .trackLatest("RecruitedMasterWorker");
+				    .trackLatest(cluster->recruitedMasterWorkerEventHolder->trackingKey);
 
 				iMaster = fNewMaster.get().get();
 
