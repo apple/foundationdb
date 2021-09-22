@@ -1611,6 +1611,7 @@ void usage() {
 	printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
+	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
 }
 
 /* parse benchmark paramters */
