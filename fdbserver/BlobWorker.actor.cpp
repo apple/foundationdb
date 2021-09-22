@@ -68,6 +68,7 @@ struct GranuleChangeFeedInfo {
 	bool doSnapshot;
 	Optional<KeyRange> granuleSplitFrom;
 	Optional<GranuleFiles> blobFilesToSnapshot;
+	Optional<GranuleFiles> existingFiles;
 };
 
 // FIXME: the circular dependencies here are getting kind of gross
@@ -105,8 +106,10 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	Promise<Void> cancelled;
 	Promise<Void> readable;
 
-	Future<Void> start(BlobWorkerData* bwData, AssignBlobRangeRequest req) {
+	AssignBlobRangeRequest originalReq;
 
+	Future<Void> start(BlobWorkerData* bwData, AssignBlobRangeRequest req) {
+		originalReq = req;
 		assignFuture = persistAssignWorkerRange(bwData, req);
 		fileUpdaterFuture = blobGranuleUpdateFiles(bwData, Reference<GranuleMetadata>::addRef(this));
 
@@ -168,6 +171,8 @@ struct BlobWorkerData {
 	AsyncVar<int> pendingDeltaFileCommitChecks;
 	AsyncVar<Version> knownCommittedVersion;
 	uint64_t knownCommittedCheckCount = 0;
+
+	PromiseStream<AssignBlobRangeRequest> granuleUpdateErrors;
 
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 	~BlobWorkerData() { printf("Destroying blob worker data for %s\n", id.toString().c_str()); }
@@ -371,7 +376,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 		ASSERT(key.getString(0) == previousGranule.begin);
 		ASSERT(key.getString(1) == previousGranule.end);
 
-		BlobGranuleSplitState st = decodeBlobGranuleSplitValue(it.value);
+		BlobGranuleSplitState st = decodeBlobGranuleSplitValue(it.value).first;
 		ASSERT(st != BlobGranuleSplitState::Unknown);
 		if (st == BlobGranuleSplitState::Started) {
 			totalStarted++;
@@ -430,7 +435,8 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 				// FIXME: enable once implemented
 				// tr.stopChangeFeed(KeyRef(prevChangeFeedId.toString()));
 			}
-			tr->set(myStateKey, blobGranuleSplitValueFor(newState));
+			// TODO also add versionstamp
+			tr->atomicOp(myStateKey, blobGranuleSplitValueFor(newState), MutationRef::SetVersionstampedValue);
 		}
 	} else if (BW_DEBUG) {
 		printf("Ignoring granule [%s - %s) split state from [%s - %s) %d -> %d\n",
@@ -443,6 +449,22 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 	}
 
 	return Void();
+}
+
+// returns the split state for a given granule on granule reassignment
+ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Transaction* tr,
+                                                                             KeyRange previousGranule,
+                                                                             KeyRange currentGranule) {
+	Tuple myStateTuple;
+	myStateTuple.append(previousGranule.begin).append(previousGranule.end).append(currentGranule.begin);
+	Key myStateKey = myStateTuple.getDataAsStandalone().withPrefix(blobGranuleSplitKeys.begin);
+
+	Optional<Value> st = wait(tr->get(myStateKey));
+	if (!st.present()) {
+		// must have been that all granules reached done and state was cleaned up
+		return std::pair(BlobGranuleSplitState::Done, invalidVersion);
+	}
+	return decodeBlobGranuleSplitValue(st.get());
 }
 
 static Value getFileValue(std::string fname, int64_t offset, int64_t length) {
@@ -860,6 +882,20 @@ static Future<Void> handleCompletedDeltaFile(BlobWorkerData* bwData,
 	return Future<Void>(Void());
 }
 
+// if we get an i/o error updating files, or a rollback, reassign the granule to ourselves and start fresh
+// FIXME: is this the correct set of errors?
+static bool granuleCanRetry(const Error& e) {
+	switch (e.code()) {
+	case error_code_please_reboot:
+	case error_code_io_error:
+	case error_code_io_timeout:
+	case error_code_http_request_failed:
+		return true;
+	default:
+		return false;
+	};
+}
+
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 // FIXME: handle errors here (forward errors)
@@ -876,6 +912,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 	state Optional<KeyRange> oldChangeFeedDataComplete;
 	state Key cfKey;
 	state Optional<Key> oldCFKey;
+	state bool snapshotEligible; // just wrote a delta file or just took granule over from another worker
 
 	try {
 		// set resume snapshot so it's not valid until we pause to ask the blob manager for a re-snapshot
@@ -910,11 +947,24 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 
 		inFlightBlobSnapshot = Future<BlobFileIndex>(); // not valid!
 
+		// if this is a reassign, calculate how close to a snapshot the previous owner was
+		if (changeFeedInfo.existingFiles.present()) {
+			GranuleFiles files = changeFeedInfo.existingFiles.get();
+			if (!files.snapshotFiles.empty() && !files.deltaFiles.empty()) {
+				Version snapshotVersion = files.snapshotFiles.back().version;
+				for (int i = files.deltaFiles.size() - 1; i >= 0; i--) {
+					if (files.deltaFiles[i].version > snapshotVersion) {
+						metadata->bytesInNewDeltaFiles += files.deltaFiles[i].length;
+					}
+				}
+			}
+			metadata->files = changeFeedInfo.existingFiles.get();
+			snapshotEligible = true;
+		}
+
 		// FIXME: not true for reassigns
-		ASSERT(changeFeedInfo.doSnapshot);
 		if (!changeFeedInfo.doSnapshot) {
 			startVersion = changeFeedInfo.previousDurableVersion;
-			// TODO metadata.files =
 		} else {
 			if (changeFeedInfo.blobFilesToSnapshot.present()) {
 				inFlightBlobSnapshot = compactFromBlob(bwData, metadata, changeFeedInfo.blobFilesToSnapshot.get());
@@ -1039,8 +1089,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						       oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 					}
 					TraceEvent("BlobGranuleDeltaFile", bwData->id)
-					    .detail("GranuleStart", metadata->keyRange.begin)
-					    .detail("GranuleEnd", metadata->keyRange.end)
+					    .detail("Granule", metadata->keyRange)
 					    .detail("Version", metadata->bufferedDeltaVersion.get());
 
 					// launch pipelined, but wait for previous operation to complete before persisting to FDB
@@ -1079,101 +1128,108 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					// if we just wrote a delta file, check if we need to compact here.
 					// exhaust old change feed before compacting - otherwise we could end up with an endlessly growing
 					// list of previous change feeds in the worst case.
-					if (metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
-					    !readOldChangeFeed && !lastFromOldChangeFeed) {
-
-						if (BW_DEBUG && (inFlightBlobSnapshot.isValid() || !inFlightDeltaFiles.empty())) {
-							printf("Granule [%s - %s) ready to re-snapshot, waiting for outstanding %d snapshot and %d "
-							       "deltas to "
-							       "finish\n",
-							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str(),
-							       inFlightBlobSnapshot.isValid() ? 1 : 0,
-							       inFlightDeltaFiles.size());
-						}
-						// wait for all in flight snapshot/delta files
-						if (inFlightBlobSnapshot.isValid()) {
-							BlobFileIndex completedSnapshot = wait(inFlightBlobSnapshot);
-							metadata->files.snapshotFiles.push_back(completedSnapshot);
-							metadata->durableSnapshotVersion.set(completedSnapshot.version);
-							inFlightBlobSnapshot = Future<BlobFileIndex>(); // not valid!
-						}
-						for (auto& it : inFlightDeltaFiles) {
-							BlobFileIndex completedDeltaFile = wait(it);
-							wait(handleCompletedDeltaFile(
-							    bwData, metadata, completedDeltaFile, cfKey, changeFeedInfo.changeFeedStartVersion));
-						}
-						inFlightDeltaFiles.clear();
-
-						if (BW_DEBUG) {
-							printf("Granule [%s - %s) checking with BM for re-snapshot after %d bytes\n",
-							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str(),
-							       metadata->bytesInNewDeltaFiles);
-						}
-
-						TraceEvent("BlobGranuleSnapshotCheck", bwData->id)
-						    .detail("GranuleStart", metadata->keyRange.begin)
-						    .detail("GranuleEnd", metadata->keyRange.end)
-						    .detail("Version", metadata->durableDeltaVersion.get());
-
-						// Save these from the start so repeated requests are idempotent
-						// Need to retry in case response is dropped or manager changes. Eventually, a manager will
-						// either reassign the range with continue=true, or will revoke the range. But, we will keep the
-						// range open at this version for reads until that assignment change happens
-						metadata->resumeSnapshot.reset();
-						state int64_t statusEpoch = metadata->continueEpoch;
-						state int64_t statusSeqno = metadata->continueSeqno;
-						loop {
-							bwData->currentManagerStatusStream.send(
-							    GranuleStatusReply(metadata->keyRange, true, statusEpoch, statusSeqno));
-
-							Optional<Void> result = wait(timeout(metadata->resumeSnapshot.getFuture(), 1.0));
-							if (result.present()) {
-								break;
-							}
-							if (BW_DEBUG) {
-								printf("Granule [%s - %s)\n, hasn't heard back from BM, re-sending status\n",
-								       metadata->keyRange.begin.printable().c_str(),
-								       metadata->keyRange.end.printable().c_str());
-							}
-						}
-
-						if (BW_DEBUG) {
-							printf("Granule [%s - %s) re-snapshotting after %d bytes\n",
-							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str(),
-							       metadata->bytesInNewDeltaFiles);
-						}
-						TraceEvent("BlobGranuleSnapshotFile", bwData->id)
-						    .detail("GranuleStart", metadata->keyRange.begin)
-						    .detail("GranuleEnd", metadata->keyRange.end)
-						    .detail("Version", metadata->durableDeltaVersion.get());
-						// TODO: this could read from FDB instead if it knew there was a large range clear at the end or
-						// it knew the granule was small, or something
-						// BlobFileIndex newSnapshotFile = wait(compactFromBlob(bwData, metadata, metadata->files));
-
-						// Have to copy files object so that adding to it as we start writing new delta files in
-						// parallel doesn't conflict. We could also pass the snapshot version and ignore any snapshot
-						// files >= version and any delta files > version, but that's more complicated
-						inFlightBlobSnapshot = compactFromBlob(bwData, metadata, metadata->files);
-						metadata->pendingSnapshotVersion = metadata->durableDeltaVersion.get();
-
-						// reset metadata
-						metadata->bytesInNewDeltaFiles = 0;
-					}
+					snapshotEligible = true;
 				}
+
+				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
+				    !readOldChangeFeed && !lastFromOldChangeFeed) {
+
+					if (BW_DEBUG && (inFlightBlobSnapshot.isValid() || !inFlightDeltaFiles.empty())) {
+						printf("Granule [%s - %s) ready to re-snapshot, waiting for outstanding %d snapshot and %d "
+						       "deltas to "
+						       "finish\n",
+						       metadata->keyRange.begin.printable().c_str(),
+						       metadata->keyRange.end.printable().c_str(),
+						       inFlightBlobSnapshot.isValid() ? 1 : 0,
+						       inFlightDeltaFiles.size());
+					}
+					// wait for all in flight snapshot/delta files
+					if (inFlightBlobSnapshot.isValid()) {
+						BlobFileIndex completedSnapshot = wait(inFlightBlobSnapshot);
+						metadata->files.snapshotFiles.push_back(completedSnapshot);
+						metadata->durableSnapshotVersion.set(completedSnapshot.version);
+						inFlightBlobSnapshot = Future<BlobFileIndex>(); // not valid!
+					}
+					for (auto& it : inFlightDeltaFiles) {
+						BlobFileIndex completedDeltaFile = wait(it);
+						wait(handleCompletedDeltaFile(
+						    bwData, metadata, completedDeltaFile, cfKey, changeFeedInfo.changeFeedStartVersion));
+					}
+					inFlightDeltaFiles.clear();
+
+					if (BW_DEBUG) {
+						printf("Granule [%s - %s) checking with BM for re-snapshot after %d bytes\n",
+						       metadata->keyRange.begin.printable().c_str(),
+						       metadata->keyRange.end.printable().c_str(),
+						       metadata->bytesInNewDeltaFiles);
+					}
+
+					TraceEvent("BlobGranuleSnapshotCheck", bwData->id)
+					    .detail("Granule", metadata->keyRange)
+					    .detail("Version", metadata->durableDeltaVersion.get());
+
+					// Save these from the start so repeated requests are idempotent
+					// Need to retry in case response is dropped or manager changes. Eventually, a manager will
+					// either reassign the range with continue=true, or will revoke the range. But, we will keep the
+					// range open at this version for reads until that assignment change happens
+					metadata->resumeSnapshot.reset();
+					state int64_t statusEpoch = metadata->continueEpoch;
+					state int64_t statusSeqno = metadata->continueSeqno;
+					loop {
+						bwData->currentManagerStatusStream.send(
+						    GranuleStatusReply(metadata->keyRange, true, statusEpoch, statusSeqno));
+
+						Optional<Void> result = wait(timeout(metadata->resumeSnapshot.getFuture(), 1.0));
+						if (result.present()) {
+							break;
+						}
+						if (BW_DEBUG) {
+							printf("Granule [%s - %s)\n, hasn't heard back from BM, re-sending status\n",
+							       metadata->keyRange.begin.printable().c_str(),
+							       metadata->keyRange.end.printable().c_str());
+						}
+					}
+
+					if (BW_DEBUG) {
+						printf("Granule [%s - %s) re-snapshotting after %d bytes\n",
+						       metadata->keyRange.begin.printable().c_str(),
+						       metadata->keyRange.end.printable().c_str(),
+						       metadata->bytesInNewDeltaFiles);
+					}
+					TraceEvent("BlobGranuleSnapshotFile", bwData->id)
+					    .detail("Granule", metadata->keyRange)
+					    .detail("Version", metadata->durableDeltaVersion.get());
+					// TODO: this could read from FDB instead if it knew there was a large range clear at the end or
+					// it knew the granule was small, or something
+					// BlobFileIndex newSnapshotFile = wait(compactFromBlob(bwData, metadata, metadata->files));
+
+					// Have to copy files object so that adding to it as we start writing new delta files in
+					// parallel doesn't conflict. We could also pass the snapshot version and ignore any snapshot
+					// files >= version and any delta files > version, but that's more complicated
+					inFlightBlobSnapshot = compactFromBlob(bwData, metadata, metadata->files);
+					metadata->pendingSnapshotVersion = metadata->durableDeltaVersion.get();
+
+					// reset metadata
+					metadata->bytesInNewDeltaFiles = 0;
+				}
+				snapshotEligible = false;
 
 				// finally, after we optionally write delta and snapshot files, add new mutations to buffer
 				if (!deltas.mutations.empty()) {
 					if (deltas.mutations.size() == 1 && deltas.mutations.back().param1 == lastEpochEndPrivateKey) {
 						// FIXME: do rollback here!!! look at ChangeFeedRollback trace event
 						if (BW_DEBUG) {
-							printf("BW [%s - %s) NEEDS TO ROLLBACK @ %lld\n",
+							printf("BW [%s - %s) ROLLBACK @ %lld\n",
 							       metadata->keyRange.begin.printable().c_str(),
 							       metadata->keyRange.end.printable().c_str(),
 							       deltas.version);
+							TraceEvent(SevWarn, "GranuleRollback", bwData->id)
+							    .detail("Granule", metadata->keyRange)
+							    .detail("Version", deltas.version);
 						}
+						// FIXME: handle this better! If rollback version is after pendingDurableVersion, don't need to
+						// relinquish whole granule, just need to discard in-memory deltas and buffered delta version
+						throw please_reboot();
 					} else {
 						for (auto& delta : deltas.mutations) {
 							// 8 for version, 1 for type, 4 for each param length then actual param size
@@ -1214,23 +1270,44 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
-		if (BW_DEBUG) {
-			printf("Granule file updater for [%s - %s) got error %s, exiting\n",
-			       metadata->keyRange.begin.printable().c_str(),
-			       metadata->keyRange.end.printable().c_str(),
-			       e.name());
+
+		if (metadata->cancelled.canBeSet()) {
+			metadata->cancelled.send(Void());
 		}
-		TraceEvent(SevError, "GranuleFileUpdaterError", bwData->id)
-		    .detail("GranuleStart", metadata->keyRange.begin)
-		    .detail("GranuleEnd", metadata->keyRange.end)
-		    .error(e);
-		// TODO in this case, need to update range mapping that it doesn't have the range, and/or try to re-"open" the
-		// range if someone else doesn't have it
+
+		if (e.code() == error_code_granule_assignment_conflict) {
+			TraceEvent(SevInfo, "GranuleAssignmentConflict", bwData->id).detail("Granule", metadata->keyRange);
+		} else {
+			if (e.code() != error_code_please_reboot) {
+				++bwData->stats.granuleUpdateErrors;
+				if (BW_DEBUG) {
+					printf("Granule file updater for [%s - %s) got error %s, exiting\n",
+					       metadata->keyRange.begin.printable().c_str(),
+					       metadata->keyRange.end.printable().c_str(),
+					       e.name());
+				}
+				TraceEvent(SevWarn, "GranuleFileUpdaterError", bwData->id)
+				    .detail("Granule", metadata->keyRange)
+				    .error(e);
+			}
+
+			if (granuleCanRetry(e)) {
+				// explicitly cancel all outstanding write futures BEFORE updating promise stream, to ensure they can't
+				// update files after the re-assigned granule acquires the lock
+				inFlightBlobSnapshot.cancel();
+				for (auto& f : inFlightDeltaFiles) {
+					f.cancel();
+				}
+
+				bwData->granuleUpdateErrors.send(metadata->originalReq);
+			}
+		}
 		throw e;
 	}
 }
 
-// TODO might want to separate this out for valid values for range assignments vs read requests
+// TODO might want to separate this out for valid values for range assignments vs read requests. Assignment conflict
+// isn't valid for read requests but is for assignments
 namespace {
 bool canReplyWith(Error e) {
 	switch (e.code()) {
@@ -1238,7 +1315,6 @@ bool canReplyWith(Error e) {
 	case error_code_future_version: // not thrown yet
 	case error_code_wrong_shard_server:
 	case error_code_process_behind: // not thrown yet
-		// TODO should we reply with granule_assignment_conflict?
 		return true;
 	default:
 		return false;
@@ -1353,13 +1429,13 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 				throw transaction_too_old();
 			}
 			if (metadata->cancelled.isSet()) {
-				throw transaction_too_old();
+				throw wrong_shard_server();
 			}
 			Future<Void> waitForVersionFuture = waitForVersion(metadata, req.readVersion);
 			if (!waitForVersionFuture.isReady()) {
 				choose {
 					when(wait(waitForVersionFuture)) {}
-					when(wait(metadata->cancelled.getFuture())) { throw transaction_too_old(); }
+					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 				}
 			}
 
@@ -1458,18 +1534,11 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 	return Void();
 }
 
-// FIXME: in split, need to persist version of created change feed so if worker immediately fails afterwards, new worker
-// picking up the splitting shard knows where the change feed handoff point is. OR need to have change feed return
-// end_of_stream when it knows it has nothing up to the specified end version, and use the commit takeover version as
-// the end version. If it sealed successfully there would trivially be nothing between the seal version and the new
-// commit takeover version. You'd need to start the new change feed at the seal version though, not the commit takeover
-// version.
 ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwData, AssignBlobRangeRequest req) {
 	ASSERT(!req.continueAssignment);
 	state Transaction tr(bwData->db);
 	state Key lockKey = granuleLockKey(req.keyRange);
 	state GranuleChangeFeedInfo info;
-	info.changeFeedId = deterministicRandom()->randomUniqueID();
 	if (BW_DEBUG) {
 		printf("%s persisting assignment [%s - %s)\n",
 		       bwData->id.toString().c_str(),
@@ -1485,25 +1554,27 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 			// FIXME: could add list of futures and do the different parts that are disjoint in parallel?
 			info.changeFeedStartVersion = invalidVersion;
 			Optional<Value> prevLockValue = wait(tr.get(lockKey));
-			if (prevLockValue.present()) {
+			state bool hasPrevOwner = prevLockValue.present();
+			if (hasPrevOwner) {
 				std::tuple<int64_t, int64_t, UID> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
 				acquireGranuleLock(req.managerEpoch, req.managerSeqno, std::get<0>(prevOwner), std::get<1>(prevOwner));
 				info.changeFeedId = std::get<2>(prevOwner);
-				info.doSnapshot = false;
 
-				ASSERT(info.changeFeedId == UID());
-
-				/*info.existingFiles = wait(loadPreviousFiles(&tr, req.keyRange));
+				GranuleFiles granuleFiles = wait(loadPreviousFiles(&tr, req.keyRange));
+				info.existingFiles = granuleFiles;
 				info.previousDurableVersion = info.existingFiles.get().deltaFiles.empty()
 				                                  ? info.existingFiles.get().snapshotFiles.back().version
-				                                  : info.existingFiles.get().deltaFiles.back().version;*/
-				// FIXME: Handle granule reassignments!
-				ASSERT(false);
+				                                  : info.existingFiles.get().deltaFiles.back().version;
 
+				info.doSnapshot = info.existingFiles.get().snapshotFiles.empty();
+				// for the non-splitting cases, this doesn't need to be 100% accurate, it just needs to be smaller than
+				// the next delta file write.
+				info.changeFeedStartVersion = info.previousDurableVersion;
 			} else {
 				// else we are first, no need to check for owner conflict
 				// FIXME: use actual 16 bytes of UID instead of converting it to 32 character string and then that to
 				// bytes
+				info.changeFeedId = deterministicRandom()->randomUniqueID();
 				wait(tr.registerChangeFeed(StringRef(info.changeFeedId.toString()), req.keyRange));
 				info.doSnapshot = true;
 				info.previousDurableVersion = invalidVersion;
@@ -1512,49 +1583,85 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 			tr.set(lockKey, blobGranuleLockValueFor(req.managerEpoch, req.managerSeqno, info.changeFeedId));
 			wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, req.keyRange, blobGranuleMappingValueFor(bwData->id)));
 
+			Tuple historyKey;
+			historyKey.append(req.keyRange.end).append(req.keyRange.end);
+			state Optional<Value> parentGranulesValue =
+			    wait(tr.get(historyKey.getDataAsStandalone().withPrefix(blobGranuleHistoryKeys.begin)));
+
 			// If anything in previousGranules, need to do the handoff logic and set ret.previousChangeFeedId, and the
 			// previous durable version will come from the previous granules
-			if (!req.previousGranules.empty()) {
+			if (parentGranulesValue.present()) {
+				// references memory in parentGranulesValue standalone
+				state VectorRef<KeyRangeRef> parentGranules = decodeBlobGranuleHistoryValue(parentGranulesValue.get());
+				// TODO REMOVE
+				if (BW_DEBUG) {
+					printf("Decoded parent granules for [%s - %s)\n",
+					       req.keyRange.begin.printable().c_str(),
+					       req.keyRange.end.printable().c_str());
+					for (auto& pg : parentGranules) {
+						printf("  [%s - %s)\n", pg.begin.printable().c_str(), pg.end.printable().c_str());
+					}
+				}
+
 				// TODO change this for merge
-				ASSERT(req.previousGranules.size() == 1);
-				Optional<Value> prevGranuleLockValue = wait(tr.get(granuleLockKey(req.previousGranules[0])));
+				ASSERT(parentGranules.size() == 1);
 
-				ASSERT(prevGranuleLockValue.present());
+				state std::pair<BlobGranuleSplitState, Version> granuleSplitState;
+				if (hasPrevOwner) {
+					std::pair<BlobGranuleSplitState, Version> _st =
+					    wait(getGranuleSplitState(&tr, parentGranules[0], req.keyRange));
+					granuleSplitState = _st;
+				} else {
+					granuleSplitState = std::pair(BlobGranuleSplitState::Started, invalidVersion);
+				}
 
-				std::tuple<int64_t, int64_t, UID> prevGranuleLock =
-				    decodeBlobGranuleLockValue(prevGranuleLockValue.get());
-				info.prevChangeFeedId = std::get<2>(prevGranuleLock);
+				ASSERT(!hasPrevOwner || granuleSplitState.first > BlobGranuleSplitState::Started);
 
-				wait(updateGranuleSplitState(&tr,
-				                             req.previousGranules[0],
-				                             req.keyRange,
-				                             info.prevChangeFeedId.get(),
-				                             BlobGranuleSplitState::Assigned));
+				if (granuleSplitState.first == BlobGranuleSplitState::Started) {
+					wait(updateGranuleSplitState(&tr,
+					                             parentGranules[0],
+					                             req.keyRange,
+					                             info.prevChangeFeedId.get(),
+					                             BlobGranuleSplitState::Assigned));
+				}
 
-				// FIXME: store this somewhere useful for time travel reads
-				GranuleFiles prevFiles = wait(loadPreviousFiles(&tr, req.previousGranules[0]));
-				ASSERT(!prevFiles.snapshotFiles.empty() || !prevFiles.deltaFiles.empty());
-				info.granuleSplitFrom = req.previousGranules[0];
-				info.blobFilesToSnapshot = prevFiles;
-				info.previousDurableVersion = info.blobFilesToSnapshot.get().deltaFiles.empty()
-				                                  ? info.blobFilesToSnapshot.get().snapshotFiles.back().version
-				                                  : info.blobFilesToSnapshot.get().deltaFiles.back().version;
+				// if granule wasn't done with old change feed, load it
+				if (granuleSplitState.first < BlobGranuleSplitState::Done) {
+					Optional<Value> prevGranuleLockValue = wait(tr.get(granuleLockKey(parentGranules[0])));
+					ASSERT(prevGranuleLockValue.present());
+					std::tuple<int64_t, int64_t, UID> prevGranuleLock =
+					    decodeBlobGranuleLockValue(prevGranuleLockValue.get());
+					info.prevChangeFeedId = std::get<2>(prevGranuleLock);
+					info.granuleSplitFrom = parentGranules[0];
+					if (granuleSplitState.first == BlobGranuleSplitState::Assigned) {
+						// was already assigned, use change feed start version
+						ASSERT(granuleSplitState.second != invalidVersion);
+						info.changeFeedStartVersion = granuleSplitState.second;
+					}
+				}
 
-				// FIXME: need to handle takeover of a splitting range! If snapshot and/or deltas found for new range,
-				// don't snapshot
+				if (info.doSnapshot) {
+					// FIXME: store this somewhere useful for time travel reads
+					GranuleFiles prevFiles = wait(loadPreviousFiles(&tr, parentGranules[0]));
+					ASSERT(!prevFiles.snapshotFiles.empty() || !prevFiles.deltaFiles.empty());
+
+					info.blobFilesToSnapshot = prevFiles;
+					info.previousDurableVersion = info.blobFilesToSnapshot.get().deltaFiles.empty()
+					                                  ? info.blobFilesToSnapshot.get().snapshotFiles.back().version
+					                                  : info.blobFilesToSnapshot.get().deltaFiles.back().version;
+				}
 			}
-			// else: FIXME: If nothing in previousGranules, previous durable version is max of previous snapshot version
-			// and previous delta version. If neither present, need to do a snapshot at the start.
-			// Assumes for now that this isn't a takeover, so nothing to do here
+
 			wait(tr.commit());
 
-			TraceEvent("BlobWorkerPersistedAssignment", bwData->id)
-			    .detail("GranuleStart", req.keyRange.begin)
-			    .detail("GranuleEnd", req.keyRange.end);
-
-			if (info.changeFeedStartVersion == invalidVersion) {
+			if (!hasPrevOwner) {
 				info.changeFeedStartVersion = tr.getCommittedVersion();
+			} else {
+				ASSERT(info.changeFeedStartVersion != invalidVersion);
 			}
+
+			TraceEvent("BlobWorkerPersistedAssignment", bwData->id).detail("Granule", req.keyRange);
+
 			return info;
 		} catch (Error& e) {
 			if (e.code() == error_code_granule_assignment_conflict) {
@@ -1572,6 +1679,7 @@ static GranuleRangeMetadata constructActiveBlobRange(BlobWorkerData* bwData,
 
 	Reference<GranuleMetadata> newMetadata = makeReference<GranuleMetadata>();
 	newMetadata->keyRange = keyRange;
+	// FIXME: original Epoch/Seqno is now not necessary with originalReq
 	newMetadata->originalEpoch = epoch;
 	newMetadata->originalSeqno = seqno;
 	newMetadata->continueEpoch = epoch;
@@ -1611,9 +1719,11 @@ static std::pair<Future<Void>, Reference<GranuleMetadata>> changeBlobRange(BlobW
                                                                            int64_t epoch,
                                                                            int64_t seqno,
                                                                            bool active,
-                                                                           bool disposeOnCleanup) {
+                                                                           bool disposeOnCleanup,
+                                                                           bool selfReassign) {
 	if (BW_DEBUG) {
-		printf("Changing range for [%s - %s): %s @ (%lld, %lld)\n",
+		printf("%s range for [%s - %s): %s @ (%lld, %lld)\n",
+		       selfReassign ? "Re-assigning" : "Changing",
 		       keyRange.begin.printable().c_str(),
 		       keyRange.end.printable().c_str(),
 		       active ? "T" : "F",
@@ -1622,11 +1732,9 @@ static std::pair<Future<Void>, Reference<GranuleMetadata>> changeBlobRange(BlobW
 	}
 
 	// For each range that intersects this update:
-	// If the identical range already exists at the same assignment sequence nunmber, this is a noop
-	// Otherwise, this will consist of a series of ranges that are either older, or newer.
-	// For each older range, cancel it if it is active.
-	// Insert the current range.
-	// Re-insert all newer ranges over the current range.
+	// If the identical range already exists at the same assignment sequence number and it is not a self-reassign, this
+	// is a noop. Otherwise, this will consist of a series of ranges that are either older, or newer. For each older
+	// range, cancel it if it is active. Insert the current range. Re-insert all newer ranges over the current range.
 
 	std::vector<Future<Void>> futures;
 
@@ -1634,16 +1742,22 @@ static std::pair<Future<Void>, Reference<GranuleMetadata>> changeBlobRange(BlobW
 
 	auto ranges = bwData->granuleMetadata.intersectingRanges(keyRange);
 	for (auto& r : ranges) {
+		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
 		if (r.value().lastEpoch == epoch && r.value().lastSeqno == seqno) {
-			// applied the same assignment twice, make idempotent
 			ASSERT(r.begin() == keyRange.begin);
 			ASSERT(r.end() == keyRange.end);
-			if (r.value().activeMetadata.isValid()) {
-				futures.push_back(success(r.value().activeMetadata->assignFuture));
+
+			if (selfReassign) {
+				thisAssignmentNewer = true;
+			} else {
+				// applied the same assignment twice, make idempotent
+				if (r.value().activeMetadata.isValid()) {
+					futures.push_back(success(r.value().activeMetadata->assignFuture));
+				}
+				return std::pair(waitForAll(futures), Reference<GranuleMetadata>()); // already applied, nothing to do
 			}
-			return std::pair(waitForAll(futures), Reference<GranuleMetadata>()); // already applied, nothing to do
 		}
-		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
+
 		if (r.value().activeMetadata.isValid() && thisAssignmentNewer) {
 			// cancel actors for old range and clear reference
 			if (BW_DEBUG) {
@@ -1752,14 +1866,13 @@ ACTOR Future<Void> registerBlobWorker(BlobWorkerData* bwData, BlobWorkerInterfac
 	}
 }
 
-ACTOR Future<Void> handleRangeAssign(BlobWorkerData* bwData, AssignBlobRangeRequest req) {
+ACTOR Future<Void> handleRangeAssign(BlobWorkerData* bwData, AssignBlobRangeRequest req, bool isSelfReassign) {
 	try {
 		if (req.continueAssignment) {
 			resumeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno);
 		} else {
-			// FIXME: wait to reply unless worker confirms it should own range and takes out lock?
 			state std::pair<Future<Void>, Reference<GranuleMetadata>> futureAndNewGranule =
-			    changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, true, false);
+			    changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, true, false, isSelfReassign);
 
 			wait(futureAndNewGranule.first);
 
@@ -1767,14 +1880,23 @@ ACTOR Future<Void> handleRangeAssign(BlobWorkerData* bwData, AssignBlobRangeRequ
 				wait(futureAndNewGranule.second->start(bwData, req));
 			}
 		}
-		req.reply.send(AssignBlobRangeReply(true));
+		if (!isSelfReassign) {
+			ASSERT(!req.reply.isSet());
+			req.reply.send(AssignBlobRangeReply(true));
+		}
 		return Void();
 	} catch (Error& e) {
 		if (BW_DEBUG) {
-			printf("AssignRange got error %s\n", e.name());
+			printf("AssignRange [%s - %s) got error %s\n",
+			       req.keyRange.begin.printable().c_str(),
+			       req.keyRange.end.printable().c_str(),
+			       e.name());
 		}
-		if (canReplyWith(e)) {
-			req.reply.sendError(e);
+
+		if (!isSelfReassign) {
+			if (canReplyWith(e)) {
+				req.reply.sendError(e);
+			}
 		}
 		throw;
 	}
@@ -1782,12 +1904,17 @@ ACTOR Future<Void> handleRangeAssign(BlobWorkerData* bwData, AssignBlobRangeRequ
 
 ACTOR Future<Void> handleRangeRevoke(BlobWorkerData* bwData, RevokeBlobRangeRequest req) {
 	try {
-		wait(changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, false, req.dispose).first);
+		wait(
+		    changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, false, req.dispose, false).first);
 		req.reply.send(AssignBlobRangeReply(true));
 		return Void();
 	} catch (Error& e) {
+		// FIXME: retry on error if dispose fails?
 		if (BW_DEBUG) {
-			printf("RevokeRange got error %s\n", e.name());
+			printf("RevokeRange [%s - %s) got error %s\n",
+			       req.keyRange.begin.printable().c_str(),
+			       req.keyRange.end.printable().c_str(),
+			       e.name());
 		}
 		if (canReplyWith(e)) {
 			req.reply.sendError(e);
@@ -1797,11 +1924,12 @@ ACTOR Future<Void> handleRangeRevoke(BlobWorkerData* bwData, RevokeBlobRangeRequ
 }
 
 // FIXME: handle errors
-// Because change feeds send uncommitted data and explicit rollback messages, we speculatively buffer/write uncommitted
-// data. This means we must ensure the data is actually committed before "committing" those writes in the blob granule.
-// The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed to be an earlier
-// committed version.
-ACTOR Future<Void> runGrvChecks(BlobWorkerData* bwData) {
+// Because change feeds send uncommitted data and explicit rollback messages, we speculatively buffer/write
+// uncommitted data. This means we must ensure the data is actually committed before "committing" those writes in
+// the blob granule. The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed
+// to be an earlier committed version.
+ACTOR Future<Void> runCommitVersionChecks(BlobWorkerData* bwData) {
+	state Transaction tr(bwData->db);
 	loop {
 		// only do grvs to get committed version if we need it to persist delta files
 		while (bwData->pendingDeltaFileCommitChecks.get() == 0) {
@@ -1813,14 +1941,19 @@ ACTOR Future<Void> runGrvChecks(BlobWorkerData* bwData) {
 
 		state int checksToResolve = bwData->pendingDeltaFileCommitChecks.get();
 
-		Transaction tr(bwData->db);
-		Version readVersion = wait(tr.getReadVersion());
+		tr.reset();
+		try {
+			Version readVersion = wait(tr.getReadVersion());
 
-		ASSERT(readVersion >= bwData->knownCommittedVersion.get());
-		if (readVersion > bwData->knownCommittedVersion.get()) {
-			++bwData->knownCommittedCheckCount;
-			bwData->knownCommittedVersion.set(readVersion);
-			bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() - checksToResolve);
+			ASSERT(readVersion >= bwData->knownCommittedVersion.get());
+			if (readVersion > bwData->knownCommittedVersion.get()) {
+				++bwData->knownCommittedCheckCount;
+				bwData->knownCommittedVersion.set(readVersion);
+				bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() - checksToResolve);
+			}
+			++bwData->stats.commitVersionChecks;
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
 	}
 }
@@ -1861,7 +1994,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 	state Future<Void> collection = actorCollection(addActor.getFuture());
 
 	addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
-	addActor.send(runGrvChecks(&self));
+	addActor.send(runCommitVersionChecks(&self));
 
 	try {
 		loop choose {
@@ -1885,31 +2018,18 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 				++self.stats.rangeAssignmentRequests;
 				--self.stats.numRangesAssigned;
 				state AssignBlobRangeRequest assignReq = _req;
-				if (assignReq.continueAssignment) {
-					ASSERT(assignReq.previousGranules.empty());
-				}
-				if (!assignReq.previousGranules.empty()) {
-					ASSERT(!assignReq.continueAssignment);
-				}
-				// TODO remove this later once we support merges
-				ASSERT(assignReq.previousGranules.size() <= 1);
 				if (BW_DEBUG) {
-					printf("Worker %s assigned range [%s - %s) @ (%lld, %lld):\n  continue=%s\n  prev=",
+					printf("Worker %s assigned range [%s - %s) @ (%lld, %lld):\n  continue=%s\n",
 					       self.id.toString().c_str(),
 					       assignReq.keyRange.begin.printable().c_str(),
 					       assignReq.keyRange.end.printable().c_str(),
 					       assignReq.managerEpoch,
 					       assignReq.managerSeqno,
 					       assignReq.continueAssignment ? "T" : "F");
-
-					for (auto& it : assignReq.previousGranules) {
-						printf("    [%s - %s)\n", it.begin.printable().c_str(), it.end.printable().c_str());
-					}
-					printf("\n");
 				}
 
 				if (self.managerEpochOk(assignReq.managerEpoch)) {
-					addActor.send(handleRangeAssign(&self, assignReq));
+					addActor.send(handleRangeAssign(&self, assignReq, false));
 				} else {
 					assignReq.reply.send(AssignBlobRangeReply(false));
 				}
@@ -1933,6 +2053,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 					revokeReq.reply.send(AssignBlobRangeReply(false));
 				}
 			}
+			when(AssignBlobRangeRequest granuleToReassign = waitNext(self.granuleUpdateErrors.getFuture())) {
+				addActor.send(handleRangeAssign(&self, granuleToReassign, true));
+			}
 			when(wait(collection)) {
 				ASSERT(false);
 				throw internal_error();
@@ -1943,9 +2066,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 			printf("Blob worker got error %s, exiting\n", e.name());
 		}
 		TraceEvent("BlobWorkerDied", self.id).error(e, true);
+		throw e;
 	}
-
-	return Void();
 }
 
 // TODO add unit tests for assign/revoke range, especially version ordering

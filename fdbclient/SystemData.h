@@ -526,20 +526,23 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 
 // blob granule keys
 
-// \xff/bgf/(startKey, endKey, {snapshot|delta}, version) = [[filename]]
+// \xff\x02/bgf/(startKey, endKey, {snapshot|delta}, version) = [[filename]]
 extern const KeyRangeRef blobGranuleFileKeys;
 
 // TODO could shrink the size of the mapping keyspace by using something similar to tags instead of UIDs. We'd probably
 // want to do that in V1 or it'd be a big migration.
 
-// \xff/bgm/[[begin]] = [[BlobWorkerUID]]
+// \xff\x02/bgm/[[begin]] = [[BlobWorkerUID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
 
-// \xff/bgl/(begin,end) = (epoch, seqno, changefeed id)
+// \xff\x02/bgl/(begin,end) = (epoch, seqno, changefeed id)
 extern const KeyRangeRef blobGranuleLockKeys;
 
-// \xff/bgs/(oldbegin,oldend,newbegin) = state
+// \xff\x02/bgs/(oldbegin,oldend,newbegin) = state
 extern const KeyRangeRef blobGranuleSplitKeys;
+
+// \xff\x02/bgh/(start,end) = [(oldbegin, oldend)]
+extern const KeyRangeRef blobGranuleHistoryKeys;
 
 const Value blobGranuleMappingValueFor(UID const& workerID);
 UID decodeBlobGranuleMappingValue(ValueRef const& value);
@@ -548,8 +551,12 @@ const Value blobGranuleLockValueFor(int64_t epochNum, int64_t sequenceNum, UID c
 // FIXME: maybe just define a struct?
 std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(ValueRef const& value);
 
+// these are versionstamped
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
-BlobGranuleSplitState decodeBlobGranuleSplitValue(ValueRef const& value);
+std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef const& value);
+
+const Value blobGranuleHistoryValueFor(VectorRef<KeyRangeRef> const& parentGranules);
+VectorRef<KeyRangeRef> decodeBlobGranuleHistoryValue(ValueRef const& value);
 
 // \xff/bwl/[[BlobWorkerID]] = [[BlobWorkerInterface]]
 extern const KeyRangeRef blobWorkerListKeys;

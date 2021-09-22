@@ -1112,6 +1112,7 @@ const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff\x02/bgf/"), Literal
 const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), LiteralStringRef("\xff\x02/bgm0"));
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
+const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
 
 const Value blobGranuleMappingValueFor(UID const& workerID) {
 	BinaryWriter wr(Unversioned());
@@ -1147,14 +1148,32 @@ std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(const ValueRef& val
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st) {
 	BinaryWriter wr(Unversioned());
 	wr << st;
+	return addVersionStampAtEnd(wr.toValue());
+}
+
+std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const ValueRef& value) {
+	BlobGranuleSplitState st;
+	Version v;
+	BinaryReader reader(value, Unversioned());
+	reader >> st;
+	reader >> v;
+	return std::pair(st, v);
+}
+
+// const Value blobGranuleHistoryValueFor(VectorRef<KeyRangeRef> const& parentGranules);
+// VectorRef<KeyRangeRef> decodeBlobGranuleHistoryValue(ValueRef const& value);
+
+const Value blobGranuleHistoryValueFor(VectorRef<KeyRangeRef> const& parentGranules) {
+	BinaryWriter wr(Unversioned());
+	wr << parentGranules;
 	return wr.toValue();
 }
 
-BlobGranuleSplitState decodeBlobGranuleSplitValue(const ValueRef& value) {
-	BlobGranuleSplitState st;
+VectorRef<KeyRangeRef> decodeBlobGranuleHistoryValue(const ValueRef& value) {
+	VectorRef<KeyRangeRef> parentGranules;
 	BinaryReader reader(value, Unversioned());
-	reader >> st;
-	return st;
+	reader >> parentGranules;
+	return parentGranules;
 }
 
 const KeyRangeRef blobWorkerListKeys(LiteralStringRef("\xff\x02/bwList/"), LiteralStringRef("\xff\x02/bwList0"));

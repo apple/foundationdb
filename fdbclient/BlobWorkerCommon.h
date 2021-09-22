@@ -35,6 +35,8 @@ struct BlobWorkerStats {
 	Counter changeFeedInputBytes;
 	Counter readReqTotalFilesReturned;
 	Counter readReqDeltaBytesReturned;
+	Counter commitVersionChecks;
+	Counter granuleUpdateErrors;
 
 	int numRangesAssigned;
 	int mutationBytesBuffered;
@@ -54,7 +56,8 @@ struct BlobWorkerStats {
 	    rangeAssignmentRequests("RangeAssignmentRequests", cc), readRequests("ReadRequests", cc),
 	    wrongShardServer("WrongShardServer", cc), changeFeedInputBytes("RangeFeedInputBytes", cc),
 	    readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
-	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), numRangesAssigned(0), mutationBytesBuffered(0) {
+	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), commitVersionChecks("CommitVersionChecks", cc),
+	    granuleUpdateErrors("GranuleUpdateErrors", cc), numRangesAssigned(0), mutationBytesBuffered(0) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });

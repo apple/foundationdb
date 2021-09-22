@@ -120,17 +120,11 @@ struct AssignBlobRangeRequest {
 	KeyRangeRef keyRange;
 	int64_t managerEpoch;
 	int64_t managerSeqno;
-	// If continueAssignment is true, this is just to instruct the worker that it still owns the range, so it should
-	// re-snapshot it and continue. If continueAssignment is false and previousGranules is empty, this is either the
-	// initial assignment to construct a previously non-existent granule, or a reassignment. Depending on what state
-	// exists for the granule currently, the worker will either start a new granule, or just pick up from where the
-	// previous worker left off.
+	// If continueAssignment is true, this is just to instruct the worker that it *still* owns the range, so it should
+	// re-snapshot it and continue.
 
-	// For a split or merge, continueAssignment==false.
-	// For a split, previousGranules will contain one granule that contains keyRange. For a merge, previousGranules will
-	// contain two or more granules, the union of which will be keyRange.
+	// For an initial assignment, reassignent, split, or merge, continueAssignment==false.
 	bool continueAssignment;
-	VectorRef<KeyRangeRef> previousGranules; // only set if there is a granule boundary change
 
 	ReplyPromise<AssignBlobRangeReply> reply;
 
@@ -138,7 +132,7 @@ struct AssignBlobRangeRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, managerEpoch, managerSeqno, continueAssignment, previousGranules, reply, arena);
+		serializer(ar, keyRange, managerEpoch, managerSeqno, continueAssignment, reply, arena);
 	}
 };
 

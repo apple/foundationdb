@@ -165,11 +165,9 @@ void getRanges(std::vector<std::pair<KeyRangeRef, bool>>& results, KeyRangeMap<b
 
 struct RangeAssignmentData {
 	bool continueAssignment;
-	std::vector<KeyRange> previousRanges;
 
 	RangeAssignmentData() : continueAssignment(false) {}
-	RangeAssignmentData(bool continueAssignment, std::vector<KeyRange> previousRanges)
-	  : continueAssignment(continueAssignment), previousRanges(previousRanges) {}
+	RangeAssignmentData(bool continueAssignment) : continueAssignment(continueAssignment) {}
 };
 
 struct RangeRevokeData {
@@ -332,9 +330,6 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 			req.managerEpoch = bmData->epoch;
 			req.managerSeqno = seqNo;
 			req.continueAssignment = assignment.assign.get().continueAssignment;
-			for (auto& it : assignment.assign.get().previousRanges) {
-				req.previousGranules.push_back_deep(req.arena, it);
-			}
 			AssignBlobRangeReply _rep = wait(bmData->workersById[workerID].assignBlobRangeRequest.getReply(req));
 			rep = _rep;
 		} else {
@@ -580,7 +575,7 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 						RangeAssignment ra;
 						ra.isAssign = true;
 						ra.keyRange = range;
-						ra.assign = RangeAssignmentData(); // continue=false, no previous granules
+						ra.assign = RangeAssignmentData(false); // continue=false
 						bmData->rangesToAssign.send(ra);
 					}
 				}
@@ -640,8 +635,7 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 		raContinue.isAssign = true;
 		raContinue.worker = currentWorkerId;
 		raContinue.keyRange = range;
-		raContinue.assign =
-		    RangeAssignmentData(true, std::vector<KeyRange>()); // continue, no "previous" range to do handover
+		raContinue.assign = RangeAssignmentData(true); // continue assignment and re-snapshot
 		bmData->rangesToAssign.send(raContinue);
 		return Void();
 	}
@@ -686,17 +680,25 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 				ASSERT(newLockSeqno >= std::get<1>(prevGranuleLock));
 			}
 
+			// acquire granule lock so nobody else can make changes to this granule.
 			tr->set(lockKey, blobGranuleLockValueFor(bmData->epoch, newLockSeqno, std::get<2>(prevGranuleLock)));
 
+			Standalone<VectorRef<KeyRangeRef>> history;
+			history.push_back(history.arena(), range);
+			Value historyValue = blobGranuleHistoryValueFor(history);
 			// set up split metadata
 			for (int i = 0; i < newRanges.size() - 1; i++) {
-				Tuple key;
-				key.append(range.begin).append(range.end).append(newRanges[i]);
-				tr->set(key.getDataAsStandalone().withPrefix(blobGranuleSplitKeys.begin),
-				        blobGranuleSplitValueFor(BlobGranuleSplitState::Started));
+				Tuple splitKey;
+				splitKey.append(range.begin).append(range.end).append(newRanges[i]);
+				tr->atomicOp(splitKey.getDataAsStandalone().withPrefix(blobGranuleSplitKeys.begin),
+				             blobGranuleSplitValueFor(BlobGranuleSplitState::Started),
+				             MutationRef::SetVersionstampedValue);
 
-				// acquire granule lock so nobody else can make changes to this granule.
+				Tuple historyKey;
+				historyKey.append(newRanges[i]).append(newRanges[i + 1]);
+				tr->set(historyKey.getDataAsStandalone().withPrefix(blobGranuleHistoryKeys.begin), historyValue);
 			}
+
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
@@ -720,14 +722,12 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 	raRevoke.revoke = RangeRevokeData(false); // not a dispose
 	bmData->rangesToAssign.send(raRevoke);
 
-	std::vector<KeyRange> originalRange;
-	originalRange.push_back(range);
 	for (int i = 0; i < newRanges.size() - 1; i++) {
 		// reassign new range and do handover of previous range
 		RangeAssignment raAssignSplit;
 		raAssignSplit.isAssign = true;
 		raAssignSplit.keyRange = KeyRangeRef(newRanges[i], newRanges[i + 1]);
-		raAssignSplit.assign = RangeAssignmentData(false, originalRange);
+		raAssignSplit.assign = RangeAssignmentData(false);
 		// don't care who this range gets assigned to
 		bmData->rangesToAssign.send(raAssignSplit);
 	}
@@ -839,14 +839,13 @@ ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
 					RangeAssignment assignNew;
 					assignNew.isAssign = true;
 					assignNew.keyRange = randomRange.range();
-					assignNew.assign =
-					    RangeAssignmentData(false, std::vector<KeyRange>()); // not a continue, no boundary change
+					assignNew.assign = RangeAssignmentData(false); // not a continue
 					bmData->rangesToAssign.send(assignNew);
 					break;
 				}
 			}
 			if (tries == 0 && BM_DEBUG) {
-				printf("Range mover couldn't find range to move, skipping\n");
+				printf("Range mover couldn't find random range to move, skipping\n");
 			}
 		} else if (BM_DEBUG) {
 			printf("Range mover found %d workers, skipping\n", bmData->workerAssignments.size());
@@ -893,8 +892,9 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 	addActor.send(monitorClientRanges(&self));
 	addActor.send(rangeAssigner(&self));
 
-	// TODO add back once everything is properly implemented!
-	// addActor.send(rangeMover(&self));
+	if (BUGGIFY) {
+		addActor.send(rangeMover(&self));
+	}
 
 	// TODO probably other things here eventually
 	loop choose {
