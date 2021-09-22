@@ -20,6 +20,9 @@
 
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
+#include "fdbrpc/fdbrpc.h"
+#include "flow/flow.h"
+#include "flow/network.h"
 #define BOOST_DATE_TIME_NO_LIB
 
 #include <algorithm>
@@ -51,6 +54,7 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/NetworkTest.h"
@@ -947,7 +951,10 @@ enum class ServerRole {
 	SkipListTest,
 	Test,
 	VersionedMapTest,
-	UnitTests
+	UnitTests,
+	RemoteIKVS,
+	RemoteIKVSClient,
+	SpawnRemoteIKVS
 };
 struct CLIOptions {
 	std::string commandLine;
@@ -1159,6 +1166,12 @@ private:
 					role = ServerRole::ConsistencyCheck;
 				else if (!strcmp(sRole, "unittests"))
 					role = ServerRole::UnitTests;
+				else if (!strcmp(sRole, "remoteIKVS"))
+					role = ServerRole::RemoteIKVS;
+				else if (!strcmp(sRole, "remoteIKVSClient"))
+					role = ServerRole::RemoteIKVSClient;
+				else if (!strcmp(sRole, "spawnRemoteIKVS"))
+					role = ServerRole::SpawnRemoteIKVS;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1653,6 +1666,59 @@ private:
 };
 } // namespace
 
+struct RemoteIKVSServerInterface {
+	constexpr static FileIdentifier file_identifier = 1938843;
+	RequestStream<struct GetRemoteIKVSServerRequest> getRemoteIKVSServerInterf;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, getRemoteIKVSServerInterf);
+	}
+};
+
+struct GetRemoteIKVSServerRequest {
+	constexpr static FileIdentifier file_identifier = 9393921;
+	ReplyPromise<RemoteIKVSServerInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+ACTOR Future<Void> runRemoteIKVSServer() {
+
+	state RemoteIKVSServerInterface remoteIKVSServer;
+	remoteIKVSServer.getRemoteIKVSServerInterf.makeWellKnownEndpoint(WLTOKEN_FIRST_AVAILABLE,
+	                                                                 TaskPriority::DefaultEndpoint);
+	loop choose {
+		when(wait(delay(1.5))) { std::cout << "Waiting for connection...\n"; }
+		when(GetRemoteIKVSServerRequest req = waitNext(remoteIKVSServer.getRemoteIKVSServerInterf.getFuture())) {
+			std::cout << "received response for running remote IKVS server\n";
+			req.reply.send(remoteIKVSServer);
+		}
+	}
+}
+
+ACTOR Future<Void> testRemoteIKVSClient() {
+	state RemoteIKVSServerInterface server;
+	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:6666");
+	wait(delay(0.5));
+	std::cout << "initializing connection to server...\n";
+	server.getRemoteIKVSServerInterf = RequestStream<GetRemoteIKVSServerRequest>(Endpoint({ addr }, UID(-1, 2)));
+	RemoteIKVSServerInterface interf = wait(server.getRemoteIKVSServerInterf.getReply(GetRemoteIKVSServerRequest()));
+	std::cout << "Connection established\n";
+	server = interf;
+	return Void();
+}
+
+ACTOR Future<Void> spawnRemoteIKVS() {
+	state ExecCmdValueString snapArg(LiteralStringRef("bin/fdbserver -r remoteIKVS --public_address 127.0.0.1:6666"));
+	int err = wait(execHelper(&snapArg, UID(-1, 2), "~/work/foundationdb/buildDir", "RemoteIKVS"));
+	std::cout << err << std::endl;
+	return Void();
+}
+
 int main(int argc, char* argv[]) {
 	// TODO: Remove later, this is just to force the statics to be initialized
 	// otherwise the unit test won't run
@@ -1783,8 +1849,8 @@ int main(int argc, char* argv[]) {
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 
-			const bool expectsPublicAddress =
-			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
+			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
+			                                   role == ServerRole::Restore || role == ServerRole::RemoteIKVS);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
@@ -2119,6 +2185,15 @@ int main(int argc, char* argv[]) {
 			}
 
 			f = result;
+		} else if (role == ServerRole::RemoteIKVS) {
+			f = stopAfter(runRemoteIKVSServer());
+			g_network->run();
+		} else if (role == ServerRole::RemoteIKVSClient) {
+			f = stopAfter(testRemoteIKVSClient());
+			g_network->run();
+		} else if (role == ServerRole::SpawnRemoteIKVS) {
+			f = stopAfter(spawnRemoteIKVS());
+			g_network->run();
 		}
 
 		int rc = FDB_EXIT_SUCCESS;
