@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
@@ -217,8 +218,12 @@ private:
 			    .detail("TagKey", serverTagKeyFor(serverKeysDecodeServer(m.param1)))
 			    .detail("Tag", tag.toString());
 
-			toCommit->addTag(tag);
-			toCommit->writeTypedMessage(privatized);
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				toCommit->writeToStorageTeams(tLogGroupCollection, {ptxn::txsTeam}, privatized);
+			} else {
+				toCommit->addTag(tag);
+				toCommit->writeTypedMessage(privatized);
+			}
 		}
 	}
 
@@ -288,11 +293,17 @@ private:
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
-			toCommit->addTag(tag);
-			toCommit->writeTypedMessage(LogProtocolMessage(), true);
-			toCommit->addTag(tag);
-			toCommit->writeTypedMessage(privatized);
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				//TODO (Vishesh) Add LogProtocolMesssage?
+				toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+			} else {
+				toCommit->addTag(tag);
+				toCommit->writeTypedMessage(LogProtocolMessage(), true);
+				toCommit->addTag(tag);
+				toCommit->writeTypedMessage(privatized);
+			}
 		}
+
 		if (!initialCommit) {
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			if (storageCache) {
@@ -350,8 +361,13 @@ private:
 		// This is done to make the cache servers aware of the cached key-ranges
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-		toCommit->addTag(cacheTag);
-		toCommit->writeTypedMessage(privatized);
+
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+		} else {
+			toCommit->addTag(cacheTag);
+			toCommit->writeTypedMessage(privatized);
+		}
 	}
 
 	void checkSetConfigKeys(MutationRef m) {
@@ -426,8 +442,12 @@ private:
 
 			Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
 			if (tagV.present()) {
-				toCommit->addTag(decodeServerTagValue(tagV.get()));
-				toCommit->writeTypedMessage(privatized);
+				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+					toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+				} else {
+					toCommit->addTag(decodeServerTagValue(tagV.get()));
+					toCommit->writeTypedMessage(privatized);
+				}
 			}
 		}
 	}
@@ -454,8 +474,12 @@ private:
 		if (tagV.present()) {
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			toCommit->addTag(decodeServerTagValue(tagV.get()));
-			toCommit->writeTypedMessage(privatized);
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				toCommit->writeToStorageTeams(tLogGroupCollection, {ptxn::txsTeam}, privatized);
+			} else {
+				toCommit->addTag(decodeServerTagValue(tagV.get()));
+				toCommit->writeTypedMessage(privatized);
+			}
 		}
 	}
 
@@ -576,8 +600,13 @@ private:
 
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-		toCommit->addTags(allTags);
-		toCommit->writeTypedMessage(privatized);
+
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+		} else {
+			toCommit->addTags(allTags);
+			toCommit->writeTypedMessage(privatized);
+		}
 	}
 
 	void checkSetOtherKeys(MutationRef m) {
@@ -696,10 +725,15 @@ private:
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = keyAfter(kv.key, arena).withPrefix(systemKeys.begin, arena);
 
-					toCommit->addTag(decodeServerTagValue(kv.value));
-					toCommit->writeTypedMessage(privatized);
+					if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+						toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+					} else {
+						toCommit->addTag(decodeServerTagValue(kv.value));
+						toCommit->writeTypedMessage(privatized);
+					}
 				}
 			}
+
 			// Might be a tss removal, which doesn't store a tag there.
 			// Chained if is a little verbose, but avoids unecessary work
 			if (toCommit && !initialCommit && !serverKeysCleared.size()) {
@@ -718,8 +752,12 @@ private:
 								privatized.param2 =
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
 
-								toCommit->addTag(decodeServerTagValue(tagV.get()));
-								toCommit->writeTypedMessage(privatized);
+								if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+									toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+								} else {
+									toCommit->addTag(decodeServerTagValue(tagV.get()));
+									toCommit->writeTypedMessage(privatized);
+								}
 							}
 						}
 					}
@@ -898,8 +936,13 @@ private:
 		if (Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get(); tagV.present()) {
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			toCommit->addTag(decodeServerTagValue(tagV.get()));
-			toCommit->writeTypedMessage(privatized);
+
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+			} else {
+				toCommit->addTag(decodeServerTagValue(tagV.get()));
+				toCommit->writeTypedMessage(privatized);
+			}
 		}
 	}
 
@@ -923,8 +966,12 @@ private:
 
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-					toCommit->addTag(decodeServerTagValue(tagV.get()));
-					toCommit->writeTypedMessage(privatized);
+					if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+						toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+					} else {
+						toCommit->addTag(decodeServerTagValue(tagV.get()));
+						toCommit->writeTypedMessage(privatized);
+					}
 				}
 			}
 		}
@@ -1015,10 +1062,15 @@ private:
 			}
 
 			// Add the tags to both begin and end mutations
-			toCommit->addTags(allTags);
-			toCommit->writeTypedMessage(mutationBegin);
-			toCommit->addTags(allTags);
-			toCommit->writeTypedMessage(mutationEnd);
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, mutationBegin);
+				toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, mutationEnd);
+			} else {
+				toCommit->addTags(allTags);
+				toCommit->writeTypedMessage(mutationBegin);
+				toCommit->addTags(allTags);
+				toCommit->writeTypedMessage(mutationEnd);
+			}
 		}
 	}
 
