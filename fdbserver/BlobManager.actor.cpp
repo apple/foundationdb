@@ -857,7 +857,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 				if (BM_DEBUG) {
 					printf("Blob manager dying...\n");
 				}
-				throw;
+				return Void();
 			}
 
 			// if we get here, most likely error is a read-write conflict
