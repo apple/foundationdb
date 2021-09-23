@@ -140,6 +140,7 @@ private:
 		if (!m.param1.startsWith(keyServersPrefix)) {
 			return;
 		}
+		// TraceEvent("checkSetKeyServersPrefix MetadataMutation").detail("ToCommit", toCommit  ? 1 : 0);
 
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
@@ -188,6 +189,8 @@ private:
 		if (!m.param1.startsWith(serverKeysPrefix)) {
 			return;
 		}
+		// TraceEvent("checkSetServerKeysPrefix MetadataMutation");
+
 		if (toCommit) {
 			Tag tag = decodeServerTagValue(
 			    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get());
@@ -209,6 +212,8 @@ private:
 		if (!m.param1.startsWith(serverTagPrefix)) {
 			return;
 		}
+		// TraceEvent("checkSetServerTagsPrefix MetadataMutation").detail("ToCommit", toCommit  ? 1 : 0);
+
 		UID id = decodeServerTagKey(m.param1);
 		Tag tag = decodeServerTagValue(m.param2);
 
@@ -274,7 +279,7 @@ private:
 		if (!m.param1.startsWith(cacheKeysPrefix) || toCommit == nullptr) {
 			return;
 		}
-
+		// TraceEvent("checkSetCacheKeysPrefix MetadataMutation");
 		// Create a private mutation for cache servers
 		// This is done to make the cache servers aware of the cached key-ranges
 		MutationRef privatized = m;
@@ -338,6 +343,8 @@ private:
 		if (!m.param1.startsWith(tssMappingKeys.begin)) {
 			return;
 		}
+		// TraceEvent("checkSetTSSMappingKeys MetadataMutation");
+
 		// Normally uses key backed map, so have to use same unpacking code here.
 		UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
 		UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
@@ -370,6 +377,7 @@ private:
 		if (!toCommit) {
 			return;
 		}
+		// TraceEvent("checkSetTSSQuarantineKeys MetadataMutation");
 		UID tssId = decodeTssQuarantineKey(m.param1);
 		Optional<Value> ssiV = txnStateStore->readValue(serverListKeyFor(tssId)).get();
 		if (!ssiV.present()) {
@@ -478,7 +486,7 @@ private:
 		if (!toCommit) {
 			return;
 		}
-
+		// TraceEvent("checkSetGlobalKeys MetadataMutation");
 		// Notifies all servers that a Master's server epoch ends
 		auto allServers = txnStateStore->readRange(serverTagKeys).get();
 		std::set<Tag> allTags;
@@ -610,7 +618,7 @@ private:
 		if (!serverTagKeys.intersects(range)) {
 			return;
 		}
-
+		// TraceEvent("checkClearServerTagKeys MetadataMutation");
 		// Storage server removal always happens in a separate version from any prior writes (or any subsequent
 		// reuse of the tag) so we can safely destroy the tag here without any concern about intra-batch
 		// ordering
@@ -901,6 +909,7 @@ private:
 		if (cachedRangeInfo.size() == 0 || !toCommit) {
 			return;
 		}
+		// TraceEvent("tagStorageServersForCachedKeyRanges MetadataMutation");
 
 		std::map<KeyRef, MutationRef>::iterator itr;
 		KeyRef keyBegin, keyEnd;
@@ -1037,4 +1046,36 @@ void applyMetadataMutations(SpanID const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore) {
 	ApplyMetadataMutationsImpl(spanContext, dbgid, arena, mutations, txnStateStore).apply();
+}
+
+bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
+	for (auto const& m : mutations) {
+
+		if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
+			if (m.param1.startsWith(globalKeysPrefix) || (m.param1.startsWith(cacheKeysPrefix)) ||
+			    (m.param1.startsWith(configKeysPrefix)) || (m.param1.startsWith(serverListPrefix)) ||
+			    (m.param1.startsWith(storageCachePrefix)) || (m.param1.startsWith(serverTagPrefix)) ||
+			    (m.param1.startsWith(tssMappingKeys.begin)) || (m.param1.startsWith(tssQuarantineKeys.begin)) ||
+			    (m.param1.startsWith(applyMutationsEndRange.begin)) ||
+			    (m.param1.startsWith(applyMutationsKeyVersionMapRange.begin)) ||
+			    (m.param1.startsWith(logRangesRange.begin)) || (m.param1.startsWith(serverKeysPrefix)) ||
+			    (m.param1.startsWith(keyServersPrefix)) || (m.param1.startsWith(cacheKeysPrefix))) {
+				return true;
+			}
+		} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
+			KeyRangeRef range(m.param1, m.param2);
+			if ((keyServersKeys.intersects(range)) || (configKeys.intersects(range)) ||
+			    (serverListKeys.intersects(range)) || (tagLocalityListKeys.intersects(range)) ||
+			    (serverTagKeys.intersects(range)) || (serverTagHistoryKeys.intersects(range)) ||
+			    (range.intersects(applyMutationsEndRange)) || (range.intersects(applyMutationsKeyVersionMapRange)) ||
+			    (range.intersects(logRangesRange)) || (tssMappingKeys.intersects(range)) ||
+			    (tssQuarantineKeys.intersects(range)) || (range.contains(coordinatorsKey)) ||
+			    (range.contains(databaseLockedKey)) || (range.contains(metadataVersionKey)) ||
+			    (range.contains(mustContainSystemMutationsKey)) || (range.contains(writeRecoveryKey)) ||
+			    (range.intersects(testOnlyTxnStateStorePrefixRange))) {
+				return true;
+			}
+		}
+	}
+	return false;
 }

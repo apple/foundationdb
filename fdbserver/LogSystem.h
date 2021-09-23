@@ -765,10 +765,21 @@ struct LogPushData : NonCopyable {
 	// copy written_tags, after filtering, into given set
 	void saveTags(std::set<Tag>& filteredTags) const {
 		for (const auto& tag : written_tags) {
-			if (!tag.isNonPrimaryTLogType()) {
-				filteredTags.insert(tag);
-			}
+			filteredTags.insert(tag);
 		}
+	}
+
+	void getLocations(const std::set<Tag>& tags, std::set<uint16_t>& writtenTLogs) {
+		std::vector<Tag> vtags(tags.begin(), tags.end());
+		std::vector<int> msg_locations;
+		logSystem->getPushLocations(vtags, msg_locations, false /*allLocations*/);
+		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
+	}
+
+	void getLocations(const std::vector<Tag>& vtags, std::set<uint16_t>& writtenTLogs) {
+		std::vector<int> msg_locations;
+		logSystem->getPushLocations(vtags, msg_locations, false /*allLocations*/);
+		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
 	}
 
 	// store tlogs as represented by index

@@ -156,6 +156,7 @@ struct GetCommitVersionReply {
 	Version version;
 	Version prevVersion;
 	uint64_t requestNum;
+	std::unordered_map<uint16_t, Version> tpcvMap;
 
 	GetCommitVersionReply() : resolverChangesVersion(0), version(0), prevVersion(0), requestNum(0) {}
 	explicit GetCommitVersionReply(Version version, Version prevVersion, uint64_t requestNum)
@@ -163,7 +164,7 @@ struct GetCommitVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, resolverChanges, resolverChangesVersion, version, prevVersion, requestNum);
+		serializer(ar, resolverChanges, resolverChangesVersion, version, prevVersion, requestNum, tpcvMap);
 	}
 };
 
@@ -173,19 +174,21 @@ struct GetCommitVersionRequest {
 	uint64_t requestNum;
 	uint64_t mostRecentProcessedRequestNum;
 	UID requestingProxy;
+	std::set<uint16_t> writtenTLogs;
 	ReplyPromise<GetCommitVersionReply> reply;
 
 	GetCommitVersionRequest() {}
 	GetCommitVersionRequest(SpanID spanContext,
 	                        uint64_t requestNum,
 	                        uint64_t mostRecentProcessedRequestNum,
-	                        UID requestingProxy)
+	                        UID requestingProxy,
+	                        std::set<uint16_t>& writtenTLogs)
 	  : spanContext(spanContext), requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum),
-	    requestingProxy(requestingProxy) {}
+	    requestingProxy(requestingProxy), writtenTLogs(writtenTLogs) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply, spanContext);
+		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, writtenTLogs, reply, spanContext);
 	}
 };
 

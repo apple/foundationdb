@@ -1165,6 +1165,10 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			self->lastVersionTime = now();
 			self->version = self->recoveryTransactionVersion;
 			rep.prevVersion = self->lastEpochEnd;
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), self->lastEpochEnd);
+			}
+
 		} else {
 			double t1 = now();
 			if (BUGGIFY) {
@@ -1199,6 +1203,14 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
 		proxyItr->second.replies[req.requestNum] = rep;
 		ASSERT(rep.prevVersion >= 0);
+
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			for (uint16_t tLog : req.writtenTLogs) {
+				rep.tpcvMap[tLog] = self->tpcvVector[tLog];
+				self->tpcvVector[tLog] = rep.version;
+			}
+		}
+
 		req.reply.send(rep);
 
 		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
@@ -1287,7 +1299,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(ReportRawCommittedVersionRequest req =
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && req.prevVersion.present() &&
 				    (self->liveCommittedVersion.get() != invalidVersion) &&
 				    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
 					self->addActor.send(waitForPrev(self, req));
