@@ -103,7 +103,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
 		throw movekeys_conflict();
 	}
-
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
