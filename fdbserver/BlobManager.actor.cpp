@@ -218,27 +218,6 @@ struct BlobManagerData {
 	~BlobManagerData() { printf("Destroying blob manager data for %s\n", id.toString().c_str()); }
 };
 
-// TODO REMOVE eventually
-ACTOR Future<Void> nukeBlobWorkerData(BlobManagerData* bmData) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	loop {
-		try {
-			tr->clear(blobWorkerListKeys);
-			tr->clear(blobGranuleMappingKeys);
-			tr->clear(changeFeedKeys);
-
-			return Void();
-		} catch (Error& e) {
-			if (BM_DEBUG) {
-				printf("Nuking blob worker data got error %s\n", e.name());
-			}
-			wait(tr->onError(e));
-		}
-	}
-}
-
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
 	// TODO is it better to just pass empty metrics to estimated?
 	// TODO handle errors here by pulling out into its own transaction instead of the main loop's transaction, and
@@ -672,6 +651,12 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
+			if (e.code() == error_code_granule_assignment_conflict) {
+				if (bmData->iAmReplaced.canBeSet()) {
+					bmData->iAmReplaced.send(Void());
+				}
+				return Void();
+			}
 			wait(tr->onError(e));
 		}
 	}
@@ -829,43 +814,23 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 
 	state Future<Void> collection = actorCollection(self.addActor.getFuture());
 
-	// TODO remove once we have persistence + failure detection
 	if (BM_DEBUG) {
-		printf("Blob manager nuking previous workers and range assignments on startup\n");
-	}
-	wait(nukeBlobWorkerData(&self));
-
-	if (BM_DEBUG) {
-		printf("Blob manager nuked previous workers and range assignments\n");
-		printf("Blob manager taking lock\n");
+		printf("Blob manager starting...\n");
 	}
 
 	self.epoch = epoch;
 
 	// make sure the epoch hasn't gotten stale
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self.db);
-
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		try {
-			wait(checkManagerLock(tr, &self));
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_granule_assignment_conflict) {
-				if (BM_DEBUG) {
-					printf("Blob manager dying...\n");
-				}
-				return Void();
-			}
-
-			// if we get here, most likely error is a read-write conflict
-			if (BM_DEBUG) {
-				printf("Blob manager lock check got unexpected error %s\n", e.name());
-			}
-			wait(tr->onError(e));
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	try {
+		wait(checkManagerLock(tr, &self));
+	} catch (Error& e) {
+		if (BM_DEBUG) {
+			printf("Blob manager lock check got unexpected error %s. Dying...\n", e.name());
 		}
+		return Void();
 	}
 
 	if (BM_DEBUG) {
@@ -896,7 +861,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 				if (BM_DEBUG) {
 					printf("Blob Manager exiting because it is replaced\n");
 				}
-				return Void();
+				break;
 			}
 			when(HaltBlobManagerRequest req = waitNext(bmInterf.haltBlobManager.getFuture())) {
 				req.reply.send(Void());
