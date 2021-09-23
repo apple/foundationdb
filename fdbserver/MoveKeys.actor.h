@@ -43,6 +43,7 @@ class DDEnabledState {
 	// in-memory flag to disable DD
 	bool ddEnabled = true;
 	UID ddEnabledStatusUID;
+	bool skipCheckMoveKeysLock = false;
 
 public:
 	// checks if DD is enabled/disable transiently
@@ -51,6 +52,9 @@ public:
 	// transiently enable(true) or disable(false) the DD. If the process
 	// restarts, the state will be forgotten.
 	bool setDDEnabled(bool status, UID snapUID);
+
+	bool shouldSkipCheckMoveKeysLock() const { return skipCheckMoveKeysLock; };
+	void setSkipCheckMoveKeysLock(bool skip) { skipCheckMoveKeysLock = skip; };
 };
 
 // Calling moveKeys, etc with the return value of this actor ensures that no movekeys, etc

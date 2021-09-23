@@ -4334,7 +4334,12 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key
 	                         // the case where this key is being relocated. But 'src' is the canonical location until
 	                         // the move is finished, because it could be cancelled at any time.
 	decodeKeyServersValue(serverTagResult, serverUids[0].value, src, ignore);
+<<<<<<< HEAD
 	Optional<std::vector<StorageServerInterface>> serverInterfaces =
+=======
+	std::cout << "src: " << describe(src) << ", dest: " << describe(ignore) << std::endl;
+	Optional<vector<StorageServerInterface>> serverInterfaces =
+>>>>>>> 9e8c261e2 (Killed only server to verify exclude can bring back a cluster)
 	    wait(transactionalGetServerInterfaces(ver, cx, info, src, options.readTags));
 
 	ASSERT(serverInterfaces.present()); // since this is happening transactionally, /FF/keyServers and /FF/serverList
