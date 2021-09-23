@@ -7051,8 +7051,8 @@ public:
 		state VersionedBTree::BTreeCursor cur;
 		wait(
 		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
-		// state PriorityMultiLock::Lock lock;
-		// state bool isLocked = false;
+		state PriorityMultiLock::Lock lock;
+		state bool isLocked = false;
 		state Future<Void> f;
 		++g_redwoodMetrics.metric.opGetRange;
 
@@ -7066,12 +7066,12 @@ public:
 
 		if (rowLimit > 0) {
 			f = cur.seekGTE(keys.begin);
-			/*TEST(!isLocked && !f.isReady()); // readRange_impl seekGTE acquire lock and wait on disk
+			TEST(!isLocked && !f.isReady()); // readRange_impl seekGTE acquire lock and wait on disk
 			TEST(isLocked || f.isReady()); // readRange_impl seekGTE skip lock because data is cached or already locked
 			if (!isLocked && !f.isReady()) {
-			    isLocked = true;
-			    wait(store(lock, self->m_concurrentReads.lock()));
-			}*/
+				isLocked = true;
+				wait(store(lock, self->m_concurrentReads.lock()));
+			}
 			wait(f);
 
 			if (self->prefetch) {
@@ -7120,12 +7120,12 @@ public:
 			}
 		} else {
 			f = cur.seekLT(keys.end);
-			/*TEST(!isLocked && !f.isReady()); // readRange_impl seekLT acquire lock and wait on disk
+			TEST(!isLocked && !f.isReady()); // readRange_impl seekLT acquire lock and wait on disk
 			TEST(isLocked || f.isReady()); // readRange_impl seekLT skip lock because data is cached or already locked
 			if (!isLocked && !f.isReady()) {
-			    isLocked = true;
-			    wait(store(lock, self->m_concurrentReads.lock()));
-			}*/
+				isLocked = true;
+				wait(store(lock, self->m_concurrentReads.lock()));
+			}
 			wait(f);
 
 			if (self->prefetch) {
@@ -7190,17 +7190,10 @@ public:
 		wait(
 		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead));
 
-		// state PriorityMultiLock::Lock lock;
+		// state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
 
 		++g_redwoodMetrics.metric.opGet;
-
-		state Future<Void> f = cur.seekGTE(key);
-		/*TEST(f.isReady()); // Acquire lock and wait on disk
-		TEST(!f.isReady()); // Skip lock because data is cached
-		if (!f.isReady()) {
-		    wait(store(lock, self->m_concurrentReads.lock()));
-		}*/
-		wait(f);
+		wait(cur.seekGTE(key));
 		if (cur.isValid() && cur.get().key == key) {
 			// Return a Value whose arena depends on the source page arena
 			Value v;
