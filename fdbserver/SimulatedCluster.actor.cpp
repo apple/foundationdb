@@ -1308,6 +1308,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	// Using [0, 4) to disable the RocksDB storage engine.
 	// TODO: Figure out what is broken with the RocksDB engine in simulation.
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	storage_engine_type = 4;
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
