@@ -21,7 +21,9 @@
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
 #include "fdbrpc/fdbrpc.h"
+// #include "flow/Error.h"
 #include "flow/flow.h"
+// #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #define BOOST_DATE_TIME_NO_LIB
 
@@ -58,6 +60,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/NetworkTest.h"
+#include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SimulatedCluster.h"
@@ -1686,19 +1689,19 @@ struct GetRemoteIKVSServerRequest {
 	}
 };
 
-ACTOR Future<Void> runRemoteIKVSServer() {
+// ACTOR Future<Void> runRemoteIKVSServer() {
 
-	state RemoteIKVSServerInterface remoteIKVSServer;
-	remoteIKVSServer.getRemoteIKVSServerInterf.makeWellKnownEndpoint(WLTOKEN_FIRST_AVAILABLE,
-	                                                                 TaskPriority::DefaultEndpoint);
-	loop choose {
-		when(wait(delay(1.5))) { std::cout << "Waiting for connection...\n"; }
-		when(GetRemoteIKVSServerRequest req = waitNext(remoteIKVSServer.getRemoteIKVSServerInterf.getFuture())) {
-			std::cout << "received response for running remote IKVS server\n";
-			req.reply.send(remoteIKVSServer);
-		}
-	}
-}
+// 	state RemoteIKVSServerInterface remoteIKVSServer;
+// 	remoteIKVSServer.getRemoteIKVSServerInterf.makeWellKnownEndpoint(WLTOKEN_FIRST_AVAILABLE,
+// 	                                                                 TaskPriority::DefaultEndpoint);
+// 	loop choose {
+// 		when(wait(delay(1.5))) { std::cout << "Waiting for connection...\n"; }
+// 		when(GetRemoteIKVSServerRequest req = waitNext(remoteIKVSServer.getRemoteIKVSServerInterf.getFuture())) {
+// 			std::cout << "received response for running remote IKVS server\n";
+// 			req.reply.send(remoteIKVSServer);
+// 		}
+// 	}
+// }
 
 ACTOR Future<Void> testRemoteIKVSClient() {
 	state RemoteIKVSServerInterface server;
@@ -1714,8 +1717,23 @@ ACTOR Future<Void> testRemoteIKVSClient() {
 
 ACTOR Future<Void> spawnRemoteIKVS() {
 	state ExecCmdValueString snapArg(LiteralStringRef("bin/fdbserver -r remoteIKVS --public_address 127.0.0.1:6666"));
-	int err = wait(execHelper(&snapArg, UID(-1, 2), "~/work/foundationdb/buildDir", "RemoteIKVS"));
-	std::cout << err << std::endl;
+	state Future<int> exec = execHelper(&snapArg, UID(-1, 2), "~/work/foundationdb_fork1", "RemoteIKVS");
+	wait(success(exec) || testRemoteIKVSClient());
+	if (exec.isReady()) {
+		std::cout << exec.get() << std::endl;
+	}
+
+	// choose {
+	// 	when(int err = wait(exec)) {
+	// 		std::cout << err << std::endl;
+	// 		UNSTOPPABLE_ASSERT(false);
+	// 	}
+	// 	when(wait(testRemoteIKVSClient())) {
+	// 		UNSTOPPABLE_ASSERT(false);
+	// 	}
+	// }
+	// int err = wait(execHelper(&snapArg, UID(-1, 2), "~/work/foundationdb/buildDir", "RemoteIKVS"));
+	// std::cout << exec << std::endl;
 	return Void();
 }
 
@@ -2186,7 +2204,7 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == ServerRole::RemoteIKVS) {
-			f = stopAfter(runRemoteIKVSServer());
+			f = stopAfter(runRemoteServer());
 			g_network->run();
 		} else if (role == ServerRole::RemoteIKVSClient) {
 			f = stopAfter(testRemoteIKVSClient());
