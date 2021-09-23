@@ -30,7 +30,7 @@ struct VersionStampWorkload : TestWorkload {
 	uint64_t nodeCount;
 	double testDuration;
 	double transactionsPerSecond;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	int64_t nodePrefix;
 	int keyBytes;
 	bool failIfDataLost;
@@ -301,7 +301,7 @@ struct VersionStampWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> _start(Database cx, VersionStampWorkload* self, double delay) {
 		state double startTime = now();

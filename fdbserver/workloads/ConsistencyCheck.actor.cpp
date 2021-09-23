@@ -148,7 +148,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return success; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	void testFailure(std::string message, bool isError = false) {
 		success = false;
@@ -313,7 +313,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
 				bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise, keyServersKeys));
 				if (keyServerResult) {
-					state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers =
+					state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 					    keyServerPromise.getFuture().get();
 
 					// Get the locations of all the shards in the database
@@ -529,7 +529,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					req.tags = TagSet();
 
 					// Try getting the entries in the specified range
-					state vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
+					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 					state int j = 0;
 					for (j = 0; j < iter_ss.size(); j++) {
 						resetReply(req);
@@ -739,7 +739,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise, range));
 		if (!keyServerResult)
 			return false;
-		state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> shards =
+		state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards =
 		    keyServerPromise.getFuture().get();
 
 		// key/value pairs in the given range
@@ -767,7 +767,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					// Fetch key/values from storage servers
 					// Here we read from all storage servers and make sure results are consistent
 					// Note: this maybe duplicate but to make sure all storage servers available in a quiescent database
-					state vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
+					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 					for (const auto& kv : shards[i].second) {
 						resetReply(req);
 						keyValueFutures.push_back(kv.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
@@ -858,12 +858,12 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<bool> getKeyServers(
 	    Database cx,
 	    ConsistencyCheckWorkload* self,
-	    Promise<std::vector<std::pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise,
+	    Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
 	    KeyRangeRef kr) {
-		state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers;
+		state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
 
 		// Try getting key server locations from the master proxies
-		state vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
+		state std::vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
 		state Key begin = kr.begin;
 		state Key end = kr.end;
 		state int limitKeyServers = BUGGIFY ? 1 : 100;
@@ -924,7 +924,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Retrieves the locations of all shards in the database
 	// Returns false if there is a failure (in this case, keyLocationPromise will never be set)
 	ACTOR Future<bool> getKeyLocations(Database cx,
-	                                   std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> shards,
+	                                   std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards,
 	                                   ConsistencyCheckWorkload* self,
 	                                   Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise) {
 		state Standalone<VectorRef<KeyValueRef>> keyLocations;
@@ -949,7 +949,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					req.tags = TagSet();
 
 					// Try getting the shard locations from the key servers
-					state vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
+					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 					for (const auto& kv : shards[i].second) {
 						resetReply(req);
 						keyValueFutures.push_back(kv.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
@@ -1035,16 +1035,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Retrieves a vector of the storage servers' estimates for the size of a particular shard
 	// If a storage server can't be reached, its estimate will be -1
 	// If there is an error, then the returned vector will have 0 size
-	ACTOR Future<vector<int64_t>> getStorageSizeEstimate(vector<StorageServerInterface> storageServers,
-	                                                     KeyRangeRef shard) {
-		state vector<int64_t> estimatedBytes;
+	ACTOR Future<std::vector<int64_t>> getStorageSizeEstimate(std::vector<StorageServerInterface> storageServers,
+	                                                          KeyRangeRef shard) {
+		state std::vector<int64_t> estimatedBytes;
 
 		state WaitMetricsRequest req;
 		req.keys = shard;
 		req.max.bytes = -1;
 		req.min.bytes = 0;
 
-		state vector<Future<ErrorOr<StorageMetrics>>> metricFutures;
+		state std::vector<Future<ErrorOr<StorageMetrics>>> metricFutures;
 
 		try {
 			// Check the size of the shard on each storage server
@@ -1164,14 +1164,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			dbSize = _dbSize;
 		}
 
-		state vector<KeyRangeRef> ranges;
+		state std::vector<KeyRangeRef> ranges;
 
 		for (int k = 0; k < keyLocations.size() - 1; k++) {
 			KeyRangeRef range(keyLocations[k].key, keyLocations[k + 1].key);
 			ranges.push_back(range);
 		}
 
-		state vector<int> shardOrder;
+		state std::vector<int> shardOrder;
 		shardOrder.reserve(ranges.size());
 		for (int k = 0; k < ranges.size(); k++)
 			shardOrder.push_back(k);
@@ -1185,8 +1185,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			state int shard = shardOrder[i];
 
 			state KeyRangeRef range = ranges[shard];
-			state vector<UID> sourceStorageServers;
-			state vector<UID> destStorageServers;
+			state std::vector<UID> sourceStorageServers;
+			state std::vector<UID> destStorageServers;
 			state Transaction tr(cx);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state int bytesReadInRange = 0;
@@ -1229,17 +1229,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				return false;
 			}
 
-			state vector<UID> storageServers = (isRelocating) ? destStorageServers : sourceStorageServers;
-			state vector<StorageServerInterface> storageServerInterfaces;
+			state std::vector<UID> storageServers = (isRelocating) ? destStorageServers : sourceStorageServers;
+			state std::vector<StorageServerInterface> storageServerInterfaces;
 
 			//TraceEvent("ConsistencyCheck_GetStorageInfo").detail("StorageServers", storageServers.size());
 			loop {
 				try {
-					vector<Future<Optional<Value>>> serverListEntries;
+					std::vector<Future<Optional<Value>>> serverListEntries;
 					serverListEntries.reserve(storageServers.size());
 					for (int s = 0; s < storageServers.size(); s++)
 						serverListEntries.push_back(tr.get(serverListKeyFor(storageServers[s])));
-					state vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 					for (int s = 0; s < serverListValues.size(); s++) {
 						if (serverListValues[s].present())
 							storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
@@ -1266,7 +1266,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 			}
 
-			state vector<int64_t> estimatedBytes = wait(self->getStorageSizeEstimate(storageServerInterfaces, range));
+			state std::vector<int64_t> estimatedBytes =
+			    wait(self->getStorageSizeEstimate(storageServerInterfaces, range));
 
 			// Gets permitted size range of shard
 			int64_t maxShardSize = getMaxShardSize(dbSize);
@@ -1320,7 +1321,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						req.tags = TagSet();
 
 						// Try getting the entries in the specified range
-						state vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
+						state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 						state int j = 0;
 						for (j = 0; j < storageServerInterfaces.size(); j++) {
 							resetReply(req);
@@ -1711,7 +1712,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                              ConsistencyCheckWorkload* self) {
 		state int i;
 		state int j;
-		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 		// Check each pair of storage servers for an address match
 		for (i = 0; i < storageServers.size(); i++) {
 			// Check that each storage server has the correct key value store type
@@ -1755,8 +1756,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                   DatabaseConfiguration configuration,
 	                                   std::map<UID, StorageServerInterface> tssMapping,
 	                                   ConsistencyCheckWorkload* self) {
-		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
-		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 		std::vector<Optional<Key>> missingStorage; // vector instead of a set to get the count
 
 		for (int i = 0; i < workers.size(); i++) {
@@ -1937,7 +1938,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		if (g_simulator.extraDB)
 			return true;
 
-		vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		std::set<NetworkAddress> workerAddresses;
 
 		for (const auto& it : workers) {
@@ -1950,7 +1951,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			workerAddresses.insert(NetworkAddress(addr.ip, addr.port, true, addr.isTLS()));
 		}
 
-		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
+		std::vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->isReliable() && all[i]->name == std::string("Server") &&
 			    all[i]->startingClass != ProcessClass::TesterClass &&
@@ -1998,7 +1999,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				state ClusterConnectionString old(currentKey.get().toString());
 
-				vector<ProcessData> workers = wait(::getWorkers(&tr));
+				std::vector<ProcessData> workers = wait(::getWorkers(&tr));
 
 				std::map<NetworkAddress, LocalityData> addr_locality;
 				for (auto w : workers) {
@@ -2031,8 +2032,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Optional<Key> expectedPrimaryDcId;
 		state Optional<Key> expectedRemoteDcId;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		state vector<WorkerDetails> allWorkers = wait(getWorkers(self->dbInfo));
-		state vector<WorkerDetails> nonExcludedWorkers =
+		state std::vector<WorkerDetails> allWorkers = wait(getWorkers(self->dbInfo));
+		state std::vector<WorkerDetails> nonExcludedWorkers =
 		    wait(getWorkers(self->dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY));
 		auto& db = self->dbInfo->get();
 

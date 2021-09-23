@@ -31,7 +31,7 @@ struct BulkLoadWorkload : TestWorkload {
 	uint64_t targetBytes;
 	Key keyPrefix;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
 	ContinuousSample<double> latencies;
 
@@ -61,7 +61,7 @@ struct BulkLoadWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 		m.emplace_back("Rows written", transactions.getValue() * writesPerTransaction, Averaged::False);

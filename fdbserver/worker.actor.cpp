@@ -438,7 +438,7 @@ std::vector<DiskStore> getDiskStores(std::string folder,
                                      KeyValueStoreType type,
                                      FilesystemCheck check) {
 	std::vector<DiskStore> result;
-	vector<std::string> files;
+	std::vector<std::string> files;
 
 	if (check == FilesystemCheck::FILES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
 		files = platform::listFiles(folder, suffix);
@@ -1617,7 +1617,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			when(InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::DataDistributor;
-				DataDistributorInterface recruited(locality);
+				DataDistributorInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
 				if (ddInterf->get().present()) {
@@ -2201,7 +2201,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
     Reference<AsyncVar<Value>> result,
     MonitorLeaderInfo info) {
 	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
-	state vector<NetworkAddress> addrs = ccf.coordinators();
+	state std::vector<NetworkAddress> addrs = ccf.coordinators();
 	state ElectionResultRequest request;
 	state int index = 0;
 	state int successIndex = 0;
@@ -2375,7 +2375,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string configPath,
                         std::map<std::string, std::string> manualKnobOverrides,
                         ConfigDBType configDBType) {
-	state vector<Future<Void>> actors;
+	state std::vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
 	state Reference<LocalConfiguration> localConfig =
 	    makeReference<LocalConfiguration>(dataFolder, configPath, manualKnobOverrides);

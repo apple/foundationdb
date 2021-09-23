@@ -29,7 +29,7 @@
 struct UnreadableWorkload : TestWorkload {
 	uint64_t nodeCount;
 	double testDuration;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 
 	UnreadableWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
@@ -48,7 +48,7 @@ struct UnreadableWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	static Optional<KeyRef> containsUnreadable(KeyRangeMap<bool>& unreadableMap,
 	                                           KeyRangeRef const& range,

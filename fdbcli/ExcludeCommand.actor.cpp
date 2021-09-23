@@ -83,7 +83,7 @@ ACTOR Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 	}
 }
 
-ACTOR Future<vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
+ACTOR Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
@@ -96,7 +96,7 @@ ACTOR Future<vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 			state RangeResult r2 = wait(safeThreadFutureToFuture(resultFuture2));
 			ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
-			vector<std::string> exclusions;
+			std::vector<std::string> exclusions;
 			for (const auto& i : r) {
 				auto addr = i.key.removePrefix(fdb_cli::excludedServersSpecialKeyRange.begin).toString();
 				exclusions.push_back(addr);
@@ -113,7 +113,7 @@ ACTOR Future<vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 }
 
 // Get the list of excluded localities by reading the keys.
-ACTOR Future<vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
+ACTOR Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
@@ -126,7 +126,7 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Reference<IDatabase> db)
 			state RangeResult r2 = wait(safeThreadFutureToFuture(resultFuture2));
 			ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
-			vector<std::string> excludedLocalities;
+			std::vector<std::string> excludedLocalities;
 			for (const auto& i : r) {
 				auto locality = i.key.removePrefix(fdb_cli::excludedLocalitySpecialKeyRange.begin).toString();
 				excludedLocalities.push_back(locality);
@@ -143,7 +143,7 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Reference<IDatabase> db)
 }
 
 ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> db,
-                                                                vector<AddressExclusion> excl,
+                                                                std::vector<AddressExclusion> excl,
                                                                 bool waitForAllExcluded) {
 	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
@@ -171,7 +171,7 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatab
 	return inProgressExclusion;
 }
 
-ACTOR Future<Void> checkForCoordinators(Reference<IDatabase> db, vector<AddressExclusion> exclusionVector) {
+ACTOR Future<Void> checkForCoordinators(Reference<IDatabase> db, std::vector<AddressExclusion> exclusionVector) {
 
 	state bool foundCoordinator = false;
 	state std::vector<NetworkAddress> coordinatorList;
@@ -224,8 +224,8 @@ const KeyRangeRef exclusionInProgressSpecialKeyRange(LiteralStringRef("\xff\xff/
 
 ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn) {
 	if (tokens.size() <= 1) {
-		state vector<std::string> excludedAddresses = wait(getExcludedServers(db));
-		state vector<std::string> excludedLocalities = wait(getExcludedLocalities(db));
+		state std::vector<std::string> excludedAddresses = wait(getExcludedServers(db));
+		state std::vector<std::string> excludedLocalities = wait(getExcludedLocalities(db));
 
 		if (!excludedAddresses.size() && !excludedLocalities.size()) {
 			printf("There are currently no servers or localities excluded from the database.\n"

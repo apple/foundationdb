@@ -50,18 +50,18 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	int numSimultaneousOperations;
 
 	// The futures for asynchronous IO operations
-	vector<Future<OperationInfo>> operations;
+	std::vector<Future<OperationInfo>> operations;
 
 	// Our in memory representation of what the file should be
 	Reference<AsyncFileBuffer> memoryFile;
 
 	// A vector holding a lock for each byte in the file. 0xFFFFFFFF means that the byte is being written, any other
 	// number means that it is being read that many times
-	vector<uint32_t> fileLock;
+	std::vector<uint32_t> fileLock;
 
 	// A mask designating whether each byte in the file has been explicitly written (bytes which weren't explicitly
 	// written have no guarantees about content)
-	vector<unsigned char> fileValidityMask;
+	std::vector<unsigned char> fileValidityMask;
 
 	// Whether or not the correctness test succeeds
 	bool success;
@@ -159,7 +159,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	}
 
 	ACTOR Future<Void> runCorrectnessTest(AsyncFileCorrectnessWorkload* self) {
-		state vector<OperationInfo> postponedOperations;
+		state std::vector<OperationInfo> postponedOperations;
 		state int validOperations = 0;
 
 		loop {
@@ -264,7 +264,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 			// Cumulative density function for the different operations
 			int cdfArray[] = { 0, 1000, 2000, 2100, 2101, 2102 };
-			vector<int> cdf = vector<int>(cdfArray, cdfArray + 6);
+			std::vector<int> cdf = std::vector<int>(cdfArray, cdfArray + 6);
 
 			// Choose a random operation type (READ, WRITE, SYNC, REOPEN, TRUNCATE).
 			int random = deterministicRandom()->randomInt(0, cdf.back());
@@ -426,7 +426,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 	Future<bool> check(Database const& cx) override { return success; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (enabled) {
 			m.emplace_back("Number of Operations Performed", numOperations.getValue(), Averaged::False);
 			m.emplace_back("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, Averaged::False);

@@ -38,10 +38,8 @@
 #include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using std::make_pair;
 using std::max;
 using std::min;
-using std::pair;
 
 namespace oldTLog_4_6 {
 
@@ -892,7 +890,7 @@ void commitMessages(Reference<LogData> self,
 		              10;
 	}
 
-	self->version_sizes[version] = make_pair(expectedBytes, expectedBytes);
+	self->version_sizes[version] = std::make_pair(expectedBytes, expectedBytes);
 	self->bytesInput += addedBytes;
 	bytesInput += addedBytes;
 
