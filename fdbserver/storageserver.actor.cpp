@@ -671,8 +671,8 @@ public:
 		Reference<EventCacheHolder> busiestReadTagEventHolder;
 
 		TransactionTagCounter(UID thisServerID)
-		  : thisServerID(thisServerID), busiestReadTagEventHolder(makeReference<EventCacheHolder>(
-		                                    thisServerID.toString() + "/BusiestReadTag")) {}
+		  : thisServerID(thisServerID),
+		    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
 
 		int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
@@ -825,8 +825,8 @@ public:
 	    ssDurableVersionUpdateLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                   SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM,
 	                                                                   Histogram::Unit::microseconds)),
-	    transactionTagCounter(ssi.id()),storageServerSourceTLogIDEventHolder(
-	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
+	    transactionTagCounter(ssi.id()), storageServerSourceTLogIDEventHolder(makeReference<EventCacheHolder>(
+	                                         ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
