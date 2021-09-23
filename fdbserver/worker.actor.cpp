@@ -1678,19 +1678,18 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				req.reply.send(recruited);
 			}
 			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobManager;
 				BlobManagerInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
 				if (bmInterf->get().present()) {
 					recruited = bmInterf->get().get();
 					TEST(true); // Recruited while already a blob manager.
-					// What if this one is the new one that caused the old one to error out, because it up'ed the epoch.
-					// But now the new one can't register because bmInterf is already set.
-					// Should be okay based on logic of haltRegisteringorPreviousSingleton bc references to bmInterf are
-					// passed around.
 				} else {
 					startRole(Role::BLOB_MANAGER, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.haltBlobManager);
 
 					Future<Void> blobManagerProcess = blobManager(recruited, dbInfo, req.epoch);
 					errorForwarders.add(forwardError(

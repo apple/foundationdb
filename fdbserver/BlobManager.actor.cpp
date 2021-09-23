@@ -402,8 +402,6 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 }
 
 ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> collection = actorCollection(addActor.getFuture());
 	loop {
 		// inject delay into range assignments
 		if (BUGGIFY_WITH_PROB(0.05)) {
@@ -436,7 +434,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 			// FIXME: if range is assign, have some sort of semaphore for outstanding assignments so we don't assign
 			// a ton ranges at once and blow up FDB with reading initial snapshots.
-			addActor.send(doRangeAssignment(bmData, assignment, workerId, seqNo));
+			bmData->addActor.send(doRangeAssignment(bmData, assignment, workerId, seqNo));
 		} else {
 			// Revoking a range could be a large range that contains multiple ranges.
 			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
@@ -449,7 +447,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 				// the same logical change
 				bmData->workerStats[it.value()].numGranulesAssigned -= 1;
 				if (!assignment.worker.present() || assignment.worker.get() == it.value())
-					addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
+					bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
 			}
 
 			bmData->workerAssignments.insert(assignment.keyRange, UID());
@@ -709,8 +707,6 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 
 ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
 	try {
-		state PromiseStream<Future<Void>> addActor;
-		state Future<Void> collection = actorCollection(addActor.getFuture());
 		state Future<Void> waitFailure = waitFailureClient(bwInterf.waitFailure, SERVER_KNOBS->BLOB_WORKER_TIMEOUT);
 		state ReplyPromiseStream<GranuleStatusReply> statusStream =
 		    bwInterf.granuleStatusStreamRequest.getReplyStream(GranuleStatusStreamRequest(bmData->epoch));
@@ -770,7 +766,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 						       rep.granuleRange.end.printable().c_str());
 					}
 					lastSeenSeqno.insert(rep.granuleRange, std::pair(rep.epoch, rep.seqno));
-					addActor.send(maybeSplitRange(bmData, bwInterf.id(), rep.granuleRange));
+					bmData->addActor.send(maybeSplitRange(bmData, bwInterf.id(), rep.granuleRange));
 				}
 			}
 		}
@@ -831,8 +827,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	state BlobManagerData self(deterministicRandom()->randomUniqueID(),
 	                           openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> collection = actorCollection(addActor.getFuture());
+	state Future<Void> collection = actorCollection(self.addActor.getFuture());
 
 	// TODO remove once we have persistence + failure detection
 	if (BM_DEBUG) {
@@ -884,25 +879,40 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		self.workersById.insert({ bwInterf.id(), bwInterf });
 		self.workerStats.insert({ bwInterf.id(), BlobWorkerStats() });
 		self.workerMonitors.insert({ bwInterf.id(), monitorBlobWorker(&self, bwInterf) });
-		addActor.send(blobWorker(bwInterf, dbInfo));
+		self.addActor.send(blobWorker(bwInterf, dbInfo));
 	}
 
-	addActor.send(monitorClientRanges(&self));
-	addActor.send(rangeAssigner(&self));
+	self.addActor.send(monitorClientRanges(&self));
+	self.addActor.send(rangeAssigner(&self));
 
 	if (BUGGIFY) {
-		addActor.send(rangeMover(&self));
+		self.addActor.send(rangeMover(&self));
 	}
 
 	// TODO probably other things here eventually
-	loop choose {
-		when(wait(self.iAmReplaced.getFuture())) {
-			if (BM_DEBUG) {
-				printf("Blob Manager exiting because it is replaced\n");
+	try {
+		loop choose {
+			when(wait(self.iAmReplaced.getFuture())) {
+				if (BM_DEBUG) {
+					printf("Blob Manager exiting because it is replaced\n");
+				}
+				return Void();
 			}
-			return Void();
+			when(HaltBlobManagerRequest req = waitNext(bmInterf.haltBlobManager.getFuture())) {
+				req.reply.send(Void());
+				TraceEvent("BlobManagerHalted", bmInterf.id()).detail("ReqID", req.requesterID);
+				break;
+			}
+			when(wait(collection)) {
+				TraceEvent("BlobManagerActorCollectionError");
+				ASSERT(false);
+				throw internal_error();
+			}
 		}
+	} catch (Error& err) {
+		TraceEvent("BlobManagerDied", bmInterf.id()).error(err, true);
 	}
+	return Void();
 }
 
 // Test:
