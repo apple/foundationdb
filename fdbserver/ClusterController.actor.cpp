@@ -38,6 +38,7 @@
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/RatekeeperInterface.h"
+#include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -69,6 +70,7 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
+	Future<Void> haltBlobManager;
 	Standalone<VectorRef<StringRef>> issues;
 
 	WorkerInfo()
@@ -89,7 +91,8 @@ struct WorkerInfo : NonCopyable {
 	WorkerInfo(WorkerInfo&& r) noexcept
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
-	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), issues(r.issues) {}
+	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), haltBlobManager(r.haltBlobManager),
+	    issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -100,6 +103,7 @@ struct WorkerInfo : NonCopyable {
 		details = std::move(r.details);
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
+		haltBlobManager = r.haltBlobManager;
 		issues = r.issues;
 	}
 };
@@ -160,6 +164,14 @@ public:
 			serverInfo->set(newInfo);
 		}
 
+		void setBlobManager(const BlobManagerInterface& interf) {
+			auto newInfo = serverInfo->get();
+			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
+			newInfo.blobManager = interf;
+			serverInfo->set(newInfo);
+		}
+
 		void clearInterf(ProcessClass::ClassType t) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
@@ -168,6 +180,8 @@ public:
 				newInfo.distributor = Optional<DataDistributorInterface>();
 			} else if (t == ProcessClass::RatekeeperClass) {
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
+			} else if (t == ProcessClass::BlobManagerClass) {
+				newInfo.blobManager = Optional<BlobManagerInterface>();
 			}
 			serverInfo->set(newInfo);
 		}
@@ -242,7 +256,9 @@ public:
 		return (db.serverInfo->get().distributor.present() &&
 		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().ratekeeper.present() &&
-		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId);
+		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().blobManager.present() &&
+		        db.serverInfo->get().blobManager.get().locality.processId() == processId);
 	}
 
 	WorkerDetails getStorageWorker(RecruitStorageRequest const& req) {
@@ -2755,7 +2771,8 @@ public:
 	bool onMasterIsBetter(const WorkerDetails& worker, ProcessClass::ClusterRole role) const {
 		ASSERT(masterProcessId.present());
 		const auto& pid = worker.interf.locality.processId();
-		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper) ||
+		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper &&
+		     role != ProcessClass::BlobManager) ||
 		    pid == masterProcessId.get()) {
 			return false;
 		}
@@ -3042,6 +3059,8 @@ public:
 	Optional<UID> recruitingDistributorID;
 	AsyncVar<bool> recruitRatekeeper;
 	Optional<UID> recruitingRatekeeperID;
+	AsyncVar<bool> recruitBlobManager;
+	Optional<UID> recruitingBlobManagerID;
 
 	// Stores the health information from a particular worker's perspective.
 	struct WorkerHealth {
@@ -3077,7 +3096,7 @@ public:
 	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
 	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
-	    recruitDistributor(false), recruitRatekeeper(false),
+	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
@@ -3158,6 +3177,27 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 	void recruit(ClusterControllerData* cc) const { cc->recruitDistributor.set(true); }
 };
 
+struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
+
+	BlobManagerSingleton(const Optional<BlobManagerInterface>& interface) : Singleton(interface) {}
+
+	Role getRole() const { return Role::BLOB_MANAGER; }
+	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::BlobManager; }
+
+	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
+		if (interface.present()) {
+			cc->db.setBlobManager(interface.get());
+		}
+	}
+	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
+		if (interface.present()) {
+			cc->id_worker[pid].haltBlobManager =
+			    brokenPromiseToNever(interface.get().haltBlobManager.getReply(HaltBlobManagerRequest(cc->id)));
+		}
+	}
+	void recruit(ClusterControllerData* cc) const { cc->recruitBlobManager.set(true); }
+};
+
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterControllerData::DBInfo* db) {
 	state MasterInterface iMaster;
 
@@ -3216,6 +3256,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
 				dbInfo.distributor = db->serverInfo->get().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
+				dbInfo.blobManager = db->serverInfo->get().blobManager;
 				dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 
 				TraceEvent("CCWDB", cluster->id)
@@ -3481,14 +3522,17 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// Try to find a new process for each singleton.
 	WorkerDetails newRKWorker = findNewProcessForSingleton(self, ProcessClass::Ratekeeper, id_used);
 	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
+	WorkerDetails newBMWorker = findNewProcessForSingleton(self, ProcessClass::BlobManager, id_used);
 
 	// Find best possible fitnesses for each singleton.
 	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
+	auto bestFitnessForBM = findBestFitnessForSingleton(self, newBMWorker, ProcessClass::BlobManager);
 
 	auto& db = self->db.serverInfo->get();
 	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
 	auto ddSingleton = DataDistributorSingleton(db.distributor);
+	auto bmSingleton = BlobManagerSingleton(db.blobManager);
 
 	// Check if the singletons are healthy.
 	// side effect: try to rerecruit the singletons to more optimal processes
@@ -3498,31 +3542,40 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	bool ddHealthy = isHealthySingleton<DataDistributorInterface>(
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
+	bool bmHealthy = isHealthySingleton<BlobManagerInterface>(
+	    self, newBMWorker, bmSingleton, bestFitnessForBM, self->recruitingBlobManagerID);
+
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
-	if (!(rkHealthy && ddHealthy)) {
+	if (!(rkHealthy && ddHealthy && bmHealthy)) {
 		return;
 	}
 
 	// if we reach here, we know that the singletons are healthy so let's
 	// check if we can colocate the singletons in a more optimal way
 
+	// TODO: verify that we don't need to get the pid from the worker like we were doing before
 	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
+	Optional<Standalone<StringRef>> currBMProcessId = bmSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
+	Optional<Standalone<StringRef>> newBMProcessId = newBMWorker.interf.locality.processId();
 
-	auto currColocMap = getColocCounts({ currRKProcessId, currDDProcessId });
-	auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId });
+	auto currColocMap = getColocCounts({ currRKProcessId, currDDProcessId, currBMProcessId });
+	auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId, newBMProcessId });
 
-	// if the new coloc counts are not worse (i.e. each singleton's coloc count has not increased)
+	// if the new coloc counts are collectively better (i.e. each singleton's coloc count has not increased)
 	if (newColocMap[newRKProcessId] <= currColocMap[currRKProcessId] &&
-	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId]) {
+	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId] &&
+	    newColocMap[newBMProcessId] <= currColocMap[currBMProcessId]) {
 		// rerecruit the singleton for which we have found a better process, if any
 		if (newColocMap[newRKProcessId] < currColocMap[currRKProcessId]) {
 			rkSingleton.recruit(self);
 		} else if (newColocMap[newDDProcessId] < currColocMap[currDDProcessId]) {
 			ddSingleton.recruit(self);
+		} else if (newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
+			bmSingleton.recruit(self);
 		}
 	}
 }
@@ -4048,6 +4101,13 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 		auto registeringSingleton = RatekeeperSingleton(req.ratekeeperInterf);
 		haltRegisteringOrCurrentSingleton<RatekeeperInterface>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
+	}
+
+	if (req.blobManagerInterf.present()) {
+		auto currSingleton = BlobManagerSingleton(self->db.serverInfo->get().blobManager);
+		auto registeringSingleton = BlobManagerSingleton(req.blobManagerInterf);
+		haltRegisteringOrCurrentSingleton<BlobManagerInterface>(
+		    self, w, currSingleton, registeringSingleton, self->recruitingBlobManagerID);
 	}
 
 	// Notify the worker to register again with new process class/exclusive property
@@ -4861,6 +4921,117 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 	}
 }
 
+// Acquires the BM lock by getting the next epoch no.
+ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		try {
+			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
+			state int64_t newEpoch = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) + 1 : 1;
+			tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
+
+			wait(tr->commit());
+			return newEpoch;
+		} catch (Error& e) {
+			printf("Acquiring blob manager lock got error %s\n", e.name());
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> startBlobManager(ClusterControllerData* self) {
+	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
+
+	TraceEvent("CCStartBlobManager", self->id).log();
+	loop {
+		try {
+			state bool noBlobManager = !self->db.serverInfo->get().blobManager.present();
+			while (!self->masterProcessId.present() ||
+			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+			}
+			if (noBlobManager && self->db.serverInfo->get().blobManager.present()) {
+				// Existing blob manager registers while waiting, so skip.
+				return Void();
+			}
+
+			state std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			state WorkerFitnessInfo bmWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+			                                                                      ProcessClass::BlobManager,
+			                                                                      ProcessClass::NeverAssign,
+			                                                                      self->db.config,
+			                                                                      id_used);
+
+			int64_t nextEpoch = wait(getNextBMEpoch(self));
+			InitializeBlobManagerRequest req(deterministicRandom()->randomUniqueID(), nextEpoch);
+			state WorkerDetails worker = bmWorker.worker;
+			if (self->onMasterIsBetter(worker, ProcessClass::BlobManager)) {
+				worker = self->id_worker[self->masterProcessId.get()].details;
+			}
+
+			self->recruitingBlobManagerID = req.reqId;
+			TraceEvent("CCRecruitBlobManager", self->id)
+			    .detail("Addr", worker.interf.address())
+			    .detail("BMID", req.reqId);
+
+			ErrorOr<BlobManagerInterface> interf = wait(worker.interf.blobManager.getReplyUnlessFailedFor(
+			    req, SERVER_KNOBS->WAIT_FOR_BLOB_MANAGER_JOIN_DELAY, 0));
+			if (interf.present()) {
+				self->recruitBlobManager.set(false);
+				self->recruitingBlobManagerID = interf.get().id();
+				const auto& blobManager = self->db.serverInfo->get().blobManager;
+				TraceEvent("CCBlobManagerRecruited", self->id)
+				    .detail("Addr", worker.interf.address())
+				    .detail("BMID", interf.get().id());
+				if (blobManager.present() && blobManager.get().id() != interf.get().id() &&
+				    self->id_worker.count(blobManager.get().locality.processId())) {
+					TraceEvent("CCHaltBlobManagerAfterRecruit", self->id)
+					    .detail("BMID", blobManager.get().id())
+					    .detail("DcID", printable(self->clusterControllerDcId));
+					BlobManagerSingleton(blobManager).halt(self, blobManager.get().locality.processId());
+				}
+				if (!blobManager.present() || blobManager.get().id() != interf.get().id()) {
+					self->db.setBlobManager(interf.get());
+				}
+				checkOutstandingRequests(self);
+				return Void();
+			}
+		} catch (Error& e) {
+			TraceEvent("CCBlobManagerRecruitError", self->id).error(e);
+			if (e.code() != error_code_no_more_servers) {
+				throw;
+			}
+		}
+		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+	}
+}
+
+ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
+	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		wait(self->db.serverInfo->onChange());
+	}
+
+	loop {
+		if (self->db.serverInfo->get().blobManager.present() && !self->recruitBlobManager.get()) {
+			choose {
+				when(wait(waitFailureClient(self->db.serverInfo->get().blobManager.get().waitFailure,
+				                            SERVER_KNOBS->BLOB_MANAGER_FAILURE_TIME))) {
+					TraceEvent("CCBlobManagerDied", self->id)
+					    .detail("BMID", self->db.serverInfo->get().blobManager.get().id());
+					self->db.clearInterf(ProcessClass::BlobManagerClass);
+				}
+				when(wait(self->recruitBlobManager.onChange())) {}
+			}
+		} else {
+			wait(startBlobManager(self));
+		}
+	}
+}
+
 ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	state Future<Void> dbInfoChange = self->db.serverInfo->onChange();
 	state Future<Void> updateDBInfo = self->updateDBInfo.onTrigger();
@@ -4989,6 +5160,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
+	self.addActor.send(monitorBlobManager(&self));
 	// self.addActor.send(monitorTSSMapping(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",

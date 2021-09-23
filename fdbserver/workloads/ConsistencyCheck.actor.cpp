@@ -2257,6 +2257,22 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
+		// Check BlobManager
+		if (db.blobManager.present() &&
+		    (!nonExcludedWorkerProcessMap.count(db.blobManager.get().address()) ||
+		     nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
+		         ProcessClass::BlobManager) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_BlobManagerNotBest")
+			    .detail("BestBlobManagerFitness", fitnessLowerBound)
+			    .detail(
+			        "ExistingBlobManagerFitness",
+			        nonExcludedWorkerProcessMap.count(db.blobManager.get().address())
+			            ? nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
+			                  ProcessClass::BlobManager)
+			            : -1);
+			return false;
+		}
+
 		// TODO: Check Tlog
 
 		return true;

@@ -25,8 +25,6 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/BlobWorkerInterface.h" // TODO REMOVE
-#include "fdbserver/BlobManagerInterface.h" // TODO REMOVE
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
@@ -1439,14 +1437,6 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	RatekeeperData* selfPtr = &self; // let flow compiler capture self
 	self.addActor.send(
 	    recurring([selfPtr]() { refreshStorageServerCommitCost(selfPtr); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
-
-	// TODO MOVE eventually
-	if (!g_network->isSimulated() && SERVER_KNOBS->BG_URL == "") {
-		printf("Not starting blob manager poc, no url configured\n");
-	} else {
-		printf("Starting blob manager with url=%s\n", SERVER_KNOBS->BG_URL.c_str());
-		self.addActor.send(blobManager(rkInterf.locality, dbInfo));
-	}
 
 	TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
 	    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)

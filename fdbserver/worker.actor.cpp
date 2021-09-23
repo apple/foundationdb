@@ -42,6 +42,7 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/DataDistributorInterface.h"
+#include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -517,6 +518,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       ProcessClass initialClass,
                                       Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
                                       Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                      Reference<AsyncVar<Optional<BlobManagerInterface>> const> bmInterf,
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
@@ -539,6 +541,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
+		                              bmInterf->get(),
 		                              degraded->get(),
 		                              localConfig->lastSeenVersion(),
 		                              localConfig->configClassSet());
@@ -596,6 +599,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			when(wait(ccInterface->onChange())) { break; }
 			when(wait(ddInterf->onChange())) { break; }
 			when(wait(rkInterf->onChange())) { break; }
+			when(wait(bmInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
 			when(wait(issues->onChange())) { break; }
@@ -616,6 +620,10 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	}
 
 	if (dbi.ratekeeper.present() && dbi.ratekeeper.get().address() == address) {
+		return true;
+	}
+
+	if (dbi.blobManager.present() && dbi.blobManager.get().address() == address) {
 		return true;
 	}
 
@@ -1232,6 +1240,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
+	state Reference<AsyncVar<Optional<BlobManagerInterface>>> bmInterf(new AsyncVar<Optional<BlobManagerInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1493,6 +1502,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		                                       initialClass,
 		                                       ddInterf,
 		                                       rkInterf,
+		                                       bmInterf,
 		                                       degraded,
 		                                       connFile,
 		                                       issues,
@@ -1531,7 +1541,9 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 						    .detail("RatekeeperID",
 						            localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 						    .detail("DataDistributorID",
-						            localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
+						            localInfo.distributor.present() ? localInfo.distributor.get().id() : UID())
+						    .detail("BlobManagerID",
+						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID());
 						dbInfo->set(localInfo);
 					}
 					errorForwarders.add(
@@ -1663,6 +1675,31 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
+				req.reply.send(recruited);
+			}
+			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobManager;
+				BlobManagerInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+
+				if (bmInterf->get().present()) {
+					recruited = bmInterf->get().get();
+					TEST(true); // Recruited while already a blob manager.
+				} else {
+					startRole(Role::BLOB_MANAGER, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.haltBlobManager);
+
+					Future<Void> blobManagerProcess = blobManager(recruited, dbInfo, req.epoch);
+					errorForwarders.add(forwardError(
+					    errors,
+					    Role::BLOB_MANAGER,
+					    recruited.id(),
+					    setWhenDoneOrError(blobManagerProcess, bmInterf, Optional<BlobManagerInterface>())));
+					bmInterf->set(Optional<BlobManagerInterface>(recruited));
+				}
+				TraceEvent("BlobManagerReceived", req.reqId).detail("BlobManagerId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when(InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
@@ -2486,6 +2523,7 @@ const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
+const Role Role::BLOB_MANAGER("BlobManager", "BM");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");

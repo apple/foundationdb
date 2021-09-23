@@ -197,6 +197,7 @@ struct BlobWorkerStats {
 struct BlobManagerData {
 	UID id;
 	Database db;
+	PromiseStream<Future<Void>> addActor;
 
 	std::unordered_map<UID, BlobWorkerInterface> workersById;
 	std::unordered_map<UID, BlobWorkerStats> workerStats; // mapping between workerID -> workerStats
@@ -216,27 +217,6 @@ struct BlobManagerData {
 	BlobManagerData(UID id, Database db) : id(id), db(db), knownBlobRanges(false, normalKeys.end) {}
 	~BlobManagerData() { printf("Destroying blob manager data for %s\n", id.toString().c_str()); }
 };
-
-// TODO REMOVE eventually
-ACTOR Future<Void> nukeBlobWorkerData(BlobManagerData* bmData) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	loop {
-		try {
-			tr->clear(blobWorkerListKeys);
-			tr->clear(blobGranuleMappingKeys);
-			tr->clear(changeFeedKeys);
-
-			return Void();
-		} catch (Error& e) {
-			if (BM_DEBUG) {
-				printf("Nuking blob worker data got error %s\n", e.name());
-			}
-			wait(tr->onError(e));
-		}
-	}
-}
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
 	// TODO is it better to just pass empty metrics to estimated?
@@ -401,8 +381,6 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 }
 
 ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> collection = actorCollection(addActor.getFuture());
 	loop {
 		// inject delay into range assignments
 		if (BUGGIFY_WITH_PROB(0.05)) {
@@ -435,7 +413,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 			// FIXME: if range is assign, have some sort of semaphore for outstanding assignments so we don't assign
 			// a ton ranges at once and blow up FDB with reading initial snapshots.
-			addActor.send(doRangeAssignment(bmData, assignment, workerId, seqNo));
+			bmData->addActor.send(doRangeAssignment(bmData, assignment, workerId, seqNo));
 		} else {
 			// Revoking a range could be a large range that contains multiple ranges.
 			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
@@ -448,7 +426,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 				// the same logical change
 				bmData->workerStats[it.value()].numGranulesAssigned -= 1;
 				if (!assignment.worker.present() || assignment.worker.get() == it.value())
-					addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
+					bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
 			}
 
 			bmData->workerAssignments.insert(assignment.keyRange, UID());
@@ -479,35 +457,6 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Blo
 	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
 
 	return Void();
-}
-
-// TODO eventually CC should probably do this and pass it as part of recruitment?
-ACTOR Future<int64_t> acquireManagerLock(BlobManagerData* bmData) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
-
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		try {
-			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
-			state int64_t newEpoch;
-			if (oldEpoch.present()) {
-				newEpoch = decodeBlobManagerEpochValue(oldEpoch.get()) + 1;
-			} else {
-				newEpoch = 1; // start at 1
-			}
-
-			tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
-
-			wait(tr->commit());
-			return newEpoch;
-		} catch (Error& e) {
-			if (BM_DEBUG) {
-				printf("Acquiring blob manager lock got error %s\n", e.name());
-			}
-			wait(tr->onError(e));
-		}
-	}
 }
 
 // FIXME: this does all logic in one transaction. Adding a giant range to an existing database to hybridize would spread
@@ -702,6 +651,12 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
+			if (e.code() == error_code_granule_assignment_conflict) {
+				if (bmData->iAmReplaced.canBeSet()) {
+					bmData->iAmReplaced.send(Void());
+				}
+				return Void();
+			}
 			wait(tr->onError(e));
 		}
 	}
@@ -737,8 +692,6 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 
 ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
 	try {
-		state PromiseStream<Future<Void>> addActor;
-		state Future<Void> collection = actorCollection(addActor.getFuture());
 		state Future<Void> waitFailure = waitFailureClient(bwInterf.waitFailure, SERVER_KNOBS->BLOB_WORKER_TIMEOUT);
 		state ReplyPromiseStream<GranuleStatusReply> statusStream =
 		    bwInterf.granuleStatusStreamRequest.getReplyStream(GranuleStatusStreamRequest(bmData->epoch));
@@ -798,7 +751,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 						       rep.granuleRange.end.printable().c_str());
 					}
 					lastSeenSeqno.insert(rep.granuleRange, std::pair(rep.epoch, rep.seqno));
-					addActor.send(maybeSplitRange(bmData, bwInterf.id(), rep.granuleRange));
+					bmData->addActor.send(maybeSplitRange(bmData, bwInterf.id(), rep.granuleRange));
 				}
 			}
 		}
@@ -853,58 +806,78 @@ ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
 	}
 }
 
-// TODO MOVE ELSEWHERE
-// TODO replace locality with full BlobManagerInterface eventually
-ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
+                               Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                               int64_t epoch) {
 	state BlobManagerData self(deterministicRandom()->randomUniqueID(),
 	                           openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> collection = actorCollection(addActor.getFuture());
-
-	// TODO remove once we have persistence + failure detection
-	if (BM_DEBUG) {
-		printf("Blob manager nuking previous workers and range assignments on startup\n");
-	}
-	wait(nukeBlobWorkerData(&self));
+	state Future<Void> collection = actorCollection(self.addActor.getFuture());
 
 	if (BM_DEBUG) {
-		printf("Blob manager nuked previous workers and range assignments\n");
-		printf("Blob manager taking lock\n");
+		printf("Blob manager starting...\n");
 	}
 
-	int64_t _epoch = wait(acquireManagerLock(&self));
-	self.epoch = _epoch;
+	self.epoch = epoch;
+
+	// make sure the epoch hasn't gotten stale
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self.db);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	try {
+		wait(checkManagerLock(tr, &self));
+	} catch (Error& e) {
+		if (BM_DEBUG) {
+			printf("Blob manager lock check got unexpected error %s. Dying...\n", e.name());
+		}
+		return Void();
+	}
+
 	if (BM_DEBUG) {
-		printf("Blob manager acquired lock at epoch %lld\n", _epoch);
+		printf("Blob manager acquired lock at epoch %lld\n", epoch);
 	}
 
 	int numWorkers = 2;
 	for (int i = 0; i < numWorkers; i++) {
-		state BlobWorkerInterface bwInterf(locality, deterministicRandom()->randomUniqueID());
+		state BlobWorkerInterface bwInterf(bmInterf.locality, deterministicRandom()->randomUniqueID());
 		bwInterf.initEndpoints();
 		self.workersById.insert({ bwInterf.id(), bwInterf });
 		self.workerStats.insert({ bwInterf.id(), BlobWorkerStats() });
 		self.workerMonitors.insert({ bwInterf.id(), monitorBlobWorker(&self, bwInterf) });
-		addActor.send(blobWorker(bwInterf, dbInfo));
+		self.addActor.send(blobWorker(bwInterf, dbInfo));
 	}
 
-	addActor.send(monitorClientRanges(&self));
-	addActor.send(rangeAssigner(&self));
+	self.addActor.send(monitorClientRanges(&self));
+	self.addActor.send(rangeAssigner(&self));
 
 	if (BUGGIFY) {
-		addActor.send(rangeMover(&self));
+		self.addActor.send(rangeMover(&self));
 	}
 
 	// TODO probably other things here eventually
-	loop choose {
-		when(wait(self.iAmReplaced.getFuture())) {
-			if (BM_DEBUG) {
-				printf("Blob Manager exiting because it is replaced\n");
+	try {
+		loop choose {
+			when(wait(self.iAmReplaced.getFuture())) {
+				if (BM_DEBUG) {
+					printf("Blob Manager exiting because it is replaced\n");
+				}
+				break;
 			}
-			return Void();
+			when(HaltBlobManagerRequest req = waitNext(bmInterf.haltBlobManager.getFuture())) {
+				req.reply.send(Void());
+				TraceEvent("BlobManagerHalted", bmInterf.id()).detail("ReqID", req.requesterID);
+				break;
+			}
+			when(wait(collection)) {
+				TraceEvent("BlobManagerActorCollectionError");
+				ASSERT(false);
+				throw internal_error();
+			}
 		}
+	} catch (Error& err) {
+		TraceEvent("BlobManagerDied", bmInterf.id()).error(err, true);
 	}
+	return Void();
 }
 
 // Test:
@@ -918,8 +891,8 @@ ACTOR Future<Void> blobManager(LocalityData locality, Reference<AsyncVar<ServerD
 // DB has [B - D). It should show up coalesced in knownBlobRanges, and [C - D) should be removed.
 // DB has [A - D). It should show up coalesced in knownBlobRanges, and [A - B) should be removed.
 // DB has [A - B) and [C - D). They should show up in knownBlobRanges, and [B - C) should be in removed.
-// DB has [B - C). It should show up in knownBlobRanges, [B - C) should be in added, and [A - B) and [C - D) should be
-// in removed.
+// DB has [B - C). It should show up in knownBlobRanges, [B - C) should be in added, and [A - B) and [C - D) should
+// be in removed.
 TEST_CASE("/blobmanager/updateranges") {
 	KeyRangeMap<bool> knownBlobRanges(false, normalKeys.end);
 	Arena ar;
