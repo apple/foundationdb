@@ -357,6 +357,10 @@ public:
 	void addref() override { ReferenceCounted<TCTeamInfo>::addref(); }
 	void delref() override { ReferenceCounted<TCTeamInfo>::delref(); }
 
+	bool hasServer(const UID& server) {
+		return std::find(serverIDs.begin(), serverIDs.end(), server) != serverIDs.end();
+	}
+
 	void addServers(const std::vector<UID>& servers) override {
 		serverIDs.reserve(servers.size());
 		for (int i = 0; i < servers.size(); i++) {
@@ -891,6 +895,35 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		return Void();
+	}
+
+	// Returns a random healthy team, which does not contain excludeServer.
+	std::vector<UID> getRandomHealthyTeam(const UID& excludeServer) {
+		std::vector<int> candidates, backup;
+		for (int i = 0; i < teams.size(); ++i) {
+			if (teams[i]->isHealthy() && !teams[i]->hasServer(excludeServer)) {
+				candidates.push_back(i);
+			} else if (teams[i]->size() - (teams[i]->hasServer(excludeServer) ? 1 : 0) > 0) {
+				// If a team has at least one other server besides excludeServer, select it
+				// as a backup candidate.
+				backup.push_back(i);
+			}
+		}
+
+		// Prefer a healthy team not containing excludeServer.
+		if (candidates.size() > 0) {
+			return teams[deterministicRandom()->randomInt(0, candidates.size())]->getServerIDs();
+		}
+
+		// The backup choice is a team with at least one server besides excludeServer, in this
+		// case, the team  will be possibily relocated to a healthy destination later by DD.
+		if (backup.size() > 0) {
+			std::vector<UID> res = teams[deterministicRandom()->randomInt(0, backup.size())]->getServerIDs();
+			std::remove(res.begin(), res.end(), excludeServer);
+			return res;
+		}
+
+		return std::vector<UID>();
 	}
 
 	// SOMEDAY: Make bestTeam better about deciding to leave a shard where it is (e.g. in PRIORITY_TEAM_HEALTHY case)
@@ -6152,6 +6185,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
+			state std::vector<UID> teamForDroppedRange;
+			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
+				// Choose a random healthy team to host the to-be-dropped range.
+				const UID serverID = removeFailedServer.getFuture().get();
+				std::vector<UID> pTeam = primaryTeamCollection->getRandomHealthyTeam(serverID);
+				teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
+				if (configuration.usableRegions > 1) {
+					std::vector<UID> rTeam = remoteTeamCollection->getRandomHealthyTeam(serverID);
+					teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
+				}
+			}
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
@@ -6159,7 +6203,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
-				wait(removeKeysFromFailedServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
+				wait(removeKeysFromFailedServer(
+				    cx, removeFailedServer.getFuture().get(), teamForDroppedRange, lock, ddEnabledState));
 				Optional<UID> tssPairID;
 				wait(removeStorageServer(cx, removeFailedServer.getFuture().get(), tssPairID, lock, ddEnabledState));
 			} else {
