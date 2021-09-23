@@ -698,6 +698,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 	Promise<UID> removeFailedServer;
 
+	Reference<EventCacheHolder> ddTrackerStartingEventHolder;
+	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
+	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
+	
+
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
 		LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*)storageServerSet.getPtr();
@@ -752,9 +757,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
 	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
 	    getShardMetrics(getShardMetrics), removeFailedServer(removeFailedServer),
-	    getUnhealthyRelocationCount(getUnhealthyRelocationCount) {
+	    getUnhealthyRelocationCount(getUnhealthyRelocationCount),
+		ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
+		teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
+		storageServerRecruitmentEventHolder(makeReference<EventCacheHolder>("StorageServerRecruitment_"+distributorId.toString()))
+		 {
 		if (!primary || configuration.usableRegions == 1) {
-			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest("DDTrackerStarting");
+			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest(ddTrackerStartingEventHolder->trackingKey);
 		}
 	}
 
@@ -834,7 +843,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		if (!self->primary || self->configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", self->distributorId)
 			    .detail("State", "Active")
-			    .trackLatest("DDTrackerStarting");
+			    .trackLatest(self->ddTrackerStartingEventHolder->trackingKey);
 		}
 
 		return Void();
@@ -2257,7 +2266,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
 		    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
 		    .detail("DoBuildTeams", doBuildTeams)
-		    .trackLatest("TeamCollectionInfo");
+		    .trackLatest(teamCollectionInfoEventHolder->trackingKey);
 
 		return addedTeams;
 	}
@@ -2294,7 +2303,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
 		    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
 		    .detail("DoBuildTeams", doBuildTeams)
-		    .trackLatest("TeamCollectionInfo");
+		    .trackLatest(teamCollectionInfoEventHolder->trackingKey);
 
 		// Advance time so that we will not have multiple TeamCollectionInfo at the same time, otherwise
 		// simulation test will randomly pick one TeamCollectionInfo trace, which could be the one before build teams
@@ -2418,7 +2427,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
 				    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
 				    .detail("DoBuildTeams", self->doBuildTeams)
-				    .trackLatest("TeamCollectionInfo");
+				    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
 			}
 		} else {
 			self->lastBuildTeamsFailed = true;
@@ -4889,7 +4898,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 	state bool lastIsTss = false;
 	TraceEvent("StorageServerRecruitment", self->distributorId)
 	    .detail("State", "Idle")
-	    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
+	    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
 	loop {
 		if (!recruiting) {
 			while (self->recruitingStream.get() == 0) {
@@ -4898,7 +4907,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 			    .detail("State", "Recruiting")
 			    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
-			    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
+			    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
 			recruiting = true;
 			lastIsTss = self->isTssRecruiting;
 		} else {
@@ -4909,7 +4918,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 							TraceEvent("StorageServerRecruitment", self->distributorId)
 							    .detail("State", "Recruiting")
 							    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
-							    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
+							    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
 							lastIsTss = self->isTssRecruiting;
 						}
 					}
@@ -4922,7 +4931,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			}
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 			    .detail("State", "Idle")
-			    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
+			    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
 			recruiting = false;
 		}
 	}
@@ -5784,9 +5793,10 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	UID ddId;
 	PromiseStream<Future<Void>> addActor;
 	DDTeamCollection* teamCollection;
+	Reference<EventCacheHolder> initialDDEventHolder;
 
 	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id)
-	  : dbInfo(db), ddId(id), teamCollection(nullptr) {}
+	  : dbInfo(db), ddId(id), teamCollection(nullptr),initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")) {}
 };
 
 ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db, double* lastLimited) {
@@ -5904,14 +5914,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    .detail("E", initData->shards.end()[-1].key)
 					    .detail("Src", describe(initData->shards.end()[-2].primarySrc))
 					    .detail("Dest", describe(initData->shards.end()[-2].primaryDest))
-					    .trackLatest("InitialDD");
+					    .trackLatest(self->initialDDEventHolder->trackingKey);
 				} else {
 					TraceEvent("DDInitGotInitialDD", self->ddId)
 					    .detail("B", "")
 					    .detail("E", "")
 					    .detail("Src", "[no items]")
 					    .detail("Dest", "[no items]")
-					    .trackLatest("InitialDD");
+					    .trackLatest(self->initialDDEventHolder->trackingKey);
 				}
 
 				if (initData->mode && ddEnabledState->isDDEnabled()) {
