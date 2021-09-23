@@ -63,5 +63,6 @@ void applyMetadataMutations(SpanID const& spanContext,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
+bool containsMetadataMutation(const VectorRef<MutationRef>& mutations);
 
 #endif

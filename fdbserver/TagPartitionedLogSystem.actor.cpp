@@ -532,7 +532,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 			}
 			std::vector<Future<Void>> tLogCommitResults;
 			for (int loc = 0; loc < it->logServers.size(); loc++) {
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 					if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
 						prevVersion = tpcvMap.get()[location];
 					} else {
