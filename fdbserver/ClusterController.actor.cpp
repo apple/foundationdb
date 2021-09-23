@@ -1315,10 +1315,10 @@ public:
 		    db.recoveryStalled) {
 			if (db.config.regions.size() > 1) {
 				auto regions = db.config.regions;
-				if (clusterControllerDcId.get() == regions[0].dcId) {
+				if (clusterControllerDcId.get() == regions[0].dcId && regions[1].priority >= 0) {
 					std::swap(regions[0], regions[1]);
 				}
-				ASSERT(clusterControllerDcId.get() == regions[1].dcId);
+				ASSERT(regions[1].priority < 0 || clusterControllerDcId.get() == regions[1].dcId);
 				checkRegions(regions);
 			}
 		}
