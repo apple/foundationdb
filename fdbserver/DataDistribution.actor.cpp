@@ -701,7 +701,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Reference<EventCacheHolder> ddTrackerStartingEventHolder;
 	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
 	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
-	
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -758,12 +757,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
 	    getShardMetrics(getShardMetrics), removeFailedServer(removeFailedServer),
 	    getUnhealthyRelocationCount(getUnhealthyRelocationCount),
-		ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
-		teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
-		storageServerRecruitmentEventHolder(makeReference<EventCacheHolder>("StorageServerRecruitment_"+distributorId.toString()))
-		 {
+	    ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
+	    teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
+	    storageServerRecruitmentEventHolder(
+	        makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())) {
 		if (!primary || configuration.usableRegions == 1) {
-			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest(ddTrackerStartingEventHolder->trackingKey);
+			TraceEvent("DDTrackerStarting", distributorId)
+			    .detail("State", "Inactive")
+			    .trackLatest(ddTrackerStartingEventHolder->trackingKey);
 		}
 	}
 
@@ -5794,9 +5795,16 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	PromiseStream<Future<Void>> addActor;
 	DDTeamCollection* teamCollection;
 	Reference<EventCacheHolder> initialDDEventHolder;
+	Reference<EventCacheHolder> movingDataEventHolder;
+	Reference<EventCacheHolder> totalDataInFlightEventHolder;
+	Reference<EventCacheHolder> totalDataInFlightRemoteEventHolder;
 
 	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id)
-	  : dbInfo(db), ddId(id), teamCollection(nullptr),initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")) {}
+	  : dbInfo(db), ddId(id), teamCollection(nullptr),
+	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
+	    movingDataEventHolder(makeReference<EventCacheHolder>("MoveData")),
+	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
+	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
 };
 
 ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db, double* lastLimited) {

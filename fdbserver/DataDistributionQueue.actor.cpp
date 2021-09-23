@@ -23,6 +23,8 @@
 #include <vector>
 
 #include "flow/ActorCollection.h"
+#include "flow/FastRef.h"
+#include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
@@ -403,6 +405,9 @@ struct DDQueueData {
 
 	std::map<int, int> priority_relocations;
 	int unhealthyRelocations;
+
+	Reference<EventCacheHolder> movedKeyServersEventHolder;
+
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
 		// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
@@ -455,7 +460,8 @@ struct DDQueueData {
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), lastLimited(lastLimited),
 	    suppressIntervals(0), lastInterval(0), unhealthyRelocations(0),
-	    rawProcessingUnhealthy(new AsyncVar<bool>(false)) {}
+	    rawProcessingUnhealthy(new AsyncVar<bool>(false)),
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1216,7 +1222,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					if (rd.keys.begin == keyServersPrefix) {
 						TraceEvent("MovedKeyServerKeys")
 						    .detail("Dest", describe(destIds))
-						    .trackLatest("MovedKeyServers");
+						    .trackLatest(self->movedKeyServersEventHolder->trackingKey);
 					}
 
 					if (!signalledTransferComplete) {
