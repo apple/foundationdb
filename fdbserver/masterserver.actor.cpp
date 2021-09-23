@@ -261,7 +261,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Reference<EventCacheHolder> masterRecoveryAvailableEventHolder;
 	Reference<EventCacheHolder> recoveredConfigEventHolder;
 
-	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
+	MasterData(Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
 	           MasterInterface const& myInterface,
 	           ServerCoordinators const& coordinators,
 	           ClusterControllerFullInterface const& clusterController,

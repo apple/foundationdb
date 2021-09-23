@@ -2899,12 +2899,10 @@ public:
 
 	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
 
-	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
-	                      LocalityData const& locality,
-	                      ServerCoordinators const& coordinators)
-	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), clusterControllerProcessId(locality.processId()),
-	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
-	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
+	ClusterControllerData(ClusterControllerFullInterface const& ccInterface, LocalityData const& locality)
+	  : clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
+	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
+	    gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
 	    recruitingDistributor(false), recruitRatekeeper(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
