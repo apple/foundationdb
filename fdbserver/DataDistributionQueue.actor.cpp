@@ -1682,9 +1682,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					    .detail("PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
 					    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
 					    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
-					    .trackLatest("MovingData"); // this track event's lifestyle is contolled by
-					                                // movingDataEventHolder in DataDistribution.actor.cpp. Please make
-					                                // sure the keys in both places are matched.
+					    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
+					                                // DataDistributorData::movingDataEventHolder. The track latest key
+					                                // we use here must match the key used in the holder.
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
