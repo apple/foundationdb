@@ -5707,13 +5707,14 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				    .detail("ServerCount", self->server_info.size())
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 				    .detail("HighestPriority", highestPriority)
-				    .trackLatest(self->primary
-				                     ? "TotalDataInFlight"
-				                     : "TotalDataInFlightRemote"); // this track event's lifestyle is contolled by
-				                                                   // totalDataInFlightEventHolder or
-				                                                   // totalDataInFlightRemoteEventHolder in
-				                                                   // DataDistribution.actor.cpp. Please make sure the
-				                                                   // keys in both places are matched.
+				    .trackLatest(
+				        self->primary
+				            ? "TotalDataInFlight"
+				            : "TotalDataInFlightRemote"); // This trace event's trackLatest lifetime is controlled by
+				                                          // DataDistributorData::totalDataInFlightEventHolder or
+				                                          // DataDistributorData::totalDataInFlightRemoteEventHolder. The
+				                                          // track latest key we use here must match the key used in the
+				                                          // holder.
 
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
