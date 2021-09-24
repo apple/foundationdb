@@ -175,7 +175,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		while (dest.empty()) {
 			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 			if (!interfs.empty()) {
-				const auto& interf = interfs[random() % interfs.size()];
+				const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
 				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
 					dest.push_back(interf.uniqueID);
 					self->addr = interf.address();
