@@ -1,0 +1,13 @@
+[configuration]
+config = 'triple'
+storageEngineType = 3
+processesPerMachine = 1
+coordinators = 3
+machineCount = 45
+
+[[test]]
+testTitle = 'DataLossRecovery'
+useDB = true
+
+    [[test.workload]]
+    testName = 'DataLossRecovery'
