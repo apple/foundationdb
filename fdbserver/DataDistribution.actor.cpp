@@ -5716,9 +5716,9 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				            ? "TotalDataInFlight"
 				            : "TotalDataInFlightRemote"); // This trace event's trackLatest lifetime is controlled by
 				                                          // DataDistributorData::totalDataInFlightEventHolder or
-				                                          // DataDistributorData::totalDataInFlightRemoteEventHolder. The
-				                                          // track latest key we use here must match the key used in the
-				                                          // holder.
+				                                          // DataDistributorData::totalDataInFlightRemoteEventHolder.
+				                                          // The track latest key we use here must match the key used in
+				                                          // the holder.
 
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
