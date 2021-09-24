@@ -6025,27 +6025,20 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				    .detail("PriorityTeam1Left", 0)
 				    .detail("PriorityTeam0Left", 0)
 				    .detail("PrioritySplitShard", 0)
-				    .trackLatest("MovingData"); // this track event's lifestyle is contolled by movingDataEventHolder in
-				                                // DataDistribution.actor.cpp. Please make sure the keys in both places
-				                                // are matched.
+				    .trackLatest(self->movingDataEventHolder->trackingKey);
 
 				TraceEvent("TotalDataInFlight", self->ddId)
 				    .detail("Primary", true)
 				    .detail("TotalBytes", 0)
 				    .detail("UnhealthyServers", 0)
 				    .detail("HighestPriority", 0)
-				    .trackLatest("TotalDataInFlight"); // this track event's lifestyle is contolled by
-				                                       // totalDataInFlightEventHolder in DataDistribution.actor.cpp.
-				                                       // Please make sure the keys in both places are matched.
+				    .trackLatest(self->totalDataInFlightEventHolder->trackingKey);
 				TraceEvent("TotalDataInFlight", self->ddId)
 				    .detail("Primary", false)
 				    .detail("TotalBytes", 0)
 				    .detail("UnhealthyServers", 0)
 				    .detail("HighestPriority", configuration.usableRegions > 1 ? 0 : -1)
-				    .trackLatest(
-				        "TotalDataInFlightRemote"); // this track event's lifestyle is contolled by
-				                                    // totalDataInFlightRemoteEventHolder in DataDistribution.actor.cpp.
-				                                    // Please make sure the keys in both places are matched.
+				    .trackLatest(self->totalDataInFlightRemoteEventHolder->trackingKey);
 
 				wait(waitForDataDistributionEnabled(cx, ddEnabledState));
 				TraceEvent("DataDistributionEnabled").log();
