@@ -260,12 +260,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		}
 	case ProcessClass::BlobWorker:
 		switch (_class) {
-		case ProcessClass::BlobWorker:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::BestFit;
-		// TODO: do we want this? If there's an unset process available,
-		//       would we rather have _no_ BW as opposed to one recruited on unset?
-		case ProcessClass::UnsetClass:
-			return ProcessClass::UnsetFit;
 		default:
 			return ProcessClass::NeverAssign;
 		}

@@ -67,6 +67,10 @@ namespace {
 
 const int MACHINE_REBOOT_TIME = 10;
 
+// The max number of extra blob worker machines we might (i.e. randomly) add to the simulated cluster.
+// Note that this is in addition to the two we always have.
+const int NUM_EXTRA_BW_MACHINES = 5;
+
 bool destructed = false;
 
 // Configuration details specified in workload test files that change the simulation
@@ -1996,18 +2000,20 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		ASSERT_LE(dcCoordinators, machines);
 
 		// TODO: caching disabled for this merge
-		if (dc == 0) {
-			// FIXME: we hardcode the second last (i.e. i=machines-2) machine to specifically test storage cache
-			machines++;
+		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
+		int storageCacheMachines = 0;
+		int blobWorkerMachines = 0;
 
-			// FIXME: we hardcode the last (i.e. i=machines-1) machine to specifically test blob worker
-			machines++;
+		if (dc == 0) {
+			storageCacheMachines = 1;
+			blobWorkerMachines = 2 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
 		}
 
-		int useSeedForMachine = deterministicRandom()->randomInt(0, machines);
+		int totalMachines = machines + storageCacheMachines + blobWorkerMachines;
+		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
-		for (int machine = 0; machine < machines; machine++) {
+		for (int machine = 0; machine < totalMachines; machine++) {
 			Standalone<StringRef> machineId(deterministicRandom()->randomUniqueID().toString());
 			if (machine == 0 || machineCount - dataCenters <= 4 || assignedMachines != 4 ||
 			    simconfig.db.regions.size() || deterministicRandom()->random01() < 0.5) {
@@ -2033,17 +2039,20 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 					nonVersatileMachines++;
 			}
 
-			// FIXME: hack to add machine specifically to test storage cache
+			// FIXME: hack to add machines specifically to test storage cache and blob workers
 			// TODO: caching disabled for this merge
-			if (machine == machines - 2 && dc == 0) {
-				processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-				nonVersatileMachines++;
-			}
 
-			// FIXME: hack to add machine specifically to test blob worker
-			if (machine == machines - 1 && dc == 0) {
-				processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
-				nonVersatileMachines++;
+			// `machines` here is the normal (non-temporary) machines that totalMachines comprises of
+			if (machine >= machines && dc == 0) {
+				if (storageCacheMachines > 0) {
+					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
+					nonVersatileMachines++;
+					storageCacheMachines--;
+				} else if (blobWorkerMachines > 0) {
+					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
+					nonVersatileMachines++;
+					blobWorkerMachines--;
+				}
 			}
 
 			std::vector<IPAddress> ips;
