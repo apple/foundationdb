@@ -225,7 +225,6 @@ ACTOR Future<int> spawnProcess(std::string path,
 	return -1;
 }
 #endif
-#endif
 
 ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
 	state Standalone<StringRef> uidStr(snapUID.toString());
