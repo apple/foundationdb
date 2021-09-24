@@ -37,6 +37,8 @@
 
 #define BM_DEBUG false
 
+// FIXME: change all BlobManagerData* to Reference<BlobManagerData> to avoid segfaults if core loop gets error
+
 // TODO add comments + documentation
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena ar,

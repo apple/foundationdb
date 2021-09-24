@@ -41,6 +41,8 @@
 #define BW_DEBUG true
 #define BW_REQUEST_DEBUG false
 
+// FIXME: change all BlobWorkerData* to Reference<BlobWorkerData> to avoid segfaults if core loop gets error
+
 // TODO add comments + documentation
 struct BlobFileIndex {
 	Version version;
@@ -95,6 +97,8 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	NotifiedVersion durableSnapshotVersion;
 	Version pendingSnapshotVersion = 0;
 
+	AsyncVar<int> rollbackCount;
+
 	int64_t originalEpoch;
 	int64_t originalSeqno;
 	int64_t continueEpoch;
@@ -126,18 +130,18 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	// better to have this in 2 separate objects, where the granule metadata map has the futures, but the read
 	// queries/file updater/range feed only copy the reference to the file/delta data.
 	Future<Void> cancel(bool dispose) {
-		ASSERT(cancelled.canBeSet());
-		cancelled.send(Void());
-
+		if (cancelled.canBeSet()) {
+			// Could have been cancelled already by rollback or error in BGUpdateFiles
+			cancelled.send(Void());
+		}
 		assignFuture.cancel();
 		fileUpdaterFuture.cancel();
 
 		if (dispose) {
 			// FIXME: implement dispose!
 			return delay(0.1);
-		} else {
-			return Future<Void>(Void());
 		}
+		return Future<Void>(Void());
 	}
 };
 
@@ -861,11 +865,12 @@ static bool filterOldMutations(const KeyRange& range,
 	return false;
 }
 
-static Future<Void> handleCompletedDeltaFile(BlobWorkerData* bwData,
-                                             Reference<GranuleMetadata> metadata,
-                                             BlobFileIndex completedDeltaFile,
-                                             Key cfKey,
-                                             Version cfStartVersion) {
+ACTOR Future<Void> handleCompletedDeltaFile(BlobWorkerData* bwData,
+                                            Reference<GranuleMetadata> metadata,
+                                            BlobFileIndex completedDeltaFile,
+                                            Key cfKey,
+                                            Version cfStartVersion,
+                                            std::deque<std::pair<Version, Version>> rollbacksInProgress) {
 	metadata->files.deltaFiles.push_back(completedDeltaFile);
 	ASSERT(metadata->durableDeltaVersion.get() < completedDeltaFile.version);
 	metadata->durableDeltaVersion.set(completedDeltaFile.version);
@@ -878,9 +883,13 @@ static Future<Void> handleCompletedDeltaFile(BlobWorkerData* bwData,
 		// have completed
 		// FIXME: also have these be async, have each pop change feed wait on the prior one, wait on them before
 		// re-snapshotting
-		return bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
+		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
+		wait(popFuture);
 	}
-	return Future<Void>(Void());
+	while (!rollbacksInProgress.empty() && completedDeltaFile.version >= rollbacksInProgress.front().first) {
+		rollbacksInProgress.pop_front();
+	}
+	return Void();
 }
 
 // if we get an i/o error updating files, or a rollback, reassign the granule to ourselves and start fresh
@@ -897,6 +906,109 @@ static bool granuleCanRetry(const Error& e) {
 	};
 }
 
+struct InFlightDeltaFile {
+	Future<BlobFileIndex> future;
+	Version version;
+	uint64_t bytes;
+
+	InFlightDeltaFile(Future<BlobFileIndex> future, Version version, uint64_t bytes)
+	  : future(future), version(version), bytes(bytes) {}
+};
+
+static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
+                                 Version mutationVersion,
+                                 Version rollbackVersion,
+                                 std::deque<InFlightDeltaFile>& inFlightDeltaFiles,
+                                 std::deque<std::pair<Version, Version>>& rollbacksInProgress,
+                                 std::deque<std::pair<Version, Version>>& rollbacksCompleted) {
+	Version cfRollbackVersion;
+	if (metadata->pendingDeltaVersion > rollbackVersion) {
+		// if we already started writing mutations to a delta file with version > rollbackVersion,
+		// we need to rescind those delta file writes
+		ASSERT(!inFlightDeltaFiles.empty());
+		cfRollbackVersion = metadata->durableDeltaVersion.get();
+		int toPop = 0;
+		for (auto& df : inFlightDeltaFiles) {
+			if (df.version > rollbackVersion) {
+				df.future.cancel();
+				metadata->bytesInNewDeltaFiles -= df.bytes;
+				toPop++;
+				if (BW_DEBUG) {
+					printf("[%s - %s) rollback cancelling delta file @ %lld\n",
+					       metadata->keyRange.begin.printable().c_str(),
+					       metadata->keyRange.end.printable().c_str(),
+					       df.version);
+				}
+			} else {
+				ASSERT(df.version > cfRollbackVersion);
+				cfRollbackVersion = df.version;
+			}
+		}
+		ASSERT(toPop > 0);
+		while (toPop > 0) {
+			inFlightDeltaFiles.pop_back();
+			toPop--;
+		}
+		metadata->pendingDeltaVersion = cfRollbackVersion;
+		if (BW_DEBUG) {
+			printf("[%s - %s) rollback discarding all %d in-memory mutations\n",
+			       metadata->keyRange.begin.printable().c_str(),
+			       metadata->keyRange.end.printable().c_str(),
+			       metadata->currentDeltas.size());
+		}
+
+		// discard all in-memory mutations
+		metadata->deltaArena = Arena();
+		metadata->currentDeltas = GranuleDeltas();
+		metadata->bufferedDeltaBytes = 0;
+		metadata->bufferedDeltaVersion.set(cfRollbackVersion);
+
+	} else {
+		// No pending delta files to discard, just in-memory mutations
+
+		// FIXME: could binary search?
+		int mIdx = metadata->currentDeltas.size() - 1;
+		while (mIdx >= 0) {
+			if (metadata->currentDeltas[mIdx].version <= rollbackVersion) {
+				break;
+			}
+			mIdx--;
+		}
+		mIdx++;
+		if (BW_DEBUG) {
+			printf("[%s - %s) rollback discarding only %d in-memory mutations\n",
+			       metadata->keyRange.begin.printable().c_str(),
+			       metadata->keyRange.end.printable().c_str(),
+			       metadata->currentDeltas.size() - mIdx);
+		}
+
+		metadata->currentDeltas.resize(metadata->deltaArena, mIdx);
+
+		// delete all deltas in rollback range, but we can optimize here to just skip the uncommitted mutations directly
+		// and immediately pop the rollback out of inProgress
+		metadata->bufferedDeltaVersion.set(rollbackVersion);
+		cfRollbackVersion = mutationVersion;
+	}
+
+	if (BW_DEBUG) {
+		printf("[%s - %s) finishing rollback to %lld\n",
+		       metadata->keyRange.begin.printable().c_str(),
+		       metadata->keyRange.end.printable().c_str(),
+		       cfRollbackVersion);
+	}
+
+	metadata->rollbackCount.set(metadata->rollbackCount.get() + 1);
+
+	// add this rollback to in progress, and put all completed ones back in progress
+	rollbacksInProgress.push_back(std::pair(rollbackVersion, mutationVersion));
+	for (int i = rollbacksCompleted.size() - 1; i >= 0; i--) {
+		rollbacksInProgress.push_front(rollbacksCompleted[i]);
+	}
+	rollbacksCompleted.clear();
+
+	return cfRollbackVersion;
+}
+
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 // FIXME: handle errors here (forward errors)
@@ -904,7 +1016,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> oldChangeFeedStream;
 	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> changeFeedStream;
 	state Future<BlobFileIndex> inFlightBlobSnapshot;
-	state std::deque<Future<BlobFileIndex>> inFlightDeltaFiles;
+	state std::deque<InFlightDeltaFile> inFlightDeltaFiles;
 	state Future<Void> oldChangeFeedFuture;
 	state Future<Void> changeFeedFuture;
 	state GranuleChangeFeedInfo changeFeedInfo;
@@ -913,7 +1025,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 	state Optional<KeyRange> oldChangeFeedDataComplete;
 	state Key cfKey;
 	state Optional<Key> oldCFKey;
+
+	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
+	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
+
+	state Optional<std::pair<Version, Version>> currentRollback;
 	state bool snapshotEligible; // just wrote a delta file or just took granule over from another worker
+	state bool justDidRollback = false;
 
 	try {
 		// set resume snapshot so it's not valid until we pause to ask the blob manager for a re-snapshot
@@ -1026,10 +1144,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 			}
 			if (!inFlightBlobSnapshot.isValid()) {
 				while (inFlightDeltaFiles.size() > 0) {
-					if (inFlightDeltaFiles.front().isReady()) {
-						BlobFileIndex completedDeltaFile = wait(inFlightDeltaFiles.front());
-						wait(handleCompletedDeltaFile(
-						    bwData, metadata, completedDeltaFile, cfKey, changeFeedInfo.changeFeedStartVersion));
+					if (inFlightDeltaFiles.front().future.isReady()) {
+						BlobFileIndex completedDeltaFile = wait(inFlightDeltaFiles.front().future);
+						wait(handleCompletedDeltaFile(bwData,
+						                              metadata,
+						                              completedDeltaFile,
+						                              cfKey,
+						                              changeFeedInfo.changeFeedStartVersion,
+						                              rollbacksCompleted));
 						inFlightDeltaFiles.pop_front();
 					} else {
 						break;
@@ -1051,7 +1173,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					// if old change feed has caught up with where new one would start, finish last one and start new
 					// one
 
-					readOldChangeFeed = false;
 					Key cfKey = StringRef(changeFeedInfo.changeFeedId.toString());
 					changeFeedFuture = bwData->db->getChangeFeedStream(changeFeedStream,
 					                                                   cfKey,
@@ -1096,20 +1217,22 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					if (inFlightBlobSnapshot.isValid() && inFlightDeltaFiles.empty()) {
 						previousDeltaFileFuture = inFlightBlobSnapshot;
 					} else if (!inFlightDeltaFiles.empty()) {
-						previousDeltaFileFuture = inFlightDeltaFiles.back();
+						previousDeltaFileFuture = inFlightDeltaFiles.back().future;
 					} else {
 						previousDeltaFileFuture = Future<BlobFileIndex>(BlobFileIndex());
 					}
-					inFlightDeltaFiles.push_back(writeDeltaFile(bwData,
-					                                            metadata->keyRange,
-					                                            metadata->originalEpoch,
-					                                            metadata->originalSeqno,
-					                                            metadata->deltaArena,
-					                                            metadata->currentDeltas,
-					                                            metadata->bufferedDeltaVersion.get(),
-					                                            previousDeltaFileFuture,
-					                                            oldChangeFeedDataComplete,
-					                                            changeFeedInfo.prevChangeFeedId));
+					Future<BlobFileIndex> dfFuture = writeDeltaFile(bwData,
+					                                                metadata->keyRange,
+					                                                metadata->originalEpoch,
+					                                                metadata->originalSeqno,
+					                                                metadata->deltaArena,
+					                                                metadata->currentDeltas,
+					                                                metadata->bufferedDeltaVersion.get(),
+					                                                previousDeltaFileFuture,
+					                                                oldChangeFeedDataComplete,
+					                                                changeFeedInfo.prevChangeFeedId);
+					inFlightDeltaFiles.push_back(InFlightDeltaFile(
+					    dfFuture, metadata->bufferedDeltaVersion.get(), metadata->bufferedDeltaBytes));
 
 					oldChangeFeedDataComplete.reset();
 					// add new pending delta file
@@ -1133,7 +1256,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 				// FIXME: if we're still reading from old change feed, we should probably compact if we're making a
 				// bunch of extra delta files at some point, even if we don't consider it for a split yet
 				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
-				    !readOldChangeFeed && !lastFromOldChangeFeed) {
+				    !readOldChangeFeed) {
 
 					if (BW_DEBUG && (inFlightBlobSnapshot.isValid() || !inFlightDeltaFiles.empty())) {
 						printf("Granule [%s - %s) ready to re-snapshot, waiting for outstanding %d snapshot and %d "
@@ -1152,9 +1275,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						inFlightBlobSnapshot = Future<BlobFileIndex>(); // not valid!
 					}
 					for (auto& it : inFlightDeltaFiles) {
-						BlobFileIndex completedDeltaFile = wait(it);
-						wait(handleCompletedDeltaFile(
-						    bwData, metadata, completedDeltaFile, cfKey, changeFeedInfo.changeFeedStartVersion));
+						BlobFileIndex completedDeltaFile = wait(it.future);
+						wait(handleCompletedDeltaFile(bwData,
+						                              metadata,
+						                              completedDeltaFile,
+						                              cfKey,
+						                              changeFeedInfo.changeFeedStartVersion,
+						                              rollbacksCompleted));
 					}
 					inFlightDeltaFiles.clear();
 
@@ -1220,12 +1347,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						printf("[%s - %s) Waiting on delta file b/c old change feed\n",
 						       metadata->keyRange.begin.printable().c_str(),
 						       metadata->keyRange.end.printable().c_str());
-						BlobFileIndex completedDeltaFile = wait(inFlightDeltaFiles.front());
+						BlobFileIndex completedDeltaFile = wait(inFlightDeltaFiles.front().future);
 						printf("  [%s - %s) Got completed delta file\n",
 						       metadata->keyRange.begin.printable().c_str(),
 						       metadata->keyRange.end.printable().c_str());
-						wait(handleCompletedDeltaFile(
-						    bwData, metadata, completedDeltaFile, cfKey, changeFeedInfo.changeFeedStartVersion));
+						wait(handleCompletedDeltaFile(bwData,
+						                              metadata,
+						                              completedDeltaFile,
+						                              cfKey,
+						                              changeFeedInfo.changeFeedStartVersion,
+						                              rollbacksCompleted));
 						inFlightDeltaFiles.pop_front();
 					}
 				}
@@ -1234,41 +1365,103 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 				// finally, after we optionally write delta and snapshot files, add new mutations to buffer
 				if (!deltas.mutations.empty()) {
 					if (deltas.mutations.size() == 1 && deltas.mutations.back().param1 == lastEpochEndPrivateKey) {
-						// FIXME: do rollback here!!! look at ChangeFeedRollback trace event
-						if (BW_DEBUG) {
-							printf("BW [%s - %s) ROLLBACK @ %lld\n",
-							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str(),
-							       deltas.version);
-							TraceEvent(SevWarn, "GranuleRollback", bwData->id)
-							    .detail("Granule", metadata->keyRange)
-							    .detail("Version", deltas.version);
+						// Note rollbackVerision is durable, [rollbackVersion+1 - deltas.version] needs to be tossed
+						// For correctness right now, there can be no waits and yields either in rollback handling
+						// or in handleBlobGranuleFileRequest once waitForVersion has succeeded, otherwise this will
+						// race and clobber results
+						Version rollbackVersion;
+						BinaryReader br(deltas.mutations[0].param2, Unversioned());
+						br >> rollbackVersion;
+
+						// FIXME: THIS IS FALSE!! delta can commit by getting committed version out of band, without
+						// seeing rollback mutation.
+						ASSERT(rollbackVersion >= metadata->durableDeltaVersion.get());
+
+						if (!rollbacksInProgress.empty()) {
+							ASSERT(rollbacksInProgress.front().first == rollbackVersion);
+							ASSERT(rollbacksInProgress.front().second == deltas.version);
+							printf("Passed rollback %lld -> %lld\n", deltas.version, rollbackVersion);
+							rollbacksCompleted.push_back(rollbacksInProgress.front());
+							rollbacksInProgress.pop_front();
+						} else {
+							// FIXME: add counter for granule rollbacks and rollbacks skipped?
+							// explicitly check last delta in currentDeltas because metadata-bufferedDeltaVersion
+							// includes empties
+							if (metadata->pendingDeltaVersion <= rollbackVersion &&
+							    (metadata->currentDeltas.empty() ||
+							     metadata->currentDeltas.back().version <= rollbackVersion)) {
+
+								if (BW_DEBUG) {
+									printf("BW could skip rollback completely\n");
+								}
+							}
+
+							if (BW_DEBUG) {
+								printf("BW [%s - %s) ROLLBACK @ %lld -> %lld\n",
+								       metadata->keyRange.begin.printable().c_str(),
+								       metadata->keyRange.end.printable().c_str(),
+								       deltas.version,
+								       rollbackVersion);
+								TraceEvent(SevWarn, "GranuleRollback", bwData->id)
+								    .detail("Granule", metadata->keyRange)
+								    .detail("Version", deltas.version)
+								    .detail("RollbackVersion", rollbackVersion);
+							}
+							Version cfRollbackVersion = doGranuleRollback(metadata,
+							                                              deltas.version,
+							                                              rollbackVersion,
+							                                              inFlightDeltaFiles,
+							                                              rollbacksInProgress,
+							                                              rollbacksCompleted);
+
+							// reset change feeds
+							if (readOldChangeFeed) {
+								oldChangeFeedStream = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+								oldChangeFeedFuture = bwData->db->getChangeFeedStream(
+								    oldChangeFeedStream,
+								    oldCFKey.get(),
+								    cfRollbackVersion + 1,
+								    MAX_VERSION,
+								    changeFeedInfo.granuleSplitFrom.get() /*metadata->keyRange*/);
+							} else {
+								changeFeedStream = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+								changeFeedFuture = bwData->db->getChangeFeedStream(
+								    changeFeedStream, cfKey, cfRollbackVersion + 1, MAX_VERSION, metadata->keyRange);
+							}
+							justDidRollback = true;
+							currentRollback.reset();
+							break;
 						}
-						// FIXME: handle this better! If rollback version is after pendingDurableVersion, don't need to
-						// relinquish whole granule, just need to discard in-memory deltas and buffered delta version
-						throw please_reboot();
+					} else if (!rollbacksInProgress.empty() && rollbacksInProgress.front().first < deltas.version &&
+					           rollbacksInProgress.front().second > deltas.version) {
+						if (BW_DEBUG) {
+							printf("Skipping mutations @ %lld b/c prior rollback\n", deltas.version);
+						}
 					} else {
 						for (auto& delta : deltas.mutations) {
-							// 8 for version, 1 for type, 4 for each param length then actual param size
 							metadata->bufferedDeltaBytes += delta.totalSize();
 							bwData->stats.changeFeedInputBytes += delta.totalSize();
 							bwData->stats.mutationBytesBuffered += delta.totalSize();
 
 							DEBUG_MUTATION("BlobWorkerBuffer", deltas.version, delta, bwData->id)
 							    .detail("Granule", metadata->keyRange)
-							    .detail("ChangeFeedID",
-							            (readOldChangeFeed || lastFromOldChangeFeed) ? oldCFKey.get() : cfKey)
-							    .detail("OldChangeFeed", (readOldChangeFeed || lastFromOldChangeFeed) ? "T" : "F");
+							    .detail("ChangeFeedID", readOldChangeFeed ? oldCFKey.get() : cfKey)
+							    .detail("OldChangeFeed", readOldChangeFeed ? "T" : "F");
 						}
 						metadata->currentDeltas.push_back_deep(metadata->deltaArena, deltas);
 					}
 				}
-				ASSERT(metadata->bufferedDeltaVersion.get() <= deltas.version);
-				if (metadata->bufferedDeltaVersion.get() < deltas.version) {
-					metadata->bufferedDeltaVersion.set(deltas.version);
+				if (justDidRollback) {
+					break;
+				} else {
+					ASSERT(metadata->bufferedDeltaVersion.get() <= deltas.version);
+					if (metadata->bufferedDeltaVersion.get() < deltas.version) {
+						metadata->bufferedDeltaVersion.set(deltas.version);
+					}
 				}
 			}
-			if (lastFromOldChangeFeed) {
+			if (lastFromOldChangeFeed && !justDidRollback) {
+				readOldChangeFeed = false;
 				lastFromOldChangeFeed = false;
 				// set this so next delta file write updates granule split metadata to done
 				ASSERT(changeFeedInfo.granuleSplitFrom.present());
@@ -1295,25 +1488,21 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 		if (e.code() == error_code_granule_assignment_conflict) {
 			TraceEvent(SevInfo, "GranuleAssignmentConflict", bwData->id).detail("Granule", metadata->keyRange);
 		} else {
-			if (e.code() != error_code_please_reboot) {
-				++bwData->stats.granuleUpdateErrors;
-				if (BW_DEBUG) {
-					printf("Granule file updater for [%s - %s) got error %s, exiting\n",
-					       metadata->keyRange.begin.printable().c_str(),
-					       metadata->keyRange.end.printable().c_str(),
-					       e.name());
-				}
-				TraceEvent(SevWarn, "GranuleFileUpdaterError", bwData->id)
-				    .detail("Granule", metadata->keyRange)
-				    .error(e);
+			++bwData->stats.granuleUpdateErrors;
+			if (BW_DEBUG) {
+				printf("Granule file updater for [%s - %s) got error %s, exiting\n",
+				       metadata->keyRange.begin.printable().c_str(),
+				       metadata->keyRange.end.printable().c_str(),
+				       e.name());
 			}
+			TraceEvent(SevWarn, "GranuleFileUpdaterError", bwData->id).detail("Granule", metadata->keyRange).error(e);
 
 			if (granuleCanRetry(e)) {
 				// explicitly cancel all outstanding write futures BEFORE updating promise stream, to ensure they can't
 				// update files after the re-assigned granule acquires the lock
 				inFlightBlobSnapshot.cancel();
 				for (auto& f : inFlightDeltaFiles) {
-					f.cancel();
+					f.future.cancel();
 				}
 
 				bwData->granuleUpdateErrors.send(metadata->originalReq);
@@ -1448,11 +1637,27 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 			if (metadata->cancelled.isSet()) {
 				throw wrong_shard_server();
 			}
-			Future<Void> waitForVersionFuture = waitForVersion(metadata, req.readVersion);
-			if (!waitForVersionFuture.isReady()) {
+
+			loop {
+				Future<Void> waitForVersionFuture = waitForVersion(metadata, req.readVersion);
+				if (waitForVersionFuture.isReady()) {
+					// didn't yield, so no need to check rollback stuff
+					break;
+				}
+				// rollback resets all of the version information, so we have to redo wait for version on rollback
+				state int rollbackCount = metadata->rollbackCount.get();
 				choose {
 					when(wait(waitForVersionFuture)) {}
+					when(wait(metadata->rollbackCount.onChange())) {}
 					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+				}
+				if (rollbackCount == metadata->rollbackCount.get()) {
+					break;
+				} else if (BW_REQUEST_DEBUG) {
+					printf("[%s - %s) @ %lld hit rollback, restarting waitForVersion\n",
+					       req.keyRange.begin.printable().c_str(),
+					       req.keyRange.end.printable().c_str(),
+					       req.readVersion);
 				}
 			}
 
