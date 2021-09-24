@@ -4958,7 +4958,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 	state bool lastIsTss = false;
 	TraceEvent("StorageServerRecruitment", self->distributorId)
 	    .detail("State", "Idle")
-	    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
+	    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 	loop {
 		if (!recruiting) {
 			while (self->recruitingStream.get() == 0) {
@@ -4967,7 +4967,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 			    .detail("State", "Recruiting")
 			    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
-			    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
+			    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 			recruiting = true;
 			lastIsTss = self->isTssRecruiting;
 		} else {
@@ -4978,7 +4978,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 							TraceEvent("StorageServerRecruitment", self->distributorId)
 							    .detail("State", "Recruiting")
 							    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
-							    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
+							    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 							lastIsTss = self->isTssRecruiting;
 						}
 					}
@@ -4991,7 +4991,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			}
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 			    .detail("State", "Idle")
-			    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
+			    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 			recruiting = false;
 		}
 	}
@@ -5707,7 +5707,13 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				    .detail("ServerCount", self->server_info.size())
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 				    .detail("HighestPriority", highestPriority)
-				    .trackLatest(self->primary ? "TotalDataInFlight" : "TotalDataInFlightRemote");
+				    .trackLatest(self->primary
+				                     ? "TotalDataInFlight"
+				                     : "TotalDataInFlightRemote"); // this track event's lifestyle is contolled by
+				                                                   // totalDataInFlightEventHolder or
+				                                                   // totalDataInFlightRemoteEventHolder in
+				                                                   // DataDistribution.actor.cpp. Please make sure the
+				                                                   // keys in both places are matched.
 
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
@@ -5860,7 +5866,7 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	DataDistributorData(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
 	  : dbInfo(db), ddId(id), teamCollection(nullptr),
 	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
-	    movingDataEventHolder(makeReference<EventCacheHolder>("MoveData")),
+	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
 };
@@ -6015,20 +6021,27 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				    .detail("PriorityTeam1Left", 0)
 				    .detail("PriorityTeam0Left", 0)
 				    .detail("PrioritySplitShard", 0)
-				    .trackLatest("MovingData");
+				    .trackLatest("MovingData"); // this track event's lifestyle is contolled by movingDataEventHolder in
+				                                // DataDistribution.actor.cpp. Please make sure the keys in both places
+				                                // are matched.
 
 				TraceEvent("TotalDataInFlight", self->ddId)
 				    .detail("Primary", true)
 				    .detail("TotalBytes", 0)
 				    .detail("UnhealthyServers", 0)
 				    .detail("HighestPriority", 0)
-				    .trackLatest("TotalDataInFlight");
+				    .trackLatest("TotalDataInFlight"); // this track event's lifestyle is contolled by
+				                                       // totalDataInFlightEventHolder in DataDistribution.actor.cpp.
+				                                       // Please make sure the keys in both places are matched.
 				TraceEvent("TotalDataInFlight", self->ddId)
 				    .detail("Primary", false)
 				    .detail("TotalBytes", 0)
 				    .detail("UnhealthyServers", 0)
 				    .detail("HighestPriority", configuration.usableRegions > 1 ? 0 : -1)
-				    .trackLatest("TotalDataInFlightRemote");
+				    .trackLatest(
+				        "TotalDataInFlightRemote"); // this track event's lifestyle is contolled by
+				                                    // totalDataInFlightRemoteEventHolder in DataDistribution.actor.cpp.
+				                                    // Please make sure the keys in both places are matched.
 
 				wait(waitForDataDistributionEnabled(cx, ddEnabledState));
 				TraceEvent("DataDistributionEnabled").log();
