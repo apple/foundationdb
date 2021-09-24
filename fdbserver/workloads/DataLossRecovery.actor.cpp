@@ -73,6 +73,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Value newValue = "TestNewValue"_sr;
 
 		wait(self->writeAndVerify(self, cx, key, oldValue));
+<<<<<<< HEAD
 
 		// Move [key, endKey) to team: {address}.
 		state NetworkAddress address =
@@ -83,6 +84,22 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		// Expect reads on metadata to timeout.
 		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
+=======
+		
+		// Move [key, endKey) to team: {address}.
+		state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, KeyRangeRef(key, endKey)));
+		wait(self->readAndVerify(self, cx, key, oldValue));
+
+		// Kill team {address}, and expect read to timeout.
+		self->killProcess(self, address);
+		wait(self->readAndVerify(self, cx, key, "Timeout"_sr));
+
+		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
+		// Expect read to return 'value not found'.
+		int ignore = wait(setDDMode(cx, 1));
+		wait(self->exclude(self, cx, key, address));
+		wait(self->readAndVerify(self, cx, key, Optional<Value>()));
+>>>>>>> 32aa1e8bc8b8d456f45e4fe7f9c39da33ce7f0b4
 
 		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, newValue));
