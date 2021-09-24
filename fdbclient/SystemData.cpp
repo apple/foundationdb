@@ -1163,15 +1163,16 @@ std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const Valu
 // const Value blobGranuleHistoryValueFor(VectorRef<KeyRangeRef> const& parentGranules);
 // VectorRef<KeyRangeRef> decodeBlobGranuleHistoryValue(ValueRef const& value);
 
-const Value blobGranuleHistoryValueFor(VectorRef<KeyRangeRef> const& parentGranules) {
-	BinaryWriter wr(Unversioned());
+const Value blobGranuleHistoryValueFor(Standalone<VectorRef<KeyRangeRef>> const& parentGranules) {
+	// FIXME: make separate version for BG
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
 	wr << parentGranules;
 	return wr.toValue();
 }
 
-VectorRef<KeyRangeRef> decodeBlobGranuleHistoryValue(const ValueRef& value) {
-	VectorRef<KeyRangeRef> parentGranules;
-	BinaryReader reader(value, Unversioned());
+Standalone<VectorRef<KeyRangeRef>> decodeBlobGranuleHistoryValue(const ValueRef& value) {
+	Standalone<VectorRef<KeyRangeRef>> parentGranules;
+	BinaryReader reader(value, IncludeVersion());
 	reader >> parentGranules;
 	return parentGranules;
 }

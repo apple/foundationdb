@@ -555,8 +555,8 @@ std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(ValueRef const& val
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
 std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef const& value);
 
-const Value blobGranuleHistoryValueFor(VectorRef<KeyRangeRef> const& parentGranules);
-VectorRef<KeyRangeRef> decodeBlobGranuleHistoryValue(ValueRef const& value);
+const Value blobGranuleHistoryValueFor(Standalone<VectorRef<KeyRangeRef>> const& parentGranules);
+Standalone<VectorRef<KeyRangeRef>> decodeBlobGranuleHistoryValue(ValueRef const& value);
 
 // \xff/bwl/[[BlobWorkerID]] = [[BlobWorkerInterface]]
 extern const KeyRangeRef blobWorkerListKeys;

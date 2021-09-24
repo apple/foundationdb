@@ -401,25 +401,33 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			state KeyRange r = range;
 			state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
 			if (BGV_DEBUG) {
-				printf("Final availability check [%s - %s)\n", r.begin.printable().c_str(), r.end.printable().c_str());
+				printf("Final availability check [%s - %s) @ %lld\n",
+				       r.begin.printable().c_str(),
+				       r.end.printable().c_str(),
+				       readVersion);
 			}
+			state KeyRange last;
 			state Future<Void> requester = cx->readBlobGranulesStream(chunkStream, r, 0, readVersion);
 			loop {
 				try {
 					// just make sure granule returns a non-error response, to ensure the range wasn't lost and the
 					// workers are all caught up. Kind of like a quiet database check, just for the blob workers
 					Standalone<BlobGranuleChunkRef> nextChunk = waitNext(chunkStream.getFuture());
+					last = nextChunk.keyRange;
 					checks++;
 				} catch (Error& e) {
 					if (e.code() == error_code_end_of_stream) {
 						break;
 					}
 					if (BGV_DEBUG) {
-						printf("BG Verifier failed final availability check for [%s - %s) @ %lld with error %s\n",
+						printf("BG Verifier failed final availability check for [%s - %s) @ %lld with error %s. Last "
+						       "Success=[%s - %s)\n",
 						       r.begin.printable().c_str(),
 						       r.end.printable().c_str(),
 						       readVersion,
-						       e.name());
+						       e.name(),
+						       last.begin.printable().c_str(),
+						       last.end.printable().c_str());
 					}
 					throw e;
 				}

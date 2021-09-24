@@ -551,12 +551,13 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 
 				wait(tr->commit());
 				if (BW_DEBUG) {
-					printf("Granule [%s - %s) updated fdb with delta file %s of size %d at version %lld\n",
+					printf("Granule [%s - %s) updated fdb with delta file %s of size %d at version %lld, cv=%lld\n",
 					       keyRange.begin.printable().c_str(),
 					       keyRange.end.printable().c_str(),
 					       fname.c_str(),
 					       serialized.size(),
-					       currentDeltaVersion);
+					       currentDeltaVersion,
+					       tr->getCommittedVersion());
 				}
 
 				if (BUGGIFY_WITH_PROB(0.01)) {
@@ -1041,8 +1042,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 				wait(delay(deterministicRandom()->random01()));
 			}
 
-			// TODO: handle empty versions here
-			// TODO: Buggify delay in change feed stream
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations;
 			if (readOldChangeFeed) {
 				Standalone<VectorRef<MutationsAndVersionRef>> oldMutations = waitNext(oldChangeFeedStream.getFuture());
@@ -1131,6 +1130,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					snapshotEligible = true;
 				}
 
+				// FIXME: if we're still reading from old change feed, we should probably compact if we're making a
+				// bunch of extra delta files at some point, even if we don't consider it for a split yet
 				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
 				    !readOldChangeFeed && !lastFromOldChangeFeed) {
 
@@ -1211,6 +1212,22 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 
 					// reset metadata
 					metadata->bytesInNewDeltaFiles = 0;
+				} else if (snapshotEligible &&
+				           metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
+					// if we're in the old change feed case and can't snapshot but we have enough data to, don't queue
+					// too many delta files in parallel
+					while (inFlightDeltaFiles.size() > 10) {
+						printf("[%s - %s) Waiting on delta file b/c old change feed\n",
+						       metadata->keyRange.begin.printable().c_str(),
+						       metadata->keyRange.end.printable().c_str());
+						BlobFileIndex completedDeltaFile = wait(inFlightDeltaFiles.front());
+						printf("  [%s - %s) Got completed delta file\n",
+						       metadata->keyRange.begin.printable().c_str(),
+						       metadata->keyRange.end.printable().c_str());
+						wait(handleCompletedDeltaFile(
+						    bwData, metadata, completedDeltaFile, cfKey, changeFeedInfo.changeFeedStartVersion));
+						inFlightDeltaFiles.pop_front();
+					}
 				}
 				snapshotEligible = false;
 
@@ -1562,11 +1579,18 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 
 				GranuleFiles granuleFiles = wait(loadPreviousFiles(&tr, req.keyRange));
 				info.existingFiles = granuleFiles;
-				info.previousDurableVersion = info.existingFiles.get().deltaFiles.empty()
-				                                  ? info.existingFiles.get().snapshotFiles.back().version
-				                                  : info.existingFiles.get().deltaFiles.back().version;
+				info.doSnapshot = false;
 
-				info.doSnapshot = info.existingFiles.get().snapshotFiles.empty();
+				if (info.existingFiles.get().snapshotFiles.empty()) {
+					ASSERT(info.existingFiles.get().deltaFiles.empty());
+					info.previousDurableVersion = invalidVersion;
+					info.doSnapshot = true;
+				} else if (info.existingFiles.get().deltaFiles.empty()) {
+					info.previousDurableVersion = info.existingFiles.get().snapshotFiles.back().version;
+				} else {
+					info.previousDurableVersion = info.existingFiles.get().deltaFiles.back().version;
+				}
+
 				// for the non-splitting cases, this doesn't need to be 100% accurate, it just needs to be smaller than
 				// the next delta file write.
 				info.changeFeedStartVersion = info.previousDurableVersion;
@@ -1584,15 +1608,15 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 			wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, req.keyRange, blobGranuleMappingValueFor(bwData->id)));
 
 			Tuple historyKey;
-			historyKey.append(req.keyRange.end).append(req.keyRange.end);
-			state Optional<Value> parentGranulesValue =
+			historyKey.append(req.keyRange.begin).append(req.keyRange.end);
+			Optional<Value> parentGranulesValue =
 			    wait(tr.get(historyKey.getDataAsStandalone().withPrefix(blobGranuleHistoryKeys.begin)));
 
 			// If anything in previousGranules, need to do the handoff logic and set ret.previousChangeFeedId, and the
 			// previous durable version will come from the previous granules
 			if (parentGranulesValue.present()) {
-				// references memory in parentGranulesValue standalone
-				state VectorRef<KeyRangeRef> parentGranules = decodeBlobGranuleHistoryValue(parentGranulesValue.get());
+				state Standalone<VectorRef<KeyRangeRef>> parentGranules =
+				    decodeBlobGranuleHistoryValue(parentGranulesValue.get());
 				// TODO REMOVE
 				if (BW_DEBUG) {
 					printf("Decoded parent granules for [%s - %s)\n",
@@ -1617,14 +1641,6 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 
 				ASSERT(!hasPrevOwner || granuleSplitState.first > BlobGranuleSplitState::Started);
 
-				if (granuleSplitState.first == BlobGranuleSplitState::Started) {
-					wait(updateGranuleSplitState(&tr,
-					                             parentGranules[0],
-					                             req.keyRange,
-					                             info.prevChangeFeedId.get(),
-					                             BlobGranuleSplitState::Assigned));
-				}
-
 				// if granule wasn't done with old change feed, load it
 				if (granuleSplitState.first < BlobGranuleSplitState::Done) {
 					Optional<Value> prevGranuleLockValue = wait(tr.get(granuleLockKey(parentGranules[0])));
@@ -1633,14 +1649,26 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 					    decodeBlobGranuleLockValue(prevGranuleLockValue.get());
 					info.prevChangeFeedId = std::get<2>(prevGranuleLock);
 					info.granuleSplitFrom = parentGranules[0];
+
 					if (granuleSplitState.first == BlobGranuleSplitState::Assigned) {
 						// was already assigned, use change feed start version
 						ASSERT(granuleSplitState.second != invalidVersion);
 						info.changeFeedStartVersion = granuleSplitState.second;
+					} else if (granuleSplitState.first == BlobGranuleSplitState::Started) {
+						wait(updateGranuleSplitState(&tr,
+						                             parentGranules[0],
+						                             req.keyRange,
+						                             info.prevChangeFeedId.get(),
+						                             BlobGranuleSplitState::Assigned));
+						// change feed was created as part of this transaction, changeFeedStartVersion will be set later
+					} else {
+						ASSERT(false);
 					}
 				}
 
 				if (info.doSnapshot) {
+					// only need to do snapshot if no files exist yet for this granule.
+					ASSERT(info.previousDurableVersion == invalidVersion);
 					// FIXME: store this somewhere useful for time travel reads
 					GranuleFiles prevFiles = wait(loadPreviousFiles(&tr, parentGranules[0]));
 					ASSERT(!prevFiles.snapshotFiles.empty() || !prevFiles.deltaFiles.empty());
@@ -1654,7 +1682,7 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 
 			wait(tr.commit());
 
-			if (!hasPrevOwner) {
+			if (info.changeFeedStartVersion == invalidVersion) {
 				info.changeFeedStartVersion = tr.getCommittedVersion();
 			} else {
 				ASSERT(info.changeFeedStartVersion != invalidVersion);

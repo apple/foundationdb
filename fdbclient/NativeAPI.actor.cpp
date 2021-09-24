@@ -6640,6 +6640,7 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
                                           KeyRange range) {
 	loop {
 		try {
+			state Version lastEmpty = invalidVersion;
 			state ChangeFeedStreamRequest req;
 			req.rangeID = rangeID;
 			req.begin = begin;
@@ -6651,9 +6652,21 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 			loop {
 				state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture());
 				begin = rep.mutations.back().version + 1;
+
+				if (rangeID.printable() == "8696f5d434d2247e73307a158f9f2a6b" && begin >= 234494075) {
+					printf("  NA CF %s [%s - %s) got %d at %lld\n",
+					       rangeID.printable().c_str(),
+					       range.begin.printable().c_str(),
+					       range.end.printable().c_str(),
+					       rep.mutations.size(),
+					       begin);
+				}
 				state int resultLoc = 0;
+				// TODO TELL EVAN about fix
 				while (resultLoc < rep.mutations.size()) {
-					if (rep.mutations[resultLoc].mutations.size() || rep.mutations[resultLoc].version + 1 == end) {
+					if (rep.mutations[resultLoc].mutations.size() || rep.mutations[resultLoc].version + 1 == end ||
+					    (rep.mutations[resultLoc].mutations.empty() &&
+					     rep.mutations[resultLoc].version >= lastEmpty + 5000000)) {
 						wait(results.onEmpty());
 						results.send(rep.mutations[resultLoc]);
 					}

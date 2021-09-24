@@ -662,7 +662,10 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 	}
 
 	if (BM_DEBUG) {
-		printf("Splitting range [%s - %s) into:\n", range.begin.printable().c_str(), range.end.printable().c_str());
+		printf("Splitting range [%s - %s) into (%d):\n",
+		       range.begin.printable().c_str(),
+		       range.end.printable().c_str(),
+		       newRanges.size() - 1);
 		for (int i = 0; i < newRanges.size() - 1; i++) {
 			printf("  [%s - %s)\n", newRanges[i].printable().c_str(), newRanges[i + 1].printable().c_str());
 		}
@@ -781,6 +784,9 @@ ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
 						       randomRange.end().printable().c_str(),
 						       randomRange.value().toString().c_str());
 					}
+
+					// FIXME: with low probability, could immediately revoke it from the new assignment and move it back
+					// right after to test that race
 
 					RangeAssignment revokeOld;
 					revokeOld.isAssign = false;
