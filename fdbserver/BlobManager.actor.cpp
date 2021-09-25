@@ -771,8 +771,16 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 
 // TODO this is only for chaos testing right now!! REMOVE LATER
 ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
+	ASSERT(g_network->isSimulated());
 	loop {
 		wait(delay(30.0));
+
+		if (g_simulator.speedUpSimulation) {
+			if (BM_DEBUG) {
+				printf("Range mover stopping\n");
+			}
+			return Void();
+		}
 
 		if (bmData->workersById.size() > 1) {
 			int tries = 10;
