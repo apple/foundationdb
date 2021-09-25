@@ -4,7 +4,7 @@ testTitle = 'BlobGranuleCorrectnessTestLarge'
     [[test.workload]]
     testName = 'ReadWrite'
     testDuration = 200.0
-    transactionsPerSecond = 1000
+    transactionsPerSecond = 200
     writesPerTransactionA = 0
     readsPerTransactionA = 10
     writesPerTransactionB = 10
