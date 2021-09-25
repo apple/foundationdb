@@ -175,14 +175,13 @@ ACTOR Future<int> spawnProcess(std::string path,
 			loop {
 				int bytes =
 				    read(readFD.get(), &outputBuffer[bytesRead], SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT - bytesRead);
-				if (bytes > 0)
-					bytesRead += bytes;
 				if (bytes < 0 && errno == EAGAIN)
 					break;
 				else if (bytes < 0)
 					throw internal_error();
 				else if (bytes == 0)
 					break;
+				bytesRead += bytes;
 			}
 
 			if (err < 0) {
