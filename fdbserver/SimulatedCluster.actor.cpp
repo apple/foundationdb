@@ -2001,13 +2001,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 
 		// TODO: caching disabled for this merge
 		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
-		int storageCacheMachines = 0;
-		int blobWorkerMachines = 0;
-
-		if (dc == 0) {
-			storageCacheMachines = 1;
-			blobWorkerMachines = 2 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
-		}
+		int storageCacheMachines = dc == 0 ? 1 : 0;
+		int blobWorkerMachines = 2 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
 
 		int totalMachines = machines + storageCacheMachines + blobWorkerMachines;
 		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
@@ -2043,12 +2038,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 			// TODO: caching disabled for this merge
 
 			// `machines` here is the normal (non-temporary) machines that totalMachines comprises of
-			if (machine >= machines && dc == 0) {
-				if (storageCacheMachines > 0) {
+			if (machine >= machines) {
+				if (storageCacheMachines > 0 && dc == 0) {
 					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
 					nonVersatileMachines++;
 					storageCacheMachines--;
-				} else if (blobWorkerMachines > 0) {
+				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
 					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
 					nonVersatileMachines++;
 					blobWorkerMachines--;
