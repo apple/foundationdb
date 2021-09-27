@@ -145,7 +145,6 @@ set(FDBSERVER_SRCS
   ptxn/test/FakeLogSystem.h
   ptxn/test/FakeLogSystem.cpp
   ptxn/test/FakePeekCursor.h
-  ptxn/test/FakePeekCursor.h
   ptxn/test/FakePeekCursor.cpp
   ptxn/test/FakeProxy.actor.cpp
   ptxn/test/FakeProxy.actor.h
