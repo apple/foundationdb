@@ -140,7 +140,7 @@ private:
 		if (!m.param1.startsWith(keyServersPrefix)) {
 			return;
 		}
-		// TraceEvent("checkSetKeyServersPrefix MetadataMutation").detail("ToCommit", toCommit  ? 1 : 0);
+		// TraceEvent("checkSetKeyServersPrefix").detail("ToCommit", toCommit  ? 1 : 0);
 
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
@@ -189,7 +189,7 @@ private:
 		if (!m.param1.startsWith(serverKeysPrefix)) {
 			return;
 		}
-		// TraceEvent("checkSetServerKeysPrefix MetadataMutation");
+		// TraceEvent("checkSetServerKeysPrefix");
 
 		if (toCommit) {
 			Tag tag = decodeServerTagValue(
@@ -212,7 +212,7 @@ private:
 		if (!m.param1.startsWith(serverTagPrefix)) {
 			return;
 		}
-		// TraceEvent("checkSetServerTagsPrefix MetadataMutation").detail("ToCommit", toCommit  ? 1 : 0);
+		// TraceEvent("checkSetServerTagsPrefix").detail("ToCommit", toCommit  ? 1 : 0);
 
 		UID id = decodeServerTagKey(m.param1);
 		Tag tag = decodeServerTagValue(m.param2);
@@ -279,7 +279,7 @@ private:
 		if (!m.param1.startsWith(cacheKeysPrefix) || toCommit == nullptr) {
 			return;
 		}
-		// TraceEvent("checkSetCacheKeysPrefix MetadataMutation");
+		// TraceEvent("checkSetCacheKeysPrefix");
 		// Create a private mutation for cache servers
 		// This is done to make the cache servers aware of the cached key-ranges
 		MutationRef privatized = m;
@@ -343,7 +343,7 @@ private:
 		if (!m.param1.startsWith(tssMappingKeys.begin)) {
 			return;
 		}
-		// TraceEvent("checkSetTSSMappingKeys MetadataMutation");
+		// TraceEvent("checkSetTSSMappingKeys");
 
 		// Normally uses key backed map, so have to use same unpacking code here.
 		UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
@@ -377,7 +377,7 @@ private:
 		if (!toCommit) {
 			return;
 		}
-		// TraceEvent("checkSetTSSQuarantineKeys MetadataMutation");
+		// TraceEvent("checkSetTSSQuarantineKeys");
 		UID tssId = decodeTssQuarantineKey(m.param1);
 		Optional<Value> ssiV = txnStateStore->readValue(serverListKeyFor(tssId)).get();
 		if (!ssiV.present()) {
@@ -486,7 +486,7 @@ private:
 		if (!toCommit) {
 			return;
 		}
-		// TraceEvent("checkSetGlobalKeys MetadataMutation");
+		// TraceEvent("checkSetGlobalKeys");
 		// Notifies all servers that a Master's server epoch ends
 		auto allServers = txnStateStore->readRange(serverTagKeys).get();
 		std::set<Tag> allTags;
@@ -618,7 +618,7 @@ private:
 		if (!serverTagKeys.intersects(range)) {
 			return;
 		}
-		// TraceEvent("checkClearServerTagKeys MetadataMutation");
+		// TraceEvent("checkClearServerTagKeys");
 		// Storage server removal always happens in a separate version from any prior writes (or any subsequent
 		// reuse of the tag) so we can safely destroy the tag here without any concern about intra-batch
 		// ordering
@@ -909,7 +909,7 @@ private:
 		if (cachedRangeInfo.size() == 0 || !toCommit) {
 			return;
 		}
-		// TraceEvent("tagStorageServersForCachedKeyRanges MetadataMutation");
+		// TraceEvent("tagStorageServersForCachedKeyRanges");
 
 		std::map<KeyRef, MutationRef>::iterator itr;
 		KeyRef keyBegin, keyEnd;

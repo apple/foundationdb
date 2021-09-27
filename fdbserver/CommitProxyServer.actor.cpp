@@ -514,13 +514,6 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			auto& m = (*pMutations)[mutationNum];
-			if (m.param1.startsWith(serverTagPrefix)) {
-				std::set<Tag> serverTags;
-				Tag tag = decodeServerTagValue(m.param2);
-				serverTags.insert(tag);
-				transactionTags.insert(tag);
-				toCommit.getLocations(serverTags, writtenTLogs);
-			}
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 				transactionTags.insert(tags.begin(), tags.end());
@@ -557,9 +550,7 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 				UNREACHABLE();
 			}
 		}
-		if (containsMetadataMutation(trs[transactionNum].transaction.mutations)) {
-			hasMetadataMutation = true;
-		}
+		hasMetadataMutation = containsMetadataMutation(trs[transactionNum].transaction.mutations);
 	}
 
 	return transactionTags;
@@ -1220,13 +1211,13 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		self->toCommit.getLocations(self->writtenTags, postResolutionTLogs);
 		for (auto& t : postResolutionTLogs) {
 			if (self->writtenTLogs.find(t) == self->writtenTLogs.end()) {
-				TraceEvent("Tag in message does not have PCV!")
-				    .detail("tags in batch before resolution", self->writtenTagsPreResolution)
-				    .detail("tags in batch after resolution", self->writtenTags)
-				    .detail("size of TLog set before resolution", self->writtenTLogs.size())
-				    .detail("size of TLog set after resolution", postResolutionTLogs.size())
-				    .detail("Original batch had metadata mutations", self->hasMetadataMutation)
-				    .detail("Recevied metadata mutations from proxy", self->metadataMutationFromProxy);
+				TraceEvent(SevError, "TagHasNoPCV", pProxyCommitData->dbgid)
+				    .detail("tagsBeforeResolution", self->writtenTagsPreResolution)
+				    .detail("tagsAfterResolution", self->writtenTags)
+				    .detail("numTLogsBeforeResolution", self->writtenTLogs.size())
+				    .detail("numTLogsAfterResolution", postResolutionTLogs.size())
+				    .detail("hasMetadataMutation", self->hasMetadataMutation)
+				    .detail("metadataMutationFromProxy", self->metadataMutationFromProxy);
 				ASSERT(false);
 			}
 		}
