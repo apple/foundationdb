@@ -42,15 +42,20 @@ struct FDBOptionInfo {
 	// be no cumulative effects from calling multiple times).
 	int defaultFor;
 
+	enum class ParamType { None, String, Int, Bytes };
+
+	ParamType paramType;
+
 	FDBOptionInfo(std::string name,
 	              std::string comment,
 	              std::string parameterComment,
 	              bool hasParameter,
 	              bool hidden,
 	              bool persistent,
-	              int defaultFor)
+	              int defaultFor,
+	              ParamType paramType)
 	  : name(name), comment(comment), parameterComment(parameterComment), hasParameter(hasParameter), hidden(hidden),
-	    persistent(persistent), defaultFor(defaultFor) {}
+	    persistent(persistent), defaultFor(defaultFor), paramType(paramType) {}
 
 	FDBOptionInfo() {}
 };
@@ -103,8 +108,9 @@ public:
 	typename OptionList::const_iterator end() const { return options.cend(); }
 };
 
-#define ADD_OPTION_INFO(type, var, name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor)      \
+#define ADD_OPTION_INFO(                                                                                               \
+    type, var, name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor, paramType)               \
 	type::optionInfo.insert(                                                                                           \
-	    var, FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor));
+	    var, FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor, paramType));
 
 #endif
