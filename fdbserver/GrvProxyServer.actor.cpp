@@ -117,8 +117,8 @@ struct GrvProxyStats {
 	                                                    LiteralStringRef("GrvConfirmEpochLive"),
 	                                                    Histogram::Unit::microseconds)),
 	    grvGetCommittedVersionRpcDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                       LiteralStringRef("GrvGetCommittedVersionRpc"),
-	                                       Histogram::Unit::microseconds)) {
+	                                                          LiteralStringRef("GrvGetCommittedVersionRpc"),
+	                                                          Histogram::Unit::microseconds)) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
 		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });
@@ -546,7 +546,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	}
 
 	state double grvConfirmEpochLive = now();
- 	grvProxyData->stats.grvConfirmEpochLiveDist->sampleSeconds(grvConfirmEpochLive - grvStart);
+	grvProxyData->stats.grvConfirmEpochLiveDist->sampleSeconds(grvConfirmEpochLive - grvStart);
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
 		    "TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.confirmEpochLive");
