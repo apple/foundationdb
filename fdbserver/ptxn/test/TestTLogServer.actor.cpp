@@ -79,8 +79,11 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		for (ptxn::TLogGroup& tlogGroup : pContext->tLogGroups) {
 			std::string filename =
 			    filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
-			IKeyValueStore* data = openKVStore(req.storeType, filename, tlogGroup.logGroupId, 500e6);
-			state IDiskQueue* queue = new InMemoryDiskQueue(tlogGroup.logGroupId);
+			IKeyValueStore* data = keyValueStoreMemory(joinPath(folder, "loggroup"), tlogGroup.logGroupId, 500e6);
+			IDiskQueue* queue = openDiskQueue(joinPath(folder, "logqueue-" + tlogGroup.logGroupId.toString() + "-"),
+			                                  "fdq",
+			                                  tlogGroup.logGroupId,
+			                                  DiskQueueVersion::V1);
 			persistentDataAndQueues[tlogGroup.logGroupId] = std::make_pair(data, queue);
 		}
 
