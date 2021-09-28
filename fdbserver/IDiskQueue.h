@@ -103,8 +103,7 @@ public:
 class InMemoryDiskQueue : public IDiskQueue {
 public:
 	InMemoryDiskQueue(UID dbgid)
-	  : dbgid(dbgid), recovered(false), initialized(false),
-	   cursorWrite(0), cursorRead(0), cursorCommit(0) {}
+	  : dbgid(dbgid), recovered(false), initialized(false), cursorWrite(0), cursorRead(0), cursorCommit(0) {}
 
 	location push(StringRef contents) override {
 		// ASSERT(recovered);
@@ -113,8 +112,8 @@ public:
 		return location(cursorWrite, cursorWrite);
 	}
 
-	void pop(location upTo) override { 
-		ASSERT(upTo.hi); 
+	void pop(location upTo) override {
+		ASSERT(upTo.hi);
 		cursorRead = cursorRead < upTo.hi ? upTo.hi : cursorRead;
 		cursorRead = cursorRead > cursorCommit ? cursorCommit : cursorRead;
 	}
@@ -156,9 +155,7 @@ public:
 
 	StorageBytes getStorageBytes() const override { return StorageBytes(); }
 
-	int getCommitOverhead() const override {
-		return 0;
-	}
+	int getCommitOverhead() const override { return 0; }
 
 private:
 	UID dbgid;

@@ -1714,7 +1714,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
 
 					// TODO: create kv and disk queue per TLog group.
-					std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
+					std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>>
+					    persistentDataAndQueues;
 					for (auto& group : req.tlogGroups) {
 						// memory managed by each tlog group
 						// worker.actor.cpp have more complex logic to construct IDiskQueue and IKeyValueStore
@@ -1748,7 +1749,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 						tLogCore = handleIOErrors(tLogCore, entry.second.first, entry.first);
 						tLogCore = handleIOErrors(tLogCore, entry.second.second, entry.first);
 					}
-					
+
 					errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
 					logData.actor = tLogCore;
 					logData.uid = logId;

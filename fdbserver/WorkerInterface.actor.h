@@ -1042,18 +1042,19 @@ ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> per
 }
 
 namespace ptxn {
-ACTOR Future<Void> tLog(std::unordered_map<TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
-                        Reference<AsyncVar<ServerDBInfo>> db,
-                        LocalityData locality,
-                        PromiseStream<InitializePtxnTLogRequest> tlogRequests,
-                        UID tlogId,
-                        UID workerID,
-                        bool restoreFromDisk,
-                        Promise<Void> oldLog,
-                        Promise<Void> recovered,
-                        std::string folder,
-                        Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog);
+ACTOR Future<Void> tLog(
+    std::unordered_map<TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
+    Reference<AsyncVar<ServerDBInfo>> db,
+    LocalityData locality,
+    PromiseStream<InitializePtxnTLogRequest> tlogRequests,
+    UID tlogId,
+    UID workerID,
+    bool restoreFromDisk,
+    Promise<Void> oldLog,
+    Promise<Void> recovered,
+    std::string folder,
+    Reference<AsyncVar<bool>> degraded,
+    Reference<AsyncVar<UID>> activeSharedTLog);
 }
 
 typedef decltype(&tLog) TLogFn;

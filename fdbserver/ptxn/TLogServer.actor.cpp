@@ -1030,7 +1030,8 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req, Reference<LogGeneration
 		version = result.first;
 
 		if (req.endVersion.present() && version > req.endVersion.get()) {
-			// [will remove afterPR] previously has a bug, if first run version is bigger than req, it will be returned anyways.
+			// [will remove afterPR] previously has a bug, if first run version is bigger than req, it will be returned
+			// anyways.
 			break;
 		}
 		auto& data = result.second;
@@ -1477,18 +1478,19 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 	return Void();
 }
 
-ACTOR Future<Void> tLog(std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
-                        Reference<AsyncVar<ServerDBInfo>> db,
-                        LocalityData locality,
-                        PromiseStream<InitializePtxnTLogRequest> tlogRequests,
-                        UID tlogId,
-                        UID workerID,
-                        bool restoreFromDisk,
-                        Promise<Void> recovered,
-                        Promise<Void> oldLog,
-                        std::string folder,
-                        Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog) {
+ACTOR Future<Void> tLog(
+    std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
+    Reference<AsyncVar<ServerDBInfo>> db,
+    LocalityData locality,
+    PromiseStream<InitializePtxnTLogRequest> tlogRequests,
+    UID tlogId,
+    UID workerID,
+    bool restoreFromDisk,
+    Promise<Void> recovered,
+    Promise<Void> oldLog,
+    std::string folder,
+    Reference<AsyncVar<bool>> degraded,
+    Reference<AsyncVar<UID>> activeSharedTLog) {
 
 	state Reference<TLogServerData> self = makeReference<TLogServerData>(tlogId, workerID, db, degraded, folder);
 	state Future<Void> error = actorCollection(self->sharedActors.getFuture());

@@ -55,7 +55,6 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 	UNREACHABLE();
 }
 
-
 ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     std::shared_ptr<ptxn::test::TestDriverContext> pContext,
                                     std::string folder) {
@@ -75,11 +74,11 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		StringRef fileLogQueuePrefix = "logqueue-"_sr;
 		StringRef tlogQueueExtension = "fdq"_sr;
 		ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
-		const StringRef prefix =
-			req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
+		const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 		std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
 		for (ptxn::TLogGroup& tlogGroup : pContext->tLogGroups) {
-			std::string filename = filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
+			std::string filename =
+			    filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
 			IKeyValueStore* data = openKVStore(req.storeType, filename, tlogGroup.logGroupId, 500e6);
 			state IDiskQueue* queue = new InMemoryDiskQueue(tlogGroup.logGroupId);
 			persistentDataAndQueues[tlogGroup.logGroupId] = std::make_pair(data, queue);
@@ -588,13 +587,13 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 		StringRef fileLogQueuePrefix = "logqueue-"_sr;
 		StringRef tlogQueueExtension = "fdq"_sr;
 		ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
-		const StringRef prefix =
-			req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
+		const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 
 		state std::unordered_map<ptxn::TLogGroupID, IDiskQueue*> qs;
 		std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
 		for (ptxn::TLogGroup& tlogGroup : pContext->tLogGroups) {
-			std::string filename = filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
+			std::string filename =
+			    filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
 			IKeyValueStore* data = openKVStore(req.storeType, filename, tlogGroup.logGroupId, 500e6);
 			state IDiskQueue* queue = new InMemoryDiskQueue(tlogGroup.logGroupId);
 			qs[tlogGroup.logGroupId] = queue;
@@ -602,17 +601,17 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 		}
 
 		actors.push_back(ptxn::tLog(persistentDataAndQueues,
-		                             makeReference<AsyncVar<ServerDBInfo>>(),
-		                             LocalityData(),
-		                             initializeTLog,
-		                             tlogId,
-		                             workerId,
-		                             false,
-		                             Promise<Void>(),
-		                             Promise<Void>(),
-		                             folder,
-		                             makeReference<AsyncVar<bool>>(false),
-		                             makeReference<AsyncVar<UID>>(tlogId)));
+		                            makeReference<AsyncVar<ServerDBInfo>>(),
+		                            LocalityData(),
+		                            initializeTLog,
+		                            tlogId,
+		                            workerId,
+		                            false,
+		                            Promise<Void>(),
+		                            Promise<Void>(),
+		                            folder,
+		                            makeReference<AsyncVar<bool>>(false),
+		                            makeReference<AsyncVar<UID>>(tlogId)));
 		initializeTLog.send(tLogInitializations.back());
 		std::cout << "Recruit tlog " << i << " : " << tlogId.shortString() << ", workerID: " << workerId.shortString()
 		          << "\n";
@@ -635,7 +634,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
 	state IDiskQueue* q = qs[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
-	// in this test, Location must has the same `lo` and `hi` 
+	// in this test, Location must has the same `lo` and `hi`
 	// because I did not implement merging multiple location into a single StringRef and return for InMemoryDiskQueue
 	ASSERT(q->getNextReadLocation().hi + NUM_COMMITS == q->getNextCommitLocation().hi);
 	loop {
