@@ -276,13 +276,24 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		if (self->allowTestStorageMigration) {
 			state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
 			state int i;
+			state std::string wiggleLocalityKeyValue = conf.perpetualStorageWiggleLocality;
+			state std::string wiggleLocalityKey;
+			state std::string wiggleLocalityValue;
+			if (wiggleLocalityKeyValue != "0") {
+				int split = wiggleLocalityKeyValue.find(':');
+				wiggleLocalityKey = wiggleLocalityKeyValue.substr(0, split);
+				wiggleLocalityValue = wiggleLocalityKeyValue.substr(split + 1);
+			}
 			loop {
 				state bool pass = true;
 				state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 
 				for (i = 0; i < storageServers.size(); i++) {
 					// Check that each storage server has the correct key value store type
-					if (!storageServers[i].isTss()) {
+					if (!storageServers[i].isTss() &&
+					    (wiggleLocalityKeyValue == "0" ||
+					     (storageServers[i].locality.get(wiggleLocalityKey).present() &&
+					      storageServers[i].locality.get(wiggleLocalityKey).get().toString() == wiggleLocalityValue))) {
 						ReplyPromise<KeyValueStoreType> typeReply;
 						ErrorOr<KeyValueStoreType> keyValueStoreType =
 						    wait(storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
@@ -397,10 +408,32 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			} else if (randomChoice == 8) {
 				if (self->allowTestStorageMigration) {
 					TEST(true); // storage migration type change
+
+					// randomly configuring perpetual_storage_wiggle_locality
+					state std::string randomPerpetualWiggleLocality;
+					if (deterministicRandom()->random01() < 0.25) {
+						state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+						StorageServerInterface randomSS =
+						    storageServers[deterministicRandom()->randomInt(0, storageServers.size())];
+						std::vector<StringRef> localityKeys = { LocalityData::keyDcId,
+							                                    LocalityData::keyDataHallId,
+							                                    LocalityData::keyZoneId,
+							                                    LocalityData::keyMachineId,
+							                                    LocalityData::keyProcessId };
+						StringRef randomLocalityKey =
+						    localityKeys[deterministicRandom()->randomInt(0, localityKeys.size())];
+						if (randomSS.locality.isPresent(randomLocalityKey)) {
+							randomPerpetualWiggleLocality =
+							    " perpetual_storage_wiggle_locality=" + randomLocalityKey.toString() + ":" +
+							    randomSS.locality.get(randomLocalityKey).get().toString();
+						}
+					}
+
 					wait(success(IssueConfigurationChange(
 					    cx,
 					    storageMigrationTypes[deterministicRandom()->randomInt(
-					        0, sizeof(storageMigrationTypes) / sizeof(storageMigrationTypes[0]))],
+					        0, sizeof(storageMigrationTypes) / sizeof(storageMigrationTypes[0]))] +
+					        randomPerpetualWiggleLocality,
 					    false)));
 				}
 			} else {
