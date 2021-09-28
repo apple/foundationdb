@@ -1713,6 +1713,15 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int i;
 		state int j;
 		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		state std::string wiggleLocalityKeyValue = configuration.perpetualStorageWiggleLocality;
+		state std::string wiggleLocalityKey;
+		state std::string wiggleLocalityValue;
+		if (wiggleLocalityKeyValue != "0") {
+			int split = wiggleLocalityKeyValue.find(':');
+			wiggleLocalityKey = wiggleLocalityKeyValue.substr(0, split);
+			wiggleLocalityValue = wiggleLocalityKeyValue.substr(split + 1);
+		}
+
 		// Check each pair of storage servers for an address match
 		for (i = 0; i < storageServers.size(); i++) {
 			// Check that each storage server has the correct key value store type
@@ -1723,10 +1732,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (!keyValueStoreType.present()) {
 				TraceEvent("ConsistencyCheck_ServerUnavailable").detail("ServerID", storageServers[i].id());
 				self->testFailure("Storage server unavailable");
-			} else if ((!storageServers[i].isTss() &&
-			            keyValueStoreType.get() != configuration.storageServerStoreType) ||
-			           (storageServers[i].isTss() &&
-			            keyValueStoreType.get() != configuration.testingStorageServerStoreType)) {
+			} else if (((!storageServers[i].isTss() &&
+			             keyValueStoreType.get() != configuration.storageServerStoreType) ||
+			            (storageServers[i].isTss() &&
+			             keyValueStoreType.get() != configuration.testingStorageServerStoreType)) &&
+			           (wiggleLocalityKeyValue == "0" ||
+			            (storageServers[i].locality.get(wiggleLocalityKey).present() &&
+			             storageServers[i].locality.get(wiggleLocalityKey).get().toString() == wiggleLocalityValue))) {
 				TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
 				    .detail("ServerID", storageServers[i].id())
 				    .detail("StoreType", keyValueStoreType.get().toString())
