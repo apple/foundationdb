@@ -100,7 +100,7 @@ enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME }
 // New fast restore reuses the type from legacy slow restore
 enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 
-enum class DataMovementType {
+enum class DBMoveType {
 	UNDEFINED = 0,
 	START,
 	STATUS,
@@ -903,7 +903,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 };
 
 // TODO update for data movement
-CSimpleOpt::SOption g_rgDataMovementStartOptions[] = {
+CSimpleOpt::SOption g_rgDBMoveStartOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
@@ -935,13 +935,136 @@ CSimpleOpt::SOption g_rgDataMovementStartOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
+CSimpleOpt::SOption g_rgDBMoveStatusOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
+#endif
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
+	{ OPT_ERRORLIMIT, "--errorlimit", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	    SO_END_OF_OPTIONS
+};
+
+CSimpleOpt::SOption g_rgDBMoveSwitchOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
+#endif
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_FORCE, "-f", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	    SO_END_OF_OPTIONS
+};
+
+CSimpleOpt::SOption g_rgDBMoveAbortOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
+#endif
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_CLEANUP, "--cleanup", SO_NONE },
+	{ OPT_DSTONLY, "--dstonly", SO_NONE },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	    SO_END_OF_OPTIONS
+};
+
+CSimpleOpt::SOption g_rgDBMovePauseOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
+#endif
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	    SO_END_OF_OPTIONS
+};
+
 const KeyRef exeAgent = LiteralStringRef("backup_agent");
 const KeyRef exeBackup = LiteralStringRef("fdbbackup");
 const KeyRef exeRestore = LiteralStringRef("fdbrestore");
 const KeyRef exeFastRestoreTool = LiteralStringRef("fastrestore_tool"); // must be lower case
 const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
-const KeyRef exeDataMovement = LiteralStringRef("fdbmove");
+const KeyRef exeDatabaseMovement = LiteralStringRef("fdbmove");
 
 extern const char* getSourceVersion();
 
@@ -1342,10 +1465,10 @@ static void printDBBackupUsage(bool devhelp) {
 }
 
 // TODO: need to update the usage describtion here
-static void printDataMovementUsage(bool devhelp) {
+static void printDBMovementUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | switch | abort | pause | resume) [OPTIONS]\n\n",
-	       exeDataMovement.toString().c_str());
+	       exeDatabaseMovement.toString().c_str());
 
 	printf(" TOP LEVEL OPTIONS:\n");
 	printf("  --build_flags  Print build information and exit.\n");
@@ -1416,7 +1539,7 @@ static void printUsage(ProgramExe programExe, bool devhelp) {
 		printDBBackupUsage(devhelp);
 		break;
 	case ProgramExe::DB_MOVE:
-		printDataMovementUsage(devhelp);
+		printDBMovementUsage(devhelp);
 		break;
 	case ProgramExe::UNDEFINED:
 	default:
@@ -1497,10 +1620,10 @@ ProgramExe getProgramType(std::string programExe) {
 	}
 
 	// Check if data movement between multi-tenant clusters
-	else if ((programExe.length() >= exeDataMovement.size()) &&
-	         (programExe.compare(programExe.length() - exeDataMovement.size(),
-	                             exeDataMovement.size(),
-	                             (const char*)exeDataMovement.begin()) == 0)) {
+	else if ((programExe.length() >= exeDatabaseMovement.size()) &&
+	         (programExe.compare(programExe.length() - exeDatabaseMovement.size(),
+	                             exeDatabaseMovement.size(),
+	                             (const char*)exeDatabaseMovement.begin()) == 0)) {
 		enProgramExe = ProgramExe::DB_MOVE;
 	}
 	return enProgramExe;
@@ -1573,19 +1696,19 @@ DBType getDBType(std::string dbType) {
 	return enBackupType;
 }
 
-DataMovementType getDataMovementType(std::string dataMovementTypeStr) {
-	DataMovementType dataMovementType = DataMovementType::UNDEFINED;
-	std::transform(dataMovementTypeStr.begin(), dataMovementTypeStr.end(), dataMovementTypeStr.begin(), ::tolower);
-	static std::map<std::string, DataMovementType> values;
+DBMoveType getDBMoveType(std::string dbMoveTypeStr) {
+	DBMoveType dbMoveType = DBMoveType::UNDEFINED;
+	std::transform(dbMoveTypeStr.begin(), dbMoveTypeStr.end(), dbMoveTypeStr.begin(), ::tolower);
+	static std::map<std::string, DBMoveType> values;
 	if (values.empty()) {
-		values["start"] = DataMovementType::START;
+		values["start"] = DBMoveType::START;
 		// TODO add more mapping if more commands are supported here
 	}
-	auto res = values.find(dataMovementTypeStr);
+	auto res = values.find(dbMoveTypeStr);
 	if (res != values.end()) {
-		dataMovementType = res->second;
+		dbMoveType = res->second;
 	}
-	return dataMovementType;
+	return dbMoveType;
 }
 
 ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
@@ -1969,10 +2092,10 @@ ACTOR Future<Void> runAgent(Database db) {
 }
 
 // TODO check whether update needed
-ACTOR Future<Void> submitDataMovement(Database src,
-                                      Database dest,
-                                      Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                      std::string tagName) {
+ACTOR Future<Void> submitDBMove(Database src,
+                                Database dest,
+                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                std::string tagName) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
@@ -2015,6 +2138,107 @@ ACTOR Future<Void> submitDataMovement(Database src,
 		}
 
 		throw backup_error();
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> statusDBMove(Database src, Database dest, std::string tagName, int errorLimit) {
+	try {
+		state DatabaseBackupAgent backupAgent(src);
+
+		std::string statusText = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
+		printf("%s\n", statusText.c_str());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> switchDBMove(Database src,
+                                Database dest,
+                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                std::string tagName,
+                                ForceAction forceAction) {
+	try {
+		state DatabaseBackupAgent backupAgent(src);
+
+		// Backup everything, if no ranges were specified
+		if (backupRanges.size() == 0) {
+			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		}
+
+		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef(), forceAction));
+		printf("The DR on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
+	}
+
+	catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		switch (e.code()) {
+		case error_code_backup_error:
+			fprintf(stderr, "ERROR: An error was encountered during submission\n");
+			break;
+		case error_code_backup_duplicate:
+			fprintf(stderr, "ERROR: A DR is already running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+			break;
+		default:
+			fprintf(stderr, "ERROR: %s\n", e.what());
+			break;
+		}
+
+		throw backup_error();
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> abortDBMove(Database src,
+                               Database dest,
+                               std::string tagName,
+                               PartialBackup partial,
+                               DstOnly dstOnly) {
+	try {
+		state DatabaseBackupAgent backupAgent(src);
+
+		wait(backupAgent.abortBackup(dest, Key(tagName), partial, AbortOldBackup::False, dstOnly));
+		wait(backupAgent.unlockBackup(dest, Key(tagName)));
+
+		printf("The DR on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		switch (e.code()) {
+		case error_code_backup_error:
+			fprintf(stderr, "ERROR: An error was encountered during submission\n");
+			break;
+		case error_code_backup_unneeded:
+			fprintf(stderr, "ERROR: A DR was not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+			break;
+		default:
+			fprintf(stderr, "ERROR: %s\n", e.what());
+			break;
+		}
+		throw;
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> changeDBMoveResumed(Database src, Database dest, bool pause) {
+	try {
+		state DatabaseBackupAgent backupAgent(src);
+		wait(backupAgent.taskBucket->changePause(dest, pause));
+		printf("All DR agents have been %s.\n", pause ? "paused" : "resumed");
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
 	}
 
 	return Void();
@@ -3304,7 +3528,7 @@ int main(int argc, char* argv[]) {
 		BackupType backupType = BackupType::UNDEFINED;
 		RestoreType restoreType = RestoreType::UNKNOWN;
 		DBType dbType = DBType::UNDEFINED;
-		DataMovementType dataMovementType;
+		DBMoveType dbMoveType;
 
 		std::unique_ptr<CSimpleOpt> args;
 
@@ -3416,14 +3640,29 @@ int main(int argc, char* argv[]) {
 			break;
 		case ProgramExe::DB_MOVE:
 			if (argc < 2) {
-				printDataMovementUsage(false);
+				printDBMovementUsage(false);
 				return FDB_EXIT_ERROR;
 			}
-			dataMovementType = getDataMovementType(argv[1]);
-			switch (dataMovementType) {
+			dbMoveType = getDBMoveType(argv[1]);
+			switch (dbMoveType) {
 			// TODO support more operations here
-			case DataMovementType::START:
-				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDataMovementStartOptions, SO_O_EXACT);
+			case DBMoveType::START:
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveStartOptions, SO_O_EXACT);
+				break;
+			case DBMoveType::STATUS:
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveStatusOptions, SO_O_EXACT);
+				break;
+			case DBMoveType::SWITCH:
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveSwitchOptions, SO_O_EXACT);
+				break;
+			case DBMoveType::ABORT:
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveAbortOptions, SO_O_EXACT);
+				break;
+			case DBMoveType::PAUSE:
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMovePauseOptions, SO_O_EXACT);
+				break;
+			case DBMoveType::RESUME:
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMovePauseOptions, SO_O_EXACT);
 				break;
 			default:
 				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
@@ -4424,15 +4663,30 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		case ProgramExe::DB_MOVE:
-			if (!initCluster() || !initSourceCluster(dataMovementType != DataMovementType::ABORT || !dstOnly)) {
+			if (!initCluster() || !initSourceCluster(dbMoveType != DBMoveType::ABORT || !dstOnly)) {
 				return FDB_EXIT_ERROR;
 			}
-			switch (dataMovementType) {
+			switch (dbMoveType) {
 			// TODO add more operations
-			case DataMovementType::START:
-				f = stopAfter(submitDataMovement(sourceDb, db, backupKeys, tagName));
+			case DBMoveType::START:
+				f = stopAfter(submitDBMove(sourceDb, db, backupKeys, tagName));
 				break;
-			case DataMovementType::UNDEFINED:
+			case DBMoveType::STATUS:
+				f = stopAfter(statusDBMove(sourceDb, db, tagName, maxErrors));
+				break;
+			case DBMoveType::SWITCH:
+				f = stopAfter(switchDBMove(sourceDb, db, backupKeys, tagName, forceAction));
+				break;
+			case DBMoveType::ABORT:
+				f = stopAfter(abortDBMove(sourceDb, db, tagName, partial, dstOnly));
+				break;
+			case DBMoveType::PAUSE:
+				f = stopAfter(changeDBMoveResumed(sourceDb, db, true));
+				break;
+			case DBMoveType::RESUME:
+				f = stopAfter(changeDBMoveResumed(sourceDb, db, false));
+				break;
+			case DBMoveType::UNDEFINED:
 			default:
 				fprintf(stderr, "ERROR: Unsupported data movement action %s\n", argv[1]);
 				printHelpTeaser(argv[0]);
