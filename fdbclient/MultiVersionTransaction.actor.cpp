@@ -887,12 +887,15 @@ void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
 	double timeoutDuration = extractIntOption(value, 0, std::numeric_limits<int>::max()) / 1000.0;
 
 	ThreadFuture<Void> prevTimeout;
-	ThreadFuture<Void> newTimeout = onMainThread([this, timeoutDuration]() {
-		return timeoutImpl(timeoutTsav, timeoutDuration - std::max(0.0, now() - startTime));
-	});
+	double transactionStartTime = startTime;
 
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
+
+		Reference<ThreadSingleAssignmentVar<Void>> tsav = timeoutTsav;
+		ThreadFuture<Void> newTimeout = onMainThread([transactionStartTime, tsav, timeoutDuration]() {
+			return timeoutImpl(tsav, timeoutDuration - std::max(0.0, now() - transactionStartTime));
+		});
 
 		prevTimeout = currentTimeout;
 		currentTimeout = newTimeout;
@@ -910,12 +913,12 @@ template <class T>
 ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
 	ThreadFuture<Void> f;
 
-	// We create a ThreadFuture that holds a reference to this below,
-	// but the ThreadFuture does not increment the ref count
-	timeoutTsav->addref();
-
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
+
+		// Our ThreadFuture holds a reference to this TSAV,
+		// but the ThreadFuture does not increment the ref count
+		timeoutTsav->addref();
 		f = ThreadFuture<Void>(timeoutTsav.getPtr());
 	}
 
