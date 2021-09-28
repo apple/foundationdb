@@ -73,14 +73,16 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Value newValue = "TestNewValue"_sr;
 
 		wait(self->writeAndVerify(self, cx, key, oldValue));
-		
+
 		// Move [key, endKey) to team: {address}.
-		state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, KeyRangeRef(key, endKey)));
-		wait(self->readAndVerify(self, cx, key, oldValue));
+		state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, systemKeys));
+		wait(self->readAndVerify(self, cx, keyServersKey(key), oldValue));
 
 		// Kill team {address}, and expect read to timeout.
 		self->killProcess(self, address);
-		wait(self->readAndVerify(self, cx, key, "Timeout"_sr));
+		std::cout << "Killed process: " << address.toString() << endl;
+		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
+		std::cout << "Verified reading metadata timeout" << endl;
 
 		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
 		// Expect read to return 'value not found'.
@@ -186,7 +188,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		state UID owner = deterministicRandom()->randomUniqueID();
 		state DDEnabledState ddEnabledState;
-		ddEnabledState.setSkipCheckMoveKeysLock(false);
 
 		state Transaction tr(cx);
 

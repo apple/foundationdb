@@ -483,6 +483,59 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	return Void();
 }
 
+ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
+                                      RecruitFromConfigurationReply recruits,
+                                      std::vector<StorageServerInterface>* servers,
+                                      std::unordered_map<UID, Tag>* serverTagMap) {
+	servers->clear();
+
+	RangeResult serverTags = self->txnStateStore->readRange(serverTagKeys).get();
+
+	state uint16_t maxTagId = 0;
+	for (const KeyValueRef& kv : serverTags) {
+		Tag t = decodeServerTagValue(kv.value);
+		maxTagId = std::max(maxTagId, t.id);
+	}
+
+	state int idx = 0;
+	while (idx < recruits.storageServers.size()) {
+		TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
+		    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
+		Optional<Value> dcId = recruits.storageServers[idx].locality.dcId();
+		ASSERT(dcId.present());
+
+		Optional<Value> localityValue = self->txnStateStore->readValue(tagLocalityListKeyFor(dcId.get())).get();
+		ASSERT(localityValue.present());
+		int8_t locality = decodeTagLocalityListValue(localityValue);
+
+		InitializeStorageRequest isr;
+		isr.seedTag = Tag(locality, ++maxTagId);
+		isr.storeType = self->configuration.storageServerStoreType;
+		isr.reqId = deterministicRandom()->randomUniqueID();
+		isr.interfaceId = deterministicRandom()->randomUniqueID();
+
+		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
+
+		if (newServer.isError()) {
+			if (!newServer.isError(error_code_recruitment_failed) &&
+			    !newServer.isError(error_code_request_maybe_delivered))
+				throw newServer.getError();
+
+			TEST(true); // masterserver initial storage recuitment loop failed to get new server
+			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
+		} else {
+			servers->push_back(newServer.get().interf);
+			serverTagMap[newServer.get().interf.uniqueID] = Tag(locality, maxTagId);
+		}
+	}
+
+	TraceEvent("MasterRecruitedInitialStorageServers", self->dbgid)
+	    .detail("TargetCount", self->configuration.storageTeamSize)
+	    .detail("Servers", describe(*servers));
+
+	return Void();
+}
+
 Future<Void> waitCommitProxyFailure(std::vector<CommitProxyInterface> const& commitProxies) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(commitProxies.size());
@@ -1903,6 +1956,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 
+	// So that all changes to transaction state store is only in the master's RAM?
 	wait(discardCommit(self->txnStateStore, self->txnStateLogAdapter));
 
 	// Wait for the recovery transaction to complete.
@@ -1915,6 +1969,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	}
 
 	ASSERT(self->recoveryTransactionVersion != 0);
+
+	// Here.
 
 	self->recoveryState = RecoveryState::WRITING_CSTATE;
 	TraceEvent("MasterRecoveryState", self->dbgid)

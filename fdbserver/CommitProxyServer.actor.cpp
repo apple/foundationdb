@@ -870,6 +870,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	self->metadataVersionAfter = pProxyCommitData->txnStateStore->readValue(metadataVersionKey).get();
 
 	auto fcm = pProxyCommitData->logAdapter->getCommitMessage();
+	// Is transaction state store committed only here?
 	self->storeCommits.emplace_back(fcm, pProxyCommitData->txnStateStore->commit());
 	pProxyCommitData->version = self->commitVersion;
 	if (!pProxyCommitData->validState.isSet())

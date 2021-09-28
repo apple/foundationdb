@@ -11,3 +11,4 @@ useDB = true
 
     [[test.workload]]
     testName = 'DataLossRecovery'
+    
