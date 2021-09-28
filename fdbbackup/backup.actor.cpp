@@ -23,7 +23,6 @@
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
-#include <_ctype.h>
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
 
@@ -75,7 +74,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Type of program being executed
-enum class ProgramExe { AGENT, BACKUP, RESTORE, FASTRESTORE_TOOL, DR_AGENT, DB_BACKUP, DATA_MOVEMENT, UNDEFINED };
+enum class ProgramExe { AGENT, BACKUP, RESTORE, FASTRESTORE_TOOL, DR_AGENT, DB_BACKUP, DB_MOVE, UNDEFINED };
 
 enum class BackupType {
 	UNDEFINED = 0,
@@ -101,10 +100,15 @@ enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME }
 // New fast restore reuses the type from legacy slow restore
 enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 
-enum class DataMovementType{
+enum class DataMovementType {
 	UNDEFINED = 0,
-	START, STATUS, SWITCH, ABORT, PAUSE, RESUME
-	// todo: add more operation type
+	START,
+	STATUS,
+	SWITCH,
+	ABORT,
+	PAUSE,
+	RESUME
+	// TODO: add more operation type
 };
 
 //
@@ -898,7 +902,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
-// todo update for data movement 
+// TODO update for data movement
 CSimpleOpt::SOption g_rgDataMovementStartOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
@@ -937,7 +941,7 @@ const KeyRef exeRestore = LiteralStringRef("fdbrestore");
 const KeyRef exeFastRestoreTool = LiteralStringRef("fastrestore_tool"); // must be lower case
 const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
-const KeyRef exeDataMovement = LiteralStringRef("data_move");
+const KeyRef exeDataMovement = LiteralStringRef("fdbmove");
 
 extern const char* getSourceVersion();
 
@@ -1337,7 +1341,7 @@ static void printDBBackupUsage(bool devhelp) {
 	return;
 }
 
-// todo: need to update the usage describtion here
+// TODO: need to update the usage describtion here
 static void printDataMovementUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | switch | abort | pause | resume) [OPTIONS]\n\n",
@@ -1411,7 +1415,7 @@ static void printUsage(ProgramExe programExe, bool devhelp) {
 	case ProgramExe::DB_BACKUP:
 		printDBBackupUsage(devhelp);
 		break;
-	case ProgramExe::DATA_MOVEMENT:
+	case ProgramExe::DB_MOVE:
 		printDataMovementUsage(devhelp);
 		break;
 	case ProgramExe::UNDEFINED:
@@ -1497,7 +1501,7 @@ ProgramExe getProgramType(std::string programExe) {
 	         (programExe.compare(programExe.length() - exeDataMovement.size(),
 	                             exeDataMovement.size(),
 	                             (const char*)exeDataMovement.begin()) == 0)) {
-		enProgramExe = ProgramExe::DATA_MOVEMENT;						 
+		enProgramExe = ProgramExe::DB_MOVE;
 	}
 	return enProgramExe;
 }
@@ -1569,16 +1573,16 @@ DBType getDBType(std::string dbType) {
 	return enBackupType;
 }
 
-DataMovementType getDataMovementType(std::string dataMovementTypeStr){
+DataMovementType getDataMovementType(std::string dataMovementTypeStr) {
 	DataMovementType dataMovementType = DataMovementType::UNDEFINED;
-	std::transform(dataMovementTypeStr.begin(),dataMovementTypeStr.end(),dataMovementTypeStr.begin(), ::tolower);
-	static std::map<std::string,DataMovementType> values;
-	if(values.empty()){
+	std::transform(dataMovementTypeStr.begin(), dataMovementTypeStr.end(), dataMovementTypeStr.begin(), ::tolower);
+	static std::map<std::string, DataMovementType> values;
+	if (values.empty()) {
 		values["start"] = DataMovementType::START;
-		//todo add more mapping if more commands are supported here
+		// TODO add more mapping if more commands are supported here
 	}
 	auto res = values.find(dataMovementTypeStr);
-	if(res!=values.end()){
+	if (res != values.end()) {
 		dataMovementType = res->second;
 	}
 	return dataMovementType;
@@ -1964,10 +1968,12 @@ ACTOR Future<Void> runAgent(Database db) {
 	return Void();
 }
 
-// todo check whether update needed
-ACTOR Future<Void> submitDataMovement(Database src,Database dest,Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                  std::string tagName){
-									  try {
+// TODO check whether update needed
+ACTOR Future<Void> submitDataMovement(Database src,
+                                      Database dest,
+                                      Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                      std::string tagName) {
+	try {
 		state DatabaseBackupAgent backupAgent(src);
 
 		// Backup everything, if no ranges were specified
@@ -1988,7 +1994,8 @@ ACTOR Future<Void> submitDataMovement(Database src,Database dest,Standalone<Vect
 			// Throw an error that will not display any additional information
 			throw actor_cancelled();
 		} else {
-			printf("The data movement on tag `%s' was successfully submitted.\n", printable(StringRef(tagName)).c_str());
+			printf("The data movement on tag `%s' was successfully submitted.\n",
+			       printable(StringRef(tagName)).c_str());
 		}
 	}
 
@@ -2011,7 +2018,6 @@ ACTOR Future<Void> submitDataMovement(Database src,Database dest,Standalone<Vect
 	}
 
 	return Void();
-
 }
 
 ACTOR Future<Void> submitDBBackup(Database src,
@@ -3408,20 +3414,20 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			break;
-		case ProgramExe::DATA_MOVEMENT:
-			if(argc < 2){
+		case ProgramExe::DB_MOVE:
+			if (argc < 2) {
 				printDataMovementUsage(false);
 				return FDB_EXIT_ERROR;
 			}
 			dataMovementType = getDataMovementType(argv[1]);
-			switch(dataMovementType){
-				//todo support more operations here
-				case DataMovementType::START:
-					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDataMovementStartOptions, SO_O_EXACT);
-					break;
-				default:
-					args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
-					break;
+			switch (dataMovementType) {
+			// TODO support more operations here
+			case DataMovementType::START:
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDataMovementStartOptions, SO_O_EXACT);
+				break;
+			default:
+				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
+				break;
 			}
 			break;
 		case ProgramExe::RESTORE:
@@ -3940,8 +3946,8 @@ int main(int argc, char* argv[]) {
 					}
 				}
 				break;
-			case ProgramExe::DATA_MOVEMENT:
-				// todo
+			case ProgramExe::DB_MOVE:
+				// TODO
 				// Error, if the keys option was not specified
 				if (backupKeys.size() == 0) {
 					fprintf(stderr, "ERROR: Unknown data movement option value `%s'\n", args->File(argLoop));
@@ -4417,12 +4423,12 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			break;
-		case ProgramExe::DATA_MOVEMENT:
+		case ProgramExe::DB_MOVE:
 			if (!initCluster() || !initSourceCluster(dataMovementType != DataMovementType::ABORT || !dstOnly)) {
 				return FDB_EXIT_ERROR;
 			}
 			switch (dataMovementType) {
-			// todo add more operations
+			// TODO add more operations
 			case DataMovementType::START:
 				f = stopAfter(submitDataMovement(sourceDb, db, backupKeys, tagName));
 				break;
