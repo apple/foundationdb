@@ -1025,6 +1025,14 @@ std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const& value) {
 	return std::make_pair(zoneId, version);
 }
 
+const KeyRangeRef clientLibMetadataKeys(LiteralStringRef("\xff\x02/clientlib/meta/"),
+                                        LiteralStringRef("\xff\x02/clientlib/meta0"));
+const KeyRef clientLibMetadataPrefix = clientLibMetadataKeys.begin;
+
+const KeyRangeRef clientLibBinaryKeys(LiteralStringRef("\xff\x02/clientlib/bin/"),
+                                      LiteralStringRef("\xff\x02/clientlib/bin0"));
+const KeyRef clientLibBinaryPrefix = clientLibBinaryKeys.begin;
+
 const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
                                                    LiteralStringRef("\xff/TESTONLYtxnStateStore0"));
 

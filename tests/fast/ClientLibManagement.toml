@@ -1,0 +1,5 @@
+[[test]]
+testTitle = 'ClientLibManagement'
+
+    [[test.workload]]
+    testName = 'ClientLibManagement'

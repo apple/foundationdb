@@ -174,6 +174,8 @@ ERROR( special_keys_write_disabled, 2114, "Special Key space is not allowed to w
 ERROR( special_keys_no_write_module_found, 2115, "Special key space key or keyrange in set or clear does not intersect a module" )
 ERROR( special_keys_cross_module_clear, 2116, "Special key space clear crosses modules" )
 ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message." )
+ERROR( client_lib_invalid_metadata, 2118, "Invalid client library metadata provided." )
+ERROR( client_lib_already_exists, 2119, "Client library with same identifier already exists on the cluster." )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
