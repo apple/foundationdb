@@ -138,6 +138,7 @@ public:
 	virtual int randomInt(int min, int maxPlusOne) = 0;
 	virtual int64_t randomInt64(int64_t min, int64_t maxPlusOne) = 0;
 	virtual uint32_t randomUInt32() = 0;
+	virtual uint64_t randomUInt64() = 0;
 	virtual UID randomUniqueID() = 0;
 	virtual char randomAlphaNumeric() = 0;
 	virtual std::string randomAlphaNumeric(int length) = 0;

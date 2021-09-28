@@ -84,6 +84,10 @@ uint32_t DeterministicRandom::randomUInt32() {
 	return gen64();
 }
 
+uint64_t DeterministicRandom::randomUInt64() {
+	return gen64();
+}
+
 uint32_t DeterministicRandom::randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) {
 	std::uniform_real_distribution<double> distribution(std::log(min), std::log(maxPlusOne - 1));
 	double logpower = distribution(random);
