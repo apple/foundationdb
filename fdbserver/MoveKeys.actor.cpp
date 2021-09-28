@@ -1564,7 +1564,7 @@ void seedShardServers(Arena& arena,
 	ASSERT(numKeyRanges > 1);
 	ASSERT(numKeyRanges <= numServers);
 
-	int serverIndex = 0;
+	int serverIndex = 1;
 	StringRef keyRangeStart = allKeys.begin;
 	for (int index = 0; index < keySplits.size(); ++index) {
 		auto keyRange = KeyRangeRef(keyRangeStart, keySplits[index]);
