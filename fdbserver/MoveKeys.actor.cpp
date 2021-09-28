@@ -1490,6 +1490,36 @@ ACTOR Future<Void> moveKeys(Database cx,
 	return Void();
 }
 
+void setUpMetadataServers(Arena& arena,
+                          CommitTransactionRef& tr,
+                          std::vector<StorageServerInterface> servers,
+                          std::unordered_map<UID, Tag> serverTagMap) {
+	std::sort(servers.begin(), servers.end());
+
+	for (auto& s : servers) {
+		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(serverTagMap[s.id()]));
+		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
+	}
+
+	std::vector<Tag> serverTags;
+	std::vector<UID> serverSrcUID;
+	serverTags.reserve(servers.size());
+	for (auto& s : servers) {
+		serverTags.push_back(serverTagMap[s.id()]);
+		serverSrcUID.push_back(s.id());
+	}
+
+	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
+	                                                    : keyServersValue(RangeResult(), serverSrcUID);
+
+	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, systemKeys, ksValue, Value());
+
+	for (auto& s : servers) {
+		krmSetPreviouslyEmptyRange(
+		    tr, arena, serverKeysPrefixFor(s.id()), systemKeys, serverKeysTrueEmptyRange, serverKeysFalse);
+	}
+}
+
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers) {

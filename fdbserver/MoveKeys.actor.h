@@ -62,6 +62,11 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 // This does not modify the moveKeysLock
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState);
 
+void setUpMetadataServers(Arena& arena,
+                          CommitTransactionRef& tr,
+                          std::vector<StorageServerInterface> servers,
+                          std::unordered_map<UID, Tag> serverTagMap);
+
 void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers);
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
